@@ -24,6 +24,7 @@ import * as InputModule from "./Input.ts"
 import { Mise as MiseSurface } from "./Mise.ts"
 import * as NodeArtifactModule from "./NodeArtifact.ts"
 import * as NpmTargetModule from "./NpmTarget.ts"
+import * as OwnersModule from "./Owners.ts"
 import * as PackageManagerModule from "./PackageManager.ts"
 import * as RuntimeModule from "./Runtime.ts"
 import * as RustToolchainModule from "./RustToolchain.ts"
@@ -96,6 +97,24 @@ export { Cache, Flags, Host, Sandbox, Sandboxes } from "./WorkspaceDeclaration.t
 export { make as LocalRepository } from "./LocalRepository.ts"
 /** @category constructors @since 0.1.0 */
 export { Package } from "./Package.ts"
+
+/**
+ * Ownership: `S.Owners.declare` validates the `owners` option a Package or
+ * Workspace carries, `S.Owners.Codeowners` and `S.Owners.Tree` are the two
+ * generated-file rules that project every declaration into
+ * `.github/CODEOWNERS` and the per-directory `OWNERS` tree, and `S.Teams`
+ * declares the workspace roster team references resolve against.
+ *
+ * @category namespace exports
+ * @since 0.1.0
+ */
+export const Owners = Object.freeze({
+  declare: OwnersModule.declare,
+  Codeowners: OwnersModule.Codeowners,
+  Tree: OwnersModule.Tree
+})
+
+export { Teams } from "./Owners.ts"
 /** @category constructors @since 0.1.0 */
 export { gitCommit, Mcp, NodeModule, symlink } from "./Reference.ts"
 /** @category targets @since 0.1.0 */

@@ -480,7 +480,21 @@ describe("attrs accessors reject a target of the wrong rule", () => {
   it("Git.Commit", () => {
     const commit = S.Git.Commit({ gates: [shellTest], message: "chore: release" })
     expect(GitTarget.commitAttrsOf(commit).message).toBe("chore: release")
+    expect(GitTarget.commitAttrsOf(commit).changes).toBeUndefined()
     expect(() => GitTarget.commitAttrsOf(shellTest)).toThrow(/expected a Git.Commit target, received Shell.Test/)
+  })
+
+  it("Git.Commit declares the pathspec scope it stages", () => {
+    const scoped = S.Git.Commit({
+      gates: [shellTest],
+      message: "chore: release",
+      changes: ["src/**", "//README.md"]
+    })
+    expect(GitTarget.commitAttrsOf(scoped).changes).toEqual(["src/**", "//README.md"])
+    // An empty scope silently degrades to sweep-only semantics downstream, so
+    // the declaration is rejected outright.
+    expect(() => S.Git.Commit({ gates: [], message: "chore: empty", changes: [] as never }))
+      .toThrow(/Git\.Commit declaration.*is invalid/)
   })
 
   it("Github.CiGen", () => {

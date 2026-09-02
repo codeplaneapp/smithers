@@ -90,6 +90,8 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Npm.Published`          | NpmTarget         | build              | yes       | no               | package executor |
 | `NpmPublish`             | NpmPublish        | run                | no        | no               | flow body        |
 | `Overlay`                | NodeArtifact      | build              | yes       | no               | package executor |
+| `Owners.Codeowners`      | Owners            | build, lint        | no        | no               | package executor |
+| `Owners.Tree`            | Owners            | build, lint        | no        | no               | package executor |
 | `PackageJsonCheck`       | PackageJson       | lint               | yes       | no               | flow body        |
 | `PackageJsonWrite`       | PackageJson       | run                | no        | no               | flow body        |
 | `PackageLint`            | PackageLint       | lint               | no        | no               | flow body        |
@@ -113,4 +115,4 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `VitestCoverage`         | VitestCoverage    | test               | no        | yes              | flow body        |
 | `VitestWatch`            | VitestWatch       | run                | no        | no               | flow body        |
 
-102 rules.
+104 rules.

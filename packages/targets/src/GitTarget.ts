@@ -15,12 +15,21 @@ import * as Target from "./Target.ts"
 /**
  * Attrs for {@link Commit}.
  *
+ * `changes` is the pathspec scope the commit owns. The executor resolves each
+ * entry against the declaring package directory (`//` anchors an entry to the
+ * workspace root), stages exactly `git add -A -- <resolved>`, and refuses the
+ * invocation when the index already carries a staged path outside the scope.
+ * A declaration without `changes` owns nothing: the executor refuses it
+ * unless the operator acknowledges a whole-tree stage with `--sweep`. An
+ * empty scope is a construction-time rejection, never a silent sweep.
+ *
  * @category schemas
  * @since 0.1.0
  */
 export const CommitAttrs = Schema.Struct({
   gates: Attr.Gates,
-  message: Schema.Union([Schema.NonEmptyString, Reference.AgentSelection])
+  message: Schema.Union([Schema.NonEmptyString, Reference.AgentSelection]),
+  changes: Schema.optional(Schema.NonEmptyArray(Schema.NonEmptyString))
 })
 
 const commitDefinition = Target.make("Git.Commit", {
@@ -112,7 +121,9 @@ export const Submodule = submoduleDefinition
  * The validated attrs of one `Git.Commit` target.
  *
  * `message` is either the fixed commit text or the {@link Reference.AgentRef}
- * naming the workspace agent that writes it at execution time.
+ * naming the workspace agent that writes it at execution time. `changes` is
+ * the declared pathspec scope the commit stages, or undefined when the
+ * declaration owns no scope and stages only under an operator's `--sweep`.
  *
  * @category accessors
  * @since 0.1.0

@@ -17,6 +17,7 @@ import * as NodeFs from "node:fs"
 import * as NodePath from "node:path"
 import * as NodeUtil from "node:util/types"
 import * as Config from "./Config.ts"
+import * as ExecSandbox from "./ExecSandbox.ts"
 import { failureMessage } from "./GeneratedFile.ts"
 import * as Input from "./Input.ts"
 import * as SafeFs from "./SafeFs.ts"
@@ -210,6 +211,7 @@ export const ExecFailureCode = Schema.Literals([
   "signaled",
   "stream_failed",
   "secret_proxy_failed",
+  "sandbox_unenforceable",
   "exit_status"
 ])
 
@@ -569,6 +571,23 @@ const hostValue = (name: string): string | undefined => {
 }
 
 /**
+ * The executable lookup environment a resolved Nix closure supplies.
+ *
+ * `path` replaces the host `PATH`; `variables` are the closure's other
+ * exported variables that tools need to run from it, such as the certificate
+ * bundle its `curl` and `git` read. Neither is key material here: the planner
+ * folds the closure's store hash into the target's `layers`, and this record
+ * only tells the spawn where the tools that hash names live.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ToolEnvironment {
+  readonly path: string
+  readonly variables: Readonly<Record<string, string>>
+}
+
+/**
  * Constructs the deliberately narrow ambient environment visible to a tool.
  *
  * `secretEnv` is applied last, after withholding, because a declared secret is
@@ -579,12 +598,20 @@ const hostValue = (name: string): string | undefined => {
 const toolEnvironment = (
   declared: Readonly<Record<string, string>>,
   sensitiveEnv: ReadonlyArray<string>,
-  secretEnv: Readonly<Record<string, string>> = {}
+  secretEnv: Readonly<Record<string, string>> = {},
+  base: ToolEnvironment | undefined = undefined
 ): NodeJS.ProcessEnv => {
   const env = Object.create(null) as NodeJS.ProcessEnv
   for (const name of inheritedEnvironmentNames) {
     const value = hostValue(name)
     if (value !== undefined) env[name] = value
+  }
+  // A declared environment replaces the host's executable lookup entirely: the
+  // closure's PATH is the whole PATH, so a tool the closure lacks is absent
+  // rather than found on the host by accident.
+  if (base !== undefined) {
+    for (const [name, value] of Object.entries(base.variables)) env[name] = value
+    env["PATH"] = base.path
   }
   env["CLICOLOR"] = "0"
   env["FORCE_COLOR"] = "0"
@@ -746,11 +773,12 @@ const spawnTool = (
   sensitiveEnv: ReadonlyArray<string>,
   secretEnv: Readonly<Record<string, string>>,
   onStdout?: ((chunk: Uint8Array) => void) | undefined,
-  onStderr?: ((chunk: Uint8Array) => void) | undefined
+  onStderr?: ((chunk: Uint8Array) => void) | undefined,
+  base?: ToolEnvironment | undefined
 ): Effect.Effect<Spawned, ExecError> =>
   Effect.callback<Spawned, ExecError>((resume) => {
     const [executable, ...args] = payload.argv
-    const env = toolEnvironment(payload.env, sensitiveEnv, secretEnv)
+    const env = toolEnvironment(payload.env, sensitiveEnv, secretEnv, base)
     let child: NodeChildProcess.ChildProcess
     try {
       child = NodeChildProcess.spawn(executable, args, {
@@ -949,6 +977,14 @@ export const run = (
     readonly workspaceRoot: string
     readonly cacheDirectory?: string | undefined
     readonly sensitiveEnv?: ReadonlyArray<string> | undefined
+    /** The resolved Nix closure whose PATH replaces the host's, when one is declared. */
+    readonly environment?: ToolEnvironment | undefined
+    /**
+     * The confinement this run executes under. Absent, the tool runs
+     * unconfined; present, the host enforces it or the run fails closed with
+     * `sandbox_unenforceable`.
+     */
+    readonly sandbox?: ExecSandbox.Request | undefined
     /** Receives stdout bytes as the child produces them. */
     readonly onStdout?: ((chunk: Uint8Array) => void) | undefined
     /** Receives stderr bytes as the child produces them. */
@@ -970,7 +1006,7 @@ export const run = (
         // other path crossing this boundary gets. `normalizeCacheDirectory`
         // settles the lexical question only: a `.flows` that is a symbolic
         // link to somewhere else entirely is refused here.
-        resolveWorkspacePath(options.workspaceRoot, cacheDirectory)
+        const cacheRoot = resolveWorkspacePath(options.workspaceRoot, cacheDirectory)
         const substitute = (value: string): string =>
           resolveScriptToken(
             value.replaceAll(cacheDirectoryToken, cacheDirectory).replaceAll(runtimeBinToken, process.execPath)
@@ -980,7 +1016,19 @@ export const run = (
           ...payload,
           argv: [substitute(executable), ...args.map(substitute)]
         }
-        return { resolved, sensitiveEnv, cwd: resolveWorkspacePath(options.workspaceRoot, resolved.cwd) }
+        const cwd = resolveWorkspacePath(options.workspaceRoot, resolved.cwd)
+        const confinement = options.sandbox === undefined
+          ? undefined
+          : ExecSandbox.plan(
+            options.sandbox,
+            {
+              workspaceRoot: NodeFs.realpathSync(NodePath.resolve(options.workspaceRoot)),
+              cwd,
+              tmp: NodePath.join(cacheRoot, "sandbox", sandboxRunId())
+            },
+            ExecSandbox.host()
+          )
+        return { resolved, sensitiveEnv, cwd, confinement }
       },
       catch: (cause) =>
         execError({
@@ -992,10 +1040,37 @@ export const run = (
           stderr: tail(failureMessage(cause))
         })
     }),
-    ({ cwd, resolved, sensitiveEnv }) =>
-      withSecretEnvironment(resolved.secrets, diagnostic, (secretEnv) =>
+    ({ confinement, cwd, resolved, sensitiveEnv }) => {
+      if (ExecSandbox.isUnenforceable(confinement)) {
+        return Effect.fail(
+          execError({
+            argv: resolved.argv,
+            cwd: resolved.cwd,
+            exitCode: -1,
+            code: "sandbox_unenforceable",
+            stdout: "",
+            stderr: tail(confinement.message)
+          })
+        )
+      }
+      if (confinement !== undefined && confinement.mechanism._tag === "docker" && resolved.secrets.length > 0) {
+        return Effect.fail(
+          execError({
+            argv: resolved.argv,
+            cwd: resolved.cwd,
+            exitCode: -1,
+            code: "sandbox_unenforceable",
+            stdout: "",
+            stderr: tail(
+              "sandbox: the docker mechanism cannot reach the loopback secret proxy, so a target that declares " +
+                "secrets needs the native mechanism (bubblewrap on Linux, seatbelt on macOS)"
+            )
+          })
+        )
+      }
+      return withSecretEnvironment(resolved.secrets, diagnostic, (secretEnv) =>
         Effect.flatMap(
-          spawnTool(cwd, resolved, sensitiveEnv, secretEnv, options.onStdout, options.onStderr),
+          confined(confinement, cwd, resolved, sensitiveEnv, secretEnv, options),
           (output) =>
             resolved.expectedExitCodes.includes(output.exitCode)
               ? Effect.succeed({
@@ -1010,10 +1085,90 @@ export const run = (
                   exitCode: output.exitCode,
                   code: "exit_status",
                   stdout: output.stdoutTail,
-                  stderr: output.stderrTail
+                  stderr: tail(annotate(confinement, output.stderrTail))
                 })
               )
         ))
+    }
+  )
+}
+
+/** A name for one confined run's private host directory. */
+const sandboxRunId = (): string => `${process.pid.toString(36)}-${Date.now().toString(36)}-${runCounter++}`
+let runCounter = 0
+
+/** Appends the sandbox's reading of a failed run's output, when it has one. */
+const annotate = (confinement: ExecSandbox.Plan | undefined, stderr: string): string => {
+  if (confinement === undefined) return stderr
+  const note = ExecSandbox.diagnose(confinement, stderr)
+  return note === undefined ? stderr : `${stderr}\n${note}`
+}
+
+/**
+ * Spawns the tool inside its confinement. The host directory the run may
+ * scribble in is created first and removed however the run ends; the declared
+ * write directories are created so the mechanism has something to bind. The
+ * wrapper's argv never reaches a diagnostic: an error carries the tool's own
+ * argv, the way an unconfined run reports it.
+ */
+const confined = (
+  confinement: ExecSandbox.Plan | undefined,
+  cwd: string,
+  resolved: Payload,
+  sensitiveEnv: ReadonlyArray<string>,
+  secretEnv: Readonly<Record<string, string>>,
+  options: {
+    readonly environment?: ToolEnvironment | undefined
+    readonly onStdout?: ((chunk: Uint8Array) => void) | undefined
+    readonly onStderr?: ((chunk: Uint8Array) => void) | undefined
+  }
+): Effect.Effect<Spawned, ExecError> => {
+  if (confinement === undefined) {
+    return spawnTool(cwd, resolved, sensitiveEnv, secretEnv, options.onStdout, options.onStderr, options.environment)
+  }
+  const prepare = Effect.try({
+    try: () => {
+      NodeFs.mkdirSync(NodePath.join(confinement.tmp, "home"), { recursive: true })
+      NodeFs.mkdirSync(NodePath.join(confinement.tmp, "cache"), { recursive: true })
+      for (const write of confinement.writes) NodeFs.mkdirSync(write, { recursive: true })
+      const base = toolEnvironment(resolved.env, sensitiveEnv, secretEnv, options.environment)
+      const visible: Record<string, string> = {}
+      for (const [name, value] of Object.entries(base)) if (typeof value === "string") visible[name] = value
+      const wrapped = ExecSandbox.wrap(confinement, resolved.argv, visible)
+      return {
+        ...resolved,
+        argv: wrapped.argv as [string, ...Array<string>],
+        env: { ...resolved.env, ...wrapped.env }
+      }
+    },
+    catch: (cause) =>
+      execError({
+        argv: resolved.argv,
+        cwd: resolved.cwd,
+        exitCode: -1,
+        code: "spawn_failed",
+        stdout: "",
+        stderr: tail(`sandbox: could not prepare the confinement: ${failureMessage(cause)}`)
+      })
+  })
+  const cleanup = Effect.sync(() => {
+    try {
+      NodeFs.rmSync(confinement.tmp, { recursive: true, force: true })
+    } catch {
+      // A scratch directory that resists removal is left for the next run's sweep.
+    }
+  })
+  return Effect.flatMap(
+    prepare,
+    (payload) =>
+      spawnTool(cwd, payload, sensitiveEnv, secretEnv, options.onStdout, options.onStderr, options.environment).pipe(
+        Effect.mapError((error) => ({
+          ...error,
+          argv: resolved.argv,
+          stderr: tail(annotate(confinement, error.stderr))
+        })),
+        Effect.ensuring(cleanup)
+      )
   )
 }
 
@@ -1039,5 +1194,9 @@ export const ExecLive = (options: {
   readonly workspaceRoot: string
   readonly cacheDirectory?: string | undefined
   readonly sensitiveEnv?: ReadonlyArray<string> | undefined
+  /** The resolved Nix closure whose PATH replaces the host's, when one is declared. */
+  readonly environment?: ToolEnvironment | undefined
+  /** The confinement every exec of this target runs under; see {@link ExecSandbox}. */
+  readonly sandbox?: ExecSandbox.Request | undefined
 }): Layer.Layer<Action.Requirement<"smithers-build/exec">, never, FlowRuntime.FlowRuntime> =>
   Exec.toLayer((payload) => run(options, payload))

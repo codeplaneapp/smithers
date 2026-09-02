@@ -206,7 +206,17 @@ describe("the declaration surface", () => {
     expect(Object.keys(Gate.fields).sort()).toEqual(["job", "name", "pattern", "verb"])
     // A job says what it requires and what it runs.
     expect(Object.keys(Job.fields).sort())
-      .toEqual(["continueOnError", "id", "matrix", "name", "runsOn", "steps", "timeoutMinutes", "toolchain"])
+      .toEqual([
+        "continueOnError",
+        "id",
+        "matrix",
+        "name",
+        "publishesToCache",
+        "runsOn",
+        "steps",
+        "timeoutMinutes",
+        "toolchain"
+      ])
   })
 
   it("refuses a step whose verb is not a CLI verb value", () => {
@@ -781,6 +791,93 @@ describe("render", () => {
   })
 })
 
+describe("the split cache credential", () => {
+  const readerJob = {
+    id: "reader",
+    runsOn: "ubuntu-latest",
+    toolchain: CiToolchain.Needs({ runtimes: [node] }),
+    steps: [{ name: "Workspace targets", verb: Verb.Ci, pattern: "//packages/..." }]
+  }
+  const publisherJob = {
+    id: "publish",
+    runsOn: "ubuntu-latest",
+    publishesToCache: true,
+    toolchain: CiToolchain.Needs({ runtimes: [node] }),
+    steps: [{ name: "Warm the cache", verb: Verb.Ci, pattern: "//packages/..." }]
+  }
+  /** A workflow with the split declared: one untrusted reader, one trunk writer. */
+  const splitAttrs = {
+    ...goldenAttrs,
+    gates: [],
+    cacheUrlSecret: Secret("REMOTE_CACHE_URL"),
+    cacheTokenSecret: Secret("CACHE_READ_TOKEN"),
+    cacheWriteTokenSecret: Secret("CACHE_WRITE_TOKEN"),
+    jobs: [readerJob, publisherJob]
+  }
+
+  it("renders the write credential and its guard only into the publishing job", () => {
+    const rendered = render(attrsOf(splitAttrs))
+    const readerBlock = rendered.slice(rendered.indexOf("  reader:"), rendered.indexOf("  publish:"))
+    const publishBlock = rendered.slice(rendered.indexOf("  publish:"))
+    expect(publishBlock).toContain(
+      "    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
+    )
+    expect(publishBlock).toContain("          CACHE_READ_TOKEN: \"${{ secrets.CACHE_READ_TOKEN }}\"")
+    expect(publishBlock).toContain("          CACHE_WRITE_TOKEN: \"${{ secrets.CACHE_WRITE_TOKEN }}\"")
+    // The reader pulls at full speed and can publish nothing: read entries
+    // only, no write entry, no guard.
+    expect(readerBlock).toContain("          CACHE_READ_TOKEN: \"${{ secrets.CACHE_READ_TOKEN }}\"")
+    expect(readerBlock).not.toContain("CACHE_WRITE_TOKEN")
+    expect(readerBlock).not.toContain("    if:")
+    expect(() => parseWorkflow(rendered)).not.toThrow()
+  })
+
+  it("guards a multi-trunk workflow with one ref clause per push branch", () => {
+    const rendered = render(attrsOf({ ...splitAttrs, pushBranches: ["main", "release"] }))
+    expect(rendered).toContain(
+      "    if: ${{ github.event_name == 'push' && " +
+        "(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release') }}"
+    )
+  })
+
+  it("refuses a publishing job with no declared write credential", () => {
+    const { cacheWriteTokenSecret: _dropped, ...withoutWrite } = splitAttrs
+    expect(() => render(attrsOf(withoutWrite))).toThrow(/no cacheWriteTokenSecret is declared/)
+  })
+
+  it("refuses a declared write credential no job publishes with", () => {
+    expect(() => render(attrsOf({ ...splitAttrs, jobs: [readerJob] })))
+      .toThrow(/no job declares publishesToCache/)
+  })
+
+  it("refuses read and write credentials naming the same variable", () => {
+    expect(() => render(attrsOf({ ...splitAttrs, cacheTokenSecret: Secret("CACHE_WRITE_TOKEN") })))
+      .toThrow(/name the same variable/)
+  })
+
+  it("refuses a publishing job whose guard can never be true", () => {
+    // `pullRequest` stays true, so the workflow keeps a trigger and the
+    // refusal is the guard's, not the no-trigger throw's.
+    expect(() => render(attrsOf({ ...splitAttrs, pushBranches: [] })))
+      .toThrow(/guard can never be true/)
+  })
+
+  it("refuses a push branch the guard expression cannot carry", () => {
+    expect(() => render(attrsOf({ ...splitAttrs, pushBranches: ["b'ranch"] })))
+      .toThrow(/cannot be embedded in the publish guard/)
+  })
+
+  it("refuses a gate only a publishing job would satisfy", () => {
+    // The publishing job is skipped on every pull request, so a gate it alone
+    // carries would go unchecked exactly where gates matter.
+    const gated = {
+      ...splitAttrs,
+      gates: [{ name: "workspace graph", verb: Verb.Test, pattern: "//packages/...", job: "publish" }]
+    }
+    expect(() => render(attrsOf(gated))).toThrow(/does not run workspace graph/)
+  })
+})
+
 describe("GithubCiGen target wiring", () => {
   const checkingAttrs = {
     workflowName: "CI",
@@ -996,7 +1093,44 @@ describe("a platform matrix", () => {
 
   it("still admits no free-form command through the matrix", () => {
     expect(Object.keys(Job.fields).sort())
-      .toEqual(["continueOnError", "id", "matrix", "name", "runsOn", "steps", "timeoutMinutes", "toolchain"])
+      .toEqual([
+        "continueOnError",
+        "id",
+        "matrix",
+        "name",
+        "publishesToCache",
+        "runsOn",
+        "steps",
+        "timeoutMinutes",
+        "toolchain"
+      ])
     expect(Object.keys(MatrixRow.fields).sort()).toEqual(["advisory", "os"])
+  })
+})
+
+describe("system packages", () => {
+  it("renders one apt step that is a no-op on a runner without apt-get", () => {
+    const apt = CiToolchain.Apt({ packages: ["bubblewrap", "iproute2"] })
+    expect(CiToolchain.Needs({ apt }).apt).toEqual(apt)
+    const rendered = render({
+      ...goldenAttrs,
+      jobs: [{
+        id: "test",
+        name: "test",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({ runtimes: [node], apt }),
+        steps: [{ name: "Targets", verb: Verb.Test, pattern: "//packages/..." }]
+      }],
+      gates: []
+    })
+    expect(rendered).toContain("- name: Install system packages")
+    expect(rendered).toContain("if command -v apt-get >/dev/null 2>&1; then")
+    expect(rendered).toContain("sudo apt-get install -y -qq --no-install-recommends 'bubblewrap' 'iproute2'")
+    expect(rendered).not.toContain("if: ")
+  })
+
+  it("refuses a package name apt would not accept", () => {
+    expect(() => CiToolchain.Apt({ packages: ["bubble wrap"] })).toThrow()
+    expect(() => CiToolchain.Apt({ packages: [] })).toThrow()
   })
 })

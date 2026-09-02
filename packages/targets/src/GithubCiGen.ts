@@ -25,6 +25,7 @@ import * as Schema from "effect/Schema"
 import * as CiToolchain from "./CiToolchain.ts"
 import { DriftError, generateFile, resolveOutputPath, WriteFileError } from "./GeneratedFile.ts"
 import * as Input from "./Input.ts"
+import * as Nix from "./Nix.ts"
 import * as PackageManager from "./PackageManager.ts"
 import * as RemoteCache from "./RemoteCache.ts"
 import * as RustToolchain from "./RustToolchain.ts"
@@ -169,8 +170,9 @@ export const maximumTimeoutMinutes = 360
  * red without failing the pipeline: a literal `continue-on-error: true` on the
  * whole job, which makes every platform advisory at once, and an expression
  * reading the matrix context, whose value each row supplies for itself. This
- * generator emits no `if:` key, so a per-platform allowance has to be the
- * second one: the advisory bit is carried in an `include:` row beside the
+ * generator emits no per-row `if:` key (its only `if:` is the whole-job guard
+ * on a {@link Job.publishesToCache} job), so a per-platform allowance has to be
+ * the second one: the advisory bit is carried in an `include:` row beside the
  * runner label, and the job renders `continue-on-error: ${{ matrix.advisory }}`
  * once. Promoting a platform from advisory to required is then one boolean in
  * BUILD.ts, and {@link validateJobs} checks the promotion rather than trusting
@@ -242,6 +244,18 @@ export const Job = Schema.Struct({
    * carries the bit per row instead, in {@link MatrixRow.advisory}.
    */
   continueOnError: Schema.optional(Schema.Boolean),
+  /**
+   * Whether this job holds the write credential and publishes to the remote
+   * cache.
+   *
+   * A publishing job is rendered with
+   * `if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/<branch>' }}`
+   * over the declared push branches, so no `pull_request` run of it can ever
+   * receive the credential; every other job receives only the read credential.
+   * The trust model is `packages/build/infra/CACHE-TRUST.md`: readers are
+   * untrusted, writers are post-merge trunk jobs only. Absent means false.
+   */
+  publishesToCache: Schema.optional(Schema.Boolean),
   /** What the runner must provide before the first target runs. */
   toolchain: CiToolchain.Toolchain,
   steps: Schema.Array(TargetStep)
@@ -299,8 +313,22 @@ export const Attrs = Schema.Struct({
    * name, so the two cannot disagree.
    */
   cacheUrlSecret: Schema.optional(Secret.Declaration),
-  /** The declared secret supplying the remote-cache bearer token. */
+  /**
+   * The declared secret supplying the remote-cache bearer token. When
+   * {@link cacheWriteTokenSecret} is also declared, this is the READ
+   * credential, rendered into every job.
+   */
   cacheTokenSecret: Schema.optional(Secret.Declaration),
+  /**
+   * The declared secret supplying the remote-cache WRITE bearer token.
+   *
+   * When declared, {@link cacheTokenSecret} is the read credential and this
+   * entry is rendered only into jobs that declare
+   * {@link Job.publishesToCache}, each guarded to post-merge push runs, so a
+   * `pull_request` job can pull at full speed and publish nothing. The trust
+   * model and rollout ordering are `packages/build/infra/CACHE-TRUST.md`.
+   */
+  cacheWriteTokenSecret: Schema.optional(Secret.Declaration),
   /** The jobs the workflow declares. A generated workflow needs at least one. @default [] */
   jobs: Schema.Array(Job).pipe(
     Schema.withConstructorDefault(Effect.succeed<ReadonlyArray<Job>>([]))
@@ -358,7 +386,9 @@ export const actions = {
   setupGo: "actions/setup-go@v5",
   foundryToolchain: "foundry-rs/foundry-toolchain@v1",
   rustCache: "Swatinem/rust-cache@v2",
-  uploadArtifact: "actions/upload-artifact@v4"
+  uploadArtifact: "actions/upload-artifact@v4",
+  nixInstallerDeterminate: "DeterminateSystems/nix-installer-action@v16",
+  nixInstallerCachix: "cachix/install-nix-action@v31"
 } as const
 
 /**
@@ -618,12 +648,52 @@ const installArgv = (attrs: Attrs): ReadonlyArray<string> =>
  * @category rendering
  * @since 0.1.0
  */
-export const stepCommand = (attrs: Attrs, step: TargetStep): string =>
+export const stepCommand = (attrs: Attrs, step: TargetStep, nix?: CiToolchain.NixSetup | undefined): string =>
   [
+    ...developPrefix(nix),
     ...PackageManager.exec(attrs.packageManager, ["smithers-build", Verb.command(step.verb)]),
     shellArgument(step.pattern),
     ...(step.parallelism === undefined ? [] : ["--jobs", String(step.parallelism)])
   ].join(" ")
+
+/**
+ * The `nix develop <environment> --command` prefix every command of a job
+ * with a Nix environment runs behind, so the tools the command spawns come
+ * from the closure and never from the runner image.
+ */
+const developPrefix = (nix: CiToolchain.NixSetup | undefined): ReadonlyArray<string> =>
+  nix === undefined ? [] : ["nix", "develop", ...Nix.developArguments(nix.environment), "--command"]
+
+/**
+ * The extra `nix.conf` lines a declared binary cache adds, each value a
+ * `secrets.<NAME>` expression the workflow reads at run time.
+ */
+const nixExtraConf = (nix: CiToolchain.NixSetup): string | undefined => {
+  if (nix.substituter === undefined || nix.publicKey === undefined) return undefined
+  return [
+    `extra-substituters = \${{ secrets.${nix.substituter.env} }}`,
+    `extra-trusted-public-keys = \${{ secrets.${nix.publicKey.env} }}`
+  ].join("\n")
+}
+
+/** The steps that install Nix and, when declared, trust a binary cache. */
+const nixSteps = (nix: CiToolchain.NixSetup): ReadonlyArray<RenderedStep> => {
+  const extraConf = nixExtraConf(nix)
+  switch (nix.installer) {
+    case "determinate":
+      return [{
+        name: "Install Nix",
+        uses: actions.nixInstallerDeterminate,
+        ...(extraConf === undefined ? {} : { with: { "extra-conf": extraConf } })
+      }]
+    case "cachix":
+      return [{
+        name: "Install Nix",
+        uses: actions.nixInstallerCachix,
+        ...(extraConf === undefined ? {} : { with: { extra_nix_config: extraConf } })
+      }]
+  }
+}
 
 /** The setup action for the declared package manager, when it needs one. */
 const managerSetupAction = (manager: PackageManager.PackageManager): string | undefined => {
@@ -720,10 +790,17 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       with: { version: needs.foundry.release }
     })
   }
-  const managerSetup = managerSetupAction(attrs.packageManager)
-  if (needs.install && managerSetup !== undefined) steps.push({ uses: managerSetup })
-  for (const setup of needs.runtimes) steps.push(...runtimeSteps(setup))
-  if (needs.install) steps.push({ run: installArgv(attrs).join(" ") })
+  if (needs.nix !== undefined) {
+    // The environment supplies the package manager and the interpreters, so
+    // no setup action runs; the install itself runs inside the dev shell.
+    steps.push(...nixSteps(needs.nix))
+    if (needs.install) steps.push({ run: [...developPrefix(needs.nix), ...installArgv(attrs)].join(" ") })
+  } else {
+    const managerSetup = managerSetupAction(attrs.packageManager)
+    if (needs.install && managerSetup !== undefined) steps.push({ uses: managerSetup })
+    for (const setup of needs.runtimes) steps.push(...runtimeSteps(setup))
+    if (needs.install) steps.push({ run: installArgv(attrs).join(" ") })
+  }
   if (needs.rust !== undefined) {
     steps.push({
       name: "Install pinned Rust toolchain",
@@ -748,6 +825,20 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       name: "Install ripgrep",
       uses: actions.installTool,
       with: { tool: `ripgrep@${needs.ripgrep.release}` }
+    })
+  }
+  if (needs.apt !== undefined) {
+    // The generator emits no `if:` key, so the step decides for itself: a
+    // runner without apt-get (macOS, Windows) runs nothing and stays green.
+    steps.push({
+      name: "Install system packages",
+      run: [
+        "if command -v apt-get >/dev/null 2>&1; then",
+        `  sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ${
+          needs.apt.packages.map(shellWord).join(" ")
+        }`,
+        "fi"
+      ].join("\n")
     })
   }
   if (needs.browser !== undefined) {
@@ -884,9 +975,74 @@ const isWhollyAdvisory = (job: Job): boolean =>
  * and a job that runs a target step without installing the workspace has no
  * binary to run it with.
  */
+/**
+ * One push branch, as a literal inside a single-quoted GitHub expression.
+ *
+ * The set excludes quotes, whitespace, `$`, and `{`, so a branch name can
+ * carry no expression and cannot close the quote it is rendered inside. A
+ * branch outside it is refused rather than escaped: the guard is a security
+ * boundary, and an escaping scheme is a second grammar to get wrong.
+ */
+const publishBranchName = /^[A-Za-z0-9._/-]+$/
+
+/**
+ * The split write-credential declaration, checked as a whole.
+ *
+ * Each refusal is a workflow that would do less than it declares or hold more
+ * than it should: a publishing job with no write credential publishes nothing,
+ * a write credential no job uses is a trunk that silently stops publishing,
+ * equal read and write names are one credential wearing two names (both cache
+ * services refuse the value-level analogue), and a publishing job whose guard
+ * can never be true is a job that never runs.
+ */
+const validatePublishing = (attrs: Attrs): void => {
+  const publishing = attrs.jobs.filter((job) => job.publishesToCache === true)
+  if (attrs.cacheWriteTokenSecret === undefined) {
+    if (publishing.length > 0) {
+      throw new Error(
+        `GithubCiGen: job ${
+          JSON.stringify(publishing[0]!.id)
+        } declares publishesToCache but no cacheWriteTokenSecret is declared; declare the write credential or drop the flag`
+      )
+    }
+    return
+  }
+  if (publishing.length === 0) {
+    throw new Error(
+      "GithubCiGen: cacheWriteTokenSecret is declared but no job declares publishesToCache; the trunk would silently stop publishing to the cache"
+    )
+  }
+  if (
+    attrs.cacheTokenSecret !== undefined &&
+    RemoteCache.normalizeTokenEnv(attrs.cacheTokenSecret.env) ===
+      RemoteCache.normalizeTokenEnv(attrs.cacheWriteTokenSecret.env)
+  ) {
+    throw new Error(
+      "GithubCiGen: cacheTokenSecret and cacheWriteTokenSecret name the same variable; a reader holding the write credential can publish, so the two must differ"
+    )
+  }
+  if (attrs.pushBranches.length === 0) {
+    throw new Error(
+      `GithubCiGen: job ${
+        JSON.stringify(publishing[0]!.id)
+      } declares publishesToCache but the workflow has no push branches, so its guard can never be true`
+    )
+  }
+  for (const branch of attrs.pushBranches) {
+    if (!publishBranchName.test(branch)) {
+      throw new Error(
+        `GithubCiGen: push branch ${
+          JSON.stringify(branch)
+        } cannot be embedded in the publish guard; use letters, digits, ".", "_", "/", and "-"`
+      )
+    }
+  }
+}
+
 const validateJobs = (attrs: Attrs): void => {
   const ids = new Set<string>()
   const required = new Set(attrs.requiredJobs)
+  validatePublishing(attrs)
   for (const job of attrs.jobs) {
     validateJobRunners(job)
     // A lane named in `requiredJobs` is a lane the pipeline promises to run.
@@ -982,12 +1138,18 @@ export const satisfiesGate = (step: TargetStep, gate: Gate): boolean =>
 /**
  * The declared gates no declared job performs.
  *
+ * A job that declares {@link Job.publishesToCache} satisfies nothing here: it
+ * renders behind a push-only `if:` guard, so GitHub skips it on every pull
+ * request and a gate it alone carried would go unchecked exactly where gates
+ * matter.
+ *
  * @category validation
  * @since 0.1.0
  */
 export const missingGates = (attrs: Attrs): ReadonlyArray<Gate> =>
   attrs.gates.filter((gate) =>
     !attrs.jobs.some((job) =>
+      job.publishesToCache !== true &&
       (gate.job === undefined || job.id === gate.job) &&
       job.steps.some((step) => satisfiesGate(step, gate))
     )
@@ -1010,6 +1172,35 @@ const cacheEnvironment = (attrs: Attrs): Readonly<Record<string, string>> => {
     env[RemoteCache.normalizeTokenEnv(attrs.cacheTokenSecret.env)] = `\${{ secrets.${attrs.cacheTokenSecret.env} }}`
   }
   return env
+}
+
+/**
+ * Renders the write-credential entry, for publishing jobs alone.
+ *
+ * At most one entry, on the same terms as {@link cacheEnvironment}: the
+ * declared name keyed to the repository secret of the same name. `render`
+ * merges it only into the step env of a job that declares
+ * {@link Job.publishesToCache}, never into the shared map.
+ */
+const writeCacheEnvironment = (attrs: Attrs): Readonly<Record<string, string>> =>
+  attrs.cacheWriteTokenSecret === undefined ? {} : {
+    [RemoteCache.normalizeTokenEnv(attrs.cacheWriteTokenSecret.env)]:
+      `\${{ secrets.${attrs.cacheWriteTokenSecret.env} }}`
+  }
+
+/**
+ * The `if:` expression guarding a publishing job to post-merge push runs.
+ *
+ * Rendered PLAIN rather than through `scalar`, on the same terms as
+ * {@link matrixExpressions}: a quoted expression is a string GitHub coerces
+ * rather than the condition the job declares. The branch names inside it are
+ * held to {@link publishBranchName} by `validatePublishing`, so nothing here
+ * can open an expression or close a quote.
+ */
+const publishGuard = (attrs: Attrs): string => {
+  const refs = attrs.pushBranches.map((branch) => `github.ref == 'refs/heads/${branch}'`)
+  const condition = refs.length === 1 ? refs[0]! : `(${refs.join(" || ")})`
+  return `\${{ github.event_name == 'push' && ${condition} }}`
 }
 
 /**
@@ -1057,8 +1248,14 @@ export const render = (attrs: Attrs): string => {
     "jobs:"
   ]
   const cacheEnv = cacheEnvironment(attrs)
-  const hasCacheEnv = Object.keys(cacheEnv).length > 0
+  const writeEnv = writeCacheEnvironment(attrs)
   for (const job of attrs.jobs) {
+    // A publishing job carries the write credential, so the whole job is
+    // guarded to post-merge push runs and its steps get the write entry. Every
+    // other job renders exactly as it would without the split.
+    const publishes = job.publishesToCache === true
+    const jobEnv = publishes ? { ...cacheEnv, ...writeEnv } : cacheEnv
+    const hasJobEnv = Object.keys(jobEnv).length > 0
     // A job id is a mapping KEY, and YAML resolves a plain `no:` or `on:` to a
     // boolean just as it does a value, so an id that reads as one is quoted.
     lines.push(`  ${scalar(job.id)}:`)
@@ -1082,6 +1279,7 @@ export const render = (attrs: Attrs): string => {
     } else {
       lines.push(`    runs-on: ${runner(job.runsOn!)}`)
     }
+    if (publishes) lines.push(`    if: ${publishGuard(attrs)}`)
     if (job.timeoutMinutes !== undefined) lines.push(`    timeout-minutes: ${job.timeoutMinutes}`)
     if (job.matrix !== undefined) {
       lines.push(`    continue-on-error: ${matrixExpressions.advisory}`)
@@ -1093,8 +1291,8 @@ export const render = (attrs: Attrs): string => {
     for (const step of job.steps) {
       rendered.push({
         ...(step.name === undefined ? {} : { name: step.name }),
-        run: stepCommand(attrs, step),
-        ...(hasCacheEnv ? { env: cacheEnv } : {})
+        run: stepCommand(attrs, step, job.toolchain.nix),
+        ...(hasJobEnv ? { env: jobEnv } : {})
       })
     }
     if (job.toolchain.artifacts !== undefined) rendered.push(...artifactSteps(job.toolchain.artifacts))

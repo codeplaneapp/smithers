@@ -13,6 +13,8 @@
  * @since 0.1.0
  */
 import * as NodeUtil from "node:util/types"
+import type * as Attr from "./Attr.ts"
+import type * as WorkspaceDeclaration from "./WorkspaceDeclaration.ts"
 
 /**
  * Runtime marker for a workspace configuration declaration.
@@ -60,6 +62,15 @@ export interface Workspace {
   readonly [TypeId]: typeof TypeId
   readonly cacheDirectory: string
   readonly gitignored: boolean
+  /**
+   * The confinement every tool-running target executes under. `"none"` is
+   * the explicit opt-out; `{}` is the default confinement (declared reads and
+   * writes only, no network); `{ network: "loopback" }` and
+   * `{ network: true }` open the network in steps.
+   */
+  readonly sandbox: Attr.Sandbox
+  /** The mechanism that enforces the confinement, when the platform default is not wanted. */
+  readonly sandboxes: WorkspaceDeclaration.SandboxesDeclaration | undefined
 }
 
 /**
@@ -73,6 +84,35 @@ export interface Options {
   readonly cacheDirectory?: string | undefined
   /** @default false */
   readonly gitignored?: boolean | undefined
+  /** @default "none" */
+  readonly sandbox?: Attr.Sandbox | undefined
+  /** @default undefined, meaning the platform's own mechanism */
+  readonly sandboxes?: WorkspaceDeclaration.SandboxesDeclaration | undefined
+}
+
+const sandboxesTypeId = Symbol.for("smithers-build/Sandboxes")
+
+const isSandboxesDeclaration = (value: unknown): value is WorkspaceDeclaration.SandboxesDeclaration => {
+  if (typeof value !== "object" || value === null) return false
+  const descriptor = Object.getOwnPropertyDescriptor(value, sandboxesTypeId)
+  return descriptor !== undefined && "value" in descriptor && descriptor.value === sandboxesTypeId
+}
+
+/**
+ * Checks whether a value is a sandbox policy: `"none"`, or an object whose
+ * only member is an optional `network` of `true`, `false`, or `"loopback"`.
+ *
+ * @category guards
+ * @since 0.1.0
+ */
+export const isSandboxPolicy = (value: unknown): value is Attr.Sandbox => {
+  if (value === "none") return true
+  if (typeof value !== "object" || value === null || NodeUtil.isProxy(value)) return false
+  for (const name of Object.getOwnPropertyNames(value)) {
+    if (name !== "network") return false
+  }
+  const network = (value as { readonly network?: unknown }).network
+  return network === undefined || typeof network === "boolean" || network === "loopback"
 }
 
 const absolute = /^([/\\]|[A-Za-z]:)/
@@ -144,11 +184,11 @@ export const Workspace = (options: Options = {}): Workspace => {
     throw new TypeError("Workspace options must not contain symbol properties")
   }
   for (const name of names) {
-    if (name !== "cacheDirectory" && name !== "gitignored") {
+    if (name !== "cacheDirectory" && name !== "gitignored" && name !== "sandbox" && name !== "sandboxes") {
       throw new TypeError(`Workspace received unknown option ${JSON.stringify(name)}`)
     }
   }
-  const read = (name: "cacheDirectory" | "gitignored"): unknown => {
+  const read = (name: "cacheDirectory" | "gitignored" | "sandbox" | "sandboxes"): unknown => {
     const descriptor = Object.getOwnPropertyDescriptor(options, name)
     if (descriptor === undefined) return undefined
     if (!("value" in descriptor) || descriptor.enumerable !== true) {
@@ -158,18 +198,34 @@ export const Workspace = (options: Options = {}): Workspace => {
   }
   const cacheDirectory = read("cacheDirectory")
   const gitignored = read("gitignored")
+  const sandbox = read("sandbox")
+  const sandboxes = read("sandboxes")
   if (cacheDirectory !== undefined && typeof cacheDirectory !== "string") {
     throw new TypeError("Workspace option cacheDirectory must be a string")
   }
   if (gitignored !== undefined && typeof gitignored !== "boolean") {
     throw new TypeError("Workspace option gitignored must be a boolean")
   }
+  if (sandbox !== undefined && !isSandboxPolicy(sandbox)) {
+    throw new TypeError(
+      "Workspace option sandbox must be \"none\" or { network?: boolean | \"loopback\" }"
+    )
+  }
+  if (sandboxes !== undefined && !isSandboxesDeclaration(sandboxes)) {
+    throw new TypeError("Workspace option sandboxes must be an S.Sandboxes declaration")
+  }
   return Object.freeze<Workspace>({
     [TypeId]: TypeId,
     cacheDirectory: cacheDirectory === undefined
       ? defaultCacheDirectory
       : normalizeCacheDirectory(cacheDirectory),
-    gitignored: gitignored ?? false
+    gitignored: gitignored ?? false,
+    sandbox: sandbox === undefined
+      ? "none"
+      : sandbox === "none"
+      ? "none"
+      : Object.freeze({ ...(sandbox.network === undefined ? {} : { network: sandbox.network }) }),
+    sandboxes
   })
 }
 
@@ -187,5 +243,7 @@ export const isWorkspace = (value: unknown): value is Workspace => {
   }
   return own(TypeId) === TypeId &&
     typeof own("cacheDirectory") === "string" &&
-    typeof own("gitignored") === "boolean"
+    typeof own("gitignored") === "boolean" &&
+    (own("sandbox") === undefined || isSandboxPolicy(own("sandbox"))) &&
+    (own("sandboxes") === undefined || isSandboxesDeclaration(own("sandboxes")))
 }

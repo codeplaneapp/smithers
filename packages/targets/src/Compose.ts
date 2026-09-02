@@ -636,6 +636,7 @@ export const checkGenerator = (
     readonly workspaceRoot: string
     readonly cacheDirectory?: string | undefined
     readonly sensitiveEnv?: ReadonlyArray<string> | undefined
+    readonly environment?: Exec.ToolEnvironment | undefined
   },
   payload: GenerateCheckPayload
 ): Effect.Effect<void, Exec.ExecError | GeneratedFile.DriftError> => {
@@ -689,6 +690,7 @@ export const GenerateCheckLive = (options: {
   readonly workspaceRoot: string
   readonly cacheDirectory?: string | undefined
   readonly sensitiveEnv?: ReadonlyArray<string> | undefined
+  readonly environment?: Exec.ToolEnvironment | undefined
 }): Layer.Layer<Action.Requirement<"smithers-build/generate-check">, never, FlowRuntime.FlowRuntime> =>
   GenerateCheck.toLayer((payload) => checkGenerator(options, payload))
 

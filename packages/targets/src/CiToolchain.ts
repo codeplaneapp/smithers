@@ -23,8 +23,10 @@
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
+import * as NixDeclaration from "./Nix.ts"
 import * as Runtime from "./Runtime.ts"
 import * as RustToolchain from "./RustToolchain.ts"
+import * as Secret from "./Secret.ts"
 
 /**
  * Schema for the Node releases a runner may install.
@@ -214,6 +216,29 @@ export type RipgrepRelease = typeof RipgrepRelease.Type
 export const RipgrepSetup = Schema.Struct({ release: RipgrepRelease })
 
 /**
+ * Schema for the system packages a Linux runner installs with `apt-get`.
+ *
+ * The sandbox mechanism on Linux is bubblewrap, and a hosted runner image does
+ * not ship it. A job whose targets run confined declares the package here; the
+ * generated step is a no-op on a runner without `apt-get`, so one job
+ * declaration serves a platform matrix.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const AptSetup = Schema.Struct({
+  packages: Schema.NonEmptyArray(Schema.NonEmptyString.check(Schema.isPattern(/^[a-z0-9][a-z0-9+.-]*$/)))
+})
+
+/**
+ * One declared `apt-get` installation.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type AptSetup = typeof AptSetup.Type
+
+/**
  * One declared ripgrep installation.
  *
  * @category models
@@ -334,6 +359,15 @@ export const Ripgrep = (options: { readonly release: RipgrepRelease }): RipgrepS
   RipgrepSetup.make({ release: options.release })
 
 /**
+ * Declares that a Linux job installs system packages with `apt-get`.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const Apt = (options: { readonly packages: ReadonlyArray<string> }): AptSetup =>
+  AptSetup.make({ packages: [...options.packages] as [string, ...Array<string>] })
+
+/**
  * Declares that a job installs a Go toolchain.
  *
  * @category constructors
@@ -396,6 +430,100 @@ export const Rust = (options: {
   /** @default true */
   readonly cache?: boolean | undefined
 }): RustSetup => RustSetup.make({ toolchain: options.toolchain, cache: options.cache ?? true })
+
+/**
+ * Schema for the installers a generated job may install Nix with.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const NixInstaller = Schema.Literals(["determinate", "cachix"])
+
+/**
+ * The installers a generated job may install Nix with.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type NixInstaller = typeof NixInstaller.Type
+
+/**
+ * Schema for a declared Nix installation.
+ *
+ * `environment` is the workspace's `S.Nix.Environment`; every step of the job
+ * runs inside `nix develop` of it, so the runner's own interpreters are never
+ * used. `substituter` and `publicKey` are {@link Secret} declarations naming
+ * the repository secrets that hold a binary cache URL and its signing public
+ * key; the values reach the generated workflow only as `secrets.<NAME>`
+ * expressions, never as literals.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const NixSetup = Schema.Struct({
+  environment: NixDeclaration.EnvironmentDeclaration,
+  installer: NixInstaller,
+  substituter: Schema.optional(Secret.Declaration),
+  publicKey: Schema.optional(Secret.Declaration)
+})
+
+/**
+ * One declared Nix installation.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type NixSetup = typeof NixSetup.Type
+
+/**
+ * Declares that a job installs Nix and runs every step inside the declared
+ * environment.
+ *
+ * @example
+ * ```ts
+ * import { Smithers } from "@smthrs/targets"
+ *
+ * const environment = Smithers.Nix.Environment({ flake: Smithers.file("//flake.nix") })
+ *
+ * export const needs = Smithers.CiToolchain.Needs({
+ *   nix: Smithers.CiToolchain.Nix({
+ *     environment,
+ *     substituter: Smithers.Secret("NIX_CACHE_URL"),
+ *     publicKey: Smithers.Secret("NIX_CACHE_PUBLIC_KEY")
+ *   })
+ * })
+ * ```
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const Nix = (options: {
+  readonly environment: NixDeclaration.Environment
+  /** @default "determinate" */
+  readonly installer?: NixInstaller | undefined
+  readonly substituter?: Secret.Secret | undefined
+  readonly publicKey?: Secret.Secret | undefined
+}): NixSetup => {
+  if (typeof options !== "object" || options === null) throw new TypeError("CiToolchain.Nix options must be an object")
+  if (!NixDeclaration.isEnvironment(options.environment)) {
+    throw new TypeError("CiToolchain.Nix environment must be an S.Nix.Environment declaration")
+  }
+  if (options.substituter !== undefined && !Secret.isSecret(options.substituter)) {
+    throw new TypeError("CiToolchain.Nix substituter must be an S.Secret declaration")
+  }
+  if (options.publicKey !== undefined && !Secret.isSecret(options.publicKey)) {
+    throw new TypeError("CiToolchain.Nix publicKey must be an S.Secret declaration")
+  }
+  if ((options.substituter === undefined) !== (options.publicKey === undefined)) {
+    throw new Error("CiToolchain.Nix substituter and publicKey are declared together")
+  }
+  return NixSetup.make({
+    environment: options.environment,
+    installer: options.installer ?? "determinate",
+    ...(options.substituter === undefined ? {} : { substituter: options.substituter }),
+    ...(options.publicKey === undefined ? {} : { publicKey: options.publicKey })
+  })
+}
 
 /**
  * A workspace-relative path a generated step may name.
@@ -624,8 +752,11 @@ export const Toolchain = Schema.Struct({
   rust: Schema.optional(RustSetup),
   jj: Schema.optional(JjSetup),
   ripgrep: Schema.optional(RipgrepSetup),
+  apt: Schema.optional(AptSetup),
   go: Schema.optional(GoSetup),
   foundry: Schema.optional(FoundrySetup),
+  /** Install Nix and run every step inside the declared environment. */
+  nix: Schema.optional(NixSetup),
   browser: Schema.optional(SystemBrowser),
   workflowLint: Schema.optional(WorkflowLint),
   artifacts: Schema.optional(ArtifactUpload)
@@ -669,22 +800,42 @@ export const Needs = (options: {
   readonly rust?: RustSetup | undefined
   readonly jj?: JjSetup | undefined
   readonly ripgrep?: RipgrepSetup | undefined
+  /** System packages a Linux runner installs before its targets run; a no-op elsewhere. */
+  readonly apt?: AptSetup | undefined
   readonly go?: GoSetup | undefined
   readonly foundry?: FoundrySetup | undefined
+  readonly nix?: NixSetup | undefined
   readonly browser?: SystemBrowser | undefined
   readonly workflowLint?: WorkflowLint | undefined
   readonly artifacts?: ArtifactUpload | undefined
-} = {}): Toolchain =>
-  Toolchain.make({
+} = {}): Toolchain => {
+  if (options.nix !== undefined) {
+    // The environment supplies every interpreter and language toolchain, so a
+    // job that also installs one on the runner would run two copies and the
+    // generated PATH would decide which. Refuse the mix rather than pick.
+    const mixed = (["runtimes", "rust", "jj", "ripgrep", "go", "foundry"] as const).filter((name) => {
+      const value = options[name]
+      return Array.isArray(value) ? value.length > 0 : value !== undefined
+    })
+    if (mixed.length > 0) {
+      throw new Error(
+        `CiToolchain.Needs: a Nix environment supplies the toolchain; remove ${mixed.join(", ")} from the job`
+      )
+    }
+  }
+  return Toolchain.make({
     submodules: options.submodules ?? false,
     install: options.install ?? true,
     runtimes: options.runtimes ?? [],
     ...(options.rust === undefined ? {} : { rust: options.rust }),
     ...(options.jj === undefined ? {} : { jj: options.jj }),
     ...(options.ripgrep === undefined ? {} : { ripgrep: options.ripgrep }),
+    ...(options.apt === undefined ? {} : { apt: options.apt }),
     ...(options.go === undefined ? {} : { go: options.go }),
     ...(options.foundry === undefined ? {} : { foundry: options.foundry }),
+    ...(options.nix === undefined ? {} : { nix: options.nix }),
     ...(options.browser === undefined ? {} : { browser: options.browser }),
     ...(options.workflowLint === undefined ? {} : { workflowLint: options.workflowLint }),
     ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts })
   })
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as Config from "../src/Config.ts"
+import * as WorkspaceDeclaration from "../src/WorkspaceDeclaration.ts"
 
 describe("Workspace", () => {
   it("defaults the cache directory to .flows and gitignored to false", () => {
@@ -106,5 +107,34 @@ describe("Config.normalizeCacheDirectory", () => {
     expect(() => Config.Workspace({ cacheDirectory: "" })).toThrow(/must not be empty/)
     expect(() => Config.Workspace({ cacheDirectory: "/abs" })).toThrow(/workspace-relative/)
     expect(() => Config.Workspace({ cacheDirectory: ".." })).toThrow(/must not leave the workspace/)
+  })
+})
+
+describe("Workspace sandbox options", () => {
+  it("defaults to no confinement and keeps a declared policy", () => {
+    expect(Config.Workspace().sandbox).toBe("none")
+    expect(Config.Workspace().sandboxes).toBeUndefined()
+    expect(Config.Workspace({ sandbox: {} }).sandbox).toEqual({})
+    expect(Config.Workspace({ sandbox: { network: "loopback" } }).sandbox).toEqual({ network: "loopback" })
+    expect(Config.Workspace({ sandbox: "none" }).sandbox).toBe("none")
+  })
+
+  it("keeps a declared mechanism and refuses anything else", () => {
+    const sandboxes = WorkspaceDeclaration.Sandboxes({
+      default: WorkspaceDeclaration.Sandbox.Docker({ image: "node:22" })
+    })
+    expect(Config.Workspace({ sandboxes }).sandboxes).toBe(sandboxes)
+    expect(() => Config.Workspace({ sandboxes: { default: "docker" } as never })).toThrow(/S\.Sandboxes/)
+    expect(() => Config.Workspace({ sandbox: "always" as never })).toThrow(/sandbox/)
+    expect(() => Config.Workspace({ sandbox: { network: "all" } as never })).toThrow(/sandbox/)
+    expect(() => Config.Workspace({ sandbox: { reads: [] } as never })).toThrow(/sandbox/)
+  })
+
+  it("recognizes a declaration with and without the sandbox fields", () => {
+    expect(Config.isWorkspace(Config.Workspace({ sandbox: {} }))).toBe(true)
+    const legacy = { [Config.TypeId]: Config.TypeId, cacheDirectory: ".flows", gitignored: false }
+    expect(Config.isWorkspace(legacy)).toBe(true)
+    const forged = { [Config.TypeId]: Config.TypeId, cacheDirectory: ".flows", gitignored: false, sandbox: "always" }
+    expect(Config.isWorkspace(forged)).toBe(false)
   })
 })

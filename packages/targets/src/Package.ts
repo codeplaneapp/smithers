@@ -15,6 +15,7 @@
 import * as NodeUtil from "node:util/types"
 import { Filegroup } from "./Filegroup.ts"
 import * as Input from "./Input.ts"
+import * as Owners from "./Owners.ts"
 import * as Target from "./Target.ts"
 
 /**
@@ -45,6 +46,8 @@ export interface PackageMetadata {
   readonly keys: ReadonlyArray<string>
   /** The declared default visibility, when the package stated one. */
   readonly defaultVisibility?: "public"
+  /** The validated ownership declaration, when the package stated one. */
+  readonly owners?: Owners.Declaration
 }
 
 /**
@@ -92,12 +95,13 @@ const isWrappableInput = (value: unknown): value is Input.File | Input.Glob =>
 export const Package = <const T extends Readonly<Record<string, MapValue>>>(options: {
   readonly targets: T
   readonly defaultVisibility?: "public"
+  readonly owners?: Owners.Options | Owners.Declaration | undefined
 }): PackageValue<{ readonly [K in keyof T]: T[K] extends Target.AnyTarget ? T[K] : Target.AnyTarget }> => {
   if (typeof options !== "object" || options === null || NodeUtil.isProxy(options)) {
     throw new TypeError("Package options must be a plain object")
   }
   for (const key of Object.getOwnPropertyNames(options)) {
-    if (key !== "targets" && key !== "defaultVisibility") {
+    if (key !== "targets" && key !== "defaultVisibility" && key !== "owners") {
       throw new TypeError(`Package received unknown option ${JSON.stringify(key)}`)
     }
   }
@@ -108,6 +112,7 @@ export const Package = <const T extends Readonly<Record<string, MapValue>>>(opti
         `so ${JSON.stringify(defaultVisibility)} cannot be honoured`
     )
   }
+  const owners = options.owners === undefined ? undefined : Owners.declare(options.owners)
   const map: unknown = options.targets
   if (
     typeof map !== "object" || map === null || NodeUtil.isProxy(map) ||
@@ -153,7 +158,8 @@ export const Package = <const T extends Readonly<Record<string, MapValue>>>(opti
   const metadata: PackageMetadata = Object.freeze({
     abi,
     keys: Object.freeze(keys),
-    ...(defaultVisibility === undefined ? {} : { defaultVisibility })
+    ...(defaultVisibility === undefined ? {} : { defaultVisibility }),
+    ...(owners === undefined ? {} : { owners })
   })
   Object.defineProperty(result, PackageTypeId, {
     configurable: false,

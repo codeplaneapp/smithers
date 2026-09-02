@@ -1,0 +1,302 @@
+/**
+ * The sandbox contract, platform by platform, without spawning anything.
+ *
+ * Every mechanism's argv is built from a plan and a fake host, so the Linux
+ * argv is checked on macOS and the seatbelt profile on Linux. Real enforcement
+ * is proven end to end in `@smthrs/build-cli`'s sandbox suites, which run the
+ * host's own mechanism.
+ */
+import * as NodePath from "node:path"
+import { describe, expect, it } from "vitest"
+import * as ExecSandbox from "../src/ExecSandbox.ts"
+import { Sandbox } from "../src/WorkspaceDeclaration.ts"
+
+const root = "/work/ws"
+
+const host = (
+  platform: NodeJS.Platform,
+  executables: Readonly<Record<string, string>> = {},
+  existing: ReadonlyArray<string> = [],
+  directories: ReadonlyArray<string> = []
+): ExecSandbox.Host => ({
+  platform,
+  executable: (name) => executables[name],
+  exists: (path) => existing.includes(path) || directories.includes(path),
+  isDirectory: (path) => directories.includes(path),
+  uid: 501,
+  gid: 20
+})
+
+const linux = host("linux", { bwrap: "/usr/bin/bwrap" }, ["/work/ws/src/a.ts"], [
+  "/work/ws/node_modules",
+  "/work/ws/dist"
+])
+const darwin = host("darwin", { "/usr/bin/sandbox-exec": "/usr/bin/sandbox-exec" }, ["/work/ws/src/a.ts"], [
+  "/work/ws/node_modules",
+  "/work/ws/dist"
+])
+const windows = host("win32", { docker: "C:\\docker.exe" })
+
+const request: ExecSandbox.Request = {
+  policy: {},
+  reads: ["src/a.ts", "node_modules", "missing.txt", "../outside"],
+  writes: ["dist", "out/bundle.js"],
+  readOnly: [".flows/cache"]
+}
+
+const planned = (hostFacts: ExecSandbox.Host, override: Partial<ExecSandbox.Request> = {}): ExecSandbox.Plan => {
+  const plan = ExecSandbox.plan(
+    { ...request, ...override },
+    { workspaceRoot: root, cwd: `${root}/pkg`, tmp: "/work/ws/.flows/sandbox/run1" },
+    hostFacts
+  )
+  if (plan === undefined || ExecSandbox.isUnenforceable(plan)) throw new Error("expected a plan")
+  return plan
+}
+
+describe("network", () => {
+  it("resolves the policy to a posture and lets services open loopback only", () => {
+    expect(ExecSandbox.network(undefined)).toBe("none")
+    expect(ExecSandbox.network({})).toBe("none")
+    expect(ExecSandbox.network({ network: false })).toBe("none")
+    expect(ExecSandbox.network({ network: "loopback" })).toBe("loopback")
+    expect(ExecSandbox.network({ network: true })).toBe("open")
+    expect(ExecSandbox.network("none")).toBe("open")
+    expect(ExecSandbox.network(undefined, true)).toBe("loopback")
+    expect(ExecSandbox.network({ network: true }, true)).toBe("open")
+  })
+})
+
+describe("selection", () => {
+  it("picks the platform mechanism when nothing is declared", () => {
+    expect(ExecSandbox.select(request, linux)).toEqual({ _tag: "bubblewrap", executable: "/usr/bin/bwrap" })
+    expect(ExecSandbox.select(request, darwin)).toEqual({ _tag: "seatbelt", executable: "/usr/bin/sandbox-exec" })
+  })
+
+  it("selects nothing for the explicit opt-outs", () => {
+    expect(ExecSandbox.select({ ...request, policy: "none" }, linux)).toEqual({ _tag: "none" })
+    expect(ExecSandbox.select({ ...request, mechanism: Sandbox.None() }, linux)).toEqual({ _tag: "none" })
+    expect(ExecSandbox.enforceable({ ...request, policy: "none" }, linux)).toBe(false)
+  })
+
+  it("refuses a Linux host without bwrap instead of running unconfined", () => {
+    const selected = ExecSandbox.select(request, host("linux"))
+    expect(ExecSandbox.isUnenforceable(selected)).toBe(true)
+    if (!ExecSandbox.isUnenforceable(selected)) return
+    expect(selected.missing).toBe("bwrap")
+    expect(selected.message).toContain("bubblewrap")
+    expect(selected.message).toContain("never runs unconfined")
+    expect(ExecSandbox.enforceable(request, host("linux"))).toBe(false)
+  })
+
+  it("refuses Windows without a docker declaration and honors one with docker on PATH", () => {
+    const bare = ExecSandbox.select(request, host("win32"))
+    expect(ExecSandbox.isUnenforceable(bare)).toBe(true)
+    if (ExecSandbox.isUnenforceable(bare)) expect(bare.missing).toBe("S.Sandbox.Docker")
+    const declared = ExecSandbox.select({ ...request, mechanism: Sandbox.Docker({ image: "node:22" }) }, windows)
+    expect(declared).toEqual({ _tag: "docker", executable: "C:\\docker.exe", image: "node:22" })
+    const missing = ExecSandbox.select({ ...request, mechanism: Sandbox.Docker({ image: "node:22" }) }, host("win32"))
+    expect(ExecSandbox.isUnenforceable(missing)).toBe(true)
+    if (ExecSandbox.isUnenforceable(missing)) expect(missing.missing).toBe("docker")
+  })
+
+  it("refuses a bubblewrap declaration off Linux", () => {
+    const selected = ExecSandbox.select({ ...request, mechanism: Sandbox.Bubblewrap() }, darwin)
+    expect(ExecSandbox.isUnenforceable(selected)).toBe(true)
+    if (ExecSandbox.isUnenforceable(selected)) expect(selected.mechanism).toBe("bubblewrap")
+  })
+})
+
+describe("plan", () => {
+  it("anchors paths at the root, drops escapes and missing reads, and opens a file output's directory", () => {
+    const plan = planned(linux)
+    expect(plan.reads).toEqual(["/work/ws/src/a.ts", "/work/ws/node_modules"])
+    expect(plan.writes).toEqual(["/work/ws/out", "/work/ws/dist"])
+    expect(plan.readOnly).toEqual(["/work/ws/.flows/cache"])
+    expect(plan.network).toBe("none")
+    expect(plan.cwd).toBe("/work/ws/pkg")
+  })
+
+  it("collapses a path covered by a broader entry", () => {
+    const plan = planned(
+      host("linux", { bwrap: "/usr/bin/bwrap" }, ["/work/ws/src/a.ts", "/work/ws/src/b.ts"], [
+        "/work/ws/src"
+      ]),
+      { reads: ["src", "src/a.ts", "src/b.ts"] }
+    )
+    expect(plan.reads).toEqual(["/work/ws/src"])
+  })
+
+  it("returns nothing for an opted-out policy and the refusal for an unenforceable host", () => {
+    expect(
+      ExecSandbox.plan({ ...request, policy: "none" }, { workspaceRoot: root, cwd: root, tmp: "/t" }, linux)
+    ).toBeUndefined()
+    const refused = ExecSandbox.plan(request, { workspaceRoot: root, cwd: root, tmp: "/t" }, host("linux"))
+    expect(ExecSandbox.isUnenforceable(refused)).toBe(true)
+  })
+})
+
+describe("bubblewrap argv", () => {
+  it("binds the root read-only, shadows the workspace, binds the declared set, and remounts read-only last", () => {
+    const argv = ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"])
+    const text = argv.join(" ")
+    expect(argv[0]).toBe("/usr/bin/bwrap")
+    expect(text).toContain("--ro-bind / /")
+    expect(text).toContain("--tmpfs /work/ws")
+    expect(text).toContain("--ro-bind /work/ws/src/a.ts /work/ws/src/a.ts")
+    expect(text).toContain("--bind /work/ws/dist /work/ws/dist")
+    expect(text).toContain("--remount-ro /work/ws")
+    expect(text).toContain("--unshare-all")
+    expect(text).not.toContain("--share-net")
+    expect(text).toContain("--chdir /work/ws/pkg")
+    expect(argv.slice(-2)).toEqual(["node", "build.js"])
+    expect(argv.indexOf("--remount-ro")).toBeGreaterThan(argv.lastIndexOf("--bind"))
+  })
+
+  it("re-closes a read-only subtree under a writable directory", () => {
+    const argv = ExecSandbox.bubblewrap(
+      planned(host("linux", { bwrap: "/usr/bin/bwrap" }, [], ["/work/ws/.flows"]), {
+        writes: [".flows"],
+        readOnly: [".flows/cache"]
+      }),
+      ["true"]
+    )
+    const text = argv.join(" ")
+    expect(text).toContain("--bind /work/ws/.flows /work/ws/.flows")
+    expect(text).toContain("--ro-bind-try /work/ws/.flows/cache /work/ws/.flows/cache")
+    expect(text.indexOf("--ro-bind-try")).toBeGreaterThan(text.indexOf("--bind /work/ws/.flows "))
+  })
+
+  it("unshares the network for the default policy and shares the host's for loopback and open", () => {
+    const open = ExecSandbox.bubblewrap(planned(linux, { policy: { network: true } }), ["true"]).join(" ")
+    expect(open).toContain("--share-net")
+    const loopback = ExecSandbox.bubblewrap(planned(linux, { policy: { network: "loopback" } }), ["true"])
+    expect(loopback.join(" ")).toContain("--share-net")
+    expect(loopback.slice(-2)).toEqual(["--", "true"])
+    const services = ExecSandbox.bubblewrap(planned(linux, { services: true }), ["true"]).join(" ")
+    expect(services).toContain("--share-net")
+  })
+})
+
+describe("seatbelt profile", () => {
+  it("denies network and writes, closes reads under the workspace, and reopens the declared set", () => {
+    const profile = ExecSandbox.seatbelt(planned(darwin))
+    expect(profile.startsWith("(version 1)(allow default)")).toBe(true)
+    expect(profile).toContain("(deny network*)")
+    expect(profile).toContain("(deny file-write*)")
+    expect(profile).toContain(
+      "(allow file-write* (subpath \"/dev\") (subpath \"/work/ws/out\") (subpath \"/work/ws/dist\") (subpath \"/work/ws/.flows/sandbox/run1\"))"
+    )
+    expect(profile).toContain("(deny file-write* (subpath \"/work/ws/.flows/cache\"))")
+    expect(profile).toContain("(deny file-read* (subpath \"/work/ws\"))")
+    expect(profile).toContain("(allow file-read-metadata (subpath \"/work/ws\"))")
+    expect(profile).toContain("(literal \"/work/ws\")")
+    expect(profile).toContain("(literal \"/work/ws/src\")")
+    expect(profile).toContain("(subpath \"/work/ws/src/a.ts\")")
+    expect(profile).toContain("(subpath \"/work/ws/node_modules\")")
+    expect(profile).not.toContain("localhost")
+  })
+
+  it("opens loopback and the whole network in steps", () => {
+    const loopback = ExecSandbox.seatbelt(planned(darwin, { policy: { network: "loopback" } }))
+    expect(loopback).toContain("(deny network*)")
+    expect(loopback).toContain("(allow network-bind (local ip \"localhost:*\"))")
+    const open = ExecSandbox.seatbelt(planned(darwin, { policy: { network: true } }))
+    expect(open).not.toContain("(deny network*)")
+  })
+
+  it("escapes quotes and backslashes in paths", () => {
+    const plan = planned(
+      host("darwin", { "/usr/bin/sandbox-exec": "/usr/bin/sandbox-exec" }, [], ["/work/ws/we\"ird"]),
+      {
+        reads: ["we\"ird"],
+        writes: []
+      }
+    )
+    expect(ExecSandbox.seatbelt(plan)).toContain("(subpath \"/work/ws/we\\\"ird\")")
+  })
+})
+
+describe("docker argv", () => {
+  it("mounts the declared set at its host paths, closes the network, and maps the user", () => {
+    const plan = planned(
+      host("win32", { docker: "docker" }, ["/work/ws/src/a.ts"], ["/work/ws/node_modules", "/work/ws/dist"]),
+      {
+        mechanism: Sandbox.Docker({ image: "node:22" })
+      }
+    )
+    const argv = ExecSandbox.docker(plan, ["node", "build.js"], { PATH: "/ignored", HOME: "/ignored", CI: "1" })
+    const text = argv.join(" ")
+    expect(argv.slice(0, 3)).toEqual(["docker", "run", "--rm"])
+    expect(text).toContain("--read-only")
+    expect(text).toContain("--network none")
+    expect(text).toContain("--workdir /work/ws/pkg")
+    expect(text).toContain("--user 501:20")
+    expect(text).toContain("--mount type=bind,src=/work/ws/src/a.ts,dst=/work/ws/src/a.ts,readonly")
+    expect(text).toContain("--mount type=bind,src=/work/ws/dist,dst=/work/ws/dist ")
+    expect(text).toContain("--env CI=1")
+    expect(text).not.toContain("PATH=/ignored")
+    expect(text).toContain("--env HOME=/tmp/home node:22 node build.js")
+  })
+
+  it("opens the bridge network only for an open policy", () => {
+    const plan = planned(host("win32", { docker: "docker" }), {
+      mechanism: Sandbox.Docker({ image: "node:22" }),
+      policy: { network: true }
+    })
+    expect(ExecSandbox.docker(plan, ["true"], {}).join(" ")).toContain("--network bridge")
+  })
+})
+
+describe("wrap and environment", () => {
+  it("redirects the temporary and home directories into the confinement", () => {
+    const seatbelt = ExecSandbox.wrap(planned(darwin), ["true"], {})
+    expect(seatbelt.argv.slice(0, 2)).toEqual(["/usr/bin/sandbox-exec", "-p"])
+    expect(seatbelt.env["TMPDIR"]).toBe("/work/ws/.flows/sandbox/run1")
+    expect(seatbelt.env["HOME"]).toBe("/work/ws/.flows/sandbox/run1/home")
+    const bubblewrap = ExecSandbox.wrap(planned(linux), ["true"], {})
+    expect(bubblewrap.env["TMPDIR"]).toBe("/tmp")
+    expect(bubblewrap.env["HOME"]).toBe("/tmp/home")
+    expect(bubblewrap.env["XDG_CACHE_HOME"]).toBe("/tmp/cache")
+  })
+})
+
+describe("diagnose", () => {
+  it("names the workspace paths a tool was denied and which side of the boundary they fell on", () => {
+    const plan = planned(linux)
+    const text = [
+      "/bin/sh: 1: cannot create /work/ws/pkg/notes.txt: Read-only file system",
+      "Error: ENOENT: no such file or directory, open '/work/ws/src/b.ts'",
+      "/bin/sh: /work/ws/dist/x.js: Operation not permitted",
+      "EACCES: permission denied, open '/etc/passwd'"
+    ].join("\n")
+    const note = ExecSandbox.diagnose(plan, text)
+    expect(note).toContain("sandbox: pkg/notes.txt is outside the declared read set")
+    expect(note).toContain("sandbox: src/b.ts is outside the declared read set")
+    expect(note).toContain("sandbox: dist/x.js was denied inside the declared set")
+    expect(note).not.toContain("/etc/passwd")
+    expect(note).toContain("bubblewrap, network none")
+  })
+
+  it("stays silent when the output names no workspace path", () => {
+    expect(ExecSandbox.diagnose(planned(linux), "everything is fine")).toBeUndefined()
+  })
+
+  it("reads relative paths against the working directory", () => {
+    const plan = planned(darwin, { reads: ["src/a.ts"], writes: [] })
+    const note = ExecSandbox.diagnose(plan, "sh: line 1: out/esc: Operation not permitted")
+    expect(note).toContain(`sandbox: ${NodePath.posix.join("pkg", "out/esc")} is outside the declared read set`)
+  })
+})
+
+describe("host", () => {
+  it("resolves executables on PATH and refuses a missing one", () => {
+    const real = ExecSandbox.host()
+    expect(real.platform).toBe(process.platform)
+    expect(real.executable("definitely-not-a-real-executable-xyz")).toBeUndefined()
+    const node = real.executable(NodePath.basename(process.execPath))
+    if (node !== undefined) expect(NodePath.isAbsolute(node)).toBe(true)
+    expect(real.exists(process.execPath)).toBe(true)
+    expect(real.isDirectory(NodePath.dirname(process.execPath))).toBe(true)
+  })
+})

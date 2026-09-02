@@ -1,7 +1,7 @@
 /**
  * The WORKSPACE.ts declaration surface: `S.Workspace(name, options)` and the
  * typed service declarations it composes — `S.Cache`, `S.Host`, `S.Flags`,
- * `S.Npm.NodeModules`, `S.Sandboxes`, and `S.Sandbox.*`.
+ * `S.Npm.NodeModules`, `S.Nix.Environment`, `S.Sandboxes`, and `S.Sandbox.*`.
  *
  * Every constructor is inert: it validates and freezes data, performs no
  * I/O, and constructs no target. The build CLI's workspace loader validates
@@ -16,6 +16,8 @@ import * as Config from "./Config.ts"
 import * as Input from "./Input.ts"
 import * as LocalRepository from "./LocalRepository.ts"
 import { isSmithersCloudDeclaration, type SmithersCloudDeclaration } from "./MemoryTarget.ts"
+import * as Nix from "./Nix.ts"
+import * as Owners from "./Owners.ts"
 import * as PackageManager from "./PackageManager.ts"
 import * as Reference from "./Reference.ts"
 import * as RemoteCache from "./RemoteCache.ts"
@@ -253,7 +255,8 @@ export const NodeModules = (options: {
  */
 export const SandboxDeclaration = Schema.Union([
   Schema.TaggedStruct("SandboxBubblewrap", {}),
-  Schema.TaggedStruct("SandboxDocker", { image: Schema.NonEmptyString })
+  Schema.TaggedStruct("SandboxDocker", { image: Schema.NonEmptyString }),
+  Schema.TaggedStruct("SandboxNone", {})
 ])
 
 /**
@@ -279,13 +282,20 @@ export const isSandboxDeclaration: (value: unknown) => value is SandboxDeclarati
  * @since 0.1.0
  */
 export const Sandbox = Object.freeze({
+  /** Bubblewrap on Linux; refused elsewhere. The selection with no declaration on Linux. */
   Bubblewrap: (): SandboxDeclaration => Object.freeze({ _tag: "SandboxBubblewrap" }) as SandboxDeclaration,
+  /** `docker run` with the named image supplying the toolchain; the only mechanism on Windows. */
   Docker: (options: { readonly image: string }): SandboxDeclaration => {
     if (typeof options !== "object" || options === null || typeof options.image !== "string" || options.image === "") {
       throw new TypeError("Sandbox.Docker requires an image name")
     }
     return Object.freeze({ _tag: "SandboxDocker", image: options.image })
-  }
+  },
+  /**
+   * No confinement at all. The explicit opt-out: every target runs
+   * unconfined and no result of such a run enters the shared cache.
+   */
+  None: (): SandboxDeclaration => Object.freeze({ _tag: "SandboxNone" }) as SandboxDeclaration
 })
 
 /**
@@ -391,6 +401,8 @@ export interface WorkspaceDeclaration {
     | PackageManager.PnpmDeclaration
     | undefined
   readonly nodeModules: NodeModulesDeclaration | undefined
+  /** The Nix closure every tool-running target resolves executables from. */
+  readonly environment: Nix.Environment | undefined
   readonly toolchains: ReadonlyArray<Toolchain.Declaration | { readonly _tag: string }>
   readonly flags: FlagsDeclaration | undefined
   readonly host: HostDeclaration | undefined
@@ -399,6 +411,10 @@ export interface WorkspaceDeclaration {
   readonly agents: AgentsDeclaration | undefined
   readonly gitHooks: GitHooks | undefined
   readonly repos: Readonly<Record<string, LocalRepository.Declaration>> | undefined
+  /** Workspace-wide default owners: what a package with no owning ancestor resolves to. */
+  readonly owners: Owners.Declaration | undefined
+  /** The team roster `team:<name>` references resolve against. */
+  readonly teams: Owners.TeamsDeclaration | undefined
 }
 
 /**
@@ -434,6 +450,7 @@ export interface WorkspaceOptions {
     | PackageManager.PnpmDeclaration
     | undefined
   readonly nodeModules?: NodeModulesDeclaration | undefined
+  readonly environment?: Nix.Environment | undefined
   readonly toolchains?: ReadonlyArray<Toolchain.Declaration | { readonly _tag: string }> | undefined
   readonly flags?: FlagsDeclaration | undefined
   readonly host?: HostDeclaration | undefined
@@ -442,6 +459,8 @@ export interface WorkspaceOptions {
   readonly agents?: AgentsDeclaration | undefined
   readonly gitHooks?: GitHooks | undefined
   readonly repos?: Readonly<Record<string, LocalRepository.Declaration>> | undefined
+  readonly owners?: Owners.Options | Owners.Declaration | undefined
+  readonly teams?: Owners.TeamsDeclaration | Readonly<Record<string, ReadonlyArray<string>>> | undefined
 }
 
 const knownOptions: ReadonlySet<string> = new Set([
@@ -450,6 +469,7 @@ const knownOptions: ReadonlySet<string> = new Set([
   "runtime",
   "packageManager",
   "nodeModules",
+  "environment",
   "toolchains",
   "flags",
   "host",
@@ -457,7 +477,9 @@ const knownOptions: ReadonlySet<string> = new Set([
   "sandboxes",
   "agents",
   "gitHooks",
-  "repos"
+  "repos",
+  "owners",
+  "teams"
 ])
 
 const workspaceName = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -498,7 +520,8 @@ const repositoryPath = (value: string): string => {
  *     manifest: S.file("//package.json"),
  *     lockfile: S.file("//yarn.lock")
  *   }),
- *   nodeModules: S.Npm.NodeModules({ packageJson: S.file("//package.json") })
+ *   nodeModules: S.Npm.NodeModules({ packageJson: S.file("//package.json") }),
+ *   environment: S.Nix.Environment({ flake: S.file("//flake.nix") })
  * })
  * ```
  *
@@ -541,8 +564,16 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
   if (hasAnyNode && !hasAllNode) {
     throw new TypeError("Workspace runtime, packageManager, and nodeModules must be declared together")
   }
-  if (!hasAllNode && (options.toolchains === undefined || options.toolchains.length === 0)) {
-    throw new TypeError("Workspace requires either the Node runtime/packageManager/nodeModules set or toolchains")
+  if (options.environment !== undefined && !Nix.isEnvironment(options.environment)) {
+    throw new TypeError("Workspace environment must be an S.Nix.Environment declaration")
+  }
+  if (
+    !hasAllNode && options.environment === undefined &&
+    (options.toolchains === undefined || options.toolchains.length === 0)
+  ) {
+    throw new TypeError(
+      "Workspace requires the Node runtime/packageManager/nodeModules set, an environment, or toolchains"
+    )
   }
   if (
     options.runtime !== undefined && !Runtime.isRuntime(options.runtime) &&
@@ -633,6 +664,8 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
     }
     gitHooks = Object.freeze(hooks)
   }
+  const owners = options.owners === undefined ? undefined : Owners.declare(options.owners)
+  const teams = options.teams === undefined ? undefined : Owners.Teams(options.teams)
   const value = Object.create(null) as Record<string, unknown>
   Object.defineProperty(value, WorkspaceTypeId, {
     configurable: false,
@@ -646,6 +679,7 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
   value["runtime"] = options.runtime
   value["packageManager"] = options.packageManager
   value["nodeModules"] = options.nodeModules
+  value["environment"] = options.environment
   value["toolchains"] = Object.freeze([...(options.toolchains ?? [])])
   value["flags"] = options.flags
   value["host"] = options.host
@@ -654,6 +688,8 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
   value["agents"] = options.agents
   value["gitHooks"] = gitHooks
   value["repos"] = repos
+  value["owners"] = owners
+  value["teams"] = teams
   return Object.freeze(value) as unknown as WorkspaceDeclaration
 }
 
@@ -677,6 +713,16 @@ export const flagNames = (workspace: WorkspaceDeclaration): ReadonlySet<string> 
   new Set(workspace.flags === undefined ? [] : Object.keys(workspace.flags.flags))
 
 /**
+ * The team names a workspace declares, for index-time owner reference
+ * validation.
+ *
+ * @category accessors
+ * @since 0.1.0
+ */
+export const teamNames = (workspace: WorkspaceDeclaration): ReadonlySet<string> =>
+  new Set(workspace.teams === undefined ? [] : Object.keys(workspace.teams.teams))
+
+/**
  * The first declared Rust toolchain layer, or undefined for a workspace that
  * declares none.
  *
@@ -690,3 +736,19 @@ export const flagNames = (workspace: WorkspaceDeclaration): ReadonlySet<string> 
 export const rustToolchain = (
   workspace: WorkspaceDeclaration
 ): RustToolchain.ToolchainDeclaration | undefined => workspace.toolchains?.find(RustToolchain.isToolchainDeclaration)
+
+/**
+ * The Nix environment a workspace's tools resolve from, or undefined for a
+ * workspace that declares none.
+ *
+ * The `environment` option wins; a `toolchains` entry declared with
+ * `S.Nix.Environment` is the same thing in list form. An `S.Nix.DevShell`
+ * entry is deliberately not one: it pins the tools `S.Nix.bin` references
+ * name and nothing else, so a Go workspace that lists a dev shell beside its
+ * Go toolchain keeps resolving `go` the way it declared.
+ *
+ * @category accessors
+ * @since 0.1.0
+ */
+export const nixEnvironment = (workspace: WorkspaceDeclaration): Nix.Environment | undefined =>
+  workspace.environment ?? workspace.toolchains?.find(Nix.isEnvironment)
