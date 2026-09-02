@@ -100,13 +100,33 @@ merges and the edges the write-conflict pass adds, and refuse with
 across every level (object keys, array items and holes, map entries, set and
 chunk values, and bytes) and refuses with `payload_too_large` naming the
 offending value path. A flow call's input and a declaration body are budgeted
-separately. Every limit is checked before the structure it guards is
-allocated.
+separately, and the effect paths of a flow placed inside a plan value count as
+its members.
+
+`Graph.maximumEffectPaths` bounds the read and write paths, summed, of one
+effect declaration. Every declaration the graph carries obeys it: an
+annotation, a dynamic node's own envelope, a called flow's envelope, and a
+synthesized lane merge, whose reads and writes both name the overlap it
+merges. `Graph.maximumPlanEffectPaths` bounds the paths admitted across the
+plan, counting a declaration where it is declared and again at every work
+node that inherits it as its effective envelope, because each such node is a
+writer the conflict pass compares. Both refuse with `plan_too_large` naming
+the node that declared or inherited the paths, before a path is copied:
+declared and inherited envelopes are admitted while the plan is visited,
+before the write-conflict pass runs, and a lane merge as it is synthesized.
+
+Every limit is checked before the structure it guards is allocated. An
+array-backed declaration is refused by its lengths without reading a member;
+a caller-assembled iterable, which has no length to refuse by, is copied one
+path at a time and refused as soon as it exceeds the limit.
 
 The write-conflict pass buckets literal writers by path, so disjoint literal
 writers cost linear time. A writer whose path ends in `*` is compared against
 every later writer, so its cost grows with the number of nodes that declare
-effects.
+effects. `Effects.overlaps` and `Effects.narrow` index exact paths in a set
+and find the paths a glob covers by binary search over the sorted
+declaration, so comparing two declarations costs their combined length plus
+the matches rather than their product.
 
 ## Agent Skills validation
 

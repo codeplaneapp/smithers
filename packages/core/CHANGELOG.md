@@ -8,6 +8,11 @@
   `Graph.maximumGraphConflicts`, and `Graph.maximumPayloadMembers`, the width
   bounds `Graph.build` enforces alongside its depth bounds, and the
   `plan_too_large` and `payload_too_large` diagnostics they throw.
+- Added `Graph.maximumEffectPaths` and `Graph.maximumPlanEffectPaths`, the
+  bounds on the read and write paths one effect declaration may list and on
+  the paths admitted across a plan. `Graph.build` refuses either with
+  `plan_too_large` naming the node before it copies a path and before the
+  write-conflict pass runs.
 - Added `Markdown.validateSkillFrontmatter` and the `Markdown.SkillFrontmatter`
   shape, so a caller holding already-parsed frontmatter can apply the Agent
   Skills rules without a document, and the `skill_invalid_name`,
@@ -32,6 +37,13 @@
   allocation, the write-conflict pass indexes literal writers by path instead
   of comparing every pair, and reachability walks an adjacency index instead
   of every recorded edge.
+- Fixed `Effects.overlaps` and `Effects.narrow`, which compared every path of
+  one declaration against every path of the other, so two writers naming the
+  same twenty thousand files kept `Graph.build` busy for minutes with no limit
+  reached. Both now index exact paths in a set and find the paths a glob
+  covers by binary search over the sorted declaration, and `Graph.build`
+  bounds the paths it admits. A flow placed inside a plan value now charges
+  its effect paths to the member budget instead of copying them unbounded.
 
 ## [1.0.0-rc.0] - 2026-08-31
 

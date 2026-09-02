@@ -137,4 +137,70 @@ describe("Effects", () => {
     expect(original.mode).toBe("expected")
     expect(original.tier).toBe("compensable")
   })
+
+  it("overlaps two wide literal writers in time linear in their size", () => {
+    const shared = Array.from({ length: 20_001 }, (_, index) => `out/${index}`)
+    const left = declaration({ writes: [...shared, "left"] })
+    const right = declaration({ writes: [...shared, "right"] })
+
+    const started = performance.now()
+    const matches = Effects.overlaps(left, right)
+    const elapsed = performance.now() - started
+
+    expect(matches).toEqual([...shared].sort())
+    expect(elapsed).toBeLessThan(1_000)
+  })
+
+  it("narrows a wide literal envelope in time linear in its size", () => {
+    const inside = Array.from({ length: 20_000 }, (_, index) => `src/${index}`)
+    const envelope = declaration({ reads: inside, writes: inside })
+    const step = declaration({ reads: [...inside, "outside/read"], writes: ["outside/write", ...inside] })
+
+    const started = performance.now()
+    const result = Effects.narrow(envelope, step)
+    const elapsed = performance.now() - started
+
+    expect(result).toEqual({ ok: false, code: "effect_outside_envelope", paths: ["outside/read", "outside/write"] })
+    expect(elapsed).toBeLessThan(1_000)
+  })
+
+  it("matches globs of a caller-assembled declaration exactly as covers does", () => {
+    // Hand-built declarations are unsorted and may repeat paths. The indexed
+    // search must report what the pairwise definition reports: the covered
+    // path when one side covers the other, the shared path when equal.
+    const assembled = (writes: ReadonlyArray<string>): Effects.Declaration => ({
+      reads: [],
+      writes,
+      mode: "expected",
+      onConflict: "serialize"
+    })
+    const pairwise = (a: Effects.Declaration, b: Effects.Declaration): ReadonlyArray<string> => {
+      const matches: Array<string> = []
+      for (const left of a.writes) {
+        for (const right of b.writes) {
+          if (left === right || Effects.covers(left, right)) {
+            matches.push(right)
+          } else if (Effects.covers(right, left)) {
+            matches.push(left)
+          }
+        }
+      }
+      return [...new Set(matches)].sort()
+    }
+    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, ReadonlyArray<string>, ReadonlyArray<string>]> = [
+      [["b/**", "a", "../**", "a/**"], ["a/b", "../x", "b", "a", "b/c/**", "../**"], ["../**", "a", "a/b", "b/c/**"]],
+      [["ab**", "ab*"], ["abc", "ab*", "ab**"], ["ab*", "ab**", "abc"]],
+      [["*"], ["x", "./y", "*"], ["*", "x"]],
+      [["src/**", "src/**"], ["src", "src/", "srcX"], ["src/"]],
+      [["x*", "x/**"], ["x/**", "x*"], ["x*", "x/**"]],
+      [["a/**"], ["b", "a0", "a/z", "a", "a/b", "a/"], ["a/", "a/b", "a/z"]],
+      [["a/", "a/b"], ["a/**", "a/", "a/b", "a"], ["a/", "a/b"]]
+    ]
+
+    for (const [left, right, expected] of cases) {
+      expect(Effects.overlaps(assembled(left), assembled(right))).toEqual(expected)
+      expect(Effects.overlaps(assembled(left), assembled(right))).toEqual(pairwise(assembled(left), assembled(right)))
+      expect(Effects.overlaps(assembled(right), assembled(left))).toEqual(pairwise(assembled(right), assembled(left)))
+    }
+  })
 })

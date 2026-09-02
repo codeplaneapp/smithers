@@ -230,9 +230,10 @@ export type GraphBuildErrorCode = typeof GraphBuildErrorCode.Type
  * `plan_too_large`, `payload_too_deep`, `payload_too_large`,
  * `capability_outside_grant`, and `invalid_node`. For `plan_too_large` it
  * names the node whose admission crossed the limit: the node itself, the
- * target of the edge, or the second writer of the conflict. `nodes` is
- * populated for `write_conflict`. `paths` carries the offending value path
- * for `payload_too_large`.
+ * target of the edge, the second writer of the conflict, or the node whose
+ * effect declaration listed too many paths. `nodes` is populated for
+ * `write_conflict`. `paths` carries the offending value path for
+ * `payload_too_large`.
  *
  * @category errors
  * @since 0.0.0
@@ -335,6 +336,29 @@ export const maximumGraphConflicts = 65_536
  */
 export const maximumPayloadMembers = 100_000
 
+/**
+ * Maximum number of read and write paths, summed, one effect declaration may
+ * list before {@link build} refuses the plan with `plan_too_large`. Every
+ * declaration the graph carries obeys it: an annotation, a dynamic node's own
+ * envelope, a called flow's envelope, and a synthesized lane merge, whose
+ * reads and writes both name the overlap it merges.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumEffectPaths = 1024
+
+/**
+ * Maximum number of effect paths {@link build} admits across one plan before
+ * it refuses with `plan_too_large`. A declaration is counted where it is
+ * declared and again at every work node that inherits it as its effective
+ * envelope, because each such node is a writer the conflict pass compares.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumPlanEffectPaths = 65_536
+
 interface GraphImpl {
   readonly nodes: ReadonlyArray<InternalNode>
   readonly edges: ReadonlyArray<InternalEdge>
@@ -361,29 +385,66 @@ export type Graph = GraphImpl
 const option = <I, S>(context: Context.Context<never>, key: Context.Key<I, S>): S | undefined =>
   Option.getOrUndefined(Annotations.getOption(context, key))
 
-const snapshotEffects = (declaration: Effects.Declaration | undefined): Effects.Declaration | undefined =>
-  declaration === undefined
-    ? undefined
-    : {
-      reads: [...declaration.reads],
-      writes: [...declaration.writes],
-      mode: declaration.mode,
-      onConflict: declaration.onConflict,
-      ...(declaration.tier === undefined ? {} : { tier: declaration.tier })
-    }
-
 const snapshotPlacement = (placement: Placement.Placement | undefined): Placement.Placement | undefined =>
   placement === undefined ? undefined : { ...placement }
 
 const snapshotLane = (lane: Annotations.LaneOptions | undefined): Annotations.LaneOptions | undefined =>
   lane === undefined ? undefined : { ...lane }
 
-const annotationProjection = (context: Context.Context<never>): AnnotationsProjection => ({
+const annotationProjection = (
+  context: Context.Context<never>,
+  effects: Effects.Declaration | undefined
+): AnnotationsProjection => ({
   placement: snapshotPlacement(option(context, Annotations.Placement)),
-  effects: snapshotEffects(option(context, Annotations.Effects)),
+  effects,
   lane: snapshotLane(option(context, Annotations.Lane)),
   priority: option(context, Annotations.Priority)
 })
+
+/**
+ * Copies one declaration's paths, refusing before the copy grows past
+ * `limit`. A real array is refused by its length before a member is read; any
+ * other iterable is copied one path at a time and refused as soon as it
+ * exceeds the limit, so a caller-assembled declaration cannot dodge the bound
+ * by hiding its size from `length`.
+ */
+const copyPaths = (
+  paths: ReadonlyArray<string>,
+  limit: number,
+  refuse: () => GraphBuildError
+): Array<string> => {
+  if (Array.isArray(paths)) {
+    const length = paths.length
+    if (length > limit) throw refuse()
+    return Array.from({ length }, (_, index) => paths[index]!)
+  }
+  const copy: Array<string> = []
+  for (const path of paths) {
+    if (copy.length >= limit) throw refuse()
+    copy.push(path)
+  }
+  return copy
+}
+
+/**
+ * Snapshots a declaration into graph-owned data, copying at most `limit`
+ * paths in total across its reads and writes.
+ */
+const boundedEffects = (
+  declaration: Effects.Declaration,
+  limit: number,
+  refuse: () => GraphBuildError
+): Effects.Declaration => {
+  const reads = copyPaths(declaration.reads, limit, refuse)
+  const writes = copyPaths(declaration.writes, limit - reads.length, refuse)
+  return {
+    reads,
+    writes,
+    mode: declaration.mode,
+    onConflict: declaration.onConflict,
+    ...(declaration.tier === undefined ? {} : { tier: declaration.tier })
+  }
+}
 
 const withoutEffects = (context: Context.Context<never>): Context.Context<never> =>
   Context.omit(Annotations.Effects)(context)
@@ -499,6 +560,27 @@ const charge = (budget: MemberBudget, members: number, nodeId: string, path: str
   if (budget.used > maximumPayloadMembers) {
     throw new GraphBuildError({ code: "payload_too_large", paths: [path], nodeId })
   }
+}
+
+/**
+ * Projects the effects a flow value carries into identity, charging each path
+ * to the member budget so a flow placed inside a plan value cannot smuggle an
+ * unbounded envelope past {@link maximumPayloadMembers}.
+ */
+const reflectedEffects = (
+  declaration: Effects.Declaration | undefined,
+  nodeId: string,
+  path: string,
+  budget: MemberBudget
+): Effects.Declaration | undefined => {
+  if (declaration === undefined) return undefined
+  const effects = boundedEffects(
+    declaration,
+    maximumPayloadMembers - budget.used,
+    () => new GraphBuildError({ code: "payload_too_large", paths: [path], nodeId })
+  )
+  charge(budget, effects.reads.length + effects.writes.length, nodeId, path)
+  return effects
 }
 
 // The intrinsic getters read the collection's internal slot, so an own `size`
@@ -850,7 +932,7 @@ function reflection(
       input: schemaIdentity(flow.input, nodeId, depth + 1, `${path}.input`, budget),
       output: schemaIdentity(flow.output, nodeId, depth + 1, `${path}.output`, budget),
       capabilities: [...new Set(flow.capabilities)].sort(),
-      effects: snapshotEffects(flow.effects),
+      effects: reflectedEffects(flow.effects, nodeId, `${path}.effects`, budget),
       implementation: reflection(
         flow.implementation,
         nodeId,
@@ -1050,7 +1132,8 @@ function reflection(
 const declarationBody = (
   ast: NodeAst,
   flow: FlowDetails | undefined,
-  nodeId: string
+  nodeId: string,
+  ownEffects: Effects.Declaration | undefined
 ): unknown => {
   switch (ast._tag) {
     case "Succeed":
@@ -1066,7 +1149,7 @@ const declarationBody = (
         flows: reflection(ast.flows, nodeId, new Set(), 0, "$.flows"),
         output: reflection(ast.output, nodeId, new Set(), 0, "$.output"),
         prompt: ast.prompt,
-        effects: snapshotEffects(ast.effects)
+        effects: ownEffects
       }
     case "FlowCall":
       return {
@@ -1074,7 +1157,7 @@ const declarationBody = (
         input: flow === undefined ? undefined : schemaIdentity(flow.input, nodeId, 0, "$.input"),
         output: flow === undefined ? undefined : schemaIdentity(flow.output, nodeId, 0, "$.output"),
         capabilities: flow?.capabilities === undefined ? undefined : [...new Set(flow.capabilities)].sort(),
-        effects: snapshotEffects(flow?.effects),
+        effects: ownEffects,
         implementation: reflection(flow?.implementation, nodeId, new Set(), 0, "$.implementation")
       }
     case "Map":
@@ -1285,6 +1368,27 @@ export const build = (
   const planTooLarge = (nodeId: string): GraphBuildError =>
     new GraphBuildError({ code: "plan_too_large", paths: [], nodeId })
 
+  // Effect paths admitted so far, across every declaration this build copies.
+  let planEffectPaths = 0
+  /**
+   * Snapshots a declaration into graph-owned data, charging its paths to the
+   * per-declaration and plan-wide limits. Both are checked before a path is
+   * copied, so the copy never grows past the smaller remaining allowance.
+   */
+  const admitEffects = (
+    declaration: Effects.Declaration | undefined,
+    nodeId: string
+  ): Effects.Declaration | undefined => {
+    if (declaration === undefined) return undefined
+    const effects = boundedEffects(
+      declaration,
+      Math.min(maximumEffectPaths, maximumPlanEffectPaths - planEffectPaths),
+      () => planTooLarge(nodeId)
+    )
+    planEffectPaths += effects.reads.length + effects.writes.length
+    return effects
+  }
+
   const recordNode = (node: InternalNode): void => {
     if (observed.length >= maximumGraphNodes) throw planTooLarge(node.id)
     observed.push(node)
@@ -1319,16 +1423,23 @@ export const build = (
     }
     ast = validateNodeAst(ast, id)
     const annotations = Annotations.merge(parentAnnotations, ast.annotations)
-    const projection = annotationProjection(annotations)
+    const projection = annotationProjection(annotations, admitEffects(option(annotations, Annotations.Effects), id))
     const targetFlow = ast._tag === "FlowCall" ? internal.flow(ast) : undefined
     const flow = Flow.isFlow(targetFlow)
       ? targetFlow as FlowDetails
       : undefined
-    const declaredEffects = projection.effects ??
-      (ast._tag === "Dynamic" ? snapshotEffects(ast.effects) : undefined) ??
-      (ast._tag === "FlowCall" ? snapshotEffects(flow?.effects) : undefined)
+    // The declaration the AST itself carries: a dynamic node's own envelope or
+    // the called flow's. It is admitted even when an annotation overrides it,
+    // because it still reaches key material and, for a flow call, the body's
+    // envelope.
+    const ownEffects = ast._tag === "Dynamic"
+      ? admitEffects(ast.effects, id)
+      : ast._tag === "FlowCall"
+      ? admitEffects(flow?.effects, id)
+      : undefined
+    const declaredEffects = projection.effects ?? ownEffects
     const work = ast._tag === "Dynamic"
-    const effectiveEffects = work ? declaredEffects ?? snapshotEffects(envelope) : undefined
+    const effectiveEffects = work ? declaredEffects ?? admitEffects(envelope, id) : undefined
     const identityEffects = work ? effectiveEffects : projection.effects
     const dependencies: Array<string> = []
     const continuationDependencies = new Set<string>()
@@ -1498,7 +1609,7 @@ export const build = (
             normalizedGrant === undefined
               ? flowCapabilities
               : normalizedGrant.filter((capability) => flowCapabilities.includes(capability)),
-            snapshotEffects(flow.effects) ?? narrowedEnvelope,
+            ownEffects ?? narrowedEnvelope,
             depth + 1,
             ast.input
           )
@@ -1536,7 +1647,7 @@ export const build = (
     current.keyMaterial = {
       version: "flows/key-material/v2",
       kind: tier(identityEffects),
-      body: declarationBody(ast, flow, id),
+      body: declarationBody(ast, flow, id, ownEffects),
       inputs,
       layers: resolveLayers({
         nodeId: id,
@@ -1568,7 +1679,7 @@ export const build = (
       "root",
       flow.annotations,
       flow.capabilities,
-      snapshotEffects(flow.effects),
+      admitEffects(flow.effects, "root"),
       0,
       input
     )
@@ -1723,13 +1834,16 @@ export const build = (
         ...laneConflict.right.capabilities
       ])
     ].sort()
-    const mergeEffects = Effects.make({
-      reads: laneConflict.paths,
-      writes: laneConflict.paths,
-      mode: "hermetic",
-      onConflict: "serialize",
-      tier: "compensable"
-    })
+    const mergeEffects = admitEffects(
+      Effects.make({
+        reads: laneConflict.paths,
+        writes: laneConflict.paths,
+        mode: "hermetic",
+        onConflict: "serialize",
+        tier: "compensable"
+      }),
+      mergeId
+    )!
     const leftPlacement = reflection(laneConflict.left.placement, mergeId)
     const rightPlacement = reflection(laneConflict.right.placement, mergeId)
     const placement = JSON.stringify(leftPlacement) === JSON.stringify(rightPlacement)

@@ -284,3 +284,227 @@ describe("Graph width limits", () => {
     }
   })
 })
+
+describe("Graph effect path limits", () => {
+  const paths = (count: number, prefix = "out"): Array<string> =>
+    Array.from({ length: count }, (_, index) => `${prefix}/${index}`)
+
+  const declaring = (
+    reads: ReadonlyArray<string>,
+    writes: ReadonlyArray<string>,
+    onConflict: Effects.Declaration["onConflict"] = "serialize"
+  ): Node.Any => Node.withEffects(Node.dynamic({}), Effects.make({ reads, writes, mode: "hermetic", onConflict }))
+
+  const assembled = (reads: ReadonlyArray<string>, writes: ReadonlyArray<string>): Node.Any =>
+    Node.withEffects(Node.dynamic({}), { reads, writes, mode: "hermetic", onConflict: "serialize" })
+
+  const pad = (index: number): string => String(index).padStart(4, "0")
+
+  it("exports fixed effect path limits", () => {
+    expect(Graph.maximumEffectPaths).toBe(1024)
+    expect(Graph.maximumPlanEffectPaths).toBe(65_536)
+  })
+
+  it("refuses two writers that share 20,001 literal paths before any overlap work", () => {
+    const shared = paths(20_001)
+    const node = Node.all({ left: declaring([], shared), right: declaring([], shared) })
+
+    const started = performance.now()
+    const error = thrown(() => Graph.build(node))
+    const elapsed = performance.now() - started
+
+    expect(error).toBeInstanceOf(Graph.GraphBuildError)
+    expect(error).toMatchObject({ code: "plan_too_large", paths: [], nodeId: "root.all.left" })
+    expect(elapsed).toBeLessThan(1_000)
+  })
+
+  it("refuses a declaration of 1,000,000 paths by its length before reading a member", () => {
+    const million = paths(1_000_000)
+    let members = 0
+    const observed = new Proxy(million, {
+      get: (target, key) => {
+        if (typeof key === "string" && /^\d+$/.test(key)) members++
+        return Reflect.get(target, key)
+      }
+    })
+
+    const started = performance.now()
+    const error = thrown(() => Graph.build(assembled([], observed)))
+    const elapsed = performance.now() - started
+
+    expect(error).toBeInstanceOf(Graph.GraphBuildError)
+    expect(error).toMatchObject({ code: "plan_too_large", paths: [], nodeId: "root" })
+    expect(members).toBe(0)
+    expect(elapsed).toBeLessThan(1_000)
+    expect(thrown(() => Graph.build(assembled(million, [])))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "root"
+    })
+  })
+
+  it("copies a caller-assembled iterable no further than the limit", () => {
+    // A generator has no length to refuse by, so the copy itself is bounded:
+    // it stops one path past the limit instead of draining the iterable.
+    let yielded = 0
+    function* endless(): Generator<string> {
+      while (true) {
+        yielded++
+        yield `out/${yielded}`
+      }
+    }
+    const iterable = endless() as unknown as ReadonlyArray<string>
+
+    expect(thrown(() => Graph.build(assembled(iterable, [])))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "root"
+    })
+    expect(yielded).toBe(Graph.maximumEffectPaths + 1)
+
+    const within = new Set(paths(Graph.maximumEffectPaths)) as unknown as ReadonlyArray<string>
+    const graph = Graph.build(assembled(within, []))
+    expect(Graph.effects(graph)[0]?.declared?.reads).toEqual(paths(Graph.maximumEffectPaths))
+  })
+
+  it("builds a declaration listing exactly maximumEffectPaths paths and refuses one more", () => {
+    const half = Graph.maximumEffectPaths / 2
+    const graph = Graph.build(declaring(paths(half, "in"), paths(half)))
+    expect(Graph.effects(graph)[0]?.declared?.reads).toHaveLength(half)
+    expect(Graph.effects(graph)[0]?.declared?.writes).toHaveLength(half)
+
+    expect(thrown(() => Graph.build(declaring(paths(half, "in"), paths(half + 1))))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "root"
+    })
+  })
+
+  it("admits exactly maximumPlanEffectPaths paths across a plan and refuses one more", () => {
+    const writers = Graph.maximumPlanEffectPaths / Graph.maximumEffectPaths
+    const members: Record<string, Node.Any> = {}
+    for (let index = 0; index < writers; index++) {
+      members[`w${pad(index)}`] = declaring([], paths(Graph.maximumEffectPaths, `w${index}`))
+    }
+
+    const graph = Graph.build(Node.all(members))
+    expect(Graph.nodes(graph)).toHaveLength(writers + 1)
+    expect(Graph.conflicts(graph)).toEqual([])
+
+    expect(thrown(() => Graph.build(Node.all({ ...members, x: declaring([], ["extra"]) })))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "root.all.x"
+    })
+  })
+
+  it("counts an inherited envelope at every work node that inherits it", () => {
+    const envelope = Effects.make({
+      reads: [],
+      writes: paths(Graph.maximumEffectPaths),
+      mode: "hermetic",
+      onConflict: "serialize"
+    })
+    const inheriting = (children: number): Node.Any =>
+      Node.withEffects(siblings(children, () => Node.dynamic({})), envelope)
+    // The root declares the envelope once and every dynamic child inherits
+    // it, so the plan admits `children + 1` declarations of the maximum size.
+    const children = Graph.maximumPlanEffectPaths / Graph.maximumEffectPaths - 1
+
+    const graph = Graph.build(inheriting(children))
+    expect(Graph.effects(graph).filter((entry) => entry.effective !== undefined)).toHaveLength(children)
+    expect(Graph.conflicts(graph)).toHaveLength(children * (children - 1) / 2)
+
+    expect(thrown(() => Graph.build(inheriting(children + 1)))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: `root.all.n${pad(children)}`
+    })
+  })
+
+  it("admits a called flow's envelope once for the call and the body it encloses", () => {
+    const called = Flow.make({
+      input: Schema.Number,
+      output: Schema.Number,
+      effects: Effects.make({
+        reads: [],
+        writes: paths(Graph.maximumEffectPaths),
+        mode: "hermetic",
+        onConflict: "serialize"
+      }),
+      body: (value) => Node.succeed(value)
+    })
+    const calls = Graph.maximumPlanEffectPaths / Graph.maximumEffectPaths
+
+    const graph = Graph.build(siblings(calls, (index) => called(index)))
+    expect(Graph.effects(graph)).toHaveLength(calls)
+
+    expect(thrown(() => Graph.build(siblings(calls + 1, (index) => called(index))))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: `root.all.n${pad(calls)}`
+    })
+  })
+
+  it("admits a dynamic node's own envelope even when an annotation overrides it", () => {
+    const own = Effects.make({
+      reads: [],
+      writes: paths(Graph.maximumEffectPaths, "own"),
+      mode: "hermetic",
+      onConflict: "serialize"
+    })
+    const override = Effects.make({
+      reads: [],
+      writes: paths(Graph.maximumEffectPaths, "override"),
+      mode: "hermetic",
+      onConflict: "serialize"
+    })
+    const overridden = (): Node.Any => Node.withEffects(Node.dynamic({ effects: own }), override)
+    // Both declarations reach the graph: the override as the node's declared
+    // effects and the node's own envelope inside its key material.
+    const count = Graph.maximumPlanEffectPaths / (2 * Graph.maximumEffectPaths)
+
+    const graph = Graph.build(siblings(count, overridden))
+    expect(Graph.effects(graph)[0]?.declared?.writes[0]).toBe("override/0")
+    expect(Graph.nodes(graph)[1]?.keyMaterial.body).toMatchObject({ _tag: "Dynamic", effects: { writes: own.writes } })
+
+    expect(thrown(() => Graph.build(siblings(count + 1, overridden)))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: `root.all.n${pad(count)}`
+    })
+  })
+
+  it("counts a synthesized lane merge as one declaration naming its overlap twice", () => {
+    const half = Graph.maximumEffectPaths / 2
+    const laned = (shared: number): Node.Any =>
+      Node.all({ left: declaring([], paths(shared), "lane"), right: declaring([], paths(shared), "lane") })
+
+    const graph = Graph.build(laned(half))
+    const merge = Graph.effects(graph).find((entry) => entry.nodeId === "lane.merge.0")
+    expect(merge?.declared?.reads).toHaveLength(half)
+    expect(merge?.declared?.writes).toHaveLength(half)
+
+    expect(thrown(() => Graph.build(laned(half + 1)))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "lane.merge.0"
+    })
+  })
+
+  it("charges the effects of a flow placed in a plan value to the member budget", () => {
+    const carrying = (count: number): Node.Any =>
+      Node.succeed({
+        flow: Flow.make({
+          effects: Effects.make({ reads: paths(count, "in"), writes: [], mode: "hermetic", onConflict: "serialize" })
+        })
+      })
+
+    expect(() => Graph.build(carrying(Graph.maximumEffectPaths + 1))).not.toThrow()
+    expect(thrown(() => Graph.build(carrying(Graph.maximumPayloadMembers)))).toMatchObject({
+      code: "payload_too_large",
+      paths: ["$.flow.effects"],
+      nodeId: "root"
+    })
+  })
+})

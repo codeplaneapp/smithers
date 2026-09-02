@@ -100,16 +100,59 @@ called invalid can never become a durable step key.
 ## Limits
 
 `Graph.build` walks author-controlled and agent-generated structure, so it
-enforces documented bounds instead of failing with a host stack overflow.
-`Graph.maximumGraphDepth` bounds nested node structure and
-`Graph.maximumPayloadDepth` bounds a reflected plan value. Both refuse with a
-coded `GraphBuildError` naming the offending node. Plan width is deliberately
-unbounded: node count and reflected payload size are the caller's resource
-budget.
+enforces documented bounds instead of failing with a host stack overflow or
+exhausting memory. `Graph.maximumGraphDepth` bounds nested node structure and
+`Graph.maximumPayloadDepth` bounds a reflected plan value; both refuse with
+`plan_too_deep` or `payload_too_deep` naming the offending node.
+`Graph.maximumGraphNodes`, `Graph.maximumGraphEdges`, and
+`Graph.maximumGraphConflicts` bound plan width, counting synthesized lane
+merges and the edges the write-conflict pass adds, and refuse with
+`plan_too_large` naming the node whose admission crossed the limit.
+`Graph.maximumPayloadMembers` bounds the members one plan value expands to
+across every level (object keys, array items and holes, map entries, set and
+chunk values, and bytes) and refuses with `payload_too_large` naming the
+offending value path. A flow call's input and a declaration body are budgeted
+separately, and the effect paths of a flow placed inside a plan value count as
+its members.
 
-The write-conflict pass compares every pair of work nodes and tests
-reachability between them, so its cost grows quadratically with the number of
-nodes that declare effects.
+`Graph.maximumEffectPaths` bounds the read and write paths, summed, of one
+effect declaration. Every declaration the graph carries obeys it: an
+annotation, a dynamic node's own envelope, a called flow's envelope, and a
+synthesized lane merge, whose reads and writes both name the overlap it
+merges. `Graph.maximumPlanEffectPaths` bounds the paths admitted across the
+plan, counting a declaration where it is declared and again at every work
+node that inherits it as its effective envelope, because each such node is a
+writer the conflict pass compares. Both refuse with `plan_too_large` naming
+the node that declared or inherited the paths, before a path is copied:
+declared and inherited envelopes are admitted while the plan is visited,
+before the write-conflict pass runs, and a lane merge as it is synthesized.
+
+Every limit is checked before the structure it guards is allocated. An
+array-backed declaration is refused by its lengths without reading a member;
+a caller-assembled iterable, which has no length to refuse by, is copied one
+path at a time and refused as soon as it exceeds the limit.
+
+The write-conflict pass buckets literal writers by path, so disjoint literal
+writers cost linear time. A writer whose path ends in `*` is compared against
+every later writer, so its cost grows with the number of nodes that declare
+effects. `Effects.overlaps` and `Effects.narrow` index exact paths in a set
+and find the paths a glob covers by binary search over the sorted
+declaration, so comparing two declarations costs their combined length plus
+the matches rather than their product.
+
+## Agent Skills validation
+
+`Markdown.parseSkill` parses frontmatter with the failsafe YAML schema and then
+enforces the intrinsic rules of the Agent Skills specification: a `name` of 1
+to 64 lowercase ASCII letters, digits, or single hyphens that does not start or
+end with a hyphen, a `description` of 1 to 1024 characters counted in code
+points, a scalar space-separated `allowed-tools`, a scalar `license`, a
+`compatibility` of 1 to 500 characters, and `metadata` mapping string keys to
+scalar values. Each field reports its own stable `MarkdownError` code, and an
+invalid value is never echoed into the message.
+`Markdown.validateSkillFrontmatter` applies the same rules to already-parsed
+frontmatter. The one rule that needs the file system, that `name` equals the
+skill directory name, stays with `@smthrs/registry`.
 
 ## Mutability
 
@@ -239,8 +282,14 @@ Pure graph introspection for flow declarations.
 | `isFatalDiagnostic` (const) | predicates | Reports whether a diagnostic blocks `keyMaterial`. |
 | `keyMaterial` (const) | getters | Returns node-associated, digest-free key material in topological dependency order. |
 | `LayerRequest` (interface) | models | Information supplied to the planner's pure per-node layer resolver. |
+| `maximumEffectPaths` (const) | limits | Maximum number of read and write paths, summed, one effect declaration may list before `build` refuses the plan with `plan_too_large`. |
+| `maximumGraphConflicts` (const) | limits | Maximum number of write conflicts `build` records before it refuses the plan. |
 | `maximumGraphDepth` (const) | limits | Maximum structural nesting accepted by `build`. |
+| `maximumGraphEdges` (const) | limits | Maximum number of dependency edges, including the conflict and lane-merge edges the write-conflict pass adds, accepted by `build`. |
+| `maximumGraphNodes` (const) | limits | Maximum number of nodes, including synthesized lane merges, accepted by `build`. |
 | `maximumPayloadDepth` (const) | limits | Maximum nesting accepted while projecting a plan value into identity. |
+| `maximumPayloadMembers` (const) | limits | Maximum number of members one plan value may expand to while it is projected into identity: object keys, array items and holes, map entries, set and chunk values, and bytes, summed across every level of that value. |
+| `maximumPlanEffectPaths` (const) | limits | Maximum number of effect paths `build` admits across one plan before it refuses with `plan_too_large`. |
 | `nodes` (const) | getters | Returns graph nodes in structural preorder. |
 | `PlacementEntry` (interface) | models | Resolved placement for one graph node. |
 | `placements` (const) | getters | Returns resolved placement data in structural preorder. |
@@ -261,7 +310,7 @@ Graph-local ids may occur only inside dependency references. The key compiler re
 
 Parses Agent Skills documents and lowers markdown prompts into ordinary flows.
 
-General markdown discovery belongs to `/registry`. Agent Skills frontmatter is parsed with the complete failsafe YAML schema before this module lowers the document to the ordinary flow shape.
+General markdown discovery belongs to `/registry`. Agent Skills frontmatter is parsed with the complete failsafe YAML schema, then checked against the intrinsic rules of the Agent Skills specification (https://agentskills.io/specification), before this module lowers the document to the ordinary flow shape. The one rule that needs the file system, that `name` equals the skill directory name, stays with the registry.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
@@ -271,8 +320,10 @@ General markdown discovery belongs to `/registry`. Agent Skills frontmatter is p
 | `MarkdownErrorCode` (const) | models | Stable code emitted by markdown loader failures. |
 | `MarkdownErrorCode` (type) | models | Stable code emitted by markdown loader failures. |
 | `MarkdownFrontmatter` (interface) | models | Already-parsed metadata accepted by the markdown flow loader. |
-| `parseSkill` (const) | constructors | Parses an Agent Skills document with failsafe-schema YAML semantics. |
+| `parseSkill` (const) | constructors | Parses an Agent Skills document with failsafe-schema YAML semantics and validates its frontmatter with `validateSkillFrontmatter`. |
 | `SkillDocument` (interface) | models | Parsed Agent Skills document. |
+| `SkillFrontmatter` (interface) | models | Agent Skills frontmatter that passed `validateSkillFrontmatter`. |
+| `validateSkillFrontmatter` (const) | validation | Checks already-parsed Agent Skills frontmatter against the specification's intrinsic rules and lowers the fields this package reads. |
 
 ### Node
 
