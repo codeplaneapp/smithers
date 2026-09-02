@@ -511,16 +511,25 @@ describe("KubernetesSandbox", () => {
             yield* output(session, "mkdir -p sub/nested")
             expect((yield* output(session, "pwd", { cwd: "./sub/nested/" })).stdout).toBe(`${workdir}/sub/nested\n`)
             expect((yield* output(session, "pwd", { cwd: root })).stdout).toBe(`${root}\n`)
-            // `env(1)` delivers keys `export` would refuse, dropping only the
-            // explicitly undefined ones.
+            // `env(1)` carries a value with spaces as one entry and sets
+            // nothing for an explicitly undefined name.
             const delivered = yield* output(
               session,
-              `printf '%s:%s:%s' "$KEEP" "$(printenv WITH-DASH)" "\${DROP-unset}"`,
+              `printf '%s:%s:%s' "$KEEP" "$PRESENT" "\${DROP-unset}"`,
               {
-                env: { "KEEP": "two words", "WITH-DASH": "delivered", "DROP": undefined }
+                env: { "KEEP": "two words", "PRESENT": "delivered", "DROP": undefined }
               }
             )
             expect(delivered).toEqual({ stdout: "two words:delivered:unset", code: 0 })
+            // A name the guest `sh -c` would drop is refused before anything
+            // is sent, so every platform gives the caller the same answer.
+            // `env(1)` would carry `WITH-DASH` to the shell, and dash, which
+            // is `/bin/sh` on Debian and Ubuntu, would then discard it.
+            const refused = yield* Effect.flip(
+              Effect.scoped(session.spawn(`printenv WITH-DASH`, { env: { "WITH-DASH": "delivered" } }))
+            )
+            expect((refused as ProviderError).code).toBe("spawn_error")
+            expect((refused as ProviderError).message).toContain("WITH-DASH")
             // Standard input arrives on the exec's own input channel, verified
             // through the file the command writes.
             const bytes = new Uint8Array([0, 1, 2, 255, 254, 10, 13, 0, 7])
@@ -541,8 +550,10 @@ describe("KubernetesSandbox", () => {
         const withEnv = spawns.find((call) => call.args.at(-1)?.includes("env ") === true)!
         // Every `-u` before every assignment: `env` stops reading options at
         // the first operand, so `env KEEP=1 -u DROP prog` would run `-u`.
-        expect(withEnv.args.at(-1)).toContain(`exec env -u DROP 'KEEP=two words' WITH-DASH=delivered /bin/sh -c`)
+        expect(withEnv.args.at(-1)).toContain(`exec env -u DROP 'KEEP=two words' PRESENT=delivered /bin/sh -c`)
         expect(withEnv.args.at(-1)).not.toContain("export")
+        // The refused spawn never reached the cluster at all.
+        expect(fake.calls.some((call) => call.args.at(-1)?.includes("WITH-DASH") === true)).toBe(false)
         const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin") === true)!
         expect(fed.args.slice(0, 2)).toEqual(["exec", "--stdin"])
         // Only a command with input asks for the input channel.

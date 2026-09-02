@@ -749,6 +749,20 @@ Ask what would break if a boundary were removed, and its purpose becomes clear.
 
 The **host boundary** exists so flow code can run in a browser. `@smthrs/kernel` declares a closed set of five service tags and nothing else; every platform implementation lives in its own package: `@smthrs/platform-node`, `@smthrs/platform-bun`, `@smthrs/platform-browser`. Four of those five tags are Effect's own: `FileSystem`, `Path`, `ChildProcessSpawner`, and `HttpClient` are contracts `effect` already declares, so Smithers supplies implementations rather than wrappers. One more, `Jj`, is a contract of `@smthrs/jj`, whose tag the kernel decorates in place rather than shadowing with a second one, so a consumer that needs only that capability does not take the whole host surface. A module that depends only on the kernel root never statically resolves a `node:` built-in, which is what makes browser bundling possible at all. `@smthrs/kernel` sits in front of that surface and decorates each service with a grant check, so a flow that asks for a file it was never granted fails in the error channel rather than reading the file.
 
+{/* generated:kernel-contract start */}
+
+`@smthrs/kernel` owns the closed host boundary and decorates the same service
+tags supplied by each platform adapter. Capability checks happen before a host
+operation, and mutable inputs are snapshotted so the operation executed after
+an attended grant is the operation that was authorized. Native filesystems use
+a descriptor-relative executor; isolated browser and test volumes may attest
+whole-volume isolation. Process, network, Jujutsu, and filesystem refusals keep
+their structured permission error through the host service's fixed error
+channel. See the Kernel API contract for the exact resources,
+stable error codes, limits, and public test subpaths.
+
+{/* generated:kernel-contract end */}
+
 The **database and journal** split separates the storage driver from the shapes stored in it. `@smthrs/database` owns no domain tables; it wraps any Effect `SqlClient` and adds the transactional write retry that the rest of the system assumes. `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/plan`, and `@smthrs/engine-store` each own their own tables and the migration set that creates them, composed over one migrations table. Swap the driver and every shape survives.
 
 The **canonical, crypto, keys, and engine** chain decides identity before storage sees anything. `@smthrs/canonical` owns RFC 8785 JSON, `@smthrs/crypto` owns SHA-256, `@smthrs/keys` owns canonical flow-key derivation and stored-key validation, and `@smthrs/engine` owns action-key policy above the seam. The engine computes a key before it calls `FlowEngine.Encoded.actionExecute`, so storage never implements key policy.
@@ -900,6 +914,29 @@ These are Node-only, deliberately. The gate asserts each one _still_ fails to bu
 | `@smthrs/flows/NodeRuntime`                      | The supported production composition: it opens a Node SQLite file and closes over a Node scope                                     |
 | `@smthrs/flows/SandboxedFlow`                    | The sandboxed child-flow tier: it bundles a host module with esbuild through `node:url` paths and starts a guest runtime           |
 
+### What the browser host serves
+
+{/* generated:platform-browser-contract start */}
+
+The `@smthrs/platform-browser` bundle is the only host
+whose services are adapters over injected backends rather than over the machine,
+so its divergences from `NodeHost` are part of the browser claim. Its
+`FileSystem` honours the options a caller can set: a recursive `readDirectory`
+is walked here because the promises slice has no recursive `readdir`, `access`
+answers `readable` and `writable` from the reported mode bits because a mounted
+volume has no user identity, `makeDirectory` forwards `mode`, and `realPath`
+canonicalizes rather than echoing its input, which matters because
+`@smthrs/kernel` resolves every guarded path through it before checking the
+grant. Operations the slice cannot serve at all, symlink creation and writable
+handles and watchers among them, fail with `NotFound` rather than pretending.
+
+Its `ChildProcessSpawner` runs one command at a time behind a permit held until
+the interpreter promise settles. Interruption, timeout, and `kill` abort the
+interpreter through just-bash's `AbortSignal` and are reported on the handle as
+a `PlatformError`, never as an interrupt replayed into the caller's fiber.
+
+{/* generated:platform-browser-contract end */}
+
 ### The rule this encodes
 
 A platform-neutral package root exports **contracts**; an implementation lives in its platform package, `@smthrs/platform-node`, `@smthrs/platform-bun`, or `@smthrs/platform-browser`, the way `effect` keeps `@effect/platform-node` out of `effect`. A neutral root that re-exports an implementation resolves that implementation's imports for every consumer, including browser ones, before any bundler can tree-shake it. Package barrel tests pin the namespaces each root exports, and the browser gate pins every browser-safe entry point in this table.
@@ -1028,6 +1065,7 @@ flowchart TD
   RS["@smthrs/run-store"] --> D
   RS --> J
   SC["@smthrs/step-cache"] --> D
+  SC --> C
   A["@smthrs/artifacts"] --> Crypto
   PB --> JJ
   PB --> K
@@ -1082,7 +1120,7 @@ flowchart TD
 | `@smthrs/platform-browser` | Browser implementations of effect's `FileSystem` and `ChildProcessSpawner`, and the `BrowserHost` bundle, which provides effect's own fetch-backed `HttpClient` | Depends on `effect`, `@smthrs/kernel`, and `@smthrs/jj` for the slots it fills; the ZenFS and just-bash backends are arguments, not dependencies |
 | `@smthrs/journal` | The immutable event history: journal rows, projections, redaction, and the `OwnerId` fence its durable channel accepts | Open event envelope; owns `flows_journal_events` only |
 | `@smthrs/run-store` | Executable run state: run rows, attempt rows, and ownership arbitration | Owns `flows_runs` and `flows_attempts`; validates supplied liveness evidence, never probes |
-| `@smthrs/step-cache` | Sealed step results addressed by step-key digest, plus the HTTP action-cache client and the local-first/remote-second composition | Owns `flows_step_cache`; depends on `database` alone |
+| `@smthrs/step-cache` | Sealed step results addressed by step-key digest, plus the HTTP action-cache client and the local-first/remote-second composition | Owns the mutable `flows_step_cache` head and the append-only `flows_step_cache_recorded` provenance ledger; depends on `database` and `canonical` |
 | `@smthrs/plan` | The persisted plan: the `KeyMaterial`→`StepKey` compiler, `Plan.compile`/`append`, `PlanDiff`, and the append-only `PlanStore` | Owns `flows_plans`, `flows_plan_nodes`, `flows_plan_edges`, and migration block `4000`; performs no I/O beyond the database and executes nothing |
 | `@smthrs/artifacts` | The content-addressed artifact store the step cache references by digest: local, remote-over-HTTP, and the combination | Owns no tables and no migration; depends on `crypto` alone. Host access is Effect's `FileSystem` and `HttpClient` tags |
 | `@smthrs/flow` | The flow authoring model, flows, actions, durable primitives, retry policy, step identity, and the `FlowRuntime` port they execute against | Declares the runtime port; depends on nothing that implements it |
@@ -1098,7 +1136,8 @@ flowchart TD
 Each storage package owns its own tables and its own migration set:
 `@smthrs/journal` owns `flows_journal_events`, `@smthrs/run-store` owns
 `flows_runs` and `flows_attempts`, `@smthrs/step-cache` owns
-`flows_step_cache`, `@smthrs/plan` owns `flows_plans`, `flows_plan_nodes`, and
+`flows_step_cache` and `flows_step_cache_recorded`, `@smthrs/plan` owns
+`flows_plans`, `flows_plan_nodes`, and
 `flows_plan_edges`, and `@smthrs/engine-store` owns
 `flows_deferred_completions` and `flows_clock_deadlines`. `@smthrs/database`'s `Migrations` composes those
 sets over one `flows_migrations` table, namespacing each package's migration
@@ -1178,12 +1217,12 @@ against a remote `smithers serve` with `--remote`.
 
 | Flag | Meaning |
 | --- | --- |
-| `--credential string` | See the command pages. |
-| `--json` | See the command pages. |
-| `--remote string` | See the command pages. |
-| `--quiet` | See the command pages. |
-| `--mcp-config string` | See the command pages. |
-| `--root string` | See the command pages. |
+| `--credential string` | Bearer token for the remote control plane; falls back to SMITHERS_API_KEY |
+| `--json` | Print the machine-readable document instead of the human rendering |
+| `--remote string` | http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE |
+| `--quiet` | Drop the banners and notices commands write to stderr |
+| `--mcp-config string` | Path to the JSON array of MCP servers the local executor projects into a run's flow catalog |
+| `--root string` | Project root to act on, instead of walking up from the working directory |
 | `--help, -h` | Show help information |
 | `--version, -v` | Show version information |
 | `--wizard` | Start wizard mode for a command |
@@ -1232,7 +1271,7 @@ Plan-level and node-level (`ask`) approvals; principal stamped server-side. A no
 
 | Flag | Meaning |
 | --- | --- |
-| `--scope choice` | (choices: once, run, remembered) |
+| `--scope choice` | How far the grant reaches: this ask only, the whole run (the default, matching `up`), or every later run. The MCP resolve_approval tool defaults to `once` instead, because an argument a client never sent must not widen what it may do (choices: once, run, remembered) |
 
 ---
 
@@ -2516,7 +2555,7 @@ The runtime distinguishes these cases:
 | Defect | Effect cause outside the error channel | Captured or allowed to die according to `Flow.CaptureDefects` |
 | Infrastructure interruption | `Action.InfraInterrupt` | Retried only when the action declares `interruptRetryPolicy` |
 | Suspension | `Flow.Suspended` result | Releases ownership and leaves the run resumable |
-| Composition failure | `EngineStore.EngineCompositionError` | Indicates missing or incompatible engine services |
+| Composition failure | An unmet `Requirements` type | Rejected by the compiler; the engine raises no runtime composition error |
 | Permission denial | `Permission.PermissionError`, or `PlatformError` carrying it | `Jj` and `HttpClient` fail with the typed kernel failure directly; Effect-owned tags (`FileSystem`, `ChildProcessSpawner`) surface a `PlatformError` with reason `PermissionDenied` whose `cause` is recovered via `Permission.fromPlatformError` |
 
 `Action.InfraInterrupt` is deliberately narrower than cancellation. An exhausted infrastructure retry schedule becomes a defect:
@@ -3096,7 +3135,11 @@ Route: /concepts/sync
 
 > Read-only journal replication: cursor-based reads and credit-bounded subscriptions over Effect RPC.
 
-This page defines the current journal replication protocol in `@smthrs/sync`: cursor-based reads and credit-bounded subscriptions over Effect RPC. It does not describe bidirectional event writes.
+This page defines the journal replication protocol in `@smthrs/sync`:
+cursor-based reads and credit-bounded subscriptions over Effect RPC, plus the
+branch collaboration group that complements them.
+
+{/* generated:sync-protocol start */}
 
 ### Scopes and cursors
 
@@ -3116,43 +3159,97 @@ const cursor = Schema.decodeUnknownSync(SyncProtocol.RunCursor)({
 })
 ```
 
-A run cursor stores the last observed sequence. A workspace cursor is an array of per-run cursors. Because journal sequences may have holes, a cursor means “read entries after this number,” not “expect the next number to be exactly one greater.”
+A run cursor stores the last sequence the client was delivered. A workspace
+cursor is an array of per-run cursors with at most one entry per run: a request
+that names one run twice is refused with `invalid_request`, because the read
+position and the echoed response state would otherwise disagree. Journal
+sequences may have holes, so a cursor means "read entries after this number",
+not "expect the next number to be exactly one greater".
 
 ### Read
 
-`Sync.Read` accepts a scope, cursor, and limit and returns journal entries plus the next cursor. `RunCatalog` supplies the run list for workspace reads; `SyncServer.layer` combines it with `Journal`.
+`Sync.Read` accepts a scope, a cursor set, and a limit, and returns journal
+entries plus the cursor set the page served through. `RunCatalog` supplies the
+run list for workspace reads; `SyncServer.layer` combines it with `Journal`.
 
-The server merges workspace entries deterministically. Consumers should persist the returned cursor only after applying the returned batch.
+`limit` is bounded at `SyncProtocol.maxReadLimit`. A page is also bounded by
+the encoded-entry ceiling, `maxFrameBytes`, which defaults to 1 MiB. The
+ceiling is a budget on the page, not a verdict on the read: the server serves
+entries until the next one would cross it, then returns `done: false` so the
+client asks for the rest. Only a single entry whose own encoded size exceeds
+the ceiling fails, with `frame_too_large`, because no page can carry it.
 
-A page is also bounded by the encoded-entry ceiling, `maxFrameBytes`, which defaults to 1 MiB. The ceiling is a budget on the page, not a verdict on the read: the server serves entries until the next one would cross it, then returns `done: false` so the client asks for the rest. Only a single entry whose own encoded size exceeds the ceiling fails, with `frame_too_large`, because no page can carry it.
+Persist the returned cursors only after applying the returned batch.
 
 ### Subscribe
 
-`Sync.Subscribe` streams:
+`Sync.Subscribe` streams `Entries` frames, each carrying one run's entries and
+the interval the server covered (`runId`, `fromSeq`, `toSeq`), and a terminal
+`Closed` frame when the server ends the subscription. `fromSeq` and `toSeq`
+describe the covered interval, not the sequences actually carried: dropped
+admissions leave legitimate holes. No frame carries a cursor; a client tracks
+its own, which is what `SyncClient` does.
 
-- `Entries` frames with events and the next cursor,
-- `Heartbeat` frames when no entries arrive,
-- one terminal `Closed` frame.
+The `Heartbeat` variant is RESERVED. No server emits one at 1.0.0-rc.0, so a
+client must not wait for one; it stays in the union so adding it later is not a
+wire break. Keepalive is a transport concern, because a heartbeat here would
+spend the subscription's credit.
 
-The request includes a credit count. Credit is a hard limit on frames emitted by that subscription, not a sliding acknowledgement window. There is currently no Ack RPC. A client that needs more data opens another subscription from the last durable cursor.
+The request includes a credit count between 1 and
+`SyncProtocol.maxSubscribeCredit`. Credit is a hard limit on frames emitted by
+that subscription, not a sliding acknowledgement window, and there is no Ack
+RPC. A client that needs more resubscribes from the cursors it has
+acknowledged, which is what `SyncClient` does once per window.
 
-`SyncClient.subscribe` wraps the RPC stream and detects invalid cursor movement as `SyncGapError`. Transport, authentication, and reconnect policy remain application concerns.
+A subscription also ends when the credential that opened it expires, with
+`SyncError` code `unauthorized`. Authorization happens once, at open, so
+without that deadline a signed expiry could not revoke a stream that simply
+stayed connected.
+
+`SyncClient.subscribe` wraps the RPC stream. It detects invalid cursor movement
+as `SyncGapError`, refuses a frame or a catch-up page that contradicts itself
+as a `protocol_violation`, reconnects transport failures under exponential
+backoff capped at five seconds, and resumes from the cursors it has
+acknowledged. Authentication is `SyncAuth`, and both are part of the package
+rather than left to the application.
 
 ### Compacted runs
 
-A cursor below a run's compaction floor names entries the journal has deleted. The read or the subscription fails with `SyncError` code `compacted`, and the error carries a `Resync` of `{ runId, checkpointSeq }`: the floor to resume from. `SyncClient.subscribe` handles it rather than surfacing it. It moves that run's cursor to `checkpointSeq`, logs the skipped range, and restarts the subscription, so a workspace subscription costs one reconnect per compacted run instead of dying over one of them.
+A cursor below a run's compaction floor names entries the journal has deleted.
+The read or the subscription fails with `SyncError` code `compacted`, and the
+error carries a `Resync` of `{ runId, checkpointSeq }`: the floor to resume
+from. `SyncClient.subscribe` handles it rather than surfacing it. It moves that
+run's cursor to `checkpointSeq` and restarts the subscription, so a workspace
+subscription costs one reconnect per compacted run instead of dying over one of
+them.
 
 :::warning
-The resync moves a cursor, not state. The entries below `checkpointSeq` are never delivered, and no sync RPC serves the checkpoint state that stands for them. A follower rebuilding a projection from scratch reads that prefix out of band: `journal.latestCheckpoint(runId)`, apply `checkpoint.state`, then continue from the sync stream. See Checkpoints and compaction.
+The resync moves a cursor, not state. The entries below `checkpointSeq` are
+never delivered, and no sync RPC serves the checkpoint state that stands for
+them. `SubscribeOptions.onResync` runs before the cursor moves and must
+succeed, so a consumer that cannot restore the prefix fails instead of silently
+skipping it. A Node follower reads that prefix out of band with
+`journal.latestCheckpoint(runId)`, applies `checkpoint.state`, and continues
+from the sync stream. See Checkpoints and compaction.
 :::
-
-### Authentication
-
-`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability, the branch share scheme extended with a signed `kid` for key rotation, presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`FLOWS_SYNC_SECRET`, `FLOWS_SYNC_KEY_ID`); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
 
 ### Directionality
 
-Current RPCs are read-only: `Read` and `Subscribe`. Client-to-server event submission, bidirectional reconciliation, acknowledgement windows, and resumable transport sessions are **Planned**.
+`SyncRpcs` is read only: `Sync.Read` and `Sync.Subscribe`. Client-to-server
+submission is not planned work, it is `BranchRpcs`: `Branch.Submit` admits one
+command onto a branch's journal run under a client-minted idempotency key, and
+`Branch.Announce`, `Branch.Leave`, `Branch.Roster`, and `Branch.WatchRoster`
+carry ephemeral presence. `BranchRpcs` has no production mount at
+1.0.0-rc.0; the gateway serves `SyncRpcs` alone.
+
+Bidirectional reconciliation of the read path, acknowledgement windows, and
+resumable transport sessions remain unplanned.
+
+{/* generated:sync-protocol end */}
+
+### Authentication
+
+`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability, the branch share scheme extended with a signed `kid` for key rotation, presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. The verified expiry travels with the principal, so an open subscription ends with `unauthorized` when the credential that opened it runs out. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`FLOWS_SYNC_SECRET`, `FLOWS_SYNC_KEY_ID`); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
 
 See Journal and the `@smthrs/sync` reference.
 
@@ -3166,8 +3263,11 @@ Route: /concepts/time-travel
 
 This page explains the inspect, fork, and rewind operations of the one
 `TimeTravel` service in `@smthrs/time-travel`, and the snapshot, compensation,
-and recovery machinery behind them. It also identifies the integration work the
-durable engine does not yet perform automatically.
+and recovery machinery behind them. It also says what a composition still has
+to wire by hand, and what of the surface the release candidate ships.
+
+The surface sections below are generated from the package that owns them; edit
+`packages/time-travel/docs/concepts.md`, never this file's generated region.
 
 ### Frames and snapshots
 
@@ -3216,7 +3316,7 @@ Use flow replay when the goal is to resume computation. Use projection replay wh
 
 ### Fork
 
-`fork` requires a terminal or inactive parent run, creates a store-level fork, and asks `Jj` to add an isolated workspace. The workspace name and path are derived from the child run id the fork mints rather than supplied, so a frame forked twice gets two lanes, and the lane is forgotten when the service is released.
+`fork` requires a terminal or inactive parent run, creates a store-level fork, and asks `Jj` to add an isolated workspace pinned at the frame's recorded jj pointer. The workspace name and path are derived from the child run id the fork mints rather than supplied, so a frame forked twice gets two lanes, and the lane is forgotten when the service is released. A frame with no recorded pointer still lands at the lane default, and the fork discloses that as a warning rather than restoring the parent's tree.
 
 The SQL store copies the parent's versioned engine state without terminal
 result or cancellation fields and clones its attempt rows. The fork can
@@ -3248,40 +3348,70 @@ identity run-local.
 
 Behind the service, an effect-handler registry maps effect kinds to assessment and rollback handlers, classifies suffix records, invokes eligible handlers, and returns receipts. Unknown or irreversible effects can block a rewind. None of it is a caller parameter: `EffectBoundary` is the only half of that contract you touch, from the producer side.
 
+{/* generated:time-travel-surface start */}
+
 ### Rewind protocol
 
 `rewind`:
 
-1. claims and activates an inactive pending or suspended run,
-2. records an audit and rate-limit decision,
-3. loads journal entries after the target frame,
-4. checks descendant lineage,
-5. assesses and compensates external effects,
-6. restores the Jujutsu workspace,
-7. archives and truncates the suffix atomically,
-8. records completion or a recoverable failure.
+1. validates the position before anything durable exists, so a refused frame
+   leaves no claim, no audit row, and no read page behind,
+2. claims and activates an inactive pending or suspended run, and holds that
+   lease with a heartbeat for as long as the protocol runs, so a co-located
+   engine cannot steal the run out from under a slow compensation,
+3. records an audit row and the rate-limit decision,
+4. loads the journal entries after the target frame,
+5. resolves descendants: an attached child still depending on the truncated
+   history, and a detached child under the `block` policy, both refuse the
+   rewind while they are live,
+6. assesses and compensates external effects, persisting each receipt before
+   the next irreversible step,
+7. restores the Jujutsu workspace to the frame's pointer,
+8. archives and truncates the suffix atomically, fenced on the ownership claim,
+9. cancels the children the policy asked for, then records completion or a
+   recoverable failure.
 
-Detached child policy is either `block` (the default) or `cancel`. Terminal descendants are disclosed as warnings because their external effects cannot be erased by deleting a parent suffix.
+Step 8 is the commit point. Cancelling a child is terminal and has no inverse,
+so it runs only after that commit: a rewind that fails earlier leaves every
+child exactly as it was. The cancellations the operator asked for are written to
+the audit detail before the commit, so a crash in the middle of them is finished
+by the next recovery pass instead of being silently dropped. Terminal
+descendants are disclosed as warnings, because their external effects cannot be
+erased by deleting a parent suffix.
 
-Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work, except one whose run a live process still holds. That one is left exactly as the crash left it, still pending and still recoverable, so a rewind a living process still owns is never stolen. `TimeTravel.layerWith({ isAlive })` decides what counts as live; the default is the lease check the engine's run driver already applies to those rows.
+Step 9 is why recovery is not an operation: building `TimeTravel.layer` finishes
+or rolls back any rewind a crash interrupted, before the service accepts new
+work, except one whose run a live process still holds. That one is left exactly
+as the crash left it, still pending and still recoverable, so a rewind a living
+process still owns is never stolen. `TimeTravel.layerWith({ isAlive })` decides
+what counts as live; the default is the lease check the engine's run driver
+already applies to those rows.
 
 ### Current integration boundary
 
-The time-travel package is implemented and tested as a protocol library, but `EngineStore` does not automatically create every snapshot, lineage edge, or effect-boundary record it consumes. Applications must wire those records and migrations explicitly. Automatic end-to-end integration is **Planned**.
+The time-travel package is implemented and tested as a protocol library,
+including against a journal an ordinary engine run wrote. `EngineStore`
+populates the evidence it reads: it stamps `meta.lineageId` on every record,
+journals a tier-2 anchor per attempt, and writes the effect-boundary records
+around an irreversible dispatch and a child spawn. What a composition still
+supplies by hand is the store itself, the migration that creates its tables, and
+any `CompensationHandlers` its adapters own.
 
 ### What 1.0.0-rc.0 ships
 
 Time travel is a library API in this release, and only a library API.
 
-| Surface | 1.0.0-rc.0 |
-| --- | --- |
-| `TimeTravel.inspect`, `replay`, `fork`, `rewind` | available from `@smthrs/time-travel` |
-| CLI verbs | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; migrating from 0.x lists them |
-| MCP tools | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
-| Composition | not composed into `NodeControl`, and the CLI does not install migration block 5000 |
+| Surface                                | 1.0.0-rc.0                                                                                                                                                     |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TimeTravel.inspect`, `fork`, `rewind` | available from `@smthrs/time-travel`. `inspect` is the replay entry point; there is no separate `replay` operation                                             |
+| CLI verbs                              | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; migrating from 0.x lists them                     |
+| MCP tools                              | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
+| Composition                            | not composed into `NodeControl`, and the CLI does not install migration block 5000                                                                             |
 
 A program that wants time travel provides `TimeTravelStore` and calls the
 service itself. Nothing in the command line reaches it.
+
+{/* generated:time-travel-surface end */}
 
 The word "checkpoint" means two different things in this release, and neither
 is a worktree lane. On the journal it is the durable state that replays a run
@@ -3312,6 +3442,8 @@ token can perform every control operation the server exposes.
 `NodeControl.layerServer` and `layerServerBearerAuth` bind to `127.0.0.1` when
 no host is supplied. A non-loopback host is rejected unless the host adapter
 passes the explicit `listen: true` opt-in corresponding to `--listen`:
+the `@smthrs/cli` API reference lists the complete composition
+surface.
 
 ```ts
 import { NodeControl } from "@smthrs/cli"
@@ -3628,7 +3760,7 @@ executes that claim on every build. Browser support
 lists every entry point and the seven that stay Node-only.
 
 ```ts
-import { BrowserHost } from "@smthrs/platform-browser/BrowserHost"
+import { BrowserHost } from "@smthrs/platform-browser"
 
 const host = BrowserHost.layer({ bash, fs, jj })
 ```
@@ -3738,6 +3870,31 @@ const page = yield* journal.entries({ runId, limit: 100 })
 ```
 
 An accepted submission is not necessarily durable until `flush` completes.
+
+{/* generated:testing-guide start */}
+
+### The testing library
+
+Everything above is supplied by the package under test: `@smthrs/kernel` ships `TestHost`, `@smthrs/journal` ships `TestJournal`, and so on. `@smthrs/testing` is the separate published library for the other half of a test, the part that asserts. It carries engine and model doubles, pure plan and journal assertions, a host conformance suite, deterministic score gates, and the Vitest adapter that runs an Effect body under a test clock.
+
+```ts
+import { Conformance, EngineSubject, JournalAssertions, TestLayers } from "@smthrs/testing"
+import * as Vitest from "@smthrs/testing/Vitest"
+```
+
+The root entry point exports one namespace per module, and each is also importable from its own subpath. `Vitest` is the exception and is absent from the root barrel: `vitest` refuses to load through `require()`, so a barrel that carried it would break `require("@smthrs/testing")` for every CommonJS consumer of the assertion helpers.
+
+Three things it is used for, in rising order of commitment.
+
+**Assert what a run journaled.** `JournalAssertions.expectJournal` reads entries in `entry.index` order and answers about steps and journaled effects separately, so an at-most-once claim about an external effect cannot be satisfied by an ordinary step that happens to share its key.
+
+**Replay a model instead of calling one.** `CachedModel` records what a fixture is missing and replays what it has, matching a request by its canonical shape with `modelId` erased. `RecordedModel` is the strict double that claims each recorded call once and refuses a request the fixture does not describe. Neither reads the environment, so how a suite decides to record stays the suite's business.
+
+**Certify an engine.** `Conformance.coreSuite()` is the mandatory black-box suite every `EngineSubject` must pass: identity, interruption, replay, and race. `MemoryEngine` and `FlowEngineLike` are the two reference subjects it is developed against, and `RestartableEngine` adds the restart and hard-kill boundaries that a lease-based reclaim has to recover from. The race and interrupt cases advance a `TestClock`, so register them through `Vitest.testEffect(...).effect`, which supplies one, and not through `.live`, which does not.
+
+Every failure the package raises carries a stable `code` from a closed union, so a caller matches on the code rather than on the prose of a message. The package's own reference, generated from its sources, lists every module and every documented export.
+
+{/* generated:testing-guide end */}
 
 ### Test invariants
 

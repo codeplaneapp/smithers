@@ -10,6 +10,7 @@ import type { Scope } from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelledStatus, cancelMarker, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -428,15 +429,18 @@ const unframe = (run: GatheredRun, nonce: number): Unframed => {
 /**
  * The caller's environment as an `env(1)` prefix.
  *
- * `env`, not `export`: `export` requires a shell identifier and aborts the
- * whole script for a name Node and the session contract both accept
- * (`WITH-DASH=1`), while `env` passes any name through. The program after the
- * prefix is absolute, because `env` resolves it through the environment it has
- * just built and a caller's `PATH` override would otherwise keep a bare `sh`
- * from ever starting. GNU coreutils, busybox, and BSD `env` all support `-u`,
- * so an undefined value explicitly deletes a variable the task definition put
- * in the environment instead of silently keeping it: `undefined` means the
- * same "remove this one" for a remote command that it means for a local one.
+ * `env`, not `export`: `export` is a POSIX special builtin, so a name it
+ * refuses ends the whole non-interactive script, taking the sentinel this
+ * transport frames its exit status with. `env` carries any name to the process
+ * it starts, but the `sh -c` that frames the script keeps only shell
+ * identifiers, so `spawn` refuses the rest up front rather than letting the
+ * guest shell drop them unseen. The program after the prefix is absolute,
+ * because `env` resolves it through the environment it has just built and a
+ * caller's `PATH` override would otherwise keep a bare `sh` from ever
+ * starting. GNU coreutils, busybox, and BSD `env` all support `-u`, so an
+ * undefined value explicitly deletes a variable the task definition put in the
+ * environment instead of silently keeping it: `undefined` means the same
+ * "remove this one" for a remote command that it means for a local one.
  *
  * Every `-u` comes before every assignment, because `env` stops reading
  * options at the first operand: `env A=1 -u B prog` hands `-u` to `env` as
@@ -684,6 +688,7 @@ export const make = (options: AwsSandboxOptions): Provider => ({
         remoteId: taskArn,
         workdir,
         spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+          yield* checkEnvironmentNames(spawnOptions.env)
           const nonce = nextNonce++
           const pidfile = `${pidDirectory}/${nonce}.pid`
           const fed = yield* redirect(command, spawnOptions.stdin)
