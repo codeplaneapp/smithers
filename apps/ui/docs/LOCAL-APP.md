@@ -61,6 +61,20 @@ the failure). The trail line for `/api/auth/native/claim` names the cookie's
 attributes, never its value, and every `/` and `/api/*` request leaves a
 `METHOD /path -> status in Nms` line.
 
+The cloud proxy (`/api/cloud/*`, lane piper) forwards to `SMITHERS_CLOUD_API`
+(default `https://api.jjhub.tech`) with the same rules as the identity proxy:
+Host and Origin follow the upstream, `content-length` and the local session
+header are dropped, Set-Cookie is re-scoped, and the request carries
+`Authorization: Bearer` from the Bun-side credential — the cloud token NEVER
+reaches the renderer. Cloud sign-in (`/api/cloud-auth/*`) is the CLI's browser
+flow: start answers the login URL, the callback lands on a loopback listener,
+and the token lives in the macOS keychain (`smithers-cloud`) plus Bun memory;
+the session route answers `{ state, username, expiresAt }` only.
+`SMITHERS_CLOUD_TOKEN` is a dev/CI override read first. A signed-in session
+loads the repository inventory (the sidebar's `org/ → repo → working copies`
+tree) through the proxy; the bootstrap advertises the `jjhub` capability when
+the proxy is enabled.
+
 ## Repository and process authority
 
 Native repository opening is a two-step grant flow: the picker authorizes a
@@ -117,6 +131,10 @@ All mutations require `Content-Type: application/json`; failures use
 | GET/POST | `/api/pty` | List/create PTYs; create accepts `repoId`, never `cwd` |
 | POST | `/api/pty/:id/resize` | Resize a PTY |
 | DELETE | `/api/pty/:id` | Stop a PTY |
+| ANY | `/api/cloud/*` | Cloud proxy to `SMITHERS_CLOUD_API` (Bearer from the Bun credential; 501 offline) |
+| POST | `/api/cloud-auth/start` | Begin the browser login; answers `{ url }` |
+| GET | `/api/cloud-auth/session` | `{ state, username, expiresAt }` — never the token |
+| POST | `/api/cloud-auth/sign-out` | Delete the keychain credential and the in-memory token |
 
 WebSocket subscriptions carry target-run and PTY output. Client messages are
 limited to subscription control, `target-run.attach`, and `pty.input`.
@@ -139,6 +157,20 @@ Durable routes use `/w/:workspace/b/:branch/f/:frame`. Browser back/forward,
 reload, and immutable branch forks operate on workspace/branch/frame records in
 the same store as cards. Fullscreen is explicit; the composer remains mounted
 and usable while a card is maximized.
+
+Repositories have one address space (lane piper, ADR 0001): the sidebar's
+Repos section is the tree `org/ → repo → working copies` — cloud repositories
+from the signed-in inventory, local checkouts nested under their repository
+when the remote parses into it (standalone rows otherwise), cloud workspaces
+beneath their repo. Selecting a repo row names `org/repo`; selecting a copy
+row names `org/repo#copyId`. The composer's origin chip states where the
+selection lives (`~/smithers · 3 ahead of main`, or `head @ qupxosqw` at a
+repository's head). File cards carry the global address
+(`/org/repo/path`) and the position the read was taken at; when the
+repository's head commit has moved since, a "head moved" line offers an
+explicit refresh — nothing re-reads on its own. `/files.list` and
+`/files.read` accept a global path (`/files.read /org/repo/README.md`) when
+the two-segment prefix is a repository the app knows.
 
 ## Build and verification
 

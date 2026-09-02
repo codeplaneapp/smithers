@@ -443,10 +443,23 @@ automation (workspaces spec §5.5).
 
 **Job.** One place code lives; the local checkout is a working copy of it.
 
-**No new surface.** The repository selector in the chrome lists cloud
-repositories beside local checkouts; a cloud repository's rows show a cloud
-glyph in the origin chip instead of a `~/` path. Every card above names its
-repository in the header. The bare-command rule (§0) applies to both.
+**Shipped (lane piper, ADR 0001).** The sidebar's Repos section is the tree
+`org/ → repo → working copies`, fed by the cloud inventory
+(`GET /api/cloud/api/user/repos` + `/user/orgs` + per-repo `/bookmarks` for
+the default bookmark's head, through the `/api/cloud/*` proxy) and the local
+`repos.loaded`. No mirror glyph — the backend has no mirror status yet
+(plue#445). Selecting a repo row names `org/repo`; a copy row names
+`org/repo#copyId`. The origin chip reads `~/smithers · 3 ahead of main` for a
+local copy with a jj probe (the branch when no probe ran) and
+`head @ qupxosqw` at a repository's head. `file` and `file-list` card headers
+carry the global `address` and `readAt`; a `head moved to <id> · refresh`
+line appears when the inventory's head commit differs from `readAt.commitId`
+— nothing auto-refreshes. `/files.list` and `/files.read` accept the global
+path as one token. The watched-repos collection, the `repos.watch*` flows,
+and the first-run repo chooser are gone: the inventory is the one truth, and
+signing in to Smithers Cloud (`/api/cloud-auth/*`, token in the macOS
+keychain, never in the renderer) is the only door to it. The bare-command
+rule (§0) applies to both local and cloud selections.
 
 ### 3.12 Review of the table
 
