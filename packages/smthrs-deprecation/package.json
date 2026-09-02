@@ -27,7 +27,7 @@
     "smithers"
   ],
   "engines": {
-    "node": ">=14"
+    "node": ">=22.19.0"
   },
   "sideEffects": true,
   "exports": {
