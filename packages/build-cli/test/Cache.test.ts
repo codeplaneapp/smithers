@@ -1249,3 +1249,24 @@ describe("a publication namespace keeps an untrusted result off the trusted key"
     await expect(Fs.stat(NodePath.join(root, ".flows"))).rejects.toMatchObject({ code: "ENOENT" })
   })
 })
+
+describe("the shared tier admits only confined results", () => {
+  it("keeps a put marked shared: false in the local tier", async () => {
+    const methods: Array<string> = []
+    const cache = await openCache({
+      workspaceRoot: root,
+      endpoint,
+      fetch: (_input, init) => {
+        methods.push(init?.method ?? "GET")
+        return Promise.resolve(new Response(null, { status: 201 }))
+      },
+      warn: () => {}
+    })
+    await cache.put(result.key, result, { shared: false })
+    expect(methods).toEqual([])
+    expect(await cache.get(result.key)).toEqual(result)
+    await cache.put(result.key, result)
+    expect(methods).toEqual(["PUT"])
+    await cache.close()
+  })
+})

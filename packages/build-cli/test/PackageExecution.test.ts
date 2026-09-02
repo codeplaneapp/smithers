@@ -194,7 +194,9 @@ export const Package = S.Package({ targets: { bad } })
     commitAll(root)
     const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
     expect(exitCode).toBe(1)
-    expect(logs).toContain("wrote outside its declared write-set")
+    expect(logs).toMatch(
+      /wrote outside its declared write-set|sandbox: .* outside the declared write set|Operation not permitted|Read-only file system/
+    )
     expect(logs).toContain("other.txt")
     expect(await Fs.readFile(NodePath.join(root, "other.txt"), "utf8")).toBe("innocent")
     expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("b")
@@ -237,7 +239,9 @@ export const Package = S.Package({ targets: { bad } })
     commitAll(root)
     const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
     expect(exitCode).toBe(1)
-    expect(logs).toContain("wrote outside its declared write-set")
+    expect(logs).toMatch(
+      /wrote outside its declared write-set|sandbox: .* outside the declared write set|Operation not permitted|Read-only file system/
+    )
     expect(await Fs.readFile(NodePath.join(root, "secret.txt"), "utf8")).toBe("safe")
   })
 })
@@ -263,12 +267,16 @@ export const Package = S.Package({ targets: { bad } })
     commitAll(root)
     const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
     expect(exitCode).toBe(1)
-    expect(logs).toContain("wrote outside its declared write-set")
+    expect(logs).toMatch(
+      /wrote outside its declared write-set|sandbox: .* outside the declared write set|Operation not permitted|Read-only file system/
+    )
     expect(logs).toContain("linkdir/target.txt")
     // The external write is reverted; the in-set change stays.
     const escaped = await Fs.access(NodePath.join(external, "target.txt")).then(() => true, () => false)
     expect(escaped).toBe(false)
-    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("b")
+    // The sandbox denies the escaping write at the kernel, the command fails,
+    // and the run reverts every write it made, the declared one included.
+    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("a")
   })
 
   it("reverts and fails a check-mode dry-run that touches the real tree through a symlink", async () => {
@@ -288,7 +296,9 @@ export const Package = S.Package({ targets: { bad } })
     commitAll(root)
     const { exitCode, logs } = await serve(root, ["//:bad"])
     expect(exitCode).toBe(1)
-    expect(logs).toContain("check touched the real tree through a symlink")
+    expect(logs).toMatch(
+      /check touched the real tree through a symlink|sandbox: .* outside the declared write set|Operation not permitted|Read-only file system/
+    )
     const escaped = await Fs.access(NodePath.join(external, "leak.txt")).then(() => true, () => false)
     expect(escaped).toBe(false)
     // Check mode never touched the real out.txt either.
@@ -338,7 +348,9 @@ export const Package = S.Package({ targets: { bad } })
     commitAll(root)
     const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
     expect(exitCode).toBe(1)
-    expect(logs).toContain("wrote outside its declared write-set")
+    expect(logs).toMatch(
+      /wrote outside its declared write-set|sandbox: .* outside the declared write set|Operation not permitted|Read-only file system/
+    )
     expect(logs).toContain("ignored-leak.txt")
     // The gitignored out-of-set write is reverted; the in-set change stays.
     const leakGone = await Fs.access(NodePath.join(root, "ignored-leak.txt")).then(() => false, () => true)
@@ -367,7 +379,9 @@ export const Package = S.Package({ targets: { bad } })
     commitAll(root)
     const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
     expect(exitCode).toBe(1)
-    expect(logs).toContain("wrote outside its declared write-set")
+    expect(logs).toMatch(
+      /wrote outside its declared write-set|sandbox: .* outside the declared write set|Operation not permitted|Read-only file system/
+    )
     expect(logs).toContain(".env")
     expect(await Fs.readFile(NodePath.join(root, ".env"), "utf8")).toBe("secret")
     expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("b")
@@ -1123,10 +1137,12 @@ export const Package = S.Package({ targets: { confined, networked, open } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const confined = S.Shell.Run({ command: ${JSON.stringify(`${process.execPath} listen.cjs`)} })
+const confined = S.Shell.Run({ command: ${
+        JSON.stringify(`${process.execPath} listen.cjs`)
+      }, data: [S.file("listen.cjs")] })
 const loopback = S.Shell.Run({ command: ${
         JSON.stringify(`${process.execPath} listen.cjs`)
-      }, sandbox: { network: "loopback" } })
+      }, data: [S.file("listen.cjs")], sandbox: { network: "loopback" } })
 const egress = S.Shell.Run({ command: "curl -sf --max-time 5 https://example.com/ > /dev/null", sandbox: { network: "loopback" } })
 export const Package = S.Package({ targets: { confined, egress, loopback } })
 `

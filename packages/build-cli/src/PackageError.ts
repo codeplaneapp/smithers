@@ -57,6 +57,7 @@ export type Code =
   | "no_default_target"
   | "unknown_agent"
   | "unknown_flag"
+  | "unknown_team"
   | "undeclared_host_bin"
   | "illegal_data_target"
   | "private_owner_conflict"

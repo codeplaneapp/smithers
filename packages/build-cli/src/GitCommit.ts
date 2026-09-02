@@ -223,9 +223,9 @@ const status = async (root: string, pathspecs: ReadonlyArray<string>): Promise<R
  * `git add -A` used to run unconditionally, and the comment beside it called
  * the sweep deliberate. That swept every unrelated modification, addition, and
  * deletion sitting in the working tree — a concurrent agent's edits included —
- * into the commit this target creates, and no attr on `Git.Commit` can express
- * a scope, so the target author had no way to stop it. A notice is not a
- * guard: an invocation that cannot name what it owns refuses here instead.
+ * into the commit this target creates, and no attr on `Git.Commit` could
+ * express a scope, so the target author had no way to stop it. A notice is not
+ * a guard: an invocation that cannot name what it owns refuses here instead.
  *
  * A scoped invocation is narrower. `git add -A -- <paths>` scopes only the new
  * staging operation; the commit that follows publishes the whole index, so a
@@ -278,9 +278,10 @@ export interface CommitOptions {
    * The pathspecs this commit owns, or undefined when it owns nothing.
    *
    * A scoped stage leaves a concurrent unrelated edit elsewhere unstaged and
-   * uncommitted. Current `Git.Commit` attrs can express no scope at all, so a
-   * target-driven invocation always arrives here undefined and is refused by
-   * {@link refuseUnrelated} rather than sweeping the tree.
+   * uncommitted. A target-driven invocation receives the write set resolved
+   * from the target's declared `changes` attr; a rule that declares none
+   * arrives here undefined and is refused by {@link refuseUnrelated} rather
+   * than sweeping the tree.
    */
   readonly paths?: ReadonlyArray<string> | undefined
   /**

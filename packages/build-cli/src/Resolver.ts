@@ -46,6 +46,7 @@ import { builtinModules } from "node:module"
 import * as NodePath from "node:path"
 import * as ts from "typescript"
 import type { CachedResult, CacheStore } from "./Cache.ts"
+import { jsExtensionSiblings } from "./internal/js-extension-siblings.js"
 import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex as sha256 } from "./internal/Text.ts"
 
@@ -81,17 +82,6 @@ const dynamicTextLimit = 200
 
 /** Extensions whose files are parsed for specifiers. */
 const scannableExtensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"])
-
-/**
- * TypeScript siblings probed before the literal file for a JavaScript-suffixed
- * specifier, matching the compiler's `./foo.js` → `foo.ts` mapping.
- */
-const jsExtensionSiblings: Readonly<Record<string, ReadonlyArray<string>>> = {
-  ".js": [".ts", ".tsx"],
-  ".jsx": [".tsx"],
-  ".mjs": [".mts"],
-  ".cjs": [".cts"]
-}
 
 /** Extension probe order for extensionless specifiers, the compiler's order. */
 const probeExtensions = [".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".json"] as const

@@ -12,6 +12,7 @@ import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import * as Path from "./internal/Path.ts"
 import * as Text from "./internal/Text.ts"
+import type * as NixExec from "./NixExec.ts"
 import * as PackageTree from "./PackageTree.ts"
 import * as StampExec from "./StampExec.ts"
 
@@ -26,6 +27,8 @@ export interface Context {
   readonly root: string
   readonly packagePath: string
   readonly workspace: WorkspaceDeclaration.WorkspaceDeclaration
+  /** The workspace's resolved Nix environment, when it declares one. */
+  readonly nix?: NixExec.ResolvedEnvironment | undefined
 }
 
 /**
@@ -134,6 +137,19 @@ export const resolveNix = async (name: string, context: Context): Promise<
   | { readonly ok: true; readonly path: string; readonly identity: unknown }
   | { readonly ok: false; readonly refusal: string; readonly identity: unknown }
 > => {
+  // A resolved environment answers from its own PATH: no `nix develop` per
+  // tool, and the closure's store hash is the identity every reference keys on.
+  if (context.nix !== undefined) {
+    const path = PackageTree.findOnPath(name, { PATH: context.nix.path.join(NodePath.delimiter) })
+    const authority = { closure: context.nix.hash, inputs: context.nix.inputs }
+    return path === undefined
+      ? {
+        ok: false,
+        refusal: `the declared Nix environment provides no ${JSON.stringify(name)}`,
+        identity: { tag: "NixBin", name, absent: true, authority }
+      }
+      : { ok: true, path, identity: { tag: "NixBin", name, path, authority } }
+  }
   const nix = PackageTree.findOnPath("nix")
   const declaration = context.workspace.toolchains?.find((entry) => entry._tag === "NixDevShell") as
     | { readonly flake: Input.File; readonly lock: Input.File }

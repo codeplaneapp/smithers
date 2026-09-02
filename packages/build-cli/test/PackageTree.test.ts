@@ -392,6 +392,39 @@ describe("captureFile heals a tampered CAS blob", () => {
   })
 })
 
+describe("the CAS publish path", () => {
+  it("leaves no temp files beside the blobs it writes", async () => {
+    await Fs.mkdir(NodePath.join(root, "dist"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", "a.txt"), "art")
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "other")
+    const tree = await PackageTree.captureOutDir(root, ".flows", "dist")
+    const file = await PackageTree.captureFile(root, ".flows", "out.txt")
+    const listed = (await Fs.readdir(NodePath.join(root, ".flows", "cas"))).sort()
+    expect(listed).toEqual([tree.entries[0]!.digest, file.digest].sort())
+  })
+
+  it("removes its temp file when the publishing rename fails", async () => {
+    // A directory squatting on the blob's content-addressed name: the verify
+    // read fails (EISDIR), the temp copy succeeds, and the rename onto a
+    // directory fails. The failed publish must not strand the temp file.
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "art")
+    const digest = PackageTree.digestBytes(Buffer.from("art", "utf8"))
+    const cas = NodePath.join(root, ".flows", "cas")
+    await Fs.mkdir(NodePath.join(cas, digest), { recursive: true })
+    await expect(PackageTree.captureFile(root, ".flows", "out.txt")).rejects.toThrow()
+    expect(await Fs.readdir(cas)).toEqual([digest])
+  })
+
+  it("names blobs by lowercase sha256 hex alone", () => {
+    const digest = sha256("art")
+    expect(PackageTree.isSha256Hex(digest)).toBe(true)
+    expect(PackageTree.isSha256Hex(digest.toUpperCase())).toBe(false)
+    expect(PackageTree.isSha256Hex(digest.slice(1))).toBe(false)
+    expect(PackageTree.isSha256Hex(`${digest}0`)).toBe(false)
+    expect(PackageTree.isSha256Hex("../".padEnd(64, "a"))).toBe(false)
+  })
+})
+
 describe("captureOutDir bounds the tree it walks", () => {
   it("refuses a tree deeper than the declared depth limit", async () => {
     const segments = Array.from({ length: PackageTree.outDirLimits.depth + 2 }, (_, index) => `d${index}`)

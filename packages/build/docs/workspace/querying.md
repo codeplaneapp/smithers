@@ -67,6 +67,44 @@ the dependent.
 pattern fails with `deps() requires one exact or default target`. Quote the
 expression so the shell does not interpret the parentheses.
 
+## rdeps()
+
+`rdeps(label)` is the reverse: every labeled target whose dependency closure
+reaches the one named. It is the question ownership asks when a package
+claims changes to what it depends on.
+
+```sh
+smithers-build query 'rdeps(//lib:srcs)'
+```
+
+```
+//lib:srcs is depended on by 2 targets
+  //app:build
+  //data:build
+```
+
+Package mode only. The JSON form is `{query, root, dependents}`.
+
+## owners()
+
+`owners(label)` reports the owners of the package holding the label, each with
+its reasons, the agent policy for the package directory, and the packages it
+depends on.
+
+```sh
+smithers-build query 'owners(//lib:srcs)'
+```
+
+```
+//lib agents: human-approve
+  libby                     approve  direct
+  team:platform             approve  inherited from //
+```
+
+Package mode only. For the owners of individual paths, and for a diff, use
+the [owners command](../reference/cli.md#owners). See
+[Ownership](../concepts/ownership.md).
+
 ## Graphs
 
 `graph` plans the pattern under a verb-neutral selection: every target the

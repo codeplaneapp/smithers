@@ -27,6 +27,7 @@ import * as Compose from "@smthrs/targets/Compose"
 import * as CronTarget from "@smthrs/targets/CronTarget"
 import type * as Docker from "@smthrs/targets/Docker"
 import * as Exec from "@smthrs/targets/Exec"
+import * as ExecSandbox from "@smthrs/targets/ExecSandbox"
 import * as GithubTarget from "@smthrs/targets/GithubTarget"
 import type * as GitTarget from "@smthrs/targets/GitTarget"
 import * as Input from "@smthrs/targets/Input"
@@ -66,7 +67,9 @@ import { collectTargets } from "./internal/Attrs.ts"
 import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex } from "./internal/Text.ts"
 import * as MemoryBackend from "./MemoryBackend.ts"
+import * as NixExec from "./NixExec.ts"
 import * as OverlayExec from "./OverlayExec.ts"
+import * as OwnersResolution from "./Owners.ts"
 import type * as PackageIndexModule from "./PackageIndex.ts"
 import * as PackageTree from "./PackageTree.ts"
 import * as Planner from "./Planner.ts"
@@ -126,6 +129,8 @@ const implementedRules: ReadonlySet<string> = new Set([
   "Shell.Serve",
   "Shell.Diff",
   "Generate",
+  "Owners.Codeowners",
+  "Owners.Tree",
   "Materialize",
   "Clean",
   "Suite",
@@ -195,6 +200,8 @@ const implementedRules: ReadonlySet<string> = new Set([
 const checkModeRules: ReadonlySet<string> = new Set([
   "Shell.Diff",
   "Generate",
+  "Owners.Codeowners",
+  "Owners.Tree",
   "Github.CiGen",
   "Agent.Lint",
   "Foundry.Fmt",
@@ -658,6 +665,8 @@ interface PlanContext {
   readonly inputs: Readonly<Record<string, string>>
   /** Secret presence used only for typed outward refusals; values never enter plans or keys. */
   readonly environment: Readonly<Record<string, string | undefined>>
+  /** The workspace's resolved Nix environment, when it declares one; its PATH is `environment`'s. */
+  readonly nixEnvironment: NixExec.ResolvedEnvironment | undefined
   /** Lazily opened cache store for plan-time closure rows and graph digests. */
   store: CacheStore | undefined
   storeWarned: boolean
@@ -1125,7 +1134,8 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
     const resolved = await GoExec.resolveNix(String(reference["name"]), {
       root: context.root,
       packagePath: "",
-      workspace: context.index.workspace
+      workspace: context.index.workspace,
+      nix: context.nixEnvironment
     })
     outcome = resolved.ok
       ? { _tag: "resolved", tool: { path: resolved.path, identity: resolved.identity } }
@@ -1768,6 +1778,25 @@ const visit = async (
     }
   }
 
+  // The two ownership projections are Generate-shaped: they plan no process
+  // and emit bytes rendered from the package index, so the emit check/write
+  // machinery below is theirs unchanged.
+  if ((rule === "Owners.Codeowners" || rule === "Owners.Tree") && refusal === undefined) {
+    const entries: Array<NonNullable<PackageNode["emit"]>[number]> = []
+    if (rule === "Owners.Codeowners") {
+      const declared = attrMember(attrs, "path")
+      const path = Input.resolvePath(packagePath, typeof declared === "string" ? declared : "//.github/CODEOWNERS")
+      const org = String(attrMember(attrs, "org"))
+      entries.push({ path, value: { kind: "bytes", text: OwnersResolution.renderCodeowners(context.index, org) } })
+    } else {
+      const file = attrMember(attrs, "file")
+      for (const rendered of OwnersResolution.renderOwnersTree(context.index, typeof file === "string" ? file : "OWNERS")) {
+        entries.push({ path: rendered.path, value: { kind: "bytes", text: rendered.content } })
+      }
+    }
+    for (const entry of entries) writeSet.push(entry.path)
+    emit = entries
+  }
   if (rule === "Generate" && refusal === undefined) {
     const script = attrMember(attrs, "script")
     const emitAttr = attrMember(attrs, "emit")
@@ -2494,7 +2523,10 @@ const visit = async (
   // Current write-set state keys the check verdict: a hand-edited generated
   // file or a removed emitted symlink must re-key the check.
   let writeSetState: unknown = null
-  if (rule === "Generate" || rule === "Shell.Diff" || rule === "Changesets.Version") {
+  if (
+    rule === "Generate" || rule === "Shell.Diff" || rule === "Changesets.Version" ||
+    rule === "Owners.Codeowners" || rule === "Owners.Tree"
+  ) {
     if (emit !== undefined) {
       const states: Array<unknown> = []
       for (const entry of emit) {
@@ -2681,6 +2713,15 @@ const visit = async (
     wouldRun: true,
     keyMaterial: previewMaterial,
     keyPreview: Planner.keyOf(previewMaterial),
+    ...(context.nixEnvironment === undefined ? {} : {
+      nixEnvironment: {
+        storePath: context.nixEnvironment.storePath,
+        hash: context.nixEnvironment.hash,
+        closure: context.nixEnvironment.closure,
+        path: context.nixEnvironment.path,
+        variables: context.nixEnvironment.variables
+      }
+    }),
     rule,
     mode,
     packagePath,
@@ -2842,6 +2883,21 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
       signal: options.signal
     })
     : undefined
+  // A declared environment resolves once per plan and fails closed: the
+  // host's PATH is never consulted for a tool the workspace said comes from
+  // the closure.
+  const nixDeclaration = WorkspaceDeclaration.nixEnvironment(workspace)
+  const nixEnvironment = nixDeclaration === undefined
+    ? undefined
+    : await NixExec.resolveEnvironment({
+      root: index.root,
+      declaration: nixDeclaration,
+      cacheDirectory: options.cacheDirectory,
+      environment: options.environment ?? process.env,
+      signal: options.signal,
+      log
+    })
+  const hostEnvironment = options.environment ?? process.env
   const context: PlanContext = {
     root: index.root,
     cacheDirectory: options.cacheDirectory,
@@ -2858,7 +2914,10 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     visiting: new Set(),
     rootModes,
     inputs: options.inputs ?? {},
-    environment: options.environment ?? process.env,
+    environment: nixEnvironment === undefined
+      ? hostEnvironment
+      : NixExec.hostEnvironmentWith(nixEnvironment, hostEnvironment),
+    nixEnvironment,
     ambient: {
       node: process.version,
       platform: process.platform,
@@ -2908,62 +2967,68 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
   return { roots, workList, nodes: context.nodes, closures: context.closureResults }
 }
 
-// Local Unix sockets are process IPC (tsx uses one to relay signals), not
-// egress. Keep IP networking denied while allowing tools to coordinate with
-// their own children.
-const sandboxProfile = "(version 1)(allow default)(deny network*)(allow network* (local unix-socket))"
-
 /**
- * The loopback profile: the network stays denied except on the loopback
- * interface, where binding, accepting, and connecting are allowed. Two
- * declarations select it: a consumer that declared `services` (it reaches
- * the service the executor started for it), and a target that declared
- * `sandbox: { network: "loopback" }` (a test suite that starts its own
- * local listeners, Go's httptest pattern, where the default profile fails
- * the bind with "operation not permitted"). Egress stays denied under
- * both; `localhost` matches 127.0.0.1 and ::1.
- */
-const sandboxProfileWithLoopback = `${sandboxProfile}` +
-  `(allow network-bind (local ip "localhost:*"))` +
-  `(allow network-inbound (local ip "localhost:*"))` +
-  `(allow network-outbound (remote ip "localhost:*"))`
-
-/**
- * Whether the declared sandbox would actually be applied on this host.
+ * The confinement one package node runs under.
  *
- * A declaration that asks for nothing (`"none"`, or `network: true`) is
- * vacuously enforced. Anything stricter needs `sandbox-exec`, which is macOS
- * only, so on every other platform — Linux included, which is where CI runs —
- * the answer is false and the target runs with unrestricted egress.
+ * The read set is what the content key covers: the node's expanded declared
+ * inputs, the declared outputs of every transitive dependency, the
+ * `node_modules` trees above the working directory, and the cache
+ * directory's scratch and fetch store. The write set is the node's declared
+ * outputs, its declared `changes`, its clean targets, a cargo crate's
+ * `target` directory, and the cache directory with the result cache itself
+ * re-closed. The policy is the node's own `sandbox` attr, the mechanism the
+ * workspace's `Sandboxes({ default })` declaration or the platform's own.
  */
-const sandboxEnforceable = (sandbox: PackageNode["sandbox"]): boolean => {
-  if (sandbox === "none") return true
-  if (typeof sandbox === "object" && sandbox !== null && sandbox.network === true) return true
-  return process.platform === "darwin"
-}
-
-const wrapSandbox = (
-  argv: ReadonlyArray<string>,
-  sandbox: PackageNode["sandbox"],
-  label: string,
-  warn: (line: string) => void,
-  loopback = false
-): ReadonlyArray<string> => {
-  if (sandbox === "none") return argv
-  if (typeof sandbox === "object" && sandbox !== null && sandbox.network === true) return argv
-  if (process.platform !== "darwin") {
-    // The warning channel, not the note channel: a declared confinement that
-    // is not applied has to survive every renderer, not just the chatty ones.
-    warn(`${label}  sandbox: unenforced on this platform`)
-    return argv
+const sandboxRequest = (
+  node: PackageNode,
+  nodes: ReadonlyMap<string, PackageNode>,
+  workspace: WorkspaceDeclaration.WorkspaceDeclaration,
+  cacheDirectory: string
+): ExecSandbox.Request => {
+  const reads = new Set<string>()
+  for (const input of node.declaredInputs) {
+    for (const file of input.files) reads.add(file.path)
   }
-  const loopbackDeclared = typeof sandbox === "object" && sandbox !== null && sandbox.network === "loopback"
-  return [
-    "/usr/bin/sandbox-exec",
-    "-p",
-    loopback || loopbackDeclared ? sandboxProfileWithLoopback : sandboxProfile,
-    ...argv
-  ]
+  const seen = new Set<string>()
+  const stack = [...node.dependencies]
+  while (stack.length > 0) {
+    const label = stack.pop()!
+    if (seen.has(label)) continue
+    seen.add(label)
+    const dependency = nodes.get(label)
+    if (dependency === undefined) continue
+    for (const path of dependency.outDirs) reads.add(path)
+    for (const path of dependency.outFiles) reads.add(path)
+    if (dependency.lane?.kind === "cargo") { for (const path of dependency.lane.outFiles) reads.add(path) }
+    stack.push(...dependency.dependencies)
+  }
+  const above = (directory: string): void => {
+    reads.add("node_modules")
+    const segments = directory.split("/").filter((segment) => segment !== "" && segment !== ".")
+    for (let index = 1; index <= segments.length; index += 1) {
+      reads.add([...segments.slice(0, index), "node_modules"].join("/"))
+    }
+  }
+  above(node.cwd)
+  above(node.packagePath)
+  reads.add(`${cacheDirectory}/tmp`)
+  reads.add(`${cacheDirectory}/store`)
+  const writes = new Set<string>([cacheDirectory, ...node.outDirs, ...node.cleanOutDirs])
+  for (const path of node.outFiles) writes.add(NodePath.posix.dirname(path))
+  for (const path of node.cleanPaths) writes.add(NodePath.posix.dirname(path))
+  for (const pattern of node.writeSet) writes.add(staticPrefixOf(pattern) || ".")
+  if (node.lane?.kind === "cargo") {
+    writes.add(node.packagePath === "" ? "target" : `${node.packagePath}/target`)
+    for (const path of node.lane.outFiles) writes.add(NodePath.posix.dirname(path))
+  }
+  return {
+    policy: node.sandbox,
+    mechanism: workspace.sandboxes?.sandboxes["default"],
+    reads: [...reads],
+    writes: [...writes],
+    readOnly: [`${cacheDirectory}/cache`],
+    services: node.serviceDeps.length > 0
+  }
 }
 
 /** Joins the invocation's abort signal with a per-consumer one, when both exist. */
@@ -3132,16 +3197,9 @@ export const execute = async (
   ): Promise<ExecOutcome> => {
     const resolved = await resolveSpawn(node, override)
     if ("error" in resolved) return { ok: false, error: resolved.error }
-    const wrapped = wrapSandbox(
-      resolved.argv,
-      node.sandbox,
-      node.label,
-      reporter.warn,
-      node.serviceDeps.length > 0
-    )
     const payload: Exec.Payload = {
       cwd: node.cwd,
-      argv: wrapped as [string, ...Array<string>],
+      argv: resolved.argv,
       env: resolved.env,
       secrets: resolved.secrets,
       expectedExitCodes: [0],
@@ -3152,6 +3210,15 @@ export const execute = async (
         workspaceRoot,
         cacheDirectory,
         sensitiveEnv: credentialNames,
+        // The exec boundary enforces the confinement or fails the run closed;
+        // nothing here can weaken it into a warning.
+        sandbox: sandboxRequest(node, planned.nodes, index.workspace, cacheDirectory),
+        ...(node.nixEnvironment === undefined ? {} : {
+          environment: {
+            path: node.nixEnvironment.path.join(NodePath.delimiter),
+            variables: node.nixEnvironment.variables
+          }
+        }),
         ...(process.env["SMTHRS_REPO_CHILD"] === "1"
           ? {
             onStdout: (chunk: Uint8Array) => process.stdout.write(chunk),
@@ -3248,6 +3315,10 @@ export const execute = async (
     return { output: cached.output }
   }
 
+  /** Whether this node's runs are confined on this host; an unconfined result stays local. */
+  const sandboxEnforced = (node: PackageNode): boolean =>
+    ExecSandbox.enforceable(sandboxRequest(node, planned.nodes, index.workspace, cacheDirectory), ExecSandbox.host())
+
   const cachePut = async (node: PackageNode, output: unknown, key: string = node.keyPreview): Promise<void> => {
     if (!node.cacheable) return
     await store.put(key, {
@@ -3257,7 +3328,7 @@ export const execute = async (
       exitOk: true,
       output,
       storedAt: new Date().toISOString()
-    }).catch((cause: unknown) => {
+    }, { shared: sandboxEnforced(node) }).catch((cause: unknown) => {
       log(`smthrs: could not store ${node.label} in the cache: ${Diagnostic.describe(cause)}`)
     })
   }
@@ -3335,7 +3406,7 @@ export const execute = async (
     const record = output as { readonly kind?: unknown; readonly outDir?: unknown; readonly digest?: unknown }
     if (
       record.kind !== "directory-archive" || record.outDir !== node.outDirs[0] ||
-      typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)
+      typeof record.digest !== "string" || !PackageTree.isSha256Hex(record.digest)
     ) return false
     const tar = PackageTree.findOnPath("tar")
     if (tar === undefined) return false
@@ -4892,6 +4963,12 @@ export const execute = async (
           await captureBuild(node, key)
           return green("ran")
         }
+        case "Owners.Codeowners":
+        case "Owners.Tree": {
+          const outcome = await runEmit(node)
+          if (!outcome.ok) return fail(outcome.error ?? "owners generate failed")
+          return green("ran")
+        }
         case "Generate": {
           if (node.emit !== undefined) {
             const outcome = await runEmit(node)
@@ -4966,8 +5043,8 @@ export const execute = async (
               target: node.declaration,
               gateRunner: commitGateRunner,
               agentMessage: agentMessageComposer(signal),
-              // `Git.Commit` attrs cannot express a scope today. The write set is the only
-              // available scope, and it stays empty until the rule declares one. An empty
+              // The write set is the declared `changes` attr resolved against the
+              // declaring package. A rule that declares none owns nothing, and an empty
               // scope is not an invitation to sweep the tree: `commit` refuses an
               // invocation that owns nothing unless the operator passed `--sweep`.
               ...(node.writeSet.length === 0 ? {} : { paths: node.writeSet }),
@@ -5268,9 +5345,19 @@ export const run = async (options: RunOptions): Promise<Executor.Summary | PlanR
         ...(node.argv === undefined ? {} : { argv: node.argv }),
         ...(node.shards === 1 ? {} : { shards: node.shards }),
         ...(node.lane?.kind === "cargo" && node.argv === undefined ? { commands: node.lane.commands } : {}),
-        ...(node.sandbox === undefined
+        // Every tool-running node reports its confinement: the declared policy
+        // (the default confinement when none is declared) and whether this
+        // host enforces it. Execution fails a confined node the host cannot
+        // enforce, so a false here is a run that will not proceed.
+        ...(node.argv === undefined && node.sandbox === undefined
           ? {}
-          : { sandbox: node.sandbox, sandboxEnforced: sandboxEnforceable(node.sandbox) }),
+          : {
+            sandbox: node.sandbox ?? {},
+            sandboxEnforced: ExecSandbox.enforceable(
+              sandboxRequest(node, planned.nodes, options.index.workspace, options.cacheDirectory),
+              ExecSandbox.host()
+            )
+          }),
         ...(node.refusal === undefined ? {} : { refusal: node.refusal })
       }))
     }

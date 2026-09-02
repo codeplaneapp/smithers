@@ -11,7 +11,7 @@
  * @since 0.1.0
  */
 import * as NodeChildProcess from "node:child_process"
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
@@ -32,6 +32,15 @@ const errno = (cause: unknown): string | undefined =>
  * @since 0.1.0
  */
 export const digestBytes = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex")
+
+/**
+ * Whether a string is a lowercase sha256 hex digest: the only name the CAS
+ * stores a blob under, and the only digest shape a manifest may carry.
+ *
+ * @category hashing
+ * @since 0.1.0
+ */
+export const isSha256Hex = (value: string): boolean => /^[0-9a-f]{64}$/.test(value)
 
 /** The digest and observed byte count of one streamed file. */
 interface FileDigest {
@@ -1268,6 +1277,65 @@ export interface FileManifest {
 const casDirectory = (root: string, cacheDirectory: string): string =>
   NodePath.join(root, ...cacheDirectory.split("/"), "cas")
 
+/** One collision-resistant temp-name scrap: the pid plus real entropy, never `Math.random`. */
+const tempToken = (): string => `${process.pid}-${randomBytes(8).toString("hex")}`
+
+const unsupportedSync = new Set(["EINVAL", "EPERM", "EISDIR", "EACCES", "ENOTSUP"])
+
+/**
+ * Flushes one path on the hosts that support fsync on it: a freshly written
+ * temp blob before its publishing rename, and the parent directory after one.
+ */
+const syncForPublish = async (path: string): Promise<void> => {
+  let handle: Awaited<ReturnType<typeof Fs.open>> | undefined
+  try {
+    handle = await Fs.open(path, "r")
+    await handle.sync()
+  } catch (cause) {
+    const code = errno(cause)
+    if (code === undefined || !unsupportedSync.has(code)) throw cause
+  } finally {
+    if (handle !== undefined) await handle.close()
+  }
+}
+
+/**
+ * Writes one produced file into the CAS under its digest.
+ *
+ * A blob is content-addressed, so an existing one of the right name is
+ * usually the right bytes. It is not trusted on name alone: a tampered or
+ * truncated blob is re-verified against its digest and rewritten from the
+ * freshly produced file, so a rebuild heals the CAS instead of leaving it
+ * poisoned for every later run to miss on. A fresh blob is copied to a temp
+ * sibling, flushed, and renamed into place — Bazel's `DiskCacheClient` does
+ * the same, "fsync temp before we rename it to avoid data loss in the case
+ * of machine crashes (the OS may reorder the writes and the rename)" — and a
+ * publish that fails removes its temp so the store never accretes scraps.
+ */
+const putBlob = async (cas: string, source: string, digest: string): Promise<void> => {
+  const blob = NodePath.join(cas, digest)
+  let present: boolean
+  try {
+    present = (await digestFileBytes(blob)) === digest
+  } catch {
+    present = false
+  }
+  if (present) return
+  const temp = `${blob}.tmp-${tempToken()}`
+  try {
+    await Fs.copyFile(source, temp)
+    await syncForPublish(temp)
+    await Fs.rename(temp, blob)
+  } catch (cause) {
+    try {
+      await Fs.rm(temp, { force: true })
+    } catch {
+      // The failed publish is the story; a failed cleanup must not mask it.
+    }
+    throw cause
+  }
+}
+
 /**
  * Configurable ceilings for one captured outDir.
  *
@@ -1499,23 +1567,7 @@ export const captureOutDir = async (
   const cas = casDirectory(storeRoot, cacheDirectory)
   await Fs.mkdir(cas, { recursive: true })
   for (const file of files) {
-    const blob = NodePath.join(cas, file.digest)
-    // A blob is content-addressed, so an existing one of the right name is
-    // usually the right bytes. It is not trusted on name alone: a tampered or
-    // truncated blob is re-verified against its digest and rewritten from the
-    // freshly produced file, so a rebuild heals the CAS instead of leaving it
-    // poisoned for every later run to miss on.
-    let present: boolean
-    try {
-      present = (await digestFileBytes(blob)) === file.digest
-    } catch {
-      present = false
-    }
-    if (!present) {
-      const temp = `${blob}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`
-      await Fs.copyFile(file.absolute, temp)
-      await Fs.rename(temp, blob)
-    }
+    await putBlob(cas, file.absolute, file.digest)
   }
   return { outDir, entries }
 }
@@ -1539,23 +1591,7 @@ export const captureFile = async (
   const digest = await digestFileBytes(absolute)
   const cas = casDirectory(storeRoot, cacheDirectory)
   await Fs.mkdir(cas, { recursive: true })
-  const blob = NodePath.join(cas, digest)
-  // Existence by name is not proof of content. `captureOutDir` verifies the
-  // blob it finds and rewrites a tampered or truncated one from the freshly
-  // produced file; this path used to trust the name, so a poisoned blob was
-  // re-admitted by every rebuild and every restore kept failing the digest
-  // check with no way back short of deleting the CAS by hand.
-  let present: boolean
-  try {
-    present = (await digestFileBytes(blob)) === digest
-  } catch {
-    present = false
-  }
-  if (!present) {
-    const temp = `${blob}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`
-    await Fs.copyFile(absolute, temp)
-    await Fs.rename(temp, blob)
-  }
+  await putBlob(cas, absolute, digest)
   return { path, digest, executable: (stats.mode & 0o111) !== 0 }
 }
 
@@ -1570,7 +1606,7 @@ export const decodeFileManifest = (value: unknown): FileManifest | undefined => 
   const digest = (value as { readonly digest?: unknown }).digest
   const executable = (value as { readonly executable?: unknown }).executable
   if (typeof path !== "string" || !isConfinedRelative(path)) return undefined
-  if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest) || typeof executable !== "boolean") return undefined
+  if (typeof digest !== "string" || !isSha256Hex(digest) || typeof executable !== "boolean") return undefined
   return { path, digest, executable }
 }
 
@@ -1607,7 +1643,7 @@ export const materializeFile = async (
   await confinedAncestor(root, destination, manifest.path)
   await Fs.mkdir(NodePath.dirname(destination), { recursive: true })
   await confinedParent(root, destination, manifest.path)
-  const temporary = `${destination}.smthrs-${process.pid}-${Math.random().toString(16).slice(2)}`
+  const temporary = `${destination}.smthrs-${tempToken()}`
   await Fs.copyFile(blob, temporary)
   await Fs.chmod(temporary, manifest.executable ? 0o755 : 0o644)
   await Fs.rename(temporary, destination)
@@ -1676,7 +1712,7 @@ export const decodeManifest = (value: unknown): OutDirManifest | undefined => {
       typeof path !== "string" || !safeManifestPath.test(path) || !isConfinedRelative(path) ||
       (kind !== "file" && kind !== "link") ||
       typeof digest !== "string" ||
-      (kind === "file" && !/^[0-9a-f]{64}$/.test(digest)) ||
+      (kind === "file" && !isSha256Hex(digest)) ||
       typeof executable !== "boolean" ||
       typeof target !== "string" ||
       (kind === "link" && !isConfinedLinkTarget(target))
@@ -1729,22 +1765,6 @@ const recoverStrandedTree = async (parent: string, absolute: string): Promise<vo
   if (oldTrees.length === 1) await Fs.rename(NodePath.join(parent, oldTrees[0]!.name), absolute)
 }
 
-const unsupportedDirectorySync = new Set(["EINVAL", "EPERM", "EISDIR", "EACCES", "ENOTSUP"])
-
-/** Makes the publishing rename durable when the host supports directory fsync. */
-const syncDirectory = async (directory: string): Promise<void> => {
-  let handle: Awaited<ReturnType<typeof Fs.open>> | undefined
-  try {
-    handle = await Fs.open(directory, "r")
-    await handle.sync()
-  } catch (cause) {
-    const code = errno(cause)
-    if (code === undefined || !unsupportedDirectorySync.has(code)) throw cause
-  } finally {
-    if (handle !== undefined) await handle.close()
-  }
-}
-
 /**
  * Materializes one manifest tree atomically: the tree is fully built as a
  * temp sibling, then rename-swapped over the outDir root.
@@ -1764,7 +1784,7 @@ export const materializeManifest = async (
   await Fs.mkdir(parent, { recursive: true })
   await confinedParent(root, absolute, manifest.outDir)
   await recoverStrandedTree(parent, absolute)
-  const stamp = `${process.pid}-${Math.random().toString(36).slice(2)}`
+  const stamp = tempToken()
   const temp = NodePath.join(parent, `.smthrs-mat-${stamp}`)
   try {
     await Fs.mkdir(temp, { recursive: true })
@@ -1825,7 +1845,7 @@ export const materializeManifest = async (
       }
       throw cause
     }
-    await syncDirectory(parent)
+    await syncForPublish(parent)
     if (hadOld) await Fs.rm(old, { recursive: true, force: true })
   } catch (cause) {
     await Fs.rm(temp, { recursive: true, force: true })

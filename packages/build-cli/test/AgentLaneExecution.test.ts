@@ -662,18 +662,7 @@ export const Package = S.Package({ targets: { gate, redGate, commit, agentCommit
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-import * as Target from "@smthrs/targets/Target"
-const base = S.Git.Commit({ gates: [], message: "chore: scoped" })
-const baseMetadata = Target.metadata(base)
-const attrs = Object.freeze({ ...(baseMetadata.attrs as object), changes: ["owned.txt"] })
-const scoped = Object.assign(() => undefined, base) as typeof base
-Object.defineProperty(scoped, Target.TargetTypeId, {
-  value: Object.freeze({
-    ...baseMetadata,
-    attrs,
-    forKind: (kind: Target.Kind) => ({ ...baseMetadata.forKind(kind), attrs }),
-  }),
-})
+const scoped = S.Git.Commit({ gates: [], message: "chore: scoped", changes: ["owned.txt"] })
 export const Package = S.Package({ targets: { scoped } })
 `
     )

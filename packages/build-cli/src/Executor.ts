@@ -18,7 +18,8 @@ import { Action, type Flow, Interpreter } from "@smthrs/flow"
 import { ExecIrreversibleLive } from "@smthrs/targets/Changesets"
 import { GenerateCheckLive } from "@smthrs/targets/Compose"
 import { CheckDocsLive } from "@smthrs/targets/DocsParity"
-import { ExecLive } from "@smthrs/targets/Exec"
+import { ExecLive, type ToolEnvironment } from "@smthrs/targets/Exec"
+import * as ExecSandbox from "@smthrs/targets/ExecSandbox"
 import { ExpandFilegroupLive, isFilegroup } from "@smthrs/targets/Filegroup"
 import { CheckFileLive, resolveOutputPath, WriteFileLive } from "@smthrs/targets/GeneratedFile"
 import { LlmReviewLive } from "@smthrs/targets/LlmLint"
@@ -33,6 +34,7 @@ import * as Layer from "effect/Layer"
 import type * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as Os from "node:os"
+import * as NodePath from "node:path"
 import { performance } from "node:perf_hooks"
 import * as NodeUtil from "node:util/types"
 import { entryLimit, openCache } from "./Cache.ts"
@@ -226,6 +228,74 @@ type Executable = Flow.Flow<
   never
 >
 
+/** The `node_modules` directory of every package directory from the root down to `cwd`. */
+const nodeModulesAbove = (cwd: string): ReadonlyArray<string> => {
+  const found = ["node_modules"]
+  const segments = cwd === "." ? [] : cwd.split("/").filter((segment) => segment !== "" && segment !== ".")
+  for (let index = 1; index <= segments.length; index += 1) {
+    found.push([...segments.slice(0, index), "node_modules"].join("/"))
+  }
+  return found
+}
+
+/** Joins a workspace-relative directory and a path declared against it. */
+const under = (cwd: string, path: string): string => cwd === "." || cwd === "" ? path : `${cwd}/${path}`
+
+/**
+ * The confinement one BUILD.ts target runs under, or nothing when the
+ * workspace opts out.
+ *
+ * The read set is what the content key covers: the target's expanded declared
+ * inputs, the declared outputs of every transitive dependency, the
+ * `node_modules` trees above the working directory, and the cache directory's
+ * scratch and fetch store. The write set is the target's declared outputs and
+ * the cache directory (the knip configuration and the bun scratch program
+ * live there) with the result cache itself re-closed.
+ */
+const sandboxRequestFor = (
+  workspace: Workspace,
+  target: Planner.PlannedTarget,
+  byLabel: ReadonlyMap<string, Planner.PlannedTarget>
+): ExecSandbox.Request | undefined => {
+  if (workspace.sandbox === "none") return undefined
+  const attrs = target.attrs as { readonly cwd?: unknown } | null
+  const cwd = typeof attrs?.cwd === "string" && attrs.cwd !== "" ? attrs.cwd : "."
+  const reads = new Set<string>()
+  for (const input of target.declaredInputs) {
+    for (const file of input.files) reads.add(file.path)
+  }
+  const seen = new Set<string>()
+  const stack = [...target.dependencies]
+  while (stack.length > 0) {
+    const label = stack.pop()!
+    if (seen.has(label)) continue
+    seen.add(label)
+    const dependency = byLabel.get(label)
+    if (dependency === undefined) continue
+    if (dependency.declaredOutputs !== undefined) {
+      for (const path of dependency.declaredOutputs.paths) reads.add(under(dependency.declaredOutputs.cwd, path))
+    }
+    for (const input of dependency.declaredInputs) {
+      for (const file of input.files) reads.add(file.path)
+    }
+    stack.push(...dependency.dependencies)
+  }
+  for (const directory of nodeModulesAbove(cwd)) reads.add(directory)
+  reads.add(`${workspace.cacheDirectory}/tmp`)
+  reads.add(`${workspace.cacheDirectory}/store`)
+  const writes = new Set<string>([workspace.cacheDirectory])
+  if (target.declaredOutputs !== undefined) {
+    for (const path of target.declaredOutputs.paths) writes.add(under(target.declaredOutputs.cwd, path))
+  }
+  return {
+    policy: workspace.sandbox,
+    mechanism: workspace.sandboxes?.sandboxes["default"],
+    reads: [...reads],
+    writes: [...writes],
+    readOnly: [`${workspace.cacheDirectory}/cache`]
+  }
+}
+
 /**
  * Runs one target Flow to settlement in its own in-memory runtime.
  *
@@ -242,13 +312,24 @@ const runTarget = (
   executionId: string,
   sensitiveEnv: ReadonlyArray<string>,
   packageName?: string | undefined,
-  signal?: AbortSignal | undefined
+  signal?: AbortSignal | undefined,
+  nixEnvironment?: Planner.PlannedEnvironment | undefined,
+  sandbox?: ExecSandbox.Request | undefined
 ): Promise<Exit.Exit<unknown, unknown>> => {
   const flow = target as unknown as Executable
+  // A planned environment replaces the host's executable lookup for every
+  // layer that spawns: the exec action, the generator check, and the package
+  // manager and runtime layers the install flow resolves through.
+  const environment: ToolEnvironment | undefined = nixEnvironment === undefined
+    ? undefined
+    : { path: nixEnvironment.path.join(NodePath.delimiter), variables: nixEnvironment.variables }
+  const hostEnvironment: Readonly<Record<string, string | undefined>> = environment === undefined
+    ? process.env
+    : { ...process.env, ...environment.variables, PATH: environment.path }
   const runtime = Layer.mergeAll(
     layerInstall,
-    ExecLive({ workspaceRoot, cacheDirectory, sensitiveEnv }),
-    GenerateCheckLive({ workspaceRoot, cacheDirectory, sensitiveEnv }),
+    ExecLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment, sandbox }),
+    GenerateCheckLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment }),
     ExecIrreversibleLive({ workspaceRoot }),
     CaptureOutputsLive({ workspaceRoot, cacheDirectory }),
     ExpandFilegroupLive({ workspaceRoot, cacheDirectory }),
@@ -266,7 +347,7 @@ const runTarget = (
     // The toolchain comes from this target's own attrs, so two targets in one
     // graph can run under different managers and the layer matches whichever
     // BUILD.ts declared.
-    Layer.provideMerge(layerPackageManager(workspaceRoot, declaredToolchain(attrs), sensitiveEnv)),
+    Layer.provideMerge(layerPackageManager(workspaceRoot, declaredToolchain(attrs), sensitiveEnv, hostEnvironment)),
     Layer.provideMerge(layerNonInteractiveNodeServices)
   )
   return Effect.runPromiseExit(
@@ -1033,6 +1114,7 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
     // measurement still holds, so it is taken again here rather than assumed.
     const beforeRun = await revalidateInputs(workspace, target)
     if (beforeRun !== undefined) return fail(beforeRun)
+    const sandbox = sandboxRequestFor(workspace, target, byLabel)
     const exit = await runTarget(
       workspace.root,
       workspace.cacheDirectory,
@@ -1041,7 +1123,9 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       `smithers-build-target-${target.keyPreview.slice(0, 24)}`,
       options.remoteCache === undefined ? [] : credentialEnvNames(options.remoteCache.credentials),
       options.packageName,
-      options.signal
+      options.signal,
+      target.nixEnvironment,
+      sandbox
     )
     if (!Exit.isSuccess(exit)) {
       return fail(describeFailure(Cause.squash(exit.cause)))
@@ -1075,6 +1159,8 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       log(`smthrs: skipped the cache store for ${label} because its result does not round trip: ${encoded.reason}`)
       return
     }
+    // A result produced outside an enforced confinement is evidence for this
+    // machine only; it never reaches the tier other machines read.
     await store.put(target.keyPreview, {
       key: target.keyPreview,
       target: target.target,
@@ -1082,9 +1168,11 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       exitOk: true,
       output: encoded.output,
       storedAt: new Date().toISOString()
-    }).catch((cause: unknown) => {
-      log(`smthrs: could not store ${label} in the cache: ${describeFailure(cause)}`)
-    })
+    }, { shared: sandbox !== undefined && ExecSandbox.enforceable(sandbox, ExecSandbox.host()) }).catch(
+      (cause: unknown) => {
+        log(`smthrs: could not store ${label} in the cache: ${describeFailure(cause)}`)
+      }
+    )
   }
 
   reporter.begin({

@@ -8,6 +8,7 @@ import * as Config from "@smthrs/targets/Config"
 import { isFilegroup } from "@smthrs/targets/Filegroup"
 import { writeGeneratedFile } from "@smthrs/targets/GeneratedFile"
 import * as Input from "@smthrs/targets/Input"
+import * as Nix from "@smthrs/targets/Nix"
 import * as PackageDefaults from "@smthrs/targets/PackageDefaults"
 import * as PackageJson from "@smthrs/targets/PackageJson"
 import * as RemoteCache from "@smthrs/targets/RemoteCache"
@@ -66,6 +67,8 @@ export interface BuildModule {
   readonly file: string
   readonly targets: ReadonlyMap<string, Target.AnyTarget>
   readonly defaults: ReadonlyArray<PackageDefaults.PackageDefaults>
+  /** The Nix environment this BUILD.ts exports for its package, when it does. */
+  readonly environment: Nix.Environment | undefined
 }
 
 /**
@@ -432,6 +435,10 @@ const importNamespace = async (entry: SafeFs.Entry): Promise<unknown> => {
 export interface ResolvedConfig {
   readonly cacheDirectory: string
   readonly gitignored: boolean
+  /** The confinement every tool-running target executes under. */
+  readonly sandbox: Config.Workspace["sandbox"]
+  /** The declared mechanism, or the platform default when absent. */
+  readonly sandboxes: Config.Workspace["sandboxes"]
 }
 
 const declaredConfig = (namespace: unknown): Config.Workspace | undefined => {
@@ -477,7 +484,10 @@ export const resolveConfig = async (
   const declared = declaration ?? Config.Workspace()
   return {
     cacheDirectory: Config.normalizeCacheDirectory(override ?? declared.cacheDirectory),
-    gitignored: declared.gitignored
+    gitignored: declared.gitignored,
+    // A declaration forged before these fields existed still resolves.
+    sandbox: declared.sandbox ?? "none",
+    sandboxes: declared.sandboxes
   }
 }
 
@@ -1021,11 +1031,17 @@ const packagePathForBuild = (buildFile: string): string => {
  */
 export class Workspace {
   readonly root: string
+  /** The confinement every tool-running target executes under; `"none"` unless the root BUILD.ts declares one. */
+  readonly sandbox: Config.Workspace["sandbox"]
+  /** The declared enforcement mechanism, or the platform default when absent. */
+  readonly sandboxes: Config.Workspace["sandboxes"]
   readonly currentPackage: string
   readonly cacheDirectory: string
   readonly files: ReadonlyArray<string>
   readonly buildFiles: ReadonlyArray<string>
   readonly defaultRules: Array<PackageDefaultsEntry> = []
+  /** Exported `S.Nix.Environment` declarations by the package path that declared them. */
+  private readonly environments = new Map<string, Nix.Environment>()
   private readonly modules = new Map<string, Promise<BuildModule>>()
   private readonly labels = new Map<string, Target.AnyTarget>()
   private readonly targetLabels = new Map<Target.AnyTarget, string>()
@@ -1043,9 +1059,13 @@ export class Workspace {
     cwd: string,
     cacheDirectory: string,
     files: ReadonlyArray<string>,
+    sandbox: Config.Workspace["sandbox"],
+    sandboxes: Config.Workspace["sandboxes"],
     signal?: AbortSignal | undefined
   ) {
     this.root = root
+    this.sandbox = sandbox
+    this.sandboxes = sandboxes
     this.currentPackage = Label.currentPackage(root, cwd)
     this.cacheDirectory = cacheDirectory
     this.files = files
@@ -1074,6 +1094,8 @@ export class Workspace {
     cwd: string,
     options: {
       readonly cacheDirectory?: string | undefined
+      readonly sandbox?: Config.Workspace["sandbox"] | undefined
+      readonly sandboxes?: Config.Workspace["sandboxes"] | undefined
       readonly signal?: AbortSignal | undefined
     } = {}
   ): Promise<Workspace> {
@@ -1094,6 +1116,8 @@ export class Workspace {
       effectiveCwd,
       cacheDirectory,
       await workspaceFiles(absolute, cacheDirectory, options.signal),
+      options.sandbox ?? "none",
+      options.sandboxes,
       options.signal
     )
   }
@@ -1191,6 +1215,7 @@ export class Workspace {
     const targets = new Map<string, Target.AnyTarget>()
     const defaults: Array<PackageDefaults.PackageDefaults> = []
     const declarations: Array<readonly [string, PackageJson.Declaration]> = []
+    let environment: Nix.Environment | undefined
     for (const [name, value] of Object.entries(namespace).sort(([left], [right]) => byCodeUnit(left, right))) {
       if (Target.isTarget(value)) {
         this.register(targets, packagePath, name, value)
@@ -1201,6 +1226,14 @@ export class Workspace {
         }
       } else if (PackageJson.isDeclaration(value)) {
         declarations.push([name, value])
+      } else if (Nix.isEnvironment(value)) {
+        // One environment per BUILD.ts: two exports would leave the package's
+        // tools with two closures and nothing to choose between them.
+        if (environment !== undefined && environment !== value) {
+          throw new Error(`${relative} exports more than one Nix environment; a package declares at most one`)
+        }
+        environment = value
+        this.environments.set(packagePath, value)
       }
     }
     // Manifest declarations expand in a second pass, after every target this
@@ -1248,7 +1281,33 @@ export class Workspace {
     for (const [name, declaration] of declarations) {
       this.expandDeclaration(targets, packagePath, name, declaration, resolve)
     }
-    return { file: relative, targets, defaults }
+    return { file: relative, targets, defaults, environment }
+  }
+
+  /**
+   * The Nix environment a package's targets run under: the one its own
+   * BUILD.ts exports, else the nearest ancestor package's, else the root's.
+   *
+   * Every BUILD.ts on the way up is loaded to answer, so a declaration in an
+   * ancestor package is visible even when nothing selected a target there. A
+   * package that exports its own overrides every ancestor's for that package
+   * alone.
+   *
+   * @category discovery
+   * @since 0.1.0
+   */
+  async environmentFor(packagePath: string): Promise<Nix.Environment | undefined> {
+    await this.ensureDefaults()
+    let current = packagePath
+    while (true) {
+      const build = this.buildForPackage(current)
+      if (this.buildFiles.includes(build)) await this.loadBuild(build)
+      const declared = this.environments.get(current)
+      if (declared !== undefined) return declared
+      if (current === "") return undefined
+      const slash = current.lastIndexOf("/")
+      current = slash === -1 ? "" : current.slice(0, slash)
+    }
   }
 
   private defaultTarget(packagePath: string, targets: ReadonlyMap<string, Target.AnyTarget>): Target.AnyTarget {

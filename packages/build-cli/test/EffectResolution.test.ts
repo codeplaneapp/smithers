@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import { installEffectResolution } from "../src/effect-resolution.js"
+import { jsExtensionSiblings } from "../src/internal/js-extension-siblings.js"
 
 installEffectResolution()
 
@@ -50,6 +51,15 @@ describe("the CommonJS resolver a bridged declaration module gets", () => {
   it("still reports a specifier that resolves to nothing", () => {
     const require = createRequire(NodePath.join(outside, "environments", "PACKAGE.ts"))
     expect(() => require.resolve("../src/Missing.js")).toThrow(/Cannot find module '\.\.\/src\/Missing\.js'/)
+  })
+
+  it("pins the shared `./x.js` -> `x.ts` table to the compiler's mapping", () => {
+    expect(jsExtensionSiblings).toEqual({
+      ".js": [".ts", ".tsx"],
+      ".jsx": [".tsx"],
+      ".mjs": [".mts"],
+      ".cjs": [".cts"]
+    })
   })
 })
 

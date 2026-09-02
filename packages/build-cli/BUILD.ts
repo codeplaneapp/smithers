@@ -32,6 +32,9 @@ const tests = Smithers.glob("test/**/*.test.ts")
  */
 const fixtures = Smithers.glob("test/fixtures/**/*")
 
+/** `Docs.test.ts` reads the colocated command reference, so it is key material. */
+const prose = Smithers.glob("docs/*.md")
+
 export const lib = Smithers.Typecheck({
   packageManager,
   srcs: [sources],
@@ -55,7 +58,7 @@ export const check = Smithers.Typecheck({
 export const test = Smithers.Vitest({
   packageManager,
   tests: [tests],
-  sources: [sources, fixtures],
+  sources: [sources, fixtures, prose],
   deps: [lib],
   config: Smithers.file("vitest.config.ts"),
   environment: "node",

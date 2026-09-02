@@ -24,6 +24,7 @@ import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import * as NodeUtil from "node:util/types"
+import * as Environment from "./Environment.ts"
 
 /**
  * Node host services needed by non-interactive smithers-build execution.
@@ -342,10 +343,16 @@ export const layerRuntime = (
 export const layerPackageManager = (
   projectRoot: string,
   toolchain: Toolchain = defaultToolchain,
-  sensitiveEnvironment: ReadonlyArray<string> = []
+  sensitiveEnvironment: ReadonlyArray<string> = [],
+  /**
+   * The host environment executables are looked up in. A workspace with a
+   * declared Nix environment passes a copy whose `PATH` is the closure's, so
+   * the manager and the runtime come from the closure and never from the host.
+   */
+  source?: Readonly<Record<string, string | undefined>> | undefined
 ) => {
   const environment = packageManagerEnvironment(
-    process.env,
+    source ?? Environment.ambientEnvironment(),
     sensitiveEnvironment
   )
   const options = {

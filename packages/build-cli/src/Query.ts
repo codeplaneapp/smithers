@@ -47,6 +47,34 @@ export interface Dependencies {
 }
 
 /**
+ * Result of an `rdeps(label)` query: every labeled target that depends on
+ * the root, transitively.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Dependents {
+  readonly query: string
+  readonly root: string
+  readonly dependents: ReadonlyArray<string>
+}
+
+/**
+ * Result of an `owners(label)` query: the owners of the package holding the
+ * label, with reasons, plus the packages it depends on.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface PackageOwners {
+  readonly query: string
+  readonly package: string
+  readonly owners: ReadonlyArray<{ readonly owner: string; readonly role: string; readonly reasons: ReadonlyArray<string> }>
+  readonly agentPolicy: string
+  readonly upstream: ReadonlyArray<string>
+}
+
+/**
  * Evaluates a bare label/pattern listing or `deps(label)`.
  *
  * @category querying
@@ -102,7 +130,25 @@ const kind = (name: string, style: Ansi.Palette): string => {
  * @category formatting
  * @since 0.1.0
  */
-export const text = (result: Listing | Dependencies, style: Ansi.Palette = Ansi.none): string => {
+export const text = (
+  result: Listing | Dependencies | Dependents | PackageOwners,
+  style: Ansi.Palette = Ansi.none
+): string => {
+  if ("dependents" in result) {
+    const count = result.dependents.length
+    const head = `${style.bold(result.root)} ${style.dim(`is depended on by ${count} ${count === 1 ? "target" : "targets"}`)}`
+    return [head, ...result.dependents.map((label) => `  ${label}`)].join("\n")
+  }
+  if ("owners" in result) {
+    const head = `${style.bold(result.package)} ${style.dim(`agents: ${result.agentPolicy}`)}`
+    const owners = result.owners.length === 0
+      ? [`  ${style.dim("no owners")}`]
+      : result.owners.map((entry) => `  ${entry.owner.padEnd(24)}  ${entry.role}  ${style.dim(entry.reasons.join(", "))}`)
+    const upstream = result.upstream.length === 0
+      ? []
+      : [style.dim(`depends on ${result.upstream.join(" ")}`)]
+    return [head, ...owners, ...upstream].join("\n")
+  }
   if ("root" in result) {
     const count = result.dependencies.length
     const head = `${style.bold(result.root)} ${style.dim(`depends on ${count} ${count === 1 ? "target" : "targets"}`)}`

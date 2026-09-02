@@ -4,14 +4,17 @@
  * @since 0.1.0
  */
 import * as Input from "@smthrs/targets/Input"
+import type * as Nix from "@smthrs/targets/Nix"
 import * as SafeFs from "@smthrs/targets/SafeFs"
 import * as Target from "@smthrs/targets/Target"
 import { createHash } from "node:crypto"
 import * as NodePath from "node:path"
 import { fileURLToPath } from "node:url"
 import * as NodeUtil from "node:util/types"
+import { declaredToolchain, defaultToolchain } from "./engine.ts"
 import { byCodeUnit } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
+import * as NixExec from "./NixExec.ts"
 import type * as Workspace from "./Workspace.ts"
 
 /**
@@ -70,6 +73,28 @@ export interface PlannedTarget {
   readonly wouldRun: true
   readonly keyMaterial: KeyMaterial
   readonly keyPreview: string
+  /**
+   * The resolved Nix environment the target's tools run from, when its
+   * package declares one and the verb executes. The store hash is already
+   * in `keyMaterial.layers` as `nix:<hash>`; `closure` is every store path
+   * the environment references, so a sandbox can bind-mount exactly the
+   * toolchain the key names as its read set.
+   */
+  readonly nixEnvironment?: PlannedEnvironment | undefined
+}
+
+/**
+ * The resolved Nix environment recorded on a planned target.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface PlannedEnvironment {
+  readonly storePath: string
+  readonly hash: string
+  readonly closure: ReadonlyArray<string>
+  readonly path: ReadonlyArray<string>
+  readonly variables: Readonly<Record<string, string>>
 }
 
 /**
@@ -837,7 +862,36 @@ export const attrsValue = (
 /** Targets whose execution resolves a package-manager and runtime layer. */
 const toolchainTargets: ReadonlySet<string> = new Set(["Install", "Lockfile"])
 
-const layers = (metadata: Target.Metadata): ReadonlyArray<string> => {
+/**
+ * Targets whose only key gap was toolchain identity.
+ *
+ * Each runs an external compiler, test runner, or linter whose executable the
+ * host supplied. Under a declared Nix environment that executable is the
+ * closure the `nix:<hash>` layer names, so the result becomes admissible.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const environmentCacheableTargets: ReadonlySet<string> = new Set([
+  "TsBuild",
+  "DtsBuild",
+  "Typecheck",
+  "Vitest",
+  "VitestCoverage",
+  "NodeTest",
+  "EsLint",
+  "BiomeCheck",
+  "DepsLint",
+  "PackageLint",
+  "CargoTest",
+  "CargoLint"
+])
+
+const layers = (
+  metadata: Target.Metadata,
+  environment: NixExec.ResolvedEnvironment | undefined
+): ReadonlyArray<string> => {
+  const declared: Array<string> = []
   // The layer identity is the declaration, not a constant: two workspaces that
   // declare different managers must not share a key for the same target.
   if (toolchainTargets.has(metadata.target) && typeof metadata.attrs === "object" && metadata.attrs !== null) {
@@ -846,15 +900,21 @@ const layers = (metadata: Target.Metadata): ReadonlyArray<string> => {
       const name = "name" in declaration ? declaration.name : undefined
       const version = "version" in declaration ? declaration.version : undefined
       if (typeof name === "string" && typeof version === "string") {
-        return [`package-manager:${name}@${version}`]
+        declared.push(`package-manager:${name}@${version}`)
       }
     }
   }
   if (metadata.target === "LlmLint" && typeof metadata.attrs === "object" && metadata.attrs !== null) {
     const model = "model" in metadata.attrs ? metadata.attrs.model : undefined
-    if (typeof model === "string") return [`model:${model}`]
+    if (typeof model === "string") declared.push(`model:${model}`)
   }
-  return []
+  // Every target that spawns a process under the environment is keyed on the
+  // closure it spawns from. A target that runs nothing has no such dependency,
+  // and keying it would re-run bounded in-process checks on every closure edit.
+  if (environment !== undefined && capabilities(metadata.target).includes("proc:spawn")) {
+    declared.push(NixExec.layer(environment))
+  }
+  return declared
 }
 
 const capabilities = (target: string): ReadonlyArray<string> => {
@@ -920,6 +980,45 @@ export const make = async (
   }
 
   const roots = await Promise.all(compatible.map((target) => workspace.label(target)))
+  // `graph` and `query` describe the tree without running anything, so they
+  // never need `nix` on the host; every executing verb resolves the declared
+  // environment once per declaration and fails closed without it.
+  const executing = verb !== "graph" && verb !== "query"
+  const environments = new Map<Nix.Environment, Promise<NixExec.ResolvedEnvironment>>()
+  const asserted = new Set<string>()
+  const environmentOf = async (label: string): Promise<NixExec.ResolvedEnvironment | undefined> => {
+    if (!executing) return undefined
+    const parsed = Label.parse(label, "")
+    const declaration = await workspace.environmentFor(parsed.packagePath)
+    if (declaration === undefined) return undefined
+    let pending = environments.get(declaration)
+    if (pending === undefined) {
+      pending = NixExec.resolveEnvironment({
+        root: workspace.root,
+        declaration,
+        cacheDirectory: workspace.cacheDirectory,
+        signal: workspace.signal
+      })
+      environments.set(declaration, pending)
+    }
+    return pending
+  }
+  // A declared runtime or manager version is an assertion against the closure,
+  // checked once per (closure, tool) so a hundred targets cost one probe each.
+  const assertToolchain = async (environment: NixExec.ResolvedEnvironment, attrs: unknown): Promise<void> => {
+    const toolchain = declaredToolchain(attrs)
+    if (toolchain === defaultToolchain) return
+    const tools = [
+      { name: toolchain.runtime, executable: toolchain.runtimeExecutable, requirement: toolchain.runtimeVersion },
+      { name: toolchain.manager, executable: toolchain.managerExecutable, requirement: toolchain.managerVersion }
+    ]
+    for (const tool of tools) {
+      const key = `${environment.hash}\0${tool.name}\0${tool.executable ?? ""}\0${tool.requirement}`
+      if (asserted.has(key)) continue
+      await NixExec.assertToolVersion(environment, tool, { root: workspace.root, signal: workspace.signal })
+      asserted.add(key)
+    }
+  }
   const ambient = {
     node: process.version,
     platform: process.platform,
@@ -996,6 +1095,8 @@ export const make = async (
     const declaredInputs = await workspace.expandInputs(target, view.inputs, view.dependencies)
     const inputDigests = new Map<Input.Declared, string>()
     for (const expanded of declaredInputs) inputDigests.set(expanded.declaration, expanded.digest)
+    const environment = await environmentOf(label)
+    if (environment !== undefined) await assertToolchain(environment, view.attrs)
     const keyMaterial: KeyMaterial = {
       body: {
         flow: target._tag,
@@ -1011,7 +1112,7 @@ export const make = async (
         declared: declaredInputs,
         dependencies
       },
-      layers: layers(metadata),
+      layers: layers(metadata, environment),
       capabilities: capabilities(metadata.target)
     }
     const planned: PlannedTarget = {
@@ -1022,11 +1123,23 @@ export const make = async (
       dependencies: dependencies.map((dependency) => dependency.label),
       declaredInputs,
       declaredOutputs: view.outputs,
-      cacheable: view.cacheable,
+      // A declared environment puts the toolchain in the key, which is the
+      // condition these targets were waiting on to be cacheable at all.
+      cacheable: view.cacheable ||
+        (environment !== undefined && environmentCacheableTargets.has(metadata.target)),
       cacheLookup: "not-wired",
       wouldRun: true,
       keyMaterial,
-      keyPreview: keyOf(keyMaterial)
+      keyPreview: keyOf(keyMaterial),
+      ...(environment === undefined ? {} : {
+        nixEnvironment: {
+          storePath: environment.storePath,
+          hash: environment.hash,
+          closure: environment.closure,
+          path: environment.path,
+          variables: environment.variables
+        }
+      })
     }
     visiting.delete(label)
     finished.set(label, planned)

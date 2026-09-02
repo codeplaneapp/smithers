@@ -49,7 +49,12 @@ export interface CachedResult {
  */
 export interface CacheStore {
   get(key: string): Promise<CachedResult | null>
-  put(key: string, r: CachedResult): Promise<void>
+  /**
+   * Stores a result. `shared: false` keeps it in the local tier only: a
+   * result produced by an unconfined run is evidence for this machine and
+   * nothing more, so it never reaches a store other machines read.
+   */
+  put(key: string, r: CachedResult, options?: { readonly shared?: boolean | undefined }): Promise<void>
   close(): Promise<void>
 }
 
@@ -1402,11 +1407,11 @@ export const openCache = async (opts: OpenCacheOptions): Promise<CacheStore> => 
       await writeLocal(cacheRoot, key, fetched, options.io).catch(() => undefined)
       return fetched
     },
-    async put(key: string, r: CachedResult): Promise<void> {
+    async put(key: string, r: CachedResult, putOptions?: { readonly shared?: boolean | undefined }): Promise<void> {
       sanitizeKey(key)
       const result = normalizeCachedResult(key, r)
       await writeLocal(cacheRoot, key, result, options.io)
-      if (remote !== null) await remote.put(key, result)
+      if (remote !== null && putOptions?.shared !== false) await remote.put(key, result)
     },
     async close(): Promise<void> {
       if (remote !== null) await remote.close()

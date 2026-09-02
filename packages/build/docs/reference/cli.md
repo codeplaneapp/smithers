@@ -294,6 +294,42 @@ The drift message names each offending file with its status and suggests
 
 ---
 
+## owners
+
+Resolves the owners, their reasons, and the agent policy for workspace paths,
+or for the paths a diff touches. Package mode only; a BUILD.ts workspace has
+no owners declarations. Never executes.
+
+```sh
+smithers-build owners src/Apps/Artwork/index.tsx data/schema.graphql
+smithers-build owners --diff origin/main
+smithers-build owners --diff HEAD --format json
+```
+
+| Argument | Description                                              |
+| -------- | -------------------------------------------------------- |
+| `paths`  | Zero or more workspace-relative paths; omit with `--diff` |
+
+| Option   | Alias | Type   | Default | Description                                                              |
+| -------- | ----- | ------ | ------- | ------------------------------------------------------------------------ |
+| `--diff` | `-d`  | string |         | Also resolve every path changed since this git base, like `S.gitDiff(base)` |
+
+Plus the [common options](#common-options).
+
+Returns:
+
+| Field                 | Description                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------- |
+| `touched_paths`       | One `{path, package, owners, agent_policy, packages}` per path; `owners` are `{login \| team, role, reasons}` |
+| `required_approvers`  | Every owner with the `approve` role, deduplicated and sorted                                         |
+| `suggested_reviewers` | Every owner with only the `review` role                                                              |
+
+Failure: error code `owners_failed`, exit code 1, for a workspace without
+`WORKSPACE.ts`, an unknown team, a path outside the workspace, or no paths
+at all. See [Ownership](../concepts/ownership.md).
+
+---
+
 ## ci
 
 Plans `lint`, `build`, `test`, and `docs` over one pattern and executes the
@@ -326,17 +362,20 @@ targets. Exit code 1 for both.
 
 ## query
 
-Lists labels or evaluates `deps(label)`. Never executes.
+Lists labels or evaluates `deps(label)`, `rdeps(label)`, or `owners(label)`.
+Never executes.
 
 ```sh
 smithers-build query //...
 smithers-build query //packages/flow:lib
 smithers-build query 'deps(//packages/engine:lib)'
+smithers-build query 'rdeps(//packages/flow:lib)'
+smithers-build query 'owners(//packages/flow:lib)'
 ```
 
-| Argument | Description                          |
-| -------- | ------------------------------------ |
-| `expr`   | A label, a pattern, or `deps(label)` |
+| Argument | Description                                                          |
+| -------- | -------------------------------------------------------------------- |
+| `expr`   | A label, a pattern, `deps(label)`, `rdeps(label)`, or `owners(label)` |
 
 Options: the [common options](#common-options) only.
 
@@ -358,6 +397,13 @@ A bare label or pattern returns:
 
 `deps()` requires exactly one root. A recursive pattern fails with
 `deps() requires one exact or default target`.
+
+`rdeps(label)` returns `{query, root, dependents}`: every labeled target
+whose dependency closure reaches the root. `owners(label)` returns
+`{query, package, owners, agentPolicy, upstream}` for the package holding
+the label: its resolved owners with reasons, the policy for its directory,
+and the packages it depends on. Both are package mode only and take one
+exact or default target.
 
 Failure: error code `query_failed`, exit code 1.
 

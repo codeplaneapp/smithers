@@ -21,6 +21,7 @@ import { declaredToolchain, runInstall } from "./engine.ts"
 import * as Executor from "./Executor.ts"
 import * as GitHooks from "./GitHooks.ts"
 import * as GraphOutput from "./GraphOutput.ts"
+import * as Owners from "./Owners.ts"
 import * as PackageDiscovery from "./PackageDiscovery.ts"
 import * as PackageExec from "./PackageExec.ts"
 import * as PackageIndex from "./PackageIndex.ts"
@@ -35,6 +36,7 @@ import {
   type RemoteCacheAccess,
   remoteCacheOf,
   resolveConfig,
+  type ResolvedConfig,
   type ResolvedRemoteCache,
   resolveInstallAttrs,
   resolveRemoteCache,
@@ -129,6 +131,8 @@ export interface RuntimeConfig {
 interface PreparedWorkspace {
   readonly root: string
   readonly cacheDirectory: string
+  readonly sandbox: ResolvedConfig["sandbox"]
+  readonly sandboxes: ResolvedConfig["sandboxes"]
   readonly remoteCache?: RemoteCacheAccess | undefined
 }
 
@@ -310,9 +314,13 @@ const prepare = async (
   const preparedRemote = remoteCacheAccess(remoteCache, runtime)
   if (writeState && config.gitignored) await ensureGitignored(root, config.cacheDirectory)
   runtime.signal?.throwIfAborted()
-  return preparedRemote === undefined
-    ? { root, cacheDirectory: config.cacheDirectory }
-    : { root, cacheDirectory: config.cacheDirectory, remoteCache: preparedRemote }
+  const base = {
+    root,
+    cacheDirectory: config.cacheDirectory,
+    sandbox: config.sandbox,
+    sandboxes: config.sandboxes
+  }
+  return preparedRemote === undefined ? base : { ...base, remoteCache: preparedRemote }
 }
 
 /** Opens the workspace index under the resolved cache directory. */
@@ -325,6 +333,8 @@ const openWorkspace = async (
   return {
     workspace: await Workspace.make(prepared.root, process.cwd(), {
       cacheDirectory: prepared.cacheDirectory,
+      sandbox: prepared.sandbox,
+      sandboxes: prepared.sandboxes,
       signal: runtime.signal
     }),
     remoteCache: prepared.remoteCache
@@ -366,7 +376,32 @@ const openPackageIndex = async (
 const packageQuery = async (
   index: PackageIndex.PackageIndex,
   expression: string
-): Promise<Query.Listing | Query.Dependencies> => {
+): Promise<Query.Listing | Query.Dependencies | Query.Dependents | Query.PackageOwners> => {
+  const dependentsMatch = expression.match(/^rdeps\((.+)\)$/)
+  if (dependentsMatch?.[1] !== undefined) {
+    const label = dependentsMatch[1].trim()
+    const rows = index.resolve(label)
+    if (rows.length !== 1) throw new Error("rdeps() requires one exact or default target")
+    return { query: expression, root: rows[0]!.label, dependents: Owners.rdeps(index, label) }
+  }
+  const ownersMatch = expression.match(/^owners\((.+)\)$/)
+  if (ownersMatch?.[1] !== undefined) {
+    const rows = index.resolve(ownersMatch[1].trim())
+    if (rows.length !== 1) throw new Error("owners() requires one exact or default target")
+    const packagePath = rows[0]!.packagePath
+    const directory = packagePath === "" ? "PACKAGE.ts" : `${packagePath}/PACKAGE.ts`
+    return {
+      query: expression,
+      package: packagePath === "" ? "//" : `//${packagePath}`,
+      owners: Owners.packageOwners(index, packagePath).map((entry) => ({
+        owner: entry.owner,
+        role: entry.role,
+        reasons: entry.reasons.map(Owners.reasonText)
+      })),
+      agentPolicy: Owners.agentPolicyOf(index, directory),
+      upstream: Owners.upstreamPackages(index, packagePath).map((path) => path === "" ? "//" : `//${path}`)
+    }
+  }
   const dependencyMatch = expression.match(/^deps\((.+)\)$/)
   if (dependencyMatch?.[1] !== undefined) {
     const rows = index.resolve(dependencyMatch[1].trim())
@@ -921,14 +956,14 @@ export const makeCli = (config: RuntimeConfig = {}) =>
         )
     })
     .command("query", {
-      description: "List labels or evaluate deps(label)",
-      args: z.object({ expr: z.string().describe("Label, pattern, or deps(label)") }),
+      description: "List labels or evaluate deps(label), rdeps(label), or owners(label)",
+      args: z.object({ expr: z.string().describe("Label, pattern, deps(label), rdeps(label), or owners(label)") }),
       options: workspaceOption,
       alias: { workspace: "w" },
       async run(context) {
         try {
           const index = await openPackageIndex(context.options, config)
-          let result: Query.Listing | Query.Dependencies
+          let result: Query.Listing | Query.Dependencies | Query.Dependents | Query.PackageOwners
           if (index !== undefined) {
             result = await packageQuery(index, context.args.expr)
           } else {
@@ -938,6 +973,35 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           return present(context, config, result, (style) => Query.text(result, style))
         } catch (cause) {
           return context.error({ code: "query_failed", exitCode: 1, message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("owners", {
+      description: "Resolve owners, reasons, and the agent policy for paths, or for the paths a diff touches",
+      args: z.object({
+        paths: z.array(z.string()).optional().describe("Workspace-relative paths; omit them and pass --diff instead")
+      }),
+      options: workspaceOption.extend({
+        diff: z.string().optional().describe(
+          "Also resolve every path changed since this git base, like S.gitDiff(base)"
+        )
+      }),
+      alias: { workspace: "w", diff: "d" },
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          if (index === undefined) {
+            throw new Error("owners reads PACKAGE.ts owners declarations; this workspace has no WORKSPACE.ts")
+          }
+          const paths = [...(context.args.paths ?? [])]
+          if (context.options.diff !== undefined) {
+            paths.push(...await Owners.changedPaths(index.root, context.options.diff))
+          }
+          if (paths.length === 0) throw new Error("owners needs at least one path, or --diff <base>")
+          const resolution = Owners.resolve(index, paths)
+          return present(context, config, Owners.toJson(resolution), (style) => Owners.text(resolution, style))
+        } catch (cause) {
+          return context.error({ code: "owners_failed", exitCode: 1, message: Diagnostic.describe(cause) })
         }
       }
     })

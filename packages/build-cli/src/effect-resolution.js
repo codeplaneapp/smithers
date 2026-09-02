@@ -54,6 +54,7 @@ import * as NodePath from "node:path"
 import { fileURLToPath } from "node:url"
 import { register as registerCommonJs } from "tsx/cjs/api"
 import { register as registerModule } from "tsx/esm/api"
+import { jsExtensionSiblings } from "./internal/js-extension-siblings.js"
 
 const installation = Symbol.for("smthrs/effect-resolution-installed")
 const registration = Symbol.for("smthrs/effect-resolution-registration")
@@ -101,19 +102,6 @@ const isCliOwned = (specifier) =>
 
 /** Workspace packages whose module-level state is compared by identity. */
 const cliOwnedPackages = ["@smthrs/targets", "@smthrs/plan", "@smthrs/core", "@smthrs/flow"]
-
-/**
- * TypeScript's `./foo.js` -> `foo.ts` mapping, in the compiler's probe order.
- *
- * tsx applies it on the ES-module path; the CommonJS bridge below applies the
- * same table so a declaration module's relative imports mean one thing.
- */
-const jsExtensionSiblings = {
-  ".js": [".ts", ".tsx"],
-  ".jsx": [".tsx"],
-  ".mjs": [".mts"],
-  ".cjs": [".cts"]
-}
 
 /** tsx's marker for the CommonJS virtual module it wraps a CJS `.ts` file in. */
 const commonjsVirtualParameter = "tsx-commonjs-virtual-query"

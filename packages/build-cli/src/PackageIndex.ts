@@ -10,6 +10,7 @@
  *
  * @since 0.1.0
  */
+import * as Owners from "@smthrs/targets/Owners"
 import * as PackageValue from "@smthrs/targets/Package"
 import * as Target from "@smthrs/targets/Target"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
@@ -130,6 +131,7 @@ export class PackageIndex {
   private readonly labelsByTarget: ReadonlyMap<Target.AnyTarget, string>
   private readonly owners: WeakMap<Target.AnyTarget, string>
   private readonly packagePaths: ReadonlySet<string>
+  private readonly packageOwners: ReadonlyMap<string, Owners.Declaration>
 
   private constructor(
     root: string,
@@ -139,7 +141,8 @@ export class PackageIndex {
     byLabel: ReadonlyMap<string, IndexedTarget>,
     labelsByTarget: ReadonlyMap<Target.AnyTarget, string>,
     owners: WeakMap<Target.AnyTarget, string>,
-    packagePaths: ReadonlySet<string>
+    packagePaths: ReadonlySet<string>,
+    packageOwners: ReadonlyMap<string, Owners.Declaration>
   ) {
     this.root = root
     this.workspace = workspace
@@ -156,6 +159,7 @@ export class PackageIndex {
     this.labelsByTarget = labelsByTarget
     this.owners = owners
     this.packagePaths = packagePaths
+    this.packageOwners = packageOwners
   }
 
   /**
@@ -170,6 +174,7 @@ export class PackageIndex {
     const folded = new Map<string, string>()
     const labelsByTarget = new Map<Target.AnyTarget, string>()
     const packagePaths = new Set<string>()
+    const packageOwners = new Map<string, Owners.Declaration>()
     const sortedPackages = [...graph.packages].sort((left, right) => byCodeUnit(left.file, right.file))
     for (const loaded of sortedPackages) {
       if (packagePaths.has(loaded.packagePath)) {
@@ -179,6 +184,7 @@ export class PackageIndex {
       }
       packagePaths.add(loaded.packagePath)
       const metadata = PackageValue.metadata(loaded.value)
+      if (metadata.owners !== undefined) packageOwners.set(loaded.packagePath, metadata.owners)
       for (const key of metadata.keys) {
         if (!PackageValue.targetKeyPattern.test(key)) {
           throw new PackageError("invalid_target_key", `Package key fails the target grammar: ${JSON.stringify(key)}`, {
@@ -321,6 +327,21 @@ export class PackageIndex {
       validateReferences(row.target, row.label)
       assertLegalDataClosure(row)
     }
+    // Owner reference resolution: every team:<name> an owners declaration
+    // names must be on the workspace roster; an unknown team is a graph-load
+    // error, the same way an unknown agent or flag is.
+    const teams = WorkspaceDeclaration.teamNames(graph.workspace)
+    const checkTeams = (declaration: Owners.Declaration, where: string): void => {
+      for (const team of Owners.teamReferences(declaration)) {
+        if (!teams.has(team)) {
+          throw new PackageError("unknown_team", `owners of ${where} name team:${team}, which the workspace S.Teams roster does not declare`, {
+            path: where
+          })
+        }
+      }
+    }
+    if (graph.workspace.owners !== undefined) checkTeams(graph.workspace.owners, "the workspace")
+    for (const [packagePath, declaration] of packageOwners) checkTeams(declaration, `//${packagePath}`)
     rows.sort((left, right) => byCodeUnit(left.label, right.label))
     return new PackageIndex(
       graph.root,
@@ -330,7 +351,8 @@ export class PackageIndex {
       byLabel,
       labelsByTarget,
       owners,
-      packagePaths
+      packagePaths,
+      packageOwners
     )
   }
 
@@ -363,6 +385,37 @@ export class PackageIndex {
    */
   ownerOf(target: Target.AnyTarget): string | undefined {
     return this.owners.get(target)
+  }
+
+  /**
+   * Every discovered package path, sorted, `""` for the root.
+   *
+   * @category querying
+   * @since 0.1.0
+   */
+  packages(): ReadonlyArray<string> {
+    return [...this.packagePaths].sort(byCodeUnit)
+  }
+
+  /**
+   * Whether a package exists at exactly this path.
+   *
+   * @category querying
+   * @since 0.1.0
+   */
+  hasPackage(packagePath: string): boolean {
+    return this.packagePaths.has(packagePath)
+  }
+
+  /**
+   * The ownership declaration one package carries, or undefined when it
+   * declares none and inherits.
+   *
+   * @category querying
+   * @since 0.1.0
+   */
+  ownersOf(packagePath: string): Owners.Declaration | undefined {
+    return this.packageOwners.get(packagePath)
   }
 
   /**
