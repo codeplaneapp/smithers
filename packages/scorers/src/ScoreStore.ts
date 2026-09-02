@@ -78,8 +78,9 @@ export interface ScoreObservation extends ObservationBase {
  * A scorer failure retained without failing its target.
  *
  * `code` classifies the failure so a scorer bug and an unreachable judge are
- * distinguishable without parsing `reason` prose. It is optional because rows
- * written before the column existed carry none.
+ * distinguishable without parsing `reason` prose. Migration 0004 backfills
+ * rows written before the classification existed as `inconclusive`, so every
+ * value read or written through the service carries a code.
  *
  * @category models
  * @since 0.1.0
@@ -87,7 +88,7 @@ export interface ScoreObservation extends ObservationBase {
 export interface InconclusiveObservation extends ObservationBase {
   readonly kind: "inconclusive"
   readonly reason: string
-  readonly code?: ScorerErrorCode | undefined
+  readonly code: ScorerErrorCode
 }
 
 /**
@@ -127,7 +128,7 @@ export const Observation = Schema.Union([
     targetStepKey: Key,
     scorerKey: Key,
     reason: Schema.String.check(Schema.isMinLength(1)),
-    code: Schema.optional(ScorerErrorCode),
+    code: ScorerErrorCode,
     at: Timestamp
   })
 ])

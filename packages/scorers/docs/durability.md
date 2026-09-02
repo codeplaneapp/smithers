@@ -23,10 +23,11 @@ bypass them:
   for that target fail.
 - `at_ms` is a non-negative integer. It used to be a bare number, and SQLite's
   REAL affinity kept `1.7` intact.
-- A score is non-null and within `[0, 1]`; an inconclusive row has no value and
-  a non-empty `reason`. Accepting a reasonless row used to poison the same read.
-- `failure_code` is `NULL` or one of the eight `ScorerErrorCode` literals, which
-  the read path decodes as a closed union.
+- A score is non-null and within `[0, 1]`, has no failure code, and an
+  inconclusive row has no value, a non-empty `reason`, and one of the eight
+  `ScorerErrorCode` literals. Migration `0004_require_failure_codes` backfills
+  older unclassified failures as `inconclusive` before making the code
+  mandatory. Accepting a reasonless or unclassified row used to poison reads.
 - `metadata_json` is `NULL` or valid JSON.
 
 The remaining rules have no useful SQL spelling and are enforced by the store
@@ -60,6 +61,10 @@ is read with `DurableWriter.affectedRows`, which is dialect-agnostic and
 accepts the bigint that `SqlClient.SafeIntegers` produces. Reading an own
 numeric `changes` treated that bigint as "already claimed", committed the claim,
 and dropped the observation forever on every retry.
+
+The single-row insert may report only zero or one affected row. Zero is the
+conflict path and one is a new claim; a larger count is a contradictory driver
+result, so the store fails and rolls the whole transaction back.
 
 A failure inside the transaction rolls the claim back, so the job can be
 retried. `test/ScoreStore.test.ts` proves that with a real SQL failure and

@@ -26,9 +26,14 @@ the published `1.0.0-rc.0` packages, so every `@since` tag in `src/` reads
   migration `0003_score_failure_codes`. `offset` is the cursor; `before` is a
   time filter, and on its own it could never walk past a page of rows sharing
   one timestamp.
-- Added colocated documentation under `docs/`, with `test/docs.test.ts` as its
-  drift owner: the reference table in `docs/api.md` and the `@category` JSDoc in
-  `src/` must agree.
+- Inconclusive observations now require a structured failure code. Migration
+  `0004_require_failure_codes` backfills legacy rows as `inconclusive` and
+  enforces the invariant in SQLite.
+- `recordOnce` now accepts only the two possible affected-row counts, zero or
+  one, and rolls back on any contradictory driver result.
+- Added package-owned generated documentation: `Package.ts`, `BUILD.ts`, and
+  `scripts/docs.mjs` project categorized source exports into `docs/exports.md`,
+  while `test/docs.test.ts` keeps the curated API table synchronized.
 
 ### Changed
 

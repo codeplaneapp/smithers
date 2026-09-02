@@ -10,6 +10,7 @@ import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import initialScores from "../src/migrations/0001_scores.ts"
 import failureCodes from "../src/migrations/0003_score_failure_codes.ts"
+import requiredFailureCodes from "../src/migrations/0004_require_failure_codes.ts"
 import { ScorerError } from "../src/ScorerError.ts"
 import * as ScoreStore from "../src/ScoreStore.ts"
 import * as SqlScoreStore from "../src/SqlScoreStore.ts"
@@ -132,7 +133,24 @@ describe("ScoreStore", () => {
       ],
       [
         "an inconclusive observation with a blank reason",
-        { kind: "inconclusive", targetStepKey: "a", scorerKey: "s", reason: "", at: 1 } as ScoreStore.Observation
+        {
+          kind: "inconclusive",
+          targetStepKey: "a",
+          scorerKey: "s",
+          reason: "",
+          code: "inconclusive",
+          at: 1
+        } as ScoreStore.Observation
+      ],
+      [
+        "an inconclusive observation with no failure code",
+        {
+          kind: "inconclusive",
+          targetStepKey: "a",
+          scorerKey: "s",
+          reason: "unavailable",
+          at: 1
+        } as unknown as ScoreStore.Observation
       ]
     ])("refuses to persist %s", async (_name, observation) => {
       const failure = await failed(Effect.gen(function*() {
@@ -165,27 +183,17 @@ describe("ScoreStore", () => {
       expect(failure.cause).toBeDefined()
     })
 
-    it("accepts explicit undefined optional members and omits them on read", async () => {
+    it("accepts explicit undefined optional score members and omits them on read", async () => {
       const output = await run(Effect.gen(function*() {
         const store = yield* ScoreStore.ScoreStore
         yield* store.record(score({ reason: undefined, meta: undefined, at: 1 }))
-        yield* store.record({
-          kind: "inconclusive",
-          targetStepKey: "a",
-          scorerKey: "s",
-          reason: "unavailable",
-          code: undefined,
-          at: 2
-        })
         return yield* store.observations("a")
       }))
       expect(output).toEqual([
-        { kind: "score", targetStepKey: "a", scorerKey: "s", score: 1, at: 1 },
-        { kind: "inconclusive", targetStepKey: "a", scorerKey: "s", reason: "unavailable", at: 2 }
+        { kind: "score", targetStepKey: "a", scorerKey: "s", score: 1, at: 1 }
       ])
       expect(output[0]).not.toHaveProperty("reason")
       expect(output[0]).not.toHaveProperty("meta")
-      expect(output[1]).not.toHaveProperty("code")
     })
 
     it("returns a typed failure when an observation kind cannot be read", async () => {
@@ -209,6 +217,7 @@ describe("ScoreStore", () => {
             targetStepKey: "a",
             scorerKey: "s",
             reason: "",
+            code: "inconclusive",
             at: 1
           })
         )
@@ -522,6 +531,7 @@ describe("ScoreStore", () => {
             targetStepKey: "a",
             scorerKey: "s",
             reason: "unavailable",
+            code: "inconclusive",
             at: 2 + index
           })
         }
@@ -534,7 +544,14 @@ describe("ScoreStore", () => {
     it("reports a target whose scorer never once succeeded", async () => {
       const output = await run(Effect.gen(function*() {
         const store = yield* ScoreStore.ScoreStore
-        yield* store.record({ kind: "inconclusive", targetStepKey: "a", scorerKey: "s", reason: "down", at: 1 })
+        yield* store.record({
+          kind: "inconclusive",
+          targetStepKey: "a",
+          scorerKey: "s",
+          reason: "down",
+          code: "inconclusive",
+          at: 1
+        })
         return yield* store.aggregate("a", "s")
       }))
       expect(output).toEqual({ count: 0, mean: undefined, min: undefined, inconclusive: 1 })
@@ -562,12 +579,16 @@ describe("ScoreStore", () => {
           ) VALUES ('score', '', 's', 0.5, 1)`),
           unknownCode: yield* Effect.flip(sql`INSERT INTO flows_scores (
             kind, target_step_key, scorer_key, value, reason, failure_code, at_ms
-          ) VALUES ('inconclusive', 'a', 's', NULL, 'why', 'invented', 1)`)
+          ) VALUES ('inconclusive', 'a', 's', NULL, 'why', 'invented', 1)`),
+          missingCode: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, reason, failure_code, at_ms
+          ) VALUES ('inconclusive', 'a', 's', NULL, 'why', NULL, 1)`)
         }
       }))
       expect(failures.blankScorer).toBeDefined()
       expect(failures.blankTarget).toBeDefined()
       expect(failures.unknownCode).toBeDefined()
+      expect(failures.missingCode).toBeDefined()
     })
 
     it("refuses invalid scores, timestamps, and inconclusive rows at the table boundary", async () => {
@@ -610,17 +631,20 @@ describe("ScoreStore", () => {
             kind, target_step_key, scorer_key, value, reason, at_ms
           ) VALUES ('inconclusive', '', '', NULL, NULL, 1)`
           yield* failureCodes
+          yield* requiredFailureCodes
           return yield* sql<{
             readonly target_step_key: string
             readonly scorer_key: string
             readonly reason: string
-          }>`SELECT target_step_key, scorer_key, reason FROM flows_scores`
+            readonly failure_code: string
+          }>`SELECT target_step_key, scorer_key, reason, failure_code FROM flows_scores`
         }).pipe(Effect.provide(TestDatabase.layer))
       )
       expect(rows).toEqual([{
         target_step_key: "Stored target step key predates the non-empty-key requirement",
         scorer_key: "Stored scorer key predates the non-empty-key requirement",
-        reason: "Stored inconclusive observation predates the recorded-reason requirement"
+        reason: "Stored inconclusive observation predates the recorded-reason requirement",
+        failure_code: "inconclusive"
       }])
     })
   })

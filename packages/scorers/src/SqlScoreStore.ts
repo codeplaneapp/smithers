@@ -168,7 +168,7 @@ const prepare = (observation: ScoreStore.Observation): Effect.Effect<Insertable,
         scorerKey: snapshot.scorerKey,
         value: snapshot.kind === "score" ? snapshot.score : null,
         reason: snapshot.reason ?? null,
-        failureCode: snapshot.kind === "inconclusive" ? snapshot.code ?? null : null,
+        failureCode: snapshot.kind === "inconclusive" ? snapshot.code : null,
         metadataJson: encoded,
         at: snapshot.at
       }))
@@ -256,7 +256,7 @@ const decode = (row: ObservationRow): Effect.Effect<ScoreStore.Observation, Scor
           targetStepKey: row.target_step_key,
           scorerKey: row.scorer_key,
           reason: row.reason,
-          ...(row.failure_code === null ? {} : { code: row.failure_code }),
+          code: row.failure_code,
           at
         }
         : {
@@ -384,6 +384,14 @@ export const make: Effect.Effect<
             // answer.
             const count = yield* DurableWriter.affectedRows(claimed)
             if (count === 0) return false
+            if (count !== 1) {
+              return yield* Effect.fail(
+                new DurableWriter.DatabaseError({
+                  code: "unknown",
+                  cause: { operation: "claim scorer job", affectedRows: count }
+                })
+              )
+            }
             yield* insert(row)
             return true
           })

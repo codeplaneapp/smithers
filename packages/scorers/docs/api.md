@@ -8,13 +8,13 @@ consumer in the tree.
 The root entry point re-exports every module as a namespace. Top-level modules
 are also importable directly as `@smthrs/scorers/<Module>`. `internal/*` and
 nested `*/index` subpaths are blocked, so the migration aggregator is reachable
-only through the root `Migrations` namespace. The three migration modules are
+only through the root `Migrations` namespace. The four migration modules are
 public subpaths and each has a default export, the migration effect itself.
 
-Every documented export is listed once in the [reference](#reference) at the end
-of this page. `test/docs.test.ts` compares that table against the `@category`
-JSDoc in `src/` and fails when a module gains or loses an export, so the table
-cannot drift while nobody is looking.
+Every declaration carrying `@category` is listed in the generated
+[`exports.md`](./exports.md) index. `//packages/scorers:docsPages` drift-checks
+that projection, while `test/docs.test.ts` also keeps the curated contract table
+at the end of this page synchronized by public export name.
 
 ```typescript
 import { Runner, RunnerLive, Scorer, ScoreStore, SqlScoreStore } from "@smthrs/scorers"
@@ -154,6 +154,9 @@ retried job records once. The identity must be non-empty, at most
 `Runner.jobIdentity([...parts])`, which length-prefixes each component: joining
 parts with a delimiter lets two different tuples produce one identity, and a
 blank identity used to make every observation after the first vanish silently.
+The claim must report exactly zero or one affected row. Zero is a duplicate;
+one proceeds to the observation insert; any other driver result fails and rolls
+the transaction back.
 
 ## Reference
 

@@ -1,7 +1,11 @@
+import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), "utf8")
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
 // The JSDoc scanner must not run past the end of a comment block, so the body
 // pattern excludes a closing delimiter rather than matching lazily.
@@ -27,10 +31,6 @@ const exported = (): ReadonlyArray<string> => {
 const tabled = (): ReadonlyArray<string> =>
   [...read("../docs/api.md").matchAll(/^\| `([A-Za-z]+\.[A-Za-z0-9_$]+)` *\| /gmu)].map(([, name]) => name!)
 
-// This package is workspace-private, so no generator writes its reference and
-// nothing outside it would notice a hand-written table going stale. The table
-// is the only place the export surface is written down twice; this is what
-// fails when a module gains or loses a documented export.
 describe("documentation", () => {
   it("tables every documented export exactly once", () => {
     const rows = tabled()
@@ -43,9 +43,18 @@ describe("documentation", () => {
     const readme = read("../README.md")
     expect(readme).toContain("docs/api.md")
     expect(readme).toContain("docs/durability.md")
+    expect(readme).toContain("docs/exports.md")
     // A private package has nothing to install, and the README used to open
     // with `npm install @smthrs/scorers`.
     expect(readme).not.toContain("npm install")
+  })
+
+  it("keeps the generated member index current", () => {
+    const checked = spawnSync(process.execPath, [join(packageRoot, "scripts", "docs.mjs"), "--check"], {
+      encoding: "utf8"
+    })
+    expect(`${checked.stdout}${checked.stderr}`).toContain("current")
+    expect(checked.status).toBe(0)
   })
 
   it("states one package version everywhere it is named", () => {
