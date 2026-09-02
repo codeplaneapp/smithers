@@ -64,6 +64,15 @@ under the same rules as everything else, and the two paths differ only in who
 decides to write one. Delivery outcomes are journaled as
 `Alerts.deliveredEventType` and `Alerts.failedEventType`.
 
+Where an alert goes is injected rather than fixed. `Alerts.Sink` is the seam:
+`Alerts.layerNoop` accepts every alert and sends nothing, and
+`Alerts.layerWebhook({ url })` POSTs each one and treats any non-2xx response
+as a failure. A deployment that has nowhere to send alerts still runs the
+policy, which keeps the detection path exercised rather than switched off.
+
+See [`@smthrs/control`](/api/control) for the run conditions the entries come
+from.
+
 ## Exports
 
 | Export | Kind | Category | Summary |
