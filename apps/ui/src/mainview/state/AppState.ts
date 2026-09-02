@@ -133,6 +133,40 @@ export const initialCloudSession = (createdAt = Date.now()): CloudSessionRow => 
   revision: 0
 })
 
+/*
+ * A cloud workspace (lane citc, ADR 0002): plue's workspace DTO trimmed to
+ * what the app states — the six statuses, the provisioning stage, the target
+ * bookmark. NO kind, NO uptime, NO workspace head, NO ahead/behind
+ * (plue#446 — the DTO does not carry them, so the row never does). This
+ * collection is the authority the workspace working copies
+ * (`workingCopies`, kind "workspace") derive from.
+ */
+export const WORKSPACE_STATUSES = ["pending", "starting", "running", "suspended", "stopped", "failed"] as const
+export const CloudWorkspaceStatusSchema = z.enum(WORKSPACE_STATUSES)
+export type CloudWorkspaceStatus = z.infer<typeof CloudWorkspaceStatusSchema>
+
+export const CloudWorkspaceRowSchema = z.object({
+  /** plue's workspace id. */
+  id: z.string(),
+  /** `org/repo` — the repositories row this workspace is bound to. */
+  repoId: z.string(),
+  name: z.string(),
+  targetBookmark: z.string().nullable(),
+  status: CloudWorkspaceStatusSchema,
+  provisioningStage: z.string().nullable(),
+  suspendedAt: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type CloudWorkspaceRow = z.infer<typeof CloudWorkspaceRowSchema>
+
+/** The fields a workspace load or act writes (the reducer adds updatedAt/revision). */
+export type CloudWorkspaceInput = Pick<
+  CloudWorkspaceRow,
+  "id" | "repoId" | "name" | "targetBookmark" | "status" | "provisioningStage" | "suspendedAt" | "createdAt"
+>
+
 /** The working-copy id of a local checkout: the pin key, stable across reopens. */
 export const localCopyIdOf = (path: string): string => repoKeyOf(path)
 
@@ -475,7 +509,21 @@ export const activeRepoOf = (
  */
 export type Tab =
   | { id: "main"; kind: "main"; title: "Smithers" }
-  | { id: string; kind: "terminal"; title: string; sessionId: string; cwd: string; repoKey?: string }
+  | {
+    id: string
+    kind: "terminal"
+    title: string
+    sessionId: string
+    /**
+     * The local directory; absent on a workspace terminal (lane citc), whose
+     * process runs inside the cloud workspace, not here.
+     */
+    cwd?: string
+    /** A cloud-workspace terminal: the workspace it attaches to, and the repo the session routes through. */
+    workspaceId?: string
+    repo?: string
+    repoKey?: string
+  }
   | {
     id: string
     kind: "harness"
@@ -503,7 +551,18 @@ const processTabShape = {
 
 export const TabSchema = z.discriminatedUnion("kind", [
   z.object({ ...tabRowShape, id: z.literal("main"), kind: z.literal("main"), title: z.literal("Smithers") }),
-  z.object({ ...processTabShape, id: z.string(), kind: z.literal("terminal"), title: z.string() }),
+  z.object({
+    ...tabRowShape,
+    id: z.string(),
+    kind: z.literal("terminal"),
+    title: z.string(),
+    sessionId: z.string(),
+    /* Optional like the TS union: a workspace terminal (lane citc) has no local cwd. */
+    cwd: z.string().optional(),
+    exitCode: z.number().nullable().optional(),
+    workspaceId: z.string().optional(),
+    repo: z.string().optional()
+  }),
   z.object({
     ...processTabShape,
     id: z.string(),
@@ -1065,6 +1124,25 @@ export type AppTransition =
     username: string | null
     expiresAt: string | null
     scopes: "degraded" | null
+  }
+  /*
+   * Lane citc: the workspaces collection (the authority the workspace
+   * working copies derive from). `workspaces.loaded` replaces a scope — the
+   * per-user list (no repoId) or one repository's — and re-syncs the
+   * workingCopies rows for that scope; `workspace.updated` upserts one row
+   * (an act's answer, the watch's poll) and re-syncs its copy row.
+   */
+  | {
+    type: "workspaces.loaded"
+    actor: "system"
+    workspaces: ReadonlyArray<CloudWorkspaceInput>
+    /** Present = one repository's list replaced; absent = the per-user list. */
+    repoId?: string
+  }
+  | {
+    type: "workspace.updated"
+    actor: "system"
+    workspace: CloudWorkspaceInput
   }
   /* The sidebar's pinned repositories: opening pins, unpinning forgets, selecting names the active one. */
   | { type: "repo.pinned"; actor: Actor; pin: PinnedRepo }

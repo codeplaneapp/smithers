@@ -22,6 +22,7 @@ import {
   ChainEventRecordSchema,
   CloudRepositorySchema,
   CloudSessionRowSchema,
+  CloudWorkspaceRowSchema,
   ConnectorOperationSchema,
   DEFAULT_PALETTE,
   DEFAULT_BRANCH_ID,
@@ -69,6 +70,7 @@ import type {
   ChainEventRecord,
   CloudRepository,
   CloudSessionRow,
+  CloudWorkspaceRow,
   ConnectorOperation,
   Frame,
   Harness,
@@ -282,7 +284,9 @@ const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
   /* Lane piper: the jjhub inventory, the working copies, and the cloud session. */
   { id: "app-cloud-repositories", schema: CloudRepositorySchema },
   { id: "app-working-copies", schema: WorkingCopySchema },
-  { id: "app-cloud-sessions", schema: CloudSessionRowSchema }
+  { id: "app-cloud-sessions", schema: CloudSessionRowSchema },
+  /* Lane citc: the cloud workspaces (the authority the workspace copies derive from). */
+  { id: "app-cloud-workspaces", schema: CloudWorkspaceRowSchema }
 ]
 /** Attempts spent waiting out a locked access-handle pool. See `openOpfsDatabase`. */
 const OPFS_OPEN_ATTEMPTS = 5
@@ -518,6 +522,8 @@ export interface AppCollections {
   readonly repositories: ReturnType<typeof createRepositoriesCollection>
   readonly workingCopies: ReturnType<typeof createWorkingCopyCollection>
   readonly cloudSessions: ReturnType<typeof createCloudSessionCollection>
+  /** Lane citc: the cloud workspaces (ADR 0002), the authority behind the workspace working copies. */
+  readonly cloudWorkspaces: ReturnType<typeof createCloudWorkspaceCollection>
 }
 
 export interface WorldStateSnapshot {
@@ -722,6 +728,13 @@ const createCloudSessionCollection = (backend: PersistenceBackend) =>
     schema: CloudSessionRowSchema
   })
 
+const createCloudWorkspaceCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-cloud-workspaces",
+    getKey: (workspace: CloudWorkspaceRow) => workspace.id,
+    schema: CloudWorkspaceRowSchema
+  })
+
 /** The strip's order: main first, then creation order. */
 const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =>
   [...collections.tabs.values()].sort((left, right) => left.ordinal - right.ordinal)
@@ -751,7 +764,8 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.recommendations.preload(),
     collections.repositories.preload(),
     collections.workingCopies.preload(),
-    collections.cloudSessions.preload()
+    collections.cloudSessions.preload(),
+    collections.cloudWorkspaces.preload()
   ])
 
   if (collections.sessions.get(SESSION_ID) === undefined) {
@@ -990,7 +1004,8 @@ export const createAppStore = async (
     recommendations: createRecommendationCollection(resolvedBackend),
     repositories: createRepositoriesCollection(resolvedBackend),
     workingCopies: createWorkingCopyCollection(resolvedBackend),
-    cloudSessions: createCloudSessionCollection(resolvedBackend)
+    cloudSessions: createCloudSessionCollection(resolvedBackend),
+    cloudWorkspaces: createCloudWorkspaceCollection(resolvedBackend)
   }
 
   await seed(collections)
@@ -1062,7 +1077,8 @@ export const createAppStore = async (
         collections.recommendations.utils.acceptMutations(transaction),
         collections.repositories.utils.acceptMutations(transaction),
         collections.workingCopies.utils.acceptMutations(transaction),
-        collections.cloudSessions.utils.acceptMutations(transaction)
+        collections.cloudSessions.utils.acceptMutations(transaction),
+        collections.cloudWorkspaces.utils.acceptMutations(transaction)
       ])
     /*
      * One atomic commit per logical transition: SQLite batches row changes in
@@ -2428,6 +2444,89 @@ export const createAppStore = async (
           else {
             collections.cloudSessions.update("cloud", (draft) => {
               Object.assign(draft, row)
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        /*
+         * Lane citc: the workspaces collection is the authority; the
+         * workspace working copies (`workspace:<id>` rows) derive from it in
+         * the same transaction, so the tree never disagrees with the card.
+         */
+        case "workspaces.loaded": {
+          const scope = transition.repoId
+          const next = new Set(transition.workspaces.map((workspace) => workspace.id))
+          const stale = [...collections.cloudWorkspaces.values()]
+            .filter((workspace) => (scope === undefined || workspace.repoId === scope) && !next.has(workspace.id))
+            .map((workspace) => workspace.id)
+          if (stale.length > 0) collections.cloudWorkspaces.delete(stale)
+          const staleCopies = [...collections.workingCopies.values()]
+            .filter((copy) =>
+              copy.kind === "workspace" &&
+              (scope === undefined || copy.repoId === scope) &&
+              copy.workspaceId !== undefined &&
+              !next.has(copy.workspaceId)
+            )
+            .map((copy) => copy.id)
+          if (staleCopies.length > 0) collections.workingCopies.delete(staleCopies)
+          for (const workspace of transition.workspaces) {
+            const row: CloudWorkspaceRow = { ...workspace, updatedAt: createdAt, revision }
+            if (collections.cloudWorkspaces.get(workspace.id) === undefined) collections.cloudWorkspaces.insert(row)
+            else {
+              collections.cloudWorkspaces.update(workspace.id, (draft) => {
+                Object.assign(draft, row)
+              })
+            }
+            const copyId = `workspace:${workspace.id}`
+            const copy: WorkingCopy = {
+              id: copyId,
+              repoId: workspace.repoId,
+              kind: "workspace",
+              label: workspace.name,
+              workspaceId: workspace.id,
+              state: workspace.status,
+              updatedAt: createdAt,
+              revision
+            }
+            if (collections.workingCopies.get(copyId) === undefined) collections.workingCopies.insert(copy)
+            else {
+              collections.workingCopies.update(copyId, (draft) => {
+                Object.assign(draft, copy)
+              })
+            }
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "workspace.updated": {
+          const workspace = transition.workspace
+          const row: CloudWorkspaceRow = { ...workspace, updatedAt: createdAt, revision }
+          if (collections.cloudWorkspaces.get(workspace.id) === undefined) collections.cloudWorkspaces.insert(row)
+          else {
+            collections.cloudWorkspaces.update(workspace.id, (draft) => {
+              Object.assign(draft, row)
+            })
+          }
+          const copyId = `workspace:${workspace.id}`
+          const copy: WorkingCopy = {
+            id: copyId,
+            repoId: workspace.repoId,
+            kind: "workspace",
+            label: workspace.name,
+            workspaceId: workspace.id,
+            state: workspace.status,
+            updatedAt: createdAt,
+            revision
+          }
+          if (collections.workingCopies.get(copyId) === undefined) collections.workingCopies.insert(copy)
+          else {
+            collections.workingCopies.update(copyId, (draft) => {
+              Object.assign(draft, copy)
             })
           }
           collections.sessions.update(SESSION_ID, (draft) => {
