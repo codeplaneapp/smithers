@@ -168,7 +168,20 @@ export type SchemaRef = typeof SchemaRef.Type
 export class BodyRefMarkdown
   extends Schema.TaggedClass<BodyRefMarkdown>("flows/registry/BodyRef/Markdown")("Markdown", {
     path: Schema.String,
-    baseDirectory: Schema.String
+    baseDirectory: Schema.String,
+    /**
+     * SHA-256 of the complete source bytes measured during discovery.
+     *
+     * Optional only so descriptors journaled before rc.0 still decode. Every
+     * current discovery and executable-binding constructor supplies it.
+     */
+    contentDigest: Schema.optional(
+      Schema.String.check(
+        Schema.isPattern(/^[0-9a-f]{64}$/, {
+          expected: "a 64-character lowercase hexadecimal SHA-256 digest"
+        })
+      )
+    )
   })
 {}
 
@@ -179,11 +192,20 @@ export class BodyRefMarkdown
  * @since 0.1.0
  */
 export class BodyRefModule extends Schema.TaggedClass<BodyRefModule>("flows/registry/BodyRef/Module")("Module", {
-  path: Schema.String
+  path: Schema.String,
+  /** SHA-256 of the complete module source bytes measured during discovery. */
+  contentDigest: Schema.optional(
+    Schema.String.check(
+      Schema.isPattern(/^[0-9a-f]{64}$/, {
+        expected: "a 64-character lowercase hexadecimal SHA-256 digest"
+      })
+    )
+  )
 }) {}
 
 /**
- * A serializable locator for a flow body, which is loaded only on demand.
+ * A serializable locator and content address for a flow body, which is loaded
+ * only on demand.
  *
  * @category models
  * @since 0.1.0
@@ -191,7 +213,8 @@ export class BodyRefModule extends Schema.TaggedClass<BodyRefModule>("flows/regi
 export const BodyRef = Schema.Union([BodyRefMarkdown, BodyRefModule])
 
 /**
- * A serializable locator for a flow body, which is loaded only on demand.
+ * A serializable locator and content address for a flow body, which is loaded
+ * only on demand.
  *
  * @category models
  * @since 0.1.0
@@ -302,6 +325,7 @@ export const DiscoveryWarningCode = Schema.Literals([
   "directory_name_mismatch",
   "name_field_ignored",
   "unknown_frontmatter_key",
+  "unknown_pack_key",
   "invalid_allowed_tools",
   "invalid_capabilities",
   "invalid_budget",
@@ -320,6 +344,9 @@ export const DiscoveryWarningCode = Schema.Literals([
   "frontmatter_parse_error",
   "root_level_entry",
   "shadowed",
+  "symlink_cycle",
+  "max_depth_exceeded",
+  "entry_too_large",
   "unreadable"
 ])
 
@@ -346,15 +373,34 @@ export class DiscoveryWarning extends Schema.Class<DiscoveryWarning>("flows/regi
 }) {}
 
 /**
+ * A positive safe-integer control-plane budget ceiling.
+ *
+ * Tokens are indivisible, and millisecond envelopes use the same finite,
+ * lossless representation so both fields survive durable JSON unchanged.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const BudgetCeiling = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
+)
+
+/**
+ * A positive safe-integer control-plane budget ceiling.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type BudgetCeiling = typeof BudgetCeiling.Type
+
+/**
  * The tokens and milliseconds a flow declares that a control plane should
  * approve for one of its runs.
  *
- * The two fields are the two fields of a control-plane `Envelope.budget`, so a
- * host projects a descriptor into an approved envelope without reinterpreting
- * either number. `@smthrs/agent`'s `Budget.layerFromEnvelope` is what turns
- * them into enforcement at the model boundary: `tokens` caps what a run may
- * spend across every model call it makes, and `milliseconds` caps how late in
- * the run one may start.
+ * Both ceilings are positive safe integers. The two fields are projected into
+ * a control-plane `Envelope.budget` without reinterpretation, and
+ * `@smthrs/agent` enforces them at the model boundary.
  *
  * An absent field is not a zero. It is the absence of that ceiling, which is
  * what {@link budgetUnbounded} spells out for a flow that declares neither.
@@ -363,8 +409,8 @@ export class DiscoveryWarning extends Schema.Class<DiscoveryWarning>("flows/regi
  * @since 0.1.0
  */
 export const FlowBudget = Schema.Struct({
-  tokens: Schema.optional(Schema.Number),
-  milliseconds: Schema.optional(Schema.Number)
+  tokens: Schema.optional(BudgetCeiling),
+  milliseconds: Schema.optional(BudgetCeiling)
 })
 
 /**
@@ -388,7 +434,7 @@ export type FlowBudget = typeof FlowBudget.Type
  * @category constructors
  * @since 0.1.0
  */
-export const budgetUnbounded: FlowBudget = {}
+export const budgetUnbounded: FlowBudget = Object.freeze({})
 
 /**
  * The discovered metadata for one flow, excluding its unloaded body content.
@@ -428,7 +474,8 @@ export class FlowDescriptor extends Schema.Class<FlowDescriptor>("flows/registry
  * @category accessors
  * @since 0.1.0
  */
-export const budgetOf = (descriptor: FlowDescriptor): FlowBudget => descriptor.budget ?? budgetUnbounded
+export const budgetOf = (descriptor: FlowDescriptor): FlowBudget =>
+  descriptor.budget === undefined ? budgetUnbounded : Object.freeze({ ...descriptor.budget })
 
 /**
  * The result of scanning one source.

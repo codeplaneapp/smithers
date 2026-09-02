@@ -323,7 +323,13 @@ describe("ModuleMetadata", () => {
 
     expect(metadata.capabilities).toEqual(["fs:read:."])
     expect(metadata.flows).toEqual([])
-    expect(metadata.effects.tier).toBe("sealed")
+    expect(metadata.effects).toEqual({
+      reads: [],
+      writes: [],
+      mode: "hermetic",
+      onConflict: "serialize",
+      tier: "sealed"
+    })
     expect(Option.getOrUndefined(metadata.model)).toBe(model)
     expect(metadata.warnings).toEqual([])
   })
@@ -339,9 +345,34 @@ describe("ModuleMetadata", () => {
 
     expect(metadata.capabilities).toEqual(["*"])
     expect(metadata.flows).toEqual(["read-pr"])
+    expect(metadata.effects).toEqual({
+      reads: ["**"],
+      writes: ["**"],
+      mode: "expected",
+      onConflict: "serialize",
+      tier: "irreversible"
+    })
     expect(metadata.warnings).toContainEqual({
       message: "Flow authority cannot be projected statically; using the conservative wildcard"
     })
+  })
+
+  it.each([
+    ["a code-point escape", "\\u{1F600}"],
+    ["a surrogate pair", "\\uD83D\\uDE00"]
+  ])("decodes %s in a description", (_label, escape) => {
+    const metadata = ModuleMetadata.parse(
+      `export default Flow.make({ description: "hi ${escape}", capabilities: [] })`
+    )
+
+    expect(metadata.description).toBe("hi 😀")
+  })
+
+  it("preserves an out-of-range code-point escape without throwing", () => {
+    const source = 'export default Flow.make({ description: "hi \\u{FFFFFF}", capabilities: [] })'
+
+    expect(() => ModuleMetadata.parse(source)).not.toThrow()
+    expect(ModuleMetadata.parse(source).description).toBe("hi \\u{FFFFFF}")
   })
 
   it.each([

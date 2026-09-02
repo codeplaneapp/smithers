@@ -11,9 +11,9 @@
  *
  * The old smithers verbs (`pack add | remove | list | update | eject`) are the
  * CLI half and are not here. This module is the runtime contract underneath
- * them, and it deliberately holds no filesystem policy of its own: it reads a
- * manifest from a directory a caller names, and the caller decides which
- * directories are local and which are installed.
+ * them. It holds one filesystem policy: every contributed source must remain
+ * inside its pack root. Packs are third-party content, so callers cannot be
+ * trusted to have validated manifest paths or symlink targets first.
  *
  * Precedence is `local` before `installed`, by name. That is the one rule the
  * old pack system had that a plain source list cannot express: two sources
@@ -26,8 +26,9 @@
  */
 import * as Digest from "@smthrs/core/Digest"
 import * as Effect from "effect/Effect"
-import type * as FileSystem from "effect/FileSystem"
+import * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { DiscoveryWarning, FlowDescriptor, Provenance, type Source } from "./Descriptor.ts"
 import type { RegistryError } from "./RegistryError.ts"
@@ -36,7 +37,7 @@ import { registryError } from "./RegistryError.ts"
 /**
  * Where a pack was installed from, and therefore which one wins a name.
  *
- * `local` is a pack the project owns — checked in, or linked into the working
+ * `local` is a pack the project owns: checked in, or linked into the working
  * tree. `installed` is one a package manager or `pack add` put there. A local
  * flow shadows an installed flow of the same name, never the other way round.
  *
@@ -62,7 +63,7 @@ export type Origin = typeof Origin.Type
  * @category models
  * @since 0.1.0
  */
-export const Requires = Schema.Struct({ smithers: Schema.NonEmptyString })
+export const Requires = Schema.Struct({ smithers: Schema.String })
 
 /**
  * The runtime range a pack declares it needs.
@@ -71,6 +72,28 @@ export const Requires = Schema.Struct({ smithers: Schema.NonEmptyString })
  * @since 0.1.0
  */
 export type Requires = typeof Requires.Type
+
+const isPackRelativePath = (value: string): boolean =>
+  value.length > 0 &&
+  !value.includes("\0") &&
+  !value.includes("\\") &&
+  !value.startsWith("/") &&
+  !/^[A-Za-z]:/.test(value) &&
+  value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
+
+const PackRelativePath = Schema.NonEmptyString.check(
+  Schema.makeFilter(
+    (value) => isPackRelativePath(value) || "must be a safe pack-relative path without traversal or empty segments",
+    { title: "PackRelativePath" }
+  )
+)
+
+const normalizePackRelativePath = (value: string): string => {
+  if (!isPackRelativePath(value)) {
+    throw new TypeError(`Pack path ${JSON.stringify(value)} is not a safe pack-relative path`)
+  }
+  return value
+}
 
 /**
  * A pack manifest, as it is written in `pack.json`.
@@ -87,8 +110,8 @@ export type Requires = typeof Requires.Type
 export class Manifest extends Schema.Class<Manifest>("flows/registry/Pack/Manifest")({
   name: Schema.NonEmptyString,
   version: Schema.NonEmptyString,
-  flows: Schema.Array(Schema.NonEmptyString),
-  skills: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+  flows: Schema.Array(PackRelativePath),
+  skills: Schema.optional(Schema.Array(PackRelativePath)),
   requires: Schema.optional(Requires)
 }) {}
 
@@ -120,7 +143,31 @@ export interface File {
 /** The manifest file every pack root carries. */
 const manifestFileName = "pack.json"
 
+const manifestLocation = (dir: string): string => `${dir.replace(/[\\/]+$/, "")}/${manifestFileName}`
+
 const decodeManifest = Schema.decodeUnknownEffect(Manifest)
+
+const manifestRecord = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+
+const unsafeManifestEntry = (
+  value: unknown
+): { readonly field: "flows" | "skills"; readonly entry: string } | undefined => {
+  const record = manifestRecord(value)
+  if (record === undefined) return undefined
+  for (const field of ["flows", "skills"] as const) {
+    const entries = record[field]
+    if (!Array.isArray(entries)) continue
+    for (const entry of entries) {
+      if (typeof entry === "string" && !isPackRelativePath(entry)) return { field, entry }
+    }
+  }
+  return undefined
+}
+
+const knownManifestKeys = new Set(["name", "version", "flows", "skills", "requires"])
 
 /**
  * Reads and decodes one pack's manifest.
@@ -137,7 +184,14 @@ export const read = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   dir: string
-): Effect.Effect<{ readonly manifest: Manifest; readonly dir: string }, RegistryError> =>
+): Effect.Effect<
+  {
+    readonly manifest: Manifest
+    readonly dir: string
+    readonly warnings: ReadonlyArray<DiscoveryWarning>
+  },
+  RegistryError
+> =>
   Effect.gen(function*() {
     const location = path.join(dir, manifestFileName)
     const invalid = (description: string, cause?: unknown) =>
@@ -145,6 +199,7 @@ export const read = (
         code: "invalid_pack",
         module: "Pack",
         method: "read",
+        path: location,
         description,
         cause
       })
@@ -155,36 +210,72 @@ export const read = (
       try: () => JSON.parse(text) as unknown,
       catch: (cause) => invalid(`the pack manifest at "${location}" is not valid JSON`, cause)
     })
+    const unsafe = unsafeManifestEntry(parsed)
+    if (unsafe !== undefined) {
+      return yield* Effect.fail(
+        invalid(
+          `the pack manifest at "${location}" contains unsafe ${unsafe.field} entry ${JSON.stringify(unsafe.entry)}`
+        )
+      )
+    }
     const manifest = yield* decodeManifest(parsed).pipe(
       Effect.mapError((cause) => invalid(`the pack manifest at "${location}" is not a valid manifest`, cause))
     )
-    return { manifest, dir }
+    const warnings = Object.keys(parsed as Record<string, unknown>).flatMap((key) =>
+      knownManifestKeys.has(key)
+        ? []
+        : [
+          new DiscoveryWarning({
+            code: "unknown_pack_key",
+            path: location,
+            message: `Unknown pack manifest key: ${key}`
+          })
+        ]
+    )
+    return { manifest, dir, warnings }
   })
 
 /**
  * The content address of one pack, as a lock file records it.
  *
- * The digest covers the manifest and every file the caller measured, each by
- * its own content hash under its pack-relative path. Two installs of the same
- * bytes produce the same digest whatever order the files were read in, and
- * editing one flow body changes it.
+ * The digest covers the manifest and every file measured by the CLI pack
+ * verbs, each by its own content hash under a validated pack-relative path.
+ * File contents are UTF-8 text; measuring binary resources is outside this
+ * contract. Unsafe paths throw a `TypeError`. Duplicate paths are retained and
+ * ordered by their content digest, so no input ordering can change the result.
+ * Two installs of the same bytes therefore produce the same digest whatever
+ * order the files were read in, and editing one flow body changes it.
  *
  * @category identity
  * @since 0.1.0
  */
-export const digest = (manifest: Manifest, files: ReadonlyArray<File>): string =>
-  Digest.digest(
+export const digest = (manifest: Manifest, files: ReadonlyArray<File>): string => {
+  const measured = files
+    .map((file) => ({
+      path: normalizePackRelativePath(file.path),
+      contents: Digest.digest(file.contents)
+    }))
+    .sort((left, right) => {
+      const pathOrder = left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+      return pathOrder !== 0
+        ? pathOrder
+        : left.contents < right.contents
+        ? -1
+        : left.contents > right.contents
+        ? 1
+        : 0
+    })
+  return Digest.digest(
     Digest.canonical({
       name: manifest.name,
       version: manifest.version,
       flows: [...manifest.flows],
       skills: manifest.skills === undefined ? [] : [...manifest.skills],
       requires: manifest.requires === undefined ? null : { smithers: manifest.requires.smithers },
-      files: files
-        .map((file) => ({ path: file.path, contents: Digest.digest(file.contents) }))
-        .sort((left, right) => left.path < right.path ? -1 : 1)
+      files: measured
     })
   )
+}
 
 interface Version {
   readonly major: number
@@ -193,7 +284,8 @@ interface Version {
 }
 
 /**
- * Reads `major.minor.patch`, ignoring any prerelease or build suffix.
+ * Reads one to three numeric version components, zero-filling omitted
+ * components and ignoring any prerelease or build suffix.
  *
  * A pack's compatibility question is about the release line, and this runtime
  * ships as `1.0.0-rc.N`. Comparing the prerelease tag as well would refuse
@@ -201,9 +293,9 @@ interface Version {
  * is the opposite of what the range means.
  */
 const parseVersion = (value: string): Version | undefined => {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(value.trim())
+  const match = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+][0-9A-Za-z.-]+)?$/.exec(value.trim())
   if (match === null) return undefined
-  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) }
+  return { major: Number(match[1]), minor: Number(match[2] ?? 0), patch: Number(match[3] ?? 0) }
 }
 
 const compare = (left: Version, right: Version): number =>
@@ -213,16 +305,16 @@ const compare = (left: Version, right: Version): number =>
     ? left.minor - right.minor
     : left.patch - right.patch
 
-/** The comparator prefixes the manifest grammar accepts, longest first. */
-const operators = [">=", "<=", ">", "<", "=", "^", "~"] as const
+type Operator = ">=" | "<=" | ">" | "<" | "=" | "^" | "~"
 
-const satisfiesComparator = (comparator: string, version: Version): boolean => {
-  if (comparator === "*") return true
-  const operator = operators.find((candidate) => comparator.startsWith(candidate))
-  const bound = parseVersion(operator === undefined ? comparator : comparator.slice(operator.length))
-  if (bound === undefined) return false
-  const order = compare(version, bound)
-  switch (operator) {
+interface Comparator {
+  readonly operator: Operator | undefined
+  readonly bound: Version
+}
+
+const satisfiesComparator = (comparator: Comparator, version: Version): boolean => {
+  const order = compare(version, comparator.bound)
+  switch (comparator.operator) {
     case ">=":
       return order >= 0
     case "<=":
@@ -238,35 +330,66 @@ const satisfiesComparator = (comparator: string, version: Version): boolean => {
       // makes no compatibility promise across them: `^0.2.3` is
       // `>=0.2.3 <0.3.0` and `^0.0.3` is `>=0.0.3 <0.0.4`. Pinning only the
       // major there would load a pack written for 0.2 against 0.9.
-      return order >= 0 && version.major === bound.major &&
-        (bound.major !== 0 ||
-          (version.minor === bound.minor && (bound.minor !== 0 || version.patch === bound.patch)))
+      return order >= 0 && version.major === comparator.bound.major &&
+        (comparator.bound.major !== 0 ||
+          (version.minor === comparator.bound.minor &&
+            (comparator.bound.minor !== 0 || version.patch === comparator.bound.patch)))
     case "~":
-      return order >= 0 && version.major === bound.major && version.minor === bound.minor
+      return order >= 0 && version.major === comparator.bound.major && version.minor === comparator.bound.minor
     default:
       // A bare version and an explicit `=` mean the same thing.
       return order === 0
   }
 }
 
+const versionPattern = "\\d+(?:\\.\\d+){0,2}(?:[-+][0-9A-Za-z.-]+)?"
+const hyphenRangePattern = new RegExp(`^(${versionPattern})\\s+-\\s+(${versionPattern})$`)
+const comparatorPattern = new RegExp(`^(>=|<=|>|<|=|\\^|~)?\\s*(${versionPattern})(?=\\s|$)`)
+
+const parseRange = (range: string): ReadonlyArray<Comparator> | undefined => {
+  const trimmed = range.trim()
+  if (trimmed === "") return undefined
+  if (trimmed === "*") return []
+
+  const hyphen = hyphenRangePattern.exec(trimmed)
+  if (hyphen !== null) {
+    const lower = parseVersion(hyphen[1]!)!
+    const upper = parseVersion(hyphen[2]!)!
+    return [{ operator: ">=", bound: lower }, { operator: "<=", bound: upper }]
+  }
+
+  const comparators: Array<Comparator> = []
+  let remaining = trimmed
+  while (remaining !== "") {
+    const match = comparatorPattern.exec(remaining)
+    if (match === null) return undefined
+    const bound = parseVersion(match[2]!)!
+    comparators.push({ operator: match[1] as Operator | undefined, bound })
+    remaining = remaining.slice(match[0].length).trimStart()
+  }
+  return comparators
+}
+
+const satisfiesRange = (range: ReadonlyArray<Comparator>, version: Version): boolean =>
+  range.every((comparator) => satisfiesComparator(comparator, version))
+
 /**
  * Whether a runtime version satisfies a pack's declared range.
  *
- * The supported grammar is the space-separated conjunction every pack manifest
- * in the old tree actually used: `*`, an exact version, and `>=`, `>`, `<=`,
- * `<`, `^`, `~` comparators. A range this cannot parse is refused rather than
- * assumed compatible, because the failure mode of guessing is a pack loading
- * against a runtime it was never written for.
+ * The supported grammar is `*`, inclusive hyphen ranges, and whitespace-
+ * separated conjunctions of bare, `=`, `>=`, `>`, `<=`, `<`, `^`, and `~`
+ * comparators. Whitespace may separate an operator from its version. Versions
+ * have one to three numeric components and omitted components are zero-filled.
+ * `x`, `*` components, and `||` unions are unreadable; only a standalone `*`
+ * is accepted. An unreadable range returns false rather than being guessed.
  *
  * @category refinements
  * @since 0.1.0
  */
 export const compatible = (range: string, runtimeVersion: string): boolean => {
   const version = parseVersion(runtimeVersion)
-  if (version === undefined) return false
-  const comparators = range.trim().split(/\s+/).filter((part) => part.length > 0)
-  if (comparators.length === 0) return false
-  return comparators.every((comparator) => satisfiesComparator(comparator, version))
+  const parsed = parseRange(range)
+  return version !== undefined && parsed !== undefined && satisfiesRange(parsed, version)
 }
 
 /**
@@ -274,18 +397,66 @@ export const compatible = (range: string, runtimeVersion: string): boolean => {
  *
  * Every path in `flows` and `skills` becomes an ordinary source rooted inside
  * the pack, so a pack is discovered by exactly the pipeline a project
- * directory is. `source` carries the pack name, which is what a
- * `DiscoveryWarning` about a pack file reads back.
+ * directory is. Lexical containment is always enforced. When both real paths
+ * are available, real-path containment also refuses symlink escapes; hosts
+ * that cannot answer `realPath` and sources not created yet use the lexical
+ * verdict. This defense is repeated because callers may construct `Installed`
+ * values without decoding a manifest. `source` carries the pack name, which
+ * is what a `DiscoveryWarning` about a pack file reads back.
  *
  * @category conversions
  * @since 0.1.0
  */
-export const sources = (pack: Installed, path: Path.Path): ReadonlyArray<Source> =>
-  [...pack.manifest.flows, ...(pack.manifest.skills ?? [])].map((relative) => ({
-    source: `pack:${pack.manifest.name}`,
-    root: path.join(pack.dir, relative),
-    naming: "path" as const
-  }))
+export const sources = (
+  pack: Installed,
+  path: Path.Path
+): Effect.Effect<ReadonlyArray<Source>, RegistryError, FileSystem.FileSystem> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const root = path.resolve(pack.dir)
+    const location = path.join(pack.dir, manifestFileName)
+    const invalid = (entry: string) =>
+      registryError({
+        code: "invalid_pack",
+        module: "Pack",
+        method: "sources",
+        path: location,
+        description:
+          `pack "${pack.manifest.name}@${pack.manifest.version}" at "${location}" declares unsafe source entry ${
+            JSON.stringify(entry)
+          }`
+      })
+    const contains = (parent: string, candidate: string): boolean => {
+      const resolvedParent = path.resolve(parent)
+      const resolvedCandidate = path.resolve(candidate)
+      const prefix = path.join(resolvedParent, path.sep)
+      return resolvedCandidate === resolvedParent || resolvedCandidate.startsWith(prefix)
+    }
+    const output: Array<Source> = []
+    for (const relative of [...pack.manifest.flows, ...(pack.manifest.skills ?? [])]) {
+      if (!isPackRelativePath(relative)) return yield* Effect.fail(invalid(relative))
+      const sourcePath = path.resolve(pack.dir, relative)
+      if (!contains(root, sourcePath)) return yield* Effect.fail(invalid(relative))
+
+      const [realRoot, realSource] = yield* Effect.all([
+        Effect.result(fs.realPath(root)),
+        Effect.result(fs.realPath(sourcePath))
+      ])
+      if (
+        Result.isSuccess(realRoot) &&
+        Result.isSuccess(realSource) &&
+        !contains(realRoot.success, realSource.success)
+      ) {
+        return yield* Effect.fail(invalid(relative))
+      }
+      output.push({
+        source: `pack:${pack.manifest.name}`,
+        root: sourcePath,
+        naming: "path"
+      })
+    }
+    return output
+  })
 
 /**
  * Stamps a descriptor with the pack it was discovered in.
@@ -371,6 +542,9 @@ export const merge = (
 
 /**
  * Refuses a pack whose declared runtime range this runtime does not satisfy.
+ * The grammar is the one documented by {@link compatible}. An unreadable
+ * declaration fails `unreadable_pack_range`; a readable but unsatisfied one
+ * fails `incompatible_pack`.
  *
  * @category refinements
  * @since 0.1.0
@@ -378,15 +552,35 @@ export const merge = (
 export const checkCompatible = (
   pack: Installed,
   runtimeVersion: string
-): Effect.Effect<void, RegistryError> =>
-  pack.manifest.requires === undefined || compatible(pack.manifest.requires.smithers, runtimeVersion)
+): Effect.Effect<void, RegistryError> => {
+  if (pack.manifest.requires === undefined) return Effect.void
+  const range = pack.manifest.requires.smithers
+  const parsed = parseRange(range)
+  const path = manifestLocation(pack.dir)
+  if (parsed === undefined) {
+    return Effect.fail(
+      registryError({
+        code: "unreadable_pack_range",
+        module: "Pack",
+        method: "checkCompatible",
+        path,
+        description: `pack "${pack.manifest.name}@${pack.manifest.version}" requires smithers range ${
+          JSON.stringify(range)
+        }, which could not be parsed`
+      })
+    )
+  }
+  const version = parseVersion(runtimeVersion)
+  return version !== undefined && satisfiesRange(parsed, version)
     ? Effect.void
     : Effect.fail(
       registryError({
         code: "incompatible_pack",
         module: "Pack",
         method: "checkCompatible",
+        path,
         description:
-          `pack "${pack.manifest.name}@${pack.manifest.version}" requires smithers ${pack.manifest.requires.smithers}, and this runtime is ${runtimeVersion}`
+          `pack "${pack.manifest.name}@${pack.manifest.version}" requires smithers ${range}, and this runtime is ${runtimeVersion}`
       })
     )
+}

@@ -32,6 +32,7 @@ describe("Authority", () => {
 
   it.each([
     ["a workspace-relative scope", "fs:write:src/**"],
+    ["an ordinary workspace-relative report", "fs:write:out/report.md"],
     ["a leading current-directory segment", "fs:write:./src/./out"],
     ["empty segments from a doubled separator", "fs:write:src//out"],
     ["a parent segment that stays inside the descent", "fs:write:src/nested/../out"],
@@ -49,6 +50,12 @@ describe("Authority", () => {
     ["a parent segment that escapes after descending", "fs:write:src/../../outside"],
     ["a posix absolute scope", "fs:write:/tmp/out"],
     ["a windows absolute scope", "fs:write:C:/tmp/out"],
+    ["a home-relative scope", "fs:write:~/.ssh/authorized_keys"],
+    ["the home directory marker", "fs:write:~"],
+    ["a shell variable prefix", "fs:write:$HOME/.bashrc"],
+    ["an interpolated shell variable", "fs:write:${HOME}/x"],
+    ["a Windows environment variable", "fs:write:%USERPROFILE%/x"],
+    ["a file URI", "fs:write:file:///etc/passwd"],
     ["an unrecognised action", "git:push"],
     ["the wildcard", "*"]
   ])("infers irreversible from %s", (_label, capability) => {

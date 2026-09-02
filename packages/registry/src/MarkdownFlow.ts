@@ -7,6 +7,7 @@
  *
  * @since 0.1.0
  */
+import * as Digest from "@smthrs/core/Digest"
 import type * as CoreMarkdown from "@smthrs/core/Markdown"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -23,7 +24,7 @@ import {
   SchemaRefMarkdownArgs,
   SchemaRefMarkdownOutput
 } from "./Descriptor.ts"
-import { inferEffectTier, maxTier } from "./internal/Authority.ts"
+import { inferEffectTier, maxTier, unprojectableDelegation } from "./internal/Authority.ts"
 import * as Frontmatter from "./internal/Frontmatter.ts"
 import * as Names from "./internal/Names.ts"
 
@@ -67,6 +68,8 @@ export type Output = typeof Output.Type
  */
 export interface FromMarkdownOptions {
   readonly text: string
+  /** SHA-256 of the complete source when the supplied text is a metadata prefix. */
+  readonly contentDigest?: string | undefined
   readonly path: string
   readonly baseDirectory: string
   readonly naming: "path" | "frontmatter"
@@ -118,10 +121,11 @@ export const fromMarkdown = (options: FromMarkdownOptions): FromMarkdownResult =
   }
 
   validateStandardFields(fields, options.path, warnings)
-  const capabilities = deriveCapabilities(fields, options.path, warnings)
   const flows = deriveFlows(fields, options.path, warnings)
+  const delegation = flows.length === 0 ? undefined : unprojectableDelegation()
+  const capabilities = deriveCapabilities(fields, delegation, options.path, warnings)
   const modelInvocable = deriveModelInvocable(fields, options.path, warnings)
-  const effects = deriveEffects(fields, capabilities, options.path, warnings)
+  const effects = deriveEffects(fields, capabilities, delegation, options.path, warnings)
   const placement = derivePlacement(fields, options.path, warnings)
   const budget = deriveBudget(fields, options.path, warnings)
   const model = typeof fields.model === "string" && fields.model.trim() !== ""
@@ -137,7 +141,8 @@ export const fromMarkdown = (options: FromMarkdownOptions): FromMarkdownResult =
         description,
         body: new BodyRefMarkdown({
           path: options.path,
-          baseDirectory: options.baseDirectory
+          baseDirectory: options.baseDirectory,
+          contentDigest: options.contentDigest ?? Digest.digest(options.text)
         }),
         input: new SchemaRefMarkdownArgs({}),
         output: new SchemaRefMarkdownOutput({}),
@@ -220,7 +225,7 @@ const deriveName = (
     return derived.name
   }
 
-  if ("name" in fields) {
+  if (Object.hasOwn(fields, "name")) {
     warnings.push({
       code: "name_field_ignored",
       path: options.path,
@@ -232,37 +237,53 @@ const deriveName = (
 
 const deriveCapabilities = (
   fields: Record<string, unknown>,
+  delegation: ReturnType<typeof unprojectableDelegation> | undefined,
   path: string,
   warnings: Array<DiscoveryWarning>
 ): ReadonlyArray<string> => {
-  if (!("capabilities" in fields)) {
+  if (!Object.hasOwn(fields, "capabilities")) {
     warnings.push({
       code: "unprojectable_authority",
       path,
-      message: "Markdown authority is not declared; using the conservative wildcard"
+      message: delegation === undefined
+        ? "Markdown authority is not declared; using the conservative wildcard"
+        : "Delegated flow authority cannot be projected statically; using the conservative wildcard"
     })
-    return ["*"]
+    return delegation?.capabilities ?? ["*"]
   }
 
   const value = fields.capabilities
+  let capabilities: ReadonlyArray<string>
   if (typeof value === "string") {
     warnings.push({
       code: "invalid_capabilities",
       path,
       message: "Frontmatter capabilities should be a string array; accepting the space-separated string"
     })
-    return value.split(/\s+/).filter((capability) => capability.length > 0)
-  }
-  if (Array.isArray(value) && value.every((capability): capability is string => typeof capability === "string")) {
-    return value
+    capabilities = value.split(/\s+/).filter((capability) => capability.length > 0)
+  } else if (
+    Array.isArray(value) &&
+    value.every((capability): capability is string => typeof capability === "string")
+  ) {
+    capabilities = value
+  } else {
+    warnings.push({
+      code: "invalid_capabilities",
+      path,
+      message: "Malformed capabilities cannot bound markdown authority; using the conservative wildcard"
+    })
+    capabilities = ["*"]
   }
 
-  warnings.push({
-    code: "invalid_capabilities",
-    path,
-    message: "Malformed capabilities cannot bound markdown authority; using the conservative wildcard"
-  })
-  return ["*"]
+  if (delegation !== undefined) {
+    warnings.push({
+      code: "unprojectable_authority",
+      path,
+      message: "Delegated flow authority cannot be projected statically; using the conservative wildcard"
+    })
+    return delegation.capabilities
+  }
+  return capabilities
 }
 
 const deriveFlows = (
@@ -291,7 +312,7 @@ const deriveModelInvocable = (
   path: string,
   warnings: Array<DiscoveryWarning>
 ): boolean => {
-  if (!("disable-model-invocation" in fields)) {
+  if (!Object.hasOwn(fields, "disable-model-invocation")) {
     return true
   }
   if (
@@ -318,15 +339,16 @@ const deriveModelInvocable = (
 const deriveEffects = (
   fields: Record<string, unknown>,
   capabilities: ReadonlyArray<string>,
+  delegation: ReturnType<typeof unprojectableDelegation> | undefined,
   path: string,
   warnings: Array<DiscoveryWarning>
 ): EffectDeclaration => {
-  const inferred = inferEffectTier(capabilities)
+  const inferred = delegation?.tier ?? inferEffectTier(capabilities)
   const value = fields.effects
   const object = typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
-  let conservative = capabilities.includes("*")
+  let conservative = delegation !== undefined || capabilities.includes("*")
   if (value !== undefined && object === undefined) {
     conservative = true
     warnings.push({
@@ -396,13 +418,13 @@ const deriveEffects = (
     })
   }
   return {
-    reads: conservative ? ["**"] : reads,
-    writes: conservative ? ["**"] : writes,
-    mode: conservative || mode === "expected" ? "expected" : "hermetic",
+    reads: delegation?.reads ?? (conservative ? ["**"] : reads),
+    writes: delegation?.writes ?? (conservative ? ["**"] : writes),
+    mode: delegation?.mode ?? (conservative || mode === "expected" ? "expected" : "hermetic"),
     onConflict: onConflict === "lane" || onConflict === "fail"
       ? onConflict
       : "serialize",
-    tier: conservative ? "irreversible" : tier
+    tier: delegation?.tier ?? (conservative ? "irreversible" : tier)
   }
 }
 
@@ -459,19 +481,22 @@ const deriveBudget = (
   }
 
   const declared = value as Record<string, unknown>
-  // Frontmatter is parsed on YAML's failsafe schema, so every scalar arrives as
-  // a string and `Number` is what turns one into a ceiling. A ceiling is a
-  // positive finite number; zero is refused rather than read as "no ceiling",
-  // because a flow that means unbounded declares nothing at all.
+  // YAML's failsafe schema supplies strings, while already-sanitized JSON may
+  // supply numbers. Both must become positive safe integers so the durable
+  // envelope preserves them exactly.
   const ceiling = (key: "tokens" | "milliseconds"): number | undefined => {
     const candidate = declared[key]
     if (candidate === undefined) return undefined
-    const parsed = typeof candidate === "string" ? Number(candidate) : Number.NaN
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
+    const parsed = typeof candidate === "number"
+      ? candidate
+      : typeof candidate === "string"
+      ? Number(candidate)
+      : Number.NaN
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed
     warnings.push({
       code: "invalid_budget",
       path,
-      message: `Frontmatter budget.${key} must be a number greater than zero; ignoring it`
+      message: `Frontmatter budget.${key} must be a positive safe integer; ignoring it`
     })
     return undefined
   }
@@ -501,7 +526,7 @@ const validateStandardFields = (
   path: string,
   warnings: Array<DiscoveryWarning>
 ): void => {
-  if ("license" in fields && typeof fields.license !== "string") {
+  if (Object.hasOwn(fields, "license") && typeof fields.license !== "string") {
     warnings.push({
       code: "invalid_license",
       path,
@@ -509,7 +534,7 @@ const validateStandardFields = (
     })
   }
 
-  if ("compatibility" in fields) {
+  if (Object.hasOwn(fields, "compatibility")) {
     const compatibility = fields.compatibility
     if (typeof compatibility !== "string" || [...compatibility].length > 500) {
       warnings.push({
@@ -520,7 +545,7 @@ const validateStandardFields = (
     }
   }
 
-  if ("metadata" in fields) {
+  if (Object.hasOwn(fields, "metadata")) {
     const metadata = fields.metadata
     if (
       typeof metadata !== "object" ||
@@ -543,7 +568,7 @@ const warnUnsupportedSchema = (
   warnings: Array<DiscoveryWarning>
 ): void => {
   for (const key of ["input", "schema"]) {
-    if (key in fields) {
+    if (Object.hasOwn(fields, key)) {
       warnings.push({
         code: "unsupported_input_schema",
         path,

@@ -7,6 +7,7 @@
  *
  * @since 0.1.0
  */
+import * as Digest from "@smthrs/core/Digest"
 import { Context, Effect, Layer, Option, Path, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { DiscoveryWarning, type FlowBody, FlowBodyModule, type FlowDescriptor, type Source } from "./Descriptor.ts"
@@ -158,7 +159,7 @@ const scanPacks = (
 ): Effect.Effect<
   { readonly entries: ReadonlyArray<FlowDescriptor>; readonly warnings: ReadonlyArray<DiscoveryWarning> },
   RegistryError,
-  Path.Path
+  FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function*() {
     const path = yield* Path.Path
@@ -167,7 +168,7 @@ const scanPacks = (
       yield* Pack.checkCompatible(pack, config.runtimeVersion)
       const entries: Array<FlowDescriptor> = []
       const warnings: Array<DiscoveryWarning> = []
-      for (const source of Pack.sources(pack, path)) {
+      for (const source of yield* Pack.sources(pack, path)) {
         const scan = yield* discovery.scan(source).pipe(
           Effect.mapError((cause) =>
             registryError({
@@ -190,7 +191,7 @@ const scanPacks = (
 const scanSources = (
   config: Config,
   discovery: Discovery
-): Effect.Effect<Snapshot, RegistryError | DiscoveryError, Path.Path> =>
+): Effect.Effect<Snapshot, RegistryError | DiscoveryError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const retained = new Map<string, RetainedDescriptor>()
     const entries: Array<FlowDescriptor> = []
@@ -278,7 +279,7 @@ const fromRef = (
       }
 
       const bodyPath = path.normalize(descriptor.body.path)
-      const text = yield* fs.readFileString(bodyPath).pipe(
+      const bytes = yield* fs.readFile(bodyPath).pipe(
         Effect.mapError((cause) =>
           registryError({
             code: "body_unavailable",
@@ -288,6 +289,20 @@ const fromRef = (
           })
         )
       )
+      if (
+        descriptor.body.contentDigest !== undefined &&
+        Digest.digest(bytes) !== descriptor.body.contentDigest
+      ) {
+        return yield* Effect.fail(
+          registryError({
+            code: "body_unavailable",
+            method: "loadBody",
+            description:
+              `body for flow "${name}" changed at "${bodyPath}" after discovery; refresh the registry before loading it`
+          })
+        )
+      }
+      const text = new TextDecoder().decode(bytes)
       return MarkdownFlow.loadBody(text, descriptor.body.baseDirectory)
     }
   )
@@ -338,7 +353,10 @@ export const make = (
     const discovery = yield* Discovery
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const scan = scanSources(config, discovery).pipe(Effect.provideService(Path.Path, path))
+    const scan = scanSources(config, discovery).pipe(
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(FileSystem.FileSystem, fs)
+    )
     const initial = yield* scan
     const state = yield* Ref.make(initial)
     const refresh = Effect.flatMap(scan, (snapshot) => Ref.set(state, snapshot))

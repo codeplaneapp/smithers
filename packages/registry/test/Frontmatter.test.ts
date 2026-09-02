@@ -142,11 +142,106 @@ describe("Frontmatter", () => {
     expect(() => JSON.stringify(result.fields)).not.toThrow()
   })
 
+  it("retains reserved mapping keys without creating inherited metadata and freezes the graph", () => {
+    const objectPrototypeHadName = Object.hasOwn(Object.prototype, "name")
+    const result = Frontmatter.parse({
+      path: "/skills/review/SKILL.md",
+      text: [
+        "---",
+        "__proto__:",
+        "  name: inherited",
+        "constructor:",
+        "  prototype:",
+        "    poisoned: true",
+        "prototype:",
+        "  name: top-prototype",
+        "nested:",
+        "  __proto__:",
+        "    name: nested-inherited",
+        "  constructor: nested-constructor",
+        "  prototype: nested-prototype",
+        "items:",
+        "  - __proto__:",
+        "      name: item-inherited",
+        "---",
+        "body"
+      ].join("\n")
+    })
+    const fields = result.fields as Record<string, unknown>
+    const nested = fields.nested as Record<string, unknown>
+    const items = fields.items as ReadonlyArray<Record<string, unknown>>
+
+    expect(Object.getPrototypeOf(fields)).toBe(null)
+    expect(Object.getPrototypeOf(nested)).toBe(null)
+    expect(Object.getPrototypeOf(fields.__proto__)).toBe(null)
+    expect(Object.getPrototypeOf(items[0])).toBe(null)
+    expect(Object.hasOwn(fields, "__proto__")).toBe(true)
+    expect(Object.hasOwn(fields, "constructor")).toBe(true)
+    expect(Object.hasOwn(fields, "prototype")).toBe(true)
+    expect(Object.hasOwn(nested, "__proto__")).toBe(true)
+    expect(Object.hasOwn(nested, "constructor")).toBe(true)
+    expect(Object.hasOwn(nested, "prototype")).toBe(true)
+    expect(Object.hasOwn(fields, "name")).toBe(false)
+    expect("name" in fields).toBe(false)
+    for (const key in fields) expect(Object.hasOwn(fields, key)).toBe(true)
+    for (const key in nested) expect(Object.hasOwn(nested, key)).toBe(true)
+    expect(Object.isFrozen(fields)).toBe(true)
+    expect(Object.isFrozen(fields.__proto__)).toBe(true)
+    expect(Object.isFrozen(nested)).toBe(true)
+    expect(Object.isFrozen(items)).toBe(true)
+    expect(Object.isFrozen(items[0])).toBe(true)
+    expect(({} as { readonly name?: unknown }).name).toBeUndefined()
+    expect(Object.hasOwn(Object.prototype, "name")).toBe(objectPrototypeHadName)
+  })
+
   it("returns one warning for malformed YAML", () => {
     const result = Frontmatter.parse({ path: "/skills/broken/SKILL.md", text: "---\nname: [\n---\nbody" })
     expect(result.fields).toEqual({})
     expect(result.warnings).toHaveLength(1)
     expect(result.warnings[0]?.code).toBe("frontmatter_parse_error")
+  })
+
+  it("reports malformed YAML without disclosing parser excerpts or raw causes", () => {
+    const secret = "SUPERSECRET-TOKEN"
+    const result = Frontmatter.parse({
+      path: "/skills/broken/SKILL.md",
+      text: `---\ndescription: "${secret}\n---\nbody`
+    })
+
+    expect(result.fields).toEqual({})
+    expect(result.warnings).toHaveLength(1)
+    expect(result.warnings[0]).toMatchObject({
+      code: "frontmatter_parse_error",
+      path: "/skills/broken/SKILL.md"
+    })
+    expect(Object.hasOwn(result.warnings[0]!, "cause")).toBe(false)
+    expect(result.warnings[0]?.message).toMatch(/line \d+, column \d+/)
+    expect(result.warnings[0]?.message).not.toContain(secret)
+    expect(JSON.stringify(result.warnings[0])).not.toContain(secret)
+  })
+
+  it("converts YAML alias-expansion refusal into a bounded public warning", () => {
+    const result = Frontmatter.parse({
+      path: "/skills/broken/SKILL.md",
+      text: [
+        "---",
+        "a: &a [x,x,x,x,x,x,x,x,x,x]",
+        "b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a,*a]",
+        "c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b,*b]",
+        "d: [*c,*c,*c,*c,*c,*c,*c,*c,*c,*c]",
+        "---",
+        "body"
+      ].join("\n")
+    })
+
+    expect(result.fields).toEqual({})
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: "frontmatter_parse_error",
+        path: "/skills/broken/SKILL.md",
+        message: "Could not parse frontmatter (YAML_PARSE_ERROR) at line 1, column 1"
+      })
+    ])
   })
 
   it("returns one warning for non-object YAML", () => {

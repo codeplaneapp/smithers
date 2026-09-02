@@ -26,7 +26,7 @@ export const deriveFromPath = (segments: ReadonlyArray<string>): Option.Option<s
 export const deriveFromFrontmatter = (
   options: { readonly fields: Record<string, unknown>; readonly dirBasename: string; readonly path: string }
 ): { readonly name: string; readonly warnings: ReadonlyArray<DiscoveryWarning> } => {
-  if (!("name" in options.fields)) {
+  if (!Object.hasOwn(options.fields, "name")) {
     return {
       name: options.dirBasename,
       warnings: [{

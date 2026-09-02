@@ -6,8 +6,13 @@
  * [File Conventions](../../../docs/specs/Specs/File%20Conventions.md), and
  * [Flow Directory](../../../docs/specs/Specs/Flow%20Directory.md).
  *
+ * Discovery follows symbolic links when the host `FileSystem.stat` does. A
+ * visited-directory identity set stops cycles and aliases, while a 32-segment
+ * depth ceiling bounds hosts that cannot supply stable directory identities.
+ *
  * @since 0.1.0
  */
+import * as Digest from "@smthrs/core/Digest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -69,19 +74,36 @@ const warning = (
   })
 
 const metadataReadLimit = 64 * 1024
-const metadataChunkSize = 512
+const markdownMetadataChunkSize = 512
+const moduleMetadataChunkSize = 8 * 1024
+
+/**
+ * Maximum complete entry size admitted to discovery and content hashing.
+ *
+ * Four MiB leaves ample room for authored metadata and bodies while refusing
+ * build artifacts or hostile entries before `readFile` allocates their bytes.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const entrySizeLimit = 4 * 1024 * 1024
+
+/**
+ * Maximum number of entry-name segments traversed below a source root.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumTraversalDepth = 32
 
 /**
  * Reads just enough of an entry file to decide its metadata.
  *
- * This reads the whole file and then truncates, rather than streaming until
- * the metadata block closes. `FileSystem.stream` is only available from a host
- * that attests whole-filesystem isolation; the Node host provides
- * descriptor-relative access one operation at a time, so a streaming read is
- * refused there and every entry would be reported `unreadable`. `readFile` is
- * one of the operations the atomic host does serve, and the host applies its
- * own read ceiling, so the bound below is a second, explicit one rather than
- * the only one.
+ * The complete admitted file is read because discovery also hashes every body.
+ * The entry-size check in `visit` is this module's only I/O and allocation
+ * bound; `metadataReadLimit` separately bounds how much of those bytes is
+ * decoded and parsed. Module prefixes use larger chunks to avoid repeatedly
+ * tokenizing hundreds of nearly identical 512-byte prefixes.
  */
 const readMetadata = (
   fs: FileSystem.FileSystem,
@@ -90,16 +112,19 @@ const readMetadata = (
 ) =>
   fs.readFile(location).pipe(
     Effect.map((bytes) => {
+      const contentDigest = Digest.digest(bytes)
       const decoder = new TextDecoder()
+      const chunkSize = kind === "module" ? moduleMetadataChunkSize : markdownMetadataChunkSize
+      const parseLimit = Math.min(bytes.length, metadataReadLimit)
       let text = ""
-      for (let offset = 0; offset < bytes.length; offset += metadataChunkSize) {
-        text += decoder.decode(bytes.subarray(offset, offset + metadataChunkSize), { stream: true })
+      for (let offset = 0; offset < parseLimit; offset += chunkSize) {
+        text += decoder.decode(bytes.subarray(offset, Math.min(offset + chunkSize, parseLimit)), { stream: true })
         const complete = kind === "markdown"
           ? Frontmatter.isMetadataComplete(text)
           : ModuleMetadata.isComplete(text)
-        if (complete || text.length >= metadataReadLimit) break
+        if (complete) break
       }
-      return text + decoder.decode()
+      return { contentDigest, text: text + decoder.decode() }
     })
   )
 
@@ -112,6 +137,9 @@ const compareWarnings = (left: DiscoveryWarning, right: DiscoveryWarning): numbe
   }
   return left.message < right.message ? -1 : left.message > right.message ? 1 : 0
 }
+
+const directoryIdentity = (info: FileSystem.File.Info, location: string): string =>
+  `${info.dev}:${Option.getOrElse(info.ino, () => location)}`
 
 /**
  * Creates a discovery service from portable file-system and path services.
@@ -181,14 +209,29 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
         const visit: (
           directory: string,
           segments: ReadonlyArray<string>,
+          visitedDirectories: Set<string>,
+          directoryOrigins: Map<string, string>,
           initialEntries?: ReadonlyArray<string>
         ) => Effect.Effect<void> =
           // Untraced because recursive directory traversal is a scan hot path.
           Effect.fnUntraced(function*(
             directory,
             segments,
+            visitedDirectories,
+            directoryOrigins,
             initialEntries
           ) {
+            if (segments.length > maximumTraversalDepth) {
+              warnings.push(
+                warning(
+                  "max_depth_exceeded",
+                  directory,
+                  `Directory "${directory}" exceeds the maximum discovery depth of ${maximumTraversalDepth} entry-name segments`
+                )
+              )
+              return
+            }
+
             const directoryEntries = initialEntries === undefined
               ? yield* Effect.result(fs.readDirectory(directory))
               : Result.succeed(initialEntries)
@@ -206,8 +249,12 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
               return
             }
 
-            const files = new Set<string>()
-            const directories: Array<{ readonly name: string; readonly location: string }> = []
+            const files = new Map<string, FileSystem.File.Info>()
+            const directories: Array<{
+              readonly name: string
+              readonly location: string
+              readonly identity: string
+            }> = []
             for (const entry of [...directoryEntries.success].sort()) {
               const location = path.join(directory, entry)
               const info = yield* Effect.result(fs.stat(location))
@@ -218,7 +265,7 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
                 continue
               }
               if (info.success.type === "File") {
-                files.add(entry)
+                files.set(entry, info.success)
                 continue
               }
               if (info.success.type !== "Directory") {
@@ -234,13 +281,14 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
               ) {
                 continue
               }
-              directories.push({ name: entry, location })
+              directories.push({ name: entry, location, identity: directoryIdentity(info.success, location) })
             }
 
             const candidates = entryPrecedence.filter((entry) => files.has(entry))
             const selected = candidates[0]
             if (selected !== undefined) {
               const location = path.join(directory, selected)
+              const selectedInfo = files.get(selected)!
               if (candidates.length > 1) {
                 warnings.push(
                   warning(
@@ -259,6 +307,14 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
                     "Path-named sources cannot contain a root-level entry"
                   )
                 )
+              } else if (selectedInfo.size > FileSystem.Size(entrySizeLimit)) {
+                warnings.push(
+                  warning(
+                    "entry_too_large",
+                    location,
+                    `Entry "${location}" is ${selectedInfo.size} bytes, exceeding the ${entrySizeLimit}-byte discovery input ceiling`
+                  )
+                )
               } else {
                 const contents = yield* Effect.result(
                   readMetadata(fs, location, selected === "flow.ts" ? "module" : "markdown")
@@ -274,10 +330,11 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
                     )
                   )
                 } else if (selected === "flow.ts") {
-                  const metadata = ModuleMetadata.parse(contents.success)
-                  const pathName = Names.deriveFromPath(segments)
+                  const metadata = ModuleMetadata.parse(contents.success.text)
                   const name = source.naming === "path"
-                    ? Option.getOrElse(pathName, () => path.basename(directory))
+                    // Root-level path-named entries were refused above, so a
+                    // module reaching this branch has at least one segment.
+                    ? segments.join("/")
                     : path.basename(directory)
                   for (const item of metadata.warnings) {
                     warnings.push(
@@ -308,7 +365,10 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
                       new FlowDescriptor({
                         name,
                         description: metadata.description,
-                        body: new BodyRefModule({ path: location }),
+                        body: new BodyRefModule({
+                          path: location,
+                          contentDigest: contents.success.contentDigest
+                        }),
                         input: metadata.hasInput
                           ? new SchemaRefModule({ path: location, field: "input" })
                           : new SchemaRefNone({}),
@@ -329,7 +389,8 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
                   }
                 } else {
                   const result = MarkdownFlow.fromMarkdown({
-                    text: contents.success,
+                    text: contents.success.text,
+                    contentDigest: contents.success.contentDigest,
                     path: location,
                     baseDirectory: directory,
                     naming: source.naming,
@@ -347,11 +408,36 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
             }
 
             for (const child of directories) {
-              yield* visit(child.location, [...segments, child.name])
+              if (visitedDirectories.has(child.identity)) {
+                const ancestor = directoryOrigins.get(child.identity) ?? child.location
+                warnings.push(
+                  warning(
+                    "symlink_cycle",
+                    child.location,
+                    `Directory "${child.location}" resolves to already visited directory "${ancestor}"; skipping recursive traversal`
+                  )
+                )
+                continue
+              }
+              visitedDirectories.add(child.identity)
+              directoryOrigins.set(child.identity, child.location)
+              yield* visit(
+                child.location,
+                [...segments, child.name],
+                visitedDirectories,
+                directoryOrigins
+              )
             }
           })
 
-        yield* visit(source.root, [], rootEntries)
+        const rootIdentity = directoryIdentity(rootInfo, source.root)
+        yield* visit(
+          source.root,
+          [],
+          new Set([rootIdentity]),
+          new Map([[rootIdentity, source.root]]),
+          rootEntries
+        )
         entries.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
         warnings.sort(compareWarnings)
         return new SourceScan({ entries, warnings })

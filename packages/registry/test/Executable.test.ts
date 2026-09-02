@@ -197,6 +197,21 @@ describe("refusals", () => {
       expect(failure.message).toContain("absent.mjs")
     }).pipe(Effect.provide(platform)))
 
+  it.effect("refuses a module whose bytes changed after discovery", () =>
+    Effect.gen(function*() {
+      const descriptor = new Descriptor.FlowDescriptor({
+        ...(yield* descriptorNamed("greet")),
+        body: new Descriptor.BodyRefModule({
+          path: `${modulesRoot}/plain.mjs`,
+          contentDigest: "0".repeat(64)
+        })
+      })
+      const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
+      expect(failure).toMatchObject({ code: "body_unavailable", flow: "greet" })
+      expect(failure.message).toContain("changed")
+      expect(failure.message).toContain("refresh")
+    }).pipe(Effect.provide(platform)))
+
   it.effect("accepts a body path already written as a file URL", () =>
     Effect.gen(function*() {
       const descriptor = new Descriptor.FlowDescriptor({

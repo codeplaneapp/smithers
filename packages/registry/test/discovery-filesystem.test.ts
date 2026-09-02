@@ -11,7 +11,7 @@ import * as Registry from "../src/Registry.ts"
  * the failures each of them can report.
  */
 type Node =
-  | { readonly kind: "file"; readonly contents: string }
+  | { readonly kind: "file"; readonly contents: string; readonly reportedSize?: number }
   | { readonly kind: "unreadable-file" }
   | { readonly kind: "directory"; readonly entries: ReadonlyArray<string> }
   | { readonly kind: "unreadable-directory" }
@@ -43,14 +43,18 @@ const info = (type: FileSystem.File.Type, size: number): FileSystem.File.Info =>
   blocks: Option.none()
 })
 
-const virtualFileSystem = (nodes: Map<string, Node>): FileSystem.FileSystem =>
+interface FileSystemCalls {
+  readonly readFile: Array<string>
+}
+
+const virtualFileSystem = (nodes: Map<string, Node>, calls?: FileSystemCalls): FileSystem.FileSystem =>
   FileSystem.makeNoop({
     exists: (path) => Effect.succeed(nodes.has(path)),
     stat: (path) => {
       const node = nodes.get(path)
       switch (node?.kind) {
         case "file":
-          return Effect.succeed(info("File", node.contents.length))
+          return Effect.succeed(info("File", node.reportedSize ?? node.contents.length))
         case "unreadable-file":
           return Effect.succeed(info("File", 0))
         case "directory":
@@ -67,6 +71,7 @@ const virtualFileSystem = (nodes: Map<string, Node>): FileSystem.FileSystem =>
       return node?.kind === "directory" ? Effect.succeed([...node.entries]) : Effect.fail(denied("readDirectory", path))
     },
     readFile: (path) => {
+      calls?.readFile.push(path)
       const node = nodes.get(path)
       return node?.kind === "file"
         ? Effect.succeed(new TextEncoder().encode(node.contents))
@@ -79,14 +84,15 @@ const virtualFileSystem = (nodes: Map<string, Node>): FileSystem.FileSystem =>
   })
 
 const root = "/vfs"
+const expectedEntrySizeLimit = 4 * 1024 * 1024
 
 const tree = (nodes: Readonly<Record<string, Node>>): Map<string, Node> => new Map(Object.entries(nodes))
 
-const scan = (nodes: Map<string, Node>, source: Partial<Source> = {}) =>
+const scan = (nodes: Map<string, Node>, source: Partial<Source> = {}, calls?: FileSystemCalls) =>
   Effect.runPromise(
     Effect.gen(function*() {
       const path = yield* Path.Path
-      return yield* Discovery.make(virtualFileSystem(nodes), path).scan({
+      return yield* Discovery.make(virtualFileSystem(nodes, calls), path).scan({
         source: "virtual",
         root,
         naming: "path",
@@ -220,7 +226,7 @@ describe("Discovery host failures", () => {
       ["a socket", "Socket"],
       ["an unknown node", "Unknown"]
     ] as const
-  )("ignores %s without warning", async (_label, type) => {
+  )("ignores a host-reported %s node without warning", async (_label, type) => {
     const result = await scan(tree({
       [root]: { kind: "directory", entries: ["other"] },
       [`${root}/other`]: { kind: "special", type }
@@ -362,7 +368,7 @@ describe("Discovery traversal", () => {
     ])
   })
 
-  it("keeps a deterministic scan when the host lists an entry twice", async () => {
+  it("bounds a duplicate directory listing by physical identity", async () => {
     const result = await scan(tree({
       [root]: { kind: "directory", entries: ["dup", "dup"] },
       [`${root}/dup`]: { kind: "directory", entries: ["SKILL.md"] },
@@ -372,19 +378,15 @@ describe("Discovery traversal", () => {
       }
     }))
 
-    expect(result.entries.map((entry) => entry.path)).toEqual([
-      `${root}/dup/SKILL.md`,
-      `${root}/dup/SKILL.md`
-    ])
+    expect(result.entries.map((entry) => entry.path)).toEqual([`${root}/dup/SKILL.md`])
     expect(result.warnings.map((warning) => warning.code)).toEqual([
+      "symlink_cycle",
       "unknown_frontmatter_key",
-      "unknown_frontmatter_key",
-      "unprojectable_authority",
       "unprojectable_authority"
     ])
   })
 
-  it("stops reading entry metadata at the read ceiling", async () => {
+  it("stops parsing entry metadata at the 64 KiB parsing ceiling", async () => {
     const result = await scan(tree({
       [root]: { kind: "directory", entries: ["huge"] },
       [`${root}/huge`]: { kind: "directory", entries: ["SKILL.md"] },
@@ -405,6 +407,44 @@ describe("Discovery traversal", () => {
       code: "missing_description",
       path: `${root}/huge/SKILL.md`
     })])
+  })
+
+  it("skips an oversized entry before reading its bytes", async () => {
+    const location = `${root}/huge/SKILL.md`
+    const calls: FileSystemCalls = { readFile: [] }
+    const result = await scan(tree({
+      [root]: { kind: "directory", entries: ["huge"] },
+      [`${root}/huge`]: { kind: "directory", entries: ["SKILL.md"] },
+      [location]: {
+        ...skill("Too large to read."),
+        reportedSize: expectedEntrySizeLimit + 1
+      }
+    }), {}, calls)
+
+    expect(result.entries).toEqual([])
+    expect(result.warnings).toEqual([expect.objectContaining({
+      code: "entry_too_large",
+      path: location,
+      message: expect.stringContaining(String(expectedEntrySizeLimit + 1))
+    })])
+    expect(calls.readFile).toEqual([])
+  })
+
+  it("still discovers an entry reported just below the input ceiling", async () => {
+    const location = `${root}/bounded/SKILL.md`
+    const calls: FileSystemCalls = { readFile: [] }
+    const result = await scan(tree({
+      [root]: { kind: "directory", entries: ["bounded"] },
+      [`${root}/bounded`]: { kind: "directory", entries: ["SKILL.md"] },
+      [location]: {
+        ...skill("Within the input ceiling."),
+        reportedSize: expectedEntrySizeLimit - 1
+      }
+    }), {}, calls)
+
+    expect(result.entries.map((entry) => entry.name)).toEqual(["bounded"])
+    expect(result.warnings).toEqual([])
+    expect(calls.readFile).toEqual([location])
   })
 })
 
@@ -481,7 +521,7 @@ describe("Registry over a virtual host", () => {
     )
   }
 
-  it("reads the body that is on the host when loadBody runs, not the one discovered", async () => {
+  it("refuses same-path body drift until the registry refreshes its content address", async () => {
     const nodes = tree({
       [root]: { kind: "directory", entries: ["review"] },
       [`${root}/review`]: { kind: "directory", entries: ["SKILL.md"] },
@@ -492,28 +532,34 @@ describe("Registry over a virtual host", () => {
     })
     const layer = registryLayer(nodes, [{ source: "virtual", root, naming: "path" }])
 
-    const before = await Effect.runPromise(
+    const result = await Effect.runPromise(
       Effect.gen(function*() {
         const registry = yield* Registry.Registry
-        return yield* registry.loadBody("review")
-      }).pipe(Effect.provide(layer))
-    )
-    nodes.set(`${root}/review/SKILL.md`, {
-      kind: "file",
-      contents: "---\ndescription: Reviews a change.\ncapabilities: []\n---\nRewritten body."
-    })
-    const after = await Effect.runPromise(
-      Effect.gen(function*() {
-        const registry = yield* Registry.Registry
-        return yield* registry.loadBody("review")
+        const declaredBefore = yield* registry.get("review")
+        const before = yield* registry.loadBody("review")
+        yield* Effect.sync(() => {
+          nodes.set(`${root}/review/SKILL.md`, {
+            kind: "file",
+            contents: "---\ndescription: Reviews a change.\ncapabilities: []\n---\nRewritten body."
+          })
+        })
+        const stale = yield* Effect.flip(registry.loadBody("review"))
+        yield* registry.refresh()
+        const declaredAfter = yield* registry.get("review")
+        const after = yield* registry.loadBody("review")
+        return { after, before, declaredAfter, declaredBefore, stale }
       }).pipe(Effect.provide(layer))
     )
 
-    expect(before).toMatchObject({ _tag: "Prompt", text: "Original body." })
-    expect(after).toMatchObject({ _tag: "Prompt", text: "Rewritten body." })
+    expect(result.before).toMatchObject({ _tag: "Prompt", text: "Original body." })
+    expect(result.stale).toMatchObject({ code: "body_unavailable", method: "loadBody" })
+    expect(result.after).toMatchObject({ _tag: "Prompt", text: "Rewritten body." })
+    expect(result.declaredBefore.body.contentDigest).toMatch(/^[0-9a-f]{64}$/)
+    expect(result.declaredAfter.body.contentDigest).toMatch(/^[0-9a-f]{64}$/)
+    expect(result.declaredAfter.body.contentDigest).not.toBe(result.declaredBefore.body.contentDigest)
   })
 
-  it("keeps the first entry when the host lists one directory twice", async () => {
+  it("keeps one entry when the host lists one physical directory twice", async () => {
     const nodes = tree({
       [root]: { kind: "directory", entries: ["review", "review"] },
       [`${root}/review`]: { kind: "directory", entries: ["SKILL.md"] },
@@ -528,10 +574,10 @@ describe("Registry over a virtual host", () => {
     )
 
     expect(result.entries.map((entry) => entry.name)).toEqual(["review"])
-    expect(result.warnings).toContainEqual(expect.objectContaining({
-      code: "duplicate_name",
-      name: "review",
-      message: `Duplicate flow name "review"; keeping first entry from "${root}/review/SKILL.md"`
-    }))
+    expect(result.warnings).toEqual([expect.objectContaining({
+      code: "symlink_cycle",
+      path: `${root}/review`,
+      message: `Directory "${root}/review" resolves to already visited directory "${root}/review"; skipping recursive traversal`
+    })])
   })
 })

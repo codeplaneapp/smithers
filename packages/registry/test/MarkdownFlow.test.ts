@@ -1,4 +1,4 @@
-import * as Option from "effect/Option"
+import { Option, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Descriptor from "../src/Descriptor.ts"
 import * as MarkdownFlow from "../src/MarkdownFlow.ts"
@@ -76,6 +76,37 @@ describe("MarkdownFlow", () => {
       metadata: { author: "Example", version: "1.0" }
     })
     expect(result.warnings).toContainEqual(expect.objectContaining({ code: "unprojectable_authority" }))
+  })
+
+  it("keeps reserved frontmatter keys own and identical across descriptor encoding", () => {
+    const result = fromMarkdown([
+      "---",
+      "description: Review a pull request",
+      "capabilities: []",
+      "__proto__:",
+      "  name: inherited",
+      "constructor:",
+      "  prototype: retained",
+      "prototype:",
+      "  value: retained",
+      "---",
+      "Review it."
+    ].join("\n"))
+    const descriptor = Option.getOrThrow(result.descriptor)
+    const encoded = Schema.encodeUnknownSync(Descriptor.FlowDescriptor)(descriptor)
+    const decoded = Schema.decodeUnknownSync(Descriptor.FlowDescriptor)(encoded)
+
+    expect(descriptor.name).toBe("review")
+    expect(Object.hasOwn(descriptor.frontmatter, "__proto__")).toBe(true)
+    expect(Object.hasOwn(descriptor.frontmatter, "name")).toBe(false)
+    expect("name" in descriptor.frontmatter).toBe(false)
+    expect(JSON.parse(JSON.stringify(decoded.frontmatter))).toEqual(
+      JSON.parse(JSON.stringify(descriptor.frontmatter))
+    )
+    expect(Object.keys(decoded.frontmatter).sort()).toEqual(Object.keys(descriptor.frontmatter).sort())
+    expect(Object.hasOwn(decoded.frontmatter, "__proto__")).toBe(true)
+    expect(Object.hasOwn(decoded.frontmatter, "name")).toBe(false)
+    expect("name" in decoded.frontmatter).toBe(false)
   })
 
   it("drops only entries with a missing description", () => {
@@ -321,6 +352,38 @@ describe("MarkdownFlow", () => {
     expect(result.warnings.map((warning) => warning.code)).toEqual(["missing_name"])
   })
 
+  it("widens a delegating flow's declared authority and reports its sealed tier", () => {
+    const result = fromMarkdown([
+      "---",
+      "description: Delegates a write",
+      "flows: [dangerous/write]",
+      "capabilities: [fs:read]",
+      "effects:",
+      "  reads: []",
+      "  writes: []",
+      "  mode: hermetic",
+      "  onConflict: serialize",
+      "  tier: sealed",
+      "---",
+      "body"
+    ].join("\n"))
+    const descriptor = Option.getOrThrow(result.descriptor)
+
+    expect(descriptor.capabilities).toEqual(["*"])
+    expect(descriptor.effects).toEqual({
+      reads: ["**"],
+      writes: ["**"],
+      mode: "expected",
+      onConflict: "serialize",
+      tier: "irreversible"
+    })
+    expect(result.warnings).toContainEqual(expect.objectContaining({ code: "unprojectable_authority" }))
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      code: "invalid_effect_tier",
+      message: "Effect tier sealed under-classifies declared authority; using irreversible"
+    }))
+  })
+
   it.each([
     ["lane", "lane"],
     ["serialize", "serialize"]
@@ -489,7 +552,7 @@ describe("MarkdownFlow", () => {
       name: "review",
       description: "Review",
       flows: ["read-pr"],
-      capabilities: ["Read"],
+      capabilities: ["*"],
       effects: placed.effects,
       model: "opus",
       placement: "sandbox"
@@ -625,7 +688,7 @@ describe("MarkdownFlow", () => {
     }
   })
 
-  it("drops a ceiling that is not a number greater than zero, and keeps the one that is", () => {
+  it("drops a ceiling that is not a positive safe integer, and keeps the one that is", () => {
     const result = fromMarkdown(
       [
         "---",
@@ -644,7 +707,7 @@ describe("MarkdownFlow", () => {
     expect(Option.getOrThrow(result.descriptor).budget).toEqual({ milliseconds: 900000 })
     expect(result.warnings).toContainEqual(expect.objectContaining({
       code: "invalid_budget",
-      message: "Frontmatter budget.tokens must be a number greater than zero; ignoring it"
+      message: "Frontmatter budget.tokens must be a positive safe integer; ignoring it"
     }))
   })
 

@@ -37,6 +37,7 @@ export class DiscoveryError extends Schema.TaggedError<DiscoveryError>()("flows/
   code: DiscoveryErrorCode,
   module: Schema.optional(Schema.String),
   method: Schema.optional(Schema.String),
+  path: Schema.optional(Schema.String),
   message: Schema.String,
   cause: Schema.optional(Schema.Defect())
 }) {}
@@ -54,6 +55,7 @@ export const RegistryErrorCode = Schema.Literals([
   "not_prompt_flow",
   "invalid_pack",
   "incompatible_pack",
+  "unreadable_pack_range",
   "unknown"
 ])
 
@@ -76,6 +78,7 @@ export class RegistryError extends Schema.TaggedError<RegistryError>()("flows/re
   code: RegistryErrorCode,
   module: Schema.optional(Schema.String),
   method: Schema.optional(Schema.String),
+  path: Schema.optional(Schema.String),
   message: Schema.String,
   cause: Schema.optional(Schema.Defect())
 }) {}
@@ -101,6 +104,7 @@ export const discoveryError = (options: {
   readonly code: DiscoveryErrorCode
   readonly module?: string | undefined
   readonly method: string
+  readonly path?: string | undefined
   readonly description?: string | undefined
   readonly cause?: unknown
 }): DiscoveryError => {
@@ -109,6 +113,7 @@ export const discoveryError = (options: {
     code: options.code,
     module,
     method: options.method,
+    path: options.path,
     message: format(options.code, module, options.method, options.description),
     cause: options.cause
   })
@@ -124,6 +129,7 @@ export const registryError = (options: {
   readonly code: RegistryErrorCode
   readonly module?: string | undefined
   readonly method: string
+  readonly path?: string | undefined
   readonly description?: string | undefined
   readonly cause?: unknown
 }): RegistryError => {
@@ -132,6 +138,7 @@ export const registryError = (options: {
     code: options.code,
     module,
     method: options.method,
+    path: options.path,
     message: format(options.code, module, options.method, options.description),
     cause: options.cause
   })

@@ -1,6 +1,9 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import { Effect, FileSystem, Layer, Option, Path, PlatformError } from "effect"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { type Source, SourceScan } from "../src/Descriptor.ts"
@@ -21,6 +24,27 @@ const scan = (source: Source) =>
       return yield* discovery.scan(source)
     }).pipe(Effect.provide(discoveryLayer))
   )
+
+const writeMarkdownFlow = (directory: string, name?: string): void => {
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, "flow.mdx"), [
+    "---",
+    ...(name === undefined ? [] : [`name: ${name}`]),
+    "description: A temporary flow.",
+    "capabilities: []",
+    "---",
+    "body"
+  ].join("\n"))
+}
+
+const withTemporaryRoot = async <A>(run: (root: string) => Promise<A>): Promise<A> => {
+  const root = mkdtempSync(join(tmpdir(), "smithers-registry-discovery-"))
+  try {
+    return await run(root)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
 
 describe("Discovery", () => {
   it("discovers path-named markdown and module flows without loading their bodies", async () => {
@@ -202,5 +226,87 @@ describe("Discovery", () => {
     const second = await scan(source)
 
     expect(second).toEqual(first)
+  })
+
+  it("stops an ancestor symlink after the first physical directory visit", async () => {
+    await withTemporaryRoot(async (root) => {
+      const directory = join(root, "a", "b")
+      const loop = join(directory, "loop")
+      writeMarkdownFlow(directory)
+      symlinkSync(root, loop, "dir")
+
+      const result = await scan({ source: "cycle", root, naming: "path" })
+
+      expect(result.entries.map((entry) => entry.name)).toEqual(["a/b"])
+      expect(result.warnings).toEqual([expect.objectContaining({
+        code: "symlink_cycle",
+        path: loop,
+        message: expect.stringContaining(root)
+      })])
+    })
+  })
+
+  it("bounds a sibling symlink that would duplicate a frontmatter name", async () => {
+    await withTemporaryRoot(async (root) => {
+      const target = join(root, "a")
+      const link = join(root, "b")
+      writeMarkdownFlow(target, "a")
+      symlinkSync(target, link, "dir")
+
+      const result = await scan({ source: "sibling", root, naming: "frontmatter" })
+
+      expect(result.entries.map((entry) => entry.name)).toEqual(["a"])
+      expect(result.warnings).toEqual([expect.objectContaining({
+        code: "symlink_cycle",
+        path: link,
+        message: expect.stringContaining(target)
+      })])
+    })
+  })
+
+  it("stops a self-link without rediscovering its flow", async () => {
+    await withTemporaryRoot(async (root) => {
+      const directory = join(root, "self")
+      const loop = join(directory, "loop")
+      writeMarkdownFlow(directory)
+      symlinkSync(directory, loop, "dir")
+
+      const result = await scan({ source: "self", root, naming: "path" })
+
+      expect(result.entries.map((entry) => entry.name)).toEqual(["self"])
+      expect(result.warnings).toEqual([expect.objectContaining({
+        code: "symlink_cycle",
+        path: loop,
+        message: expect.stringContaining(directory)
+      })])
+    })
+  })
+
+  it("discovers an acyclic flow just under the traversal depth ceiling", async () => {
+    await withTemporaryRoot(async (root) => {
+      const segments = Array.from({ length: 31 }, (_, index) => `d${String(index).padStart(2, "0")}`)
+      writeMarkdownFlow(join(root, ...segments))
+
+      const result = await scan({ source: "deep", root, naming: "path" })
+
+      expect(result.entries.map((entry) => entry.name)).toEqual([segments.join("/")])
+      expect(result.warnings).toEqual([])
+    })
+  })
+
+  it("warns and stops before traversing beyond 32 entry-name segments", async () => {
+    await withTemporaryRoot(async (root) => {
+      const segments = Array.from({ length: 33 }, (_, index) => `d${String(index).padStart(2, "0")}`)
+      const directory = join(root, ...segments)
+      writeMarkdownFlow(directory)
+
+      const result = await scan({ source: "too-deep", root, naming: "path" })
+
+      expect(result.entries).toEqual([])
+      expect(result.warnings).toEqual([expect.objectContaining({
+        code: "max_depth_exceeded",
+        path: directory
+      })])
+    })
   })
 })

@@ -1,6 +1,6 @@
 /**
  * YAML frontmatter parsing for markdown flow sources. Split out so the
- * fence handling — BOM, CRLF, an unterminated document — is stated once and
+ * fence handling for BOM, CRLF, and an unterminated document is stated once and
  * tested directly.
  *
  * @since 0.1.0
@@ -11,6 +11,9 @@ import type { DiscoveryWarning } from "../Descriptor.ts"
 
 const openingFence = /^(?:\uFEFF)?---(?:\r?\n|$)/
 const closingFence = /^---[ \t]*(?=\r?\n|$)/m
+const maximumParseIssues = 3
+
+const emptyFields = (): Record<string, Schema.Json> => Object.freeze(Object.create(null) as Record<string, Schema.Json>)
 
 /**
  * Separates a leading YAML frontmatter document from its markdown body.
@@ -60,7 +63,9 @@ export const isMetadataComplete = (text: string): boolean => {
 
 /**
  * Parses a leading YAML frontmatter document without allowing malformed input
- * to interrupt discovery.
+ * to interrupt discovery. The returned record has a null prototype, and every
+ * object and array in its graph is frozen. An inherited field can therefore
+ * never be observed as frontmatter metadata.
  *
  * @since 0.1.0
  * @category parsing
@@ -70,14 +75,23 @@ export const parse = (
 ): { readonly fields: Record<string, Schema.Json>; readonly warnings: ReadonlyArray<DiscoveryWarning> } => {
   const { frontmatter } = split(options.text)
   if (frontmatter === undefined || frontmatter.trim() === "") {
-    return { fields: {}, warnings: [] }
+    return { fields: emptyFields(), warnings: [] }
   }
 
   try {
-    const document = Yaml.parse(frontmatter, { schema: "failsafe" }) as unknown
+    const parsed = Yaml.parseDocument(frontmatter, { schema: "failsafe" })
+    if (parsed.errors.length > 0) {
+      return {
+        fields: emptyFields(),
+        warnings: parsed.errors
+          .slice(0, maximumParseIssues)
+          .map((issue) => frontmatterIssue(options.path, issue))
+      }
+    }
+    const document = parsed.toJS() as unknown
     if (typeof document !== "object" || document === null || Array.isArray(document)) {
       return {
-        fields: {},
+        fields: emptyFields(),
         warnings: [frontmatterParseError(options.path, "Frontmatter must be a YAML object")]
       }
     }
@@ -92,10 +106,13 @@ export const parse = (
         }]
         : []
     }
-  } catch (cause) {
+  } catch {
     return {
-      fields: {},
-      warnings: [frontmatterParseError(options.path, `Could not parse frontmatter: ${String(cause)}`, cause)]
+      fields: emptyFields(),
+      warnings: [frontmatterParseError(
+        options.path,
+        "Could not parse frontmatter (YAML_PARSE_ERROR) at line 1, column 1"
+      )]
     }
   }
 }
@@ -128,22 +145,39 @@ const sanitizeJson = (
       return sanitized.value
     })
     ancestors.delete(value)
-    return { value: result, changed }
+    return { value: Object.freeze(result), changed }
   }
 
-  const result: Record<string, Schema.Json> = {}
+  const result = Object.create(null) as Record<string, Schema.Json>
   for (const [key, item] of Object.entries(value)) {
     const sanitized = sanitizeJson(item, ancestors)
     changed ||= sanitized.changed
-    result[key] = sanitized.value
+    Object.defineProperty(result, key, {
+      value: sanitized.value,
+      writable: true,
+      enumerable: true,
+      configurable: true
+    })
   }
   ancestors.delete(value)
-  return { value: result, changed }
+  return { value: Object.freeze(result), changed }
 }
 
-const frontmatterParseError = (path: string, message: string, cause?: unknown): DiscoveryWarning => ({
+const frontmatterIssue = (
+  path: string,
+  issue: { readonly linePos?: ReadonlyArray<{ readonly line: number; readonly col: number }> }
+): DiscoveryWarning => {
+  const position = issue.linePos![0]!
+  const line = Math.max(1, Math.min(999_999, position.line))
+  const column = Math.max(1, Math.min(999_999, position.col))
+  return frontmatterParseError(
+    path,
+    `Could not parse frontmatter at line ${line}, column ${column}`
+  )
+}
+
+const frontmatterParseError = (path: string, message: string): DiscoveryWarning => ({
   code: "frontmatter_parse_error",
   path,
-  message,
-  cause
+  message
 })

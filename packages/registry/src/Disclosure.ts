@@ -1,12 +1,38 @@
 /**
  * Progressive-disclosure projections for registry entries.
  *
+ * XML output follows the XML 1.0 character repertoire with a stricter
+ * noncharacter rule. Forbidden C0 controls, lone surrogates, U+FDD0 through
+ * U+FDEF, and every plane's U+FFFE and U+FFFF positions are replaced with
+ * U+FFFD. Tab, line feed, carriage return, and valid astral characters are
+ * preserved.
+ *
  * Implements the model-context projection in
  * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md).
  *
  * @since 0.1.0
  */
 import type { FlowDescriptor } from "./Descriptor.ts"
+
+const isXmlCharacter = (codePoint: number): boolean =>
+  codePoint === 0x09 ||
+  codePoint === 0x0a ||
+  codePoint === 0x0d ||
+  (codePoint >= 0x20 && codePoint <= 0xd7ff) ||
+  (codePoint >= 0xe000 && codePoint <= 0xfffd) ||
+  (codePoint >= 0x10000 && codePoint <= 0x10ffff)
+
+const isNoncharacter = (codePoint: number): boolean =>
+  (codePoint >= 0xfdd0 && codePoint <= 0xfdef) || (codePoint & 0xffff) >= 0xfffe
+
+const replaceForbiddenXmlCharacters = (value: string): string => {
+  let output = ""
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!
+    output += isXmlCharacter(codePoint) && !isNoncharacter(codePoint) ? character : "\uFFFD"
+  }
+  return output
+}
 
 /**
  * Escapes text for use as XML character data.
@@ -15,7 +41,7 @@ import type { FlowDescriptor } from "./Descriptor.ts"
  * @category utilities
  */
 const escapeXml = (value: string): string =>
-  value
+  replaceForbiddenXmlCharacters(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -37,6 +63,9 @@ export const toEntries = (
 
 /**
  * Renders model-invocable descriptors as an agentskills-style XML block.
+ * XML 1.0-forbidden characters and Unicode noncharacters are replaced with
+ * U+FFFD before XML metacharacters are escaped, so one malformed descriptor
+ * cannot invalidate the catalog.
  *
  * @since 0.1.0
  * @category conversions

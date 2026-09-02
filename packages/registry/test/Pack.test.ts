@@ -9,8 +9,12 @@
  * by name rather than by scan order, and that a pack has a content address a
  * lock file can pin.
  */
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
-import { Effect, FileSystem, Layer, Option, Path, PlatformError } from "effect"
+import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as Discovery from "../src/Discovery.ts"
 import * as Pack from "../src/Pack.ts"
@@ -131,6 +135,28 @@ const readPackError = (nodes: Map<string, Node>, dir: string) =>
     }).pipe(Effect.provide(NodePath.layer))
   )
 
+const packSources = (pack: Pack.Installed) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const path = yield* Path.Path
+      return yield* Pack.sources(pack, path)
+    }).pipe(
+      Effect.provide(NodeFileSystem.layer),
+      Effect.provide(NodePath.layer)
+    )
+  )
+
+const packSourcesError = (pack: Pack.Installed) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const path = yield* Path.Path
+      return yield* Effect.flip(Pack.sources(pack, path))
+    }).pipe(
+      Effect.provide(NodeFileSystem.layer),
+      Effect.provide(NodePath.layer)
+    )
+  )
+
 const withRegistry = <A, E>(
   nodes: Map<string, Node>,
   packs: ReadonlyArray<Pack.Installed>,
@@ -205,6 +231,164 @@ describe("Pack.read", () => {
 
     expect(await readPackError(nodes, "/partial")).toMatchObject({ code: "invalid_pack" })
   })
+
+  it("fails invalid_pack when the JSON value is not an object", async () => {
+    const nodes = tree([
+      ["/array", { kind: "directory", entries: ["pack.json"] }],
+      ["/array/pack.json", manifestFile([localManifest])]
+    ])
+
+    expect(await readPackError(nodes, "/array")).toMatchObject({
+      code: "invalid_pack",
+      path: "/array/pack.json"
+    })
+  })
+
+  it("carries the pack-relative refinement on the public Manifest schema", () => {
+    expect(
+      Schema.decodeUnknownOption(Pack.Manifest)({
+        ...localManifest,
+        flows: ["../outside"]
+      })
+    ).toEqual(Option.none())
+  })
+
+  it.each(
+    [
+      ["flows", ".."],
+      ["flows", "../../outside"],
+      ["flows", "/absolute"],
+      ["flows", "."],
+      ["flows", "bad\0path"],
+      ["skills", ".."],
+      ["skills", "../../outside"],
+      ["skills", "/absolute"],
+      ["skills", "."],
+      ["skills", "bad\0path"]
+    ] as const
+  )("refuses an unsafe %s entry %j", async (field, entry) => {
+    const manifest = field === "flows"
+      ? { ...localManifest, flows: [entry] }
+      : { ...localManifest, skills: [entry] }
+    const nodes = tree([
+      ["/unsafe", { kind: "directory", entries: ["pack.json"] }],
+      ["/unsafe/pack.json", manifestFile(manifest)]
+    ])
+
+    const error = await readPackError(nodes, "/unsafe")
+
+    expect(error).toMatchObject({ code: "invalid_pack", path: "/unsafe/pack.json" })
+    expect(error.message).toContain("/unsafe/pack.json")
+    expect(error.message).toContain(JSON.stringify(entry))
+  })
+
+  it.each(["flows", "skills"] as const)("accepts a nested %s entry", async (field) => {
+    const manifest = field === "flows"
+      ? { ...localManifest, flows: ["a/b"] }
+      : { ...localManifest, skills: ["a/b"] }
+    const nodes = tree([
+      ["/nested", { kind: "directory", entries: ["pack.json"] }],
+      ["/nested/pack.json", manifestFile(manifest)]
+    ])
+
+    expect((await readPack(nodes, "/nested")).manifest[field]).toEqual(["a/b"])
+  })
+
+  it.each(["skill", "require"])(
+    "warns about the unknown top-level key %j without refusing the manifest",
+    async (key) => {
+      const nodes = tree([
+        ["/typo", { kind: "directory", entries: ["pack.json"] }],
+        [
+          "/typo/pack.json",
+          manifestFile({
+            ...localManifest,
+            [key]: key === "skill" ? ["skills"] : { smithers: ">=1.0.0" }
+          })
+        ]
+      ])
+
+      const pack = await readPack(nodes, "/typo")
+
+      expect(pack.manifest.name).toBe(localManifest.name)
+      expect(pack.warnings).toEqual([
+        expect.objectContaining({
+          code: "unknown_pack_key",
+          path: "/typo/pack.json",
+          message: expect.stringContaining(key)
+        })
+      ])
+    }
+  )
+})
+
+describe("Pack.sources", () => {
+  it("rechecks directly constructed installed values for lexical containment", async () => {
+    const pack: Pack.Installed = {
+      manifest: {
+        ...new Pack.Manifest(localManifest),
+        flows: ["../../outside"]
+      } as Pack.Manifest,
+      dir: "/pack",
+      origin: "installed"
+    }
+
+    const error = await packSourcesError(pack)
+
+    expect(error).toMatchObject({ code: "invalid_pack", path: "/pack/pack.json" })
+    expect(error.message).toContain("../../outside")
+  })
+
+  it("refuses a resolved source that a path host places outside the resolved root", async () => {
+    const basePath = await Effect.runPromise(
+      Effect.gen(function*() {
+        return yield* Path.Path
+      }).pipe(Effect.provide(NodePath.layer))
+    )
+    const escapingPath: Path.Path = {
+      ...basePath,
+      resolve: (...segments) => segments.length === 1 ? basePath.resolve(...segments) : "/outside"
+    }
+    const error = await Effect.runPromise(
+      Effect.flip(Pack.sources(installed("/pack", localManifest, "installed"), escapingPath)).pipe(
+        Effect.provide(NodeFileSystem.layer)
+      )
+    )
+
+    expect(error).toMatchObject({ code: "invalid_pack", path: "/pack/pack.json" })
+    expect(error.message).toContain(JSON.stringify("flows"))
+  })
+
+  it("keeps benign nested flow and skill entries inside the pack root", async () => {
+    const pack = installed(
+      "/pack",
+      { ...localManifest, flows: ["a/b"], skills: ["skills/review"] },
+      "installed"
+    )
+
+    await expect(packSources(pack)).resolves.toEqual([
+      { source: "pack:acme/review", root: "/pack/a/b", naming: "path" },
+      { source: "pack:acme/review", root: "/pack/skills/review", naming: "path" }
+    ])
+  })
+
+  it("refuses a source whose real path escapes through a symlink", async () => {
+    const temporary = mkdtempSync(join(tmpdir(), "smithers-registry-pack-"))
+    const packDir = join(temporary, "pack")
+    const outside = join(temporary, "outside")
+    mkdirSync(packDir)
+    mkdirSync(outside)
+    symlinkSync(outside, join(packDir, "flows"), "dir")
+
+    try {
+      const error = await packSourcesError(installed(packDir, localManifest, "installed"))
+
+      expect(error).toMatchObject({ code: "invalid_pack", path: join(packDir, "pack.json") })
+      expect(error.message).toContain("flows")
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("Pack.digest", () => {
@@ -217,6 +401,64 @@ describe("Pack.digest", () => {
     const manifest = new Pack.Manifest(localManifest)
 
     expect(Pack.digest(manifest, files)).toBe(Pack.digest(manifest, [...files].reverse()))
+  })
+
+  it("matches the lock-address golden vector", () => {
+    const manifest = new Pack.Manifest({
+      ...localManifest,
+      skills: ["skills"],
+      requires: { smithers: ">=1.0" }
+    })
+
+    expect(Pack.digest(manifest, [
+      { path: "flows/review/flow.mdx", contents: "Review it.\n" },
+      { path: "skills/triage/SKILL.md", contents: "Triage it.\n" }
+    ])).toBe("edefafe12d85981fe9294aba74263441ded75f9f677e64d2e354ee84aa89a5f1")
+  })
+
+  it("is stable across every permutation of three files", () => {
+    const manifest = new Pack.Manifest(localManifest)
+    const measured = [
+      { path: "flows/a/flow.mdx", contents: "A" },
+      { path: "flows/b/flow.mdx", contents: "B" },
+      { path: "flows/c/flow.mdx", contents: "C" }
+    ]
+    const permutations = [
+      [measured[0]!, measured[1]!, measured[2]!],
+      [measured[0]!, measured[2]!, measured[1]!],
+      [measured[1]!, measured[0]!, measured[2]!],
+      [measured[1]!, measured[2]!, measured[0]!],
+      [measured[2]!, measured[0]!, measured[1]!],
+      [measured[2]!, measured[1]!, measured[0]!]
+    ]
+
+    expect(new Set(permutations.map((items) => Pack.digest(manifest, items))).size).toBe(1)
+  })
+
+  it("orders duplicate paths by content digest so input order cannot change the address", () => {
+    const manifest = new Pack.Manifest(localManifest)
+    const left = { path: "flows/review/flow.mdx", contents: "A" }
+    const right = { path: "flows/review/flow.mdx", contents: "B" }
+
+    expect(Pack.digest(manifest, [left, right])).toBe(Pack.digest(manifest, [right, left]))
+    expect(Pack.digest(manifest, [left, left])).not.toBe(Pack.digest(manifest, [left]))
+  })
+
+  it.each(["/absolute", "../outside", "flows/../outside", "flows//review", "flows\\review"])(
+    "refuses the unsafe measured path %j",
+    (path) => {
+      expect(() => Pack.digest(new Pack.Manifest(localManifest), [{ path, contents: "body" }])).toThrow(
+        JSON.stringify(path)
+      )
+    }
+  )
+
+  it("hashes non-ASCII paths and UTF-8 text deterministically", () => {
+    const manifest = new Pack.Manifest(localManifest)
+
+    expect(Pack.digest(manifest, [{ path: "flows/café/技能.mdx", contents: "Résumé 😀\n" }])).toBe(
+      "7de8830426fe7149524e29db51acaa556f221cfe379eacd87db206d665729772"
+    )
   })
 
   it("changes when a flow body changes", () => {
@@ -298,6 +540,35 @@ describe("Pack.compatible", () => {
 
   it("compares prerelease-tagged runtimes on their release numbers", () => {
     expect(Pack.compatible(">=1.0.0", "1.0.0-rc.3")).toBe(true)
+  })
+})
+
+describe("Pack.checkCompatible", () => {
+  const requiring = (range: string): Pack.Installed =>
+    installed("/pack", { ...localManifest, requires: { smithers: range } }, "installed")
+
+  it.each([">= 1.0.0", ">=1.0", "^1", "1.0.0 - 2.0.0"])(
+    "accepts the readable npm range %j",
+    async (range) => {
+      await expect(Effect.runPromise(Pack.checkCompatible(requiring(range), "1.0.0-rc.0"))).resolves.toBeUndefined()
+      expect(Pack.compatible(range, "1.0.0-rc.0")).toBe(true)
+    }
+  )
+
+  it.each(["||", ""])("distinguishes the unreadable range %j", async (range) => {
+    const error = await Effect.runPromise(Effect.flip(Pack.checkCompatible(requiring(range), "1.0.0-rc.0")))
+
+    expect(error).toMatchObject({ code: "unreadable_pack_range", path: "/pack/pack.json" })
+    expect(error.message).toContain(JSON.stringify(range))
+    expect(error.message).toContain("could not be parsed")
+  })
+
+  it("reserves incompatible_pack for a readable range the runtime does not satisfy", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(Pack.checkCompatible(requiring(">=2.0.0"), "1.0.0-rc.0"))
+    )
+
+    expect(error).toMatchObject({ code: "incompatible_pack", path: "/pack/pack.json" })
   })
 })
 

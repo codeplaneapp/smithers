@@ -42,6 +42,7 @@
  * @since 0.1.0
  */
 import * as Annotations from "@smthrs/core/Annotations"
+import * as Digest from "@smthrs/core/Digest"
 import * as CoreFlow from "@smthrs/core/Flow"
 import * as CoreMarkdown from "@smthrs/core/Markdown"
 import * as CorePlacement from "@smthrs/core/Placement"
@@ -506,24 +507,46 @@ interface LoadedBody {
   readonly annotations: Context.Context<never>
 }
 
+const sourceBytes = (
+  descriptor: Descriptor.FlowDescriptor,
+  sourcePath: string
+): Effect.Effect<Uint8Array, ExecutableError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const bytes = yield* fs.readFile(path.normalize(sourcePath)).pipe(
+      Effect.mapError((cause) =>
+        refuse({
+          code: "body_unavailable",
+          flow: descriptor.name,
+          message: `the body of flow "${descriptor.name}" is unavailable at "${sourcePath}"`,
+          cause
+        })
+      )
+    )
+    if (
+      descriptor.body.contentDigest !== undefined &&
+      Digest.digest(bytes) !== descriptor.body.contentDigest
+    ) {
+      return yield* Effect.fail(
+        refuse({
+          code: "body_unavailable",
+          flow: descriptor.name,
+          message:
+            `the body of flow "${descriptor.name}" changed at "${sourcePath}" after discovery; refresh the registry before running it`
+        })
+      )
+    }
+    return bytes
+  })
+
 const loadMarkdown = (
   descriptor: Descriptor.FlowDescriptor,
   path: string,
   baseDirectory: string
 ): Effect.Effect<LoadedBody, ExecutableError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const pathService = yield* Path.Path
-    const text = yield* fs.readFileString(pathService.normalize(path)).pipe(
-      Effect.mapError((cause) =>
-        refuse({
-          code: "body_unavailable",
-          flow: descriptor.name,
-          message: `the body of flow "${descriptor.name}" is unavailable at "${path}"`,
-          cause
-        })
-      )
-    )
+    const text = new TextDecoder().decode(yield* sourceBytes(descriptor, path))
     // `loadBody` is typed over the whole body union but answers `Prompt` for
     // every markdown source, which is the only kind that reaches here; the
     // module arm is the branch above. Narrowing by assertion rather than by a
@@ -538,8 +561,11 @@ const loadModule = (
   descriptor: Descriptor.FlowDescriptor,
   path: string,
   options: Options
-): Effect.Effect<LoadedBody, ExecutableError> =>
+): Effect.Effect<LoadedBody, ExecutableError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
+    if (descriptor.body.contentDigest !== undefined) {
+      yield* sourceBytes(descriptor, path)
+    }
     const loaded = yield* (options.load ?? importModule)(path).pipe(
       Effect.mapError((cause) =>
         refuse({

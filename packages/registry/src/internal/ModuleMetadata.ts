@@ -6,7 +6,7 @@
  */
 import * as Option from "effect/Option"
 import type { EffectDeclaration, EffectTier, Placement } from "../Descriptor.ts"
-import { inferEffectTier, maxTier } from "./Authority.ts"
+import { inferEffectTier, maxTier, unprojectableDelegation } from "./Authority.ts"
 
 /**
  * @since 0.1.0
@@ -400,7 +400,9 @@ const propertiesFrom = (
 }
 
 const decodeEscapes = (value: string): string =>
-  value.replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|n|r|t|b|f|v|0|\\|"|'|`)/g, (_match, sequence: string) => {
+  value.replace(
+    /\\(u\{[0-9a-fA-F]{1,6}\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|n|r|t|b|f|v|0|\\|"|'|`)/g,
+    (_match, sequence: string) => {
     switch (sequence) {
       case "n":
         return "\n"
@@ -424,12 +426,14 @@ const decodeEscapes = (value: string): string =>
         return "'"
       case "`":
         return "`"
-      default:
-        return sequence.startsWith("u")
-          ? String.fromCodePoint(Number.parseInt(sequence.slice(1), 16))
-          : String.fromCodePoint(Number.parseInt(sequence.slice(1), 16))
+      default: {
+        const hexadecimal = sequence.startsWith("u{") ? sequence.slice(2, -1) : sequence.slice(1)
+        const codePoint = Number.parseInt(hexadecimal, 16)
+        return codePoint > 0x10ffff ? `\\${sequence}` : String.fromCodePoint(codePoint)
+      }
     }
-  })
+    }
+  )
 
 const stringLiteral = (source: string | undefined): string | undefined => {
   if (source === undefined) {
@@ -493,7 +497,8 @@ const objectProperties = (
 const effectDeclaration = (
   source: string | undefined,
   inferredTier: EffectTier,
-  warnings: Array<MetadataWarning>
+  warnings: Array<MetadataWarning>,
+  delegation: ReturnType<typeof unprojectableDelegation> | undefined
 ): EffectDeclaration => {
   const properties = objectProperties(source)
   if (source !== undefined && properties === undefined) {
@@ -541,11 +546,11 @@ const effectDeclaration = (
     warnings.push({ message: "Effects mode and conflict policy must be string literals; using conservative effects" })
   }
   return {
-    reads: conservative ? ["**"] : reads ?? [],
-    writes: conservative ? ["**"] : writes ?? [],
-    mode: conservative || mode === "expected" ? "expected" : "hermetic",
+    reads: delegation?.reads ?? (conservative ? ["**"] : reads ?? []),
+    writes: delegation?.writes ?? (conservative ? ["**"] : writes ?? []),
+    mode: delegation?.mode ?? (conservative || mode === "expected" ? "expected" : "hermetic"),
     onConflict: onConflict === "lane" || onConflict === "fail" ? onConflict : "serialize",
-    tier: conservative ? "irreversible" : tier
+    tier: delegation?.tier ?? (conservative ? "irreversible" : tier)
   }
 }
 
@@ -589,6 +594,7 @@ export const parse = (source: string): Metadata => {
   const flowsSource = properties.get("flows")
   const literalFlows = stringArray(flowsSource)
   const hasUnprojectableFlows = flowsSource !== undefined && (literalFlows === undefined || literalFlows.length > 0)
+  const delegation = hasUnprojectableFlows ? unprojectableDelegation() : undefined
   if (literalCapabilities === undefined) {
     warnings.push({
       message: "Capabilities must be a string-literal array for discovery; using the conservative wildcard"
@@ -608,14 +614,15 @@ export const parse = (source: string): Metadata => {
   const capabilities = literalCapabilities === undefined ||
       hasUnprojectableFlows ||
       parsedProperties.hasUnprojectableMembers
-    ? ["*"]
+    ? delegation?.capabilities ?? ["*"]
     : literalCapabilities
 
-  const inferredTier = inferEffectTier(capabilities)
+  const inferredTier = delegation?.tier ?? inferEffectTier(capabilities)
   const effects = effectDeclaration(
     properties.get("effects"),
     inferredTier,
-    warnings
+    warnings,
+    delegation
   )
 
   const modelInvocableSource = properties.get("modelInvocable")
