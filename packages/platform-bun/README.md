@@ -61,7 +61,13 @@ is a ledger record like any other.
 
 `BunHost.layerAt` and `BunHost.layerContainedAt` are the same two layers with
 `Jj` bound to one absolute repository root instead of the process working
-directory. Both refuse a relative root.
+directory. Both refuse a root that is not absolute, the empty string included,
+by throwing `BunHost.BunHostError` with `code: "invalid_repository_root"` when
+the factory is called, before any layer exists. The check is this package's,
+not the `Jj` adapter's: the message names the Bun factory that refused, never
+the adapter behind the `Jj` slot, and repeats at most 64 characters of the
+root, so a root taken from input cannot flood a log line. Branch on `code`,
+never on the message.
 
 Both contained factories take `BunHost.ContainedOptions`: the escalation
 deadline plus the reaper's `ownerPid` and system seam. `platform` is not part of
@@ -72,10 +78,10 @@ one, which `ProcessReaper` then retires without signalling anything.
 
 ## Modules
 
-| Module          | What it provides                                                                                                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BunHost`       | The closed Host bundle: `layer`, `layerAt`, `layerContained`, `layerContainedAt`; re-exports `AtomicFileSystem`, `BunChildProcessSpawner`, `BunFileSystem`, and `BunHttpClient` |
-| `BunFileSystem` | `@smthrs/platform-node`'s atomic `FileSystem`, plus `layerWith` for a host whose python3 lives elsewhere                                                                        |
+| Module          | What it provides                                                                                                                                                                                                                             |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BunHost`       | The closed Host bundle: `layer`, `layerAt`, `layerContained`, `layerContainedAt`, and the `BunHostError` those two root-bound factories throw; re-exports `AtomicFileSystem`, `BunChildProcessSpawner`, `BunFileSystem`, and `BunHttpClient` |
+| `BunFileSystem` | `@smthrs/platform-node`'s atomic `FileSystem`, plus `layerWith` for a host whose python3 lives elsewhere                                                                                                                                     |
 
 **The filesystem slot is the atomic adapter.** `BunFileSystem.layer` _is_
 `@smthrs/platform-node`'s `AtomicFileSystem.layer`, the same layer behind

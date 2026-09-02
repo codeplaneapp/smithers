@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- `BunHost.BunHostError`, the refusal `BunHost.layerAt` and
+  `BunHost.layerContainedAt` throw for a root that is not absolute, the empty
+  string included. It carries the stable code `invalid_repository_root`
+  (`BunHost.BunHostErrorCode`), names the Bun factory that refused, and repeats
+  at most 64 characters of the root. Both factories used to hand the root
+  straight to the `Jj` adapter, which threw a bare `TypeError` naming
+  `NodeJj.layerAt` or `NodeJj.layerSpawnerAt`, carried no code, and echoed the
+  whole string.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

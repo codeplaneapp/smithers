@@ -79,7 +79,11 @@ a default: only the program knows whether it has a durable one.
 
 `layerAt` and `layerContainedAt` are the two layers with `Jj` bound to one
 absolute repository root rather than the process working directory. Both refuse
-a relative root.
+a root that is not absolute, the empty string included, by throwing
+`BunHost.BunHostError` with `code: "invalid_repository_root"` when the factory
+is called. The error is this package's: its message names the Bun factory that
+refused, never the adapter behind the `Jj` slot, and repeats at most 64
+characters of the root. Branch on `code`, never on the message.
 
 Both contained factories take `BunHost.ContainedOptions`: the escalation
 deadline plus the reaper's `ownerPid` and system seam. `platform` is not part of
