@@ -182,11 +182,8 @@ describe("vitest coverage isolation conformance", () => {
   const coverageFloorDeferred = new Set([
     "cli",
     "control",
-    "fs",
     "memory",
-    "model",
     "registry",
-    "scorers",
     "std",
     "testing",
     "build",
@@ -692,22 +689,21 @@ describe("vitest coverage isolation conformance", () => {
     // directives that the earlier literal-`v8 ignore` grep never saw.
     const directive = /(?:istanbul|[cv]8|node:coverage)\s+ignore\s+(if|else|next|file|start|stop)(?=\W|$)/g
     const allowlist: Record<string, number> = {
-      // `AgentAction`'s failure boundary stringifies a decoded provider or
-      // harness cause whose fields are primitives by construction, so the
-      // `JSON.stringify` throw arm is unreachable; it exists so a future
-      // cause shape reports the failure it carries instead of a TypeError.
-      "agent/src/AgentAction.ts": 1,
-      // The budget ledger's failure renderer round-trips a cause through
-      // `JSON`. Every cause this module raises is a journal or schema failure
-      // whose fields are JSON-compatible, so the `catch` arm is unreachable;
-      // it keeps a future cyclic or BigInt-bearing cause from replacing the
-      // accounting error with a rendering defect.
-      "agent/src/Budget.ts": 1,
       // `findMissing` accepts at most 1,000 strict 64-byte digests, so its
       // serialized request cannot reach the 256 KiB protocol ceiling. The
       // assertion remains beside serialization to fail closed if either
       // invariant changes.
       "artifacts/src/RemoteArtifacts.ts": 1,
+      // Docs resolves its own location through `import.meta.url` in source
+      // and ESM builds, while the emitted CommonJS build necessarily takes
+      // the `__filename` arm. That arm is exercised by both the package's
+      // emitted-CJS test and the packed-consumer smoke, outside this source
+      // coverage process. Doctor's SQLite adapter throws Error values, and
+      // Gc's closed retention failure contract does the same; their fallbacks
+      // keep diagnostics total if those dependencies widen in the future.
+      "cli/src/Docs.ts": 5,
+      "cli/src/Doctor.ts": 1,
+      "cli/src/Gc.ts": 2,
       // The agent package's former hints (FlowEngineLike's canonicalization
       // mappers and AgentSession's process-loss fallbacks) were removed with
       // the code that needed them in 81b218ce7; the entries leave with them.
@@ -764,6 +760,20 @@ describe("vitest coverage isolation conformance", () => {
       // names none outside `DigestAlgorithm`, so the rejection translation is
       // unreachable from the engine.
       "flows/src/internal/SandboxedFlowGuest.ts": 1,
+      // The public Incur wrappers hydrate the selected route and replace its
+      // metadata-only definition before execution. The placeholder method is
+      // retained because Incur's command definition type requires one, but no
+      // public serve or fetch path can dispatch it.
+      "fs/src/Incur.ts": 1,
+      // ECMAScript arrays expose a uint32 own `length`; Proxy invariants do
+      // not permit the descriptor-backed boundary walk to observe any other
+      // shape. These guards keep future reflection changes fail-closed.
+      "fs/src/internal/Boundary.ts": 1,
+      // Projection rows, selectors, cursors, and tags are decoded before the
+      // internal frame and snapshot objects are assembled. Re-decoding those
+      // same admitted fields cannot fail; the catches remain fail-closed if a
+      // future assembly step adds an unvalidated member.
+      "gateway/src/Projections.ts": 4,
       // `fenced`'s `info` and `body` groups are mandatory (outside any
       // alternation or quantifier), so they participate in every match; the
       // fallbacks only discharge the optional type on
@@ -822,6 +832,10 @@ describe("vitest coverage isolation conformance", () => {
       // `apply` trap fires; the target body itself is unreachable by
       // construction because every application enters the trap.
       "plan/src/Planned.ts": 1,
+      // The plugin boundary uses the same ECMAScript array-length invariant
+      // as the fs boundary above, retaining a defensive refusal for a future
+      // host-reflection change.
+      "plugin/src/internal/Boundary.ts": 1,
       "run-store/src/AttemptStore.ts": 1,
       "run-store/src/RunStore.ts": 3,
       "run-store/src/internal/Boundary.ts": 1,

@@ -283,6 +283,7 @@
         "@smthrs/memory": "1.0.0-rc.0",
         "@smthrs/model": "1.0.0-rc.0",
         "@smthrs/notifications": "1.0.0-rc.0",
+        "@smthrs/observability": "1.0.0-rc.0",
         "@smthrs/plan": "1.0.0-rc.0",
         "@smthrs/platform-browser": "1.0.0-rc.0",
         "@smthrs/plugin": "1.0.0-rc.0",
@@ -413,14 +414,13 @@
       "name": "@smthrs/build-infra",
       "version": "0.1.0",
       "dependencies": {
-        "@effect/platform-bun": "4.0.0-rc.108",
-        "@effect/platform-node": "4.0.0-rc.108",
         "alchemy": "2.0.0-beta.72",
         "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "5.20260814.1",
         "@types/node": "25.9.5",
+        "@vitest/coverage-v8": "4.1.9",
         "typescript": "6.0.3",
         "vitest": "4.1.9",
       },
@@ -939,8 +939,8 @@
       "name": "@smthrs/fs",
       "version": "0.1.0",
       "dependencies": {
-        "@smthrs/core": "0.1.0",
-        "@smthrs/registry": "0.1.0",
+        "@smthrs/core": "1.0.0-rc.0",
+        "@smthrs/registry": "1.0.0-rc.0",
         "effect": "4.0.0-rc.108",
         "incur": "0.4.19",
       },
@@ -964,22 +964,13 @@
         "vite": "^8.2.1",
         "vitest": "4.1.9",
       },
-      "peerDependencies": {
-        "vite": "^8.0.0",
-      },
-      "optionalPeers": [
-        "vite",
-      ],
     },
     "packages/gateway": {
       "name": "@smthrs/gateway",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@effect/platform-node": "4.0.0-rc.108",
-        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@smthrs/control": "1.0.0-rc.0",
-        "@smthrs/journal": "1.0.0-rc.0",
-        "@smthrs/notifications": "1.0.0-rc.0",
         "@smthrs/run-store": "1.0.0-rc.0",
         "@smthrs/sync": "1.0.0-rc.0",
         "effect": "4.0.0-rc.108",
@@ -992,7 +983,9 @@
         "@smthrs/engine-store": "1.0.0-rc.0",
         "@smthrs/flow": "1.0.0-rc.0",
         "@smthrs/flows": "1.0.0-rc.0",
+        "@smthrs/journal": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
+        "@smthrs/notifications": "1.0.0-rc.0",
         "@smthrs/registry": "1.0.0-rc.0",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
@@ -1608,6 +1601,7 @@
       "dependencies": {
         "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/journal": "1.0.0-rc.0",
+        "@smthrs/observability": "1.0.0-rc.0",
         "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
