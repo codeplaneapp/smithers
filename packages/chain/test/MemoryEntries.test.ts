@@ -42,7 +42,11 @@ describe("MemoryEntries", () => {
         const written = yield* remember.handler({
           bank: "worldview",
           key: "release-plan",
-          tags: ["release"],
+          // `@smthrs/memory` `Namespace.Tag` is a template literal: every tag
+          // carries one of the stable prefixes `branch:`, `stream:`, `source:`
+          // or `scope:`, so a bare word is refused at the seam. A tag names
+          // WHERE a memory came from, and an unprefixed one cannot say.
+          tags: ["scope:release"],
           text: "ship the chain harness this week"
         })
         const found = yield* recall.handler({ banks: ["worldview"], query: "chain harness" })
