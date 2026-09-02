@@ -346,6 +346,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("run-list"),
     payload: z.object({
       repo: z.string(),
+      /** Every status the unfiltered workspace carried when listed; the filter chips read it. Optional for older cards. */
+      statuses: z.array(z.string()).optional(),
       status: z.string().optional(),
       flow: z.string().optional(),
       lineage: z.string().optional(),
@@ -381,7 +383,9 @@ export const CardSchema = z.discriminatedUnion("kind", [
           approval: z.record(z.string(), z.unknown()),
           requestedAt: z.number(),
           decision: z.enum(["approved", "denied"]).optional(),
-          decisionError: z.string().optional()
+          decisionError: z.string().optional(),
+          /** A decision is in flight: the buttons hide until the server answers, so a second click cannot send a contradicting decision. */
+          pending: z.boolean().optional()
         })
       )
     })
@@ -587,6 +591,63 @@ export const CardSchema = z.discriminatedUnion("kind", [
         commitId: z.string().nullable(),
         source: z.enum(["head", "working-copy"]).optional()
       }).optional()
+    })
+  }),
+  /*
+   * Lane citc (ADR 0002): the workspace card — a persistent cloud computer
+   * bound to a repository bookmark. The payload carries exactly what plue's
+   * workspace DTO carries: NO kind, NO uptime, NO workspace head, NO
+   * ahead/behind (plue#446 — never faked). `bookmarkHead` is the TARGET
+   * BOOKMARK's head from the bookmarks call, labeled as such in the header —
+   * never the workspace's own head. The Files and Services facets have no
+   * routes (plue#449), so no payload fields serve them: they render empty.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("workspace"),
+    payload: z.object({
+      workspaceId: z.string(),
+      /** `org/repo` — the repository the workspace is bound to. */
+      repo: z.string(),
+      name: z.string(),
+      targetBookmark: z.string().nullable(),
+      /** plue's six statuses: pending, starting, running, suspended, stopped, failed. */
+      status: z.enum(["pending", "starting", "running", "suspended", "stopped", "failed"]),
+      provisioningStage: z.string().nullable(),
+      /** The target bookmark's head from the bookmarks call — the BOOKMARK head, never the workspace head. */
+      bookmarkHead: z.object({
+        changeId: z.string().nullable(),
+        commitId: z.string().nullable()
+      }).nullable(),
+      snapshots: z.array(
+        z.object({ id: z.string(), name: z.string(), createdAt: z.string().nullable() })
+      ),
+      sessions: z.array(
+        z.object({ id: z.string(), status: z.string(), createdAt: z.string().nullable() })
+      ),
+      /** Which body tab the card shows; the terminal by default. */
+      facet: z.enum(["terminal", "files", "services", "snapshots"]).optional(),
+      /** The plue session the card's Terminal facet (and its tab) is attached to. */
+      terminalSessionId: z.string().optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * Lane citc: one workspace service's log (WORKBENCH-UX §3.1 Services
+   * facet). The routes that would feed it do not exist yet (plue#449), so no
+   * flow produces this card today — the schema lands with the workspace card
+   * so the contract is one change, and the body renders what it is handed.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("service-log"),
+    payload: z.object({
+      workspaceId: z.string(),
+      repo: z.string(),
+      service: z.string(),
+      lines: z.array(z.string()),
+      follow: z.boolean()
     })
   }),
   /*

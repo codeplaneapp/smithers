@@ -42,3 +42,55 @@ describe("the repo-plugin card", () => {
     expect(CardSchema.safeParse({ ...base, kind: "repo-plugin", payload: { repoId: "r1" } }).success).toBe(false)
   })
 })
+
+/*
+ * Lane citc (ADR 0002): the workspace card carries the plue DTO trimmed to
+ * what the card states — no kind, no uptime, no workspace head, no
+ * ahead/behind (plue#446) — and the service-log contract lands with it.
+ */
+describe("the workspace card", () => {
+  const payload = {
+    workspaceId: "ws-1",
+    repo: "will/smithers",
+    name: "review",
+    targetBookmark: "main",
+    status: "running",
+    provisioningStage: null,
+    bookmarkHead: { changeId: "qupxosqw", commitId: "c0ffee1" },
+    snapshots: [{ id: "snap-1", name: "before-upgrade", createdAt: "2026-09-01T10:00:00Z" }],
+    sessions: [{ id: "sess-1", status: "running", createdAt: null }]
+  }
+
+  test("carries the DTO plus the bookmark head, and defaults nothing", () => {
+    const card = CardSchema.parse({ ...base, kind: "workspace", payload })
+    if (card.kind !== "workspace") return
+    expect(card.payload.status).toBe("running")
+    expect(card.payload.bookmarkHead).toEqual({ changeId: "qupxosqw", commitId: "c0ffee1" })
+    // The forbidden fields are not in the schema at all (plue#446).
+    expect(JSON.stringify(Object.keys(card.payload))).not.toMatch(/kind|uptime|ahead|behind/)
+  })
+
+  test("a status outside plue's six is rejected", () => {
+    expect(CardSchema.safeParse({ ...base, kind: "workspace", payload: { ...payload, status: "melting" } }).success)
+      .toBe(false)
+  })
+
+  test("the bookmark head may be absent (an unread head is not a fact)", () => {
+    const card = CardSchema.parse({ ...base, kind: "workspace", payload: { ...payload, bookmarkHead: null } })
+    if (card.kind !== "workspace") return
+    expect(card.payload.bookmarkHead).toBeNull()
+  })
+})
+
+describe("the service-log card", () => {
+  test("carries the service, its lines, and the follow state", () => {
+    const card = CardSchema.parse({
+      ...base,
+      kind: "service-log",
+      payload: { workspaceId: "ws-1", repo: "will/smithers", service: "web", lines: ["listening"], follow: true }
+    })
+    if (card.kind !== "service-log") return
+    expect(card.payload.follow).toBe(true)
+    expect(card.payload.lines).toEqual(["listening"])
+  })
+})
