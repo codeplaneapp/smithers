@@ -83,7 +83,7 @@ const ripgrep = Smithers.CiToolchain.Ripgrep({ release: "14.1.1" })
 // ships Docker, which is why the Docker cases in the same file pass, and
 // neither of these.
 const go = Smithers.CiToolchain.Go({ release: "1.26.0" })
-const foundry = Smithers.CiToolchain.Foundry({ release: "v1.31.2" })
+const foundry = Smithers.CiToolchain.Foundry({ release: "v1.8.1" })
 
 export const ci = Smithers.GithubCiGen({
   packageManager,

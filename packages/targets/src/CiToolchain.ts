@@ -264,7 +264,7 @@ export type GoSetup = typeof GoSetup.Type
  * @category schemas
  * @since 0.1.0
  */
-export const FoundryRelease = Schema.Literals(["v1.31.2"])
+export const FoundryRelease = Schema.Literals(["v1.8.1"])
 
 /**
  * The Foundry releases a runner may install.
@@ -282,6 +282,11 @@ export type FoundryRelease = typeof FoundryRelease.Type
  * `forge fmt --check` reports drift. Every one of those assertions is about
  * what the binary does, so a runner without it removes the check rather than
  * relaxing it.
+ *
+ * The value is a Foundry RELEASE TAG, not the version `forge --version`
+ * prints. Those are different numbering schemes: release `v1.8.1` ships a
+ * binary that calls itself `forge 1.31.2`. Pinning the binary's number makes
+ * `foundryup --install` fail on a version that was never a release.
  *
  * @category schemas
  * @since 0.1.0

@@ -42,7 +42,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.31.2
+          version: v1.8.1
       - name: Workspace targets
         run: pnpm exec smithers-build ci '//packages/...' --jobs 2
         env:
@@ -303,7 +303,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: v1.31.2
+          version: v1.8.1
       - name: Package test targets
         run: pnpm exec smithers-build test '//packages/...'
         env:
