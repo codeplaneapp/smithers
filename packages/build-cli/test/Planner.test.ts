@@ -462,14 +462,19 @@ describe("implementationFingerprint", () => {
 
 describe("targetKeyBody", () => {
   it("omits the process-local Target.make implementation digest", () => {
-    const definition = () =>
-      Target.make("PlannerImplementationIdentity", {
-        attrs: Schema.Struct({}),
-        kinds: ["build"],
-        implementation: () => Target.notImplemented("PlannerImplementationIdentity")
-      })
-    const first = definition()({})
-    const second = definition()({})
+    // Two implementations with different source text, so their digests differ
+    // for a real reason (the digest is keyed on function source since the
+    // process nonce was removed); the key body must still be identical.
+    const first = Target.make("PlannerImplementationIdentity", {
+      attrs: Schema.Struct({}),
+      kinds: ["build"],
+      implementation: () => Target.notImplemented("PlannerImplementationIdentity:first")
+    })({})
+    const second = Target.make("PlannerImplementationIdentity", {
+      attrs: Schema.Struct({}),
+      kinds: ["build"],
+      implementation: () => Target.notImplemented("PlannerImplementationIdentity:second")
+    })({})
     const firstMetadata = Target.metadata(first)
     const secondMetadata = Target.metadata(second)
 
