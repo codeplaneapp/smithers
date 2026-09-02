@@ -150,4 +150,77 @@ describe("R2 content store", () => {
     expect(puts[1]?.onlyIf).toBeUndefined()
     expect(Array.from(puts[1]?.sha256 as Uint8Array)).toEqual(Array.from(new Uint8Array(digestBytes(digest))))
   })
+
+  it("reports an object R2 does not hold as absent", async () => {
+    const bucket = { get: async () => null, head: async () => null } as unknown as R2Bucket
+    const store = makeContentStore(bucket)
+
+    await expect(store.get(digestOf("absent"))).resolves.toBeNull()
+    await expect(store.has(digestOf("absent"))).resolves.toBe(false)
+    expect(errors).not.toHaveBeenCalled()
+  })
+
+  it("reports a checksum of the wrong length as a mismatch rather than reading past it", async () => {
+    const digest = digestOf("artifact")
+    const truncated = object(digest, { checksum: digestBytes(digest).slice(0, 16) })
+    const bucket = { head: async () => truncated } as unknown as R2Bucket
+
+    await expect(makeContentStore(bucket).has(digest)).resolves.toBe(false)
+    expect(String(errors.mock.calls[0]?.[0])).toContain("mismatched SHA-256 checksum")
+  })
+
+  it("still reports an unverifiable object absent when its body refuses to be cancelled", async () => {
+    const digest = digestOf("artifact")
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        throw new Error("cancel refused")
+      }
+    })
+    const bucket = { get: async () => object(digest, { body }) } as unknown as R2Bucket
+
+    await expect(makeContentStore(bucket).get(digest)).resolves.toBeNull()
+  })
+
+  it("publishes a first insert and verifies what R2 stored", async () => {
+    const digest = digestOf("artifact")
+    const bytes = Uint8Array.from(new TextEncoder().encode("artifact"))
+    let puts = 0
+    const bucket = {
+      put: async () => (puts += 1, object(digest, { checksum: digestBytes(digest) })),
+      head: async () => null
+    } as unknown as R2Bucket
+
+    await expect(makeContentStore(bucket).put(digest, bytes)).resolves.toBe("inserted")
+    expect(puts).toBe(1)
+  })
+
+  it("gives up when the conditional publication keeps losing to an object it cannot find", async () => {
+    const digest = digestOf("artifact")
+    const bytes = Uint8Array.from(new TextEncoder().encode("artifact"))
+    let heads = 0
+    const bucket = { put: async () => null, head: async () => (heads += 1, null) } as unknown as R2Bucket
+
+    await expect(makeContentStore(bucket).put(digest, bytes)).rejects.toThrow("lost its object repeatedly")
+    expect(heads).toBe(3)
+  })
+
+  it("refuses a repair R2 does not acknowledge", async () => {
+    const digest = digestOf("artifact")
+    const bytes = Uint8Array.from(new TextEncoder().encode("artifact"))
+    const corrupt = object(digest, { checksum: digestBytes("0".repeat(64)) })
+    const bucket = { put: async () => null, head: async () => corrupt } as unknown as R2Bucket
+
+    await expect(makeContentStore(bucket).put(digest, bytes)).rejects.toThrow(
+      "did not return the repaired content object"
+    )
+  })
+
+  it("reports the digests R2 does not hold as missing from a batch", async () => {
+    const present = digestOf("present")
+    const absent = digestOf("absent")
+    const stored = object(present, { checksum: digestBytes(present) })
+    const bucket = { head: async (key: string) => (key === present ? stored : null) } as unknown as R2Bucket
+
+    await expect(makeContentStore(bucket).presentDigests([absent, present])).resolves.toEqual(new Set([present]))
+  })
 })

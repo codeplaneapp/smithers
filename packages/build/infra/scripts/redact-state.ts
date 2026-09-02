@@ -4,6 +4,7 @@ import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { stackName } from "../deployment.ts"
+import { failureMessage } from "./failure-message.ts"
 
 const redacted = "__SMITHERS_CACHE_TOKEN_REDACTED__"
 
@@ -22,9 +23,17 @@ const credentialEnvironmentNames = [
   "SMITHERS_CACHE_WRITE_TOKEN"
 ] as const
 const infraDirectory = NodePath.dirname(NodePath.dirname(fileURLToPath(import.meta.url)))
-// The stack name is the state directory. Importing it keeps a rename from
-// silently turning redaction into a no-op that reports success.
-const defaultStateDirectory = NodePath.join(infraDirectory, ".alchemy", "state", stackName)
+
+/**
+ * Where the deployment keeps the state this script scrubs.
+ *
+ * The stack name is the state directory. Importing it keeps a rename from
+ * silently turning redaction into a no-op that reports success.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultStateDirectory = NodePath.join(infraDirectory, ".alchemy", "state", stackName)
 
 /**
  * Maximum bytes accepted from one Alchemy state file.
@@ -62,14 +71,33 @@ interface FileIdentity {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-const normalizeOptions = (value: RedactAlchemyStateOptions): {
+/**
+ * What one redaction run walks and what it may leave in place.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface RedactionTargets {
+  /** The values a credential binding may hold: the sentinel and every current verifier. */
   readonly permitted: ReadonlySet<string>
   readonly directory: string
-} => {
+}
+
+/**
+ * Resolves the options into the state directory and the permitted values.
+ *
+ * Without a directory the run walks {@link defaultStateDirectory}; without a
+ * token every credential this service can be deployed with is read from the
+ * environment. Every option is read as plain data, so an accessor never runs.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const resolveRedactionOptions = (value: RedactAlchemyStateOptions): RedactionTargets => {
+  if (!isRecord(value)) throw new TypeError("redaction options must be a plain record")
   let prototype: object | null
   let keys: Array<string | symbol>
   try {
-    if (!isRecord(value)) throw new TypeError("redaction options must be a plain record")
     prototype = Object.getPrototypeOf(value) as object | null
     keys = Reflect.ownKeys(value)
   } catch {
@@ -138,20 +166,6 @@ const errorCode = (value: unknown): string | undefined => {
   }
 }
 
-const failureMessage = (value: unknown): string => {
-  try {
-    if (value instanceof Error) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, "message")
-      if (descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string") {
-        return descriptor.value
-      }
-    }
-  } catch {
-    // Fall through to the deliberately generic message.
-  }
-  return "unrenderable failure"
-}
-
 const optionalOpenFlag = (name: "O_NOFOLLOW" | "O_NONBLOCK"): number =>
   (NodeFs.constants as Partial<Record<string, number>>)[name] ?? 0
 
@@ -181,11 +195,10 @@ const sameIdentity = (left: FileIdentity, right: NodeFs.BigIntStats): boolean =>
 const validateJsonBudget = (root: unknown): void => {
   const pending: Array<{ readonly depth: number; readonly value: unknown }> = [{ depth: 0, value: root }]
   let members = 0
-  while (pending.length > 0) {
-    const current = pending.pop()
-    if (current === undefined) break
+  // Each container is charged for its children before they are queued, so
+  // the running count can never pass the budget between checks.
+  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
     members += 1
-    if (members > maximumJsonMembers) throw new RangeError("Alchemy state has too many JSON members")
     if (current.depth > maximumJsonDepth) throw new RangeError("Alchemy state is nested too deeply")
     if (Array.isArray(current.value)) {
       if (members + pending.length + current.value.length > maximumJsonMembers) {
@@ -202,6 +215,29 @@ const validateJsonBudget = (root: unknown): void => {
   }
 }
 
+/**
+ * Runs `use` over an open handle and closes the handle afterwards.
+ *
+ * The operation's own failure is the one reported: a close that fails after
+ * it is not allowed to replace it, while a close that fails after a success
+ * is a failure of its own, since the bytes it was flushing may be lost.
+ */
+const usingHandle = async <A>(handle: Fs.FileHandle, use: () => Promise<A>): Promise<A> => {
+  let value: A
+  try {
+    value = await use()
+  } catch (error) {
+    try {
+      await handle.close()
+    } catch {
+      // The operation's failure is the report.
+    }
+    throw error
+  }
+  await handle.close()
+  return value
+}
+
 const readStateFile = async (file: string): Promise<{ readonly identity: FileIdentity; readonly state: unknown }> => {
   const expected = await Fs.lstat(file, { bigint: true })
   if (!expected.isFile() || expected.nlink !== 1n) {
@@ -211,17 +247,14 @@ const readStateFile = async (file: string): Promise<{ readonly identity: FileIde
     throw new RangeError(`Alchemy state file exceeds ${maximumStateFileBytes} bytes: ${file}`)
   }
 
+  const identity = identityOf(expected)
   const handle = await Fs.open(
     file,
     NodeFs.constants.O_RDONLY | optionalOpenFlag("O_NOFOLLOW") | optionalOpenFlag("O_NONBLOCK")
   )
-  let identity: FileIdentity | undefined
-  let bytes: Buffer | undefined
-  let primary: unknown
-  try {
+  const bytes = await usingHandle(handle, async () => {
     const opened = await handle.stat({ bigint: true })
-    const expectedIdentity = identityOf(expected)
-    if (!sameIdentity(expectedIdentity, opened) || opened.size > BigInt(maximumStateFileBytes)) {
+    if (!sameIdentity(identity, opened) || opened.size > BigInt(maximumStateFileBytes)) {
       throw new Error(`Alchemy state file changed before it could be read safely: ${file}`)
     }
     const buffer = Buffer.allocUnsafe(Number(opened.size) + 1)
@@ -235,21 +268,11 @@ const readStateFile = async (file: string): Promise<{ readonly identity: FileIde
       total += bytesRead
     }
     const after = await handle.stat({ bigint: true })
-    if (!sameIdentity(expectedIdentity, after) || BigInt(total) !== opened.size) {
+    if (!sameIdentity(identity, after) || BigInt(total) !== opened.size) {
       throw new Error(`Alchemy state file changed while it was being read: ${file}`)
     }
-    identity = expectedIdentity
-    bytes = buffer.subarray(0, total)
-  } catch (error) {
-    primary = error
-  }
-  try {
-    await handle.close()
-  } catch (error) {
-    primary ??= error
-  }
-  if (primary !== undefined) throw primary
-  if (identity === undefined || bytes === undefined) throw new Error(`Alchemy state file could not be read: ${file}`)
+    return buffer.subarray(0, total)
+  })
 
   let text: string
   try {
@@ -426,18 +449,13 @@ const directorySyncUnsupported = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL", "EN
 const syncDirectory = async (directory: string): Promise<void> => {
   if (process.platform === "win32") return
   const handle = await Fs.open(directory, "r")
-  let primary: unknown
-  try {
-    await handle.sync()
-  } catch (error) {
-    if (!directorySyncUnsupported.has(errorCode(error) ?? "")) primary = error
-  }
-  try {
-    await handle.close()
-  } catch (error) {
-    primary ??= error
-  }
-  if (primary !== undefined) throw primary
+  await usingHandle(handle, async () => {
+    try {
+      await handle.sync()
+    } catch (error) {
+      if (!directorySyncUnsupported.has(errorCode(error) ?? "")) throw error
+    }
+  })
 }
 
 const createTemporaryFile = async (
@@ -474,49 +492,27 @@ const writeStateFile = async (
     throw new Error(`Alchemy state file changed before redaction could be published: ${file}`)
   }
   const temporary = await createTemporaryFile(directory, NodePath.basename(file))
-  let closed = false
-  let renamed = false
-  let primary: unknown
   try {
-    await temporary.handle.writeFile(contents, "utf8")
-    await temporary.handle.sync()
-  } catch (error) {
-    primary = error
-  }
-  try {
-    await temporary.handle.close()
-    closed = true
-  } catch (error) {
-    primary ??= error
-  }
-  if (primary === undefined) {
-    try {
-      await assertCanonicalDirectory(root, directory)
-      if (!sameIdentity(identity, await Fs.lstat(file, { bigint: true }))) {
-        throw new Error(`Alchemy state file changed before redaction could be published: ${file}`)
-      }
-      await Fs.rename(temporary.file, file)
-      renamed = true
-      await syncDirectory(directory)
-    } catch (error) {
-      primary = error
+    await usingHandle(temporary.handle, async () => {
+      await temporary.handle.writeFile(contents, "utf8")
+      await temporary.handle.sync()
+    })
+    await assertCanonicalDirectory(root, directory)
+    if (!sameIdentity(identity, await Fs.lstat(file, { bigint: true }))) {
+      throw new Error(`Alchemy state file changed before redaction could be published: ${file}`)
     }
-  }
-  if (!closed) {
-    try {
-      await temporary.handle.close()
-    } catch (error) {
-      primary ??= error
-    }
-  }
-  if (!renamed) {
+    await Fs.rename(temporary.file, file)
+  } catch (error) {
     try {
       await Fs.rm(temporary.file, { force: true })
-    } catch (error) {
-      primary ??= error
+    } catch {
+      // The failure above is the report; a temporary file left behind is not.
     }
+    throw error
   }
-  if (primary !== undefined) throw primary
+  // The rename is durable only once the directory entry is, and a sync that
+  // fails here leaves the redacted file in place, so nothing is removed.
+  await syncDirectory(directory)
 }
 
 const redactFile = async (
@@ -553,9 +549,9 @@ const discoverWorkerStates = async (
   const directories = [root]
   const files: Array<string> = []
   let entries = 0
-  for (let index = 0; index < directories.length; index += 1) {
-    const current = directories[index]
-    if (current === undefined) break
+  // Array iteration observes the directories pushed while it runs, so this
+  // walks every subtree it discovers.
+  for (const current of directories) {
     await assertCanonicalDirectory(root, current)
     const handle = await Fs.opendir(current)
     for await (const entry of handle) {
@@ -565,11 +561,10 @@ const discoverWorkerStates = async (
       }
       const candidate = NodePath.join(current, entry.name)
       if (entry.isSymbolicLink()) throw new TypeError(`symbolic links are not allowed in Alchemy state: ${candidate}`)
-      if (entry.isDirectory()) {
-        const resolved = await Fs.realpath(candidate)
-        if (!inside(root, resolved)) throw new TypeError(`Alchemy state directory escapes its root: ${candidate}`)
-        directories.push(resolved)
-      } else if (entry.name === "CacheWorker.json") {
+      // The name is checked before the kind: a directory or a device named
+      // like Worker state is a state file the read path cannot scrub, and
+      // walking past it would report success over whatever it hides.
+      if (entry.name === "CacheWorker.json") {
         if (!entry.isFile()) throw new TypeError(`Alchemy Worker state is not a regular file: ${candidate}`)
         const resolved = await Fs.realpath(candidate)
         if (!inside(root, resolved)) throw new TypeError(`Alchemy Worker state escapes its root: ${candidate}`)
@@ -577,6 +572,10 @@ const discoverWorkerStates = async (
         if (files.length > maximumWorkerStateFiles) {
           throw new RangeError(`Alchemy state tree exceeds ${maximumWorkerStateFiles} Worker state files`)
         }
+      } else if (entry.isDirectory()) {
+        const resolved = await Fs.realpath(candidate)
+        if (!inside(root, resolved)) throw new TypeError(`Alchemy state directory escapes its root: ${candidate}`)
+        directories.push(resolved)
       }
     }
   }
@@ -598,7 +597,7 @@ const discoverWorkerStates = async (
  * @since 0.1.0
  */
 export const redactAlchemyState = async (options: RedactAlchemyStateOptions = {}): Promise<number> => {
-  const { directory, permitted } = normalizeOptions(options)
+  const { directory, permitted } = resolveRedactionOptions(options)
   const discovered = await discoverWorkerStates(directory)
   if (discovered === null) return 0
   let changed = 0
@@ -612,11 +611,10 @@ const invokedPath = process.argv[1]
 if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
   try {
     // The one optional argument is an absolute Alchemy state directory. The
-    // deploy wrapper never passes it — it calls `redactAlchemyState()` in
-    // process — so the default stack directory stays the operator's path and
-    // this argument exists so the CLI contract itself is executable.
-    const directory = process.argv[2]
-    const count = await redactAlchemyState(directory === undefined ? {} : { directory })
+    // deploy wrapper never passes it, since it calls `redactAlchemyState()`
+    // in process, so the default stack directory stays the operator's path
+    // and this argument exists so the CLI contract itself is executable.
+    const count = await redactAlchemyState({ directory: process.argv[2] })
     process.stdout.write(`Redacted ${count} Alchemy Worker state file(s).\n`)
   } catch (error) {
     process.stderr.write(`Alchemy state redaction failed: ${failureMessage(error)}\n`)

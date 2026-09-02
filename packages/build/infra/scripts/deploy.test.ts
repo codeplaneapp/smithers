@@ -2,8 +2,12 @@ import { existsSync } from "node:fs"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import * as NodePath from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
-import { deploy } from "./deploy.ts"
+import { deploy, resolveDeployOptions } from "./deploy.ts"
+import { redactAlchemyState } from "./redact-state.ts"
+
+const infraRoot = NodePath.resolve(fileURLToPath(new URL("..", import.meta.url).href))
 
 let directory: string
 
@@ -43,6 +47,8 @@ setInterval(() => {}, 1000)
 writeFileSync(marker + ".ready", "ready")
 `
   )
+  // The first wrapper argument names the signal this stub ends itself with.
+  await write("self-signal", "process.kill(process.pid, process.argv[4])\nsetInterval(() => {}, 1000)\n")
 })
 
 afterAll(async () => {
@@ -50,6 +56,191 @@ afterAll(async () => {
 })
 
 describe("deploy wrapper", () => {
+  it("drives the pinned Alchemy CLI from this directory and redacts real state by default", () => {
+    const resolved = resolveDeployOptions({})
+
+    expect(resolved.cli).toBe(NodePath.join(infraRoot, "node_modules", "alchemy", "bin", "cli.js"))
+    expect(existsSync(resolved.cli)).toBe(true)
+    expect(resolved.cwd).toBe(infraRoot)
+    expect(resolved.redact).toBe(redactAlchemyState)
+    expect(resolved.escalationDelayMs).toBe(10_000)
+    expect(resolveDeployOptions({ cli: "cli", cwd: "cwd", escalationDelayMs: 1 }).escalationDelayMs).toBe(1)
+  })
+
+  it("reports a command that ended on a signal of its own", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      const options = { cli: script("self-signal"), cwd: directory, redact: async () => 0 }
+
+      // 128 + SIGHUP for a termination signal the wrapper maps, and the
+      // generic failure code for one it does not.
+      expect(await deploy(["SIGHUP"], options)).toBe(129)
+      expect(await deploy(["SIGALRM"], options)).toBe(1)
+    } finally {
+      stdout.mockRestore()
+    }
+  })
+
+  it("reports a command the host refuses to start and still redacts", async () => {
+    let redactions = 0
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      // A NUL byte is refused by `spawn` itself, before any process exists.
+      const code = await deploy([], {
+        cli: script("exit-zero"),
+        cwd: `${directory}\u0000`,
+        redact: async () => (redactions += 1, 0)
+      })
+
+      expect(code).toBe(1)
+      expect(redactions).toBe(1)
+      expect(stderr.mock.calls.map((call) => String(call[0])).join("")).toContain(
+        "Alchemy deployment failed: The property 'options.cwd'"
+      )
+    } finally {
+      stderr.mockRestore()
+      stdout.mockRestore()
+    }
+  })
+
+  it("kills the command outright when a second termination signal arrives", async () => {
+    const marker = NodePath.join(directory, "second-signal")
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      const started = Date.now()
+      const code = await withIsolatedSignals(async () => {
+        const running = deploy([marker], {
+          cli: script("ignores-sigterm"),
+          cwd: directory,
+          escalationDelayMs: 10_000,
+          redact: async () => 0
+        })
+        await vi.waitFor(() => expect(existsSync(`${marker}.ready`)).toBe(true), { timeout: 10_000 })
+        process.emit("SIGTERM")
+        await vi.waitFor(() => expect(existsSync(`${marker}.sigterm`)).toBe(true), { timeout: 10_000 })
+        process.emit("SIGTERM")
+        return await running
+      })
+
+      // The child ignored the first SIGTERM, so only the immediate SIGKILL
+      // could have ended it this far ahead of the escalation delay.
+      expect(code).toBe(143)
+      expect(Date.now() - started).toBeLessThan(8_000)
+    } finally {
+      stdout.mockRestore()
+    }
+  }, 30_000)
+
+  it("holds a termination signal that arrives while state is being redacted", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      const code = await withIsolatedSignals(() =>
+        deploy([], {
+          cli: script("exit-zero"),
+          cwd: directory,
+          redact: async () => {
+            // The command is over, so there is nothing to forward the signal
+            // to; the wrapper still reports it once cleanup completes.
+            process.emit("SIGTERM")
+            return 2
+          }
+        })
+      )
+
+      expect(code).toBe(143)
+      expect(stdout.mock.calls.map((call) => String(call[0]))).toContain("Redacted 2 Alchemy Worker state file(s).\n")
+      expect(process.listenerCount("SIGTERM")).toBe(0)
+    } finally {
+      stdout.mockRestore()
+    }
+  })
+
+  it("forwards a signal to a command that never got a process", async () => {
+    let redactions = 0
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    try {
+      const code = await withIsolatedSignals(() => {
+        const running = deploy([], {
+          cli: script("exit-zero"),
+          cwd: NodePath.join(directory, "absent-directory"),
+          escalationDelayMs: 100,
+          redact: async () => (redactions += 1, 0)
+        })
+        // The spawn has already failed, so the child has no pid; the signal
+        // must be dropped rather than sent to process group zero.
+        process.emit("SIGTERM")
+        return running
+      })
+
+      expect(code).toBe(1)
+      expect(redactions).toBe(1)
+    } finally {
+      stderr.mockRestore()
+      stdout.mockRestore()
+    }
+  })
+
+  it("signals the child itself when its process group can no longer be signalled", async () => {
+    const marker = NodePath.join(directory, "group-gone")
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    const kill = vi.spyOn(process, "kill").mockImplementationOnce(() => {
+      throw Object.assign(new Error("no such process group"), { code: "ESRCH" })
+    })
+    try {
+      const code = await withIsolatedSignals(async () => {
+        const running = deploy([marker], {
+          cli: script("ignores-sigterm"),
+          cwd: directory,
+          escalationDelayMs: 300,
+          redact: async () => 0
+        })
+        await vi.waitFor(() => expect(existsSync(`${marker}.ready`)).toBe(true), { timeout: 10_000 })
+        process.emit("SIGTERM")
+        return await running
+      })
+
+      // The group kill was refused, yet the child still saw the SIGTERM: it
+      // arrived through the child's own handle.
+      expect(kill.mock.calls[0]?.[1]).toBe("SIGTERM")
+      expect(existsSync(`${marker}.sigterm`)).toBe(true)
+      expect(code).toBe(143)
+    } finally {
+      kill.mockRestore()
+      stdout.mockRestore()
+    }
+  }, 30_000)
+
+  it("signals the child through its own handle where process groups do not exist", async () => {
+    const marker = NodePath.join(directory, "no-process-groups")
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")
+    if (platform === undefined) throw new Error("process.platform is not an own property")
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+    // Windows has no process groups to signal, so the wrapper signals the
+    // child directly; the branch is real, the platform is not.
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" })
+    try {
+      const code = await withIsolatedSignals(async () => {
+        const running = deploy([marker], {
+          cli: script("ignores-sigterm"),
+          cwd: directory,
+          escalationDelayMs: 300,
+          redact: async () => 0
+        })
+        await vi.waitFor(() => expect(existsSync(`${marker}.ready`)).toBe(true), { timeout: 10_000 })
+        process.emit("SIGTERM")
+        return await running
+      })
+
+      expect(existsSync(`${marker}.sigterm`)).toBe(true)
+      expect(code).toBe(143)
+    } finally {
+      Object.defineProperty(process, "platform", platform)
+      stdout.mockRestore()
+    }
+  }, 30_000)
+
   it("returns the command's exit code and redacts state afterwards", async () => {
     let redactions = 0
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)

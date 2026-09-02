@@ -7,9 +7,9 @@ content-addressed blobs in R2.
 
 The hosted service and the self-hosted service under [`../terraform/`](../terraform/)
 serve the same HTTP routes, and cache keys and payloads do not change between
-them. They are not identical: the self-hosted translation is maintained by
-hand, and it has taken neither the read and write credential split nor the
-newer refusals this Worker applies, so treat this file as the contract for the
+them. Both carry the read and write credential split and both refuse two equal
+credentials. They are not identical: the self-hosted translation is maintained
+by hand and follows this Worker, so treat this file as the contract for the
 hosted service alone.
 
 The service has two credentials: one that may read and one that may publish.
@@ -32,11 +32,13 @@ Provide these credentials in the deploying shell:
   tokens used to derive the Worker's Cloudflare `secret_text` verifiers. Use at
   least 32 random bytes each. The Worker receives only their SHA-256 digests;
   do not put a bearer value in an `.env` file or source control. Both are
-  required, and a deployment that has not separated its credentials yet sets
-  both to the same value. Keep them equal until the CI half of the split
-  lands: the workflow generator still hands every job one credential, so a
-  write token rotated to a distinct value would stop every job publishing
-  with `403`. [`CACHE-TRUST.md`](./CACHE-TRUST.md) tracks that rollout.
+  required and they must differ. The deployment reads the pair before it
+  applies any resource and fails when either is missing or the two are equal,
+  because one value under two names lets every reader publish. To roll the
+  split out without breaking a client that still sends one credential, set
+  the write token to the current shared value and mint a new read token;
+  [`CACHE-TRUST.md`](./CACHE-TRUST.md) gives the full order, including when
+  to rotate the write token.
 - Cloudflare authentication: Set `CLOUDFLARE_API_TOKEN` and
   `CLOUDFLARE_ACCOUNT_ID` for non-interactive deployments, or authenticate
   interactively with Cloudflare OAuth. You can use `wrangler whoami` to check
@@ -133,12 +135,11 @@ That plans the typecheck (`:check`), the suite (`:suite`), ESLint (`:lint`),
 and the README parity check (`:docs`). The fast local loop is
 `pnpm exec vitest run` from `packages/build/infra`.
 
-The suite computes coverage and fails below the thresholds in
-`vitest.config.ts`. They are a ratchet set at the measured floor, raised as
-tests accrete and never lowered. `alchemy.run.ts` is excluded because it
-declares Cloudflare resources and cannot execute without an account; the rules
-it would otherwise encode live in `deployment.ts`, which the suite covers, and
-a test reads `alchemy.run.ts` to gate the wiring that remains.
+The suite computes coverage and fails below 100% on branches, functions,
+lines, and statements, the workspace's contract for every default run.
+`alchemy.run.ts` only names the Cloudflare resources; every option object and
+the stack program live in `deployment.ts`, where the suite executes them, and
+importing the graph under the suite covers the wiring itself.
 
 ## Protocol
 

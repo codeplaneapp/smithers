@@ -12,23 +12,21 @@ export default defineConfig({
       // Enabled so the thresholds below are computed rather than declared:
       // `Smithers.Vitest` only declines to pass `--coverage.enabled=false`,
       // and vitest's own default is off, so nothing measured this package
-      // until this block existed. The floors are the measured coverage
-      // rounded down: an honest ratchet, raised as tests accrete toward the
-      // workspace's 100% norm, never lowered.
+      // until this block existed. The thresholds are the workspace contract
+      // (rc-contract section 9): 100% on every default run.
       enabled: true,
       provider: "v8",
       reportsDirectory: join(tmpdir(), `flows-build-infra-coverage-${process.pid}`),
-      include: ["worker/**/*.ts", "scripts/**/*.ts", "deployment.ts"],
-      // `alchemy.run.ts` is the Cloudflare resource graph. It cannot execute
-      // without an account, so every rule it could encode lives in
-      // `deployment.ts` instead, and `worker/test/deployment-config.test.ts`
-      // gates the wiring that remains by reading the file.
-      exclude: ["worker/test/**", "scripts/**/*.test.ts", "alchemy.run.ts"],
+      // `alchemy.run.ts` only names the Cloudflare resources; every option
+      // object and the stack program come from `deployment.ts`, so importing
+      // the graph executes all of it and the suite can hold it to 100% too.
+      include: ["worker/**/*.ts", "scripts/**/*.ts", "deployment.ts", "alchemy.run.ts"],
+      exclude: ["worker/test/**", "scripts/**/*.test.ts"],
       thresholds: {
-        branches: 86,
-        functions: 97,
-        lines: 94,
-        statements: 91
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100
       }
     }
   }

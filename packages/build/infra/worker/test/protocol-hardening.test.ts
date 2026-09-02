@@ -1370,4 +1370,249 @@ describe("remote-cache hardening", () => {
     expect(reads).toBe(0)
     expect(describeFailure("secret string")).toBe("smithers build cache: request failed (kind=string)")
   })
+
+  it("attributes numeric diagnostics and survives a cause that traps inspection", () => {
+    const trapped = new Proxy({}, {
+      getOwnPropertyDescriptor() {
+        throw new Error("descriptor trap")
+      }
+    })
+
+    expect(describeFailure(null)).toBe("smithers build cache: request failed (kind=null)")
+    expect(describeFailure(Object.assign(new Error("host"), { errno: -2 }))).toBe(
+      "smithers build cache: request failed (name=Error errno=-2)"
+    )
+    expect(describeFailure(Object.assign(new Error("host"), { errno: 1.5 }))).toBe(
+      "smithers build cache: request failed (name=Error)"
+    )
+    expect(describeFailure(trapped)).toBe("smithers build cache: request failed (unattributed)")
+  })
+
+  it("names every surrogate fault in an action key", () => {
+    expect(invalidKeyDigest("\uD800a")).toBe("keyDigest must be well-formed Unicode text")
+    expect(invalidKeyDigest("\uDC00")).toBe("keyDigest must be well-formed Unicode text")
+    expect(invalidKeyDigest("key:😀")).toBeNull()
+  })
+
+  it("reads the media type without its parameters and refuses a body that declares none", async () => {
+    const handler = makeHandler()
+    const withParameters = await handler(
+      jsonRequest(`/ac/${keyDigest}`, { exitOk: true }, {
+        method: "PUT",
+        headers: { "content-type": "Application/JSON; charset=utf-8" }
+      })
+    )
+    const undeclared = await handler(rawRequest(`/ac/${keyDigest}`, { method: "PUT", body: instrumentedBody().body }))
+
+    expect(withParameters.status).toBe(201)
+    expect(undeclared.status).toBe(415)
+  })
+
+  it("does not let a body that refuses cancellation replace the answer", async () => {
+    const handler = makeHandler()
+    const refused = instrumentedBody({ failCancel: true })
+    const unauthorized = await handler(
+      rawRequest(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { authorization: "Bearer wrong", "content-type": "application/json" },
+        body: refused.body
+      })
+    )
+    const abandoned = instrumentedBody({ chunks: [textEncoder.encode("{}")], failCancel: true })
+    const mismatch = await handler(
+      rawRequest(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-length": "1", "content-type": "application/json" },
+        body: abandoned.body
+      })
+    )
+
+    expect(unauthorized.status).toBe(401)
+    expect(refused.log).toEqual(["body-cancel"])
+    expect(mismatch.status).toBe(400)
+    expect(abandoned.log).toEqual(["get-reader", "reader-cancel", "release"])
+  })
+
+  it("treats a request without a body as empty unless a length claims otherwise", async () => {
+    const handler = makeHandler()
+    const emptyArtifact = digestOf("")
+    const octets = { "content-type": "application/octet-stream" }
+
+    const undeclared = await handler(rawRequest(`/cas/${emptyArtifact}`, { method: "PUT", headers: octets }))
+    const zero = await handler(
+      rawRequest(`/cas/${emptyArtifact}`, { method: "PUT", headers: { ...octets, "content-length": "0" } })
+    )
+    const claimed = await handler(
+      rawRequest(`/cas/${emptyArtifact}`, { method: "PUT", headers: { ...octets, "content-length": "5" } })
+    )
+
+    expect(undeclared.status).toBe(201)
+    expect(zero.status).toBe(200)
+    expect(claimed.status).toBe(400)
+    await expect(claimed.json()).resolves.toEqual({ error: "content-length does not match the request body" })
+  })
+
+  it("answers 404 for a deletion and a HEAD that find nothing", async () => {
+    const handler = makeHandler()
+
+    expect((await handler(request(`/ac/${keyDigest}`, { method: "DELETE" }))).status).toBe(404)
+    expect((await handler(request(`/cas/${digestOf("absent")}`, { method: "HEAD" }))).status).toBe(404)
+  })
+
+  it("refuses canonicalization inputs a parser cannot produce", () => {
+    const hostileLength = new Proxy([], {
+      getOwnPropertyDescriptor(target, property) {
+        return property === "length"
+          ? { value: 1.5, writable: true, enumerable: false, configurable: false }
+          : Reflect.getOwnPropertyDescriptor(target, property)
+      }
+    })
+    const wide = Object.fromEntries(Array.from({ length: maxJsonMembers + 1 }, (_, index) => [String(index), 0]))
+    const chunk = "x".repeat(maxCanonicalJsonBytes / 2)
+
+    expect(() => canonicalJson(hostileLength)).toThrow("array is not an inert JSON array")
+    expect(() => canonicalJson(wide)).toThrow("JSON has too many members")
+    expect(() => canonicalJson([chunk, chunk, chunk])).toThrow("canonical JSON exceeds its byte bound")
+  })
+
+  it("turns a bodyless content object and an unknown publication outcome into refusals", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const handler = makeHandler({
+        contentStore: {
+          get: async () => "not an object" as never,
+          has: async () => false,
+          put: async () => "stored" as never,
+          presentDigests: async () => new Set()
+        }
+      })
+      const artifact = textEncoder.encode("artifact")
+
+      expect((await handler(request(`/cas/${digestOf("artifact")}`))).status).toBe(503)
+      expect(
+        (await handler(
+          request(`/cas/${digestOf("artifact")}`, {
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" },
+            body: artifact
+          })
+        )).status
+      ).toBe(503)
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it("stores provenance and skips declared outputs that name no artifact", async () => {
+    const actionCache = new MemoryActionCache()
+    const handler = makeHandler({ actionCache })
+    const response = await handler(
+      jsonRequest(`/ac/${keyDigest}`, {
+        keyDigest,
+        result: { exitOk: true },
+        createdAtMs: 1_700_000_000_000,
+        meta: {
+          boundary: {
+            declaredOutputs: {
+              outputs: [
+                { path: "declared-without-digest" },
+                { digest: null },
+                { digest: digestOf("inline"), content: "inline" },
+                { digest: digestOf("stored") }
+              ]
+            }
+          }
+        }
+      }, { method: "PUT" })
+    )
+
+    expect(response.status).toBe(201)
+    expect(actionCache.entries.get(keyDigest)?.createdAtMs).toBe(1_700_000_000_000)
+  })
+
+  it("refuses dependencies that trap inspection", () => {
+    const base = {
+      actionCache: new MemoryActionCache(),
+      contentStore: new MemoryContentStore(),
+      readTokenHash,
+      writeTokenHash
+    }
+    const trapping = (trap: "getPrototypeOf" | "getOwnPropertyDescriptor", target: object = {}) =>
+      new Proxy(target, {
+        [trap]: () => {
+          throw new Error("trap")
+        }
+      })
+
+    expect(() => createHandler(trapping("getPrototypeOf") as never)).toThrow(
+      "protocol dependencies could not be inspected safely"
+    )
+    expect(() => createHandler(trapping("getOwnPropertyDescriptor", { ...base }) as never)).toThrow(
+      "protocol dependency actionCache could not be inspected safely"
+    )
+    expect(() => createHandler({ ...base, actionCache: trapping("getOwnPropertyDescriptor") } as never)).toThrow(
+      "actionCache.get could not be inspected safely"
+    )
+    expect(() => createHandler({ ...base, actionCache: trapping("getPrototypeOf") } as never)).toThrow(
+      "actionCache.get could not be inspected safely"
+    )
+  })
+
+  it("answers findMissing from its own snapshot of the request", async () => {
+    const asked = digestOf("asked")
+    const injected = digestOf("never requested")
+    const store = (answer: ReadonlySet<string>): ContentStore => ({
+      get: async () => null,
+      has: async () => false,
+      put: async () => "inserted",
+      presentDigests: async (digests) => {
+        // A store that writes into the array it was handed must not be able
+        // to put a digest the client never asked for into the answer.
+        expect(Object.isFrozen(digests)).toBe(true)
+        Reflect.set(digests, 0, injected)
+        return answer
+      }
+    })
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const injecting = makeHandler({ contentStore: store(new Set([injected])) })
+      expect(
+        (await injecting(jsonRequest("/cas/findMissing", { digests: [asked] }, { method: "POST" }))).status
+      ).toBe(503)
+    } finally {
+      errors.mockRestore()
+    }
+
+    const quiet = makeHandler({ contentStore: store(new Set()) })
+    const response = await quiet(jsonRequest("/cas/findMissing", { digests: [asked] }, { method: "POST" }))
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ missing: [asked] })
+  })
+
+  it("releases a stalled artifact transfer exactly once when the client cancels it", async () => {
+    const digest = digestOf("stalled")
+    const stalled: ContentStore = {
+      get: async () => ({
+        body: new ReadableStream<Uint8Array>({ pull: () => new Promise<void>(() => undefined) })
+      }),
+      has: async () => true,
+      put: async () => "present",
+      presentDigests: async () => new Set()
+    }
+    const handler = makeHandler({ contentStore: stalled })
+    const held = await Promise.all(
+      Array.from({ length: maxConcurrentArtifactTransfers }, () => handler(request(`/cas/${digest}`)))
+    )
+    expect(held.map((response) => response.status)).toEqual([200, 200])
+    expect((await handler(request(`/cas/${digest}`))).status).toBe(429)
+
+    // The cancelled transfer's source read settles after the cancel and
+    // reaches the release a second time; the slot must come back once.
+    await held[0]?.body?.cancel()
+    const readmitted = await handler(request(`/cas/${digest}`))
+    expect(readmitted.status).toBe(200)
+    expect((await handler(request(`/cas/${digest}`))).status).toBe(429)
+
+    await Promise.all([held[1]?.body?.cancel(), readmitted.body?.cancel()])
+  })
 })

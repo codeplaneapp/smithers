@@ -306,8 +306,12 @@ const busy = (message: string): Response =>
 
 const methodNotAllowed = (allowed: string): Response => new Response(null, { status: 405, headers: { allow: allowed } })
 
-const mediaType = (request: Request): string =>
-  (request.headers.get("content-type") ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? ""
+const mediaType = (request: Request): string => {
+  const header = request.headers.get("content-type")
+  if (header === null) return ""
+  const parameters = header.indexOf(";")
+  return (parameters === -1 ? header : header.slice(0, parameters)).trim().toLowerCase()
+}
 
 const utf8Bytes = (value: string): number => textEncoder.encode(value).byteLength
 
@@ -344,10 +348,7 @@ const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
   }
 
   const reader = request.body.getReader()
-  let released = false
   const release = (): void => {
-    if (released) return
-    released = true
     try {
       reader.releaseLock()
     } catch {
@@ -432,50 +433,45 @@ const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
  */
 const irreversibleJson = (text: string): string | null => {
   const scopes: Array<Set<string> | null> = []
-  let expectingKey = false
+  // The member names of the object whose key comes next, or `null` when the
+  // next string is a value.
+  let keyScope: Set<string> | null = null
   let index = 0
   while (index < text.length) {
-    const character = text[index] ?? ""
+    const character = text.charAt(index)
     if (character === "{") {
-      scopes.push(new Set<string>())
-      expectingKey = true
+      keyScope = new Set<string>()
+      scopes.push(keyScope)
       index += 1
     } else if (character === "[") {
       scopes.push(null)
-      expectingKey = false
+      keyScope = null
       index += 1
     } else if (character === "}" || character === "]") {
       scopes.pop()
-      expectingKey = false
+      keyScope = null
       index += 1
     } else if (character === ",") {
-      expectingKey = scopes.at(-1) instanceof Set
+      const enclosing = scopes.at(-1)
+      keyScope = enclosing instanceof Set ? enclosing : null
       index += 1
     } else if (character === ":") {
-      expectingKey = false
+      keyScope = null
       index += 1
     } else if (character === "\"") {
       let end = index + 1
-      while (end < text.length && text[end] !== "\"") end += text[end] === "\\" ? 2 : 1
-      if (expectingKey) {
-        const names = scopes.at(-1)
-        let name: string
-        try {
-          name = JSON.parse(text.slice(index, end + 1)) as string
-        } catch {
-          // The caller already parsed this text, so a member name this scan
-          // cannot read back is a refusal rather than a storage failure.
-          return "body contains an object member name the service cannot compare"
-        }
-        if (names instanceof Set) {
-          if (names.has(name)) return "body contains a duplicate object member name"
-          names.add(name)
-        }
+      while (end < text.length && text.charAt(end) !== "\"") end += text.charAt(end) === "\\" ? 2 : 1
+      if (keyScope !== null) {
+        // The caller already parsed this text, so every string token in it
+        // parses on its own.
+        const name = JSON.parse(text.slice(index, end + 1)) as string
+        if (keyScope.has(name)) return "body contains a duplicate object member name"
+        keyScope.add(name)
       }
       index = end + 1
     } else if (character === "-" || (character >= "0" && character <= "9")) {
       let end = index + 1
-      while (end < text.length && numberLexeme.test(text[end] ?? "")) end += 1
+      while (end < text.length && numberLexeme.test(text.charAt(end))) end += 1
       const lexeme = text.slice(index, end)
       const value = Number(lexeme)
       if (!Number.isFinite(value) || Object.is(value, -0) || String(value) !== lexeme) {
@@ -532,9 +528,7 @@ export const canonicalJson = (value: unknown): string => {
   let members = 0
   const append = (fragment: string): void => {
     bytes += utf8Bytes(fragment)
-    if (!Number.isSafeInteger(bytes) || bytes > maxCanonicalJsonBytes) {
-      throw new Error("canonical JSON exceeds its byte bound")
-    }
+    if (bytes > maxCanonicalJsonBytes) throw new Error("canonical JSON exceeds its byte bound")
     chunks.push(fragment)
   }
   const appendString = (text: string): void => {
@@ -602,9 +596,7 @@ export const canonicalJson = (value: unknown): string => {
       members += keys.length
       const stringKeys = keys.sort()
       append("{")
-      for (let index = 0; index < stringKeys.length; index += 1) {
-        const key = stringKeys[index]
-        if (key === undefined) throw new Error("object key disappeared during canonicalization")
+      for (const [index, key] of stringKeys.entries()) {
         if (index > 0) append(",")
         const descriptor = Object.getOwnPropertyDescriptor(current, key)
         if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
@@ -782,10 +774,12 @@ const bearerScheme = /^Bearer +/i
 type Presented = "write" | "read" | "none"
 
 const matches = (supplied: Uint8Array<ArrayBuffer>, expected: Uint8Array<ArrayBuffer>): boolean => {
+  // Both are SHA-256 digests, so every index of `expected` reads inside `supplied`.
+  const candidate = new DataView(supplied.buffer, supplied.byteOffset, supplied.byteLength)
   let difference = 0
-  for (let index = 0; index < expected.byteLength; index += 1) {
-    difference |= (supplied[index] ?? 0) ^ (expected[index] ?? 0)
-  }
+  expected.forEach((byte, index) => {
+    difference |= byte ^ candidate.getUint8(index)
+  })
   return difference === 0
 }
 
@@ -938,12 +932,11 @@ const handleArtifact = async (
  * transfer. Wrapping the body moves the release to the point the client
  * actually stops consuming it: end of stream, error, or cancellation.
  */
-const heldWhileStreaming = (response: Response, release: () => void): Response => {
-  const body = response.body
-  if (body === null) {
-    release()
-    return response
-  }
+const heldWhileStreaming = (
+  response: Response,
+  body: NonNullable<Response["body"]>,
+  release: () => void
+): Response => {
   const reader = body.getReader()
   const held = new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -992,18 +985,22 @@ const handleFindMissing = async (
   if (!unique.every((digest) => typeof digest === "string" && hexDigest.test(digest))) {
     return json(400, { error: "every digest must be 64 lowercase hex characters" })
   }
-  const typedDigests = unique as Array<string>
-  if (typedDigests.length === 0) return json(200, { missing: [] })
-  const present = await contentStore.presentDigests(typedDigests)
+  const requested: ReadonlyArray<string> = Object.freeze([...unique] as Array<string>)
+  if (requested.length === 0) return json(200, { missing: [] })
+  // The store gets its own frozen copy and the answer is built from the
+  // snapshot above: a store that assigned into the array it was handed while
+  // its promise was pending could otherwise put a digest the client never
+  // asked for into `missing`.
+  const present = await contentStore.presentDigests(Object.freeze([...requested]))
   if (!(present instanceof Set)) throw new Error("content store returned an invalid digest set")
-  const requested = new Set(typedDigests)
+  const requestedSet = new Set(requested)
   for (const digest of present) {
-    if (typeof digest !== "string" || !requested.has(digest)) {
+    if (typeof digest !== "string" || !requestedSet.has(digest)) {
       throw new Error("content store returned a digest outside the request")
     }
   }
   return json(200, {
-    missing: typedDigests.filter((digest) => !present.has(digest))
+    missing: requested.filter((digest) => !present.has(digest))
   })
 }
 
@@ -1207,7 +1204,10 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
   const normalized = normalizeDependencies(dependencies)
   const { actionCache, contentStore, health, maxArtifactBytes, readTokenHash, writeTokenHash } = normalized
   const digestBytes = (digest: string): Uint8Array<ArrayBuffer> =>
-    Uint8Array.from(digest.match(/.{2}/g) ?? [], (pair) => Number.parseInt(pair, 16))
+    Uint8Array.from(
+      { length: digest.length / 2 },
+      (_, index) => Number.parseInt(digest.slice(index * 2, index * 2 + 2), 16)
+    )
   const expectedReadTokenHash = digestBytes(readTokenHash)
   const expectedWriteTokenHash = digestBytes(writeTokenHash)
 
@@ -1229,7 +1229,9 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
         lastHealthyAt = performance.now()
       })
       .finally(() => {
-        if (healthInFlight === current) healthInFlight = null
+        // Only this probe ever occupies the slot: a concurrent caller joins
+        // it rather than starting another.
+        healthInFlight = null
       })
     healthInFlight = current
     return current
@@ -1278,8 +1280,11 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
           await discardBody(request.body)
           return forbidden()
         }
-        const segments = url.pathname.split("/")
-        if (segments.length === 3 && segments[0] === "" && segments[1] === "cas" && segments[2] === "findMissing") {
+        const [root, route, encoded, ...rest] = url.pathname.split("/")
+        // Every cache route is `/<route>/<one segment>`: nothing before the
+        // first slash and exactly one segment after the route.
+        const routed = root === "" && encoded !== undefined && rest.length === 0
+        if (routed && route === "cas" && encoded === "findMissing") {
           if (activeFindMissingRequests >= maxConcurrentFindMissingRequests) {
             await discardBody(request.body)
             return busy("too many simultaneous findMissing requests")
@@ -1291,10 +1296,10 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
             activeFindMissingRequests -= 1
           }
         }
-        if (segments.length === 3 && segments[0] === "" && segments[1] === "ac") {
+        if (routed && route === "ac") {
           let keyDigest: string
           try {
-            keyDigest = decodeURIComponent(segments[2] ?? "")
+            keyDigest = decodeURIComponent(encoded)
           } catch {
             await discardBody(request.body)
             return json(400, { error: "keyDigest must be valid URL encoding" })
@@ -1312,9 +1317,10 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
             }
           }
           const response = await handleActionCache(request, keyDigest, url, actionCache)
+          const body = response.body
           // A hit streams its stored body after the handler returns, so the
           // request slot has to outlive the return and end with the stream.
-          if (request.method !== "GET" || response.status !== 200 || response.body === null) {
+          if (request.method !== "GET" || response.status !== 200 || body === null) {
             return response
           }
           let released = false
@@ -1325,7 +1331,7 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
           // This body is built here from validated stored text, so no store
           // can hand the wrapper something that refuses a reader; the order
           // matches the artifact path, where a store can.
-          const held = heldWhileStreaming(response, () => {
+          const held = heldWhileStreaming(response, body, () => {
             if (released) return
             released = true
             activeCacheRequests -= 1
@@ -1333,10 +1339,10 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
           streaming = true
           return held
         }
-        if (segments.length === 3 && segments[0] === "" && segments[1] === "cas") {
+        if (routed && route === "cas") {
           let digest: string
           try {
-            digest = decodeURIComponent(segments[2] ?? "")
+            digest = decodeURIComponent(encoded)
           } catch {
             await discardBody(request.body)
             return json(400, { error: "digest must be valid URL encoding" })
@@ -1355,11 +1361,12 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
                 contentStore,
                 maxArtifactBytes
               )
+              const body = response.body
               // A `PUT` body is buffered inside the slot, so the transfer is
               // over when the handler returns. A `GET` body streams after it,
               // so the slot the README promises bounds artifact transfers has
               // to outlive the return and end with the stream.
-              if (request.method !== "GET" || response.status !== 200 || response.body === null) {
+              if (request.method !== "GET" || response.status !== 200 || body === null) {
                 return response
               }
               let released = false
@@ -1367,7 +1374,7 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
               // inside the wrapping leaves this request's own `finally` and
               // the outer one still responsible for the two counters. Setting
               // them first would strand both for the isolate's lifetime.
-              const held = heldWhileStreaming(response, () => {
+              const held = heldWhileStreaming(response, body, () => {
                 if (released) return
                 released = true
                 activeArtifactTransfers -= 1

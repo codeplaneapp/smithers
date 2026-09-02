@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process"
 import * as NodePath from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { failureMessage } from "./failure-message.ts"
 import { redactAlchemyState } from "./redact-state.ts"
 
 const infraDirectory = NodePath.dirname(NodePath.dirname(fileURLToPath(import.meta.url)))
@@ -8,24 +9,8 @@ const alchemyCli = NodePath.join(infraDirectory, "node_modules", "alchemy", "bin
 const terminationSignals = ["SIGHUP", "SIGINT", "SIGTERM"] as const
 const escalationDelayMs = 10_000
 
-interface CommandResult {
-  readonly code: number | null
-  readonly signal: NodeJS.Signals | null
-}
-
-const failureMessage = (value: unknown): string => {
-  try {
-    if (value instanceof Error) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, "message")
-      if (descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string") {
-        return descriptor.value
-      }
-    }
-  } catch {
-    // Fall through to the deliberately generic message.
-  }
-  return "unrenderable failure"
-}
+/** How the Alchemy command ended, as the exit code the wrapper reports for it. */
+type CommandResult = { readonly exitCode: number }
 
 const signalExitCode = (signal: NodeJS.Signals): number => {
   switch (signal) {
@@ -72,6 +57,33 @@ export interface DeployOptions {
   readonly escalationDelayMs?: number | undefined
 }
 
+/**
+ * {@link DeployOptions} with every omission filled in.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ResolvedDeployOptions {
+  readonly cli: string
+  readonly cwd: string
+  readonly redact: () => Promise<number>
+  readonly escalationDelayMs: number
+}
+
+/**
+ * Fills every omitted substitution from the production deployment: the pinned
+ * Alchemy CLI, this directory, and real state redaction.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const resolveDeployOptions = (options: DeployOptions): ResolvedDeployOptions => ({
+  cli: options.cli ?? alchemyCli,
+  cwd: options.cwd ?? infraDirectory,
+  redact: options.redact ?? redactAlchemyState,
+  escalationDelayMs: options.escalationDelayMs ?? escalationDelayMs
+})
+
 const runAlchemy = (
   command: { readonly cli: string; readonly cwd: string },
   args: ReadonlyArray<string>,
@@ -100,7 +112,13 @@ const runAlchemy = (
     }
     onSpawn(child)
     child.once("error", (error) => finish(() => reject(error)))
-    child.once("close", (code, signal) => finish(() => resolve({ code, signal })))
+    child.once("close", (code, signal) =>
+      finish(() =>
+        resolve({
+          /* v8 ignore next -- Node reports a code or a signal on close, never neither, so the fallback is unreachable */
+          exitCode: signal !== null ? signalExitCode(signal) : code ?? 1
+        })
+      ))
   })
 
 /**
@@ -117,9 +135,8 @@ export const deploy = async (
   args: ReadonlyArray<string> = process.argv.slice(2),
   options: DeployOptions = {}
 ): Promise<number> => {
-  const target = { cli: options.cli ?? alchemyCli, cwd: options.cwd ?? infraDirectory }
-  const redact = options.redact ?? redactAlchemyState
-  const escalationDelay = options.escalationDelayMs ?? escalationDelayMs
+  const { cli, cwd, escalationDelayMs: escalationDelay, redact } = resolveDeployOptions(options)
+  const target = { cli, cwd }
   let activeChild: ChildProcess | undefined
   let requestedSignal: NodeJS.Signals | undefined
   let escalationTimer: ReturnType<typeof setTimeout> | undefined
@@ -157,15 +174,17 @@ export const deploy = async (
   let redactionFailure: unknown
   try {
     try {
+      // The handlers above are installed and the child is spawned in the
+      // same synchronous run, so no signal can arrive before `onSpawn`, and
+      // one wrapper drives one child, so `onFinish` always ends the active one.
       command = await runAlchemy(
         target,
         args,
         (child) => {
           activeChild = child
-          if (requestedSignal !== undefined) forward(requestedSignal)
         },
-        (child) => {
-          if (activeChild === child) activeChild = undefined
+        () => {
+          activeChild = undefined
           clearEscalation()
         }
       )
@@ -190,18 +209,13 @@ export const deploy = async (
   if (redactionFailure !== undefined) {
     process.stderr.write(`Alchemy state redaction failed: ${failureMessage(redactionFailure)}\n`)
   }
-  if (commandFailure !== undefined || redactionFailure !== undefined) return 1
+  if (command === undefined || redactionFailure !== undefined) return 1
   if (requestedSignal !== undefined) return signalExitCode(requestedSignal)
-  if (command?.signal !== null && command?.signal !== undefined) return signalExitCode(command.signal)
-  return command?.code ?? 1
+  return command.exitCode
 }
 
 const invokedPath = process.argv[1]
+/* v8 ignore next 3 -- the process entry runs the pinned Alchemy CLI against the operator's own state; the suite drives every wrapper path through `deploy` with substitutes instead */
 if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
-  try {
-    process.exitCode = await deploy()
-  } catch (error) {
-    process.stderr.write(`Deployment wrapper failed: ${failureMessage(error)}\n`)
-    process.exitCode = 1
-  }
+  process.exitCode = await deploy()
 }

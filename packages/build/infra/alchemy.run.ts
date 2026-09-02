@@ -1,42 +1,22 @@
 import * as Alchemy from "alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
 import { Stack } from "alchemy/Stack"
-import * as Effect from "effect/Effect"
 import {
-  artifactLifecycleRules,
-  cacheTokenVerifier,
-  retentionCron,
-  stackName,
-  workerStageOptions
+  cacheBucketOptions,
+  cacheDatabaseOptions,
+  cacheStackOutputs,
+  cacheWorkerOptions,
+  stackName
 } from "./deployment.ts"
 
-const cacheDatabase = Cloudflare.D1.Database("CacheDatabase", {
-  migrationsDir: "./worker/migrations"
-})
-
-// The Worker's scheduled sweep prunes D1 entries; R2 has no scheduled reader,
-// so artifact retention is the bucket's own lifecycle. Without it the store
-// keeps every artifact ever published, forever.
-const cacheBucket = Cloudflare.R2.Bucket("CacheBucket", {
-  lifecycleRules: [...artifactLifecycleRules]
-})
-
+// Every option object and the stack program come from `deployment.ts`, where
+// the suite executes them. This file only names the resources, which cannot
+// be applied without a Cloudflare account.
+const cacheDatabase = Cloudflare.D1.Database("CacheDatabase", cacheDatabaseOptions)
+const cacheBucket = Cloudflare.R2.Bucket("CacheBucket", cacheBucketOptions)
 const cacheWorker = Cloudflare.Worker(
   "CacheWorker",
-  Stack.useSync((stack) => ({
-    main: "./worker/index.ts",
-    compatibility: { date: "2026-08-14" },
-    // The Worker's `scheduled` handler prunes entries past the retention
-    // window; without this trigger the store grows until D1 refuses writes.
-    crons: [retentionCron],
-    env: {
-      CACHE_DATABASE: cacheDatabase,
-      CACHE_BUCKET: cacheBucket,
-      CACHE_READ_TOKEN: cacheTokenVerifier("SMITHERS_CACHE_READ_TOKEN"),
-      CACHE_WRITE_TOKEN: cacheTokenVerifier("SMITHERS_CACHE_WRITE_TOKEN")
-    },
-    ...workerStageOptions(stack.stage)
-  }))
+  Stack.useSync(cacheWorkerOptions({ database: cacheDatabase, bucket: cacheBucket }))
 )
 
 /**
@@ -54,16 +34,5 @@ export default Alchemy.Stack(
     providers: Cloudflare.providers(),
     state: Alchemy.localState()
   },
-  Effect.gen(function*() {
-    const { stage } = yield* Alchemy.Stack
-    const database = yield* cacheDatabase
-    const bucket = yield* cacheBucket
-    const worker = yield* cacheWorker
-    return {
-      stage,
-      url: worker.url,
-      databaseName: database.databaseName,
-      bucketName: bucket.bucketName
-    }
-  })
+  cacheStackOutputs({ stack: Alchemy.Stack, database: cacheDatabase, bucket: cacheBucket, worker: cacheWorker })
 )

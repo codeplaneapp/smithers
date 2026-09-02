@@ -57,15 +57,19 @@ const maxRetentionBatches = 20
 const millisecondsPerDay = 24 * 60 * 60 * 1000
 
 const digestBytes = (digest: string): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(digest.match(/.{2}/g) ?? [], (pair) => Number.parseInt(pair, 16))
+  Uint8Array.from(
+    { length: digest.length / 2 },
+    (_, index) => Number.parseInt(digest.slice(index * 2, index * 2 + 2), 16)
+  )
 
 const sameBytes = (left: ArrayBuffer, right: Uint8Array<ArrayBuffer>): boolean => {
-  const candidate = new Uint8Array(left)
+  const candidate = new DataView(left)
   if (candidate.byteLength !== right.byteLength) return false
   let difference = 0
-  for (let index = 0; index < right.byteLength; index += 1) {
-    difference |= (candidate[index] ?? 0) ^ (right[index] ?? 0)
-  }
+  // The lengths agree, so every index of `right` reads inside `candidate`.
+  right.forEach((byte, index) => {
+    difference |= byte ^ candidate.getUint8(index)
+  })
   return difference === 0
 }
 
@@ -311,11 +315,11 @@ export const makeContentStore = (bucket: R2Bucket): ContentStore => ({
     const present = new Set<string>()
     for (let offset = 0; offset < digests.length; offset += findMissingConcurrency) {
       const batch = digests.slice(offset, offset + findMissingConcurrency)
-      const objects = await Promise.all(batch.map((digest) => bucket.head(digest)))
-      for (let index = 0; index < batch.length; index += 1) {
-        const digest = batch[index]
-        const object = objects[index]
-        if (digest === undefined || object === null || object === undefined) continue
+      const probes = await Promise.all(
+        batch.map(async (digest) => ({ digest, object: await bucket.head(digest) }))
+      )
+      for (const { digest, object } of probes) {
+        if (object === null) continue
         assertObjectShape(digest, object)
         const fault = contentChecksumFault(digest, object)
         if (fault === null) {
