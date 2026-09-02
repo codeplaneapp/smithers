@@ -45,3 +45,24 @@ export const resolveNamespace = (
     bank: input
   })
 }
+
+/**
+ * Resolves and de-duplicates bank names by structured namespace, preserving
+ * the first public spelling for result attribution.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const resolveBanks = (
+  banks: ReadonlyArray<string>
+): Effect.Effect<ReadonlyArray<{ readonly namespace: Namespace.Namespace; readonly bank: string }>, MemoryError> =>
+  Effect.forEach(banks, resolveNamespace).pipe(
+    Effect.map((resolved) => {
+      const unique = new Map<string, { readonly namespace: Namespace.Namespace; readonly bank: string }>()
+      for (const entry of resolved) {
+        const identity = `${entry.namespace.kind}\u0000${entry.namespace.id}`
+        if (!unique.has(identity)) unique.set(identity, entry)
+      }
+      return [...unique.values()]
+    })
+  )

@@ -10,7 +10,8 @@
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import { compareText, literalFtsQuery } from "./internal/Text.ts"
+import { resolveBanks } from "./internal/Bank.ts"
+import { compareText, literalFtsQuery as escapeFtsQuery } from "./internal/Text.ts"
 import type * as MemoryError from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Namespace from "./Namespace.ts"
@@ -19,28 +20,33 @@ import * as Recall from "./Recall.ts"
 /**
  * Escapes a query into a quoted, implicit-AND FTS5 expression.
  *
+ * This is the one escaper both public entry points use. `MemoryStore.searchFts`
+ * applies it to the raw query it receives, so a caller that has already escaped
+ * a query must not pass the escaped form back in.
+ *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export { literalFtsQuery }
+export const literalFtsQuery: (query: string) => string = escapeFtsQuery
 
 const run = (input: Recall.Input): Effect.Effect<Recall.Output, MemoryError.MemoryError, MemoryStore.MemoryStore> =>
   Effect.gen(function*() {
     const store = yield* MemoryStore.MemoryStore
     const query = literalFtsQuery(input.query)
-    if (query.length === 0 || input.banks.length === 0) return []
+    const banks = yield* resolveBanks(input.banks)
+    if (query.length === 0 || banks.length === 0) return []
     const requested = Math.max(1, Math.ceil((input.maxTokens ?? 2048) / 256))
     const rows = yield* Effect.all(
-      input.banks.map((namespace) =>
+      banks.map(({ namespace }) =>
         store.searchFts({
-          namespace: Recall.namespaceForBank(namespace),
+          namespace,
           query: input.query,
           limit: requested * 5,
           status: "accepted"
         })
       ),
-      { concurrency: "unbounded" }
+      { concurrency: 4 }
     )
     const results: Array<Recall.Result> = []
     for (let index = 0; index < rows.length; index++) {
@@ -50,7 +56,7 @@ const run = (input: Recall.Input): Effect.Effect<Recall.Output, MemoryError.Memo
           continue
         }
         results.push({
-          bank: input.banks[index] ?? "",
+          bank: banks[index]?.bank ?? "",
           key: row.key,
           text: row.text,
           score: row.score ?? 0,

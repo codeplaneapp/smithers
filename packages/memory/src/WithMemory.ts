@@ -18,7 +18,9 @@ import * as Flow from "@smthrs/core/Flow"
 import * as Context from "effect/Context"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { MemoryError } from "./MemoryError.ts"
 import * as Namespace from "./Namespace.ts"
+import { MAX_RECALL_TOKENS } from "./Recall.ts"
 
 /**
  * The memory policy a flow tree inherits: which namespace its memory lives in,
@@ -31,7 +33,10 @@ import * as Namespace from "./Namespace.ts"
 export const Policy = Schema.Struct({
   namespace: Namespace.Namespace,
   recall: Schema.Literals(["auto", "none"]),
-  maxTokens: Schema.Int,
+  maxTokens: Schema.Int.pipe(
+    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+    Schema.check(Schema.isLessThanOrEqualTo(MAX_RECALL_TOKENS))
+  ),
   retain: Schema.Literals(["on-complete", "never"])
 })
 
@@ -102,8 +107,26 @@ const rebuild = (flow: Flow.Any, policy: Policy): Declaration => {
   if (implementation === undefined || implementation._tag !== "Dynamic") return self
   return Flow.withFlows(
     self,
-    implementation.flows.map((reference) => Flow.isFlow(reference) ? withMemory(reference, policy) : reference)
+    implementation.flows.map((reference) => Flow.isFlow(reference) ? attach(reference, policy) : reference)
   )
+}
+
+const attach = (flow: Flow.Any, policy: Policy): Flow.Any => Flow.annotate(rebuild(flow, policy), MemoryPolicy, policy)
+
+const snapshot = (input: Policy): Policy => {
+  let decoded: Policy
+  try {
+    decoded = Schema.decodeUnknownSync(Policy)(input)
+  } catch {
+    throw new MemoryError({
+      code: "invalid_argument",
+      message: "memory policy is invalid"
+    })
+  }
+  return Object.freeze({
+    ...decoded,
+    namespace: Object.freeze({ ...decoded.namespace })
+  })
 }
 
 /**
@@ -119,6 +142,8 @@ const rebuild = (flow: Flow.Any, policy: Policy): Declaration => {
  * rebuild. A nested flow that already carries a policy is replaced by this one:
  * the tree a policy is applied to runs under exactly one policy, which is what
  * makes the inherited answer predictable.
+ * The policy is decoded, detached, and deeply frozen before any annotation is
+ * attached. Invalid policies throw a typed `MemoryError` at graph-build time.
  *
  * @category combinators
  * @since 0.1.0
@@ -142,5 +167,5 @@ export function withMemory<Input extends Schema.Top, Output extends Schema.Top, 
 export function withMemory(flow: Flow.Any, policy: Policy): Flow.Any
 
 export function withMemory(flow: Flow.Any, policy: Policy): Flow.Any {
-  return Flow.annotate(rebuild(flow, policy), MemoryPolicy, policy)
+  return attach(flow, snapshot(policy))
 }

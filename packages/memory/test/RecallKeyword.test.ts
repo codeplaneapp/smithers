@@ -53,19 +53,35 @@ describe("RecallKeyword", () => {
     expect(result).toEqual([])
   })
 
-  it.each([
-    [["bank", "bank"], "duplicate"],
-    [["bank", "flow-bank"], "aliased"]
-  ] as const)("scans one resolved namespace and returns one row for %s banks", async (banks) => {
+  it("rejects an empty bank before scanning the store", async () => {
+    const failure = await Effect.runPromise(
+      Effect.flip(Keyword.recall({ banks: [""], query: "alpha" })).pipe(
+        Effect.provideService(
+          MemoryStore.MemoryStore,
+          storeOf(() => Effect.die("searchRows must not be called for an invalid bank"))
+        )
+      )
+    )
+    expect(failure.code).toBe("invalid_namespace")
+  })
+
+  it.each(
+    [
+      [["bank", "bank"], "duplicate"],
+      [["bank", "flow-bank"], "aliased"]
+    ] as const
+  )("scans one resolved namespace and returns one row for %s banks", async (banks, _label) => {
     let scans = 0
     const result = await Effect.runPromise(
       Keyword.recall({ banks: [...banks], query: "alpha" }).pipe(
         Effect.provideService(
           MemoryStore.MemoryStore,
-          storeOf(() => Effect.sync(() => {
-            scans += 1
-            return [rows[0]!]
-          }))
+          storeOf(() =>
+            Effect.sync(() => {
+              scans += 1
+              return [rows[0]!]
+            })
+          )
         )
       )
     )

@@ -238,7 +238,7 @@ describe("Source", () => {
       ], { concurrency: 1 }).pipe(
         Effect.provideService(MemoryStore.MemoryStore, store),
         Effect.provideService(Recall.Recall, recall),
-        Effect.provide(Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message))) ]))
+        Effect.provide(Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message)))]))
       )
     )
     expect(frozen).toBe(first)
@@ -256,7 +256,7 @@ describe("Source", () => {
       ]).pipe(
         Effect.provideService(MemoryStore.MemoryStore, storeOf(() => Effect.succeed([]))),
         Effect.provideService(Recall.Recall, Recall.makeNoop()),
-        Effect.provide(Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message))) ]))
+        Effect.provide(Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message)))]))
       )
     )
     expect(logged).toEqual([])
@@ -265,10 +265,11 @@ describe("Source", () => {
   it("reads primer notes once for duplicate and aliased banks", async () => {
     let scans = 0
     const store = MemoryStore.MemoryStore.of({
-      listNotes: () => Effect.sync(() => {
-        scans += 1
-        return [{ text: "primer" }]
-      })
+      listNotes: () =>
+        Effect.sync(() => {
+          scans += 1
+          return [{ text: "primer" }]
+        })
     } as unknown as MemoryStore.Service)
     const text = await Effect.runPromise(
       Source.make().read({
@@ -338,6 +339,12 @@ describe("Source", () => {
     expect(resumed).toEqual(first)
     expect(resumed.text).not.toContain("memory after the crash")
     expect(reads).toBe(1)
+  })
+
+  it("refuses a capacity that is not a positive safe integer", () => {
+    for (const capacity of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => Source.make({ capacity })).toThrow(TypeError)
+    }
   })
 
   it("evicts the least recently used snapshot at its finite capacity", async () => {

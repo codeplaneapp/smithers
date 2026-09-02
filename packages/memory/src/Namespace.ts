@@ -112,7 +112,15 @@ export type Tag = typeof Tag.Type
  * @since 0.1.0
  * @slop
  */
-export const Tags = Schema.Array(Tag).pipe(Schema.check(Schema.isMaxLength(MAX_TAGS)))
+export const Tags = Schema.Array(Tag).pipe(
+  Schema.check(Schema.isMaxLength(MAX_TAGS)),
+  Schema.check(
+    Schema.makeFilter(
+      (tags) => new Set(tags).size === tags.length ? undefined : "invalid_tag: memory tags must be unique",
+      { identifier: "invalid_tag" }
+    )
+  )
+)
 
 /**
  * A bounded collection of memory tags.
@@ -186,9 +194,12 @@ const isTags = Schema.is(Tags)
 const isMatchMode = Schema.is(MatchMode)
 
 const isTagGroupShape = (input: unknown): input is TagGroup => {
-  const pending: Array<unknown> = [input]
+  const pending: Array<{ readonly value: unknown; readonly depth: number }> = [{ value: input, depth: 1 }]
+  let nodes = 0
   while (pending.length > 0) {
-    const current = pending.pop()
+    const { depth, value: current } = pending.pop()!
+    nodes += 1
+    if (depth > MAX_TAG_GROUP_DEPTH || nodes > MAX_TAG_GROUP_NODES) return true
     if (typeof current !== "object" || current === null) return false
     if ("tags" in current) {
       if (!isTags(current.tags)) return false
@@ -197,16 +208,22 @@ const isTagGroupShape = (input: unknown): input is TagGroup => {
     }
     if ("and" in current) {
       if (!Array.isArray(current.and)) return false
-      pending.push(...current.and)
+      if (nodes + pending.length + current.and.length > MAX_TAG_GROUP_NODES) return true
+      for (let index = current.and.length - 1; index >= 0; index--) {
+        pending.push({ value: current.and[index], depth: depth + 1 })
+      }
       continue
     }
     if ("or" in current) {
       if (!Array.isArray(current.or)) return false
-      pending.push(...current.or)
+      if (nodes + pending.length + current.or.length > MAX_TAG_GROUP_NODES) return true
+      for (let index = current.or.length - 1; index >= 0; index--) {
+        pending.push({ value: current.or[index], depth: depth + 1 })
+      }
       continue
     }
     if ("not" in current) {
-      pending.push(current.not)
+      pending.push({ value: current.not, depth: depth + 1 })
       continue
     }
     return false
@@ -227,10 +244,16 @@ const tagGroupBudgetIssue = (root: TagGroup): string | undefined => {
       return `invalid_tag: tag-group node count exceeds ${MAX_TAG_GROUP_NODES}`
     }
     if ("and" in group) {
+      if (nodes + pending.length + group.and.length > MAX_TAG_GROUP_NODES) {
+        return `invalid_tag: tag-group node count exceeds ${MAX_TAG_GROUP_NODES}`
+      }
       for (let index = group.and.length - 1; index >= 0; index--) {
         pending.push({ group: group.and[index]!, depth: depth + 1 })
       }
     } else if ("or" in group) {
+      if (nodes + pending.length + group.or.length > MAX_TAG_GROUP_NODES) {
+        return `invalid_tag: tag-group node count exceeds ${MAX_TAG_GROUP_NODES}`
+      }
       for (let index = group.or.length - 1; index >= 0; index--) {
         pending.push({ group: group.or[index]!, depth: depth + 1 })
       }
@@ -311,6 +334,7 @@ export const matches = (tagGroup: TagGroup, tags: ReadonlyArray<string>): boolea
       pending.push({ ...frame, expanded: true })
       const children = "and" in group ? group.and : "or" in group ? group.or : "not" in group ? [group.not] : undefined
       if (children === undefined || !Array.isArray(children)) return false
+      if (nodes + pending.length + children.length > MAX_TAG_GROUP_NODES) return false
       for (let index = children.length - 1; index >= 0; index--) {
         pending.push({ group: children[index]!, depth: frame.depth + 1, expanded: false })
       }

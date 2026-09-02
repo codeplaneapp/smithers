@@ -1,14 +1,14 @@
 /**
  * SQLite schema and lazy FTS operations.
  *
- * @see docs/specs/Concepts/Memory.md
+ * @see https://smithers.sh/api/memory
  *
  * @since 0.1.0
  */
-import type { DatabaseError, Service as DurableWriterService } from "@smthrs/database/DurableWriter"
+import type { DatabaseError } from "@smthrs/database/DurableWriter"
 import * as Effect from "effect/Effect"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlError from "effect/unstable/sql/SqlError"
+import type { DatabaseService } from "../Database.ts"
 import type { Kind } from "../Namespace.ts"
 import { searchableText } from "./Text.ts"
 
@@ -24,9 +24,7 @@ import { searchableText } from "./Text.ts"
  * @since 0.1.0
  * @slop
  */
-export interface DatabaseService extends DurableWriterService {
-  readonly sql: SqlClient.SqlClient
-}
+export type { DatabaseService } from "../Database.ts"
 
 /**
  * A record projected into a namespace-kind FTS table.
@@ -76,6 +74,7 @@ export const migrate = (database: DatabaseService): Effect.Effect<void, Database
         namespace_id TEXT NOT NULL,
         fact_key TEXT NOT NULL,
         value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+        tags_json TEXT CHECK (tags_json IS NULL OR json_valid(tags_json)),
         ttl_ms INTEGER,
         provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
         created_at_ms INTEGER NOT NULL,
@@ -86,6 +85,11 @@ export const migrate = (database: DatabaseService): Effect.Effect<void, Database
         CHECK (length(fact_key) > 0),
         CHECK (ttl_ms IS NULL OR ttl_ms >= 0)
       )`
+      const factColumns = yield* sql<{ readonly name: string }>`PRAGMA table_info(memory_facts)`
+      if (!factColumns.some((column) => column.name === "tags_json")) {
+        yield* sql`ALTER TABLE memory_facts
+          ADD COLUMN tags_json TEXT CHECK (tags_json IS NULL OR json_valid(tags_json))`
+      }
       yield* sql`CREATE INDEX IF NOT EXISTS memory_facts_expiry_idx
         ON memory_facts (updated_at_ms, ttl_ms) WHERE ttl_ms IS NOT NULL`
       yield* sql`CREATE TABLE IF NOT EXISTS memory_threads (
@@ -293,6 +297,11 @@ export const deleteFtsRecord = (
 /**
  * Searches one namespace-kind FTS5 table in raw BM25 rank order.
  *
+ * `offset` lets a caller walk the ranked matches in pages. A match can be
+ * dropped by a status, supersession, or tag filter the FTS table knows nothing
+ * about, so returning the caller's page size in one shot would under-fill the
+ * answer; paging is what lets the store keep asking until it has enough.
+ *
  * @category queries
  * @since 0.1.0
  * @slop
@@ -302,7 +311,8 @@ export const searchFts = (
   kind: Kind,
   namespaceId: string,
   query: string,
-  limit: number
+  limit: number,
+  offset = 0
 ): Effect.Effect<ReadonlyArray<FtsMatch>, SqlError.SqlError> => {
   const { sql } = database
   const tableName = ftsTable(kind)
@@ -312,5 +322,5 @@ export const searchFts = (
     FROM ${table}
     WHERE ${table} MATCH ${query} AND namespace_id = ${namespaceId}
     ORDER BY rank
-    LIMIT ${limit}`
+    LIMIT ${limit} OFFSET ${offset}`
 }

@@ -97,7 +97,50 @@ describe("Namespace", () => {
     expect(() => decode(wide(Namespace.MAX_TAG_GROUP_NODES + 1))).toThrow(/invalid_tag/u)
   })
 
+  it("rejects an over-wide and-group and a budget overrun that no lookahead catches", () => {
+    const decode = Schema.decodeUnknownSync(Namespace.TagGroup)
+    const wideAnd = (nodes: number): unknown => ({ and: Array.from({ length: nodes - 1 }, leaf) })
+    expect(decode(wideAnd(Namespace.MAX_TAG_GROUP_NODES))).toEqual(wideAnd(Namespace.MAX_TAG_GROUP_NODES))
+    expect(() => decode(wideAnd(Namespace.MAX_TAG_GROUP_NODES + 1))).toThrow(/invalid_tag/u)
+
+    // `not` carries no child-count lookahead, so this is the shape whose budget
+    // overrun is only discovered when the last node is actually visited.
+    const lateOverrun = {
+      or: [...Array.from({ length: Namespace.MAX_TAG_GROUP_NODES - 2 }, leaf), { not: leaf() }]
+    }
+    expect(() => decode(lateOverrun)).toThrow(/node count exceeds/u)
+  })
+
+  it("refuses a tag group whose shape is not a tag group at all", () => {
+    const decode = Schema.decodeUnknownSync(Namespace.TagGroup)
+    for (
+      const malformed of [
+        null,
+        "scope:project",
+        { tags: ["not-a-vocabulary-tag"] },
+        { tags: ["scope:project"], match: "sideways" },
+        { and: "not-an-array" },
+        { or: "not-an-array" },
+        { unknown: true }
+      ]
+    ) {
+      expect(() => decode(malformed)).toThrow()
+    }
+  })
+
   it("evaluates an undecoded over-budget group as false without recursive stack growth", () => {
     expect(Namespace.matches(nested(500), ["scope:project"])).toBe(false)
+  })
+
+  // `matches` takes a decoded `TagGroup` by type, but store consumers can hand
+  // it a value that never passed the schema. It answers false rather than
+  // throwing, so a malformed group cannot kill the fiber reading memory.
+  it("answers false for a malformed group instead of throwing", () => {
+    const tags = ["scope:project"]
+    expect(Namespace.matches({ tags: ["not-a-vocabulary-tag"] } as unknown as Namespace.TagGroup, tags)).toBe(false)
+    expect(Namespace.matches({ tags: tags, match: "sideways" } as unknown as Namespace.TagGroup, tags)).toBe(false)
+    expect(Namespace.matches({ unknown: true } as unknown as Namespace.TagGroup, tags)).toBe(false)
+    expect(Namespace.matches({ and: "not-an-array" } as unknown as Namespace.TagGroup, tags)).toBe(false)
+    expect(Namespace.matches(wide(Namespace.MAX_TAG_GROUP_NODES + 2), tags)).toBe(false)
   })
 })

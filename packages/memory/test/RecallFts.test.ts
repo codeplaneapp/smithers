@@ -79,19 +79,23 @@ describe("RecallFts", () => {
     expect([blankQuery, noBanks]).toEqual([[], []])
   })
 
-  it.each([
-    ["duplicate", ["bank", "bank"]],
-    ["aliased", ["bank", "flow-bank"]]
-  ] as const)("scans one resolved namespace and returns one row for %s banks", async (_label, banks) => {
+  it.each(
+    [
+      ["duplicate", ["bank", "bank"]],
+      ["aliased", ["bank", "flow-bank"]]
+    ] as const
+  )("scans one resolved namespace and returns one row for %s banks", async (_label, banks) => {
     let scans = 0
     const result = await Effect.runPromise(
       Fts.recall({ banks: [...banks], query: "durable" }).pipe(
         Effect.provideService(
           MemoryStore.MemoryStore,
-          storeOf(() => Effect.sync(() => {
-            scans += 1
-            return [ftsRow({ key: "one", text: "durable" })]
-          }))
+          storeOf(() =>
+            Effect.sync(() => {
+              scans += 1
+              return [ftsRow({ key: "one", text: "durable" })]
+            })
+          )
         )
       )
     )

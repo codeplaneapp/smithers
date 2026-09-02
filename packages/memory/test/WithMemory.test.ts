@@ -55,11 +55,13 @@ const remembered = (bank: string, key: string, text: string) =>
 
 describe("WithMemory", () => {
   it("rejects an invalid namespace and out-of-range budget at annotation time", () => {
-    for (const invalid of [
-      { ...policy, namespace: { kind: "flow" as const, id: "" } },
-      { ...policy, maxTokens: -1 },
-      { ...policy, maxTokens: Recall.MAX_RECALL_TOKENS + 1 }
-    ]) {
+    for (
+      const invalid of [
+        { ...policy, namespace: { kind: "flow" as const, id: "" } },
+        { ...policy, maxTokens: -1 },
+        { ...policy, maxTokens: Recall.MAX_RECALL_TOKENS + 1 }
+      ]
+    ) {
       expect(() => WithMemory.withMemory(Flows.recall, invalid)).toThrow(MemoryError)
     }
   })
@@ -88,7 +90,9 @@ describe("WithMemory", () => {
         Effect.andThen(Effect.all({
           recalled: Flows.runRecallFor(scopedRecall, { banks: ["bank"], query: "q" }),
           remembered: Flows.runRememberFor(scopedRemember, { bank: "bank", key: "key", text: "text" })
-        }))
+        })),
+        Effect.provideService(Recall.Recall, Recall.makeNoop()),
+        Effect.provideService(MemoryStore.MemoryStore, MemoryStore.makeNoop())
       )
     )
     expect(Object.isFrozen(attached)).toBe(true)
@@ -250,7 +254,8 @@ describe("WithMemory", () => {
     )
 
     expect(result.rows.map((row) => row.key)).toEqual(["ledger"])
-    expect(result.written?.value).toEqual({ content: "written through the bound handler", tags: [] })
+    expect(result.written?.value).toEqual({ content: "written through the bound handler" })
+    expect(result.written?.tags).toEqual([])
   })
 
   it("refuses recall through the bound handler when the policy says none", async () => {
@@ -345,7 +350,8 @@ describe("WithMemory", () => {
 
     expect(result.kept).toEqual({ key: "kept" })
     expect(result.dropped).toEqual({ key: "dropped" })
-    expect(result.keptFact?.value).toEqual({ content: "policy namespace", tags: [] })
+    expect(result.keptFact?.value).toEqual({ content: "policy namespace" })
+    expect(result.keptFact?.tags).toEqual([])
     expect(result.droppedFact).toBeUndefined()
   })
 })

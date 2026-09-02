@@ -1,5 +1,5 @@
 /**
- * Browser-safe keyword recall.
+ * Keyword recall with no host dependencies.
  *
  * Scores each authoritative row by the number of normalized query terms
  * occurring in its key and text, breaks ties by newest update, then applies
@@ -9,6 +9,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { resolveBanks } from "./internal/Bank.ts"
 import { compareText } from "./internal/Text.ts"
 import type * as MemoryError from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
@@ -49,23 +50,27 @@ const authoritative = (row: Row, groups: ReadonlyArray<Recall.TagGroup> | undefi
 const run = (input: Recall.Input): Effect.Effect<Recall.Output, MemoryError.MemoryError, MemoryStore.MemoryStore> =>
   Effect.gen(function*() {
     const store = yield* MemoryStore.MemoryStore
+    const banks = yield* resolveBanks(input.banks)
     const terms = normalize(input.query)
-    if (input.banks.length === 0) return []
+    if (banks.length === 0 || terms.length === 0) return []
+    const requested = Math.max(1, Math.ceil((input.maxTokens ?? 2048) / 256))
+    const scanLimit = Math.min(512, requested * 5)
     const rows = yield* Effect.all(
-      input.banks.map((namespace) =>
+      banks.map(({ namespace }) =>
         store.searchRows({
-          namespace: Recall.namespaceForBank(namespace),
-          status: "accepted"
+          namespace,
+          status: "accepted",
+          limit: scanLimit
         })
       ),
-      { concurrency: "unbounded" }
+      { concurrency: 4 }
     )
     const ranked = rows.flatMap((bankRows, index) =>
       bankRows
-        .map((row) => ({ ...row, bank: input.banks[index] ?? "" }))
+        .map((row) => ({ ...row, bank: banks[index]?.bank ?? "" }))
         .filter((row) => authoritative(row, input.tagGroups))
         .map((row) => ({
-          bank: input.banks[index] ?? "",
+          bank: banks[index]?.bank ?? "",
           key: row.key,
           text: row.text,
           score: score(terms, row),

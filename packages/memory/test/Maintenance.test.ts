@@ -116,6 +116,28 @@ describe("Maintenance", () => {
     expect(result.messages.map((message) => message.id)).toEqual(["two", "three"])
   })
 
+  // Both maintenance passes read history 256 messages at a time, so a thread
+  // shorter than one page never proves the cursor advances.
+  it("walks a thread longer than one message page", async () => {
+    const total = 300
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* append(store, "paged", total)
+      const withinBudget = yield* Maintenance.limitHistory({ maxTokens: 1_000_000 })
+      const compacted = yield* Maintenance.compact({
+        summarizer: { summarize: ({ messages }) => Effect.succeed(`summarized ${messages.length}`) },
+        makeSummaryId: () => "paged-summary"
+      })
+      const remaining = yield* store.listMessages({ threadId: "paged" })
+      return { withinBudget, compacted, remaining }
+    }))
+
+    expect(result.withinBudget).toEqual({ deletedMessages: 0 })
+    expect(result.compacted.compactedThreads).toBe(1)
+    expect(result.remaining[0]?.text).toBe(`summarized ${result.compacted.deletedMessages}`)
+    expect(result.remaining).toHaveLength(total - result.compacted.deletedMessages + 1)
+  })
+
   it("writes the summary before deleting old messages in one transaction", async () => {
     const summarized: Array<ReadonlyArray<string>> = []
     const result = await run(Effect.gen(function*() {

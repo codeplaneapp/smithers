@@ -30,19 +30,26 @@
  * closes that replay gap; omitting it deliberately keeps the process-local
  * fallback.
  *
- * @see docs/specs/Concepts/Memory.md
+ * @see https://smithers.sh/api/memory
  *
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { digest, truncateBytes } from "./internal/Text.ts"
+import { resolveBanks } from "./internal/Bank.ts"
+import { canonicalJson, digest, truncateBytes } from "./internal/Text.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Recall from "./Recall.ts"
 import * as SnapshotRecorder from "./SnapshotRecorder.ts"
 
 /**
  * Source input and retry identity.
+ *
+ * `lineageId` and `iteration` alone select the frozen snapshot. Banks, query,
+ * tag groups, primer banks, and both budgets are honored only by the first
+ * read for that identity; later differences are warned and ignored.
+ * `maxTokens` caps recalled rows in conservative UTF-8 bytes, while
+ * `maxBytes` caps the complete fenced snapshot rendered here.
  *
  * @category models
  * @since 0.1.0
@@ -107,17 +114,16 @@ const fetch = (input: Input): Effect.Effect<string, never, MemoryStore.MemorySto
     const store = yield* MemoryStore.MemoryStore
     const recall = yield* Recall.Recall
     const primerBanks = input.primerBanks ?? input.banks
+    const resolvedPrimerBanks = yield* resolveBanks(primerBanks)
     const primers = yield* Effect.all(
-      primerBanks.map((namespace) =>
-        store.listNotes({ namespace: Recall.namespaceForBank(namespace), status: "accepted" })
-      ),
-      { concurrency: "unbounded" }
+      resolvedPrimerBanks.map(({ namespace }) => store.listNotes({ namespace, status: "accepted" })),
+      { concurrency: 4 }
     )
     const recalled = yield* recall.recall(input)
     return render(
       primers.flatMap((rows, index) =>
         rows.map((row) => ({
-          bank: primerBanks[index] ?? "",
+          bank: resolvedPrimerBanks[index]?.bank ?? "",
           text: row.text
         }))
       ),
@@ -147,7 +153,19 @@ export const make = (options: { readonly capacity?: number | undefined } = {}): 
   if (!Number.isSafeInteger(capacity) || capacity < 1) {
     throw new TypeError("memory source capacity must be a positive safe integer")
   }
-  const snapshots = new Map<string, Effect.Effect<string, never, MemoryStore.MemoryStore | Recall.Recall>>()
+  const snapshots = new Map<string, {
+    readonly effect: Effect.Effect<string, never, MemoryStore.MemoryStore | Recall.Recall>
+    readonly fields: Readonly<Record<string, string>>
+  }>()
+  const fields = (input: Input): Readonly<Record<string, string>> => ({
+    banks: canonicalJson(input.banks),
+    query: canonicalJson(input.query),
+    tagGroups: canonicalJson(input.tagGroups),
+    maxTokens: canonicalJson(input.maxTokens),
+    budget: canonicalJson(input.budget),
+    primerBanks: canonicalJson(input.primerBanks),
+    maxBytes: canonicalJson(input.maxBytes)
+  })
   return {
     read: (input) => {
       const key = `${input.lineageId}\u0000${input.iteration}`
@@ -155,7 +173,13 @@ export const make = (options: { readonly capacity?: number | undefined } = {}): 
       if (existing !== undefined) {
         snapshots.delete(key)
         snapshots.set(key, existing)
-        return existing
+        const currentFields = fields(input)
+        const changed = Object.keys(existing.fields).filter((field) => existing.fields[field] !== currentFields[field])
+        return changed.length === 0
+          ? existing.effect
+          : Effect.logWarning(
+            `memory source ignored changed fields for frozen snapshot ${key}: ${changed.join(", ")}`
+          ).pipe(Effect.andThen(existing.effect))
       }
       const identity: SnapshotRecorder.Identity = {
         lineageId: input.lineageId,
@@ -174,7 +198,7 @@ export const make = (options: { readonly capacity?: number | undefined } = {}): 
           )
         )
       )
-      snapshots.set(key, current)
+      snapshots.set(key, { effect: current, fields: fields(input) })
       while (snapshots.size > capacity) snapshots.delete(snapshots.keys().next().value!)
       return current
     }

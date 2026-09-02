@@ -20,11 +20,18 @@ export default defineConfig({
       // SQL migrations in this glob makes v8 ask Rollup to parse them as
       // JavaScript, producing a warning for every migration on every run.
       include: ["src/**/*.ts"],
+      // An honest measured floor: every value is at or below what the suite
+      // actually reaches (99.31 statements / 95.00 branches / 99.14 functions /
+      // 99.57 lines), so a change that drops coverage fails here. The package is
+      // still listed in `coverageFloorDeferred` in
+      // packages/flows/test/vitestCoverageIsolation.test.ts, which requires at
+      // least one value below 100; raising the last of these to 100 has to
+      // remove the package from that set in the same commit.
       thresholds: {
-        branches: 65,
-        functions: 74,
-        lines: 84,
-        statements: 83
+        branches: 95,
+        functions: 99,
+        lines: 99,
+        statements: 99
       }
     }
   }

@@ -1,11 +1,11 @@
 /**
- * Unsealed memory flow declarations and runtime bindings.
+ * Memory flow declarations and runtime bindings.
  *
  * The declarations describe the runtime operation but intentionally perform
  * no memory I/O while a graph is being built.
  *
- * @see docs/specs/Concepts/Memory.md
- * @see docs/specs/Concepts/Higher Order Flows.md
+ * @see https://smithers.sh/api/memory
+ * @see https://smithers.sh/api/patterns
  * @since 0.1.0
  */
 import * as Effects from "@smthrs/core/Effects"
@@ -13,8 +13,10 @@ import * as Flow from "@smthrs/core/Flow"
 import * as Pattern from "@smthrs/patterns/Pattern"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { resolveNamespace } from "./internal/Bank.ts"
 import type { MemoryError } from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
+import * as Namespace from "./Namespace.ts"
 import * as Recall from "./Recall.ts"
 import * as WithMemory from "./WithMemory.ts"
 
@@ -57,6 +59,10 @@ export const recallDescription = "Recall advisory memory rows from named banks."
 /**
  * Input schema for remember.
  *
+ * Tags use `Namespace.Tags` directly so model decoding and durable writes
+ * enforce the same vocabulary, uniqueness rule, and 16-tag cap before the
+ * handler performs I/O. `ttlMs` is passed to the authoritative fact row.
+ *
  * @category schemas
  * @since 0.1.0
  * @slop
@@ -65,7 +71,10 @@ export const RememberInput = Schema.Struct({
   bank: Schema.String,
   key: Schema.String,
   text: Schema.String,
-  tags: Schema.optional(Schema.Array(Schema.String))
+  tags: Schema.optional(Namespace.Tags),
+  ttlMs: Schema.optional(
+    Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))
+  )
 })
 
 /**
@@ -111,7 +120,10 @@ export const rememberEffects = Effects.make({
 })
 
 /**
- * Unsealed effect declaration for mutable cross-run memory reads.
+ * Sealed effect declaration for mutable cross-run memory reads.
+ *
+ * The core declaration shape requires a conflict policy, so this pure read
+ * uses `fail` instead of the serializing policy reserved for writes.
  *
  * @category effects
  * @since 0.1.0
@@ -121,8 +133,8 @@ export const recallEffects = Effects.make({
   reads: ["memory/**"],
   writes: [],
   mode: "expected",
-  onConflict: "serialize",
-  tier: "irreversible"
+  onConflict: "fail",
+  tier: "sealed"
 })
 
 /**
@@ -174,7 +186,42 @@ export const recallSlot = Recall.slot
 export const bindRecall = (supplied: Flow.Any): Flow.Any => Pattern.bind(recallSlot, supplied)
 
 /**
+ * Runtime binding for the remember declaration, carrying explicit provenance.
+ *
+ * Provenance is bound once, when a host builds the handler, and every call the
+ * returned function serves records it. Binding time is when a host knows the
+ * run coordinates, and keeping the handler itself one-argument is what lets it
+ * satisfy the `(input, call)` handler contract `FlowBinding.make` types: a
+ * second positional argument there would receive the `Call`, not provenance,
+ * and would persist the whole call payload into `provenance_json`.
+ *
+ * @category handlers
+ * @since 0.1.0
+ */
+export const runRememberWith = (provenance: MemoryStore.Provenance) =>
+(
+  input: RememberInputType
+): Effect.Effect<typeof RememberOutput.Type, MemoryError, MemoryStore.MemoryStore> =>
+  Effect.gen(function*() {
+    const store = yield* MemoryStore.MemoryStore
+    const { namespace } = yield* resolveNamespace(input.bank)
+    yield* store.putFact({
+      namespace,
+      key: input.key,
+      value: { content: input.text },
+      tags: input.tags ?? [],
+      ...(input.ttlMs === undefined ? {} : { ttlMs: input.ttlMs }),
+      provenance
+    })
+    return { key: input.key }
+  })
+
+/**
  * Runtime binding for the remember declaration.
+ *
+ * Records no provenance. It takes exactly one argument so a host can hand it
+ * straight to `FlowBinding.make({ flow, handler })`. Use
+ * {@link runRememberWith} to bind run coordinates.
  *
  * @category handlers
  * @since 0.1.0
@@ -182,17 +229,7 @@ export const bindRecall = (supplied: Flow.Any): Flow.Any => Pattern.bind(recallS
  */
 export const runRemember = (
   input: RememberInputType
-): Effect.Effect<typeof RememberOutput.Type, MemoryError, MemoryStore.MemoryStore> =>
-  Effect.gen(function*() {
-    const store = yield* MemoryStore.MemoryStore
-    yield* store.putFact({
-      namespace: Recall.namespaceForBank(input.bank),
-      key: input.key,
-      value: { content: input.text, tags: input.tags ?? [] },
-      provenance: {}
-    })
-    return { key: input.key }
-  })
+): Effect.Effect<typeof RememberOutput.Type, MemoryError, MemoryStore.MemoryStore> => runRememberWith({})(input)
 
 /**
  * Runtime binding for the selected recall service.
@@ -236,25 +273,33 @@ export const runRecallFor = (
  *
  * An unnamed bank resolves to the policy namespace. `retain: "never"` drops
  * the write: the caller still receives the key it asked for, and nothing
- * reaches the store.
+ * reaches the store. The optional provenance argument is forwarded unchanged.
+ *
+ * The flow comes first so this can never be mistaken for a `FlowBinding`
+ * handler; {@link handlersFor} is the one-argument handler a host binds.
  *
  * @category handlers
  * @since 0.1.0
  */
 export const runRememberFor = (
   flow: Flow.Any,
-  input: RememberInputType
+  input: RememberInputType,
+  provenance: MemoryStore.Provenance = {}
 ): Effect.Effect<typeof RememberOutput.Type, MemoryError, MemoryStore.MemoryStore> => {
   const policy = WithMemory.policyOf(flow)
-  if (policy === undefined) return runRemember(input)
+  if (policy === undefined) return runRememberWith(provenance)(input)
   if (policy.retain === "never") return Effect.succeed({ key: input.key })
-  return runRemember(
+  return runRememberWith(provenance)(
     input.bank.length > 0 ? input : { ...input, bank: Recall.bankForNamespace(policy.namespace) }
   )
 }
 
 /**
  * The runtime handlers one bound memory declaration answers with.
+ *
+ * Each handler takes exactly one argument, the decoded flow input, so it
+ * satisfies the `(input, call)` handler contract `FlowBinding.make` types.
+ * Provenance is bound by {@link handlersFor}, not passed per call.
  *
  * @category models
  * @since 0.1.0
@@ -280,11 +325,19 @@ export interface Handlers {
  * FlowBinding.make({ flow: bound, handler: Flows.handlersFor(bound).recall })
  * ```
  *
+ * The optional `provenance` is bound here, once, and recorded on every fact the
+ * returned `remember` handler writes. A host that knows its run coordinates
+ * passes them at binding time; the handler stays one-argument so it remains a
+ * legal `FlowBinding` handler.
+ *
  * @category handlers
  * @since 0.1.0
  */
-export const handlersFor = (flow: Flow.Any): Handlers => ({
-  remember: (input) => runRememberFor(flow, input),
+export const handlersFor = (
+  flow: Flow.Any,
+  provenance: MemoryStore.Provenance = {}
+): Handlers => ({
+  remember: (input) => runRememberFor(flow, input, provenance),
   recall: (input) => runRecallFor(flow, input)
 })
 

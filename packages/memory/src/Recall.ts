@@ -3,8 +3,8 @@
  *
  * Recall is both a flow-valued injection slot and an Effect runtime service.
  *
- * @see docs/specs/Concepts/Memory.md
- * @see docs/specs/Concepts/Injection And Decoration.md
+ * @see https://smithers.sh/api/memory
+ * @see https://smithers.sh/api/patterns
  *
  * @since 0.1.0
  */
@@ -15,6 +15,67 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import type * as MemoryError from "./MemoryError.ts"
 import * as Namespace from "./Namespace.ts"
+
+/**
+ * Maximum banks accepted by one model-facing recall request.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_RECALL_BANKS = 16
+
+/**
+ * Maximum code-unit length of one recall bank name.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_RECALL_BANK_NAME_LENGTH = 128
+
+/**
+ * Maximum UTF-8 byte length of a recall query.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_RECALL_QUERY_BYTES = 16 * 1_024
+
+/**
+ * Maximum conservative byte budget accepted as `maxTokens`.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_RECALL_TOKENS = 64 * 1_024
+
+/**
+ * Maximum tag groups accepted by one model-facing recall request.
+ *
+ * Every group is evaluated against every candidate row by each binding, so the
+ * per-group depth and node bounds `Namespace.TagGroup` enforces only bound one
+ * group. Without a cap on the array a single decoded request multiplies that
+ * budget without limit, so the list is bounded here as well.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_RECALL_TAG_GROUPS = 16
+
+const inputEncoder = new TextEncoder()
+const BankName = Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(MAX_RECALL_BANK_NAME_LENGTH)))
+const Query = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter((query) =>
+      inputEncoder.encode(query).byteLength <= MAX_RECALL_QUERY_BYTES
+        ? undefined
+        : `recall query exceeds ${MAX_RECALL_QUERY_BYTES} UTF-8 bytes`
+    )
+  )
+)
+const MaxTokens = Schema.Int.pipe(
+  Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+  Schema.check(Schema.isLessThanOrEqualTo(MAX_RECALL_TOKENS))
+)
 
 /**
  * A boolean tag predicate accepted by every recall implementation.
@@ -33,10 +94,12 @@ export type TagGroup = Namespace.TagGroup
  * @slop
  */
 export const Input = Schema.Struct({
-  banks: Schema.Array(Schema.String),
-  query: Schema.String,
-  tagGroups: Schema.optional(Schema.Array(Namespace.TagGroup)),
-  maxTokens: Schema.optional(Schema.Int),
+  banks: Schema.Array(BankName).pipe(Schema.check(Schema.isMaxLength(MAX_RECALL_BANKS))),
+  query: Query,
+  tagGroups: Schema.optional(
+    Schema.Array(Namespace.TagGroup).pipe(Schema.check(Schema.isMaxLength(MAX_RECALL_TAG_GROUPS)))
+  ),
+  maxTokens: Schema.optional(MaxTokens),
   budget: Schema.optional(Schema.Literals(["low", "mid", "high"]))
 })
 
@@ -220,14 +283,18 @@ export type NamespaceValue = Namespace.Namespace
 export const bankForNamespace = (namespace: Namespace.Namespace): string => `${namespace.kind}-${namespace.id}`
 
 /**
- * Maps a public bank name to the structured namespace used by MemoryStore.
+ * Performs the unvalidated syntactic inverse of {@link bankForNamespace}.
  * Prefixes preserve explicit lifetimes; an unprefixed bank is flow-local.
+ * The returned `id` is intentionally typed as `string`, not
+ * `Namespace.NonEmptyString`. Use `Bank.parse` at every I/O boundary.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export const namespaceForBank = (bank: string): Namespace.Namespace => {
+export const namespaceForBank = (
+  bank: string
+): { readonly kind: Namespace.Kind; readonly id: string } => {
   for (const kind of ["flow", "agent", "user", "global"] as const) {
     const prefix = `${kind}-`
     if (bank.startsWith(prefix) && bank.length > prefix.length) {

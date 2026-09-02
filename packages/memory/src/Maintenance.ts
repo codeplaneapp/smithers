@@ -6,7 +6,7 @@
 import * as Digest from "@smthrs/core/Digest"
 import * as Effect from "effect/Effect"
 import { MemoryError } from "./MemoryError.ts"
-import { MemoryStore, type Message } from "./MemoryStore.ts"
+import { MemoryStore, type Message, type Service } from "./MemoryStore.ts"
 
 /**
  * Result of one TTL garbage-collection pass.
@@ -91,18 +91,40 @@ export const limitHistory = (
       threadIds,
       (threadId) =>
         Effect.gen(function*() {
-          const messages = yield* store.listMessages({ threadId })
-          let chars = messages.reduce((total, message) => total + message.text.length, 0)
-          const budget = options.maxTokens * charsPerToken
-          const ids: Array<string> = []
-          for (const message of messages) {
-            if (chars <= budget) {
-              break
-            }
-            ids.push(message.id)
-            chars -= message.text.length
+          let chars = 0
+          let cursor: { readonly at: number; readonly id: string } | undefined
+          while (true) {
+            const page: ReadonlyArray<Message> = yield* store.listMessages({
+              threadId,
+              limit: MESSAGE_PAGE_SIZE,
+              ...(cursor === undefined ? {} : { cursor })
+            })
+            chars += page.reduce((total, message) => total + message.text.length, 0)
+            const last: Message | undefined = page.at(-1)
+            if (last === undefined || page.length < MESSAGE_PAGE_SIZE) break
+            cursor = { at: last.at, id: last.id }
           }
-          return yield* store.deleteMessages({ threadId, ids })
+          const budget = options.maxTokens * charsPerToken
+          let deleted = 0
+          cursor = undefined
+          while (chars > budget) {
+            const page: ReadonlyArray<Message> = yield* store.listMessages({
+              threadId,
+              limit: MESSAGE_PAGE_SIZE,
+              ...(cursor === undefined ? {} : { cursor })
+            })
+            if (page.length === 0) break
+            const ids: Array<string> = []
+            for (const message of page) {
+              if (chars <= budget) break
+              ids.push(message.id)
+              chars -= message.text.length
+            }
+            deleted += yield* store.deleteMessages({ threadId, ids })
+            const last: Message = page.at(-1)!
+            cursor = { at: last.at, id: last.id }
+          }
+          return deleted
         }),
       { concurrency: 1 }
     )
@@ -163,6 +185,29 @@ export interface CompactionResult {
 const render = (messages: ReadonlyArray<Message>): string =>
   messages.map((message) => `${message.role}: ${message.text}`).join("\n")
 
+const MESSAGE_PAGE_SIZE = 256
+
+const readAllMessages = (
+  store: Service,
+  threadId: string
+): Effect.Effect<ReadonlyArray<Message>, MemoryError> =>
+  Effect.gen(function*() {
+    const messages: Array<Message> = []
+    let cursor: { readonly at: number; readonly id: string } | undefined
+    while (true) {
+      const page = yield* store.listMessages({
+        threadId,
+        limit: MESSAGE_PAGE_SIZE,
+        ...(cursor === undefined ? {} : { cursor })
+      })
+      messages.push(...page)
+      const last = page.at(-1)
+      if (last === undefined || page.length < MESSAGE_PAGE_SIZE) break
+      cursor = { at: last.at, id: last.id }
+    }
+    return messages
+  })
+
 /**
  * Summarizes old history and atomically replaces it with a summary.
  *
@@ -194,7 +239,7 @@ export const compact = <E, R>(
     let compactedThreads = 0
     let deletedMessages = 0
     for (const threadId of threadIds) {
-      const messages = yield* store.listMessages({ threadId })
+      const messages = yield* readAllMessages(store, threadId)
       if (messages.length <= keepRecent) {
         continue
       }

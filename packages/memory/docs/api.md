@@ -61,9 +61,9 @@ Applying one never changes the graph a flow plans, node for node.
 
 ### Reading a policy back
 
-`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` are
-the policy-aware handlers, and `Flows.handlersFor(flow)` is the pair a host
-binds. The policy supplies defaults and never overrides:
+`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` read
+the policy, and `Flows.handlersFor(flow)` is the pair a host binds. The policy
+supplies defaults and never overrides:
 
 - `runRecallFor` fills in the policy bank when the caller names no banks, and
   the policy budget when the caller states no `maxTokens`. A caller that names
@@ -108,6 +108,14 @@ that call compile: `FlowBinding.make` reads `flow.input` to type the handler. A
 flow held as `Flow.Any`, the existential a pattern passes around, stays
 `Flow.Any`.
 
+Every handler takes exactly one argument, the decoded flow input, because
+`FlowBinding.make` types its handler as `(input, call)` and passes the `Call` in
+the second position. Run coordinates are bound instead, once, when the handler is
+built: `Flows.handlersFor(flow, { runId, nodeId, iteration })` records them on
+every fact its `remember` writes, and `Flows.runRememberWith(provenance)` is the
+same thing without a policy. A provenance parameter on the handler itself would
+receive the `Call` and persist it as the fact's provenance.
+
 Binding `Flows.recall` with `Flows.runRecall` reaches the store with no
 namespace, no budget cap, and no way to honour `recall: "none"`.
 
@@ -141,6 +149,89 @@ plan with `Trellis.run` rather than calling the declared flow: calling the
 originals instead loses the policy.
 
 See [delegation patterns](/api/patterns-delegation) for the trellis itself.
+
+## Store behaviours worth knowing
+
+These are the answers that surprise callers most often. Each one is enforced by
+a test in the package.
+
+- `listNotes` defaults `status` to `"accepted"`. Pending and rejected notes are
+  hidden unless you ask for them by name or pass `"any"`.
+- A message id is unique **within its thread**, not globally. The same id in two
+  threads is two messages. A same-thread retry whose `role`, `text`, or `at`
+  differs fails with `idempotency_conflict` and a path to the first field that
+  differs.
+- `appendMessage` creates a missing thread for you, in the `global` namespace
+  under the id `history`. Call `createThread` first when the thread belongs
+  somewhere else.
+- `maxTokens` is a UTF-8 **byte** ceiling over the serialized result array, not
+  a token count. Bytes conservatively bound tokens without committing the
+  package to one model's tokenizer. `Source.Input.maxBytes` is a separate
+  ceiling on the rendered snapshot text.
+- `capRecallResults` drops rows with empty text before it fills the budget.
+- Fact values are stored as JSON, so the value `getFact` returns is the value
+  `JSON.stringify` produced: `NaN` and `Infinity` become `null`, `undefined`,
+  function, and symbol members disappear, and sparse arrays collapse. The value
+  is serialized once at API entry, and the stored JSON, the search text, the
+  retained tags, and any vector projection all come from that one snapshot.
+- `RecallKeyword` normalizes both query and row text to NFKC before matching.
+  SQLite full text search does not, so the two bindings can disagree on
+  compatibility-equivalent characters.
+- The authoritative store writes **no** embedding vectors. Semantic projection
+  is opt-in through `RecallSemantic.decorateStore`, and `RecallSemantic.recall`
+  only lists vectors written under the model it was asked for.
+- TTL garbage collection is complete: `Maintenance.ttlGc` removes the expired
+  fact, its full-text projection, and its vector rows in one transaction.
+
+### Published ceilings
+
+| Ceiling                              | Value | Enforced at                   |
+| ------------------------------------ | ----- | ----------------------------- |
+| `Namespace.MAX_TAGS`                 | 16    | tag decode                    |
+| `Namespace.MAX_TAG_GROUP_DEPTH`      | 8     | tag-group decode and matching |
+| `Namespace.MAX_TAG_GROUP_NODES`      | 64    | tag-group decode and matching |
+| `Recall.MAX_RECALL_BANKS`            | 16    | `Recall.Input` decode         |
+| `Recall.MAX_RECALL_BANK_NAME_LENGTH` | 128   | `Recall.Input` decode         |
+| `Recall.MAX_RECALL_QUERY_BYTES`      | 16384 | `Recall.Input` decode         |
+| `Recall.MAX_RECALL_TOKENS`           | 65536 | `Recall.Input` and `Policy`   |
+| `Recall.MAX_RECALL_TAG_GROUPS`       | 16    | `Recall.Input` decode         |
+
+Each tag group is bounded on its own, and the group list is bounded too: every
+group is evaluated against every candidate row by every binding, so an unbounded
+list would multiply the per-group budget without limit.
+
+### What a read limit counts
+
+`limit` on `listFacts`, `listNotes`, `listMessages`, `searchRows` and `searchFts`
+bounds the rows the caller RECEIVES, after every status, supersession and
+tag-group filter on the same input. It is not a bound on the rows the query
+examines, and a bounded read never under-fills while matching rows remain.
+
+Statuses and supersession are answered in SQL. Tag groups are answered by
+`Namespace.matches`, the single source of truth for the five match modes, so a
+tag-filtered read walks the namespace in bounded pages until it has `limit`
+matches. Working-set memory stays proportional to one page, never to the
+namespace.
+
+## Failure codes
+
+`MemoryError.code` is the stable machine-readable answer, and `MemoryError.path`
+points at the offending field when one exists. `invalid_argument` means the
+caller passed something wrong; `store` means the backend failed. They are never
+the same code.
+
+| Code                    | Meaning                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| `not_found`             | the addressed record does not exist                               |
+| `fts_not_enabled`       | the namespace kind has not opted into full text search            |
+| `invalid_namespace`     | a namespace or bank name is empty or malformed                    |
+| `invalid_tag`           | a tag or tag group violates the vocabulary or a published ceiling |
+| `invalid_argument`      | any other rejected argument, with a `path` to the field           |
+| `supersede_conflict`    | a supersession request contradicts what is already stored         |
+| `idempotency_conflict`  | a retry reused an id with different immutable creation data       |
+| `embedding_unavailable` | the embedding provider failed or answered an invalid batch        |
+| `vector_model_mismatch` | a stored vector under the requested model has the wrong dimension |
+| `store`                 | the backend failed                                                |
 
 See [`@smthrs/memory` on GitHub](https://github.com/smithersai/smithers/blob/main/packages/memory/README.md)
 for installation and the full export table.

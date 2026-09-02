@@ -6,7 +6,7 @@
  * embedding route to `/model` is a follow-up that can be adapted here
  * without changing the memory contract.
  *
- * @see docs/specs/Concepts/Memory.md
+ * @see https://smithers.sh/api/memory
  * @since 0.1.0
  */
 import * as Context from "effect/Context"

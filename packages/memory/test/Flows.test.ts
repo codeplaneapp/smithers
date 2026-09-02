@@ -1,6 +1,7 @@
 import * as Effects from "@smthrs/core/Effects"
 import * as Flow from "@smthrs/core/Flow"
 import * as Graph from "@smthrs/core/Graph"
+import * as Node from "@smthrs/core/Node"
 import { Effect, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -21,14 +22,25 @@ describe("Flows", () => {
   })
 
   it("narrows recall inside a default-tier envelope and builds a sealed caller without diagnostics", () => {
-    const envelope = Effects.make({ reads: ["memory/**"], writes: [] })
+    const envelope = Effects.make({
+      reads: ["memory/**"],
+      writes: [],
+      mode: "expected",
+      onConflict: "fail"
+    })
     expect(Effects.narrow(envelope, Flows.recallEffects)).toEqual({ ok: true })
 
+    const boundRecall = Flow.make({
+      input: Flows.RecallInput,
+      output: Flows.RecallOutput,
+      effects: Flows.recallEffects,
+      body: () => Node.succeed([])
+    })
     const sealed = Flow.make({
       input: Flows.RecallInput,
       output: Flows.RecallOutput,
       effects: envelope,
-      body: (input) => Flows.recall(input)
+      body: (input) => boundRecall(input)
     })
     const diagnostics = Graph.diagnostics(Graph.build(sealed({ banks: ["bank"], query: "q" })))
     expect(diagnostics.filter((diagnostic) => diagnostic.code === "effect_tier_widening")).toEqual([])
@@ -107,9 +119,8 @@ describe("Flows", () => {
       Effect.gen(function*() {
         const store = yield* MemoryStore.MemoryStore
         const sql = yield* Effect.service(SqlClient.SqlClient)
-        yield* Flows.runRemember(
-          { bank: "bank", key: "expiring", text: "text", ttlMs: 10 },
-          { runId: "run-1", nodeId: "node-1", iteration: 2 }
+        yield* Flows.runRememberWith({ runId: "run-1", nodeId: "node-1", iteration: 2 })(
+          { bank: "bank", key: "expiring", text: "text", ttlMs: 10 }
         )
         const current = yield* store.getFact({ namespace: "bank", key: "expiring" })
         const persisted = yield* sql<{ readonly provenance_json: string }>`SELECT provenance_json
@@ -122,6 +133,36 @@ describe("Flows", () => {
     expect(result.current?.ttlMs).toBe(10)
     expect(JSON.parse(result.provenanceJson ?? "null")).toEqual({ runId: "run-1", nodeId: "node-1", iteration: 2 })
     expect(result.expired).toBeUndefined()
+  })
+
+  it("binds provenance at handler construction, not per call", async () => {
+    const persisted = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const handlers = Flows.handlersFor(Flows.remember, { runId: "run-9", nodeId: "node-9", iteration: 1 })
+        yield* handlers.remember({ bank: "bank", key: "bound", text: "text" })
+        const rows = yield* sql<{ readonly provenance_json: string }>`SELECT provenance_json
+          FROM memory_facts WHERE namespace_kind = 'flow' AND namespace_id = 'bank' AND fact_key = 'bound'`
+        return rows[0]?.provenance_json
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(JSON.parse(persisted ?? "null")).toEqual({ runId: "run-9", nodeId: "node-9", iteration: 1 })
+  })
+
+  // `FlowBinding.make({ flow, handler })` types its handler as
+  // `(input, call: Call) => Effect` and invokes it as `handler(decoded, call)`.
+  // A second positional parameter on any memory handler therefore receives the
+  // Call, so a provenance parameter there both breaks the binding's types and
+  // persists the whole call payload into `provenance_json`. Arity is the cheap
+  // in-package pin for that contract.
+  it("keeps every runtime handler one-argument so FlowBinding can bind it", () => {
+    expect(Flows.runRemember.length).toBe(1)
+    expect(Flows.runRecall.length).toBe(1)
+    expect(Flows.handlers.remember.length).toBe(1)
+    expect(Flows.handlers.recall.length).toBe(1)
+    expect(Flows.handlersFor(Flows.remember).remember.length).toBe(1)
+    expect(Flows.runRememberWith({ runId: "run-1" }).length).toBe(1)
   })
 
   it("delegates the recall handler to the installed recall service", async () => {

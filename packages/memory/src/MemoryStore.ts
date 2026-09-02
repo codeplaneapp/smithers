@@ -1,7 +1,7 @@
 /**
  * Authoritative SQL memory contract store.
  *
- * @see docs/specs/Concepts/Memory.md
+ * @see https://smithers.sh/api/memory
  *
  * @since 0.1.0
  */
@@ -43,6 +43,7 @@ export interface Fact {
   readonly namespace: Namespace.Namespace
   readonly key: string
   readonly value: unknown
+  readonly tags?: Namespace.Tags | undefined
   readonly ttlMs?: number | undefined
   readonly provenance: Provenance
   readonly createdAtMs: number
@@ -57,7 +58,7 @@ export interface Fact {
  * @slop
  */
 export interface PutFactInput {
-  readonly namespace: Namespace.Namespace
+  readonly namespace: NamespaceInput
   readonly key: string
   /**
    * Value stored through a `JSON.stringify` round trip.
@@ -70,6 +71,11 @@ export interface PutFactInput {
    * @since 0.1.0
    */
   readonly value: unknown
+  /**
+   * Validated first-class fact tags. When absent, search falls back to tags
+   * embedded in legacy fact values.
+   */
+  readonly tags?: Namespace.Tags | undefined
   readonly ttlMs?: number | undefined
   readonly provenance: Provenance
 }
@@ -82,7 +88,7 @@ export interface PutFactInput {
  * @slop
  */
 export interface GetFactInput {
-  readonly namespace: Namespace.Namespace
+  readonly namespace: NamespaceInput
   readonly key: string
 }
 
@@ -94,8 +100,9 @@ export interface GetFactInput {
  * @slop
  */
 export interface ListFactsInput {
-  readonly namespace: Namespace.Namespace
+  readonly namespace: NamespaceInput
   readonly prefix?: string | undefined
+  readonly limit?: number | undefined
 }
 
 /**
@@ -123,7 +130,7 @@ export interface Thread {
  */
 export interface CreateThreadInput {
   readonly id?: string | undefined
-  readonly namespace: Namespace.Namespace
+  readonly namespace: NamespaceInput
   readonly title?: string | undefined
   readonly metadata?: unknown
 }
@@ -136,7 +143,27 @@ export interface CreateThreadInput {
  * @slop
  */
 export interface ListThreadsInput {
-  readonly namespace?: Namespace.Namespace | undefined
+  readonly namespace?: NamespaceInput | undefined
+}
+
+/**
+ * Input for an exact durable thread read.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface GetThreadInput {
+  readonly threadId: string
+}
+
+/**
+ * Input for deleting one durable thread.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface DeleteThreadInput {
+  readonly threadId: string
 }
 
 /**
@@ -174,6 +201,19 @@ export type AppendMessageInput = Message
  */
 export interface ListMessagesInput {
   readonly threadId: string
+  readonly limit?: number | undefined
+  readonly cursor?: MessageCursor | undefined
+}
+
+/**
+ * Stable exclusive cursor for ordered message pagination.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface MessageCursor {
+  readonly at: number
+  readonly id: string
 }
 
 /**
@@ -233,7 +273,7 @@ export interface Note {
  * @slop
  */
 export interface PutNoteInput {
-  readonly namespace: Namespace.Namespace
+  readonly namespace: NamespaceInput
   readonly id: string
   readonly text: string
   readonly tags: Namespace.Tags
@@ -296,6 +336,12 @@ export type StatusFilter = NoteStatus | "any" | ReadonlyArray<NoteStatus>
  */
 export interface ListNotesInput {
   readonly namespace: NamespaceInput
+  readonly prefix?: string | undefined
+  /**
+   * At most this many rows that pass EVERY filter on this input, not a bound on
+   * the rows the query examines. An absent limit reads the whole namespace.
+   */
+  readonly limit?: number | undefined
   readonly tagGroup?: Namespace.TagGroup | undefined
   readonly tagGroups?: ReadonlyArray<Namespace.TagGroup> | undefined
   readonly status?: StatusFilter | undefined
@@ -329,6 +375,11 @@ export interface SearchRow {
  * @slop
  */
 export interface SearchRowsInput extends ListNotesInput {
+  /**
+   * At most this many merged fact and note rows that pass EVERY filter on this
+   * input. Both sides are read newest-first and bounded independently, so the
+   * merge is the true newest `limit` rows, never a sample of a wider window.
+   */
   readonly limit?: number | undefined
 }
 
@@ -389,11 +440,11 @@ export interface Service {
   readonly getFact: (input: GetFactInput) => Effect.Effect<Fact | undefined, MemoryError>
   readonly deleteFact: (input: GetFactInput) => Effect.Effect<boolean, MemoryError>
   readonly listFacts: (input: ListFactsInput) => Effect.Effect<ReadonlyArray<Fact>, MemoryError>
-  readonly listAllFacts: () => Effect.Effect<ReadonlyArray<Fact>, MemoryError>
+  readonly listAllFacts: Effect.Effect<ReadonlyArray<Fact>, MemoryError>
   readonly createThread: (input: CreateThreadInput) => Effect.Effect<Thread, MemoryError>
-  readonly getThread: (threadId: string) => Effect.Effect<Thread | undefined, MemoryError>
+  readonly getThread: (input: GetThreadInput) => Effect.Effect<Thread | undefined, MemoryError>
   readonly listThreads: (input?: ListThreadsInput | undefined) => Effect.Effect<ReadonlyArray<Thread>, MemoryError>
-  readonly deleteThread: (threadId: string) => Effect.Effect<boolean, MemoryError>
+  readonly deleteThread: (input: DeleteThreadInput) => Effect.Effect<boolean, MemoryError>
   readonly appendMessage: (input: AppendMessageInput) => Effect.Effect<void, MemoryError>
   readonly listMessages: (input: ListMessagesInput) => Effect.Effect<ReadonlyArray<Message>, MemoryError>
   readonly countMessages: (input: ListMessagesInput) => Effect.Effect<number, MemoryError>
@@ -427,6 +478,7 @@ interface FactRow {
   readonly namespace_id: string
   readonly fact_key: string
   readonly value_json: string
+  readonly tags_json: string | null
   readonly ttl_ms: number | null
   readonly provenance_json: string
   readonly created_at_ms: number
@@ -506,13 +558,6 @@ const changed = (result: unknown): number => {
     : 0
 }
 
-const validateNamespace = (
-  namespace: Namespace.Namespace
-): Effect.Effect<Namespace.Namespace, MemoryError> =>
-  Schema.decodeUnknownEffect(Namespace.Namespace)(namespace).pipe(
-    Effect.mapError(() => error("invalid_namespace", "memory namespace is invalid"))
-  )
-
 const validateTags = (tags: Namespace.Tags): Effect.Effect<Namespace.Tags, MemoryError> =>
   Schema.decodeUnknownEffect(Namespace.Tags)(tags).pipe(
     Effect.mapError(() => error("invalid_tag", "memory tags violate the vocabulary or 16-tag cap"))
@@ -535,6 +580,16 @@ const validateTime = (
   Number.isSafeInteger(value) && value >= 0
     ? Effect.succeed(value)
     : Effect.fail(error("invalid_argument", `${field} must be a non-negative safe integer`, undefined, path))
+
+const validateLimit = (
+  value: number | undefined,
+  operation: string
+): Effect.Effect<number | undefined, MemoryError> =>
+  value === undefined || (Number.isSafeInteger(value) && value >= 0)
+    ? Effect.succeed(value)
+    : Effect.fail(
+      error("invalid_argument", `${operation} limit must be a non-negative safe integer`, undefined, ["limit"])
+    )
 
 const encodeJson = (
   value: unknown,
@@ -579,12 +634,14 @@ const decodeTags = (value: string): Effect.Effect<Namespace.Tags, MemoryError> =
 const decodeFact = (row: FactRow): Effect.Effect<Fact, MemoryError> =>
   Effect.all({
     value: decodeJson(row.value_json, "fact value"),
+    tags: row.tags_json === null ? Effect.succeed(undefined) : decodeTags(row.tags_json),
     provenance: decodeProvenance(row.provenance_json)
   }).pipe(
-    Effect.map(({ provenance, value }) => ({
+    Effect.map(({ provenance, tags, value }) => ({
       namespace: { kind: row.namespace_kind, id: row.namespace_id },
       key: row.fact_key,
       value,
+      ...(tags === undefined ? {} : { tags }),
       ...(row.ttl_ms === null ? {} : { ttlMs: Number(row.ttl_ms) }),
       provenance,
       createdAtMs: Number(row.created_at_ms),
@@ -624,13 +681,25 @@ const decodeThread = (row: ThreadRow): Effect.Effect<Thread, MemoryError> =>
 
 const isExpired = (fact: Fact, now: number): boolean => fact.ttlMs !== undefined && fact.updatedAtMs + fact.ttlMs <= now
 
-const statusMatches = (filter: StatusFilter | undefined, status: NoteStatus): boolean => {
-  const selected = filter ?? "accepted"
-  return selected === "any" || (Array.isArray(selected) ? selected.includes(status) : selected === status)
-}
-
 const DELETE_MESSAGES_CHUNK_SIZE = 900
 const DELETE_EXPIRED_FACTS_CHUNK_SIZE = 256
+
+/**
+ * Rows a tag-filtered note read pulls per round trip.
+ *
+ * A tag group is evaluated in JavaScript, so a bounded read pages until it has
+ * `limit` matching rows instead of taking one oversized window. These two
+ * numbers are the page, not the answer: they bound working-set memory and the
+ * per-query cost, never how many rows the caller gets back.
+ */
+const NOTE_PAGE_SIZE = 512
+const MIN_NOTE_PAGE_SIZE = 128
+
+/**
+ * A composable SQL condition. `effect/unstable/sql` publishes no entry point
+ * for its `Statement` module, so the type is read back off `sql.literal`.
+ */
+type Fragment = ReturnType<SqlClient.SqlClient["literal"]>
 
 /**
  * Builds the SQL-backed memory service and applies idempotent migrations.
@@ -647,28 +716,54 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
     const database: Sql.DatabaseService = { sql, write: writer.write }
     yield* Sql.migrate(database).pipe(Effect.mapError(storeError("memory migration failed")))
 
-    const listFacts: Service["listFacts"] = (input) =>
+    const readFacts = (
+      input: ListFactsInput & { readonly keys?: ReadonlyArray<string> | undefined },
+      recentFirst: boolean,
+      offset = 0
+    ): Effect.Effect<ReadonlyArray<Fact>, MemoryError> =>
       Effect.gen(function*() {
-        const namespace = yield* validateNamespace(input.namespace)
+        const { namespace } = yield* resolveNamespace(input.namespace)
+        const limit = yield* validateLimit(input.limit, "listFacts")
+        if (limit === 0) return []
         const now = yield* Clock.currentTimeMillis
-        const rows = yield* sql<FactRow>`SELECT
-        namespace_kind, namespace_id, fact_key, value_json, ttl_ms,
-        provenance_json, created_at_ms, updated_at_ms
-        FROM memory_facts
-        WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
-        ORDER BY fact_key`.pipe(Effect.mapError(storeError("could not list memory facts")))
-        const facts = yield* Effect.forEach(rows, decodeFact)
-        return facts.filter((fact) =>
-          !isExpired(fact, now) && (input.prefix === undefined || fact.key.startsWith(input.prefix))
-        )
+        const order = sql.literal(recentFirst ? "updated_at_ms DESC, fact_key" : "fact_key")
+        const conditions: Array<Fragment> = [
+          sql`namespace_kind = ${namespace.kind}`,
+          sql`namespace_id = ${namespace.id}`,
+          sql`(ttl_ms IS NULL OR updated_at_ms + ttl_ms > ${now})`
+        ]
+        if (input.prefix !== undefined) {
+          conditions.push(sql`substr(fact_key, 1, length(${input.prefix})) = ${input.prefix}`)
+        }
+        if (input.keys !== undefined) {
+          conditions.push(input.keys.length === 0 ? sql.literal("1 = 0") : sql.in("fact_key", input.keys))
+        }
+        const where = sql.and(conditions)
+        const rows = yield* (limit === undefined
+          ? sql<FactRow>`SELECT
+              namespace_kind, namespace_id, fact_key, value_json, tags_json, ttl_ms,
+              provenance_json, created_at_ms, updated_at_ms
+              FROM memory_facts
+              WHERE ${where}
+              ORDER BY ${order}`
+          : sql<FactRow>`SELECT
+              namespace_kind, namespace_id, fact_key, value_json, tags_json, ttl_ms,
+              provenance_json, created_at_ms, updated_at_ms
+              FROM memory_facts
+              WHERE ${where}
+              ORDER BY ${order}
+              LIMIT ${limit} OFFSET ${offset}`).pipe(Effect.mapError(storeError("could not list memory facts")))
+        return yield* Effect.forEach(rows, decodeFact)
       })
+
+    const listFacts: Service["listFacts"] = (input) => readFacts(input, false)
 
     const getFact: Service["getFact"] = (input) =>
       Effect.gen(function*() {
-        const namespace = yield* validateNamespace(input.namespace)
+        const { namespace } = yield* resolveNamespace(input.namespace)
         yield* validateNonEmpty(input.key, "fact key", ["key"])
         const rows = yield* sql<FactRow>`SELECT
-        namespace_kind, namespace_id, fact_key, value_json, ttl_ms,
+        namespace_kind, namespace_id, fact_key, value_json, tags_json, ttl_ms,
         provenance_json, created_at_ms, updated_at_ms
         FROM memory_facts
         WHERE namespace_kind = ${namespace.kind}
@@ -683,41 +778,52 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         return isExpired(fact, now) ? undefined : fact
       })
 
-    const listAllFacts: Service["listAllFacts"] = () =>
-      Effect.gen(function*() {
-        const now = yield* Clock.currentTimeMillis
-        const rows = yield* sql<FactRow>`SELECT
-        namespace_kind, namespace_id, fact_key, value_json, ttl_ms,
+    const listAllFacts: Service["listAllFacts"] = Effect.gen(function*() {
+      const now = yield* Clock.currentTimeMillis
+      const rows = yield* sql<FactRow>`SELECT
+        namespace_kind, namespace_id, fact_key, value_json, tags_json, ttl_ms,
         provenance_json, created_at_ms, updated_at_ms
         FROM memory_facts
+        WHERE ttl_ms IS NULL OR updated_at_ms + ttl_ms > ${now}
         ORDER BY namespace_kind, namespace_id, fact_key`.pipe(
-          Effect.mapError(storeError("could not list all memory facts"))
-        )
-        const facts = yield* Effect.forEach(rows, decodeFact)
-        return facts.filter((fact) => !isExpired(fact, now))
-      })
+        Effect.mapError(storeError("could not list all memory facts"))
+      )
+      const facts = yield* Effect.forEach(rows, decodeFact)
+      return facts
+    })
 
     const putFact: Service["putFact"] = (input) =>
       Effect.gen(function*() {
-        const namespace = yield* validateNamespace(input.namespace)
+        const { namespace } = yield* resolveNamespace(input.namespace)
         yield* validateNonEmpty(input.key, "fact key", ["key"])
         if (input.ttlMs !== undefined) {
           yield* validateTime(input.ttlMs, "ttlMs", ["ttlMs"])
         }
         const valueJson = yield* encodeJson(input.value, "fact value", ["value"])
         const value = yield* decodeJson(valueJson, "fact value")
+        const tagsJson = input.tags === undefined
+          ? null
+          : canonicalJson(
+            yield* validateTags(
+              (yield* decodeJson(
+                yield* encodeJson(input.tags, "fact tags", ["tags"]),
+                "fact tags"
+              )) as Namespace.Tags
+            )
+          )
         const provenanceJson = yield* encodeJson(input.provenance, "fact provenance", ["provenance"])
         const now = yield* Clock.currentTimeMillis
         yield* database.write(
           Effect.gen(function*() {
             yield* sql`INSERT INTO memory_facts (
-            namespace_kind, namespace_id, fact_key, value_json, ttl_ms,
+            namespace_kind, namespace_id, fact_key, value_json, tags_json, ttl_ms,
             provenance_json, created_at_ms, updated_at_ms
           ) VALUES (
-            ${namespace.kind}, ${namespace.id}, ${input.key}, ${valueJson}, ${input.ttlMs ?? null},
+            ${namespace.kind}, ${namespace.id}, ${input.key}, ${valueJson}, ${tagsJson}, ${input.ttlMs ?? null},
             ${provenanceJson}, ${now}, ${now}
           ) ON CONFLICT (namespace_kind, namespace_id, fact_key) DO UPDATE SET
             value_json = excluded.value_json,
+            tags_json = excluded.tags_json,
             ttl_ms = excluded.ttl_ms,
             provenance_json = excluded.provenance_json,
             updated_at_ms = excluded.updated_at_ms`
@@ -734,7 +840,7 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
 
     const deleteFact: Service["deleteFact"] = (input) =>
       Effect.gen(function*() {
-        const namespace = yield* validateNamespace(input.namespace)
+        const { namespace } = yield* resolveNamespace(input.namespace)
         yield* validateNonEmpty(input.key, "fact key", ["key"])
         const deleted = yield* database.write(
           Effect.gen(function*() {
@@ -758,13 +864,13 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         return deleted
       })
 
-    const getThread: Service["getThread"] = (threadId) =>
+    const getThread: Service["getThread"] = (input) =>
       Effect.gen(function*() {
-        yield* validateNonEmpty(threadId, "threadId", ["threadId"])
+        yield* validateNonEmpty(input.threadId, "threadId", ["threadId"])
         const rows = yield* sql<ThreadRow>`SELECT
         thread_id, namespace_kind, namespace_id, title, metadata_json,
         created_at_ms, updated_at_ms
-        FROM memory_threads WHERE thread_id = ${threadId} LIMIT 1`.pipe(
+        FROM memory_threads WHERE thread_id = ${input.threadId} LIMIT 1`.pipe(
           Effect.mapError(storeError("could not read memory thread"))
         )
         return rows[0] === undefined ? undefined : yield* decodeThread(rows[0])
@@ -772,7 +878,7 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
 
     const createThread: Service["createThread"] = (input) =>
       Effect.gen(function*() {
-        const namespace = yield* validateNamespace(input.namespace)
+        const { namespace } = yield* resolveNamespace(input.namespace)
         const id = input.id ?? (yield* crypto.randomUUIDv4.pipe(
           Effect.mapError((cause) => error("store", "could not generate memory thread id", cause))
         ))
@@ -811,7 +917,12 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
                 existing.title !== (input.title ?? null) || existingMetadata !== metadataJson
               ) {
                 return yield* Effect.fail(
-                  error("store", `thread id "${id}" already exists with different creation data`)
+                  error(
+                    "idempotency_conflict",
+                    `thread id "${id}" already exists with different creation data`,
+                    undefined,
+                    ["threadId"]
+                  )
                 )
               }
             }
@@ -824,7 +935,7 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
       Effect.gen(function*() {
         const namespace = input.namespace === undefined
           ? undefined
-          : yield* validateNamespace(input.namespace)
+          : (yield* resolveNamespace(input.namespace)).namespace
         const rows = yield* (namespace === undefined
           ? sql<ThreadRow>`SELECT
           thread_id, namespace_kind, namespace_id, title, metadata_json,
@@ -841,13 +952,13 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         return yield* Effect.forEach(rows, decodeThread)
       })
 
-    const deleteThread: Service["deleteThread"] = (threadId) =>
+    const deleteThread: Service["deleteThread"] = (input) =>
       Effect.gen(function*() {
-        yield* validateNonEmpty(threadId, "threadId", ["threadId"])
+        yield* validateNonEmpty(input.threadId, "threadId", ["threadId"])
         return yield* database.write(
           Effect.gen(function*() {
-            yield* sql`DELETE FROM memory_messages WHERE thread_id = ${threadId}`
-            const result = yield* sql`DELETE FROM memory_threads WHERE thread_id = ${threadId}`.raw
+            yield* sql`DELETE FROM memory_messages WHERE thread_id = ${input.threadId}`
+            const result = yield* sql`DELETE FROM memory_threads WHERE thread_id = ${input.threadId}`.raw
             return changed(result) > 0
           })
         ).pipe(Effect.mapError(storeError("could not delete memory thread")))
@@ -907,10 +1018,35 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
     const listMessages: Service["listMessages"] = (input) =>
       Effect.gen(function*() {
         yield* validateNonEmpty(input.threadId, "threadId", ["threadId"])
-        const rows = yield* sql<MessageRow>`SELECT thread_id, id, role, text, at_ms
-        FROM memory_messages
-        WHERE thread_id = ${input.threadId}
-        ORDER BY at_ms, id`.pipe(Effect.mapError(storeError("could not list memory messages")))
+        const limit = yield* validateLimit(input.limit, "listMessages")
+        if (limit === 0) return []
+        if (input.cursor !== undefined) {
+          yield* validateTime(input.cursor.at, "message cursor at", ["cursor", "at"])
+          yield* validateNonEmpty(input.cursor.id, "message cursor id", ["cursor", "id"])
+        }
+        const rows = yield* (input.cursor === undefined
+          ? limit === undefined
+            ? sql<MessageRow>`SELECT thread_id, id, role, text, at_ms
+              FROM memory_messages
+              WHERE thread_id = ${input.threadId}
+              ORDER BY at_ms, id`
+            : sql<MessageRow>`SELECT thread_id, id, role, text, at_ms
+              FROM memory_messages
+              WHERE thread_id = ${input.threadId}
+              ORDER BY at_ms, id
+              LIMIT ${limit}`
+          : limit === undefined
+          ? sql<MessageRow>`SELECT thread_id, id, role, text, at_ms
+              FROM memory_messages
+              WHERE thread_id = ${input.threadId}
+                AND (at_ms > ${input.cursor.at} OR (at_ms = ${input.cursor.at} AND id > ${input.cursor.id}))
+              ORDER BY at_ms, id`
+          : sql<MessageRow>`SELECT thread_id, id, role, text, at_ms
+              FROM memory_messages
+              WHERE thread_id = ${input.threadId}
+                AND (at_ms > ${input.cursor.at} OR (at_ms = ${input.cursor.at} AND id > ${input.cursor.id}))
+              ORDER BY at_ms, id
+              LIMIT ${limit}`).pipe(Effect.mapError(storeError("could not list memory messages")))
         return rows.map((row) => ({
           threadId: row.thread_id,
           id: row.id,
@@ -941,44 +1077,99 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         return deleted
       })
 
-    const supersededIds = (
-      namespace: Namespace.Namespace
-    ): Effect.Effect<ReadonlySet<string>, MemoryError> =>
-      sql<{ readonly target_id: string }>`SELECT edges.target_id
-      FROM memory_note_supersedes edges
+    // Status and supersession are answered in SQL, which is what makes `limit`
+    // mean "at most N rows that pass every filter". A `LIMIT` applied before
+    // the filters silently under-fills: `listNotes({status:"accepted",limit:1})`
+    // over a namespace whose oldest note is `pending` used to return nothing.
+    // An absent status filter selects `accepted`; `"any"` selects everything;
+    // an array selects its members, and an empty array selects nothing.
+    const statusCondition = (filter: StatusFilter | undefined): Fragment | undefined => {
+      const selected = filter ?? "accepted"
+      if (selected === "any") return undefined
+      if (!Array.isArray(selected)) return sql`notes.status = ${selected}`
+      return selected.length === 0 ? sql.literal("1 = 0") : sql.in("notes.status", selected)
+    }
+
+    const notSupersededCondition = sql.literal(`NOT EXISTS (
+      SELECT 1 FROM memory_note_supersedes edges
       JOIN memory_notes superseder ON superseder.id = edges.superseder_id
-      JOIN memory_notes target ON target.id = edges.target_id
-      WHERE superseder.status = 'accepted'
-        AND target.namespace_kind = ${namespace.kind}
-        AND target.namespace_id = ${namespace.id}`.pipe(
-        Effect.map((rows) => new Set(rows.map((row) => row.target_id))),
-        Effect.mapError(storeError("could not read memory supersession edges"))
-      )
+      WHERE edges.target_id = notes.id AND superseder.status = 'accepted')`)
 
     const readNotes = (
-      input: ListNotesInput
+      input: ListNotesInput & { readonly ids?: ReadonlyArray<string> | undefined },
+      recentFirst = false
     ): Effect.Effect<ReadonlyArray<Note>, MemoryError> =>
       Effect.gen(function*() {
         const { namespace } = yield* resolveNamespace(input.namespace)
-        const rows = yield* sql<NoteRow>`SELECT
-        namespace_kind, namespace_id, id, text, tags_json,
-        provenance_json, status, created_at_ms
-        FROM memory_notes
-        WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
-        ORDER BY created_at_ms, id`.pipe(Effect.mapError(storeError("could not list memory notes")))
-        const notes = yield* Effect.forEach(rows, decodeNote)
-        const hidden = input.includeSuperseded === true ? new Set<string>() : yield* supersededIds(namespace)
-        return notes.filter((note) =>
-          statusMatches(input.status, note.status) &&
-          !hidden.has(note.id) &&
+        const limit = yield* validateLimit(input.limit, "listNotes")
+        if (limit === 0) return []
+        const order = sql.literal(recentFirst ? "created_at_ms DESC, id" : "created_at_ms, id")
+        const conditions: Array<Fragment> = [
+          sql`notes.namespace_kind = ${namespace.kind}`,
+          sql`notes.namespace_id = ${namespace.id}`
+        ]
+        if (input.prefix !== undefined) {
+          conditions.push(sql`substr(notes.id, 1, length(${input.prefix})) = ${input.prefix}`)
+        }
+        if (input.ids !== undefined) {
+          conditions.push(input.ids.length === 0 ? sql.literal("1 = 0") : sql.in("notes.id", input.ids))
+        }
+        const status = statusCondition(input.status)
+        if (status !== undefined) conditions.push(status)
+        if (input.includeSuperseded !== true) conditions.push(notSupersededCondition)
+        const where = sql.and(conditions)
+        const page = (rowLimit: number | undefined, offset: number) =>
+          (rowLimit === undefined
+            ? sql<NoteRow>`SELECT
+              notes.namespace_kind, notes.namespace_id, notes.id, notes.text, notes.tags_json,
+              notes.provenance_json, notes.status, notes.created_at_ms
+              FROM memory_notes notes
+              WHERE ${where}
+              ORDER BY ${order}`
+            : sql<NoteRow>`SELECT
+              notes.namespace_kind, notes.namespace_id, notes.id, notes.text, notes.tags_json,
+              notes.provenance_json, notes.status, notes.created_at_ms
+              FROM memory_notes notes
+              WHERE ${where}
+              ORDER BY ${order}
+              LIMIT ${rowLimit} OFFSET ${offset}`).pipe(
+              Effect.mapError(storeError("could not list memory notes"))
+            )
+
+        // `Namespace.matches` stays the single source of truth for the five tag
+        // match modes, so the tag filter is the one predicate left in JS. When
+        // it is active a bounded read pages until it has `limit` matches rather
+        // than overscanning a fixed window and hoping: memory stays O(page) and
+        // the answer is exact.
+        const tagFiltered = input.tagGroup !== undefined || input.tagGroups !== undefined
+        const matchesTags = (note: Note): boolean =>
           (input.tagGroup === undefined || Namespace.matches(input.tagGroup, note.tags)) &&
           (input.tagGroups === undefined || input.tagGroups.every((group) => Namespace.matches(group, note.tags)))
-        )
+        if (limit === undefined || !tagFiltered) {
+          const notes = yield* Effect.forEach(yield* page(limit, 0), decodeNote)
+          return tagFiltered ? notes.filter(matchesTags) : notes
+        }
+        const pageSize = Math.min(NOTE_PAGE_SIZE, Math.max(limit, MIN_NOTE_PAGE_SIZE))
+        const collected: Array<Note> = []
+        let offset = 0
+        while (collected.length < limit) {
+          const rows = yield* page(pageSize, offset)
+          if (rows.length === 0) break
+          offset += rows.length
+          for (const note of yield* Effect.forEach(rows, decodeNote)) {
+            if (matchesTags(note)) {
+              collected.push(note)
+              if (collected.length === limit) break
+            }
+          }
+          if (rows.length < pageSize) break
+        }
+        return collected
       })
 
     const putNote: Service["putNote"] = (input) =>
       Effect.gen(function*() {
-        const namespace = yield* validateNamespace(input.namespace)
+        const { namespace } = yield* resolveNamespace(input.namespace)
         yield* validateNonEmpty(input.id, "note id", ["id"])
         const status = input.status ?? "accepted"
         const encodedTags = yield* encodeJson(input.tags, "note tags", ["tags"])
@@ -1130,49 +1321,87 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         ).pipe(Effect.mapError(storeError("could not write memory supersession edge")))
       })
 
+    const factSearchRow = (bank: string, fact: Fact): SearchRow => ({
+      id: fact.key,
+      kind: "fact",
+      bank,
+      namespace: fact.namespace,
+      key: fact.key,
+      text: searchableText(fact.value),
+      tags: fact.tags ?? retainedTags(fact.value),
+      updatedAtMs: fact.updatedAtMs
+    })
+
+    const noteSearchRow = (bank: string, note: Note): SearchRow => ({
+      id: note.id,
+      kind: "note",
+      bank,
+      namespace: note.namespace,
+      key: note.id,
+      text: note.text,
+      tags: note.tags,
+      updatedAtMs: note.createdAtMs,
+      status: note.status
+    })
+
+    const tagMatcher = (input: {
+      readonly tagGroup?: Namespace.TagGroup | undefined
+      readonly tagGroups?: ReadonlyArray<Namespace.TagGroup> | undefined
+    }) =>
+    (tags: ReadonlyArray<string>): boolean =>
+      (input.tagGroup === undefined || Namespace.matches(input.tagGroup, tags)) &&
+      (input.tagGroups === undefined || input.tagGroups.every((group) => Namespace.matches(group, tags)))
+
+    // Both sides are read newest-first, so the merge of each side's top `limit`
+    // MATCHING rows provably contains the global top `limit`. That only holds
+    // when each side really returns `limit` matches, which is why the fact side
+    // pages the same way `readNotes` does instead of overscanning a window.
     const searchRows: Service["searchRows"] = (input) =>
       Effect.gen(function*() {
-        if (input.limit !== undefined && (!Number.isSafeInteger(input.limit) || input.limit < 0)) {
-          return yield* Effect.fail(
-            error("invalid_argument", "searchRows limit must be a non-negative safe integer", undefined, ["limit"])
-          )
-        }
+        const limit = yield* validateLimit(input.limit, "searchRows")
+        if (limit === 0) return []
         const { bank, namespace } = yield* resolveNamespace(input.namespace)
-        const [facts, notes] = yield* Effect.all([
-          listFacts({ namespace }),
-          readNotes(input)
-        ])
-        const factRows = facts.map((fact): SearchRow => ({
-          id: fact.key,
-          kind: "fact",
-          bank,
-          namespace: fact.namespace,
-          key: fact.key,
-          text: searchableText(fact.value),
-          tags: retainedTags(fact.value),
-          updatedAtMs: fact.updatedAtMs
-        }))
-        const noteRows = notes.map((note): SearchRow => ({
-          id: note.id,
-          kind: "note",
-          bank,
-          namespace: note.namespace,
-          key: note.id,
-          text: note.text,
-          tags: note.tags,
-          updatedAtMs: note.createdAtMs,
-          status: note.status
-        }))
-        const rows = [...factRows, ...noteRows]
-          .filter((row) =>
-            (input.tagGroup === undefined || Namespace.matches(input.tagGroup, row.tags)) &&
-            (input.tagGroups === undefined || input.tagGroups.every((group) => Namespace.matches(group, row.tags)))
-          )
-          .sort((left, right) => right.updatedAtMs - left.updatedAtMs || compareText(left.key, right.key))
-        if (input.limit === undefined) {
-          return rows
+        const tagFiltered = input.tagGroup !== undefined || input.tagGroups !== undefined
+        const matchesTags = tagMatcher(input)
+        const toFactRow = (fact: Fact): SearchRow => factSearchRow(bank, fact)
+        const factQuery = {
+          namespace,
+          ...(input.prefix === undefined ? {} : { prefix: input.prefix })
         }
-        return rows.slice(0, input.limit)
+        const readFactRows = Effect.gen(function*() {
+          if (limit === undefined || !tagFiltered) {
+            const facts = yield* readFacts(
+              { ...factQuery, ...(limit === undefined ? {} : { limit }) },
+              true
+            )
+            const rows = facts.map(toFactRow)
+            return tagFiltered ? rows.filter((row) => matchesTags(row.tags)) : rows
+          }
+          const pageSize = Math.min(NOTE_PAGE_SIZE, Math.max(limit, MIN_NOTE_PAGE_SIZE))
+          const collected: Array<SearchRow> = []
+          let offset = 0
+          while (collected.length < limit) {
+            const facts = yield* readFacts({ ...factQuery, limit: pageSize }, true, offset)
+            if (facts.length === 0) break
+            offset += facts.length
+            for (const fact of facts) {
+              const row = toFactRow(fact)
+              if (matchesTags(row.tags)) {
+                collected.push(row)
+                if (collected.length === limit) break
+              }
+            }
+            if (facts.length < pageSize) break
+          }
+          return collected
+        })
+        const [factRows, notes] = yield* Effect.all([
+          readFactRows,
+          readNotes({ ...input, namespace, ...(limit === undefined ? {} : { limit }) }, true)
+        ])
+        const rows = [...factRows, ...notes.map((note) => noteSearchRow(bank, note))]
+          .sort((left, right) => right.updatedAtMs - left.updatedAtMs || compareText(left.key, right.key))
+        return limit === undefined ? rows : rows.slice(0, limit)
       })
 
     const enableFts: Service["enableFts"] = (kind) =>
@@ -1194,7 +1423,7 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
             error("invalid_argument", "searchFts limit must be a non-negative safe integer", undefined, ["limit"])
           )
         }
-        const { namespace } = yield* resolveNamespace(input.namespace)
+        const { bank, namespace } = yield* resolveNamespace(input.namespace)
         const enabled = yield* Sql.isFtsEnabled(database, namespace.kind).pipe(
           Effect.mapError(storeError("could not inspect FTS enablement"))
         )
@@ -1213,27 +1442,58 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         if (limit === 0) {
           return []
         }
-        const matches = yield* Sql.searchFts(database, namespace.kind, namespace.id, query, limit).pipe(
-          Effect.mapError(storeError("memory FTS query failed"))
-        )
-        const rows = yield* searchRows({
-          namespace,
-          ...(input.tagGroup === undefined ? {} : { tagGroup: input.tagGroup }),
-          ...(input.tagGroups === undefined ? {} : { tagGroups: input.tagGroups }),
-          ...(input.status === undefined ? {} : { status: input.status }),
-          ...(input.includeSuperseded === undefined ? {} : { includeSuperseded: input.includeSuperseded })
-        })
-        const byId = new Map(rows.map((row) => [`${row.kind}\0${row.id}`, row]))
+        // Ranked matches are resolved by id, never through a recency window: a
+        // window drops a legitimately matching row simply for being older than
+        // the newest N in its namespace. Matches a status, supersession or tag
+        // filter rejects are refilled from the next page of ranks, so an FTS
+        // query for N rows returns N whenever N passing matches exist.
+        const matchesTags = tagMatcher(input)
+        const pageSize = Math.min(NOTE_PAGE_SIZE, Math.max(limit, MIN_NOTE_PAGE_SIZE))
         const ordered: Array<FtsRow> = []
-        for (const match of matches) {
-          const row = byId.get(`${match.record_kind}\0${match.record_id}`)
-          if (row !== undefined) {
-            const rank = Number(match.rank)
-            ordered.push({ ...row, rank, score: -rank })
+        let offset = 0
+        while (ordered.length < limit) {
+          const matches = yield* Sql.searchFts(database, namespace.kind, namespace.id, query, pageSize, offset).pipe(
+            Effect.mapError(storeError("memory FTS query failed"))
+          )
+          if (matches.length === 0) break
+          offset += matches.length
+          const factKeys = matches.filter((match) => match.record_kind === "fact").map((match) => match.record_id)
+          const noteIds = matches.filter((match) => match.record_kind === "note").map((match) => match.record_id)
+          const [facts, notes] = yield* Effect.all([
+            factKeys.length === 0
+              ? Effect.succeed<ReadonlyArray<Fact>>([])
+              : readFacts({
+                namespace,
+                keys: factKeys,
+                ...(input.prefix === undefined ? {} : { prefix: input.prefix })
+              }, true),
+            noteIds.length === 0
+              ? Effect.succeed<ReadonlyArray<Note>>([])
+              : readNotes({
+                namespace,
+                ids: noteIds,
+                ...(input.prefix === undefined ? {} : { prefix: input.prefix }),
+                ...(input.tagGroup === undefined ? {} : { tagGroup: input.tagGroup }),
+                ...(input.tagGroups === undefined ? {} : { tagGroups: input.tagGroups }),
+                ...(input.status === undefined ? {} : { status: input.status }),
+                ...(input.includeSuperseded === undefined ? {} : { includeSuperseded: input.includeSuperseded })
+              }, true)
+          ])
+          const byId = new Map<string, SearchRow>()
+          for (const fact of facts) {
+            const row = factSearchRow(bank, fact)
+            if (matchesTags(row.tags)) byId.set(`fact\0${row.id}`, row)
           }
-          if (ordered.length === limit) {
-            break
+          for (const note of notes) byId.set(`note\0${note.id}`, noteSearchRow(bank, note))
+          for (const match of matches) {
+            const row = byId.get(`${match.record_kind}\0${match.record_id}`)
+            if (row !== undefined) {
+              const rank = Number(match.rank)
+              ordered.push({ ...row, rank, score: -rank })
+              if (ordered.length === limit) break
+            }
           }
+          if (matches.length < pageSize) break
         }
         return ordered
       })
@@ -1328,7 +1588,14 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
               ${input.summary.text}, ${input.summary.at}
             ) ON CONFLICT (thread_id, id) DO NOTHING`.raw
             if (changed(inserted) === 0) {
-              return yield* Effect.fail(error("store", `summary id "${input.summary.id}" already exists`))
+              return yield* Effect.fail(
+                error(
+                  "idempotency_conflict",
+                  `summary id "${input.summary.id}" already exists`,
+                  undefined,
+                  ["summary", "id"]
+                )
+              )
             }
             return yield* deleteMessageRows(input.threadId, ids)
           })
@@ -1379,7 +1646,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => {
     getFact: () => unavailable("getFact"),
     deleteFact: () => unavailable("deleteFact"),
     listFacts: () => unavailable("listFacts"),
-    listAllFacts: () => unavailable("listAllFacts"),
+    listAllFacts: unavailable("listAllFacts"),
     createThread: () => unavailable("createThread"),
     getThread: () => unavailable("getThread"),
     listThreads: () => unavailable("listThreads"),

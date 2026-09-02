@@ -6,15 +6,16 @@
  * authoritative MemoryStore writes complete first, projection failures retry
  * once and are logged without changing the write result.
  *
- * @see docs/specs/Concepts/Memory.md
+ * @see https://smithers.sh/api/memory
  * @since 0.1.0
  */
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Semaphore from "effect/Semaphore"
+import type { DatabaseService } from "./Database.ts"
 import * as Embedding from "./Embedding.ts"
-import type { DatabaseService } from "./internal/Sql.ts"
+import { resolveBanks, resolveNamespace } from "./internal/Bank.ts"
 import { compareText, digest, searchableText, vectorBytes } from "./internal/Text.ts"
 import * as MemoryError from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
@@ -134,7 +135,6 @@ const invalidArgument = (message: string, path: ReadonlyArray<string>): MemoryEr
   new MemoryError.MemoryError({ code: "invalid_argument", message, path })
 
 const validateVector = (vector: Vector): MemoryError.MemoryError | undefined => {
-  if (vector.bank.length === 0) return invalidArgument("vector bank must not be empty", ["bank"])
   if (vector.key.length === 0) return invalidArgument("vector key must not be empty", ["key"])
   if (vector.model.length === 0) return invalidArgument("vector model must not be empty", ["model"])
   if (vector.contentDigest.length === 0) {
@@ -169,10 +169,11 @@ const validateVector = (vector: Vector): MemoryError.MemoryError | undefined => 
  */
 export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
   upsert: (vector) =>
-    Effect.suspend(() => {
+    Effect.gen(function*() {
       const failure = validateVector(vector)
-      if (failure !== undefined) return Effect.fail(failure)
-      return database.write(
+      if (failure !== undefined) return yield* Effect.fail(failure)
+      const { namespace } = yield* resolveNamespace(vector.bank)
+      yield* database.write(
         database.sql`
       INSERT INTO memory_vectors (
         record_kind, record_id, namespace_kind, namespace_id,
@@ -180,8 +181,8 @@ export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
       ) VALUES (
         ${vector.recordKind ?? "note"},
         ${vector.recordId ?? vector.key},
-        ${Recall.namespaceForBank(vector.bank).kind},
-        ${Recall.namespaceForBank(vector.bank).id},
+        ${namespace.kind},
+        ${namespace.id},
         ${vector.model},
         ${vector.contentDigest},
         ${vector.dimensions},
@@ -199,19 +200,21 @@ export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
       ).pipe(Effect.mapError(sqlError), Effect.asVoid)
     }),
   list: (banks, model) =>
-    Effect.all(
-      banks.map((bank) => {
-        const namespace = Recall.namespaceForBank(bank)
-        return database.sql<SqlVectorRow>`
+    resolveBanks(banks).pipe(
+      Effect.flatMap((resolved) =>
+        Effect.all(
+          resolved.map(({ bank, namespace }) => {
+            return database.sql<SqlVectorRow>`
           SELECT record_kind, record_id, namespace_kind, namespace_id,
             embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
           FROM memory_vectors
           WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
             AND embedding_model = ${model}
         `.pipe(Effect.map((rows) => ({ bank, rows })))
-      }),
-      { concurrency: "unbounded" }
-    ).pipe(
+          }),
+          { concurrency: 4 }
+        )
+      ),
       Effect.flatMap((groups) =>
         Effect.forEach(groups.flatMap(({ bank, rows }) => rows.map((row) => ({ bank, row }))), ({ bank, row }) =>
           readVector(row.vector_bytes, row.dimensions).pipe(Effect.map((vector) => ({
@@ -272,10 +275,11 @@ export const recall = (
   Effect.gen(function*() {
     const embedding = yield* Embedding.Embedding
     const store = yield* MemoryStore.MemoryStore
+    const banks = yield* resolveBanks(input.banks)
     const model = options.model ?? defaultModel
     const limit = budgetLimits[input.budget ?? "mid"]
     const query = yield* embedding.embed(input.query)
-    const vectors = yield* options.vectorStore.list(input.banks, model)
+    const vectors = yield* options.vectorStore.list(banks.map(({ bank }) => bank), model)
     if (
       vectors.some((vector) =>
         vector.model === model &&
@@ -285,20 +289,21 @@ export const recall = (
       return yield* Effect.fail(vectorMismatch("embedding dimensions do not match the query vector"))
     }
     const rows = yield* Effect.all(
-      input.banks.map((namespace) =>
+      banks.map(({ namespace }) =>
         store.searchRows({
-          namespace: Recall.namespaceForBank(namespace),
-          status: "accepted"
+          namespace,
+          status: "accepted",
+          limit: Math.min(512, limit * 5)
         })
       ),
-      { concurrency: "unbounded" }
+      { concurrency: 4 }
     )
     const byIdentity = new Map(
       rows.flatMap((bankRows, index) =>
         bankRows.map((row) =>
           [
-            `${input.banks[index] ?? ""}\u0000${row.kind}\u0000${row.id}`,
-            { ...row, bank: input.banks[index] ?? "" }
+            `${banks[index]?.bank ?? ""}\u0000${row.kind}\u0000${row.id}`,
+            { ...row, bank: banks[index]?.bank ?? "" }
           ] as const
         )
       )
@@ -339,23 +344,28 @@ export const recall = (
   })
 
 /**
- * Creates a per-key serialized projection decorator. Call it after the
- * authoritative store transaction has committed.
+ * One authoritative row submitted for semantic projection after commit.
  *
- * @category constructors
+ * @category models
  * @since 0.1.0
- * @slop
+ */
+export interface ProjectionInput {
+  readonly bank: string
+  readonly key: string
+  readonly text: string
+  readonly updatedAtMs: number
+  readonly recordKind?: "fact" | "note" | undefined
+  readonly recordId?: string | undefined
+}
+
+/**
+ * Per-key serialized semantic projection coordinator.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Projector {
-  (row: {
-    readonly bank: string
-    readonly key: string
-    readonly text: string
-    readonly updatedAtMs: number
-    readonly recordKind?: "fact" | "note" | undefined
-    readonly recordId?: string | undefined
-  }): Effect.Effect<void, never, Embedding.Embedding>
-  /** Number of keys currently projecting or waiting; exposed for diagnostics. */
+  readonly project: (row: ProjectionInput) => Effect.Effect<void, never, Embedding.Embedding>
   readonly activeKeys: () => number
 }
 
@@ -367,14 +377,7 @@ export interface Projector {
  */
 export const makeProjector = (options: Options): Projector => {
   const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
-  const project = (row: {
-    readonly bank: string
-    readonly key: string
-    readonly text: string
-    readonly updatedAtMs: number
-    readonly recordKind?: "fact" | "note" | undefined
-    readonly recordId?: string | undefined
-  }) =>
+  const project = (row: ProjectionInput) =>
     Effect.suspend(() => {
       const model = options.model ?? defaultModel
       const snapshot = Object.freeze({
@@ -419,21 +422,8 @@ export const makeProjector = (options: Options): Projector => {
         }))
       )
     })
-  return Object.assign(project, { activeKeys: () => locks.size })
+  return { project, activeKeys: () => locks.size }
 }
-
-/**
- * Projects one committed row, retrying once and degrading to a log-only
- * failure. The returned effect remains interruptible.
- *
- * @category constructors
- * @since 0.1.0
- * @slop
- */
-export const projectAfterCommit = (
-  projector: Projector,
-  row: Parameters<Projector>[0]
-): Effect.Effect<void, never, Embedding.Embedding> => projector(row)
 
 /**
  * Decorates authoritative fact and note writes with an after-commit semantic
@@ -449,8 +439,8 @@ export const decorateStore = (
   projector: Projector,
   embedding: Embedding.Service
 ): MemoryStore.Service => {
-  const project = (row: Parameters<Projector>[0]): Effect.Effect<void> =>
-    projector(row).pipe(Effect.provideService(Embedding.Embedding, embedding))
+  const project = (row: ProjectionInput): Effect.Effect<void> =>
+    projector.project(row).pipe(Effect.provideService(Embedding.Embedding, embedding))
   const superviseAfterCommit = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<void> =>
     effect.pipe(Effect.ignoreCause({ log: true, message: "memory semantic post-commit projection failed" }))
   return {

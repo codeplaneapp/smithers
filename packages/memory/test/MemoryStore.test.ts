@@ -191,11 +191,13 @@ describe("MemoryStore", () => {
   it("paginates messages by the stable at-and-id cursor", async () => {
     const pages = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
-      for (const message of [
-        { threadId: "paged", id: "a", role: "user", text: "a", at: 1 },
-        { threadId: "paged", id: "b", role: "user", text: "b", at: 2 },
-        { threadId: "paged", id: "c", role: "user", text: "c", at: 2 }
-      ]) yield* store.appendMessage(message)
+      for (
+        const message of [
+          { threadId: "paged", id: "a", role: "user", text: "a", at: 1 },
+          { threadId: "paged", id: "b", role: "user", text: "b", at: 2 },
+          { threadId: "paged", id: "c", role: "user", text: "c", at: 2 }
+        ]
+      ) yield* store.appendMessage(message)
       const first = yield* store.listMessages({ threadId: "paged", limit: 2 })
       const last = first.at(-1)!
       const second = yield* store.listMessages({
@@ -908,8 +910,12 @@ describe("MemoryStore", () => {
     expect(result.bare).not.toHaveProperty("title")
     expect(result.bare).not.toHaveProperty("metadata")
     expect(result.fetched).toEqual(result.bare)
+    // A replaying caller must be able to tell "this thread already landed" from
+    // "the database is broken", so the conflict carries its own code and path
+    // rather than the generic backend failure.
     expect(result.duplicate).toMatchObject({
-      code: "store",
+      code: "idempotency_conflict",
+      path: ["threadId"],
       message: expect.stringContaining("different creation data")
     })
     expect(result.all).toEqual([result.bare])
@@ -947,6 +953,82 @@ describe("MemoryStore", () => {
 
     expect(result.failure.code).toBe("store")
     expect(result.threads).toEqual([result.retried])
+  })
+
+  // A driver that reports neither `changes` nor `rowsAffected` reads as "no row
+  // written", which sends createThread down its read-back branch with nothing
+  // to read. It must fail typed rather than return a half-built thread.
+  it("fails typed when the driver reports no write and the row is absent", async () => {
+    const failures = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        // Neither a scalar nor an object without a row count tells the store a
+        // row landed; both must take the read-back branch.
+        const answers = [Effect.succeed("opaque driver answer"), Effect.succeed({ ok: true })]
+        const opaqueSql = new Proxy(sql, {
+          apply(target, thisArg, argumentsList) {
+            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            return statement.includes("INSERT INTO memory_threads")
+              ? { raw: answers.shift() ?? Effect.succeed({}) }
+              : Reflect.apply(target, thisArg, argumentsList)
+          }
+        })
+        const store = yield* MemoryStore.make.pipe(Effect.provideService(SqlClient.SqlClient, opaqueSql))
+        return [
+          yield* Effect.flip(store.createThread({ id: "opaque-scalar", namespace })),
+          yield* Effect.flip(store.createThread({ id: "opaque-object", namespace }))
+        ]
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(failures.map((failure) => [failure.code, failure.message])).toEqual([
+      ["store", "created memory thread could not be read back"],
+      ["store", "created memory thread could not be read back"]
+    ])
+  })
+
+  it("fails typed when an inserted note cannot be read back", async () => {
+    const failure = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const opaqueSql = new Proxy(sql, {
+          apply(target, thisArg, argumentsList) {
+            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            return statement.includes("INSERT INTO memory_notes")
+              ? { raw: Effect.succeed({ changes: 1 }) }
+              : Reflect.apply(target, thisArg, argumentsList)
+          }
+        })
+        const store = yield* MemoryStore.make.pipe(Effect.provideService(SqlClient.SqlClient, opaqueSql))
+        return yield* Effect.flip(store.putNote({ namespace, id: "ghost", text: "t", tags: [], provenance: {} }))
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect([failure.code, failure.message]).toEqual([
+      "store",
+      "inserted note could not be read back"
+    ])
+  })
+
+  it("summarizes a non-Error failure cause without leaking an unbounded value", async () => {
+    const failure = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const failingSql = new Proxy(sql, {
+          apply(target, thisArg, argumentsList) {
+            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            return statement.includes("FROM memory_notes")
+              ? Effect.fail("x".repeat(2_000))
+              : Reflect.apply(target, thisArg, argumentsList)
+          }
+        })
+        const store = yield* MemoryStore.make.pipe(Effect.provideService(SqlClient.SqlClient, failingSql))
+        return yield* Effect.flip(store.listNotes({ namespace }))
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(failure.code).toBe("store")
+    expect(failure.cause).toBe("x".repeat(1_024))
   })
 
   it("accepts equivalent thread metadata with a different key order", async () => {
@@ -1015,6 +1097,24 @@ describe("MemoryStore", () => {
       "could not compact memory history"
     ])
     expect(result.remaining).toBe(0)
+  })
+
+  // A durable caller replaying a compaction after a crash has to tell "this
+  // summary already landed, the retry is a no-op" from "the database is broken".
+  // Both used to answer `code: "store"`.
+  it("names an already-written summary as an idempotency conflict", async () => {
+    const conflict = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.appendMessage({ threadId: "thread", id: "m-0", role: "user", text: "a", at: 0 })
+      yield* store.appendMessage({ threadId: "thread", id: "summary", role: "system", text: "s", at: 1 })
+      return yield* Effect.flip(store.compactMessages({
+        threadId: "thread",
+        summary: { threadId: "thread", id: "summary", role: "system", text: "s", at: 1 },
+        deleteIds: ["m-0"]
+      }))
+    }))
+
+    expect([conflict.code, conflict.path]).toEqual(["idempotency_conflict", ["summary", "id"]])
   })
 
   it("rejects self-supersession and reports missing notes", async () => {
@@ -1172,6 +1272,195 @@ describe("MemoryStore", () => {
     expect(result.limitedAfter).toEqual(result.after.slice(0, 3))
     expect(result.exact).toHaveLength(3)
     expect(result.limitedAfter).toHaveLength(3)
+  })
+
+  // `limit` names how many rows the caller GETS, not how many the query looks
+  // at. A LIMIT applied before the status, supersession and tag filters silently
+  // under-fills, and the shortfall is invisible: the caller sees a short list,
+  // not an error.
+  it("counts the limit against rows that pass every filter, not the rows SQL touched", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      // Oldest first, so an unfiltered `limit: 1` takes the pending note and a
+      // post-filter would then discard it, leaving nothing.
+      yield* store.putNote({ namespace, id: "a-pending", text: "p", tags: [], provenance: {}, status: "pending" })
+      yield* store.putNote({ namespace, id: "b-accepted", text: "a", tags: [], provenance: {} })
+      yield* store.putNote({ namespace, id: "c-rejected", text: "r", tags: [], provenance: {}, status: "rejected" })
+      return {
+        accepted: yield* store.listNotes({ namespace, status: "accepted", limit: 1 }),
+        acceptedUnlimited: yield* store.listNotes({ namespace, status: "accepted" }),
+        selection: yield* store.listNotes({ namespace, status: ["pending", "rejected"], limit: 2 }),
+        emptySelection: yield* store.listNotes({ namespace, status: [], limit: 2 }),
+        any: yield* store.listNotes({ namespace, status: "any", limit: 3 })
+      }
+    }))
+
+    expect(result.accepted.map((note) => note.id)).toEqual(["b-accepted"])
+    expect(result.accepted).toEqual(result.acceptedUnlimited)
+    expect(result.selection.map((note) => note.id)).toEqual(["a-pending", "c-rejected"])
+    expect(result.emptySelection).toEqual([])
+    expect(result.any.map((note) => note.id)).toEqual(["a-pending", "b-accepted", "c-rejected"])
+  })
+
+  it("counts the limit against notes that survive supersession", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.putNote({ namespace, id: "a-old", text: "old", tags: [], provenance: {} })
+      yield* store.putNote({ namespace, id: "b-new", text: "new", tags: [], provenance: {}, supersedes: ["a-old"] })
+      return {
+        limited: yield* store.listNotes({ namespace, limit: 1 }),
+        unlimited: yield* store.listNotes({ namespace })
+      }
+    }))
+
+    expect(result.limited.map((note) => note.id)).toEqual(["b-new"])
+    expect(result.limited).toEqual(result.unlimited)
+  })
+
+  // 512 was the old overscan window, so a namespace larger than it is the only
+  // size at which the earlier "read a wide window and filter it" approximation
+  // is distinguishable from an exact answer.
+  it("finds tag-filtered rows past the old overscan window", async () => {
+    const total = 520
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      for (let index = 0; index < total; index++) {
+        const id = `note-${String(index).padStart(4, "0")}`
+        // listNotes reads oldest first and searchRows newest first, so a match
+        // at each end makes both directions page all the way past the window.
+        const wanted = index < 3 || index >= total - 3
+        yield* store.putNote({
+          namespace,
+          id,
+          text: `row ${index}`,
+          tags: [wanted ? "scope:project" : "scope:other"],
+          provenance: {}
+        })
+        yield* TestClock.adjust("1 millis")
+      }
+      const tagGroup = { tags: ["scope:project"], match: "any_strict" } as const
+      return {
+        ascending: yield* store.listNotes({ namespace, tagGroup, limit: 6 }),
+        descending: yield* store.searchRows({ namespace, tagGroup, limit: 6 }),
+        everything: yield* store.listNotes({ namespace, tagGroup })
+      }
+    }))
+
+    const oldest = ["note-0000", "note-0001", "note-0002"]
+    const newest = ["note-0517", "note-0518", "note-0519"]
+    expect(result.ascending.map((note) => note.id)).toEqual([...oldest, ...newest])
+    expect(result.descending.map((row) => row.id)).toEqual([...newest].reverse().concat([...oldest].reverse()))
+    expect(result.everything).toHaveLength(6)
+  })
+
+  it("answers a zero limit without reading, and honours a note id prefix", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.putFact({ namespace, key: "keep", value: "v", provenance: {} })
+      yield* store.putNote({ namespace, id: "keep-me", text: "t", tags: [], provenance: {} })
+      yield* store.putNote({ namespace, id: "drop-me", text: "t", tags: [], provenance: {} })
+      yield* store.appendMessage({ threadId: "thread", id: "m-0", role: "user", text: "a", at: 0 })
+      return {
+        facts: yield* store.listFacts({ namespace, limit: 0 }),
+        notes: yield* store.listNotes({ namespace, limit: 0 }),
+        messages: yield* store.listMessages({ threadId: "thread", limit: 0 }),
+        prefixed: yield* store.listNotes({ namespace, prefix: "keep-" }),
+        // An empty namespace ends the tag-filtered page walk on its first page.
+        emptyPage: yield* store.listNotes({
+          namespace: other,
+          tagGroup: { tags: ["scope:project"] },
+          limit: 2
+        })
+      }
+    }))
+
+    expect(result.facts).toEqual([])
+    expect(result.notes).toEqual([])
+    expect(result.messages).toEqual([])
+    expect(result.prefixed.map((note) => note.id)).toEqual(["keep-me"])
+    expect(result.emptyPage).toEqual([])
+  })
+
+  it("ends the expiry sweep on its first empty chunk", async () => {
+    const deleted = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.putFact({ namespace, key: "permanent", value: "v", provenance: {} })
+      return yield* store.deleteExpiredFacts
+    }))
+
+    expect(deleted).toBe(0)
+  })
+
+  it("pages the fact side of a tag-filtered search past the old overscan window", async () => {
+    const total = 520
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      for (let index = 0; index < total; index++) {
+        yield* store.putFact({
+          namespace,
+          key: `fact-${String(index).padStart(4, "0")}`,
+          value: `row ${index}`,
+          tags: [index < 2 ? "scope:project" : "scope:other"],
+          provenance: {}
+        })
+        yield* TestClock.adjust("1 millis")
+      }
+      const tagGroup = { tags: ["scope:project"], match: "any_strict" } as const
+      return {
+        limited: yield* store.searchRows({ namespace, tagGroup, limit: 2 }),
+        prefixed: yield* store.searchRows({ namespace, tagGroup, prefix: "fact-0000", limit: 2 })
+      }
+    }))
+
+    expect(result.limited.map((row) => row.key)).toEqual(["fact-0001", "fact-0000"])
+    expect(result.prefixed.map((row) => row.key)).toEqual(["fact-0000"])
+  })
+
+  it("resolves FTS matches by id so an older match is not lost to a recency window", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.enableFts("flow")
+      // The only note carrying the query term is the oldest of ten. A lookup
+      // built from the newest few rows cannot see it.
+      yield* store.putNote({ namespace, id: "note-00", text: "durable wombat procedure", tags: [], provenance: {} })
+      for (let index = 1; index < 10; index++) {
+        yield* store.putNote({
+          namespace,
+          id: `note-${String(index).padStart(2, "0")}`,
+          text: "durable release checklist",
+          tags: [],
+          provenance: {}
+        })
+      }
+      yield* store.putFact({
+        namespace,
+        key: "fact-quokka",
+        value: { content: "durable quokka runbook" },
+        tags: ["scope:project"],
+        provenance: {}
+      })
+      yield* store.putFact({
+        namespace,
+        key: "other-quokka",
+        value: { content: "durable quokka aside" },
+        tags: ["scope:other"],
+        provenance: {}
+      })
+      return {
+        oldest: yield* store.searchFts({ namespace, query: "wombat", limit: 1 }),
+        tagged: yield* store.searchFts({
+          namespace,
+          query: "quokka",
+          tagGroup: { tags: ["scope:project"], match: "any_strict" },
+          limit: 10
+        }),
+        prefixed: yield* store.searchFts({ namespace, query: "quokka", prefix: "fact-", limit: 10 })
+      }
+    }))
+
+    expect(result.oldest.map((row) => row.id)).toEqual(["note-00"])
+    expect(result.tagged.map((row) => row.id)).toEqual(["fact-quokka"])
+    expect(result.prefixed.map((row) => row.id)).toEqual(["fact-quokka"])
   })
 
   it("bounds the SQL rowset before decoding rows outside the search limit", async () => {

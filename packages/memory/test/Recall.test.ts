@@ -52,14 +52,20 @@ describe("Recall", () => {
   })
 
   it("round-trips schema-valid namespaces and rejects an empty bank through the validating parser", async () => {
-    for (const namespace of [
-      { kind: "flow", id: "one" },
-      { kind: "agent", id: "fleet" },
-      { kind: "user", id: "will" },
-      { kind: "global", id: "history" }
-    ] as const) {
+    for (
+      const namespace of [
+        { kind: "flow", id: "one" },
+        { kind: "agent", id: "fleet" },
+        { kind: "user", id: "will" },
+        { kind: "global", id: "history" }
+      ] as const
+    ) {
       expect(Recall.namespaceForBank(Recall.bankForNamespace(namespace))).toEqual(namespace)
     }
+    // An unprefixed name, and a bare prefix with no id after it, are both
+    // flow-local rather than a parse failure.
+    expect(Recall.namespaceForBank("plain")).toEqual({ kind: "flow", id: "plain" })
+    expect(Recall.namespaceForBank("agent-")).toEqual({ kind: "flow", id: "agent-" })
     await expect(Effect.runPromise(Effect.flip(Bank.parse("")))).resolves.toMatchObject({
       code: "invalid_namespace"
     })
@@ -68,22 +74,28 @@ describe("Recall", () => {
   it("enforces every model-facing recall ceiling at decode", () => {
     const decode = Schema.decodeUnknownSync(Recall.Input)
     const base = { banks: ["bank"], query: "q" }
-    expect(decode({
-      ...base,
-      banks: Array.from({ length: Recall.MAX_RECALL_BANKS }, (_, index) => `bank-${index}`)
-    }).banks).toHaveLength(Recall.MAX_RECALL_BANKS)
-    expect(() => decode({
-      ...base,
-      banks: Array.from({ length: Recall.MAX_RECALL_BANKS + 1 }, (_, index) => `bank-${index}`)
-    })).toThrow()
+    expect(
+      decode({
+        ...base,
+        banks: Array.from({ length: Recall.MAX_RECALL_BANKS }, (_, index) => `bank-${index}`)
+      }).banks
+    ).toHaveLength(Recall.MAX_RECALL_BANKS)
+    expect(() =>
+      decode({
+        ...base,
+        banks: Array.from({ length: Recall.MAX_RECALL_BANKS + 1 }, (_, index) => `bank-${index}`)
+      })
+    ).toThrow()
 
     expect(decode({ ...base, banks: ["b".repeat(Recall.MAX_RECALL_BANK_NAME_LENGTH)] }).banks[0]).toHaveLength(
       Recall.MAX_RECALL_BANK_NAME_LENGTH
     )
-    expect(() => decode({
-      ...base,
-      banks: ["b".repeat(Recall.MAX_RECALL_BANK_NAME_LENGTH + 1)]
-    })).toThrow()
+    expect(() =>
+      decode({
+        ...base,
+        banks: ["b".repeat(Recall.MAX_RECALL_BANK_NAME_LENGTH + 1)]
+      })
+    ).toThrow()
 
     expect(decode({ ...base, query: "q".repeat(Recall.MAX_RECALL_QUERY_BYTES) }).query).toHaveLength(
       Recall.MAX_RECALL_QUERY_BYTES
@@ -93,6 +105,15 @@ describe("Recall", () => {
     expect(decode({ ...base, maxTokens: Recall.MAX_RECALL_TOKENS }).maxTokens).toBe(Recall.MAX_RECALL_TOKENS)
     expect(() => decode({ ...base, maxTokens: Recall.MAX_RECALL_TOKENS + 1 })).toThrow()
     expect(() => decode({ ...base, maxTokens: -1 })).toThrow()
+
+    // Each group is depth- and node-bounded on its own, but the array is what
+    // multiplies that budget across every candidate row in every binding.
+    const group = { tags: ["scope:project"] }
+    expect(
+      decode({ ...base, tagGroups: Array.from({ length: Recall.MAX_RECALL_TAG_GROUPS }, () => group) }).tagGroups
+    ).toHaveLength(Recall.MAX_RECALL_TAG_GROUPS)
+    expect(() => decode({ ...base, tagGroups: Array.from({ length: Recall.MAX_RECALL_TAG_GROUPS + 1 }, () => group) }))
+      .toThrow()
   })
 
   it("rejects a several-hundred-level tag group through the model-facing input without overflowing", () => {
