@@ -1022,7 +1022,27 @@ const makeRuntime = (
           idempotencyKey: input.idempotencyKey
         }).pipe(Effect.provideService(Crypto.Crypto, crypto))
         const identity = approvalIdentity(card.approval.target)
-        yield* writer.write(Effect.gen(function*() {
+        // The key row is claimed FIRST, and the claim is a conditional insert
+        // followed by a read of whoever holds it. `idempotency_key` is the
+        // primary key, so a bare insert made two runtimes planning under one
+        // key a race the loser lost with a constraint violation surfaced as
+        // `PersistenceError`, instead of the winner's card the key promises.
+        const outcome = yield* writer.write(Effect.gen(function*() {
+          if (input.idempotencyKey !== undefined) {
+            yield* sql`
+              INSERT INTO control_plan_keys (idempotency_key, fingerprint, plan_id)
+              VALUES (${input.idempotencyKey}, ${planFingerprint}, ${planId})
+              ON CONFLICT (idempotency_key) DO NOTHING
+            `
+            const settled = yield* sql<{ readonly fingerprint: string; readonly planId: string }>`
+              SELECT fingerprint, plan_id AS "planId" FROM control_plan_keys
+              WHERE idempotency_key = ${input.idempotencyKey}
+            `
+            const holder = settled[0]
+            if (holder !== undefined && holder.planId !== planId) {
+              return { _tag: "raced", holder } as const
+            }
+          }
           yield* sql`
             INSERT INTO control_plans (plan_id, card_json, decoded_input_json, decision)
             VALUES (${planId}, ${JSON.stringify(card)}, ${JSON.stringify(decoded ?? null)}, 'pending')
@@ -1036,13 +1056,24 @@ const makeRuntime = (
               ${JSON.stringify(card.approval.target)}, 0, NULL
             )
           `
-          if (input.idempotencyKey !== undefined) {
-            yield* sql`
-              INSERT INTO control_plan_keys (idempotency_key, fingerprint, plan_id)
-              VALUES (${input.idempotencyKey}, ${planFingerprint}, ${planId})
-            `
-          }
+          return { _tag: "stored" } as const
         })).pipe(Effect.mapError(persistence("store a plan")))
+        if (outcome._tag === "raced") {
+          if (outcome.holder.fingerprint !== planFingerprint) {
+            return yield* new InvalidInput({
+              issue: `idempotency key ${String(input.idempotencyKey)} was used for another plan`
+            })
+          }
+          const stored = yield* readPlan(outcome.holder.planId)
+          if (Option.isNone(stored)) {
+            return yield* new PersistenceError({
+              operation: "read a plan",
+              message: `plan key ${String(input.idempotencyKey)} names plan ${outcome.holder.planId}, which is absent`
+            })
+          }
+          const decodedHolder = yield* storedPlan(stored.value)
+          return { card: decodedHolder.card, created: false }
+        }
         return { card, created: true }
       }),
       getPlan: Effect.fn("SqlControlRuntime.getPlan")((planId: string) =>

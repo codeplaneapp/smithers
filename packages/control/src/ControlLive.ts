@@ -919,7 +919,11 @@ export const layer: Layer.Layer<
                 ...cutoffs.map(([partition, highWater]) => snapshotForRunAt(partition, filter, highWater)),
                 tail
               ],
-              { concurrency: "unbounded" }
+              // Same bound the cutoff reads above use, plus one reserved slot
+              // so the live tail is never starved behind snapshot work. An
+              // unbounded merge read every partition of an unbounded database
+              // at once, which is the allocation a remote watcher could force.
+              { concurrency: snapshotPartitionConcurrency + 1 }
             )
           })
         )

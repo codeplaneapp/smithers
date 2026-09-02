@@ -15,10 +15,17 @@
  * vtable every transport projects, from both `ControlRuntime` implementations,
  * and from the package's own source. The source scan is the one that catches a
  * re-introduction through a new file, which a type check would happily accept.
+ *
+ * The prose scan is the same guard one layer out. `docs/pages/api/control.md`
+ * carried a `Control.pause` sentence for the whole of Phase 5 while the member
+ * was already gone, and the generated `llms` bundles copied it four more times,
+ * so a reader learned a verb the binary refuses. The page is generated from
+ * this package, which makes this package the right place to prove it stayed
+ * clean.
  */
 import { Effect } from "effect"
 import { readdirSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { Control, layerNoop } from "../src/Control.ts"
@@ -26,7 +33,8 @@ import { ControlRpcs } from "../src/ControlRpcs.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
 import { memoryRuntime } from "./TestStack.ts"
 
-const sourceRoot = fileURLToPath(new URL("../src", import.meta.url))
+const packageRoot = fileURLToPath(new URL("..", import.meta.url))
+const sourceRoot = join(packageRoot, "src")
 
 const sourceFiles = (directory: string): ReadonlyArray<string> =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
@@ -36,6 +44,24 @@ const sourceFiles = (directory: string): ReadonlyArray<string> =>
       ? [join(directory, entry.name)]
       : []
   )
+
+const repositoryRoot = join(packageRoot, "..", "..")
+
+/** The prose this package writes, plus the page its generator publishes. */
+const proseFiles = (): ReadonlyArray<string> => [
+  join(packageRoot, "README.md"),
+  ...readdirSync(join(packageRoot, "docs"), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .map((entry) => join(packageRoot, "docs", entry.name)),
+  join(repositoryRoot, "docs", "pages", "api", "control.md")
+]
+
+/**
+ * A pause the prose OFFERS, which is the regression. Saying the verb is gone is
+ * the opposite of advertising it, so a bare `pause` scan would fail the very
+ * sentences that record the removal.
+ */
+const offeredPause = /\b(?:Control|ControlRuntime|SqlControlRuntime)\.pause\b|\bcontrol\.run\.pause\b/
 
 describe("attributed pause is not part of 1.0.0-rc.0", () => {
   it("serves no Pause procedure", () => {
@@ -84,5 +110,10 @@ describe("attributed pause is not part of 1.0.0-rc.0", () => {
   it("mentions pause nowhere in the published source", () => {
     const offenders = sourceFiles(sourceRoot).filter((file) => /\bpause/i.test(readFileSync(file, "utf8")))
     expect(offenders.map((file) => file.slice(sourceRoot.length + 1))).toEqual([])
+  })
+
+  it("offers pause nowhere in the package's prose or its generated API page", () => {
+    const offenders = proseFiles().filter((file) => offeredPause.test(readFileSync(file, "utf8")))
+    expect(offenders.map((file) => relative(repositoryRoot, file))).toEqual([])
   })
 })

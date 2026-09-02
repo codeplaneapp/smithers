@@ -501,6 +501,42 @@ describe("SqlControlRuntime", () => {
     expect(signalNames).not.toContain("during-snapshot")
   })
 
+  it("hands both racers of a same-key plan the same card", async () => {
+    const observed = await twoOwners((first, second) =>
+      Effect.gen(function*() {
+        const request = { flowId: "system/test", input: { suite: "race" }, idempotencyKey: "plan:race" }
+        // `control_plan_keys.idempotency_key` is a primary key. Two runtimes
+        // planning under one key used to make the loser fail the insert, so a
+        // second operator asking for the same plan got a PersistenceError
+        // instead of the card the key promises.
+        return yield* Effect.all(
+          [Effect.exit(first.plan(request)), Effect.exit(second.plan(request))],
+          { concurrency: 2 }
+        )
+      })
+    )
+
+    const succeeded = observed.filter((exit) => exit._tag === "Success")
+    expect(succeeded).toHaveLength(2)
+    const answers = succeeded.map((exit) => (exit as { readonly value: { readonly card: { readonly planId: string; readonly digest: string }; readonly created: boolean } }).value)
+    expect(new Set(answers.map((answer) => answer.card.planId)).size).toBe(1)
+    expect(new Set(answers.map((answer) => answer.card.digest)).size).toBe(1)
+    expect(answers.filter((answer) => answer.created)).toHaveLength(1)
+  })
+
+  it("still refuses a reused plan key that names a different intent", async () => {
+    const observed = await twoOwners((first, second) =>
+      Effect.gen(function*() {
+        yield* first.plan({ flowId: "system/test", input: { suite: "one" }, idempotencyKey: "plan:reused" })
+        return yield* Effect.exit(
+          second.plan({ flowId: "system/test", input: { suite: "two" }, idempotencyKey: "plan:reused" })
+        )
+      })
+    )
+
+    expect(observed._tag).toBe("Failure")
+  })
+
   it("owns no Node imports", async () => {
     const source = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("../src/SqlControlRuntime.ts", import.meta.url), "utf8")
