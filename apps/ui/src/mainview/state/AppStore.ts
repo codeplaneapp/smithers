@@ -290,7 +290,10 @@ const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
   /* Lane citc: the cloud workspaces (the authority the workspace copies derive from). */
   { id: "app-cloud-workspaces", schema: CloudWorkspaceRowSchema },
   /* Lane change: the changes the app has read (ADR 0003). */
-  { id: "app-changes", schema: ChangeRowSchema }
+  { id: "app-changes", schema: ChangeRowSchema },
+  /* Lane sync: the Linear integrations and the per-repo GitHub App statuses (ADR 0005). */
+  { id: "app-linear-integrations", schema: LinearIntegrationRowSchema },
+  { id: "app-github-app-statuses", schema: GitHubAppStatusRowSchema }
 ]
 /** Attempts spent waiting out a locked access-handle pool. See `openOpfsDatabase`. */
 const OPFS_OPEN_ATTEMPTS = 5
@@ -530,6 +533,10 @@ export interface AppCollections {
   readonly cloudWorkspaces: ReturnType<typeof createCloudWorkspaceCollection>
   /** Lane change: the changes the app has read (ADR 0003), keyed `${repoId}#${changeId}`. */
   readonly changes: ReturnType<typeof createChangeCollection>
+  /** Lane sync: the user's Linear integrations (ADR 0005), keyed by the wire's id. */
+  readonly linearIntegrations: ReturnType<typeof createLinearIntegrationCollection>
+  /** Lane sync: the GitHub App statuses the app has read, keyed `org/repo` (ADR 0005). */
+  readonly githubAppStatuses: ReturnType<typeof createGitHubAppStatusCollection>
 }
 
 export interface WorldStateSnapshot {
@@ -748,6 +755,20 @@ const createChangeCollection = (backend: PersistenceBackend) =>
     schema: ChangeRowSchema
   })
 
+const createLinearIntegrationCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-linear-integrations",
+    getKey: (integration: LinearIntegrationRow) => integration.id,
+    schema: LinearIntegrationRowSchema
+  })
+
+const createGitHubAppStatusCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-github-app-statuses",
+    getKey: (status: GitHubAppStatusRow) => status.repo,
+    schema: GitHubAppStatusRowSchema
+  })
+
 /** The strip's order: main first, then creation order. */
 const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =>
   [...collections.tabs.values()].sort((left, right) => left.ordinal - right.ordinal)
@@ -843,7 +864,9 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.workingCopies.preload(),
     collections.cloudSessions.preload(),
     collections.cloudWorkspaces.preload(),
-    collections.changes.preload()
+    collections.changes.preload(),
+    collections.linearIntegrations.preload(),
+    collections.githubAppStatuses.preload()
   ])
 
   if (collections.sessions.get(SESSION_ID) === undefined) {
@@ -1084,7 +1107,9 @@ export const createAppStore = async (
     workingCopies: createWorkingCopyCollection(resolvedBackend),
     cloudSessions: createCloudSessionCollection(resolvedBackend),
     cloudWorkspaces: createCloudWorkspaceCollection(resolvedBackend),
-    changes: createChangeCollection(resolvedBackend)
+    changes: createChangeCollection(resolvedBackend),
+    linearIntegrations: createLinearIntegrationCollection(resolvedBackend),
+    githubAppStatuses: createGitHubAppStatusCollection(resolvedBackend)
   }
 
   await seed(collections)
@@ -1158,7 +1183,9 @@ export const createAppStore = async (
         collections.workingCopies.utils.acceptMutations(transaction),
         collections.cloudSessions.utils.acceptMutations(transaction),
         collections.cloudWorkspaces.utils.acceptMutations(transaction),
-        collections.changes.utils.acceptMutations(transaction)
+        collections.changes.utils.acceptMutations(transaction),
+        collections.linearIntegrations.utils.acceptMutations(transaction),
+        collections.githubAppStatuses.utils.acceptMutations(transaction)
       ])
     /*
      * One atomic commit per logical transition: SQLite batches row changes in
@@ -2635,6 +2662,41 @@ export const createAppStore = async (
           if (collections.changes.get(change.id) === undefined) collections.changes.insert(row)
           else {
             collections.changes.update(change.id, (draft) => {
+              Object.assign(draft, row)
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        /* Lane sync (ADR 0005): the Linear integrations list replaced; one GitHub App status upserted. */
+        case "linear.integrations.loaded": {
+          const next = new Set(transition.integrations.map((integration) => integration.id))
+          const stale = [...collections.linearIntegrations.values()]
+            .filter((integration) => !next.has(integration.id))
+            .map((integration) => integration.id)
+          if (stale.length > 0) collections.linearIntegrations.delete(stale)
+          for (const integration of transition.integrations) {
+            const row: LinearIntegrationRow = { ...integration, updatedAt: createdAt, revision }
+            if (collections.linearIntegrations.get(integration.id) === undefined) collections.linearIntegrations.insert(row)
+            else {
+              collections.linearIntegrations.update(integration.id, (draft) => {
+                Object.assign(draft, row)
+              })
+            }
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "github.app-status.loaded": {
+          const status = transition.status
+          const row: GitHubAppStatusRow = { ...status, updatedAt: createdAt, revision }
+          if (collections.githubAppStatuses.get(status.repo) === undefined) collections.githubAppStatuses.insert(row)
+          else {
+            collections.githubAppStatuses.update(status.repo, (draft) => {
               Object.assign(draft, row)
             })
           }

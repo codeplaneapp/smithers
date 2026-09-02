@@ -205,6 +205,69 @@ export type ChangeInput = Pick<
 /** The changes collection key for one repo's change. */
 export const changeRowId = (repoId: string, changeId: string): string => `${repoId}#${changeId}`
 
+/*
+ * Lane sync (ADR 0005): one Linear integration as GET /api/linear answers it
+ * — team, repository, active, last sync. The collection is the authority for
+ * the Connectors surface's Linear row (per team, with last sync) and for the
+ * bare-act resolution of linear.sync / linear.activity / linear.disconnect.
+ * The wire's numeric id is the key, as a string.
+ */
+export const LinearIntegrationRowSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  teamName: z.string(),
+  teamKey: z.string(),
+  repoOwner: z.string(),
+  repoName: z.string(),
+  active: z.boolean(),
+  remediation: z.string().nullable(),
+  lastSyncAt: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type LinearIntegrationRow = z.infer<typeof LinearIntegrationRowSchema>
+
+/** The fields an integrations load writes (the reducer adds updatedAt/revision). */
+export type LinearIntegrationInput = Pick<
+  LinearIntegrationRow,
+  "id" | "teamId" | "teamName" | "teamKey" | "repoOwner" | "repoName" | "active" | "remediation" | "lastSyncAt" | "createdAt"
+>
+
+/** The `org/repo` of an integration row. */
+export const linearIntegrationRepo = (row: Pick<LinearIntegrationRow, "repoOwner" | "repoName">): string =>
+  `${row.repoOwner}/${row.repoName}`
+
+/*
+ * Lane sync (ADR 0005): the GitHub App status the app has READ for one
+ * repository (GET /api/repos/{o}/{r}/github-app-status). The Connectors
+ * surface's GitHub row counts these — every counted row is a DTO read, so a
+ * repo the app never checked is simply absent, never assumed. `rateLimit`
+ * rides the status answer's own `github_rate_limit_*` fields when they
+ * arrive; null when they don't.
+ */
+export const GitHubAppStatusRowSchema = z.object({
+  /** `org/repo` (the key). */
+  repo: z.string(),
+  installed: z.boolean(),
+  configured: z.boolean(),
+  installationId: z.number().int().nullable(),
+  rateLimit: z.object({
+    limit: z.number().int().nonnegative(),
+    remaining: z.number().int().nonnegative(),
+    resetAt: z.string().nullable()
+  }).nullable(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type GitHubAppStatusRow = z.infer<typeof GitHubAppStatusRowSchema>
+
+/** The fields a status read writes (the reducer adds updatedAt/revision). */
+export type GitHubAppStatusInput = Pick<
+  GitHubAppStatusRow,
+  "repo" | "installed" | "configured" | "installationId" | "rateLimit"
+>
+
 /** The working-copy id of a local checkout: the pin key, stable across reopens. */
 export const localCopyIdOf = (path: string): string => repoKeyOf(path)
 
@@ -1198,6 +1261,22 @@ export type AppTransition =
     type: "change.loaded"
     actor: "system"
     change: ChangeInput
+  }
+  /*
+   * Lane sync (ADR 0005): the Linear integrations list replaced (the signed-in
+   * user's whole list — the route lists per user, so there is no scope) and
+   * one repository's GitHub App status read. Both are DTO facts, never
+   * inferred state.
+   */
+  | {
+    type: "linear.integrations.loaded"
+    actor: "system"
+    integrations: ReadonlyArray<LinearIntegrationInput>
+  }
+  | {
+    type: "github.app-status.loaded"
+    actor: "system"
+    status: GitHubAppStatusInput
   }
   /* The sidebar's pinned repositories: opening pins, unpinning forgets, selecting names the active one. */
   | { type: "repo.pinned"; actor: Actor; pin: PinnedRepo }
