@@ -106,3 +106,20 @@ named there.
 ## Filed (plue, 2026-09-02)
 
 Epic #466: #459 reviews[] with reviewer_kind, verdict, confidence_bucket, last_reviewed_seq; #460 turn + dispatch-on-turn; #461 thread states and gate; #462 agent LGTM + protected-bookmark policy; #463 auto-land intent; #464 landed provenance; #465 walkthrough artifact + SSE event.
+
+## Row 10 — Owners (shapes from plue, 2026-09-02)
+
+On the change GET: `owners { touched_paths[] { path, owners[] { login | team },
+agent_policy: auto-land|human-approve|deny, satisfied_by? { login, seq } },
+missing_approvals[] { path, candidates[] } }`; on the landing request
+`blocked_by { kind: owner, path, candidates[] }`.
+
+UI: the Owners facet replaces `owners · not available` once the field
+exists. Rows per touched path: the rule's owners, the policy word, and
+`approved by <login> at rev N` or `missing · ask <candidates>` with a
+Request review action bound to `review.request <changeId> <login>`. The
+header strip's third row reads `owners ✓` or `owners · 2 paths missing`. A
+`deny` policy renders on the header as `owners · agent changes denied on
+<path>` and on the Land button as the blocking reason. The Suggested
+reviewers slot fills from `missing_approvals[].candidates`. Teams render
+by name with no member expansion.

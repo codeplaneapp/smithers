@@ -26,11 +26,11 @@ else is rendered.
 ┌ qupxosqw · rev 5 of 5 · 2 of 3 on feature-x ──────────────── ○ OPEN ┐
 │ Serve repository files through one bounded, confined route           │
 │ smithersai/smithers  +312 −41    smithersai/plue  +18 −2              │
-│ checks ✓ 5 ● 1 running   findings ▲ 2   review ✓ 1 approved · 1 asked │
+│ checks ✓ 5 ● 1 running   findings ▲ 2   review ✓ 1 approved · 1 pending│
 │ conflict · apps/ui/src/bun/server.ts · unresolved                     │
 │ rev 5 · agent session a03f5f · snapshot s_8d1 · 2 min ago             │
 │ Diff  Findings  Checks  Review  History                                │
-│                                   Land   Request review   Revert   ⤢  │
+│                                   Land   Request review   ⤢           │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,8 +49,12 @@ right; composer stays mounted.
 ### Facets
 
 - **Diff.** Header carries two revision pickers in mono:
-  `parent ▾ → rev 5 ▾`. Default is change vs parent at the current revision.
-  Picking `rev 3 → rev 5` is the interdiff. Conflicted files lead the file
+  `parent ▾ → rev 5 ▾`. Default is change vs parent at the current revision,
+  where "parent" is that revision's own recorded `parent_commit_id`, never
+  the parent change's current commit. Picking `rev 3 → rev 5` is a jj
+  INTERDIFF: rev 3 is rebased onto rev 5's parent before diffing, so a
+  rebase between them contributes no files. `Show at rev 3` and Findings
+  Open use the same base. Conflicted files lead the file
   list with an ember marker; a conflicted hunk shows the markers and one
   action, "Resolve with an agent" (confirm), which dispatches a run and
   renders the run card; the hunk reads "resolving · run r_…" until the next
@@ -74,7 +78,14 @@ right; composer stays mounted.
   Threads: `path:line`, first comment, replies, open or resolved. A thread
   whose anchor no longer matches at the current revision reads
   `rev 3 · stale · Show at rev 3`; one whose line moved reads `moved`.
-  Posting a comment pins it to the revision shown in the Diff facet.
+  Posting a comment pins it to the revision shown in the Diff facet, and
+  so do Approve and Request changes: the verdict carries that revision's
+  commit id, supplied by the client, never stamped by the server at
+  processing time. The change card itself is LIVE (its header denominator
+  is the newer-revision signal: `rev 5 of 6`); the `rev N exists · view`
+  line belongs to snapshot cards (file, search, diff) only. The Land confirm
+  names `changeId#rev · commit` and the server refuses a land whose commit
+  no longer matches.
 - **History.** One row per revision: `rev 4 · b775d9 · rebase · will ·
   3h ago`, `rev 5 · a03f5f · agent session a03f5f · snapshot s_8d1 · 2m
   ago`. Row actions: Diff to current (opens Diff with `rev 4 → rev 5`), Open
@@ -110,15 +121,22 @@ Row: position, change id, title, checks glyph and count, review glyph. A
 changeset row carries a second line naming its repositories; it is ONE row
 because it lands atomically. Land reads as the prefix: `Land 2 ready
 (1 → 2)`. When the bottom change is blocked: `Land blocked · 1 waits on
-typecheck (plue)`. No per-row Land. Partial landing of a changeset only
-through "Split ready members" inside that change's card, which makes a new
-change and re-renders the stack.
+typecheck (plue)`. No per-row Land. The change card's Land on a mid-stack change lands the
+prefix up to and including it (the confirm says `lands 1 → 2`); on the
+bottom change it lands that change alone. Partial landing of a changeset
+only through "Split ready members", an action on the changeset's own card
+footer that appears only when the changeset is blocked and at least one
+member is ready; it makes a new change and re-renders the stack.
 
 ## 3. Revision pins
 
 - **Origin chip.** `[ smithersai/smithers ▾ ]  ~/smithers · qupxosqw#5`. The
   working copy's current change and revision, or `head @ b775d9` with no
-  copy active.
+  copy active. A local commit that matches no pushed revision has no `#seq`:
+  the chip reads `qupxosqw · a03f5f` (change id, commit under it), and a
+  card read from it pins `{ changeId, commitId }` per ADR 0001; `rev 6
+  exists · view` compares commit ids, so an unpushed local commit never
+  claims a server revision.
 - **Card headers.** File, search, diff, findings: `qupxosqw#5 · a03f5f`
   (change id and revision for humans, commit under it). When a newer
   revision exists: one mono line `rev 6 exists · view`. Head comparison is
@@ -140,9 +158,15 @@ change and re-renders the stack.
 - **The operation log.** `operations` card: rows `op 3f2a · 2m ago · agent
   session a03f5f · rebase 3 changes onto main` with Undo (confirm) per row.
   Reached from a History row's Operations toggle (scoped to that revision)
-  or `/change.ops <changeId>` (the whole change). Undo dispatches
-  `change.undo <opId>` in the workspace that holds the change, and the next
-  revision's source reads `undo of op 3f2a`. Embedded, never full-screen.
+  or `/change.ops <changeId>` (the whole change). Each op row names the
+  workspace it ran in. Undo is disabled with `workspace gone` when that
+  workspace no longer exists and `local operation · not undoable` for a
+  `push` revision (a laptop's op log is not on the server). The confirm
+  names the blast radius from a server dry run: `undo op 3f2a · affects 3
+  changes · 2 later operations · conflicts: none`; a dry run that conflicts
+  disables Undo with `would conflict`. Undo dispatches `change.undo <opId>`
+  in the op's workspace, and every touched change's next revision reads
+  `undo of op 3f2a`. Embedded, never full-screen.
 
 ## 5. Cards and frames
 
@@ -168,8 +192,12 @@ is the existing transition.
 | `change.revert` | `<changeId>` | user, agent | yes |
 | `change.ops` | `<changeId> [rev]` | user, agent | |
 | `change.undo` | `<opId>` | user, agent | yes |
+| `review.request` | `<changeId> [login]` | user, agent | |
+| `findings.fix` | `<findingId>` | user, agent | yes (renamed `findings.please-fix` in ADR 0004) |
+| `ci.logs` | `<changeId> <check> [rev]` | user, agent | |
+| `change.history` | `<changeId>` | user, agent | |
 | `review.*` | as ADR-WORKBENCH §3.3 | | verdicts user-only |
-| `workspace.open --snapshot` | `<snapshotId>` | user, agent | |
+| `workspace.open --snapshot` | `<snapshotId>` | user, agent | yes (the History row button is the confirm's button) |
 
 ## Backend shapes needed beyond the stated facts
 
@@ -195,3 +223,46 @@ is the existing transition.
 ## Filed (plue, 2026-09-02)
 
 Epic #458: #450 revisions + change GET, #451 interdiff, #452 landable_prefix + blocked_by, #453 commit_id on reviews/comments + anchor state, #454 findings per revision + feedback, #455 conflict resolve via agent, #456 revert, #457 operations + undo. Shape 9 needs no new call: `POST …/workspaces` with `snapshot_id` forks from a snapshot.
+
+## Changeset DTO (live in prod behind `feature_flags.changesets`, 2026-09-02)
+
+Routes: `GET|POST /api/orgs/{org}/changesets`, `GET …/{id}`, `POST …/{id}/land`
+(org membership; read:repository for GET, write:repository for create/land).
+
+Changeset `{ id, organization, superproject, change_id, commit_id,
+landed_commit_id, parent_change_ids[], target_bookmark, description,
+state: pending|landing|landed|failed, failure_reason, created_at, landed_at,
+members[] }`; member `{ repository_id, repository, path, change_id,
+commit_id, target_bookmark, previous_commit_id, landed_commit_id }`. Create
+`{ description, target_bookmark, parent_change_id?, members[] { repo,
+change_id, target_bookmark? } }`. Land is synchronous: 200 with the landed
+changeset; 409 on conflict or re-land with `failure_reason` on the row and
+every member bookmark restored. No realtime event: poll GET.
+
+UI consequences: the change card renders a changeset from its own state
+until #452 lands. `failed` renders the ember line with `failure_reason`
+verbatim under the header and a Retry land (confirm); `landing` disables
+Land with "landing…". Member rows show `repository · path` (the path is the
+mount under `/workspace/<org>/<repo>` in a materialized computer). Live
+fixture: org `canary-changesets-e2e`, repos `cs-api`, `cs-web`.
+
+## Until #450 lands (degraded rendering)
+
+The change DTO today carries one `commit_id` and no revisions. Until
+`revisions[]` exists: the header reads `qupxosqw · a03f5f` with no `rev N of
+M`; the History facet lists the one known commit and reads `revision history
+not recorded yet`; the Diff facet offers `parent → current` only; stale and
+moved tokens do not render (nothing can be compared); verdicts and comments
+show their commit id. Nothing is inferred from timestamps.
+
+## Critique deltas (2026-09-02, adversarially verified)
+
+Four confirmed findings folded in above: interdiff needs `parent_commit_id`
+per revision and jj interdiff semantics; undo needs per-op `workspace_id`,
+a server dry run, and blast-radius copy; a local working copy pins by
+commit id, never by a server seq; forking a workspace from a snapshot is a
+confirm act. Also folded: verdicts pin to the Diff facet's revision with a
+client-supplied commit id; the change card is live and the header
+denominator is its newer-revision signal; missing flows added (`review.
+request`, `findings.fix`, `ci.logs`, `change.history`); Revert appears only
+on a landed change; mid-stack Land and the Split action have a place.
