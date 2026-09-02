@@ -119,10 +119,11 @@ at any depth. Numeric request fields such as `max_tokens` and `budget_tokens`
 are not credentials and are left intact, so a provider diagnostic quoting them
 stays readable.
 
-A failed response body is truncated to 64 KiB before it is parsed, classified
-or redacted, and both recursive walks stop at depth 12; the text kept on the
-error is capped at 16 KiB, with `bodyTruncated` set when the cap bites. The read
-itself is not yet bounded. Endpoint URLs
+A failed response body stops being read at 64 KiB, so nothing beyond that is
+ever held, parsed, classified or redacted, and all three recursive walks over it
+stop at depth 12: past that a redacted subtree is replaced whole rather than
+descended. The text kept on the error is capped at 16 KiB, with `bodyTruncated`
+set when the cap bites. Endpoint URLs
 must be `http` or `https`, must not embed credentials or fragments, must not
 carry credential-shaped query keys, and must not contain relative path segments.
 

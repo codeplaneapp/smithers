@@ -151,13 +151,10 @@ engine exponential backtracking.
 
 Two grammar bounds are refusals rather than silent truncation: a pattern longer
 than 4096 characters, and one whose braces expand past 64 alternatives, both
-fail as `BadArgument`. So do the four constructs this grammar does not
-implement: extglob (`+(a|b)`), POSIX classes (`[[:digit:]]`), brace ranges
-(`{1..3}`), and backslash escaping. Each of them means something to the native
-globber, so reading them as ordinary characters would not fail; it would answer
-a different question, and in an exclusion that means handing the caller the very
-paths it forbade. The refusal therefore covers the exclude list as well as the
-pattern. Node's own globber does not agree with itself about one input
+fail as `BadArgument`. Four constructs are deliberately not implemented and
+match nothing: extglob (`+(a|b)`), POSIX classes (`[[:digit:]]`), numeric and
+alphabetic brace ranges (`{1..3}`), and backslash escaping, which is an ordinary
+character here. Node's own globber does not agree with itself about one input
 across the supported range either: on 22.19.0 a dotted segment after `**`
 (`**/.hidden`) matches nothing, and on 24 it matches the dotfiles. The adapter
 follows the newer reading.
@@ -181,22 +178,14 @@ the JSDoc on `isAlive` names both inputs on which they disagree.
 `ProcessReaper.reap` kills the process groups a crashed incarnation of the same
 `hostId` abandoned. It signals a record only when every guard holds: the numbers
 name something the platform can signal, the group is not this host's, the owner
-is gone, and the pid still names the process the record describes. Two of those
-guards are questions put to `ps`: this process's own group, and when the
-recorded pid started. Either can go unanswered on a host with no usable one, and
-an unanswered guard refuses, because a guard that did not run is not a guard
-that passed. No evidence never authorizes a `SIGKILL`.
-
-A refusal also decides whether the record is retired. Retiring says in the
-journal that nothing was signalled and stops every later incarnation
-re-examining a number the operating system has moved on from, so only a refusal
-a later incarnation cannot answer differently is final.
+is gone, and the pid still names the process the record describes. A record it
+cannot verify, on a host with no usable `ps`, is kept rather than killed:
+no evidence never authorizes a `SIGKILL`.
 
 | Refusal               | Retired |
 | --------------------- | ------- |
 | `owner-alive`         | no      |
 | `identity-unverified` | no      |
-| `own-group-unknown`   | no      |
 | `no-group`            | yes     |
 | `own-group`           | yes     |
 | `invalid-record`      | yes     |
@@ -250,6 +239,7 @@ with capability checks. [@smthrs/platform-bun](/api/platform-bun) and
 | `ProcessReaper.SystemOptions`         | interface | models       | How a POSIX `System` asks the operating system its questions.                                                                                                              |
 | `ProcessReaper.posixSystemWith`       | const     | constructors | Reaping on a POSIX host, with the identity probe configured.                                                                                                               |
 | `ProcessReaper.posixSystem`           | const     | constructors | Reaping on a POSIX host: one `SIGKILL` to the abandoned process group, with the identity probe at `defaultPsExecutable`.                                                   |
+| `ProcessReaper.windowsSystemWith`     | const     | constructors | Reaping on Windows, with the identity the sweep must never signal configured.                                                                                              |
 | `ProcessReaper.windowsSystem`         | const     | constructors | Reaping on Windows, which has no process groups: `taskkill /T /F` by pid.                                                                                                  |
 | `ProcessReaper.systemFor`             | const     | constructors | Selects the reaping implementation a platform needs.                                                                                                                       |
 | `ProcessReaper.identityToleranceMs`   | const     | models       | How far apart a recorded start time and the operating system's may be and still describe the same process.                                                                 |
