@@ -38,7 +38,8 @@ overrides on bare `:root` (0,1,0) lost them the moment a palette was selected.
 The package's central claim is that any palette a user can select is accessible.
 `tests/paintedPairs.ts` is that claim written down: a table of every
 (foreground, background) pair the shipped stylesheets paint, checked at 4.5:1
-across all eight palettes in both modes.
+across all eight palettes in both modes, with palettes that still fail
+enumerated in [Recorded upstream gaps](#recorded-upstream-gaps) below.
 
 Backgrounds are resolved to **exact unrounded channels**, because `mixColors`
 rounds and a browser evaluating `color-mix(in srgb, ...)` does not.
@@ -51,7 +52,10 @@ Two rules follow from the table:
   border and the elevation rather than deepening the fill, and why they restate
   that fill: the generic `.button:hover` and `.button:active` rules match them
   too and out-rank the base rule. `tests/cascade.test.ts` resolves the sheet and
-  pins what each state actually paints.
+  pins what each state actually paints. The four control shapes are `.button`,
+  `.primary`, `.secondary`, and `.danger`, and all four share the base,
+  `:focus-visible`, and `:disabled` rules, so a bare `<button class="danger">`
+  dims when disabled and takes a focus ring exactly like a bare `.primary`.
 - Every fill under text must be a pair the table can name. The muted chips and
   inline code sit on the opaque `--surface-2` rather than the translucent
   `--hover-subtle` and `--inline-code-bg`, so their pair does not depend on the
@@ -61,7 +65,7 @@ Two rules follow from the table:
   `saturate(180%)`, which is what supported browsers paint.
 - The sheet sets no `::selection` rule. A brand wash leaves the foreground
   inherited, so it lands under all nine foregrounds this sheet paints; even an
-  8% wash misses 4.5:1 in 24 (foreground, palette, mode) combinations, and the
+  8% wash misses 4.5:1 in 29 (foreground, palette, mode) combinations, and the
   0.x value was 24%. Pinning a foreground instead is worse: `::selection` is
   global, and a downstream sheet that overrides only the selection background
   inherits the pinned color (`@smthrs/ui`'s markdown editor does exactly that).
@@ -85,8 +89,9 @@ palettes. Every one traces to `scripts/generate-theme-registry.ts`:
 - Its `contrast()` runs on rounded channels, so the ratchet stops one step early.
 - `rose-pine` gives `success` and `info` the same hex in both modes.
 
-Every recorded contrast gap is a `solarized` neutral-token failure. Nothing on
-the list can be closed by a change to this package's CSS.
+Every recorded contrast gap is a `solarized` neutral-token failure. Removing the
+rule that paints a listed pair would hide the token failure rather than fix it.
+The token values themselves can only be changed in the generator.
 
 `src/themes/*.ts` are byte-for-byte generator output, guarded by
 `tests/generatedThemes.test.ts`, so closing these means changing the generator

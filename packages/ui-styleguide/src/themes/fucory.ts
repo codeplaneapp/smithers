@@ -11,7 +11,7 @@ import type { SmithersTheme } from "../SmithersTheme.ts";
  * Light semantic values are darkened so 11px badge text stays >= 4.5:1 on the
  * matching `*-soft` tint, not just on white.
  *
- * Three departures from the pre-registry constants, each closing a WCAG AA
+ * Four departures from the pre-registry constants, each closing a WCAG AA
  * failure that `tests/themeRegistry.test.ts` now enumerates:
  *
  * 1. Light `textPlaceholder` `#8a8a93` -> `#6f6f78`. `input::placeholder`

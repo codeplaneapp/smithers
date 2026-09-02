@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { reducedMotionCss, standaloneThemeCss, themeRegistry, workflowUiThemeCss } from "../src/index.ts";
+
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function themeDeclarations(css: string, theme: "light" | "dark"): Map<string, string> {
   const block =
@@ -12,17 +17,34 @@ function themeDeclarations(css: string, theme: "light" | "dark"): Map<string, st
 }
 
 const PALETTE_COUNT = Object.keys(themeRegistry).length;
+const INITIAL_STANDALONE_THEME_CSS = standaloneThemeCss();
 
 /**
- * Roughly 2.4 KB of CSS per palette, plus the shared token block and the
+ * Roughly 2.9 KB of CSS per palette, plus the shared token block and the
  * primitive rules. Derived rather than pinned at a bare 32_768, which the tenth
  * palette would have tripped with no hint of what the number meant.
  */
 const SIZE_BUDGET_PER_PALETTE = 3_600;
 
 describe("standaloneThemeCss", () => {
-  test("is one memoized string, not a rebuild per call", () => {
-    expect(standaloneThemeCss()).toBe(standaloneThemeCss());
+  test("returns the same value on repeat calls", () => {
+    const first = standaloneThemeCss();
+    const second = standaloneThemeCss();
+    expect(first).toBe(second);
+    expect(first).toBe(INITIAL_STANDALONE_THEME_CSS);
+  });
+
+  test("builds the sheet once, at module evaluation", () => {
+    // The test above cannot see this. `first`, `second`, and the pre-suite
+    // snapshot are primitive strings, so an implementation that rebuilt the
+    // whole stylesheet on every call would satisfy all three assertions; the
+    // JSDoc and `docs/api.md` both promise more than that ("built once at
+    // module evaluation ... repeat calls cost nothing"). Reading the source is
+    // what can fail: a timing budget would trade this guarantee for a flaky
+    // one, and no runtime observation distinguishes two equal strings.
+    const source = readFileSync(join(packageRoot, "src/standaloneThemeCss.ts"), "utf8");
+    expect(source).toMatch(/^const standaloneCss = \[/m);
+    expect(source).toMatch(/export function standaloneThemeCss\(\): string \{\n {2}return standaloneCss;\n\}/);
   });
 
   test("ships both dark-mode strategies and keeps color values in token declarations", () => {

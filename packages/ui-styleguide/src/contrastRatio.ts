@@ -3,8 +3,28 @@ import { hexAlpha, rgbChannels } from "./rgbChannels.ts";
 /** Parsed 0-255 srgb channels. */
 export type Rgb = readonly [number, number, number];
 
+/**
+ * Channels a color can actually have: three finite numbers from 0 to 255.
+ *
+ * Unrounded values are legal, because `mixChannels` returns the exact mix a
+ * browser computes rather than the rounded hex. Everything else is a caller
+ * mistake: `[NaN, 0, 0]` used to score `NaN`, `[Infinity, 0, 0]` scored
+ * `Infinity`, and `[-255, 0, 0]` on white scored 31.3013, outside the range
+ * this function documents.
+ */
+function checkedChannels(channels: Rgb, role: string): Rgb {
+  const valid = Array.isArray(channels) && channels.length === 3
+    && channels.every((channel) => typeof channel === "number" && channel >= 0 && channel <= 255);
+  if (!valid) {
+    throw new TypeError(
+      `contrastRatioOf needs three finite 0-255 ${role} channels, received ${JSON.stringify(channels)}`,
+    );
+  }
+  return channels;
+}
+
 /** WCAG 2.x relative luminance of already-parsed 0-255 channels. */
-export function relativeLuminanceOf(channels: Rgb): number {
+function relativeLuminanceOf(channels: Rgb): number {
   const [red, green, blue] = channels.map((channel) => {
     const encoded = channel / 255;
     return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
@@ -38,9 +58,16 @@ export function contrastRatio(foreground: string, background: string): number {
 /**
  * The same ratio from already-parsed channels, so a caller mixing colors can
  * score the exact result instead of the rounded hex the browser never sees.
+ *
+ * Both arguments are three finite channels from 0 to 255, unrounded values
+ * included. Anything else throws rather than returning a number outside the
+ * documented 1-to-21 range: this entry point takes numbers, so the hex parser
+ * that guards {@link contrastRatio} never sees them.
+ *
+ * @throws {TypeError} when either argument is not three finite 0-255 channels.
  */
 export function contrastRatioOf(foreground: Rgb, background: Rgb): number {
-  const a = relativeLuminanceOf(foreground);
-  const b = relativeLuminanceOf(background);
+  const a = relativeLuminanceOf(checkedChannels(foreground, "foreground"));
+  const b = relativeLuminanceOf(checkedChannels(background, "background"));
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }

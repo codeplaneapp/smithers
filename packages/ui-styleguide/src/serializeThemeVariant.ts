@@ -98,8 +98,8 @@ export type SerializeThemeVariantOptions = {
  * the base `:root` rule passes `fonts: true`.
  *
  * Values are read as data-only own properties and validated: every token must
- * be a non-empty string under {@link MAX_TOKEN_LENGTH} characters with no CSS
- * or markup delimiter, because the result is interpolated into a stylesheet
+ * be a non-empty string of at most `MAX_TOKEN_LENGTH` (160) characters with no
+ * CSS or markup delimiter, because the result is interpolated into a stylesheet
  * verbatim.
  *
  * @throws {TypeError} when a token is missing, is not a string, is too long, or

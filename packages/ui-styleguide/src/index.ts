@@ -14,7 +14,7 @@ import { paletteThemeCss, type PaletteThemeCssOptions } from "./paletteThemeCss.
  * block per selected palette, in the source order the cascade depends on.
  *
  * A host that pins a single palette can emit a subset instead of paying for
- * all eight (roughly 2.4 KB of CSS each). `workflowUiThemeCss` is this with the
+ * all eight (roughly 2.9 KB of CSS each). `workflowUiThemeCss` is this with the
  * primitive element and component rules appended.
  *
  * @throws {RangeError} when `palettes` names an unregistered key.
@@ -30,7 +30,7 @@ export const workflowUiThemeCss = [
   // No `::selection` rule. The 0.x sheet washed the selection with 24% brand and
   // left the foreground inherited, which puts every one of the nine foregrounds
   // this sheet paints on an unaudited background: measured across the eight
-  // palettes, even an 8% wash misses 4.5:1 in 24 (foreground, palette, mode)
+  // palettes, even an 8% wash misses 4.5:1 in 29 (foreground, palette, mode)
   // combinations. Pinning a foreground instead is worse, because it is a global
   // rule and a downstream sheet that overrides only the selection background
   // inherits it (`@smthrs/ui`'s markdown editor does exactly that). The user
@@ -50,11 +50,16 @@ export const workflowUiThemeCss = [
   ".top,.topbar { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:var(--sp-4); padding:var(--sp-3) 18px; border-bottom:1px solid var(--border); background:var(--surface-glass-strong); -webkit-backdrop-filter:blur(18px) saturate(180%); backdrop-filter:blur(18px) saturate(180%); }",
   ".title,.title-group { min-width:0; display:flex; align-items:center; gap:10px; }",
   ".toolbar,.actions { display:flex; align-items:center; justify-content:flex-end; gap:var(--sp-2); min-width:0; flex-wrap:wrap; }",
-  ".button,.primary,.secondary { min-height:var(--ctl-h); display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 var(--sp-3); border:1px solid var(--line); border-radius:var(--r-1); background:var(--panel); color:var(--text); text-decoration:none; cursor:pointer; white-space:nowrap; box-shadow:var(--shadow-1); transition:background-color .12s ease, border-color .12s ease, color .12s ease; }",
+  // `.danger` is a control shape like `.primary` and `.secondary`, so it rides
+  // the same base, focus, and disabled rules. It used to appear only in its own
+  // tint and state rules, which left a bare `<button class="danger">` with no
+  // fill, no border, no focus ring, and no disabled dimming while the identical
+  // `.primary` markup had all four.
+  ".button,.primary,.secondary,.danger { min-height:var(--ctl-h); display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 var(--sp-3); border:1px solid var(--line); border-radius:var(--r-1); background:var(--panel); color:var(--text); text-decoration:none; cursor:pointer; white-space:nowrap; box-shadow:var(--shadow-1); transition:background-color .12s ease, border-color .12s ease, color .12s ease; }",
   ".button:hover,.primary:hover,.secondary:hover { background:var(--hover); }",
   ".button:active:not(:disabled),.primary:active:not(:disabled),.secondary:active:not(:disabled) { background:color-mix(in srgb, var(--text) 6%, var(--hover)); }",
-  ".button:focus-visible,.primary:focus-visible,.secondary:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.run-row:focus-visible,.doc-link:focus-visible,.segmented:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:none; border-color:var(--ring-border); box-shadow:0 0 0 3px var(--ring); }",
-  ".button:disabled,.primary:disabled,.secondary:disabled { cursor:not-allowed; opacity:.45; }",
+  ".button:focus-visible,.primary:focus-visible,.secondary:focus-visible,.danger:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.run-row:focus-visible,.doc-link:focus-visible,.segmented:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:none; border-color:var(--ring-border); box-shadow:0 0 0 3px var(--ring); }",
+  ".button:disabled,.primary:disabled,.secondary:disabled,.danger:disabled { cursor:not-allowed; opacity:.45; }",
   ".button.primary,.primary { border-color:var(--brand-border); background:var(--brand-soft); color:var(--brand); font-weight:650; }",
   // Hover and press on a tinted button move the border and the elevation, never
   // the fill: the fill already carries brand-colored 13px text at the audited
@@ -111,7 +116,7 @@ export const workflowUiThemeCss = [
   ".livelog-node { color:var(--warning); flex:none; }",
   ".livelog-detail { color:var(--code-text); min-width:0; }",
   "* { scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--text-muted) 35%,transparent) transparent; }",
-  "@media (max-width: 760px) { .top,.topbar { align-items:flex-start; flex-direction:column; padding:10px var(--sp-3); } .toolbar,.actions { width:100%; justify-content:flex-start; } .button,.primary,.secondary { min-width:0; } }",
+  "@media (max-width: 760px) { .top,.topbar { align-items:flex-start; flex-direction:column; padding:10px var(--sp-3); } .toolbar,.actions { width:100%; justify-content:flex-start; } .button,.primary,.secondary,.danger { min-width:0; } }",
   reducedMotionCss,
 ].join("\n");
 

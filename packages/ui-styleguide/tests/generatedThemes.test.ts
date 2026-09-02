@@ -21,6 +21,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodeExecutable } from "./nodeBinary.ts";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = resolve(packageRoot, "../..");
@@ -28,8 +29,11 @@ const themesDir = join(packageRoot, "src/themes");
 
 describe("the generated theme registry", () => {
   test("matches what the generator writes today, byte for byte", () => {
+    // Node, not the Bun that runs this suite: the generator is a Node script,
+    // and running it under a different runtime would compare this package
+    // against output nobody regenerates it with.
     const result = spawnSync(
-      process.execPath,
+      nodeExecutable,
       ["--experimental-strip-types", "scripts/generate-theme-registry.ts", "--check"],
       { cwd: repositoryRoot, encoding: "utf8" },
     );

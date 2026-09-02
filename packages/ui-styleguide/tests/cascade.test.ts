@@ -91,9 +91,17 @@ describe("the resolved fill on a tinted button", () => {
     }
   }
 
-  test("danger rests transparent and primary rests on its tint", () => {
+  test("danger rests on the neutral control fill and primary on its tint", () => {
     expect(resolve("background", { classes: ["button", "primary"], states: [] })).toBe("var(--brand-soft)");
     expect(resolve("background", { classes: ["button", "danger"], states: [] })).toBe("var(--panel)");
+    // Bare and compounded resolve alike. `.danger` used to be missing from the
+    // shared control rule, so a bare one had no fill, no border, no min-height,
+    // and no focus ring while `.primary` had all four.
+    expect(resolve("background", { classes: ["danger"], states: [] })).toBe("var(--panel)");
+    expect(resolve("min-height", { classes: ["danger"], states: [] })).toBe("var(--ctl-h)");
+    expect(resolve("box-shadow", { classes: ["danger"], states: ["focus-visible"] })).toBe(
+      "0 0 0 3px var(--ring)",
+    );
   });
 
   test("a plain button still gets the neutral hover and active fills", () => {
@@ -114,10 +122,12 @@ describe("the resolved fill on a tinted button", () => {
       expect(resolve("border-color", disabled), classes.join(".")).not.toBe(resolve("border-color", active));
       expect(resolve("background", disabled)).toBe(resolve("background", { classes, states: [] }));
     }
-    // `.danger` is absent from the disabled rule's selector list, so only the
-    // `.button`/`.primary` shapes dim.
-    expect(resolve("opacity", { classes: ["button", "primary"], states: ["disabled"] })).toBe(".45");
-    expect(resolve("opacity", { classes: ["danger"], states: ["disabled"] })).toBeUndefined();
+    // Every control shape dims, bare or compounded. A disabled bare `.danger`
+    // used to stay at full opacity because `.danger` was absent from the
+    // disabled rule's selector list.
+    for (const classes of [["button", "primary"], ["primary"], ["button", "danger"], ["danger"], ["secondary"]]) {
+      expect(resolve("opacity", { classes, states: ["disabled"] }), classes.join(".")).toBe(".45");
+    }
     expect(matches(".primary:active:not(:disabled)", { classes: ["primary"], states: ["active", "disabled"] }))
       .toBe(false);
     expect(matches(".button:active:not(:disabled)", { classes: ["button"], states: ["active", "disabled"] }))

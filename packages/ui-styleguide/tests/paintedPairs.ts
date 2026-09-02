@@ -154,6 +154,19 @@ export const PAINTED_PAIRS: readonly PaintedPair[] = [
     foreground: (variant) => rgbChannels(variant.warning),
     background: (variant) => rgbChannels(variant.codeBg),
   },
+  // `.plus` and `.minus` are bare class selectors that set only a foreground,
+  // so one inside a `.code` or `.livelog` container paints on that container's
+  // `--code-bg`.
+  {
+    label: "success on codeBg",
+    foreground: (variant) => rgbChannels(variant.success),
+    background: (variant) => rgbChannels(variant.codeBg),
+  },
+  {
+    label: "danger on codeBg",
+    foreground: (variant) => rgbChannels(variant.danger),
+    background: (variant) => rgbChannels(variant.codeBg),
+  },
   // Inverted chrome: `--ink`, tooltips, inverse buttons.
   {
     label: "inverseText on inverseBg",
@@ -183,7 +196,7 @@ export function ratioFor(pair: PaintedPair, variant: ThemeVariantTokens): number
  * out rather than leaving a stale exemption behind.
  */
 export const KNOWN_CONTRAST_GAPS: ReadonlyMap<string, number> = new Map([
-["solarized/light/text on bg", 4.1296],
+  ["solarized/light/text on bg", 4.1296],
   ["solarized/light/text on surface", 4.3819],
   ["solarized/light/text on surface2", 4.1193],
   ["solarized/light/text on surface3", 4.4546],

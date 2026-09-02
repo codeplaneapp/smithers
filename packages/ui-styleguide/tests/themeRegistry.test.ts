@@ -88,10 +88,9 @@ describe("theme registry", () => {
 });
 
 describe("WCAG AA on every pair the stylesheets paint", () => {
-  // No `continue`, no guard: every palette, every mode, every pair. Failures
-  // that this package cannot fix at the source are enumerated in
-  // `KNOWN_CONTRAST_GAPS`, and the second assertion below retires an entry the
-  // moment its pair starts passing.
+  // Every palette, mode, and pair registers a test. A pair in
+  // `KNOWN_CONTRAST_GAPS` registers the inverse test instead, so its exemption
+  // cannot go stale.
   for (const { key, mode, variant } of variants) {
     for (const pair of PAINTED_PAIRS) {
       const id = `${key}/${mode}/${pair.label}`;
@@ -122,7 +121,10 @@ describe("WCAG AA on every pair the stylesheets paint", () => {
         const ratio = contrastRatio(palette.foreground, palette.background);
         const known = KNOWN_TERMINAL_GAPS.get(`${key}/${mode}`);
         if (known === undefined) expect(ratio, `${key}/${mode} terminal`).toBeGreaterThanOrEqual(AA_MINIMUM);
-        else expect(ratio, `${key}/${mode} terminal`).toBeLessThan(AA_MINIMUM);
+        else {
+          expect(ratio, `${key}/${mode} terminal`).toBeLessThan(AA_MINIMUM);
+          expect(ratio, `${key}/${mode} terminal`).toBeCloseTo(known, 3);
+        }
       }
     }
   });
@@ -144,10 +146,21 @@ describe("theme vocabulary", () => {
 
   test("every recorded gap names a variant that still exists", () => {
     const ids = new Set(variants.map(({ key, mode }) => `${key}/${mode}`));
-    for (const id of KNOWN_TERMINAL_GAPS.keys()) expect(ids.has(id), id).toBe(true);
-    for (const id of [...KNOWN_RAMP_COLLAPSES, ...KNOWN_ROLE_COLLISIONS]) {
-      expect(ids.has(id.split("/").slice(0, 2).join("/")), id).toBe(true);
+    const validRampIds = new Set<string>();
+    const validRoleIds = new Set<string>();
+    for (const { key, mode } of variants) {
+      for (let i = 0; i + 1 < TEXT_RAMP.length; i++) {
+        validRampIds.add(`${key}/${mode}/${TEXT_RAMP[i]!} > ${TEXT_RAMP[i + 1]!}`);
+      }
+      for (let i = 0; i < SEMANTICS.length; i++) {
+        for (let j = i + 1; j < SEMANTICS.length; j++) {
+          validRoleIds.add(`${key}/${mode}/${SEMANTICS[i]!}=${SEMANTICS[j]!}`);
+        }
+      }
     }
+    for (const id of KNOWN_TERMINAL_GAPS.keys()) expect(ids.has(id), id).toBe(true);
+    for (const id of KNOWN_RAMP_COLLAPSES) expect(validRampIds.has(id), id).toBe(true);
+    for (const id of KNOWN_ROLE_COLLISIONS) expect(validRoleIds.has(id), id).toBe(true);
   });
 
   test("grades the secondary text ramp with a strict step, not a flat line", () => {

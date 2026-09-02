@@ -10,7 +10,16 @@
  * transparent `#00000000` scored a plausible, maximal, wrong 21:1.
  */
 import { describe, expect, test } from "bun:test";
-import { contrastRatio, contrastRatioOf, mixChannels, mixColors, themeRegistry } from "../src/index.ts";
+import {
+  contrastRatio,
+  contrastRatioOf,
+  mixChannels,
+  mixColors,
+  type Rgb,
+  SOFT_TINT_AMOUNT,
+  themeRegistry,
+} from "../src/index.ts";
+import { PAINTED_PAIRS, ratioFor } from "./paintedPairs.ts";
 
 describe("contrastRatio", () => {
   test("matches the WCAG anchors", () => {
@@ -68,6 +77,46 @@ describe("mixColors", () => {
   });
 });
 
+describe("contrastRatioOf", () => {
+  test("scores parsed channels the same way contrastRatio scores hex", () => {
+    expect(contrastRatioOf([0, 0, 0], [255, 255, 255])).toBe(21);
+    expect(contrastRatioOf([255, 255, 255], [255, 255, 255])).toBe(1);
+    // Unrounded channels are the point of the pair form: an exact 50% gray is
+    // 3.9767 against white, while the `#808080` the hex form rounds it to is
+    // 3.9494. Half a channel of rounding moves the third decimal.
+    expect(contrastRatioOf([255, 255, 255], [127.5, 127.5, 127.5])).toBeCloseTo(3.9767, 4);
+    expect(contrastRatio("#ffffff", "#808080")).toBeCloseTo(3.9494, 4);
+  });
+
+  test("rejects channels no color can have instead of answering NaN or 31:1", () => {
+    // The public pair form takes numbers, not strings, so its parser cannot
+    // catch these. Before it validated, `[Number.NaN, 0, 0]` scored `NaN`,
+    // `[Number.POSITIVE_INFINITY, 0, 0]` scored `Infinity`, and `[-255, 0, 0]`
+    // against white scored 31.3013 -- outside the documented 1-to-21 range, and
+    // the same plausible-wrong-answer class the hex parser was hardened against.
+    const white: Rgb = [255, 255, 255];
+    for (const bad of [[Number.NaN, 0, 0], [Number.POSITIVE_INFINITY, 0, 0], [-255, 0, 0], [0, 256, 0]] as const) {
+      expect(() => contrastRatioOf(bad, white), JSON.stringify(bad)).toThrow(/finite 0-255 foreground channels/);
+      expect(() => contrastRatioOf(white, bad), JSON.stringify(bad)).toThrow(/finite 0-255 background channels/);
+    }
+    expect(() => contrastRatioOf([Number.NaN, 0, 0], white)).toThrow(TypeError);
+    expect(() => contrastRatioOf([0, 0] as unknown as Rgb, white)).toThrow(/received \[0,0\]/);
+    expect(() => contrastRatioOf("#ffffff" as unknown as Rgb, white)).toThrow(TypeError);
+  });
+
+  test("keeps every answer inside the WCAG range", () => {
+    for (const pair of PAINTED_PAIRS) {
+      for (const theme of Object.values(themeRegistry)) {
+        for (const variant of [theme.light, theme.dark]) {
+          const ratio = ratioFor(pair, variant);
+          expect(ratio, pair.label).toBeGreaterThanOrEqual(1);
+          expect(ratio, pair.label).toBeLessThanOrEqual(21);
+        }
+      }
+    }
+  });
+});
+
 describe("mixChannels", () => {
   test("returns the exact channels the browser computes, not the rounded hex", () => {
     const exact = mixChannels("#64bc9d", "#2f333c", 0.12);
@@ -76,16 +125,25 @@ describe("mixChannels", () => {
   });
 
   test("exposes the rounding gap that hid one dark --success below AA", () => {
-    // `one` dark: --success on --success-soft. The rounded oracle scored
-    // 4.5033 and passed; the browser renders 4.4781.
+    // This is the 12% recipe the package shipped before `SOFT_TINT_AMOUNT` was
+    // lowered to 10%. The vector stays because the generator's own ratchet still
+    // runs at percentages where rounding decides the verdict.
     const one = themeRegistry.one!.dark;
     const exact = contrastRatioOf(
       [0x64, 0xbc, 0x9d],
       mixChannels(one.success, one.surface, 0.12),
     );
     const rounded = contrastRatio(one.success, mixColors(one.success, one.surface, 0.12));
+    // The shipped recipe, scored the same exact way. `amount: 1` is the pure
+    // foreground: `rgbChannels` is internal, so the barrel reaches it through
+    // a full-strength mix.
+    const shippedExact = contrastRatioOf(
+      mixChannels(one.success, one.surface, 1),
+      mixChannels(one.success, one.surface, SOFT_TINT_AMOUNT),
+    );
     expect(exact).toBeLessThan(4.5);
     expect(rounded).toBeGreaterThan(4.5);
     expect(rounded - exact).toBeGreaterThan(0.02);
+    expect(shippedExact).toBeGreaterThan(4.5);
   });
 });
