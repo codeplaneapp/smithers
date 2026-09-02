@@ -88,6 +88,12 @@ export interface Host {
   readonly exists: (path: string) => boolean
   /** Whether a host path is a directory. */
   readonly isDirectory: (path: string) => boolean
+  /**
+   * The names of a directory's direct children, or undefined when the host
+   * cannot list it. Optional: a host without it keeps every declared file as
+   * its own entry, which is correct and merely long.
+   */
+  readonly entries?: ((directory: string) => ReadonlyArray<string> | undefined) | undefined
   readonly uid: number | undefined
   readonly gid: number | undefined
 }
@@ -156,6 +162,12 @@ export interface Plan {
   readonly workspaceRoot: string
   readonly cwd: string
   readonly reads: ReadonlyArray<string>
+  /**
+   * Paths inside a granted directory that the declaration did not cover,
+   * re-closed after the grant. Only a mechanism with deny rules (seatbelt)
+   * folds; the others keep every declared file as its own entry.
+   */
+  readonly readDenies: ReadonlyArray<string>
   readonly writes: ReadonlyArray<string>
   readonly readOnly: ReadonlyArray<string>
   /** A host directory the run may scribble in; created by the caller, removed after. */
@@ -211,6 +223,13 @@ export const host = (env: Readonly<Record<string, string | undefined>> = process
         return NodeFs.statSync(path).isDirectory()
       } catch {
         return false
+      }
+    },
+    entries: (directory) => {
+      try {
+        return NodeFs.readdirSync(directory)
+      } catch {
+        return undefined
       }
     },
     uid: typeof process.getuid === "function" ? process.getuid() : undefined,
@@ -302,6 +321,61 @@ const insideRoot = (root: string, candidate: string): boolean => {
     (relative !== ".." && !relative.startsWith(`..${NodePath.sep}`) && !NodePath.isAbsolute(relative))
 }
 
+/**
+ * Folds a declared file set into directories plus the entries to re-close.
+ *
+ * The seatbelt compiler caps one rule's data at 64 KiB, so a workspace with a
+ * few thousand declared sources cannot be granted file by file. Deepest
+ * first, a directory in which at least as many entries are covered as not is
+ * granted whole, and its uncovered entries are listed for a deny rule that
+ * follows the grant. The result admits exactly the declared set plus the
+ * granted directories' future entries. A directory whose uncovered entry
+ * still holds declared files deeper down is never folded over that entry,
+ * the workspace root is never folded, and a host that cannot list a
+ * directory leaves its files as they were. Covered means a declared read, a
+ * declared write, or the private tmp.
+ */
+const fold = (
+  root: string,
+  declared: ReadonlyArray<string>,
+  alsoCovered: ReadonlyArray<string>,
+  hostFacts: Host
+): { readonly reads: ReadonlyArray<string>; readonly denies: ReadonlyArray<string> } => {
+  const entries = hostFacts.entries
+  if (entries === undefined) return { reads: declared, denies: [] }
+  const covered = new Set([...declared, ...alsoCovered])
+  const candidates = new Set<string>()
+  for (const path of declared) {
+    let current = NodePath.dirname(path)
+    while (insideRoot(root, current) && current !== root && !candidates.has(current)) {
+      candidates.add(current)
+      current = NodePath.dirname(current)
+    }
+  }
+  const deepestFirst = [...candidates].sort((left, right) => right.length - left.length || (left < right ? -1 : 1))
+  const promoted: Array<string> = []
+  const denies: Array<string> = []
+  for (const directory of deepestFirst) {
+    if (covered.has(directory)) continue
+    const children = entries(directory)
+    if (children === undefined || children.length === 0) continue
+    const uncovered: Array<string> = []
+    let coveredCount = 0
+    let partial = false
+    for (const child of children) {
+      const path = NodePath.join(directory, child)
+      if (covered.has(path)) coveredCount += 1
+      else if (candidates.has(path)) partial = true
+      else uncovered.push(path)
+    }
+    if (partial || coveredCount === 0 || coveredCount < uncovered.length) continue
+    covered.add(directory)
+    promoted.push(directory)
+    denies.push(...uncovered)
+  }
+  return { reads: [...declared, ...promoted], denies }
+}
+
 /** Drops a path covered by another entry of the same set, keeping the set ordered. */
 const collapse = (paths: ReadonlyArray<string>): ReadonlyArray<string> => {
   const sorted = [...new Set(paths)].sort((left, right) => left.length - right.length || (left < right ? -1 : 1))
@@ -338,10 +412,10 @@ export const plan = (
     const absolute = NodePath.resolve(root, ...relative.split("/"))
     return insideRoot(root, absolute) ? absolute : undefined
   }
-  const reads: Array<string> = []
+  const declared: Array<string> = []
   for (const relative of request.reads) {
     const absolute = anchor(relative)
-    if (absolute !== undefined && hostFacts.exists(absolute)) reads.push(absolute)
+    if (absolute !== undefined && hostFacts.exists(absolute)) declared.push(absolute)
   }
   // A write names a directory the tool may fill. A declared output that is a
   // file, existing or not yet, opens its parent: a file cannot be bound
@@ -361,12 +435,16 @@ export const plan = (
     const absolute = anchor(relative)
     if (absolute !== undefined) readOnly.push(absolute)
   }
+  const folded = selected._tag === "seatbelt"
+    ? fold(root, declared, [...writes, ...readOnly, location.tmp], hostFacts)
+    : { reads: declared, denies: [] }
   return {
     mechanism: selected,
     network: network(request.policy, request.services ?? false),
     workspaceRoot: root,
     cwd: location.cwd,
-    reads: collapse(reads),
+    reads: collapse(folded.reads),
+    readDenies: collapse(folded.denies),
     writes: collapse(writes),
     readOnly: collapse(readOnly),
     tmp: location.tmp,
@@ -513,6 +591,9 @@ export const seatbelt = (confinement: Plan): string => {
       readable.map((path) => `(subpath ${sbpl(path)})`).join(" ")
     })`
   )
+  if (confinement.readDenies.length > 0) {
+    lines.push(`(deny file-read* ${confinement.readDenies.map((path) => `(subpath ${sbpl(path)})`).join(" ")})`)
+  }
   return lines.join("")
 }
 
@@ -577,8 +658,10 @@ export const wrap = (
   switch (confinement.mechanism._tag) {
     case "bubblewrap":
       return { argv: bubblewrap(confinement, argv), env: extra }
-    case "seatbelt":
-      return { argv: [confinement.mechanism.executable, "-p", seatbelt(confinement), ...argv], env: extra }
+    case "seatbelt": {
+      const profile = seatbelt(confinement)
+      return { argv: [confinement.mechanism.executable, "-p", profile, ...argv], env: extra }
+    }
     case "docker":
       return { argv: docker(confinement, argv, { ...env, ...extra }), env: {} }
   }

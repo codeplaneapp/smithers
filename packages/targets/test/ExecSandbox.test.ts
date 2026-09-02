@@ -178,6 +178,65 @@ describe("bubblewrap argv", () => {
   })
 })
 
+describe("folding declared files into directories", () => {
+  const listing: Readonly<Record<string, ReadonlyArray<string>>> = {
+    "/work/ws": ["src", "node_modules", "package.json"],
+    "/work/ws/src": ["lib", "c.ts", "d.ts", "__generated__"],
+    "/work/ws/src/lib": ["a.ts", "b.ts", "deep"],
+    "/work/ws/src/lib/deep": ["e.ts"],
+    "/work/ws/src/__generated__": ["x.graphql.ts"]
+  }
+  const files = ["/work/ws/src/lib/a.ts", "/work/ws/src/lib/b.ts", "/work/ws/src/lib/deep/e.ts", "/work/ws/src/c.ts"]
+  const listingHost: ExecSandbox.Host = {
+    ...host("darwin", { "/usr/bin/sandbox-exec": "/usr/bin/sandbox-exec" }, [...files, "/work/ws/package.json"], Object.keys(listing)),
+    entries: (directory) => listing[directory]
+  }
+  const reads = ["src/lib/a.ts", "src/lib/b.ts", "src/lib/deep/e.ts", "src/c.ts"]
+
+  it("grants a mostly declared subtree whole and re-closes what the declaration left out", () => {
+    const plan = planned(listingHost, { reads, writes: [] })
+    expect(plan.reads).toEqual(["/work/ws/src"])
+    expect(plan.readDenies).toEqual(["/work/ws/src/d.ts", "/work/ws/src/__generated__"])
+    const profile = ExecSandbox.seatbelt(plan)
+    const grant = profile.indexOf("(subpath \"/work/ws/src\")")
+    const close = profile.indexOf("(deny file-read* (subpath \"/work/ws/src/d.ts\") (subpath \"/work/ws/src/__generated__\"))")
+    expect(grant).toBeGreaterThan(0)
+    expect(close).toBeGreaterThan(grant)
+    expect(profile).not.toContain("a.ts")
+  })
+
+  it("counts a declared write as covered, never folds the root, and keeps every file when the host cannot list", () => {
+    const withWrite = planned(listingHost, { reads, writes: ["src/__generated__"] })
+    expect(withWrite.reads).toEqual(["/work/ws/src"])
+    expect(withWrite.readDenies).toEqual(["/work/ws/src/d.ts"])
+    const rootOnly = planned(listingHost, { reads: ["package.json"], writes: [] })
+    expect(rootOnly.reads).toEqual(["/work/ws/package.json"])
+    expect(rootOnly.readDenies).toEqual([])
+    const blind = planned({ ...listingHost, entries: undefined }, { reads, writes: [] })
+    expect([...blind.reads].sort()).toEqual([...files].sort())
+    expect(blind.readDenies).toEqual([])
+  })
+
+  it("leaves a directory alone when an uncovered entry still holds declared files below it", () => {
+    const sparse: ExecSandbox.Host = {
+      ...listingHost,
+      entries: (directory) => (directory === "/work/ws/src/lib" ? ["a.ts", "b.ts", "deep", "n1", "n2", "n3", "n4"] : listing[directory])
+    }
+    const plan = planned(sparse, { reads, writes: [] })
+    // lib: three covered entries (a, b, and the folded deep) against four uncovered ones: not folded.
+    expect(plan.reads).not.toContain("/work/ws/src/lib")
+    expect(plan.reads).not.toContain("/work/ws/src")
+    expect(plan.reads).toContain("/work/ws/src/lib/deep")
+  })
+
+  it("does not fold for bubblewrap, which binds each declared path", () => {
+    const linuxListing: ExecSandbox.Host = { ...listingHost, platform: "linux", executable: () => "/usr/bin/bwrap" }
+    const plan = planned(linuxListing, { reads, writes: [] })
+    expect([...plan.reads].sort()).toEqual([...files].sort())
+    expect(plan.readDenies).toEqual([])
+  })
+})
+
 describe("seatbelt profile", () => {
   it("denies network and writes, closes reads under the workspace, and reopens the declared set", () => {
     const profile = ExecSandbox.seatbelt(planned(darwin))
