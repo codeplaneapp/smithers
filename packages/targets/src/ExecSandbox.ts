@@ -672,11 +672,29 @@ export const wrap = (
   }
 }
 
-const denialPatterns: ReadonlyArray<RegExp> = [
-  /\b(?:EACCES|EPERM|EROFS|ENOENT)\b[^'"\n]*['"]([^'"\n]+)['"]/g,
-  /(?:^|[\s:])((?:\/|\.{0,2}\/?)[^\s:'"]+): (?:Operation not permitted|Read-only file system|Permission denied|No such file or directory)/gm,
-  /(?:Operation not permitted|Read-only file system|Permission denied|No such file or directory)[^\n]*?[:\s]['"]?((?:\/|[A-Za-z]:\\)[^'"\s:]+)/g,
-  /cannot (?:create|open|access|stat|read) ['"]?((?:\/|[A-Za-z]:\\|\.{0,2}\/)[^'":\s]+)/g
+/**
+ * Each pattern names the path a tool complained about and whether the text
+ * proves the denied operation was a write. A confined process never sees an
+ * undeclared path: seatbelt answers EPERM, bubblewrap answers ENOENT because
+ * the path was never mounted, and dash spells that "Directory nonexistent".
+ */
+const denialPatterns: ReadonlyArray<{ readonly pattern: RegExp; readonly write: boolean }> = [
+  { pattern: /\b(?:EACCES|EPERM|ENOENT)\b[^'"\n]*['"]([^'"\n]+)['"]/g, write: false },
+  { pattern: /\bEROFS\b[^'"\n]*['"]([^'"\n]+)['"]/g, write: true },
+  {
+    pattern:
+      /(?:^|[\s:])((?:\/|\.{0,2}\/?)[^\s:'"]+): (?:Operation not permitted|Permission denied|No such file or directory|Directory nonexistent|Not a directory)/gm,
+    write: false
+  },
+  { pattern: /(?:^|[\s:])((?:\/|\.{0,2}\/?)[^\s:'"]+): Read-only file system/gm, write: true },
+  {
+    pattern:
+      /(?:Operation not permitted|Permission denied|No such file or directory|Directory nonexistent)[^\n]*?[:\s]['"]?((?:\/|[A-Za-z]:\\)[^'"\s:]+)/g,
+    write: false
+  },
+  { pattern: /Read-only file system[^\n]*?[:\s]['"]?((?:\/|[A-Za-z]:\\)[^'"\s:]+)/g, write: true },
+  { pattern: /cannot (?:create|write|touch|mkdir|remove) (?:directory )?['"]?((?:\/|[A-Za-z]:\\|\.{0,2}\/?)[^'":\s]+)/g, write: true },
+  { pattern: /cannot (?:open|access|stat|read) ['"]?((?:\/|[A-Za-z]:\\|\.{0,2}\/?)[^'":\s]+)/g, write: false }
 ]
 
 /**
@@ -689,13 +707,14 @@ const denialPatterns: ReadonlyArray<RegExp> = [
  * @since 0.1.0
  */
 export const diagnose = (confinement: Plan, text: string): string | undefined => {
-  const named = new Set<string>()
-  for (const pattern of denialPatterns) {
+  // Path → whether the text proved the denied operation was a write.
+  const named = new Map<string, boolean>()
+  for (const { pattern, write } of denialPatterns) {
     for (const match of text.matchAll(pattern)) {
       const raw = match[1]
       if (raw === undefined) continue
       const absolute = NodePath.isAbsolute(raw) ? raw : NodePath.resolve(confinement.cwd, raw)
-      if (insideRoot(confinement.workspaceRoot, absolute)) named.add(absolute)
+      if (insideRoot(confinement.workspaceRoot, absolute)) named.set(absolute, (named.get(absolute) ?? false) || write)
       if (named.size >= 5) break
     }
     if (named.size >= 5) break
@@ -703,10 +722,15 @@ export const diagnose = (confinement: Plan, text: string): string | undefined =>
   if (named.size === 0) return undefined
   const covered = (path: string, set: ReadonlyArray<string>): boolean =>
     set.some((entry) => entry === path || path.startsWith(entry + NodePath.sep))
-  const lines = [...named].sort().map((path) => {
+  const lines = [...named.entries()].sort(([left], [right]) => (left < right ? -1 : 1)).map(([path, write]) => {
     const relative = toPosix(NodePath.relative(confinement.workspaceRoot, path))
     const readable = covered(path, confinement.reads) || covered(path, confinement.writes)
     const writable = covered(path, confinement.writes) && !covered(path, confinement.readOnly)
+    if (write) {
+      return writable
+        ? `sandbox: ${relative} was denied inside the declared set`
+        : `sandbox: ${relative} is outside the declared write set`
+    }
     if (!readable) return `sandbox: ${relative} is outside the declared read set`
     if (!writable) return `sandbox: ${relative} is outside the declared write set`
     return `sandbox: ${relative} was denied inside the declared set`

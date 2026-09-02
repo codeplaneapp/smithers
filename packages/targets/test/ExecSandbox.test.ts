@@ -356,7 +356,7 @@ describe("diagnose", () => {
       "EACCES: permission denied, open '/etc/passwd'"
     ].join("\n")
     const note = ExecSandbox.diagnose(plan, text)
-    expect(note).toContain("sandbox: pkg/notes.txt is outside the declared read set")
+    expect(note).toContain("sandbox: pkg/notes.txt is outside the declared write set")
     expect(note).toContain("sandbox: src/b.ts is outside the declared read set")
     expect(note).toContain("sandbox: dist/x.js was denied inside the declared set")
     expect(note).not.toContain("/etc/passwd")
@@ -365,6 +365,20 @@ describe("diagnose", () => {
 
   it("stays silent when the output names no workspace path", () => {
     expect(ExecSandbox.diagnose(planned(linux), "everything is fine")).toBeUndefined()
+  })
+
+  it("reports an escape bubblewrap never mounted as a write outside the declared set", () => {
+    // Under bubblewrap an undeclared path is absent rather than forbidden, and
+    // dash reports that absence as "Directory nonexistent" against a bare
+    // relative path; seatbelt says EPERM for the same escape.
+    const plan = planned(linux, { reads: [], writes: ["out"] })
+    const note = ExecSandbox.diagnose(
+      plan,
+      "/bin/sh: 1: cannot create linkdir/target.txt: Directory nonexistent"
+    )
+    expect(note).toContain("sandbox: pkg/linkdir/target.txt is outside the declared write set")
+    const rootDenied = ExecSandbox.diagnose(plan, "sh: line 1: cannot create out/note.txt: Read-only file system")
+    expect(rootDenied).toContain("sandbox: pkg/out/note.txt is outside the declared write set")
   })
 
   it("reads relative paths against the working directory", () => {
