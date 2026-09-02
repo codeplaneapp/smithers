@@ -37,6 +37,7 @@
     ".": "./src/index.ts",
     "./*": "./src/*.ts",
     "./internal/*": null,
+    "./migrations/*": null,
     "./*/index": null
   },
   "files": [
@@ -68,6 +69,7 @@
         "require": "./dist/cjs/*.js"
       },
       "./internal/*": null,
+      "./migrations/*": null,
       "./*/index": null
     }
   },
