@@ -55,6 +55,26 @@ describe("Exec failure codes", () => {
     expect(error.code).toBe("spawn_failed")
   })
 
+  /**
+   * `spawn <name> ENOENT` names the command for two different faults: an
+   * executable that is not on PATH, and a working directory that does not
+   * exist. A reader who trusts the message chases the wrong one, and this
+   * cost a full day of CI investigation on exactly that mistake.
+   *
+   * The case above covers the executable. This covers the directory, and
+   * asserts the message says so, because the two are indistinguishable
+   * otherwise.
+   */
+  it("says so when the working directory, not the executable, is missing", async () => {
+    const error = await failureOf(payload({
+      argv: [process.execPath, "-e", ""],
+      cwd: "no-such-directory"
+    }))
+    expect(error.code).toBe("spawn_failed")
+    expect(error.stderr).toContain("does not exist")
+    expect(error.stderr).toContain("no-such-directory")
+  })
+
   it("reports timed_out with the budget named", async () => {
     const error = await failureOf(payload({
       argv: [process.execPath, "-e", "setTimeout(() => {}, 60000)"],

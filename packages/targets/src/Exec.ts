@@ -841,7 +841,23 @@ const spawnTool = (
       // from the tail the diagnostic carries.
       finish(stdout)
       finish(stderr)
-      failure(error.message, stdout.tail, "spawn_failed")
+      // `spawn <name> ENOENT` has two causes and names only one of them. The
+      // executable may be absent from PATH, or the WORKING DIRECTORY may not
+      // exist: Node reports both by naming the command, so the message sends
+      // every reader after the wrong one. Measured, with pnpm on PATH the
+      // whole time:
+      //
+      //   spawn("pnpm", [...], { cwd: <existing> })  -> exits 0
+      //   spawn("pnpm", [...], { cwd: <missing>  })  -> "spawn pnpm ENOENT"
+      //
+      // A missing directory is reachable here rather than hypothetical:
+      // `resolveWorkspacePath` validates through `realpath`, which resolves
+      // through the nearest EXISTING ancestor and so returns a value for a
+      // path that is not there. So the answer is stated instead of guessed.
+      const detail = error.code === "ENOENT" && !NodeFs.existsSync(cwd)
+        ? `${error.message} (the working directory ${cwd} does not exist)`
+        : error.message
+      failure(detail, stdout.tail, "spawn_failed")
     })
     child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return
