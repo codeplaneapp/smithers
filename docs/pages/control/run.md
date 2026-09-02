@@ -34,6 +34,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `LaunchFailed` | `launch_failed` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
