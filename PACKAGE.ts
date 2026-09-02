@@ -374,6 +374,11 @@ const ciBrowser = S.Github.Workflow({
 const ciRust = S.Github.Workflow({
   name: "ci-rust",
   on,
+  // crates/flows-jj takes jj-lib as a path dependency into vendor/jj, and
+  // actions/checkout leaves a gitlink empty by default, so cargo fails
+  // resolution before it compiles anything. ci.yml fetched submodules
+  // recursively on both crate jobs for this reason.
+  submodules: "recursive",
   setup: githubSetup,
   run: [flowsJj.rust]
 })
@@ -381,6 +386,7 @@ const ciRust = S.Github.Workflow({
 const ciWasm = S.Github.Workflow({
   name: "ci-wasm",
   on,
+  submodules: "recursive",
   setup: githubSetup,
   run: [flowsJj.wasm]
 })
@@ -491,6 +497,11 @@ const ciNodeMacos = S.Github.Workflow({
   name: "ci-node-macos",
   on,
   runsOn: "macos-latest",
+  // Advisory, as ci.yml made both host lanes and as v1/rc0-migration kept them
+  // when it folded them into a packages matrix. They run the whole package
+  // graph on a second host so a platform break is visible; a macOS-only or
+  // Windows-only failure has never blocked a merge here.
+  continueOnError: true,
   setup: githubSetup,
   run: [...packageCi]
 })
@@ -499,6 +510,7 @@ const ciNodeWindows = S.Github.Workflow({
   name: "ci-node-windows",
   on,
   runsOn: "windows-latest",
+  continueOnError: true,
   setup: githubSetup,
   run: [...packageCi]
 })

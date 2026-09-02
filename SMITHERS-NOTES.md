@@ -149,11 +149,14 @@ Every one refused a real target, and each carries a red-then-green test.
    BUILD-mode pipeline could, because its steps were verb-and-pattern strings
    rather than target references, so `lint '//:ci'` was just another step. A
    workflow step that names a plain verb and label would close this.
-7. `S.Github.Workflow` has no `continueOnError`, so an advisory lane cannot
-   say so. `ci-node-macos` and `ci-node-windows` are advisory by convention
-   here and would be enforcing if the repository's branch protection required
-   them. `ci-faults` is required and needs no attr to say so, but nothing
-   holds it required either: see gap 8.
+7. Closed by this branch, and CI is what forced it. `S.Github.Workflow` had no
+   `continueOnError` and no `submodules`, so the first two runs reported every
+   advisory host-lane failure as a hard one, about fifty of them, and the two
+   crate lanes could not fetch `vendor/jj` at all. Both are attrs now, rendered
+   on the job and on the checkout step, each with a renderer test.
+   `ci-node-macos` and `ci-node-windows` declare `continueOnError: true`, as
+   ci.yml did; `ci-rust` and `ci-wasm` declare `submodules: "recursive"`, as
+   ci.yml did.
 8. `S.Github.Workflow` has no platform matrix, and `S.Github.CiGen` has no
    `requiredJobs`. `WorkflowAttrs` takes one `runsOn` string
    (`packages/targets/src/GithubTarget.ts:270`), and the only matrix

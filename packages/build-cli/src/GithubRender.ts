@@ -532,6 +532,7 @@ const renderJobPolicy = (
   if (workflow.jobName !== undefined) lines.push(`    name: ${scalar(workflow.jobName)}`)
   if (workflow.condition !== undefined) lines.push(`    if: ${scalar(workflow.condition)}`)
   lines.push(`    runs-on: ${scalar(workflow.runsOn ?? "ubuntu-latest")}`)
+  if (workflow.continueOnError === true) lines.push("    continue-on-error: true")
   if (workflow.environment !== undefined) lines.push(`    environment: ${scalar(workflow.environment)}`)
 }
 
@@ -653,6 +654,7 @@ const renderWorkflow = (
     if (workflow.jobName !== undefined) lines.push(`    name: ${scalar(workflow.jobName)}`)
     if (workflow.condition !== undefined) lines.push(`    if: ${scalar(workflow.condition)}`)
     lines.push(`    runs-on: ${scalar(workflow.runsOn ?? "ubuntu-latest")}`)
+    if (workflow.continueOnError === true) lines.push("    continue-on-error: true")
     if (shards > 1) {
       lines.push("    strategy:")
       lines.push("      matrix:")
@@ -664,6 +666,9 @@ const renderWorkflow = (
     if (workflow.environment !== undefined) lines.push(`    environment: ${scalar(workflow.environment)}`)
     lines.push("    steps:")
     lines.push("      - uses: actions/checkout@v4")
+    if (workflow.submodules !== undefined && workflow.submodules !== false) {
+      lines.push("        with:", ...mapping({ submodules: String(workflow.submodules) }, "          "))
+    }
     if (setup !== undefined) {
       // The root package's directory is the empty string, and `./` + "" +
       // "/actions/setup" renders the double slash `.//actions/setup`, which is

@@ -986,6 +986,37 @@ describe("toolchain variants", () => {
     ).toBe("unsupported_affected")
   })
 
+  // An advisory lane reports its failure without enforcing it. The retired
+  // ci.yml carried continue-on-error on both host lanes, and the port reported
+  // roughly fifty advisory failures as hard ones until the attr existed.
+  it("renders continue-on-error only for a lane that declares it", () => {
+    const run = anyTarget()
+    const advisory = S.Github.Workflow({
+      name: "advisory",
+      on: { pullRequest: true },
+      runsOn: "macos-latest",
+      continueOnError: true,
+      run: [run]
+    })
+    const required = S.Github.Workflow({ name: "required", on: { pullRequest: true }, run: [run] })
+    const ciGen = S.Github.CiGen({ workflows: [advisory, required] })
+    const rendered = GithubRender.render({
+      ciGen,
+      workspace: unitWorkspace,
+      resolve: resolver([
+        [ciGen, "//:githubCi"],
+        [advisory, "//:advisory"],
+        [required, "//:required"],
+        [run, "//:test"]
+      ]),
+      packageDir: ""
+    })
+    const advisoryFile = rendered.files.find((file) => file.path === "workflows/advisory.yml")
+    const requiredFile = rendered.files.find((file) => file.path === "workflows/required.yml")
+    expect(advisoryFile!.content).toMatch(/^\s*continue-on-error: true$/m)
+    expect(requiredFile!.content).not.toMatch(/continue-on-error/)
+  })
+
   // A CiGen declared in the root PACKAGE.ts has the empty string for its
   // package directory, and joining that naively renders `.//actions/setup`,
   // which GitHub does not accept as a local action path.

@@ -300,6 +300,16 @@ export const WorkflowAttrs = Schema.Struct({
   condition: Schema.optional(Schema.NonEmptyString),
   jobName: Schema.optional(Schema.NonEmptyString),
   runsOn: Schema.optional(Schema.NonEmptyString),
+  // An advisory lane: its failure is reported and read, never enforced. A
+  // repository that runs the same suites on a second host keeps them visible
+  // without letting a host-specific failure block a merge, which is what
+  // `continue-on-error` means to GitHub.
+  continueOnError: Schema.optional(Schema.Boolean),
+  // Whether the checkout fetches git submodules, and how deeply. A lane that
+  // builds against a vendored submodule needs it: actions/checkout leaves the
+  // gitlink empty by default, and a path dependency into it fails resolution
+  // before any compilation starts.
+  submodules: Schema.optional(Schema.Union([Schema.Boolean, Schema.Literal("recursive")])),
   steps: Schema.optional(Schema.NonEmptyArray(Step)),
   setup: Schema.optional(Target.Target),
   affected: Schema.optional(Schema.Boolean),

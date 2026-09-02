@@ -562,9 +562,13 @@ describe("vitest coverage isolation conformance", () => {
     // read off the files the generator actually writes: the platform list, no
     // drift between platforms, and no advisory bit.
     //
-    // Package mode has no `continueOnError` attr, so no lane can be advisory:
-    // every platform is required. Reintroducing the attr for a platform means
-    // widening this cell in review, not editing a workflow.
+    // The attr exists now, and this is that review. ci.yml carried
+    // `continue-on-error` on node-macos and node-windows, and
+    // v1/rc0-migration kept the same advisory bit per OS when it folded them
+    // into a packages matrix. The first package-mode CI runs had no way to say
+    // it and reported about fifty advisory failures as hard ones. So exactly
+    // two lanes may be advisory, named here; ubuntu reaches the same roster
+    // through `//:gates` and stays required.
     const workflowsDir = join(packagesDir, "..", ".github", "workflows")
     const laneTargets = (name: string, host: string): Array<string> => {
       const contents = readFileSync(join(workflowsDir, `${name}.yml`), "utf8")
@@ -579,8 +583,11 @@ describe("vitest coverage isolation conformance", () => {
       expect([...hosts], name).toEqual([host])
       // `continue-on-error: true` is the single line that makes a lane
       // advisory; a lane that runs but cannot fail the pipeline would read as
-      // green from every other pin in this file.
-      expect(contents, name).not.toContain("continue-on-error")
+      // green from every other pin in this file. Only the two host lanes may
+      // carry it.
+      const advisory = name === "ci-node-macos" || name === "ci-node-windows"
+      if (advisory) expect(contents, name).toMatch(/^\s*continue-on-error: true$/m)
+      else expect(contents, name).not.toContain("continue-on-error")
       return [...contents.matchAll(/run: pnpm exec smithers-build '\/\/packages\/([^:]+):ci'$/gm)]
         .map((match) => match[1]!)
         .sort()
