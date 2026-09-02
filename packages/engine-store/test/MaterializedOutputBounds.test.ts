@@ -194,7 +194,7 @@ describe("materialized outputs are digest-referenced and bounded (issue #113)", 
           const boundary = yield* StepBoundary.StepBoundary
           return yield* Effect.flip(boundary.replayOutputs({
             declaredOutputs: {
-              outputs: [{ path: "artifact.bin", digest: "d", sizeBytes: 4, content: "%%%not-base64%%%" }]
+              outputs: [{ path: "artifact.bin", digest: sha256("real"), sizeBytes: 4, content: "%%%not-base64%%%" }]
             },
             diffIdentity: "corrupt"
           }))
@@ -203,6 +203,32 @@ describe("materialized outputs are digest-referenced and bounded (issue #113)", 
       // Undecodable cache-origin bytes are corruption, not a host refusal
       // (issue #159): the caller routes this to the Inconsistency receiver.
       expect(failure).toMatchObject({ code: "boundary_corruption" })
+    }))
+
+  it.effect("a malformed digest reference refuses wholesale instead of degrading to a legacy row", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({})
+      const failure = yield* withCrypto(
+        Effect.gen(function*() {
+          const boundary = yield* StepBoundary.StepBoundary
+          // The base64 is valid on purpose: a digest-carrying row whose address
+          // fails the strict schema is foreign or tampered evidence, and it must
+          // refuse rather than materialize inline bytes under a derived digest.
+          return yield* Effect.flip(boundary.replayOutputs({
+            declaredOutputs: {
+              outputs: [{
+                path: "artifact.bin",
+                digest: "d",
+                sizeBytes: 5,
+                content: Encoding.encodeBase64(encoder.encode("small"))
+              }]
+            },
+            diffIdentity: "malformed-address"
+          }))
+        }).pipe(Effect.provide(boundaryLayer(host.fs)))
+      )
+      expect(failure).toMatchObject({ code: "unsupported_boundary" })
+      expect(host.files.has("artifact.bin")).toBe(false)
     }))
 })
 

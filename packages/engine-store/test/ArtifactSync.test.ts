@@ -56,6 +56,19 @@ describe("referencedDigests", () => {
     expect(StepBoundary.referencedDigests(mixed)).toEqual([digest])
   })
 
+  it("names nothing for evidence carrying a malformed digest reference", () => {
+    // One malformed address makes the whole row undecodable, so publication
+    // names no digests at all rather than shipping a bogus address to the sync
+    // RPC; such evidence is unusable for replay either way.
+    const tampered = evidenceFor({
+      outputs: [
+        { path: "bad.bin", digest: "beef", sizeBytes: 4 },
+        { path: "artifact.bin", digest, sizeBytes: payload.length }
+      ]
+    })
+    expect(StepBoundary.referencedDigests(tampered)).toEqual([])
+  })
+
   it("names nothing for evidence recorded by a foreign boundary", () => {
     expect(StepBoundary.referencedDigests(evidenceFor({ paths: ["output.txt"] }))).toEqual([])
   })

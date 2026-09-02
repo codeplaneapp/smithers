@@ -4,13 +4,16 @@
  *
  * @since 1.0.0
  */
+import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as StepBoundary from "../StepBoundary.ts"
 
 const RootMeta = Schema.Struct({ boundary: StepBoundary.BoundaryEvidence })
 const MetaJson = Schema.fromJsonString(Schema.Unknown)
-const ArtifactDigest = /^[0-9a-f]{64}$/
+// The store's own address schema is the one rule for what counts as a digest;
+// reimplementing it here is how the two drift apart.
+const isDigest = Schema.is(ArtifactStore.Digest)
 
 /**
  * A durable root row this build cannot interpret safely.
@@ -58,7 +61,7 @@ const collectArtifactDigests = (root: unknown): ReadonlyArray<string> => {
   while (pending.length > 0) {
     const next = pending.pop()
     if (typeof next === "string") {
-      if (ArtifactDigest.test(next)) digests.add(next)
+      if (isDigest(next)) digests.add(next)
       continue
     }
     if (Array.isArray(next)) {

@@ -390,10 +390,14 @@ const absentDigest = "absent"
  * content-addressed object directory under the digest and the row carries
  * only the reference. Temporal's blob-size limits are the prior art — the
  * evidence is persisted into every attempt row and cache entry.
+ *
+ * The digest is decoded against the store's strict address schema
+ * (`ArtifactStore.Digest`), so a persisted row carrying a malformed address
+ * fails the decode here instead of reaching the store or the sync RPCs.
  */
 const DigestReferencedOutput = Schema.Struct({
   path: Schema.String,
-  digest: Schema.NullOr(Schema.String),
+  digest: Schema.NullOr(ArtifactStore.Digest),
   sizeBytes: Schema.optional(Schema.Number),
   content: Schema.optional(Schema.String)
 })
@@ -408,8 +412,19 @@ const DigestReferencedOutput = Schema.Struct({
  */
 const LegacyInlineOutput = Schema.Struct({
   path: Schema.String,
-  content: Schema.NullOr(Schema.String)
+  content: Schema.NullOr(Schema.String),
+  // A round-7 row never carried a digest key. Forbidding the key keeps a
+  // digest-carrying row that fails the strict address schema above from
+  // silently degrading into this trusted-inline branch, whose digest is
+  // derived from the bytes rather than verified against a recorded address.
+  digest: Schema.optionalKey(Schema.Never)
 })
+
+/**
+ * Whether a decoded output row is the digest-referenced shape. The decode
+ * already discriminated the union; this is the type-level witness for it.
+ */
+const isDigestRow = Schema.is(DigestReferencedOutput)
 
 const MaterializedOutputs = Schema.Struct({
   outputs: Schema.Array(Schema.Union([DigestReferencedOutput, LegacyInlineOutput])),
@@ -528,7 +543,7 @@ export interface FileSystemOptions {
 const defaultMaxInlineBytes = 1024 * 1024
 const defaultMaxTotalInlineBytes = 8 * 1024 * 1024
 interface MeasuredDigest {
-  readonly digest: string
+  readonly digest: ArtifactStore.Digest
   readonly bytes: Uint8Array
 }
 
@@ -547,14 +562,14 @@ type MaterializedOutput = typeof DigestReferencedOutput.Type
  * @since 0.1.0
  * @category accessors
  */
-export const referencedDigests = (evidence: BoundaryEvidence): ReadonlyArray<string> => {
+export const referencedDigests = (evidence: BoundaryEvidence): ReadonlyArray<ArtifactStore.Digest> => {
   const decoded = Schema.decodeUnknownResult(MaterializedOutputs)(evidence.declaredOutputs)
   if (decoded._tag === "Failure") return []
-  const digests: Array<string> = []
+  const digests: Array<ArtifactStore.Digest> = []
   for (const output of decoded.success.outputs) {
     // A legacy round-7 row carries no digest at all, and an inline row carries
     // its bytes with it; neither references the artifact store.
-    if (!("digest" in output)) continue
+    if (!isDigestRow(output)) continue
     if (output.digest === null || output.content !== undefined) continue
     digests.push(output.digest)
   }
@@ -907,7 +922,7 @@ export const makeFileSystem = (
         for (const directory of entries.directories) emptyDirectoryCandidates.add(directory)
       }
       for (const recorded of decoded.success.outputs) {
-        const output = "digest" in recorded ? recorded : yield* fromLegacyOutput(recorded)
+        const output = isDigestRow(recorded) ? recorded : yield* fromLegacyOutput(recorded)
         if (output.digest === null) {
           const present = yield* fs.exists(output.path).pipe(Effect.mapError(hostFailure))
           if (present) yield* fs.remove(output.path).pipe(Effect.mapError(hostFailure))

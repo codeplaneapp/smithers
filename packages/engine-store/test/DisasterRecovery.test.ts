@@ -251,6 +251,36 @@ describe("backup", () => {
       expect(() => readFileSync(join(base, "backup", DisasterRecovery.manifestFileName))).toThrow()
     }))
 
+  it.effect("refuses success without an objects directory when the frozen database references a blob", () =>
+    Effect.gen(function*() {
+      const base = root()
+      const missing = sha256("referenced-without-a-tier")
+      const exit = yield* run(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          INSERT INTO flows_step_cache (
+            key_digest, result_json, meta_json, created_at_ms, recorded_run_id, recorded_event_seq
+          ) VALUES (
+            'tierless-root', '{}', ${
+          JSON.stringify({
+            boundary: {
+              declaredOutputs: {
+                outputs: [{ path: "out/result.bin", digest: missing, sizeBytes: 1 }]
+              },
+              diffIdentity: "tierless-root"
+            }
+          })
+        }, 0, 'tierless-run', 0
+          )
+        `
+        return yield* backup({ directory: join(base, "backup") }).pipe(Effect.exit)
+      }))
+
+      expect(failure(exit).code).toBe("snapshot_incomplete")
+      expect(failure(exit).cause).toEqual({ missing: [missing] })
+      expect(() => readFileSync(join(base, "backup", DisasterRecovery.manifestFileName))).toThrow()
+    }))
+
   it.effect("freezes artifact roots held only by attempt metadata and checkpoints", () =>
     Effect.gen(function*() {
       const base = root()

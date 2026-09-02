@@ -232,8 +232,15 @@ export interface BackupOptions<R = never, E = never> extends FileSizeOptions {
   readonly directory: string
   /**
    * The live store's content-addressed objects directory (the
-   * `ArtifactStore.layerFileSystem` directory). Absent means the composition
-   * has no filesystem artifact tier and the backup carries no blobs.
+   * `ArtifactStore.layerFileSystem` directory). When set, the whole capture
+   * holds the cross-process artifact backup lease, so a concurrent
+   * `ArtifactGc.gc` sweep cannot delete a blob between the database snapshot
+   * and its copy. Absent means the composition has no filesystem artifact
+   * tier: the backup carries no blobs and takes no lease, because there is
+   * no objects directory to fence, and a frozen snapshot that references any
+   * artifact digest fails with `snapshot_incomplete` instead of reporting
+   * success. A filesystem-backed composition must therefore pass the same
+   * directory it gives `ArtifactStore.layerFileSystem`.
    */
   readonly objectsDirectory?: string | undefined
   /**
@@ -532,6 +539,12 @@ const checkedFile = (
  * manifest is encoded and admitted under the same file-size ceiling before it
  * is written last, so a successful backup remains readable with its own
  * options.
+ *
+ * With an `objectsDirectory`, the whole capture holds the artifact backup
+ * lease, so concurrent sweep deletion cannot remove a referenced blob
+ * mid-copy. Without one, no lease is taken; the frozen-root verification
+ * still fails the backup loudly when the snapshot references any blob, so an
+ * unfenced capture can never report success while missing artifact bytes.
  *
  * @since 0.1.0
  * @category operations
