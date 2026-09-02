@@ -1158,6 +1158,174 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: RepoTarget,
     handler: ({ repo }) => actions.checkGitHubApp(repo)
   }),
+  /*
+   * Lane citc (ADR 0002): the persistent cloud computers. `workspace.open`
+   * creates-or-reuses one on a bookmark and renders its card (the transcript
+   * is the review surface); the acts ride the one seam; a bare act resolves
+   * the active workspace copy, else the single loaded one. Destructive acts
+   * are id-scoped and hidden — the card's buttons invoke them.
+   */
+  flow({
+    name: "workspace.list",
+    summary: "List your cloud workspaces",
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.listWorkspaces(repo)
+  }),
+  flow({
+    /* Launching a cloud computer is an outbound act: the capability always asks. */
+    name: "workspace.open",
+    summary: "Open (create or reuse) a cloud workspace on a bookmark",
+    runtime: ["jjhub"],
+    capabilities: ["outbound:launch"],
+    args: "[bookmark] [owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ bookmark: Schema.optional(Schema.String), repo: Schema.optional(Schema.String) }),
+    handler: ({ bookmark, repo }) => actions.openWorkspace(bookmark, repo)
+  }),
+  flow({
+    name: "workspace.view",
+    summary: "Open one cloud workspace's card",
+    runtime: ["jjhub"],
+    args: "<workspaceId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.String }),
+    handler: ({ workspaceId }) => actions.viewWorkspace(workspaceId)
+  }),
+  flow({
+    name: "workspace.terminal",
+    summary: "Open a terminal on a cloud workspace",
+    runtime: ["jjhub"],
+    args: "[workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId }) => actions.openWorkspaceTerminal(workspaceId)
+  }),
+  flow({
+    name: "workspace.suspend",
+    summary: "Suspend a cloud workspace",
+    runtime: ["jjhub"],
+    confirm: "suspend the workspace",
+    args: "[workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId }) => actions.suspendWorkspace(workspaceId)
+  }),
+  flow({
+    name: "workspace.resume",
+    summary: "Resume a cloud workspace",
+    runtime: ["jjhub"],
+    confirm: "resume the workspace",
+    args: "[workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId }) => actions.resumeWorkspace(workspaceId)
+  }),
+  flow({
+    name: "workspace.fork",
+    summary: "Fork a cloud workspace",
+    runtime: ["jjhub"],
+    confirm: "fork the workspace",
+    args: "[workspaceId] [name]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String), name: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId, name }) => actions.forkWorkspace(workspaceId, name)
+  }),
+  flow({
+    name: "workspace.snapshot",
+    summary: "Snapshot a cloud workspace",
+    runtime: ["jjhub"],
+    confirm: "snapshot the workspace",
+    args: "[workspaceId] [name]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String), name: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId, name }) => actions.snapshotWorkspace(workspaceId, name)
+  }),
+  flow({
+    name: "workspace.snapshot.delete",
+    summary: "Delete a workspace snapshot",
+    runtime: ["jjhub"],
+    hidden: true,
+    confirm: "delete the snapshot",
+    args: "<snapshotId> [workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ snapshotId: Schema.String, workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ snapshotId, workspaceId }) => actions.deleteWorkspaceSnapshot(snapshotId, workspaceId)
+  }),
+  flow({
+    /* The snapshot row's "Fork from": a new workspace whose image is the snapshot. */
+    name: "workspace.snapshot.fork",
+    summary: "Create a workspace from a snapshot",
+    runtime: ["jjhub"],
+    hidden: true,
+    capabilities: ["outbound:launch"],
+    confirm: "create a workspace from the snapshot",
+    args: "<snapshotId> [workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ snapshotId: Schema.String, workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ snapshotId, workspaceId }) => actions.forkWorkspaceFromSnapshot(snapshotId, workspaceId)
+  }),
+  flow({
+    name: "workspace.template",
+    summary: "Create a workspace template from a snapshot",
+    runtime: ["jjhub"],
+    args: "<snapshotId> <name> [workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      snapshotId: Schema.String,
+      name: Schema.String,
+      workspaceId: Schema.optional(Schema.String)
+    }),
+    handler: ({ snapshotId, name, workspaceId }) => actions.templateWorkspaceSnapshot(snapshotId, name, workspaceId)
+  }),
+  flow({
+    name: "workspace.sessions",
+    summary: "List a cloud workspace's sessions",
+    runtime: ["jjhub"],
+    args: "[workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId }) => actions.listWorkspaceSessions(workspaceId)
+  }),
+  flow({
+    name: "workspace.session.destroy",
+    summary: "Destroy a workspace session",
+    runtime: ["jjhub"],
+    hidden: true,
+    confirm: "destroy the session",
+    args: "<sessionId> [workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ sessionId: Schema.String, workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ sessionId, workspaceId }) => actions.destroyWorkspaceSession(sessionId, workspaceId)
+  }),
+  flow({
+    name: "workspace.delete",
+    summary: "Delete a cloud workspace",
+    runtime: ["jjhub"],
+    hidden: true,
+    confirm: "delete the workspace",
+    args: "<workspaceId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.String }),
+    handler: ({ workspaceId }) => actions.deleteWorkspace(workspaceId)
+  }),
+  flow({
+    /* The card's body tab — browser mechanics the human clicks. */
+    name: "workspace.facet",
+    summary: "Switch a workspace card's facet",
+    runtime: ["jjhub"],
+    hidden: true,
+    userOnly: true,
+    args: "<workspaceId> <facet>",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      workspaceId: Schema.String,
+      facet: Schema.Literals(["terminal", "files", "services", "snapshots"])
+    }),
+    handler: ({ workspaceId, facet }) => actions.setWorkspaceFacet(workspaceId, facet)
+  }),
   flow(RELOAD),
   alias("reload", RELOAD),
   flow(COMMANDS),

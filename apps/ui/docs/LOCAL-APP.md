@@ -187,6 +187,29 @@ surfaces, all over the workspace gateway's own projections and procedures:
   (`/runs.events <runId>` — the raw journal, rendered only where
   `/debug.verbose` is on).
 
+Lane `citc` (ADR 0002) adds the persistent cloud computers:
+
+- **`workspace`** (`/workspace.open [bookmark] [owner/repo]`, `/workspace.view
+  <id>`) — one cloud computer bound to a repository bookmark. The header
+  names the repo, the target bookmark, and the BOOKMARK's head (`bookmark
+  main head @ qupxosqw`) — plue's workspace DTO carries no kind, no uptime,
+  no workspace head, and no ahead/behind (plue#446), and the card carries
+  none. A six-state pill (pending, starting, running, suspended, stopped,
+  failed) leads; a starting workspace streams its `provisioningStage`, a
+  failed one names the stage and offers Retry (`/workspace.open` again). The
+  facet strip switches Terminal (the attached session, every session with
+  its Destroy), Files and Services (empty with the ADR's wording — no routes
+  exist, plue#449), and Snapshots (Fork from, Make template, Delete per
+  row). The footer acts: Suspend or Resume, Fork, Snapshot, and Delete
+  behind a typed confirm. `/workspace.terminal` opens the workspace's
+  terminal as an ordinary terminal tab whose row carries a `workspaceId`
+  instead of a `cwd` — the socket tunnels through the Bun server's
+  `/api/cloud-ws/` bridge with the Bun-held bearer attached upstream (the
+  token never reaches the renderer), and closing the tab detaches; killing
+  the session is the explicit `/workspace.session.destroy`. Every workspace
+  act refuses a `degraded` cloud session with the "sign in again to enable"
+  wording (ADR 0001's legacy scope set).
+
 ## Navigation and persistence
 
 Durable routes use `/w/:workspace/b/:branch/f/:frame`. Browser back/forward,

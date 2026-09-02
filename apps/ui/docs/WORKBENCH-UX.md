@@ -107,6 +107,18 @@ the route or card is in the tree today.
 
 ### 3.1 Workspace, desktop, compute (CitC + Google's cloud)
 
+> **Status (lane `citc`, landed):** the card below exists minus the Desktop
+> facet (waits on plue Phase B) and minus the image/size/uptime line — plue's
+> workspace DTO carries none of those (plue#446), so the header is repo ·
+> bookmark · the BOOKMARK's head, labeled as such. The Terminal facet runs
+> over the `/api/cloud-ws/` tunnel; Files and Services render empty with the
+> plue#449 wording until their routes exist; the Snapshots rows act (Fork
+> from, Make template, Delete). `workspace.desktop`, `workspace.attach`,
+> `workspace.services`, and `workspace.logs` are unregistered until then;
+> the shipped flows are `workspace.open/view/terminal/suspend/resume/fork/
+> snapshot/snapshot.fork/snapshot.delete/template/sessions/session.destroy/
+> delete/list/facet`.
+
 **Job.** Open the repository at a bookmark on a computer that is already set
 up, and see it: a terminal, a desktop, the files, the services.
 

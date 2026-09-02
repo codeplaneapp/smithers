@@ -19,6 +19,7 @@ import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "
 import { lazy, Suspense, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 import { BranchesCardBody } from "./cards/BranchesCard"
+import { WorkspaceCardBody } from "./cards/WorkspaceCard"
 import { AffectedCardBody } from "./cards/AffectedCard"
 import { CiMatrixCardBody } from "./cards/CiMatrixCard"
 import {
@@ -129,6 +130,8 @@ const pillStatus = (card: Card): string => {
   /* Lane L3 (docs/LOCAL-APP.md "Cards"): the payload's own status leads. */
   if (card.kind === "targets") return card.payload.status
   if (card.kind === "target-run") return card.payload.status
+  /* Lane citc: the workspace's own status is the pill. */
+  if (card.kind === "workspace") return card.payload.status
   /* The target-graph cards' payloads carry their own read status the same way. */
   if (card.kind === "graph" || card.kind === "run-history" || card.kind === "affected" || card.kind === "ci-matrix") {
     return card.payload.status
@@ -1103,6 +1106,7 @@ export function CardView({
           {card.kind === "ci-matrix" ? <CiMatrixCardBody card={card} /> : null}
           {card.kind === "agent" ? <AgentCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "explain" ? <ExplainCardBody card={card} /> : null}
+          {card.kind === "workspace" ? <WorkspaceCardBody card={card} onRunCommand={onRunCommand} /> : null}
         </div>
       </section>
     </>

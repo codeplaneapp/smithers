@@ -14,6 +14,8 @@ import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import type { PtyClient } from "./PtyClient"
+import { createCloudTerminalClient, pageCloudSocketUrl } from "./CloudTerminalClient"
+import type { CloudTerminalClient } from "./CloudTerminalClient"
 import { createTargetRunClient } from "./TargetRunClient"
 import { createAuthBillingController } from "./controller/auth-billing"
 import { createConnectorController } from "./controller/connectors"
@@ -58,6 +60,8 @@ import type { LandingsSeam } from "./seams/LandingsSeam"
 import { createNotificationsSeam } from "./seams/NotificationsSeam"
 import type { NotificationsSeam } from "./seams/NotificationsSeam"
 import { createRepositoriesSeam } from "./seams/RepositoriesSeam"
+import { createWorkspaceSeam } from "./seams/WorkspaceSeam"
+import type { WorkspaceSeam } from "./seams/WorkspaceSeam"
 import type { RepositoriesSeam } from "./seams/RepositoriesSeam"
 import { createRepoImportSeam } from "./seams/RepoImportSeam"
 import type { RepoImportSeam } from "./seams/RepoImportSeam"
@@ -163,6 +167,8 @@ export interface AppController {
   readonly notePtyExit: TabsController["notePtyExit"]
   /** The PTY transport the terminal tabs attach to (docs/LOCAL-APP.md "/ws"). */
   readonly pty: PtyClient
+  /** Lane citc: the cloud-workspace terminal transport (one socket per workspace session). */
+  readonly cloudTerminal: CloudTerminalClient
   /* Lane L3 (docs/LOCAL-APP.md "Target presentation"); see controller/targets.ts. */
   readonly openRepo: TargetsController["openRepo"]
   readonly listTargets: TargetsController["listTargets"]
@@ -307,6 +313,25 @@ export interface AppController {
   readonly signInCloud: CloudSeam["signIn"]
   readonly signOutCloud: CloudSeam["signOut"]
   readonly loadRepositories: RepositoriesSeam["loadRepositories"]
+  /*
+   * Lane citc (ADR 0002): the persistent cloud computers behind the
+   * `/api/cloud/*` proxy (state/seams/WorkspaceSeam.ts).
+   */
+  readonly listWorkspaces: WorkspaceSeam["listWorkspaces"]
+  readonly openWorkspace: WorkspaceSeam["openWorkspace"]
+  readonly viewWorkspace: WorkspaceSeam["viewWorkspace"]
+  readonly openWorkspaceTerminal: WorkspaceSeam["openTerminal"]
+  readonly suspendWorkspace: WorkspaceSeam["suspendWorkspace"]
+  readonly resumeWorkspace: WorkspaceSeam["resumeWorkspace"]
+  readonly forkWorkspace: WorkspaceSeam["forkWorkspace"]
+  readonly snapshotWorkspace: WorkspaceSeam["snapshotWorkspace"]
+  readonly deleteWorkspaceSnapshot: WorkspaceSeam["deleteSnapshot"]
+  readonly forkWorkspaceFromSnapshot: WorkspaceSeam["forkFromSnapshot"]
+  readonly templateWorkspaceSnapshot: WorkspaceSeam["templateSnapshot"]
+  readonly listWorkspaceSessions: WorkspaceSeam["listSessions"]
+  readonly destroyWorkspaceSession: WorkspaceSeam["destroySession"]
+  readonly deleteWorkspace: WorkspaceSeam["deleteWorkspace"]
+  readonly setWorkspaceFacet: WorkspaceSeam["setFacet"]
   /** Dismiss one toast on the shared corner stack (the toast.dismiss command). */
   readonly dismissToast: (id: string) => void
   /** Refresh the billing record from the billing seam (actor: system). */
@@ -341,6 +366,11 @@ export interface AppServices {
    * against an origin that is not listening.
    */
   readonly socketUrl?: () => string | undefined
+  /**
+   * Lane citc: the `/api/cloud-ws/` tunnel URL for one workspace session;
+   * default the page's own origin. Tests bind `() => undefined`.
+   */
+  readonly cloudSocketUrl?: (repo: string, sessionId: string) => string | undefined
   readonly bootstrap?: AppBootstrap
   readonly frameHistory?: FrameHistoryPort
   readonly baseUrl?: string
@@ -455,9 +485,13 @@ export const createAppController = (
     ...(services.openExternal === undefined ? {} : { openExternal: services.openExternal })
   })
   const repositoriesSeam = createRepositoriesSeam(seamCtx)
+  /* Lane citc: the cloud workspaces; its settle watches die with the controller. */
+  const workspaceSeam = createWorkspaceSeam(seamCtx)
+  ctx.onDispose(workspaceSeam.dispose)
   const reloadRepositoriesWhenSignedIn = (): void => {
     if (store.collections.cloudSessions.get("cloud")?.state === "signed-in") {
       void repositoriesSeam.loadRepositories()
+      void workspaceSeam.refreshWorkspaces()
     }
   }
   const loadCloudSession = async (): Promise<void> => {
@@ -558,6 +592,12 @@ export const createAppController = (
   const socketUrl = services.socketUrl ?? pageSocketUrl
   const pty = createPtyClient({ http, baseUrl, socketUrl, socketProtocols: localSocketProtocols })
   ctx.onDispose(pty.dispose)
+  /* Lane citc: the cloud-workspace terminal transport, one socket per session. */
+  const cloudTerminal = createCloudTerminalClient({
+    socketUrl: services.cloudSocketUrl ?? pageCloudSocketUrl,
+    socketProtocol: () => localSocketProtocols()[0]
+  })
+  ctx.onDispose(cloudTerminal.dispose)
   const targetRuns = createTargetRunClient({ socketUrl, socketProtocols: localSocketProtocols })
   ctx.onDispose(targetRuns.dispose)
   const targetGraph = createTargetGraphController(ctx, {
@@ -856,6 +896,7 @@ export const createAppController = (
     loadRepos,
     notePtyExit,
     pty,
+    cloudTerminal,
     openRepo,
     listTargets,
     runTarget,
@@ -937,6 +978,21 @@ export const createAppController = (
     signInCloud,
     signOutCloud: cloudSeam.signOut,
     loadRepositories: repositoriesSeam.loadRepositories,
+    listWorkspaces: workspaceSeam.listWorkspaces,
+    openWorkspace: workspaceSeam.openWorkspace,
+    viewWorkspace: workspaceSeam.viewWorkspace,
+    openWorkspaceTerminal: workspaceSeam.openTerminal,
+    suspendWorkspace: workspaceSeam.suspendWorkspace,
+    resumeWorkspace: workspaceSeam.resumeWorkspace,
+    forkWorkspace: workspaceSeam.forkWorkspace,
+    snapshotWorkspace: workspaceSeam.snapshotWorkspace,
+    deleteWorkspaceSnapshot: workspaceSeam.deleteSnapshot,
+    forkWorkspaceFromSnapshot: workspaceSeam.forkFromSnapshot,
+    templateWorkspaceSnapshot: workspaceSeam.templateSnapshot,
+    listWorkspaceSessions: workspaceSeam.listSessions,
+    destroyWorkspaceSession: workspaceSeam.destroySession,
+    deleteWorkspace: workspaceSeam.deleteWorkspace,
+    setWorkspaceFacet: workspaceSeam.setFacet,
     dismissToast,
     refreshBalance,
     showBalance,
@@ -1081,6 +1137,7 @@ export const createAppController = (
     loadRepos,
     notePtyExit,
     pty,
+    cloudTerminal,
     openRepo,
     listTargets,
     runTarget,
@@ -1162,6 +1219,21 @@ export const createAppController = (
     signInCloud,
     signOutCloud: cloudSeam.signOut,
     loadRepositories: repositoriesSeam.loadRepositories,
+    listWorkspaces: workspaceSeam.listWorkspaces,
+    openWorkspace: workspaceSeam.openWorkspace,
+    viewWorkspace: workspaceSeam.viewWorkspace,
+    openWorkspaceTerminal: workspaceSeam.openTerminal,
+    suspendWorkspace: workspaceSeam.suspendWorkspace,
+    resumeWorkspace: workspaceSeam.resumeWorkspace,
+    forkWorkspace: workspaceSeam.forkWorkspace,
+    snapshotWorkspace: workspaceSeam.snapshotWorkspace,
+    deleteWorkspaceSnapshot: workspaceSeam.deleteSnapshot,
+    forkWorkspaceFromSnapshot: workspaceSeam.forkFromSnapshot,
+    templateWorkspaceSnapshot: workspaceSeam.templateSnapshot,
+    listWorkspaceSessions: workspaceSeam.listSessions,
+    destroyWorkspaceSession: workspaceSeam.destroySession,
+    deleteWorkspace: workspaceSeam.deleteWorkspace,
+    setWorkspaceFacet: workspaceSeam.setFacet,
     dismissToast,
     refreshBalance,
     showBalance,

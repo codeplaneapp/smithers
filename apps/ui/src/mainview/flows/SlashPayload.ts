@@ -302,6 +302,76 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok(repo === undefined ? { assignment: rest } : { assignment: rest, repo })
   },
   "branches.list": (args) => repoOnly("branches.list", args),
+  /*
+   * Lane citc: the workspace flows. An id is always one token; fork's and
+   * snapshot's optional name is the rest of the line; template's name is one
+   * token (a slug), with the workspace id trailing it.
+   */
+  "workspace.list": (args) => repoOnly("workspace.list", args),
+  "workspace.open": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    const bookmark = rest.trim()
+    if (/\s/.test(bookmark)) return no("workspace.open takes a bookmark and optionally an owner/repo")
+    return ok({
+      ...(bookmark === "" ? {} : { bookmark }),
+      ...(repo === undefined ? {} : { repo })
+    })
+  },
+  "workspace.view": (args) => required("workspaceId", args, "workspace.view needs a workspace id"),
+  "workspace.terminal": (args) => optional("workspaceId", args),
+  "workspace.suspend": (args) => optional("workspaceId", args),
+  "workspace.resume": (args) => optional("workspaceId", args),
+  "workspace.fork": (args) => {
+    const [workspaceId, ...rest] = tokensOf(args)
+    const name = rest.join(" ").trim()
+    return ok({
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+      ...(name === "" ? {} : { name })
+    })
+  },
+  "workspace.snapshot": (args) => {
+    const [workspaceId, ...rest] = tokensOf(args)
+    const name = rest.join(" ").trim()
+    return ok({
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+      ...(name === "" ? {} : { name })
+    })
+  },
+  "workspace.snapshot.delete": (args) => {
+    const [snapshotId, workspaceId, ...rest] = tokensOf(args)
+    if (snapshotId === undefined) return no("workspace.snapshot.delete needs a snapshot id")
+    if (rest.length > 0) return no("workspace.snapshot.delete takes a snapshot id and optionally a workspace id")
+    return ok(workspaceId === undefined ? { snapshotId } : { snapshotId, workspaceId })
+  },
+  "workspace.snapshot.fork": (args) => {
+    const [snapshotId, workspaceId, ...rest] = tokensOf(args)
+    if (snapshotId === undefined) return no("workspace.snapshot.fork needs a snapshot id")
+    if (rest.length > 0) return no("workspace.snapshot.fork takes a snapshot id and optionally a workspace id")
+    return ok(workspaceId === undefined ? { snapshotId } : { snapshotId, workspaceId })
+  },
+  "workspace.template": (args) => {
+    const [snapshotId, name, workspaceId, ...rest] = tokensOf(args)
+    if (snapshotId === undefined || name === undefined) {
+      return no("workspace.template needs a snapshot id and a name: /workspace.template <snapshotId> <name> [workspaceId]")
+    }
+    if (rest.length > 0) return no("workspace.template takes a snapshot id, a one-word name, and optionally a workspace id")
+    return ok(workspaceId === undefined ? { snapshotId, name } : { snapshotId, name, workspaceId })
+  },
+  "workspace.sessions": (args) => optional("workspaceId", args),
+  "workspace.session.destroy": (args) => {
+    const [sessionId, workspaceId, ...rest] = tokensOf(args)
+    if (sessionId === undefined) return no("workspace.session.destroy needs a session id")
+    if (rest.length > 0) return no("workspace.session.destroy takes a session id and optionally a workspace id")
+    return ok(workspaceId === undefined ? { sessionId } : { sessionId, workspaceId })
+  },
+  "workspace.delete": (args) => required("workspaceId", args, "workspace.delete needs a workspace id"),
+  "workspace.facet": (args) => {
+    const [workspaceId, facet, ...rest] = tokensOf(args)
+    if (workspaceId === undefined || facet === undefined || rest.length > 0) {
+      return no("workspace.facet takes a workspace id and a facet")
+    }
+    return ok({ workspaceId, facet })
+  },
   "files.list": (args) => {
     const tokens = tokensOf(args)
     if (tokens.length > 2) return no("files.list takes a path and optionally an owner/repo")

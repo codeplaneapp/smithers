@@ -1087,7 +1087,7 @@ export type AppTransition =
     action?: { flow: string; args?: string; label: string }
   }
   /* The local-app tabs (docs/LOCAL-APP.md "Tabs"). */
-  | { type: "tab.opened"; actor: "user"; tab: Tab }
+  | { type: "tab.opened"; actor: Actor; tab: Tab }
   | { type: "tab.selected"; actor: Actor; id: string }
   | {
     /* The close question for a tab whose process is alive; `id: null` answers "keep it". */

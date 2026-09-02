@@ -18,6 +18,14 @@ import type { TabRow } from "../state/AppState"
 export function TerminalView({ tab }: { readonly tab: Extract<TabRow, { kind: "terminal" | "harness" }> }) {
   const controller = useController()
   const { sessionId } = tab
+  /*
+   * Lane citc: a workspace terminal attaches to its cloud session through
+   * the `/api/cloud-ws/` tunnel; a local one to `pty:<sessionId>` over /ws.
+   * Same three seams either way.
+   */
+  const workspace = tab.kind === "terminal" && tab.workspaceId !== undefined && tab.repo !== undefined
+    ? { workspaceId: tab.workspaceId, repo: tab.repo }
+    : undefined
   /* The last geometry sent, so a refit that changed nothing sends nothing. */
   const lastGeometry = useRef("")
   return (
@@ -25,20 +33,26 @@ export function TerminalView({ tab }: { readonly tab: Extract<TabRow, { kind: "t
       className="tab-terminal"
       data-testid={`terminal-${sessionId}`}
       stream={(write) =>
-        controller.pty.attach(sessionId, {
-          onOutput: write,
-          onExit: (code) => {
-            write(`\r\nprocess exited (${code === null ? "null" : String(code)})\r\n`)
-            controller.notePtyExit(sessionId, code)
-          }
-        })}
-      onData={(data) => controller.pty.input(sessionId, data)}
+        workspace !== undefined
+          ? controller.cloudTerminal.attach(workspace.repo, sessionId, { onOutput: write })
+          : controller.pty.attach(sessionId, {
+            onOutput: write,
+            onExit: (code) => {
+              write(`\r\nprocess exited (${code === null ? "null" : String(code)})\r\n`)
+              controller.notePtyExit(sessionId, code)
+            }
+          })}
+      onData={(data) =>
+        workspace !== undefined
+          ? controller.cloudTerminal.input(sessionId, data)
+          : controller.pty.input(sessionId, data)}
       onResize={({ cols, rows }) => {
         // The adapter refits on every host resize; only a changed geometry reaches the server.
         const geometry = `${cols}x${rows}`
         if (geometry === lastGeometry.current || cols === 0 || rows === 0) return
         lastGeometry.current = geometry
-        void controller.pty.resize(sessionId, cols, rows)
+        if (workspace !== undefined) controller.cloudTerminal.resize(sessionId, cols, rows)
+        else void controller.pty.resize(sessionId, cols, rows)
       }}
     />
   )

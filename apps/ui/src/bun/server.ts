@@ -29,7 +29,8 @@ import {
   CLOUD_AUTH_SESSION_PATH,
   CLOUD_AUTH_SIGN_OUT_PATH,
   CLOUD_AUTH_START_PATH,
-  CLOUD_ROUTE_PREFIX
+  CLOUD_ROUTE_PREFIX,
+  CLOUD_WS_ROUTE_PREFIX
 } from "smithers-shared/LocalApp"
 import {
   isLocalSessionToken,
@@ -76,6 +77,8 @@ const MAX_BODY_BYTES = 1024 * 1024
 const MAX_WS_FRAME_BYTES = 128 * 1024
 const MAX_WS_SUBSCRIPTIONS = 64
 const MAX_WS_TOPIC_CHARS = 256
+/** Frames a cloud-terminal tunnel queues before its upstream opens. */
+const MAX_CLOUD_WS_PENDING = 256
 
 export interface LocalServerOptions {
   /** 0 (the default) picks a free port. */
@@ -125,6 +128,19 @@ export interface LocalServerOptions {
 
 export interface WsSocketData {
   readonly topics: Set<string>
+  /**
+   * Lane citc: a `/api/cloud-ws/` tunnel's bridge to the cloud terminal
+   * WebSocket. Undefined on a plain `/ws` socket. Frames the renderer sends
+   * before the upstream opens queue in `pending` (bounded) and flush on open.
+   */
+  readonly cloud?: CloudWsBridge
+}
+
+export interface CloudWsBridge {
+  readonly target: string
+  readonly token: string | undefined
+  upstream: WebSocket | undefined
+  readonly pending: Array<string | Buffer>
 }
 
 export type WsSocket = ServerWebSocket<WsSocketData>
@@ -600,6 +616,49 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       })
       return upgraded ? undefined : jsonError(400, "upgrade_failed", "Expected a WebSocket upgrade.")
     }
+    if (pathname.startsWith(CLOUD_WS_ROUTE_PREFIX)) {
+      /*
+       * Lane citc: the workspace-terminal tunnel. Same authorization shape
+       * as /ws — origin and the local-session subprotocol — because a
+       * browser upgrade carries no custom headers. The path mirrors the
+       * cloud API's terminal route exactly (`repos/{o}/{r}/workspace/
+       * sessions/{id}/terminal`, nothing else), and the bearer attaches
+       * HERE from the Bun-held credential, never from the renderer.
+       */
+      const requestOrigin = request.headers.get("origin")
+      if (requestOrigin !== null && requestOrigin !== origin) {
+        return jsonError(403, "invalid_origin", "WebSocket origin does not match the local app.")
+      }
+      const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+      if (!protocols.includes(websocketProtocol)) {
+        return jsonError(401, "local_session_required", "The local session capability is required.")
+      }
+      if (cloudUpstream === null) {
+        return jsonError(501, "not_implemented", "The cloud seam is disabled in this build.")
+      }
+      const rest = pathname.slice(CLOUD_WS_ROUTE_PREFIX.length)
+      if (!/^repos\/[^/]+\/[^/]+\/workspace\/sessions\/[^/]+\/terminal$/.test(rest)) {
+        return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal sessions.")
+      }
+      const upstreamWs = cloudUpstream.startsWith("https:")
+        ? `wss:${cloudUpstream.slice("https:".length)}`
+        : `ws:${cloudUpstream.slice("http:".length)}`
+      const upgraded = bunServer.upgrade(request, {
+        data: {
+          topics: new Set<string>(),
+          cloud: {
+            target: `${upstreamWs}/api/${rest}${url.search}`,
+            token: cloudAuth?.token(),
+            upstream: undefined,
+            pending: []
+          }
+        },
+        headers: { "sec-websocket-protocol": websocketProtocol }
+      })
+      return upgraded ? undefined : jsonError(400, "upgrade_failed", "Expected a WebSocket upgrade.")
+    }
     if (pathname.startsWith("/api/")) {
       /*
        * Health remains public for process-supervisor readiness probes. The
@@ -669,8 +728,54 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       maxPayloadLength: MAX_WS_FRAME_BYTES,
       backpressureLimit: 1024 * 1024,
       closeOnBackpressureLimit: true,
-      open: () => {},
+      open: (socket) => {
+        const bridge = socket.data.cloud
+        if (bridge === undefined) return
+        /*
+         * Lane citc: connect the cloud terminal. plue requires the
+         * `terminal` subprotocol at upgrade; Bun's client carries it (and
+         * the bearer) as headers. Frames that arrived first flush on open.
+         */
+        const headers: Record<string, string> = { "sec-websocket-protocol": "terminal" }
+        if (bridge.token !== undefined) headers["authorization"] = `Bearer ${bridge.token}`
+        const upstream = new WebSocket(bridge.target, { headers } as never)
+        bridge.upstream = upstream
+        upstream.binaryType = "arraybuffer"
+        upstream.addEventListener("open", () => {
+          for (const frame of bridge.pending) upstream.send(frame)
+          bridge.pending.length = 0
+        })
+        upstream.addEventListener("message", (event) => {
+          socket.send(event.data as string | ArrayBuffer)
+        })
+        upstream.addEventListener("close", (event) => {
+          try {
+            socket.close(event.code, event.reason)
+          } catch {
+            // The renderer's socket already left; the bridge is done either way.
+          }
+        })
+        upstream.addEventListener("error", () => {
+          try {
+            socket.close(1011, "cloud terminal upstream failed")
+          } catch {
+            // Same as above.
+          }
+        })
+      },
       message: (socket, raw) => {
+        const bridge = socket.data.cloud
+        if (bridge !== undefined) {
+          const upstream = bridge.upstream
+          if (upstream !== undefined && upstream.readyState === WebSocket.OPEN) {
+            upstream.send(raw)
+          } else if (bridge.pending.length < MAX_CLOUD_WS_PENDING) {
+            bridge.pending.push(raw)
+          } else {
+            socket.close(1011, "cloud terminal upstream never opened")
+          }
+          return
+        }
         let parsed: unknown
         try {
           parsed = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw))
@@ -720,6 +825,15 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       close: (socket) => {
         for (const topic of socket.data.topics) socket.unsubscribe(topic)
         socket.data.topics.clear()
+        const bridge = socket.data.cloud
+        if (bridge?.upstream !== undefined) {
+          try {
+            bridge.upstream.close()
+          } catch {
+            // A dead upstream needs no close; the session is the cloud's to reap.
+          }
+          bridge.upstream = undefined
+        }
       }
     }
   })

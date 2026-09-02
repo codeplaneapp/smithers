@@ -61,6 +61,7 @@ const PRESENTATION_ONLY = [
   "setSelectedPath", // world card doc selection: which note the embedded editor shows — local presentation state
   "onDismissDrawer(", // graph card detail drawer close: local presentation state (which node is focused)
   "setOpenLog(", // run timeline log panel: which row's log is open — local presentation state
+  "setDeleteDraft", // workspace card delete: the typed-confirm row's open state and its draft — local presentation state; the act itself rides workspace.delete
   "onRunCommand(", // delegated: App.tsx binds it to the registry's runCommand/runCommandArgs
   // Card maximize/minimize: each calls the delegated onMaximize/onMinimize (bound to card.maximize /
   // card.minimize at the App.tsx and CardTabBody binding sites) and then hands focus to the button
@@ -178,6 +179,14 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/RepoImportCard.tsx": 1,
       /* The /theme picker: nine swatches, one shared handler through onRunCommand. */
       "../cards/ThemePickerCard.tsx": 1,
+      /*
+       * Lane citc: the workspace card's four facet tabs, the terminal facet's
+       * Open and per-session Destroy, the snapshots' Fork-from, Template and
+       * Delete, Suspend, Resume, Fork, Snapshot, the failed card's Retry, and
+       * the typed delete confirm — all through onRunCommand; the draft input
+       * rides the allowlist above.
+       */
+      "../cards/WorkspaceCard.tsx": 13,
       /*
        * The target-graph cards: the graph drawer's close/copy/open/run acts
        * (4), the timeline row's log toggle (1), the history row's replay
