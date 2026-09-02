@@ -12,6 +12,14 @@ import { FixtureEncodingError } from "./TestingError.ts"
 /**
  * One recorded model invocation.
  *
+ * `model` is the model the exchange was recorded against, and it is the same
+ * value as `request.modelId`: every recorder in this package writes it from
+ * the projected request. It is stored separately because
+ * {@link canonicalRequestDigest} erases `modelId` before hashing, so `model`
+ * is what {@link RecordedCall} still has to answer "was this recorded against
+ * the model now asking?" with. The two agreeing is a decoding rule, not a
+ * convention — see {@link Fixture}.
+ *
  * @category models
  * @since 0.0.0
  */
@@ -25,6 +33,20 @@ export interface RecordedCall {
 /**
  * A portable recording of model calls.
  *
+ * This interface and the {@link Fixture} schema below share one name and are
+ * one contract. `decode` is typed by this interface rather than by
+ * `typeof Fixture.Type`, so nothing in the compiler stops the two from
+ * drifting as long as they stay structurally assignable in the one direction
+ * a signature happens to use. `test/FixtureSchema.test.ts` holds them
+ * together: it asserts the decoded value is a `Fixture`, and it compares the
+ * key set of every level of both shapes, so a field added to one and not the
+ * other fails `tsc`.
+ *
+ * The schema is narrower than the interface in exactly one place, deliberately:
+ * a tool's `parameters` is `Record<string, unknown>` here, mirroring
+ * `@smthrs/model`'s tool shape, and `Record<string, Json>` in the schema,
+ * because a fixture is written to a file and read back.
+ *
  * @category models
  * @since 0.0.0
  */
@@ -32,6 +54,12 @@ export interface Fixture {
   readonly calls: ReadonlyArray<RecordedCall>
 }
 
+// Every optional field below is `Schema.optional`, not `Schema.optionalKey`.
+// The structural shapes in `ModelLike` write their optional fields as
+// `?: T | undefined`, because `@smthrs/model` does, and under
+// `exactOptionalPropertyTypes` an `optionalKey` field types as `?: T`, which
+// that value is not assignable to. The two shapes are one contract, so they
+// state optionality the same way.
 const eventSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text-start"), id: Schema.String }),
   Schema.Struct({ type: Schema.Literal("text-delta"), id: Schema.String, text: Schema.String }),
@@ -39,7 +67,7 @@ const eventSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("thinking-start"),
     id: Schema.String,
-    signature: Schema.optionalKey(Schema.String)
+    signature: Schema.optional(Schema.String)
   }),
   Schema.Struct({ type: Schema.Literal("thinking-delta"), id: Schema.String, text: Schema.String }),
   Schema.Struct({ type: Schema.Literal("thinking-end"), id: Schema.String }),
@@ -48,22 +76,22 @@ const eventSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("tool-call-end"),
     id: Schema.String,
-    arguments: Schema.optionalKey(Schema.String)
+    arguments: Schema.optional(Schema.String)
   }),
   Schema.Struct({
     type: Schema.Literal("tool-result"),
     id: Schema.String,
     output: Schema.String,
-    isError: Schema.optionalKey(Schema.Boolean)
+    isError: Schema.optional(Schema.Boolean)
   }),
   Schema.Struct({
     type: Schema.Literal("usage"),
-    inputTokens: Schema.optionalKey(Schema.Number),
-    outputTokens: Schema.optionalKey(Schema.Number),
-    reasoningTokens: Schema.optionalKey(Schema.Number),
-    cachedInputTokens: Schema.optionalKey(Schema.Number),
-    cacheWriteTokens: Schema.optionalKey(Schema.Number),
-    totalTokens: Schema.optionalKey(Schema.Number)
+    inputTokens: Schema.optional(Schema.Number),
+    outputTokens: Schema.optional(Schema.Number),
+    reasoningTokens: Schema.optional(Schema.Number),
+    cachedInputTokens: Schema.optional(Schema.Number),
+    cacheWriteTokens: Schema.optional(Schema.Number),
+    totalTokens: Schema.optional(Schema.Number)
   }),
   Schema.Struct({
     type: Schema.Literal("retry"),
@@ -74,8 +102,8 @@ const eventSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("settle"),
     stopReason: Schema.Literals(["stop", "length", "tool-calls", "content-filter", "error", "aborted", "unknown"]),
-    responseId: Schema.optionalKey(Schema.String),
-    itemIds: Schema.optionalKey(Schema.Array(Schema.String))
+    responseId: Schema.optional(Schema.String),
+    itemIds: Schema.optional(Schema.Array(Schema.String))
   })
 ])
 
@@ -106,7 +134,7 @@ const messageSchema = Schema.Union([
       Schema.Struct({
         type: Schema.Literal("thinking"),
         text: Schema.String,
-        signature: Schema.optionalKey(Schema.String)
+        signature: Schema.optional(Schema.String)
       }),
       Schema.Struct({
         type: Schema.Literal("tool-call"),
@@ -116,8 +144,8 @@ const messageSchema = Schema.Union([
       })
     ])),
     stopReason: stopReasonSchema,
-    responseId: Schema.optionalKey(Schema.String),
-    itemIds: Schema.optionalKey(Schema.Array(Schema.String))
+    responseId: Schema.optional(Schema.String),
+    itemIds: Schema.optional(Schema.Array(Schema.String))
   }),
   Schema.Struct({
     role: Schema.Literal("tool"),
@@ -134,18 +162,18 @@ const toolSchema = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   parameters: Schema.Record(Schema.String, Schema.Json),
-  deferred: Schema.optionalKey(Schema.Boolean),
-  loader: Schema.optionalKey(Schema.Boolean)
+  deferred: Schema.optional(Schema.Boolean),
+  loader: Schema.optional(Schema.Boolean)
 })
 
 const paramsSchema = Schema.Struct({
-  maxTokens: Schema.optionalKey(Schema.Number),
-  temperature: Schema.optionalKey(Schema.Number),
-  topP: Schema.optionalKey(Schema.Number),
-  topK: Schema.optionalKey(Schema.Number),
-  stopSequences: Schema.optionalKey(Schema.Array(Schema.String)),
-  thinkingBudget: Schema.optionalKey(Schema.Number),
-  reasoningEffort: Schema.optionalKey(Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh"]))
+  maxTokens: Schema.optional(Schema.Number),
+  temperature: Schema.optional(Schema.Number),
+  topP: Schema.optional(Schema.Number),
+  topK: Schema.optional(Schema.Number),
+  stopSequences: Schema.optional(Schema.Array(Schema.String)),
+  thinkingBudget: Schema.optional(Schema.Number),
+  reasoningEffort: Schema.optional(Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh"]))
 })
 
 const requestSchema = Schema.Struct({
@@ -154,7 +182,7 @@ const requestSchema = Schema.Struct({
   messages: Schema.Array(messageSchema),
   tools: Schema.Array(toolSchema),
   params: paramsSchema,
-  toolChoice: Schema.optionalKey(Schema.Literal("none"))
+  toolChoice: Schema.optional(Schema.Literal("none"))
 })
 
 // The codes are exactly `/model/ModelError`'s `ModelErrorCode`. Permission and
@@ -176,26 +204,45 @@ const failureSchema = Schema.Struct({
     "unknown"
   ]),
   message: Schema.String,
-  retryAfterMillis: Schema.optionalKey(Schema.Number),
-  resetAtEpochMillis: Schema.optionalKey(Schema.Number),
-  resetSource: Schema.optionalKey(Schema.String),
-  providerCode: Schema.optionalKey(Schema.String),
-  requestId: Schema.optionalKey(Schema.String),
-  httpStatus: Schema.optionalKey(Schema.Number)
+  retryAfterMillis: Schema.optional(Schema.Number),
+  resetAtEpochMillis: Schema.optional(Schema.Number),
+  resetSource: Schema.optional(Schema.String),
+  providerCode: Schema.optional(Schema.String),
+  requestId: Schema.optional(Schema.String),
+  httpStatus: Schema.optional(Schema.Number)
 })
 
 const recordedCallSchema = Schema.Struct({
   request: requestSchema,
   model: Schema.String,
   events: Schema.Array(eventSchema),
-  failure: Schema.optionalKey(failureSchema)
-})
+  failure: Schema.optional(failureSchema)
+}).check(
+  // `model` and `request.modelId` name the same thing, and a hand-written
+  // fixture where they disagree replays two different ways for no stated
+  // reason: `canonicalRequestDigest` erases `modelId`, so a request carrying
+  // `model` matches this call's shape and replays a conversation recorded for
+  // another model, while a request carrying `request.modelId` is rejected as a
+  // harness mismatch against a model it was in fact recorded with.
+  Schema.makeFilter(
+    (call) =>
+      call.model === call.request.modelId
+        ? undefined
+        : `a recorded call's model must be the model its request was made with; ` +
+          `model is ${JSON.stringify(call.model)} and request.modelId is ${JSON.stringify(call.request.modelId)}`,
+    { title: "recordedAgainstOneModel" }
+  )
+)
 
 /**
  * The JSON schema for a recorded-model fixture. The nested request, message,
  * tool, and params shapes mirror `/model/ModelRequest` structurally (the
  * provider-neutral types are owned by `ModelLike`), so an invalid fixture
- * fails decoding.
+ * fails decoding. A call whose `model` disagrees with its own
+ * `request.modelId` fails decoding too: see {@link RecordedCall}.
+ *
+ * This schema and the {@link Fixture} interface above are one contract, held
+ * together by `test/FixtureSchema.test.ts`.
  *
  * @category schemas
  * @since 0.0.0

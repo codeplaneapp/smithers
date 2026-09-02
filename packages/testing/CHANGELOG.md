@@ -15,6 +15,10 @@
 - Added package-owned documentation: `docs/api.md`, `docs/concepts.md`, and the
   generated `docs/reference.md`, which replaces the hand-maintained module
   table in `README.md`.
+- Added `docs/guide.md`, projected by the package's generator into the site's
+  Testing guide. That guide described the fixtures each package under test
+  ships and never named this library, so the published testing package was
+  reachable from the documentation site only by already knowing it existed.
 - Added `Fixture.index`, a memoized digest-keyed lookup over a fixture's
   recorded calls, and `ScoreGate.validateSamples`, the sample validator a suite
   runner needs when it constructs samples itself.
@@ -22,6 +26,10 @@
   `execution_conflict`, `fixture_not_encodable`, and `effect_kind_mismatch`
   codes.
 - Added `RestartableEngine.restartAndResume` beside `killAndResume`.
+- Added 100% coverage thresholds, the workspace norm the release contract's
+  tooling baseline states. The floors this package carried were below it, and
+  what they excused was the poison layer, the reference engines' cancellation
+  paths, and the error construction that decides whether an assertion is sound.
 
 ### Fixed
 
@@ -77,6 +85,31 @@
   adapter's publication confirmation, which was an unbounded recursion.
 - Moved `ParityManifest` under `internal/`. It is 0.x migration bookkeeping, not
   a testing-library API, and it had no consumer outside this package.
+- Fixed the two `Fixture` declarations that shared one name. The hand-written
+  interface and the schema stated optionality two different ways, so under
+  `exactOptionalPropertyTypes` a decoded fixture and the interface `decode`
+  claims to return were not the same type, and only the one direction a
+  signature happened to use was checked. The schema now states every optional
+  field the way `ModelLike` does, `test/FixtureSchema.test.ts` compares the key
+  set of both shapes at every level, and the one place the schema is
+  deliberately narrower, a tool's `parameters` being JSON rather than `unknown`,
+  is stated and pinned by a decode that refuses.
+- Fixed `MemoryEngine.interrupt`, which cancelled nothing when it arrived before
+  the worker fiber had been recorded. The reference engine used to certify
+  interruption held the fiber in a mutable field written after the fork, so an
+  interrupt in that window marked the execution aborted and left the worker
+  running. The fiber is published through a `Deferred`, so an interrupt waits
+  for it.
+- Fixed the `kind` on a suspended or aborted journal entry, which was recovered
+  by searching the flow for the step key and could answer with a nested race
+  branch that shares the name. The engine now carries the step it suspended
+  rather than looking the key back up.
+- Fixed `FlowEngineLike.layerOver` and `layerMemory`, whose declared output type
+  hid the `Crypto` service they provide.
+- Fixed a fixture whose `model` disagreed with its own `request.modelId`: the
+  two name the same thing, and a disagreement replayed one way for a request
+  carrying the first and another way for a request carrying the second. Decoding
+  now refuses it.
 
 ## [0.1.0]
 

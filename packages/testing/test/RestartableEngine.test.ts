@@ -214,3 +214,18 @@ it.scoped("killAndResume re-drives the frontier while the killed instance still 
     expect((yield* Fiber.join(abandoned)).status).toBe("completed")
     expect((yield* Fiber.join(resumed)).status).toBe("completed")
   }))
+
+it.scoped("forwards resume through the current engine facade", () =>
+  Effect.gen(function*() {
+    const harness = yield* RestartableEngine.make()
+    const executionId = "restartable/facade/resume"
+    const completed = yield* harness.engine.run({
+      flow: {
+        name: "testing/restartable/facade/resume",
+        steps: [{ key: "done", sealed: false, kind: "step", run: () => Effect.succeed("done") }]
+      },
+      payload: undefined,
+      executionId
+    })
+    expect(yield* harness.engine.resume(executionId)).toEqual(completed)
+  }))

@@ -11,13 +11,18 @@
  * confirmation the adapter ends every run with.
  */
 import { FlowEngine } from "@smthrs/engine"
-import { FlowRuntime } from "@smthrs/flow"
+import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as Cause from "effect/Cause"
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Latch from "effect/Latch"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as EngineSubject from "../../src/EngineSubject.ts"
 import * as FlowEngineLike from "../../src/FlowEngineLike.ts"
+import { EngineUnavailableError } from "../../src/TestingError.ts"
 import { describe, expect, it } from "../../src/Vitest.ts"
 
 /** Decorates the in-memory runtime, keeping every other operation real. */
@@ -34,6 +39,8 @@ const decorated = (
       )
     ).pipe(Layer.provide(FlowEngine.layerMemory))
   )
+
+const realSubject = FlowEngineLike.layerOver(FlowEngine.layerMemory)
 
 const waiting: EngineSubject.FlowSpec = {
   name: "testing/engine-like/contract/waiting",
@@ -78,6 +85,25 @@ const refusesUnsafe = decorated(() => ({
 
 const neverPublishes = decorated(() => ({ poll: () => Effect.succeed(Option.none()) }))
 
+let polledResult: Flow.Result<unknown, unknown> = new Flow.Suspended()
+const reportsScriptedResult = decorated(() => ({
+  poll: ((_flow, _executionId) => Effect.succeed(Option.some(polledResult))) as Runtime["poll"]
+}))
+
+const missingPoll = new FlowRuntime.FlowExecutionNotFound({
+  code: "execution_not_found",
+  executionId: "testing/engine-like/contract/poll-failure"
+})
+const failsPollAndIgnoresInterrupt = decorated(() => ({
+  poll: ((_flow, _executionId) => Effect.fail(missingPoll)) as Runtime["poll"],
+  interrupt: ((_flow, _executionId) => Effect.void) as Runtime["interrupt"]
+}))
+
+let submissionError: unknown = new Error("submission refused")
+const rejectsSubmission = decorated(() => ({
+  execute: ((_flow, _options) => Effect.fail(submissionError)) as Runtime["execute"]
+}))
+
 const cancelled = (executionId: string) =>
   Effect.gen(function*() {
     const engine = yield* EngineSubject.EngineSubject
@@ -118,4 +144,150 @@ describe("FlowEngineLike bounds its publication confirmation", () => {
       expect(error._tag).toBe("EngineUnavailableError")
       expect((error as { readonly message: string }).message).toContain("did not publish its result")
     }).pipe(Effect.provide(neverPublishes)))
+})
+
+describe("FlowEngineLike projects every runtime result", () => {
+  it.scoped("reports a known live execution as suspended when poll has no result", () =>
+    Effect.gen(function*() {
+      const engine = yield* EngineSubject.EngineSubject
+      const started = yield* Latch.make()
+      const executionId = "testing/engine-like/contract/live-result"
+      const running = yield* engine.run({
+        flow: {
+          name: "testing/engine-like/contract/live-result",
+          steps: [{
+            key: "waiting",
+            sealed: false,
+            kind: "step",
+            run: () => Effect.andThen(started.open, Effect.never)
+          }]
+        },
+        payload: undefined,
+        executionId
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* started.await
+
+      expect(yield* engine.result(executionId)).toEqual({ executionId, status: "suspended" })
+      yield* engine.interrupt(executionId)
+      expect((yield* Fiber.join(running)).status).toBe("aborted")
+    }).pipe(Effect.provide(realSubject)))
+
+  it.scoped("distinguishes suspension, success, handoff, failure, and interruption", () =>
+    Effect.gen(function*() {
+      const engine = yield* EngineSubject.EngineSubject
+      const started = yield* Latch.make()
+      const executionId = "testing/engine-like/contract/result-projection"
+      const running = yield* engine.run({
+        flow: {
+          name: "testing/engine-like/contract/result-projection",
+          steps: [{
+            key: "waiting",
+            sealed: false,
+            kind: "step",
+            run: () => Effect.andThen(started.open, Effect.never)
+          }]
+        },
+        payload: undefined,
+        executionId
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* started.await
+
+      polledResult = new Flow.Suspended()
+      expect(yield* engine.result(executionId)).toEqual({ executionId, status: "suspended" })
+
+      polledResult = new Flow.Complete({ exit: Exit.succeed(undefined) })
+      expect(yield* engine.result(executionId)).toEqual({ executionId, status: "completed" })
+
+      polledResult = new Flow.Complete({ exit: Exit.succeed("published") })
+      expect(yield* engine.result(executionId)).toEqual({ executionId, status: "completed", value: "published" })
+
+      polledResult = new Flow.Handoff({ flow: "next-round", payload: { cursor: 2 } })
+      const handoff = yield* engine.result(executionId)
+      expect(handoff.status).toBe("failed")
+      expect(handoff.value).toMatchObject({ code: "engine_unavailable" })
+      expect((handoff.value as EngineUnavailableError).message).toContain("handed off to flow next-round")
+
+      const refused = new EngineUnavailableError({ message: "runtime refusal" })
+      polledResult = new Flow.Complete({ exit: Exit.fail(refused) })
+      expect(yield* engine.result(executionId)).toMatchObject({
+        executionId,
+        status: "failed",
+        value: { code: "engine_unavailable", message: "runtime refusal" }
+      })
+
+      polledResult = new Flow.Complete({ exit: Exit.failCause(Cause.interrupt()) })
+      expect(yield* engine.result(executionId)).toEqual({ executionId, status: "aborted" })
+
+      yield* engine.interrupt(executionId)
+      expect((yield* Fiber.join(running)).status).toBe("aborted")
+    }).pipe(Effect.provide(reportsScriptedResult)))
+
+  it.scoped("reports poll failure until an explicit interrupt marks the execution aborted", () =>
+    Effect.gen(function*() {
+      const engine = yield* EngineSubject.EngineSubject
+      const started = yield* Latch.make()
+      const executionId = "testing/engine-like/contract/poll-failure"
+      yield* engine.run({
+        flow: {
+          name: "testing/engine-like/contract/poll-failure",
+          steps: [{
+            key: "waiting",
+            sealed: false,
+            kind: "step",
+            run: () => Effect.andThen(started.open, Effect.never)
+          }]
+        },
+        payload: undefined,
+        executionId
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* started.await
+
+      const error = yield* engine.result(executionId).pipe(Effect.flip)
+      expect(error).toMatchObject({ code: "engine_unavailable" })
+      expect((error as EngineUnavailableError).message).toContain("failed while polling")
+
+      yield* engine.interrupt(executionId)
+      expect(yield* engine.result(executionId)).toEqual({ executionId, status: "aborted" })
+    }).pipe(Effect.provide(failsPollAndIgnoresInterrupt)))
+})
+
+describe("FlowEngineLike preserves typed submission failures", () => {
+  it.scoped("maps foreign failures and passes FlowCycleDetected through", () =>
+    Effect.gen(function*() {
+      const engine = yield* EngineSubject.EngineSubject
+
+      submissionError = new Error("submission refused")
+      const unavailable = yield* engine.run({
+        flow: { ...settling, name: "testing/engine-like/contract/submission-refused" },
+        payload: undefined,
+        executionId: "testing/engine-like/contract/submission-refused"
+      }).pipe(Effect.flip)
+      expect(unavailable).toMatchObject({ code: "engine_unavailable" })
+      expect((unavailable as EngineUnavailableError).message).toContain("submission refused")
+
+      submissionError = new FlowRuntime.FlowCycleDetected({ path: ["parent", "child", "parent"] })
+      const cycle = yield* engine.run({
+        flow: { ...settling, name: "testing/engine-like/contract/submission-cycle" },
+        payload: undefined,
+        executionId: "testing/engine-like/contract/submission-cycle"
+      }).pipe(Effect.flip)
+      expect(cycle).toMatchObject({
+        code: "flow_cycle_detected",
+        path: ["parent", "child", "parent"]
+      })
+    }).pipe(Effect.provide(rejectsSubmission)))
+})
+
+describe("FlowEngineLike Web Crypto", () => {
+  it.scoped("provides fresh random byte arrays of the requested length", () =>
+    Effect.gen(function*() {
+      const crypto = yield* Crypto.Crypto
+      const first = yield* crypto.randomBytes(16)
+      const second = yield* crypto.randomBytes(7)
+
+      expect(first).toBeInstanceOf(Uint8Array)
+      expect(first).toHaveLength(16)
+      expect(second).toHaveLength(7)
+      expect(second).not.toBe(first)
+    }).pipe(Effect.provide(FlowEngineLike.layerMemory)))
 })

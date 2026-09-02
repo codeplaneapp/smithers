@@ -17,18 +17,12 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-testing-coverage-${process.pid}`),
       include: ["src/**"],
-      // The workspace norm is 100% and the release contract's tooling baseline
-      // states it. These floors are the measured coverage on 2026-09-01
-      // rounded down one point, the same honest ratchet the other packages
-      // short of the norm carry: raised as tests accrete, never lowered. What
-      // is still uncovered is named in `docs/api.md`: the durable branches of
-      // `FlowEngineLike` and `MemoryEngine` that only a real restart boundary
-      // reaches, and the pin helpers' exhaustion paths.
+      // This package meets the workspace coverage norm on every default run.
       thresholds: {
-        branches: 81,
-        functions: 95,
-        lines: 95,
-        statements: 94
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100
       }
     }
   }

@@ -122,6 +122,7 @@ describe("PlanAssertions", () => {
       yield* review.key("key:review")
       yield* review.placement("remote")
       yield* review.placement({ tag: "remote", options: { profile: "reviewer" } })
+      yield* review.placement({ tag: "remote" })
       yield* review.mode("hermetic")
       yield* review.tier("sealed")
       yield* review.onConflict("serialize")
@@ -140,6 +141,11 @@ describe("PlanAssertions", () => {
       yield* lint.tier("compensable")
       yield* lint.onConflict("lane")
       yield* expectPlan(plan).node("test").mode(undefined)
+
+      const absentMode = yield* expectPlan(plan).node("test").mode("expected").pipe(Effect.flip)
+      expect(absentMode.code).toBe("declared_effect_mismatch")
+      expect(absentMode.actual).toBeUndefined()
+      expect(absentMode.message).toContain("actual undefined")
     }))
 
   it.effect("renders a stable snapshot and fails with a readable diff", () =>
@@ -160,6 +166,47 @@ describe("PlanAssertions", () => {
       expect(error.message).toContain("- ")
       expect(error.message).toContain("+ ")
       expect(error.message).toContain("key:changed")
+
+      const missingActualLine = yield* expectPlan(plan).matchesSnapshot(`${snapshot}\nextra expected line`).pipe(
+        Effect.flip
+      )
+      expect(missingActualLine.message).toContain("- extra expected line")
+
+      const missingExpectedLine = yield* expectPlan(plan).matchesSnapshot(snapshot.split("\n").slice(0, -1).join("\n"))
+        .pipe(
+          Effect.flip
+        )
+      expect(missingExpectedLine.message).toContain("+ edge test -> review")
+    }))
+
+  it.effect("pluralizes empty-plan edge and coverage diagnostics", () =>
+    Effect.gen(function*() {
+      const empty: PlanLike = { nodes: [], edges: [] }
+      const missingEdges = yield* expectPlan(empty).edges([
+        ["prepare", "test"],
+        ["test", "publish"]
+      ]).pipe(Effect.flip)
+      expect(missingEdges.code).toBe("missing_edge")
+      expect(missingEdges.message).toContain("Missing edges")
+      expect(missingEdges.message).toContain("Actual edges: (none)")
+
+      const unexpectedEdges = yield* expectPlan(plan).edges([], { exact: true }).pipe(Effect.flip)
+      expect(unexpectedEdges.code).toBe("unexpected_edge")
+      expect(unexpectedEdges.message).toContain("Unexpected edges")
+      expect(unexpectedEdges.message).toContain("Expected edges: (none)")
+
+      const uncovered = yield* expectPlans([]).covers(["prepare", "publish"]).pipe(Effect.flip)
+      expect(uncovered.code).toBe("coverage_mismatch")
+      expect(uncovered.message).toContain("Unreached nodes")
+      expect(uncovered.message).toContain("Reached nodes: (none)")
+
+      const missingNode = yield* expectPlan(empty).contains("missing").pipe(Effect.flip)
+      expect(missingNode.code).toBe("missing_node")
+      expect(missingNode.message).toContain("Available nodes: (none)")
+
+      const oneEdge: PlanLike = { nodes: [], edges: [{ from: "prepare", to: "publish" }] }
+      const oneUnexpected = yield* expectPlan(oneEdge).edges([], { exact: true }).pipe(Effect.flip)
+      expect(oneUnexpected.message).toContain("Unexpected edge: prepare -> publish")
     }))
 
   it.effect("checks key goldens and reports drift as a cache-identity break", () =>

@@ -69,8 +69,29 @@ export const invoke = <A, E>(
   Effect.suspend(evaluate).pipe(Effect.withSpan(`testing.${operation}`, { attributes: { pin } }))
 
 /**
- * Polls `predicate` on a bounded live-clock schedule, failing the pin rather
- * than hanging when the condition never holds.
+ * Polls `probe` on a bounded live-clock schedule and returns its first defined
+ * value, failing the pin rather than hanging when no value arrives.
+ *
+ * @since 0.0.0
+ * @category assertions
+ */
+export const pollUntil = <A>(
+  pin: string,
+  probe: () => A | undefined,
+  message: string
+): Effect.Effect<A, ConformanceViolation> =>
+  Effect.suspend(() => {
+    const value = probe()
+    return value === undefined ? Effect.fail(undefined) : Effect.succeed(value)
+  }).pipe(
+    Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 99 }),
+    TestClock.withLive,
+    Effect.catch(() => fail(pin, message, "settlement within one second of live time", "still pending"))
+  )
+
+/**
+ * Polls `predicate` on the bounded live-clock schedule {@link pollUntil} uses,
+ * failing the pin rather than hanging when the condition never holds.
  *
  * @since 0.0.0
  * @category assertions
@@ -80,11 +101,7 @@ export const waitUntil = (
   predicate: () => boolean,
   message: string
 ): Effect.Effect<void, ConformanceViolation> =>
-  Effect.suspend(() => predicate() ? Effect.void : Effect.fail(undefined)).pipe(
-    Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 99 }),
-    TestClock.withLive,
-    Effect.catch(() => fail(pin, message, "settlement within one second of live time", "still pending"))
-  )
+  pollUntil(pin, () => predicate() ? true : undefined, message).pipe(Effect.asVoid)
 
 /**
  * Waits for `fiber` to settle within the bounded budget {@link waitUntil}
@@ -97,12 +114,4 @@ export const awaitFiber = <A, E>(
   pin: string,
   fiber: Fiber.Fiber<A, E>,
   message: string
-): Effect.Effect<Exit.Exit<A, E>, ConformanceViolation> =>
-  Effect.gen(function*() {
-    yield* waitUntil(pin, () => fiber.pollUnsafe() !== undefined, message)
-    const exit = fiber.pollUnsafe()
-    if (exit === undefined) {
-      return yield* fail(pin, message, "settled fiber", "pending fiber")
-    }
-    return exit
-  })
+): Effect.Effect<Exit.Exit<A, E>, ConformanceViolation> => pollUntil(pin, () => fiber.pollUnsafe(), message)

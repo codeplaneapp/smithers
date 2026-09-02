@@ -125,6 +125,17 @@ describe("Divergence entry attribution", () => {
     expect(extra).toEqual({ index: 1, field: "entry", expected: longer[1], actual: undefined })
   })
 
+  it("uses the array position when both sparse journals omit the entry", () => {
+    const expected = new Array<JournalEntryLike>(1)
+    const actual = new Array<JournalEntryLike>(1)
+    expect(Option.getOrThrow(firstDivergence(expected, actual))).toEqual({
+      index: 0,
+      field: "entry",
+      expected: undefined,
+      actual: undefined
+    })
+  })
+
   it("succeeds on identical journals", async () => {
     const journal = [entry({ a: 1 }, { index: 0 }), entry([1, 2, 3], { index: 1 })]
     const exit = await Effect.runPromiseExit(assertNoDivergence(journal, [...journal]))

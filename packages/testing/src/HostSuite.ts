@@ -169,7 +169,9 @@ const assertCapabilityError = <R>(
     })
   )
 
-const capabilityCode = (expectation: CapabilityExpectation): string => expectation.supported ? "" : expectation.code
+const capabilityCode = (
+  expectation: Extract<CapabilityExpectation, { readonly supported: false }>
+): string => expectation.code
 
 /**
  * The scratch file the round-trip probe owns for one invocation.
@@ -212,7 +214,8 @@ const provideNoAmbient = <E, R>(effect: Effect.Effect<void, E, R>, bundle: HostB
  * @category constructors
  */
 export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArray<HostSuiteCase> => {
-  const fileSystem = profile.fileSystem.supported
+  const fileSystemExpectation = profile.fileSystem
+  const fileSystem = fileSystemExpectation.supported
     ? provide(
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
@@ -244,13 +247,14 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
           fs.readFileString("/host-suite/missing.txt"),
           "FileSystem",
           "readFileString",
-          capabilityCode(profile.fileSystem)
+          capabilityCode(fileSystemExpectation)
         )
       }),
       bundle
     )
 
-  const path = profile.path.supported
+  const pathExpectation = profile.path
+  const path = pathExpectation.supported
     ? provide(
       Effect.gen(function*() {
         const path = yield* Path.Path
@@ -270,7 +274,7 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
           path.fromFileUrl(new URL("file:///host-suite/value.txt")),
           "Path",
           "fromFileUrl",
-          capabilityCode(profile.path)
+          capabilityCode(pathExpectation)
         )
       }),
       bundle
@@ -293,7 +297,8 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
     })
   )
 
-  const shell = profile.shell.supported
+  const shellExpectation = profile.shell
+  const shell = shellExpectation.supported
     ? provide(
       Effect.gen(function*() {
         const result = yield* runUnlisted
@@ -307,12 +312,13 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
         runUnlisted,
         "ChildProcessSpawner",
         "spawn",
-        capabilityCode(profile.shell)
+        capabilityCode(shellExpectation)
       ),
       bundle
     )
 
-  const jj = profile.jj.supported
+  const jjExpectation = profile.jj
+  const jj = jjExpectation.supported
     ? provide(
       Effect.gen(function*() {
         const jj = yield* JjTag
@@ -324,7 +330,7 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
     : provide(
       Effect.gen(function*() {
         const jj = yield* JjTag
-        yield* assertCapabilityError(jj.status(), "Jj", "status", capabilityCode(profile.jj))
+        yield* assertCapabilityError(jj.status(), "Jj", "status", capabilityCode(jjExpectation))
       }),
       bundle
     )
@@ -357,7 +363,8 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
       bundle
     )
 
-  const clock = profile.clock.supported
+  const clockExpectation = profile.clock
+  const clock = clockExpectation.supported
     ? provideNoAmbient(
       Effect.gen(function*() {
         const first = yield* Clock.currentTimeMillis
@@ -373,12 +380,13 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
         Clock.currentTimeMillis,
         "Clock",
         "currentTimeMillis",
-        capabilityCode(profile.clock)
+        capabilityCode(clockExpectation)
       ),
       bundle
     )
 
-  const random = profile.random.supported
+  const randomExpectation = profile.random
+  const random = randomExpectation.supported
     ? provideNoAmbient(
       Effect.gen(function*() {
         const value = yield* Random.next
@@ -386,7 +394,7 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
       }),
       bundle
     )
-    : provideNoAmbient(assertCapabilityError(Random.next, "Random", "next", capabilityCode(profile.random)), bundle)
+    : provideNoAmbient(assertCapabilityError(Random.next, "Random", "next", capabilityCode(randomExpectation)), bundle)
 
   const cleanup = provide(
     Effect.gen(function*() {

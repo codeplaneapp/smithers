@@ -5,6 +5,7 @@ import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import * as EngineSubject from "../src/EngineSubject.ts"
+import { runEffectTest } from "../src/internal/TestEffectRunner.ts"
 import * as TestLayers from "../src/TestLayers.ts"
 import { describe, expect, it, testEffect } from "../src/Vitest.ts"
 
@@ -34,6 +35,37 @@ describe("Vitest", () => {
   )
 
   it.effect("runs Effect test bodies", () => Effect.sync(() => expect(true).toBe(true)))
+
+  test.effect("runs a direct Effect body", Effect.sync(() => expect(1 + 1).toBe(2)), 1_000)
+
+  test.skip("registers a skipped layered Effect body", Effect.die("must stay skipped"))
+
+  it("interrupts a layered body and runs its finalizer when the signal aborts", async () => {
+    const controller = new AbortController()
+    let markStarted: () => void = () => undefined
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    let finalized = false
+    const execution = runEffectTest(
+      Layer.empty,
+      Layer.empty,
+      Effect.acquireRelease(
+        Effect.sync(markStarted),
+        () =>
+          Effect.sync(() => {
+            finalized = true
+          })
+      ).pipe(Effect.andThen(Effect.never)),
+      controller.signal
+    )
+
+    await started
+    controller.abort()
+
+    expect(await execution.then(() => "completed", () => "interrupted")).toBe("interrupted")
+    expect(finalized).toBe(true)
+  })
 
   it.effect("surfaces failed Effects as test failures", () =>
     Effect.gen(function*() {

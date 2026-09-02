@@ -66,14 +66,14 @@ export interface EffectExpectations {
 const failure = (
   code: JournalAssertionCode,
   message: string,
-  expected?: unknown,
+  expected: unknown,
   actual?: unknown
 ): Effect.Effect<never, JournalAssertionError> =>
   Effect.fail(
     new JournalAssertionError({
       code,
       message,
-      ...(expected === undefined ? {} : { expected }),
+      expected,
       ...(actual === undefined ? {} : { actual })
     })
   )

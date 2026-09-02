@@ -17,6 +17,20 @@ export const Package = {
     target: "packages/testing/docs/reference.md"
   },
   /**
+   * Prose this package owns, projected into a marked region of a page that
+   * belongs to everyone. The site's Testing guide is written entirely about
+   * the fixtures each package under test ships, and never named the published
+   * testing library at all, so the library was reachable from the docs site
+   * only by already knowing it existed.
+   */
+  snippets: [
+    {
+      source: "docs/guide.md",
+      region: "testing-guide",
+      target: "docs/pages/guides/testing.md"
+    }
+  ],
+  /**
    * Public entry points outside the root barrel. `Vitest` is not re-exported
    * from `src/index.ts` because `vitest` refuses to load through `require()`,
    * so a barrel that carried it would break every CommonJS consumer of the

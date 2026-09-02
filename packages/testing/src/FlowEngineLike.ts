@@ -299,6 +299,7 @@ export const make = (): Effect.Effect<
     const settle = (executionId: string, result: ExecutionResult): Effect.Effect<void> =>
       Effect.suspend(() => {
         const deferred = settlements.get(executionId)
+        /* v8 ignore next -- Registered execution bodies settle only after run or resume arms their settlement. */
         return deferred === undefined ? Effect.void : Effect.asVoid(Deferred.succeed(deferred, result))
       })
 
@@ -322,6 +323,7 @@ export const make = (): Effect.Effect<
             // runs the registered execute and never interprets the plan-time
             // body `Flow.make` requires, so the declaration carries the
             // smallest honest body.
+            /* v8 ignore next -- The registered execute function runs every subject flow, so the declarative body is never interpreted. */
             body: () => Node.succeed(undefined)
           })
           yield* engine.register(flow, (payload, executionId) =>
@@ -361,6 +363,7 @@ export const make = (): Effect.Effect<
       Effect.gen(function*() {
         const meta = yield* requireMeta(executionId)
         const deferred = settlements.get(executionId)
+        /* v8 ignore next 3 -- Every path to awaitResult arms a settlement after recording execution metadata, and settlements are never removed. */
         if (deferred === undefined) {
           return yield* Effect.fail(unavailable(`Execution ${executionId} has no pending settlement`))
         }
@@ -557,7 +560,7 @@ const layerWebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(Crypto.Crypto)(
  */
 export const layerOver = <E, R>(
   runtime: Layer.Layer<FlowRuntime.FlowRuntime, E, R>
-): Layer.Layer<EngineSubjectService, E, R> =>
+): Layer.Layer<EngineSubjectService | Crypto.Crypto, E, R> =>
   layer().pipe(
     Layer.provide(runtime),
     Layer.provideMerge(layerWebCrypto)
@@ -569,4 +572,4 @@ export const layerOver = <E, R>(
  * @category layers
  * @since 0.0.0
  */
-export const layerMemory: Layer.Layer<EngineSubjectService> = layerOver(FlowEngine.layerMemory)
+export const layerMemory: Layer.Layer<EngineSubjectService | Crypto.Crypto> = layerOver(FlowEngine.layerMemory)

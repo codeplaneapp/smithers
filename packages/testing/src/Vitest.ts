@@ -12,14 +12,12 @@
  * @since 0.0.0
  */
 import * as EffectVitest from "@effect/vitest"
-import * as Effect from "effect/Effect"
-import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import * as ManagedRuntime from "effect/ManagedRuntime"
 import type * as Scope from "effect/Scope"
 import * as TestClock from "effect/testing/TestClock"
 import * as TestConsole from "effect/testing/TestConsole"
 import { assert, describe, expect, it as vitestIt, type TestOptions } from "vitest"
+import { type Body, runEffectTest } from "./internal/TestEffectRunner.ts"
 
 /** @since 0.0.0 @category testing */
 export { assert, describe, expect }
@@ -48,8 +46,6 @@ export const it: typeof EffectVitest.it & { readonly scoped: typeof EffectVitest
   }
 ) as typeof EffectVitest.it & { readonly scoped: typeof EffectVitest.it.effect }
 
-type Body<A, E, R> = Effect.Effect<A, E, R> | (() => Effect.Effect<A, E, R>)
-
 interface TestRegistration<R> {
   <A, E>(
     name: string,
@@ -62,6 +58,12 @@ interface EffectTest<R> extends TestRegistration<R> {
   readonly skip: TestRegistration<R>
   readonly only: TestRegistration<R>
 }
+
+const vitestByMode = {
+  run: vitestIt,
+  skip: vitestIt.skip,
+  only: vitestIt.only
+} as const
 
 /**
  * The Effect-aware test registrars, each carrying the requirements `R` a
@@ -83,9 +85,6 @@ export interface TestEffect<R> {
   readonly skip: TestRegistration<R>
   readonly only: TestRegistration<R>
 }
-
-const evaluate = <A, E, R>(body: Body<A, E, R>): Effect.Effect<A, E, R> =>
-  Effect.suspend(() => typeof body === "function" ? body() : body)
 
 /**
  * Builds a **fresh** environment from the supplied layer for every test case
@@ -111,26 +110,11 @@ export const testEffect = <R, E>(layer: Layer.Layer<R, E>): TestEffect<R> => {
       options?: number | TestOptions
     ): void => {
       const testOptions = typeof options === "number" ? { timeout: options } : options ?? {}
-      const test = mode === "skip" ? vitestIt.skip : mode === "only" ? vitestIt.only : vitestIt
+      const test = vitestByMode[mode]
       test(
         name,
         testOptions,
-        async (context) => {
-          const runtime = ManagedRuntime.make(Layer.mergeAll(layer, base))
-          const fiber = runtime.runFork(Effect.scoped(evaluate(body)))
-          // The sanctioned runner-boundary AbortSignal conversion: abort
-          // becomes fiber interruption, nothing else.
-          const onAbort = () => {
-            runtime.runFork(Fiber.interrupt(fiber))
-          }
-          context.signal.addEventListener("abort", onAbort, { once: true })
-          try {
-            await runtime.runPromise(Fiber.join(fiber))
-          } finally {
-            context.signal.removeEventListener("abort", onAbort)
-            await runtime.dispose()
-          }
-        }
+        (context) => runEffectTest(layer, base, body, context.signal)
       )
     }
     const registerBody = add("run")

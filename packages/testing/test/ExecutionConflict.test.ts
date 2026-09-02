@@ -61,6 +61,21 @@ describe("a duplicate execution id is a conflict, not a silent join", () => {
       expect((error as { readonly field: string }).field).toBe("payload")
     }) as Effect.Effect<void>)
 
+  onEachSubject("bounds conflicting payload renderings", (engine) =>
+    Effect.gen(function*() {
+      const executionId = "testing/conflict/bounded-payload"
+      yield* engine.run({ flow: first, payload: { value: "a".repeat(400) }, executionId })
+      const error = yield* engine.run({ flow: first, payload: { value: "b".repeat(400) }, executionId }).pipe(
+        Effect.flip
+      )
+      expect(error._tag).toBe("ExecutionConflictError")
+      expect(error.code).toBe("execution_conflict")
+      expect((error as { readonly expected: string }).expected).toHaveLength(200)
+      expect((error as { readonly actual: string }).actual).toHaveLength(200)
+      expect((error as { readonly expected: string }).expected).toMatch(/\.\.\.$/)
+      expect((error as { readonly actual: string }).actual).toMatch(/\.\.\.$/)
+    }) as Effect.Effect<void>)
+
   onEachSubject("joins an identical re-submission", (engine) =>
     Effect.gen(function*() {
       const executionId = "testing/conflict/identical"

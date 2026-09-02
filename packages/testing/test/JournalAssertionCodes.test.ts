@@ -79,6 +79,21 @@ describe("idempotency outcomes carry three distinguishable codes", () => {
     )
   })
 
+  it("treats a primitive effect value as carrying no idempotency key", async () => {
+    const primitive = [effectEntry("publish", 0, "not-a-record")]
+    const error = await errorOf(expectJournal(primitive).effect("publish").idempotencyKey("publish-1"))
+    expect(error.code).toBe("missing_idempotency_key")
+    expect(error.expected).toBe("publish-1")
+  })
+
+  it("refuses an ordinary step in the idempotency-key assertion", async () => {
+    const ordinary = [step("publish", 0, { idempotencyKey: "publish-1" })]
+    const error = await errorOf(expectJournal(ordinary).effect("publish").idempotencyKey("publish-1"))
+    expect(error.code).toBe("effect_kind_mismatch")
+    expect(error.expected).toBe("effect")
+    expect(error.actual).toEqual(["step"])
+  })
+
   it("separates an entry that carries a different idempotency key", async () => {
     const wrongKey = [effectEntry("publish", 0, { idempotencyKey: "publish-2" })]
     const error = await errorOf(expectJournal(wrongKey).effect("publish").idempotencyKey("publish-1"))

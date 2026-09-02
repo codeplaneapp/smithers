@@ -2,11 +2,15 @@
 /**
  * Projects package-owned testing documentation into the surfaces it owns.
  *
- * One output: `docs/reference.md`, derived from the barrel's module JSDoc, each
- * module's `@category`-tagged exports, the prose in `docs/api.md`, and the
+ * Two outputs. `docs/reference.md` is derived from the barrel's module JSDoc,
+ * each module's `@category`-tagged exports, the prose in `docs/api.md`, and the
  * `description` in `package.json`. It replaces the hand-maintained module table
  * in `README.md`, which had drifted: it advertised a `Vitest` surface on the
  * root barrel that the barrel deliberately omits.
+ *
+ * Each `Package.snippets` entry is projected verbatim into a marked region of a
+ * page the site owns, so what the published site says about this package is
+ * written inside the package.
  *
  * `dprint.json` excludes the output, because this generator owns its formatting.
  *
@@ -156,6 +160,32 @@ ${referenceSections}
 `
 
 const outputs = new Map([[Package.api.target, reference]])
+
+const regionStart = (name) => `{/* generated:${name} start */}`
+const regionEnd = (name) => `{/* generated:${name} end */}`
+
+/** Replaces one marked region of a shared page with package-owned prose. */
+const replaceRegion = (source, name, body) => {
+  const start = source.indexOf(regionStart(name))
+  const end = source.indexOf(regionEnd(name))
+  if (start < 0 || end < 0 || end < start) throw new Error(`testing docs: region ${name} is missing`)
+  return `${source.slice(0, start)}${regionStart(name)}\n\n${body.trim()}\n\n${source.slice(end)}`
+}
+
+for (const snippet of Package.snippets) {
+  const current = outputs.get(snippet.target) ?? read(join(repoRoot, snippet.target))
+  outputs.set(snippet.target, replaceRegion(current, snippet.region, read(join(packageRoot, snippet.source))))
+}
+
+// The house style forbids an em-dash on a published page, and this generator
+// writes onto one. Failing here names the source file a writer has to fix
+// instead of the generated page they must never edit. The package's own
+// reference is not a published page, so it keeps the source's punctuation.
+for (const [path, content] of outputs) {
+  if (path.startsWith("docs/pages/") && content.includes("—")) {
+    throw new Error(`testing docs: ${path} would contain an em-dash`)
+  }
+}
 
 const failures = []
 let drifted = false

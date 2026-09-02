@@ -58,6 +58,35 @@ describe("ScoreGate", () => {
     expect(verdict).toEqual({ _tag: "Inconclusive", reasons: ["judge unavailable", "No score samples for mean gate"] })
   })
 
+  it("keeps an empty gate set with an environment fault inconclusive", () => {
+    expect(ScoreGate.combine([], ["runner unavailable"])).toEqual({
+      _tag: "Inconclusive",
+      reasons: ["runner unavailable"]
+    })
+  })
+
+  it("reports an unmeasurable minimum gate", async () => {
+    const verdict = await Effect.runPromise(
+      ScoreGate.expectScores([
+        { case: "first", stepKey: "first-key", scorer: "quality", kind: "inconclusive", reason: "judge unavailable" }
+      ]).min(0.9)
+    )
+    expect(verdict).toEqual({ _tag: "Inconclusive", reasons: ["judge unavailable", "No score samples for min gate"] })
+  })
+
+  it("passes an empty per-case gate and grades unresolved passes as inconclusive", async () => {
+    const verdict = await Effect.runPromise(
+      ScoreGate.expectScores([
+        { case: "first", stepKey: "first-key", scorer: "quality", kind: "inconclusive", reason: "judge unavailable" }
+      ]).perCase({})
+    )
+    expect(verdict).toEqual({ _tag: "Passed", inconclusive: ["judge unavailable"] })
+    expect(ScoreGate.grade(verdict)).toEqual({
+      exitCode: 5,
+      summary: "passed every gate with unresolved: judge unavailable"
+    })
+  })
+
   // One unavailable judge used to disable every gate: the early return fired
   // before the arithmetic ran, so 99 good scores went ungated.
   it("evaluates gates over the scores that exist and reports the fault alongside", async () => {

@@ -58,8 +58,9 @@ export interface EngineStore {
 
 interface ActiveExecution {
   readonly deferred: Deferred.Deferred<ExecutionResult>
-  fiber: Fiber.Fiber<ExecutionResult> | undefined
-  activeStepKey: string | undefined
+  /** An interrupt during startup waits for the worker instead of missing it. */
+  readonly fiber: Deferred.Deferred<Fiber.Fiber<ExecutionResult>>
+  activeStep: StepSpec | undefined
 }
 
 interface StepOutcome {
@@ -164,20 +165,6 @@ const findRecorded = (
   return undefined
 }
 
-const stepKind = (flow: FlowSpec, stepKey: string): string => {
-  const visit = (steps: ReadonlyArray<StepSpec>): string | undefined => {
-    for (const step of steps) {
-      if (step.key === stepKey) return step.kind
-      if (step.kind === "race") {
-        const found = visit(step.branches)
-        if (found !== undefined) return found
-      }
-    }
-    return undefined
-  }
-  return visit(flow.steps) ?? "step"
-}
-
 const firstFrontier = (
   flow: FlowSpec,
   journal: ReadonlyArray<JournalEntryLike>
@@ -215,24 +202,21 @@ const setStatus = (
 const suspendIfRunning = (
   store: EngineStore,
   executionId: string,
-  activeStepKey: string | undefined
+  activeStep: StepSpec | undefined
 ): Effect.Effect<ExecutionResult, EngineUnavailableError> =>
   modifyExecution(store, executionId, (execution) => {
     if (execution.status !== "running") {
       return [storedResult(execution), execution] as const
     }
-    const frontier = activeStepKey === undefined
-      ? firstFrontier(execution.flow, execution.journal)
-      : undefined
-    const stepKey = activeStepKey ?? frontier?.key
-    const journal = stepKey === undefined
+    const frontier = activeStep ?? firstFrontier(execution.flow, execution.journal)
+    const journal = frontier === undefined
       ? execution.journal
       : [
         ...execution.journal,
         {
           index: execution.journal.length,
-          stepKey,
-          kind: stepKind(execution.flow, stepKey),
+          stepKey: frontier.key,
+          kind: frontier.kind,
           outcome: "suspended" as const
         }
       ]
@@ -247,24 +231,21 @@ const suspendIfRunning = (
 const abort = (
   store: EngineStore,
   executionId: string,
-  activeStepKey: string | undefined
+  activeStep: StepSpec | undefined
 ): Effect.Effect<ExecutionResult, EngineUnavailableError> =>
   modifyExecution(store, executionId, (execution) => {
     if (execution.status === "completed" || execution.status === "failed" || execution.status === "aborted") {
       return [storedResult(execution), execution] as const
     }
-    const frontier = activeStepKey === undefined
-      ? firstFrontier(execution.flow, execution.journal)
-      : undefined
-    const stepKey = activeStepKey ?? frontier?.key
-    const journal = stepKey === undefined
+    const frontier = activeStep ?? firstFrontier(execution.flow, execution.journal)
+    const journal = frontier === undefined
       ? execution.journal
       : [
         ...execution.journal,
         {
           index: execution.journal.length,
-          stepKey,
-          kind: stepKind(execution.flow, stepKey),
+          stepKey: frontier.key,
+          kind: frontier.kind,
           outcome: "aborted" as const
         }
       ]
@@ -411,7 +392,7 @@ const executeStep = (
         }
       }
 
-      active.activeStepKey = step.key
+      active.activeStep = step
       const effect = step.kind === "step"
         ? step.run(input)
         : executeRace(store, executionId, step, input)
@@ -432,7 +413,7 @@ const executeStep = (
             return record.pipe(
               Effect.tap(() =>
                 Effect.sync(() => {
-                  active.activeStepKey = undefined
+                  active.activeStep = undefined
                 })
               ),
               Effect.as({ status: "completed" as const, value: exit.value })
@@ -442,11 +423,11 @@ const executeStep = (
             return suspendIfRunning(
               store,
               executionId,
-              active.activeStepKey
+              active.activeStep
             ).pipe(
               Effect.tap(() =>
                 Effect.sync(() => {
-                  active.activeStepKey = undefined
+                  active.activeStep = undefined
                 })
               ),
               Effect.map((result) => ({
@@ -466,7 +447,7 @@ const executeStep = (
           ).pipe(
             Effect.tap(() =>
               Effect.sync(() => {
-                active.activeStepKey = undefined
+                active.activeStep = undefined
               })
             ),
             Effect.as({ status: "failed" as const, value })
@@ -505,7 +486,7 @@ const execute = (
       }
       input = outcome.value
     }
-    active.activeStepKey = undefined
+    active.activeStep = undefined
     return yield* setStatus(store, executionId, "completed", input)
   })
 
@@ -628,8 +609,8 @@ export const make = (
       const deferred = Deferred.makeUnsafe<ExecutionResult>()
       const activeExecution: ActiveExecution = {
         deferred,
-        fiber: undefined,
-        activeStepKey: undefined
+        fiber: Deferred.makeUnsafe(),
+        activeStep: undefined
       }
       active.set(executionId, activeExecution)
       yield* setStatus(store, executionId, "running", execution.value)
@@ -639,7 +620,7 @@ export const make = (
           suspendIfRunning(
             store,
             executionId,
-            activeExecution.activeStepKey
+            activeExecution.activeStep
           ).pipe(
             Effect.tap((result) => Deferred.succeed(deferred, result)),
             Effect.asVoid,
@@ -648,15 +629,14 @@ export const make = (
         ),
         Effect.ensuring(
           Effect.sync(() => {
-            if (active.get(executionId) === activeExecution) {
-              active.delete(executionId)
-            }
+            active.delete(executionId)
           })
         ),
         Effect.tap((result) => Deferred.succeed(deferred, result)),
         Effect.orDie
       )
-      activeExecution.fiber = yield* Effect.forkIn(worker, scope)
+      const fiber = yield* Effect.forkIn(worker, scope)
+      yield* Deferred.succeed(activeExecution.fiber, fiber)
       return yield* Deferred.await(deferred)
     })
 
@@ -671,12 +651,10 @@ export const make = (
       interrupt: (executionId) =>
         Effect.gen(function*() {
           const running = active.get(executionId)
-          const result = yield* abort(store, executionId, running?.activeStepKey)
+          const result = yield* abort(store, executionId, running?.activeStep)
           if (running !== undefined) {
             yield* Deferred.succeed(running.deferred, result)
-            if (running.fiber !== undefined) {
-              yield* Fiber.interrupt(running.fiber)
-            }
+            yield* Deferred.await(running.fiber).pipe(Effect.flatMap(Fiber.interrupt))
           }
         }).pipe(
           Effect.catchTag("EngineUnavailableError", () => Effect.void)

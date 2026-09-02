@@ -2,8 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ProductionModelRequest from "@smthrs/model/ModelRequest"
 import { Cause, Effect, type Exit, Fiber, Option, Result, Stream } from "effect"
 import { decode, type Fixture } from "../src/Fixture.ts"
-import { modelErrorTag, type ModelRequestLike } from "../src/ModelLike.ts"
-import { make, scripted } from "../src/RecordedModel.ts"
+import { modelErrorTag, ModelLike, type ModelRequestLike } from "../src/ModelLike.ts"
+import { layer, make, RecordedModel, scripted } from "../src/RecordedModel.ts"
 import { ReplayHarnessMismatchError, UnscriptedModelError } from "../src/TestingError.ts"
 import journal from "./fixtures/small-run/journal.json" with { type: "json" }
 
@@ -63,8 +63,51 @@ describe("RecordedModel", () => {
   it.effect("dies for an unscripted request", () =>
     Effect.gen(function*() {
       const replay = yield* make(fixture)
-      const exit = yield* Stream.runCollect(replay.model.stream(request("An unrecorded prompt."))).pipe(Effect.exit)
-      expect(defectOf(exit)).toBeInstanceOf(UnscriptedModelError)
+      const attempted = {
+        ...request("An unrecorded prompt."),
+        tools: [{ name: "search", description: "Search", parameters: { type: "object" } }]
+      } satisfies ModelRequestLike
+      const exit = yield* Stream.runCollect(replay.model.stream(attempted)).pipe(Effect.exit)
+      const defect = defectOf(exit)
+      expect(defect).toBeInstanceOf(UnscriptedModelError)
+      expect(defect).toMatchObject({
+        code: "unscripted_model",
+        modelId: "openai:gpt-5-mini",
+        messageCount: 1,
+        toolNames: ["search"]
+      })
+    }))
+
+  it.effect("cannot claim one recorded call twice", () =>
+    Effect.gen(function*() {
+      const replay = yield* make({ calls: [fixture.calls[0]!] })
+      yield* Stream.runDrain(replay.model.stream(fixture.calls[0]!.request))
+      const exit = yield* Stream.runDrain(replay.model.stream(fixture.calls[0]!.request)).pipe(Effect.exit)
+      expect(defectOf(exit)).toMatchObject({
+        code: "unscripted_model",
+        modelId: "openai:gpt-5-mini",
+        messageCount: 1,
+        toolNames: []
+      })
+      expect(yield* replay.controller.unconsumed()).toEqual([])
+    }))
+
+  it.effect("enforces strict fixture order before claiming a call", () =>
+    Effect.gen(function*() {
+      const replay = yield* make(fixture, { strictRequestOrder: true })
+      const outOfOrder = yield* Stream.runDrain(replay.model.stream(fixture.calls[1]!.request)).pipe(Effect.exit)
+      expect(defectOf(outOfOrder)).toMatchObject({
+        code: "unscripted_model",
+        modelId: "openai:gpt-5-mini"
+      })
+      expect(yield* replay.controller.unconsumed()).toEqual(fixture.calls)
+    }))
+
+  it.effect("provides the model and replay controller through its layer", () =>
+    Effect.gen(function*() {
+      const services = yield* Effect.all([ModelLike, RecordedModel]).pipe(Effect.provide(layer(fixture)))
+      yield* Stream.runDrain(services[0].stream(fixture.calls[0]!.request))
+      expect(yield* services[1].unconsumed()).toEqual([fixture.calls[1]])
     }))
 
   it.effect("dies when the fixture model identity differs", () =>

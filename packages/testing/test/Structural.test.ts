@@ -45,9 +45,26 @@ describe("canonical", () => {
     expect(canonical(new Date(Number.NaN))).toContain("Invalid Date")
   })
 
+  it("separates two symbols by description, and names an anonymous one null", () => {
+    expect(canonical(Symbol("left"))).not.toBe(canonical(Symbol("right")))
+    expect(canonical(Symbol())).toContain("null")
+  })
+
   it("keeps a foreign object's constructor name so two classes never look alike", () => {
     class Ticket {}
+    class Invoice {}
     expect(canonical(new Ticket())).toContain("Ticket")
+    expect(same(new Ticket(), new Invoice())).toBe(false)
+  })
+
+  it("falls back to Object for a prototype that names no constructor", () => {
+    // A prototype chain built by hand: not `Object.prototype`, not `null`, and
+    // with no `constructor` to read a name from. Rendering it as `{}` is the
+    // collapse this whole module exists to stop.
+    const nameless = Object.create(Object.create(null) as object) as Record<string, unknown>
+    nameless.a = 1
+    expect(canonical(nameless)).toContain(`"constructor":"Object"`)
+    expect(same(nameless, { a: 1 })).toBe(false)
   })
 
   it("renders a null-prototype record as a plain record", () => {
