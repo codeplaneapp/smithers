@@ -1196,7 +1196,7 @@ const migrate = Command.make("migrate", {
       verifyFormat: Option.getOrUndefined(config.verifyFormat),
       verifyTypecheck: config.verifyTypecheck,
       verifyTest: Option.getOrUndefined(config.verifyTest)
-    }, target)
+    }, target, process.env)
     const root = yield* rootCommand
     const outcome = yield* Effect.result(MigrateCommand.runNode(options, { environment: process.env }))
     if (outcome._tag === "Failure") {

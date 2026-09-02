@@ -13,6 +13,7 @@ import { Cause, Effect, Exit, Logger, Runtime } from "effect"
 import { CliError as EffectCliError, Command } from "effect/unstable/cli"
 import * as CliError from "./CliError.ts"
 import { cli } from "./Command.ts"
+import * as Failure from "./internal/Failure.ts"
 import * as McpServer from "./McpServer.ts"
 import * as NodeControl from "./NodeControl.ts"
 import * as Unsupported from "./Unsupported.ts"
@@ -70,7 +71,7 @@ const report = (error: unknown): void => {
     : NodeDatabase.isUnsupportedDatabase(error)
     ? `${error.code}: ${error.message}`
     : error instanceof Error
-    ? `${errorName(error)}: ${error.message}`
+    ? `${errorName(error)}: ${Failure.sentence(error)}`
     : String(error)
   // A failure sentence is written here rather than logged, so it misses the
   // redacting logger below. It is still a line an operator reads and a

@@ -1037,7 +1037,14 @@ export const layerExecutor = (
     {
       filename: executionDatabasePath(root),
       workspaceRoot,
-      owner: { hostId: "flows-cli" },
+      // The machine's own name, for the same reason `engineDurable` stamps
+      // it: `sameHostPidProbe` compares `hostId` before it trusts a pid, and
+      // a constant made every row in every process table look local. Two
+      // checkouts inside one container and the host they are bind-mounted
+      // from share this file with disjoint pid namespaces, so under a
+      // constant the probe answered about the wrong process table, and a row
+      // whose owner was alive elsewhere read as dead here.
+      owner: { hostId: hostname() },
       // Two terminals over one project are two engine processes over one
       // `.flows/engine.db`, so "one engine process at a time" was never true
       // and a stub answering `false` let each steal the other's running rows

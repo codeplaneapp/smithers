@@ -75,10 +75,15 @@ const failure = (error: unknown): Exit.Exit<never, unknown> => Exit.failCause(Ca
 let entrypoint: Entrypoint
 let previousExitCode: number | string | null | undefined
 
+// `load()` imports the entrypoint, which pulls the whole command tree through
+// tsx under coverage instrumentation. On a loaded host that import alone can
+// outrun the suite's 30 s hook budget, which then reports eleven skipped cases
+// rather than a real failure. The budget here is for the import, not for the
+// assertions.
 beforeAll(async () => {
   previousExitCode = process.exitCode
   entrypoint = await load()
-})
+}, 120_000)
 
 afterAll(() => {
   process.exitCode = previousExitCode

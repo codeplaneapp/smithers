@@ -430,6 +430,162 @@ describe("the envelope", () => {
   })
 })
 
+/**
+ * The answers each tool gives when its arguments are good and the control
+ * plane has something to say.
+ *
+ * The cases above pin the refusals: a missing argument, an undeclared member,
+ * a status the schema does not admit. What none of them reach is the body each
+ * tool runs once it is past them, which is the half an agent actually reads.
+ */
+describe("what each tool answers on the path through", () => {
+  const demoFlow = {
+    flowId: "demo/ship",
+    description: "The fixture flow these cases plan and launch",
+    deployClass: false,
+    envelope: { capabilities: [], flows: [], budget: {} }
+  } as const
+
+  const projectControl = TestControl.layer({ now: () => 0, flows: [demoFlow] })
+
+  const event = (sequence: number, kind: string, payload: unknown) => ({
+    sequence,
+    kind,
+    runId: "run-1",
+    occurredAt: sequence * 1000,
+    payload
+  })
+
+  const history = [
+    event(1, "control.run.started", null),
+    event(2, "control.agent.cell-call-started", { flowName: "read", input: { path: "a.ts" } }),
+    event(3, "control.agent.cell-call-settled", { flowName: "read", outcome: "success", value: "contents of a" })
+  ]
+
+  /** A plane holding one running run with a fixed, finite history. */
+  const runControl = (
+    status = "running",
+    events: ReadonlyArray<unknown> = history
+  ) =>
+    Layer.effect(
+      ControlService.Control,
+      Effect.map(ControlService.Control, (service) =>
+        ControlService.make({
+          ...service,
+          list: (request) =>
+            request._tag === "runs"
+              ? Effect.succeed(
+                {
+                  _tag: "runs",
+                  items: [{ runId: "run-1", flowId: "demo/ship", status, createdAt: 0, updatedAt: 0 }]
+                } as never
+              )
+              : service.list(request),
+          watch: () => Stream.fromIterable(events as never)
+        }))
+    ).pipe(Layer.provide(projectControl))
+
+  it("plans, approves for the run, and launches a project flow", async () => {
+    const result = await callWith(projectControl, find("run_workflow"), {
+      flowId: "demo/ship",
+      input: { target: "main" }
+    }) as { readonly ok: true; readonly data: { readonly runId: string } }
+
+    // One call does all three steps, because an agent that could plan without
+    // approving would leave a plan nobody can launch.
+    expect(result.ok).toBe(true)
+    expect(result.data.runId).toBeTypeOf("string")
+  })
+
+  it("answers a watch with the run's status and the events past the cursor", async () => {
+    const whole = await callWith(runControl(), find("watch_run"), { runId: "run-1" }) as {
+      readonly data: { readonly status: string; readonly events: ReadonlyArray<unknown>; readonly sequence: number }
+    }
+    const tail = await callWith(runControl(), find("watch_run"), { runId: "run-1", afterSequence: 2 }) as {
+      readonly data: { readonly events: ReadonlyArray<{ readonly sequence: number }>; readonly sequence: number }
+    }
+
+    expect(whole.data).toMatchObject({ status: "running", sequence: 3 })
+    expect(whole.data.events).toHaveLength(3)
+    // The cursor is exclusive, and the reported sequence is where the next
+    // call should resume from rather than where this one started.
+    expect(tail.data.events.map((one) => one.sequence)).toEqual([3])
+    expect(tail.data.sequence).toBe(3)
+  })
+
+  it("reads the whole event history, the transcript, and one node's output", async () => {
+    const control = runControl()
+
+    const events = await callWith(control, find("get_run_events"), { runId: "run-1" }) as {
+      readonly data: ReadonlyArray<unknown>
+    }
+    const transcript = await callWith(control, find("get_chat_transcript"), { runId: "run-1" }) as {
+      readonly data: { readonly runId: string; readonly transcript: string }
+    }
+    const node = await callWith(control, find("get_node_detail"), { runId: "run-1", nodeId: "read#1" }) as {
+      readonly data: { readonly nodeId: string; readonly value: unknown }
+    }
+
+    expect(events.data).toHaveLength(3)
+    expect(transcript.data.runId).toBe("run-1")
+    expect(transcript.data.transcript).toBeTypeOf("string")
+    expect(node.data).toMatchObject({ nodeId: "read#1", value: "contents of a" })
+  })
+
+  it("explains a run with its status, digest, and the same card `smithers status` prints", async () => {
+    const explained = await callWith(runControl(), find("explain_run"), { runId: "run-1" }) as {
+      readonly data: { readonly runId: string; readonly status: string; readonly card: string }
+    }
+
+    expect(explained.data).toMatchObject({ runId: "run-1", status: "running" })
+    expect(explained.data.card).toContain("run-1")
+  })
+
+  it("lists a parked run with the payload that releases it, and an empty list when none is parked", async () => {
+    const parked = await callWith(
+      runControl("waiting-approval"),
+      find("list_pending_approvals")
+    ) as { readonly data: ReadonlyArray<{ readonly runId: string; readonly flowId: string }> }
+    const none = await callWith(projectControl, find("list_pending_approvals")) as {
+      readonly data: ReadonlyArray<unknown>
+    }
+
+    expect(parked.data).toHaveLength(1)
+    expect(parked.data[0]).toMatchObject({ runId: "run-1", flowId: "demo/ship" })
+    expect(none.data).toEqual([])
+  })
+
+  it("narrows the pending-approval listing to one run when the caller names it", async () => {
+    const only = await callWith(runControl("waiting-approval"), find("list_pending_approvals"), {
+      runId: "run-1"
+    }) as { readonly data: ReadonlyArray<{ readonly runId: string }> }
+
+    expect(only.data.map((entry) => entry.runId)).toEqual(["run-1"])
+  })
+})
+
+describe("the mode flags read straight off argv", () => {
+  it("selects the server on --mcp and on nothing else", () => {
+    expect(McpServer.requested(["--mcp"])).toBe(true)
+    expect(McpServer.requested(["ps", "--json"])).toBe(false)
+  })
+
+  it("reads the surface, the allowlist, and read-only from either flag spelling", () => {
+    expect(McpServer.optionsFromArguments(["--mcp", "--surface", "raw", "--read-only"]))
+      .toEqual({ surface: "raw", readOnly: true })
+    expect(McpServer.optionsFromArguments(["--mcp", "--surface=both", "--allowed-tools=get_run, list_runs ,"]))
+      .toEqual({ surface: "both", allowedTools: ["get_run", "list_runs"], readOnly: false })
+  })
+
+  it("falls back to the semantic surface for a value it does not know", () => {
+    // An unreadable surface is not a reason to widen one: the default is the
+    // narrowest of the three, which is what a client that sent nothing gets.
+    expect(McpServer.optionsFromArguments(["--mcp", "--surface", "everything"]))
+      .toEqual({ surface: "semantic", readOnly: false })
+    expect(McpServer.optionsFromArguments([])).toEqual({ surface: "semantic", readOnly: false })
+  })
+})
+
 describe("the JSON-RPC surface", () => {
   const session = McpServer.tools()
   const respond = (request: unknown) =>
@@ -640,7 +796,20 @@ describe("a real stdio round trip", () => {
             server: "smithers",
             command: process.execPath,
             args: ["--no-warnings", entry, "--mcp"],
-            cwd
+            cwd,
+            // The child boots the whole command tree through tsx before it can
+            // answer, and the client's 10 s default is a boot budget this case
+            // never meant to assert. Kept inside the case's own 60 s budget, so
+            // a server that truly never answers still fails the run.
+            //
+            // The gap this leaves is deliberate and unclosed: a `--mcp` boot
+            // that regressed past the shipped default would still pass here. A
+            // wall-clock assertion is not the way to close it — a
+            // coverage-instrumented tsx boot on a loaded host legitimately
+            // exceeds 10 s while the shipped binary, which runs `dist/esm`,
+            // does not. What this case can pin is the default a real client
+            // arrives with, so a change to that number is never silent.
+            handshakeTimeoutMs: 45_000
           })
           const supported = yield* client.callTool("list_workflows", {})
           const unsupported = yield* client.callTool("time_travel", {})
@@ -649,6 +818,7 @@ describe("a real stdio round trip", () => {
       ).pipe(Effect.provide(NodeServices.layer), Effect.orDie)
     )
 
+    expect(McpClient.defaultHandshakeTimeoutMs).toBe(10_000)
     expect(result.tools).toHaveLength(21)
     expect(result.tools).toContain("list_workflows")
     expect(result.tools).toContain("ask_human")

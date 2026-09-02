@@ -21,10 +21,10 @@ export default defineConfig({
       // less than one point for branches that depend on the host (`jj` on PATH
       // and provider keys exported), while deleted coverage still fails.
       thresholds: {
-        branches: 80,
-        functions: 83,
-        lines: 86,
-        statements: 85
+        branches: 85,
+        functions: 87,
+        lines: 90,
+        statements: 89
       }
     }
   }

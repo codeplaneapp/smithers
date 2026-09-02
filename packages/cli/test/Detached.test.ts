@@ -8,7 +8,7 @@
  * failed launch with its output attached, and a child that is alive but silent
  * past the grace window is terminated rather than left running.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -217,10 +217,11 @@ describe("launching", () => {
     expect(readFileSync(launched.logFile, "utf8")).toContain("run {\"plan\":1} --remote https://control.test")
   }, 30_000)
 
-  it("overwrites a previous run's log when the run id collides", async () => {
+  it("supersedes a previous run's log instead of destroying it when the run id collides", async () => {
     const root = project()
     const previous = Project.logFile(root, "run-collision")
-    mkdirSync(Project.logDirectory(root), { recursive: true })
+    const directory = Project.logDirectory(root)
+    mkdirSync(directory, { recursive: true })
     writeFileSync(previous, "previous run output\n", "utf8")
     const entry = child(
       `process.stderr.write("new run output\\n")
@@ -230,9 +231,18 @@ describe("launching", () => {
     const result = await Detached.launch({ root, payload: "{}", entry, intervalMs: 10 })
 
     expect(Detached.isLaunched(result)).toBe(true)
+    // The receipt still names the canonical path, so `up -d` reports the same
+    // file it always did and the new run's output is the whole of it.
     const log = readFileSync(previous, "utf8")
     expect(log).toContain("new run output")
     expect(log).not.toContain("previous run output")
+    // The earlier run's output survives beside it. Renaming over the path was
+    // silent, unrecoverable evidence loss: the log of a run an operator is
+    // still diagnosing is the one thing `up -d` writes that nothing else
+    // holds a copy of.
+    const superseded = readdirSync(directory).filter((name) => name.startsWith("run-collision.superseded-"))
+    expect(superseded).toHaveLength(1)
+    expect(readFileSync(join(directory, superseded[0]!), "utf8")).toContain("previous run output")
   }, 30_000)
 
   it("defaults the admission window to thirty seconds", () => {

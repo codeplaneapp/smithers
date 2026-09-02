@@ -11,6 +11,7 @@ import { NodeServices } from "@effect/platform-node"
 import { Control as ControlService, ControlError, type ControlSchema } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
+import type * as Namespace from "@smthrs/memory/Namespace"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { Command } from "effect/unstable/cli"
@@ -240,6 +241,15 @@ describe("presentation flags", () => {
 })
 
 describe("memory namespace parsing", () => {
+  // The store admits a `"kind:id"` string as well as the structured value, but
+  // every memory verb decodes the flag through the public schema before the
+  // store sees it. These fakes assert that guarantee instead of repeating the
+  // parse, so a verb that stopped decoding fails here loudly.
+  const asNamespace = (input: MemoryStore.NamespaceInput): Namespace.Namespace => {
+    if (typeof input === "string") throw new Error(`the CLI passed an undecoded namespace: ${input}`)
+    return input
+  }
+
   const verb = (name: "list" | "get" | "set" | "rm", namespace: string): ReadonlyArray<string> => {
     const prefix = ["memory", name, "--namespace", namespace]
     if (name === "list") return prefix
@@ -262,15 +272,15 @@ describe("memory namespace parsing", () => {
   )
 
   it("preserves one Unicode namespace identity across all four verbs", async () => {
-    const seen: Array<MemoryStore.NamespaceInput> = []
+    const seen: Array<Namespace.Namespace> = []
     const namespace = { kind: "user" as const, id: "álîçé-用户-😀" }
     const memory = MemoryStore.layerNoop({
-      listFacts: (input) => Effect.sync(() => (seen.push(input.namespace), [])),
+      listFacts: (input) => Effect.sync(() => (seen.push(asNamespace(input.namespace)), [])),
       getFact: (input) =>
         Effect.sync(() => {
-          seen.push(input.namespace)
+          seen.push(asNamespace(input.namespace))
           return {
-            namespace: input.namespace,
+            namespace: asNamespace(input.namespace),
             key: input.key,
             value: "found",
             provenance: {},
@@ -278,8 +288,8 @@ describe("memory namespace parsing", () => {
             updatedAtMs: 0
           }
         }),
-      putFact: (input) => Effect.sync(() => void seen.push(input.namespace)),
-      deleteFact: (input) => Effect.sync(() => (seen.push(input.namespace), true))
+      putFact: (input) => Effect.sync(() => void seen.push(asNamespace(input.namespace))),
+      deleteFact: (input) => Effect.sync(() => (seen.push(asNamespace(input.namespace)), true))
     })
     await Effect.runPromise(
       Effect.forEach(["list", "get", "set", "rm"] as const, (name) => runCommand(verb(name, `user:${namespace.id}`)))
@@ -295,12 +305,15 @@ describe("memory namespace parsing", () => {
   it("never lets an unknown kind address a valid user's record", async () => {
     const facts = new Map<string, MemoryStore.Fact>()
     let reads = 0
-    const keyOf = (input: MemoryStore.GetFactInput) => `${input.namespace.kind}:${input.namespace.id}:${input.key}`
+    const keyOf = (input: MemoryStore.GetFactInput) => {
+      const namespace = asNamespace(input.namespace)
+      return `${namespace.kind}:${namespace.id}:${input.key}`
+    }
     const memory = MemoryStore.layerNoop({
       putFact: (input) =>
         Effect.sync(() => {
           facts.set(keyOf(input), {
-            namespace: input.namespace,
+            namespace: asNamespace(input.namespace),
             key: input.key,
             value: input.value,
             provenance: input.provenance,

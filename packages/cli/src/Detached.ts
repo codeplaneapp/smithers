@@ -291,6 +291,13 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
       // problem, not the launcher's.
       if (runId !== undefined) {
         const file = Project.logFile(options.root, runId)
+        // A run id can arrive at a path that already holds a log — a resumed
+        // run keeps its id, and so does anything that replays one. Renaming
+        // straight over it destroyed the earlier run's only record. Move it
+        // aside under this launch's nonce instead: the receipt still names the
+        // canonical path, and nothing an operator may still be reading is
+        // deleted to get there.
+        if (existsSync(file)) renameSync(file, join(directory, `${runId}.superseded-${nonce}.log`))
         renameSync(pending, file)
         return { runId, logFile: file, pid: child.pid }
       }
