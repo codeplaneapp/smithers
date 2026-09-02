@@ -6,6 +6,7 @@
  *
  * @since 0.0.0
  */
+import * as Index from "./internal/effects.ts"
 
 /**
  * A normalized description of the resources a flow or step may read and
@@ -75,55 +76,6 @@ export const make = (input: MakeOptions): Declaration => ({
   ...(input.tier === undefined ? {} : { tier: input.tier })
 })
 
-const hasDotSegment = (path: string): boolean => path.split("/").some((segment) => segment === "." || segment === "..")
-
-/**
- * Whether an entry is a pattern. {@link covers} treats only a trailing `*` as
- * one; every other entry matches itself alone.
- */
-const isGlob = (entry: string): boolean => entry.endsWith("*")
-
-/**
- * The string prefix a glob entry matches by: everything for `*` and `**`,
- * `prefix/` for `prefix/**`, and `prefix` for `prefix*`. This is the whole
- * pattern grammar, so a sorted path list can answer "which paths does this
- * glob cover" from one binary search.
- */
-const globPrefix = (glob: string): string =>
-  glob === "*" || glob === "**" ? "" : glob.endsWith("/**") ? glob.slice(0, -2) : glob.slice(0, -1)
-
-/**
- * Returns the paths in code-unit order, reusing the array {@link make} already
- * sorted and copying only a caller-assembled declaration.
- */
-const sorted = (paths: ReadonlyArray<string>): ReadonlyArray<string> => {
-  for (let index = 1; index < paths.length; index++) {
-    if (paths[index - 1]! > paths[index]!) return [...paths].sort()
-  }
-  return paths
-}
-
-/**
- * Returns every entry of a sorted list that starts with `prefix`. Those
- * entries are contiguous in code-unit order, so the block is found by binary
- * search and the cost is the number of matches rather than the list length.
- */
-const prefixed = (paths: ReadonlyArray<string>, prefix: string): ReadonlyArray<string> => {
-  let low = 0
-  let high = paths.length
-  while (low < high) {
-    const middle = (low + high) >>> 1
-    if (paths[middle]! < prefix) {
-      low = middle + 1
-    } else {
-      high = middle
-    }
-  }
-  let end = low
-  while (end < paths.length && paths[end]!.startsWith(prefix)) end++
-  return paths.slice(low, end)
-}
-
 /**
  * Checks whether `path` is covered by an envelope entry.
  *
@@ -140,28 +92,20 @@ const prefixed = (paths: ReadonlyArray<string>, prefix: string): ReadonlyArray<s
  * @slop
  */
 export const covers = (envelope: string, path: string): boolean => {
-  if (hasDotSegment(path)) return false
-  return envelope === path || (isGlob(envelope) && path.startsWith(globPrefix(envelope)))
+  if (Index.hasDotSegment(path)) return false
+  return envelope === path || (Index.isGlob(envelope) && path.startsWith(Index.globPrefix(envelope)))
 }
 
 /**
- * Returns the paths no envelope entry covers. Exact entries are indexed in a
- * set and only the glob entries are scanned per path, so a wide literal
- * envelope costs one lookup per path instead of one comparison per pair.
+ * Returns the paths no envelope entry covers, in code-unit order. The union of
+ * both lists is indexed once, so each path is read a bounded number of times
+ * and the check itself is a merge of two rank lists plus one interval walk per
+ * covering envelope pattern.
  */
 const outside = (envelope: ReadonlyArray<string>, paths: ReadonlyArray<string>): ReadonlyArray<string> => {
-  const exact = new Set<string>()
-  const prefixes: Array<string> = []
-  for (const entry of envelope) {
-    if (isGlob(entry)) {
-      prefixes.push(globPrefix(entry))
-    } else {
-      exact.add(entry)
-    }
-  }
-  return paths.filter((path) =>
-    hasDotSegment(path) || (!exact.has(path) && !prefixes.some((prefix) => path.startsWith(prefix)))
-  )
+  const indexed = Index.indexPaths([envelope, paths])
+  return Index.outsideRanks(indexed, Index.rankPaths(indexed, envelope), Index.rankPaths(indexed, paths))
+    .map((rank) => indexed.paths[rank]!)
 }
 
 /**
@@ -204,44 +148,21 @@ export const narrow = (envelope: Declaration, step: Declaration): NarrowResult =
  * still escapes no envelope, but two writers naming the same unnormalized path
  * are still detected as writing the same resource.
  *
- * Exact paths are matched through a set and the paths a glob covers are found
- * by binary search over the sorted declaration, so the cost is linear in the
- * two declarations plus the matches rather than their product.
+ * The union of both declarations is indexed once: the distinct paths are
+ * sorted, each is scanned once for a dot segment, and each pattern's prefix
+ * is located by binary search. Exact paths then match through a merge of two
+ * rank lists and each covering pattern enumerates the other declaration's
+ * ranks inside its interval, so the cost is linear in the two declarations
+ * plus the matches, whatever the paths' lengths or how many patterns nest.
  *
  * @category analysis
  * @since 0.0.0
  * @slop
  */
 export const overlaps = (a: Declaration, b: Declaration): ReadonlyArray<string> => {
-  const matches: Array<string> = []
-  const leftSorted = sorted(a.writes)
-  const rightSorted = sorted(b.writes)
-  const rightPaths = new Set(b.writes)
-  // A pair matches from the left when `a`'s entry is the same path or a glob
-  // covering `b`'s entry. An exact entry can only equal, so it costs one set
-  // lookup; a glob enumerates the block of `b`'s paths under its prefix.
-  for (const left of a.writes) {
-    if (isGlob(left)) {
-      for (const right of prefixed(rightSorted, globPrefix(left))) {
-        if (left === right || !hasDotSegment(right)) matches.push(right)
-      }
-    } else if (rightPaths.has(left)) {
-      matches.push(left)
-    }
-  }
-  // Otherwise the pair matches from the right when `b`'s glob covers `a`'s
-  // entry. `b`'s exact entries were settled above, so only its globs are
-  // enumerated, each over the block of `a`'s paths under its prefix.
-  for (const right of b.writes) {
-    if (!isGlob(right)) continue
-    const rightDotted = hasDotSegment(right)
-    for (const left of prefixed(leftSorted, globPrefix(right))) {
-      if (left === right || hasDotSegment(left)) continue
-      if (isGlob(left) && !rightDotted && right.startsWith(globPrefix(left))) continue
-      matches.push(left)
-    }
-  }
-  return normalize(matches)
+  const indexed = Index.indexPaths([a.writes, b.writes])
+  return Index.overlapRanks(indexed, Index.rankPaths(indexed, a.writes), Index.rankPaths(indexed, b.writes))
+    .map((rank) => indexed.paths[rank]!)
 }
 
 /**

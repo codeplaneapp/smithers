@@ -10,6 +10,7 @@ import { Chunk, Context, Option, Result, Schema } from "effect"
 import * as Annotations from "./Annotations.ts"
 import * as Effects from "./Effects.ts"
 import * as Flow from "./Flow.ts"
+import * as EffectIndex from "./internal/effects.ts"
 import * as internal from "./internal/node.ts"
 import type { NodeAst } from "./internal/node.ts"
 import type * as KeyMaterial from "./KeyMaterial.ts"
@@ -231,9 +232,9 @@ export type GraphBuildErrorCode = typeof GraphBuildErrorCode.Type
  * `capability_outside_grant`, and `invalid_node`. For `plan_too_large` it
  * names the node whose admission crossed the limit: the node itself, the
  * target of the edge, the second writer of the conflict, or the node whose
- * effect declaration listed too many paths. `nodes` is populated for
- * `write_conflict`. `paths` carries the offending value path for
- * `payload_too_large`.
+ * effect declaration listed too many paths, too many patterns, or an
+ * over-long path. `nodes` is populated for `write_conflict`. `paths` carries
+ * the offending value path for `payload_too_large`.
  *
  * @category errors
  * @since 0.0.0
@@ -359,6 +360,36 @@ export const maximumEffectPaths = 1024
  */
 export const maximumPlanEffectPaths = 65_536
 
+/**
+ * Maximum length, in UTF-16 code units, of one effect path {@link build}
+ * admits before it refuses the plan with `plan_too_large`. 4096 is `PATH_MAX`
+ * on Linux, the longest path a supported host can open, so no path that names
+ * a file is refused. Every per-character cost of a build is bounded by it:
+ * the one dot-segment scan each path gets, the comparisons that sort the
+ * distinct paths, and the comparisons that locate each pattern's prefix. The
+ * length is read before any character is, so an over-long path costs one
+ * property read.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumEffectPathLength = 4096
+
+/**
+ * Maximum number of patterns, entries ending in `*`, one read list or one
+ * write list of an effect declaration may carry before {@link build} refuses
+ * the plan with `plan_too_large`. Matching two declarations costs their
+ * combined length plus one interval search per pattern, so 128 keeps the
+ * pattern term of a comparison, 128 searches of at most 16 steps each, no
+ * larger than the linear term of two declarations at {@link maximumEffectPaths}
+ * while still letting a declaration name a subtree per package of a large
+ * monorepo.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumEffectGlobs = 128
+
 interface GraphImpl {
   readonly nodes: ReadonlyArray<InternalNode>
   readonly edges: ReadonlyArray<InternalEdge>
@@ -406,22 +437,32 @@ const annotationProjection = (
  * `limit`. A real array is refused by its length before a member is read; any
  * other iterable is copied one path at a time and refused as soon as it
  * exceeds the limit, so a caller-assembled declaration cannot dodge the bound
- * by hiding its size from `length`.
+ * by hiding its size from `length`. Each path is then refused by its length
+ * before any character is read, and by the count of patterns the list has
+ * carried so far, so an over-long path or a pattern past the limit costs one
+ * property read.
  */
 const copyPaths = (
   paths: ReadonlyArray<string>,
   limit: number,
   refuse: () => GraphBuildError
 ): Array<string> => {
+  const copy: Array<string> = []
+  let globs = 0
+  const admit = (path: string): void => {
+    if (path.length > maximumEffectPathLength) throw refuse()
+    if (EffectIndex.isGlob(path) && ++globs > maximumEffectGlobs) throw refuse()
+    copy.push(path)
+  }
   if (Array.isArray(paths)) {
     const length = paths.length
     if (length > limit) throw refuse()
-    return Array.from({ length }, (_, index) => paths[index]!)
+    for (let index = 0; index < length; index++) admit(paths[index]!)
+    return copy
   }
-  const copy: Array<string> = []
   for (const path of paths) {
     if (copy.length >= limit) throw refuse()
-    copy.push(path)
+    admit(path)
   }
   return copy
 }
@@ -1718,17 +1759,62 @@ export const build = (
       ]
     }
   }
-  const reachable = (from: string, to: string): boolean => {
-    const pending = [from]
-    const seen = new Set<string>()
-    while (pending.length > 0) {
-      const current = pending.pop()!
-      if (current === to) return true
-      if (seen.has(current)) continue
-      seen.add(current)
-      for (const edge of edgesFrom(current)) pending.push(edge.to)
+  // Reachability is answered from a transitive closure over node ids, one bit
+  // per id, computed once from the structural edges. Ids are structural, so
+  // every edge points at an ancestor or at a continuation visited later and
+  // the id graph is acyclic: a node's closure is the union of its targets'
+  // closures, taken in depth-first postorder. A conflict edge added below
+  // joins its target's closure into its source's in place. That keeps every
+  // later query exact, because a work node visited later never reaches one
+  // visited earlier, so the only closure a new edge changes is its source's,
+  // and two nodes that share an id share that entry.
+  const idIndex = new Map<string, number>()
+  for (const node of observed) {
+    if (!idIndex.has(node.id)) idIndex.set(node.id, idIndex.size)
+  }
+  const ids = [...idIndex.keys()]
+  const reachWords = Math.ceil(ids.length / 32)
+  const reach = new Uint32Array(ids.length * reachWords)
+  const joinClosure = (from: number, to: number): void => {
+    const source = from * reachWords
+    const target = to * reachWords
+    for (let word = 0; word < reachWords; word++) {
+      reach[source + word] = reach[source + word]! | reach[target + word]!
     }
-    return false
+    reach[source + (to >>> 5)] = reach[source + (to >>> 5)]! | (1 << (to & 31))
+  }
+  const reachable = (from: number, to: number): boolean =>
+    (reach[from * reachWords + (to >>> 5)]! & (1 << (to & 31))) !== 0
+  {
+    const targets = ids.map((id) => edgesFrom(id).map((edge) => idIndex.get(edge.to)!))
+    const state = new Uint8Array(ids.length)
+    const stack: Array<number> = []
+    const cursor: Array<number> = []
+    for (let start = 0; start < ids.length; start++) {
+      if (state[start] !== 0) continue
+      state[start] = 1
+      stack.push(start)
+      cursor.push(0)
+      while (stack.length > 0) {
+        const top = stack.length - 1
+        const current = stack[top]!
+        const next = cursor[top]!
+        if (next < targets[current]!.length) {
+          cursor[top] = next + 1
+          const target = targets[current]![next]!
+          if (state[target] === 0) {
+            state[target] = 1
+            stack.push(target)
+            cursor.push(0)
+          }
+          continue
+        }
+        state[current] = 2
+        for (const target of targets[current]!) joinClosure(current, target)
+        stack.pop()
+        cursor.pop()
+      }
+    }
   }
 
   const conflicts: Array<Conflict> = []
@@ -1742,78 +1828,109 @@ export const build = (
     (node): node is InternalNode & { effectiveEffects: Effects.Declaration } =>
       workNodes.has(node) && node.effectiveEffects !== undefined
   )
-  // `Effects.covers` treats only a path ending in `*` as a pattern, so a writer
-  // whose every path is literal can overlap only a writer naming one of the
-  // same strings. Literal writers are bucketed by path and only glob writers
-  // are compared against every later writer; the pair order of the plain
-  // nested loop is preserved so conflict indices and edges do not move.
-  const glob = work.map((node) => node.effectiveEffects.writes.some((path) => path.endsWith("*")))
-  const globWriters: Array<number> = []
-  const literalWriters = new Map<string, Array<number>>()
-  work.forEach((node, index) => {
-    if (glob[index]) {
-      globWriters.push(index)
-      return
+  // Every pair that can overlap is found from one index of every writer's
+  // write paths. Two writers naming the same string share that path's bucket,
+  // and a writer's covering pattern enumerates the ranks under its prefix and
+  // the writers holding them, so the work is the index plus one step per
+  // (pattern, covered path, holder) triple rather than one comparison per
+  // pair of writers. A pair is marked once, in a bitset row per earlier
+  // writer, so the pairs are visited in the order of the plain nested loop
+  // and conflict indices and edges do not move. Only a marked pair overlaps,
+  // and a marked pair that is not already ordered always does, so the overlap
+  // itself is computed at most once per recorded conflict.
+  const writers = work.length
+  const indexed = EffectIndex.indexPaths(work.map((node) => node.effectiveEffects.writes))
+  const ranked = work.map((node) => EffectIndex.rankPaths(indexed, node.effectiveEffects.writes))
+  const rankCount = indexed.paths.length
+  // The writers holding each rank, ascending, in compressed-row form.
+  const bucketStart = new Int32Array(rankCount + 1)
+  for (const { ranks } of ranked) {
+    for (const rank of ranks) bucketStart[rank + 1] = bucketStart[rank + 1]! + 1
+  }
+  for (let rank = 0; rank < rankCount; rank++) {
+    bucketStart[rank + 1] = bucketStart[rank + 1]! + bucketStart[rank]!
+  }
+  const bucket = new Int32Array(bucketStart[rankCount]!)
+  const fill = bucketStart.slice(0, rankCount)
+  ranked.forEach(({ ranks }, writer) => {
+    for (const rank of ranks) {
+      const at = fill[rank]!
+      bucket[at] = writer
+      fill[rank] = at + 1
     }
-    for (const path of node.effectiveEffects.writes) {
-      const bucket = literalWriters.get(path)
-      if (bucket === undefined) {
-        literalWriters.set(path, [index])
-      } else {
-        bucket.push(index)
+  })
+  const pairWords = Math.ceil(writers / 32)
+  const pairs = new Uint32Array(writers * pairWords)
+  const mark = (left: number, right: number): void => {
+    const position = left * pairWords + (right >>> 5)
+    pairs[position] = pairs[position]! | (1 << (right & 31))
+  }
+  for (let rank = 0; rank < rankCount; rank++) {
+    const end = bucketStart[rank + 1]!
+    for (let first = bucketStart[rank]!; first < end; first++) {
+      for (let second = first + 1; second < end; second++) mark(bucket[first]!, bucket[second]!)
+    }
+  }
+  ranked.forEach(({ globs }, writer) => {
+    for (const glob of globs) {
+      const high = indexed.high[glob]!
+      for (let rank = indexed.low[glob]!; rank < high; rank++) {
+        if (indexed.dotted[rank] === 1) continue
+        const end = bucketStart[rank + 1]!
+        for (let position = bucketStart[rank]!; position < end; position++) {
+          const holder = bucket[position]!
+          if (holder < writer) {
+            mark(holder, writer)
+          } else if (holder > writer) {
+            mark(writer, holder)
+          }
+        }
       }
     }
   })
-  const candidates = (left: number): ReadonlyArray<number> => {
-    if (glob[left]) {
-      const every: Array<number> = []
-      for (let right = left + 1; right < work.length; right++) every.push(right)
-      return every
-    }
-    const found = new Set<number>()
-    for (const right of globWriters) {
-      if (right > left) found.add(right)
-    }
-    for (const path of work[left]!.effectiveEffects.writes) {
-      for (const right of literalWriters.get(path)!) {
-        if (right > left) found.add(right)
-      }
-    }
-    return [...found].sort((first, second) => first - second)
-  }
-  for (let left = 0; left < work.length; left++) {
+  for (let left = 0; left < writers; left++) {
     const a = work[left]!
-    for (const right of candidates(left)) {
-      const b = work[right]!
-      const aEffects = a.effectiveEffects
-      const bEffects = b.effectiveEffects
-      const paths = Effects.overlaps(aEffects, bEffects)
-      if (paths.length === 0) continue
-      if (reachable(a.id, b.id) || reachable(b.id, a.id)) continue
-      if (conflicts.length >= maximumGraphConflicts) throw planTooLarge(b.id)
-      const selected = strategy(aEffects, bEffects)
-      conflicts.push({ nodes: [a.id, b.id], paths, strategy: selected })
-      if (selected === "fail") {
-        observedDiagnostics.push(
-          new GraphBuildError({ code: "write_conflict", paths: [...paths], nodes: [a.id, b.id] })
-        )
-      }
-      if (selected === "serialize") {
-        addDependency(b, a.id, "conflict")
-      }
-      if (selected === "lane") {
-        for (const node of [a, b]) {
-          if (node.lane !== undefined) continue
-          const lane = { id: `lane:${node.id}` }
-          node.lane = lane
-          node.annotations = { ...node.annotations, lane }
+    const aId = idIndex.get(a.id)!
+    const row = left * pairWords
+    for (let word = 0; word < pairWords; word++) {
+      let bits = pairs[row + word]!
+      while (bits !== 0) {
+        const lowest = bits & -bits
+        bits ^= lowest
+        const right = word * 32 + 31 - Math.clz32(lowest)
+        const b = work[right]!
+        const bId = idIndex.get(b.id)!
+        if (aId === bId || reachable(aId, bId) || reachable(bId, aId)) continue
+        if (conflicts.length >= maximumGraphConflicts) throw planTooLarge(b.id)
+        const paths = EffectIndex.overlapRanks(indexed, ranked[left]!, ranked[right]!)
+          .map((rank) => indexed.paths[rank]!)
+        const aEffects = a.effectiveEffects
+        const bEffects = b.effectiveEffects
+        const selected = strategy(aEffects, bEffects)
+        conflicts.push({ nodes: [a.id, b.id], paths, strategy: selected })
+        if (selected === "fail") {
+          observedDiagnostics.push(
+            new GraphBuildError({ code: "write_conflict", paths: [...paths], nodes: [a.id, b.id] })
+          )
         }
-        laneConflicts.push({
-          conflictIndex: conflicts.length - 1,
-          left: a,
-          right: b,
-          paths
-        })
+        if (selected === "serialize") {
+          addDependency(b, a.id, "conflict")
+          joinClosure(aId, bId)
+        }
+        if (selected === "lane") {
+          for (const node of [a, b]) {
+            if (node.lane !== undefined) continue
+            const lane = { id: `lane:${node.id}` }
+            node.lane = lane
+            node.annotations = { ...node.annotations, lane }
+          }
+          laneConflicts.push({
+            conflictIndex: conflicts.length - 1,
+            left: a,
+            right: b,
+            paths
+          })
+        }
       }
     }
   }
