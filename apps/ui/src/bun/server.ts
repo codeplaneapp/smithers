@@ -145,6 +145,86 @@ export interface CloudWsBridge {
   readonly token: string | undefined
   upstream: WebSocket | undefined
   readonly pending: Array<string | Buffer>
+  /** True once the upstream handshake completed; a close before it is a refusal the tunnel classifies. */
+  opened: boolean
+}
+
+/*
+ * plue's pre-upgrade refusals as the close codes the renderer sees (ADR 0002
+ * "Terminal attach contract"): the renderer stops redialing on every one of
+ * them. 425 is plue's "session still provisioning", the same fact as 409.
+ */
+const CLOUD_WS_REFUSAL_CODES: Readonly<Record<number, number>> = {
+  401: 4401,
+  403: 4403,
+  404: 4404,
+  409: 4409,
+  425: 4409,
+  429: 4429
+}
+
+const CLOUD_WS_REFUSAL_REASONS: Readonly<Record<number, string>> = {
+  4401: "cloud sign-in required",
+  4403: "forbidden",
+  4404: "session gone",
+  4409: "session not running",
+  4429: "rate limited"
+}
+
+/** A WebSocket close reason is at most 123 UTF-8 bytes; anything longer is refused by the socket, so it is cut here. */
+const closeReasonOf = (text: string): string => {
+  const encoder = new TextEncoder()
+  let reason = text.replace(/\s+/g, " ").trim()
+  while (encoder.encode(reason).byteLength > 123) reason = reason.slice(0, -1)
+  return reason
+}
+
+/** The headers the tunnel dials the cloud terminal with: the bearer, and an Origin only where an environment still enforces one. */
+const cloudWsUpstreamHeaders = (token: string | undefined): Record<string, string> => {
+  const headers: Record<string, string> = {}
+  // plue#475: the terminal upgrade skips the Origin check for Bearer principals, so a desktop app sends none — SMITHERS_CLOUD_WS_ORIGIN is the knob for an environment that still enforces it.
+  const origin = Bun.env.SMITHERS_CLOUD_WS_ORIGIN
+  if (origin !== undefined && origin !== "") headers["origin"] = origin
+  if (token !== undefined) headers["authorization"] = `Bearer ${token}`
+  return headers
+}
+
+/*
+ * Bun's WebSocket client hides the HTTP status of a refused upgrade: every
+ * non-101 answer closes 1002 "Expected 101 status code" (verified on Bun
+ * 1.4.0), so the refusal is re-read with one plain GET of the same route,
+ * same bearer, same Origin policy. plue runs every pre-upgrade check (auth,
+ * scope, repo permission, the open-rate limit, the session lookup and its
+ * state) before it ever upgrades, so the GET answers the status the
+ * handshake got. An answer this table does not know stays 1011, the code
+ * the renderer retries once.
+ */
+const classifyCloudWsRefusal = async (
+  bridge: CloudWsBridge,
+  fetchImpl: typeof fetch
+): Promise<{ readonly code: number; readonly reason: string }> => {
+  const url = new URL(bridge.target)
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:"
+  let response: Response
+  try {
+    response = await fetchImpl(url, { headers: cloudWsUpstreamHeaders(bridge.token), redirect: "manual" })
+  } catch {
+    return { code: 1011, reason: "cloud terminal upstream failed" }
+  }
+  const code = CLOUD_WS_REFUSAL_CODES[response.status]
+  let message: string | undefined
+  try {
+    const body = (await response.json()) as { message?: unknown; error?: unknown }
+    if (typeof body.message === "string" && body.message !== "") message = body.message
+    else if (typeof body.error === "string" && body.error !== "") message = body.error
+    else if (typeof body.error === "object" && body.error !== null && typeof (body.error as { message?: unknown }).message === "string") {
+      message = (body.error as { message: string }).message
+    }
+  } catch {
+    // A body that is not JSON is plumbing, never copy.
+  }
+  if (code === undefined) return { code: 1011, reason: closeReasonOf(`cloud terminal upstream answered ${response.status}`) }
+  return { code, reason: closeReasonOf(message ?? CLOUD_WS_REFUSAL_REASONS[code] ?? "refused") }
 }
 
 export type WsSocket = ServerWebSocket<WsSocketData>
@@ -538,9 +618,26 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     cloudAuth === undefined
       ? json({ state: "signed-out", username: null, expiresAt: null })
       : json(cloudAuth.session()))
+  /*
+   * Lane citc: every live workspace-terminal bridge, so sign-out (and
+   * shutdown) can end them — the bearer was read at upgrade, and a bridge
+   * would otherwise outlive the credential it was opened with.
+   */
+  const cloudBridges = new Set<WsSocket>()
+  const closeCloudBridges = (code: number, reason: string): void => {
+    for (const socket of [...cloudBridges]) {
+      cloudBridges.delete(socket)
+      try {
+        socket.close(code, reason)
+      } catch {
+        // Already gone; its close handler released the upstream.
+      }
+    }
+  }
   router.add("POST", CLOUD_AUTH_SIGN_OUT_PATH, async () => {
     if (cloudAuth === undefined) return jsonError(501, "not_implemented", "The cloud seam is disabled in this build.")
     await cloudAuth.signOut()
+    closeCloudBridges(4401, "signed out of Smithers Cloud")
     return json({ ok: true })
   })
 
@@ -658,14 +755,20 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       if (tunnelTarget.origin !== new URL(upstreamWs).origin || !tunnelTarget.pathname.startsWith("/api/repos/")) {
         return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal sessions.")
       }
+      // Signed out, the tunnel never dials plue: an anonymous attach would only be refused there.
+      const token = cloudAuth?.token()
+      if (token === undefined) {
+        return jsonError(401, "cloud_sign_in_required", "Sign in to Smithers Cloud first — /cloud.sign-in.")
+      }
       const upgraded = bunServer.upgrade(request, {
         data: {
           topics: new Set<string>(),
           cloud: {
             target: tunnelTarget.toString(),
-            token: cloudAuth?.token(),
+            token,
             upstream: undefined,
-            pending: []
+            pending: [],
+            opened: false
           }
         },
         headers: { "sec-websocket-protocol": websocketProtocol }
@@ -749,14 +852,34 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
          * `terminal` subprotocol at upgrade; Bun's client carries it (and
          * the bearer) as headers. Frames that arrived first flush on open.
          */
-        const headers: Record<string, string> = { "sec-websocket-protocol": "terminal" }
-        // plue refuses an upgrade with no Origin before it reads auth; a desktop app has no web origin, so it sends the first-party one it is allowed to (SMITHERS_CLOUD_WS_ORIGIN overrides).
-        headers["origin"] = Bun.env.SMITHERS_CLOUD_WS_ORIGIN ?? "https://jjhub.tech"
-        if (bridge.token !== undefined) headers["authorization"] = `Bearer ${bridge.token}`
+        cloudBridges.add(socket)
+        const headers: Record<string, string> = { "sec-websocket-protocol": "terminal", ...cloudWsUpstreamHeaders(bridge.token) }
         const upstream = new WebSocket(bridge.target, { headers } as never)
         bridge.upstream = upstream
         upstream.binaryType = "arraybuffer"
+        const end = (code: number, reason: string): void => {
+          cloudBridges.delete(socket)
+          try {
+            // 1005/1006 cannot be sent in a close frame; the renderer learns of an abnormal drop by getting one.
+            if (code === 1005 || code === 1006) socket.terminate()
+            else socket.close(code, closeReasonOf(reason))
+          } catch {
+            // The renderer's socket already left; the bridge is done either way.
+          }
+        }
+        let refusing = false
+        /*
+         * A close before the handshake completed is a refusal: classified
+         * from the upstream's own HTTP answer into a distinct code the
+         * renderer never redials on (4401 … 4429), 1011 only when unknown.
+         */
+        const refuse = (): void => {
+          if (refusing) return
+          refusing = true
+          void classifyCloudWsRefusal(bridge, fetch).then(({ code, reason }) => end(code, reason))
+        }
         upstream.addEventListener("open", () => {
+          bridge.opened = true
           for (const frame of bridge.pending) upstream.send(frame)
           bridge.pending.length = 0
         })
@@ -764,18 +887,18 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
           socket.send(event.data as string | ArrayBuffer)
         })
         upstream.addEventListener("close", (event) => {
-          try {
-            socket.close(event.code, event.reason)
-          } catch {
-            // The renderer's socket already left; the bridge is done either way.
+          if (!bridge.opened) {
+            refuse()
+            return
           }
+          end(event.code, event.reason)
         })
         upstream.addEventListener("error", () => {
-          try {
-            socket.close(1011, "cloud terminal upstream failed")
-          } catch {
-            // Same as above.
+          if (!bridge.opened) {
+            refuse()
+            return
           }
+          end(1011, "cloud terminal upstream failed")
         })
       },
       message: (socket, raw) => {
@@ -850,6 +973,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         for (const topic of socket.data.topics) socket.unsubscribe(topic)
         socket.data.topics.clear()
         const bridge = socket.data.cloud
+        if (bridge !== undefined) cloudBridges.delete(socket)
         if (bridge?.upstream !== undefined) {
           try {
             bridge.upstream.close()
@@ -907,6 +1031,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       }
       writers.clear()
       // Every child dies with the server; nothing keeps a shell alive past the app.
+      closeCloudBridges(1001, "the local app is shutting down")
       await cloudAuth?.stop()
       await pty.killAll()
       repositoryAuthority.clear()

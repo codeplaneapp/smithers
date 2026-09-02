@@ -57,11 +57,11 @@ subprotocol `terminal`. A Bearer PAT alone is accepted (RequireAuth →
 write:repository → repo write → feature gates → per-user open-rate limit);
 the `?ticket=` from `POST /api/auth/sse-ticket` (30 s, single use) exists
 only for browsers, so the Bun tunnel sends the bearer and no ticket. The
-Origin header is mandatory and checked before auth: the tunnel sends
-`https://jjhub.tech` (override `SMITHERS_CLOUD_WS_ORIGIN`). No reserved app
-origin: the check is CSRF defense for cookie sessions, so plue#475 skips it
-for Bearer principals; when it lands the tunnel needs no Origin and the
-override stays as a knob for environments that still enforce it. Max message 64 KiB; server pings; resize is
+Origin header is mandatory and checked before auth: plue#475 (deployed
+2026-09-02 15:14 UTC, API image 6093db276aad) skips that check for Bearer
+principals (cookie sessions keep the allowlist), so the tunnel sends NO Origin
+unless `SMITHERS_CLOUD_WS_ORIGIN` is set, a knob for environments that still
+enforce it. No reserved app origin exists. Max message 64 KiB; server pings; resize is
 text JSON `{"type":"resize","cols","rows"}`; PTY bytes are binary frames.
 Pre-upgrade failures are HTTP (401 ticket, 403 origin, 409 session
 provisioning or stopped, 429 caps). Close codes: 1008 `access revoked: …`
