@@ -24,7 +24,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @since 0.1.0
  * @slop
  */
-const forwardOnlyIdentity: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const forwardOnlyIdentity: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`DROP TRIGGER flows_plans_forward_only`
@@ -37,5 +37,3 @@ const forwardOnlyIdentity: Effect.Effect<void, unknown, SqlClient.SqlClient> = E
       NEW.created_at_ms <> OLD.created_at_ms
     BEGIN SELECT RAISE(ABORT, 'a plan only grows'); END`
 })
-
-export default forwardOnlyIdentity

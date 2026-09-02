@@ -25,7 +25,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @since 0.1.0
  * @slop
  */
-const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`CREATE TABLE flows_plans (
@@ -77,5 +77,3 @@ const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(fu
     WHEN NEW.generation <= OLD.generation OR NEW.base_digest <> OLD.base_digest
     BEGIN SELECT RAISE(ABORT, 'a plan only grows'); END`
 })
-
-export default initial

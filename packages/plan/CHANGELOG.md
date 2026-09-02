@@ -83,6 +83,12 @@
 
 ### Fixed
 
+- The migration steps under `internal/migrations` are named exports, and
+  `Migrations` imports them by name. The CommonJS build compiled each
+  `export default` step to `exports.default`, and Node's default-import interop
+  then handed the importer the whole exports object instead of the Effect, so
+  `require("@smthrs/plan/Migrations")` produced a set whose entries had no
+  `pipe`.
 - Plan payload capture now refuses accessors and unsupported prototypes with
   `invalid_payload` instead of executing getters or collapsing `Map`, `Set`,
   `RegExp`, and class instances onto the same `{}` identity.

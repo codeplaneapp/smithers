@@ -17,13 +17,17 @@
  * its own would run outside the namespaced ordering that `@smthrs/database`
  * relies on to decide what has already been applied.
  *
+ * Each step is a named export and is imported here by name. A default export
+ * compiles to `exports.default` in the CommonJS build, and Node's interop then
+ * hands a default import the whole exports object instead of the Effect.
+ *
  * @since 0.1.0
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
-import initial from "./internal/migrations/0001_initial.ts"
-import appendOnlyHardening from "./internal/migrations/0002_append_only_hardening.ts"
-import forwardOnlyIdentity from "./internal/migrations/0003_forward_only_identity.ts"
+import { initial } from "./internal/migrations/0001_initial.ts"
+import { appendOnlyHardening } from "./internal/migrations/0002_append_only_hardening.ts"
+import { forwardOnlyIdentity } from "./internal/migrations/0003_forward_only_identity.ts"
 
 /**
  * The plan store's namespaced migration set, for composition with the other

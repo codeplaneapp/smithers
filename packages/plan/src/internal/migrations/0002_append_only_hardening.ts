@@ -30,7 +30,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @since 0.1.0
  * @slop
  */
-const appendOnlyHardening: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const appendOnlyHardening: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`CREATE TRIGGER flows_plans_no_delete BEFORE DELETE ON flows_plans
@@ -47,5 +47,3 @@ const appendOnlyHardening: Effect.Effect<void, unknown, SqlClient.SqlClient> = E
 
   yield* sql`CREATE UNIQUE INDEX flows_plan_nodes_ordinal ON flows_plan_nodes (plan_id, ordinal)`
 })
-
-export default appendOnlyHardening
