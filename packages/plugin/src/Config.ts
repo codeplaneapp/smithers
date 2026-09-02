@@ -160,9 +160,9 @@ const mergeRecords = (
  * Copies and deep-merges a configuration patch over a base configuration.
  *
  * Records merge key-by-key and every other JSON value replaces wholesale.
- * Both operands are admitted before the merge, so unsafe property names,
- * accessors, cycles, exotic prototypes, and values outside the resource
- * limits fail with `config_invalid`.
+ * Both operands and the merged output are admitted, so unsafe property names,
+ * accessors, cycles, exotic prototypes, and aggregate values outside the
+ * resource limits fail with `config_invalid`.
  *
  * @category combinators
  * @since 1.0.0-rc.0
@@ -171,7 +171,7 @@ export const merge = (base: FlowsConfig, patch: unknown): FlowsConfig => {
   const safeBase = snapshotRecord(base)
   if (patch === undefined) return safeBase
   const safePatch = snapshotRecord(patch)
-  return mergeRecords(safeBase, safePatch)
+  return snapshotRecord(mergeRecords(safeBase, safePatch))
 }
 
 /**

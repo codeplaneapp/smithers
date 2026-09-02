@@ -126,20 +126,22 @@ describe("Resolve.resolve", () => {
     expect(narrow.plugins.map((plugin) => plugin.name)).toEqual(["slow"])
   })
 
-  it("skips undefined hook entries and refuses malformed null entries", async () => {
+  it("refuses undefined and null hook entries because declarations must be callable", async () => {
     const sparse = {
       name: "sparse",
       hooks: { config: undefined }
     } as unknown as FlowsPlugin
-    const resolved = await run(Resolve.resolve([sparse]))
-    expect(resolved.handlers.size).toBe(0)
-    const error = await run(
+    const undefinedError = await run(Resolve.resolve([sparse]).pipe(Effect.flip))
+    expect(undefinedError).toMatchObject({ code: "invalid_plugin", path: "$[0].hooks.config" })
+    expect(undefinedError.message).toContain("function or a hook object")
+
+    const nullError = await run(
       Resolve.resolve([{
         name: "null-hook",
         hooks: { configResolved: null }
       } as unknown as FlowsPlugin]).pipe(Effect.flip)
     )
-    expect(error).toMatchObject({ code: "invalid_plugin", path: "$[0].hooks.configResolved" })
+    expect(nullError).toMatchObject({ code: "invalid_plugin", path: "$[0].hooks.configResolved" })
   })
 
   it("freezes the resolved plugin list and each hook's handler list", async () => {

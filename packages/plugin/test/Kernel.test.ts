@@ -14,6 +14,22 @@ describe("Config.merge", () => {
     expect(Config.merge({ a: 1 }, undefined)).toEqual({ a: 1 })
     expect(Config.merge({ a: { b: 1 } }, { a: 5 })).toEqual({ a: 5 })
   })
+
+  // 0.x dropped an `undefined` patch member: `merge({ a: 1 }, { a: undefined })`
+  // returned `{ a: 1 }`. rc.0 configuration is strict JSON, so the member is
+  // refused with its path instead. This is a decision, not an oversight: a
+  // plugin that means "leave this unset" omits the key or writes null, and a
+  // silent drop hid a typo behind a value the next handler never saw.
+  it("refuses an undefined member instead of dropping it", () => {
+    let thrown: unknown
+    try {
+      Config.merge({ a: 1 }, { a: undefined })
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toMatchObject({ code: "config_invalid", path: "$.a" })
+    expect((thrown as { readonly message: string }).message).toContain("must contain only JSON values")
+  })
 })
 
 describe("Kernel.make", () => {

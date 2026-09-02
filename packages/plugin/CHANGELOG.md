@@ -38,7 +38,9 @@
   member, and depth limits for a later `config` handler to observe.
 - Checked host-catalog hook names after `apply` selection again, so a shared
   preset carrying harness-only plugins resolves under a bare engine kernel.
-  Plugin, option, and hook-entry shapes are still validated before selection.
+  Plugin, option, and hook-entry shapes are still validated before selection,
+  and the handler bound now counts the handlers the kernel dispatches rather
+  than the handlers of plugins `apply` dropped.
 - Prevented plugins that omit a prototype-named hook from registering the
   corresponding `Object.prototype` member as a handler.
 - Kept plugin-built sealed keys run-local while complete capability identity is

@@ -183,7 +183,7 @@ const snapshotOptions = (input: unknown): RawOptions => {
 
 const validName = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= maximumPluginNameLength &&
-  Boundary.isWellFormedText(value) && !/\p{Cc}/u.test(value)
+  Boundary.isWellFormedText(value) && !/^\s*$/u.test(value) && !/\p{Cc}/u.test(value)
 
 const snapshotCatalog = (input: unknown): Readonly<Record<string, HookKind>> => {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
@@ -217,6 +217,9 @@ const snapshotHook = (
   hook: string
 ): ((...args: Array<any>) => unknown) | HookObject<(...args: Array<any>) => unknown> => {
   if (typeof entry === "function") return entry as (...args: Array<any>) => unknown
+  if (entry === undefined) {
+    throw invalidPlugin(path, "must be a function or a hook object", { plugin, hook })
+  }
   const values = ownData(entry, path, new Set(["order", "handler"]))
   if (typeof values.handler !== "function") {
     throw invalidPlugin(`${path}.handler`, "must be a function", { plugin, hook })
@@ -232,9 +235,7 @@ const snapshotHook = (
 
 const snapshotPlugin = <H>(
   input: unknown,
-  path: string,
-  known: Readonly<Record<string, HookKind>>,
-  handlerBudget: { count: number }
+  path: string
 ): FlowsPlugin<H> => {
   const values = ownData(input, path, new Set(["name", "version", "enforce", "apply", "layer", "hooks"]))
   if (!validName(values.name)) throw invalidPlugin(`${path}.name`, "requires a bounded non-empty name")
@@ -258,24 +259,7 @@ const snapshotPlugin = <H>(
     const rawHooks = ownData(values.hooks, `${path}.hooks`)
     const snapshot: Record<string, unknown> = Object.create(null)
     for (const hook of Object.keys(rawHooks)) {
-      if (!Object.hasOwn(known, hook)) {
-        throw failure(
-          "unknown_hook",
-          `plugin "${name}" declares unknown hook "${hook}"`,
-          `${path}.hooks.${hook}`,
-          { plugin: name, hook }
-        )
-      }
       const entry = rawHooks[hook]
-      if (entry === undefined) continue
-      handlerBudget.count += 1
-      if (handlerBudget.count > maximumHandlers) {
-        throw failure(
-          "resource_limit",
-          `plugin handlers exceed the limit of ${maximumHandlers}`,
-          `${path}.hooks.${hook}`
-        )
-      }
       Object.defineProperty(snapshot, hook, {
         value: snapshotHook(entry, `${path}.hooks.${hook}`, name, hook),
         enumerable: true
@@ -294,13 +278,14 @@ const snapshotPlugin = <H>(
   })
 }
 
-const flatten = <H>(
-  input: unknown,
-  known: Readonly<Record<string, HookKind>>
-): ReadonlyArray<FlowsPlugin<H>> => {
-  const output: Array<FlowsPlugin<H>> = []
+interface AdmittedPlugin<H> {
+  readonly plugin: FlowsPlugin<H>
+  readonly path: string
+}
+
+const flatten = <H>(input: unknown): ReadonlyArray<AdmittedPlugin<H>> => {
+  const output: Array<AdmittedPlugin<H>> = []
   const arrays = new WeakSet<object>()
-  const handlers = { count: 0 }
   const stack: Array<{ readonly value: unknown; readonly path: string; readonly depth: number }> = [
     { value: input, path: "$", depth: 0 }
   ]
@@ -331,7 +316,7 @@ const flatten = <H>(
       }
       continue
     }
-    output.push(snapshotPlugin<H>(current.value, current.path, known, handlers))
+    output.push(Object.freeze({ plugin: snapshotPlugin<H>(current.value, current.path), path: current.path }))
     if (output.length > maximumPlugins) {
       throw failure("resource_limit", `plugin input exceeds the ${maximumPlugins}-plugin limit`, current.path)
     }
@@ -364,6 +349,10 @@ const included = <H>(
 
 const rank = (enforce: "pre" | "post" | undefined): number => (enforce === "pre" ? 0 : enforce === "post" ? 2 : 1)
 
+const escapePluginIdentityPart = (value: string): string =>
+  // Percent must be escaped first so literal escape-looking text remains distinct from the `@` escape added next.
+  value.replaceAll("%", "%25").replaceAll("@", "%40")
+
 const snapshotCacheEnvironment = <H>(
   input: unknown,
   plugins: ReadonlyArray<FlowsPlugin<H>>
@@ -379,7 +368,7 @@ const snapshotCacheEnvironment = <H>(
         { plugin: plugin.name }
       ))
     }
-    pluginIdentities.push(`${plugin.name}@${plugin.version}`)
+    pluginIdentities.push(`${escapePluginIdentityPart(plugin.name)}@${escapePluginIdentityPart(plugin.version)}`)
   }
   const admitted = Boundary.record(input)
   if (!admitted.ok) {
@@ -459,17 +448,41 @@ export const resolve = <H = FlowsHooks>(
           : invalidPlugin("$options.hooks", "could not be inspected without executing user code")
     })
     const admitted = yield* Effect.try({
-      try: () => flatten<H>(input, known),
+      try: () => flatten<H>(input),
       catch: (cause) =>
         cause instanceof PluginError
           ? cause
           : invalidPlugin("$", "could not be inspected without executing user code")
     })
     const target = raw.target ?? "engine"
-    const selected = yield* Effect.filter(admitted, (plugin) => included(plugin, config, target))
+    const selected = yield* Effect.filter(admitted, ({ plugin }) => included(plugin, config, target))
+
+    let handlerCount = 0
+    for (const { path, plugin } of selected) {
+      const pluginHooks = plugin.hooks as Readonly<Record<string, unknown>> | undefined
+      if (pluginHooks === undefined) continue
+      for (const hook of Object.keys(pluginHooks)) {
+        if (!Object.hasOwn(known, hook)) {
+          return yield* Effect.fail(failure(
+            "unknown_hook",
+            `plugin "${plugin.name}" declares unknown hook "${hook}"`,
+            `${path}.hooks.${hook}`,
+            { plugin: plugin.name, hook }
+          ))
+        }
+        handlerCount += 1
+        if (handlerCount > maximumHandlers) {
+          return yield* Effect.fail(failure(
+            "resource_limit",
+            `plugin handlers exceed the limit of ${maximumHandlers}`,
+            `${path}.hooks.${hook}`
+          ))
+        }
+      }
+    }
 
     const seen = new Set<string>()
-    for (const plugin of selected) {
+    for (const { plugin } of selected) {
       if (seen.has(plugin.name)) {
         return yield* Effect.fail(failure(
           "duplicate_name",
@@ -483,7 +496,7 @@ export const resolve = <H = FlowsHooks>(
 
     const plugins = Object.freeze(
       selected
-        .map((plugin, index) => ({ plugin, index }))
+        .map(({ plugin }, index) => ({ plugin, index }))
         .sort((left, right) => rank(left.plugin.enforce) - rank(right.plugin.enforce) || left.index - right.index)
         .map(({ plugin }) => plugin)
     )

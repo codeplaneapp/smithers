@@ -103,6 +103,38 @@ describe("the inert plugin JSON boundary", () => {
     expect(admit({ nested: proxy })).toMatchObject({ ok: false, path: "$.nested" })
   })
 
+  // A transparent proxy is undetectable by specification, so admission does not
+  // claim to reject one. The guarantee it does make is narrower and is what this
+  // pins: reflection is descriptor-only and bounded, so a non-throwing trap runs
+  // a fixed number of times and only the inert data it returns is copied.
+  it("copies a transparent proxy's data without letting its traps reach the result", () => {
+    let traps = 0
+    const proxy = new Proxy({ a: 1 }, {
+      ownKeys: (target) => {
+        traps += 1
+        return Reflect.ownKeys(target)
+      },
+      getPrototypeOf: (target) => {
+        traps += 1
+        return Reflect.getPrototypeOf(target)
+      },
+      getOwnPropertyDescriptor: (target, key) => {
+        traps += 1
+        return Reflect.getOwnPropertyDescriptor(target, key)
+      }
+    })
+    const admitted = admit({ nested: proxy })
+    // Sampled here because vitest's own comparators read the proxy afterwards.
+    // ownKeys, getPrototypeOf, and one descriptor read for the single member.
+    const during = traps
+    expect(during).toBe(3)
+    expect(admitted).toMatchObject({ ok: true, value: { nested: { a: 1 } } })
+    const nested = ((admitted as Boundary.AdmissionSuccess).value as { readonly nested: object }).nested
+    expect(nested).not.toBe(proxy)
+    expect(Object.getPrototypeOf(nested)).toBe(Object.prototype)
+    expect(Object.isFrozen(nested)).toBe(true)
+  })
+
   it("enforces byte, string, key, depth, member, and node bounds", () => {
     expect(admit(null, { maxBytes: 3 })).toMatchObject({ ok: false })
     expect(admit(true, { maxBytes: 3 })).toMatchObject({ ok: false })

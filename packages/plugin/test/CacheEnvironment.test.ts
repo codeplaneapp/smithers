@@ -105,6 +105,26 @@ describe("the kernel declares the cache environment (issue #88)", () => {
     expect(versionOne).not.toEqual(versionTwo)
   })
 
+  it("escapes identity delimiters injectively while leaving ordinary identities readable", async () => {
+    const resolveLayers = async (name: string, version: string) => {
+      const kernel = await run(Kernel.make(
+        [Plugin.make({ name, version })],
+        {},
+        { cacheEnvironment: { layers: [], capabilities: {} } }
+      ))
+      return kernel.plugins.resolved.cacheEnvironment?.layers
+    }
+
+    const delimiterInName = await resolveLayers("flows-plugin-a@b", "c")
+    const delimiterInVersion = await resolveLayers("flows-plugin-a", "b@c")
+    expect(delimiterInName).toEqual(["flows-plugin-a%40b@c"])
+    expect(delimiterInVersion).toEqual(["flows-plugin-a@b%40c"])
+    expect(delimiterInName).not.toEqual(delimiterInVersion)
+    expect(await resolveLayers("flows-plugin-a", "1.0.0")).toEqual(["flows-plugin-a@1.0.0"])
+    expect(await resolveLayers("flows-plugin-a%40b", "c")).toEqual(["flows-plugin-a%2540b@c"])
+    expect(await resolveLayers("@smthrs/x", "1.0.0")).toEqual(["%40smthrs/x@1.0.0"])
+  })
+
   it("refuses to declare a cache environment for a versionless selected plugin", async () => {
     const error = await run(
       Kernel.make(

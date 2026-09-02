@@ -84,6 +84,64 @@ describe("plugin configuration snapshots", () => {
     )
   })
 
+  it("re-admits a merged config so aggregate member bounds cannot be bypassed", () => {
+    const base = Object.fromEntries(Array.from({ length: 3_000 }, (_, index) => [`base${index}`, index]))
+    const patch = Object.fromEntries(Array.from({ length: 3_000 }, (_, index) => [`patch${index}`, index]))
+    let error: unknown
+
+    try {
+      Config.merge(base, patch)
+    } catch (cause) {
+      error = cause
+    }
+
+    expect(error).toMatchObject({ code: "config_invalid", path: "$" })
+  })
+
+  it("still returns a deeply merged and frozen config after result admission", () => {
+    const merged = Config.merge(
+      { feature: { enabled: true, nested: { left: 1 } }, stable: [1, 2] },
+      { feature: { label: "ready", nested: { right: 2 } } }
+    )
+
+    expect(merged).toEqual({
+      feature: { enabled: true, label: "ready", nested: { left: 1, right: 2 } },
+      stable: [1, 2]
+    })
+    expect(Object.isFrozen(merged)).toBe(true)
+    expect(Object.isFrozen(merged["feature"])).toBe(true)
+    expect(Object.isFrozen((merged["feature"] as { readonly nested: unknown }).nested)).toBe(true)
+  })
+
+  it("stops the config waterfall before a later hook can observe an over-limit merge", async () => {
+    const initial = Object.fromEntries(Array.from({ length: 3_000 }, (_, index) => [`base${index}`, index]))
+    const patch = Object.fromEntries(Array.from({ length: 3_000 }, (_, index) => [`patch${index}`, index]))
+    const observedMembers: Array<number> = []
+    const error = await run(
+      Kernel.make([
+        {
+          name: "expander",
+          hooks: { config: () => Effect.succeed(patch) }
+        },
+        {
+          name: "observer",
+          hooks: {
+            config: (config) =>
+              Effect.sync(() => {
+                observedMembers.push(Object.keys(config).length)
+                return {}
+              })
+          }
+        }
+      ], initial).pipe(Effect.flip)
+    )
+
+    // The refusal is attributed to the handler whose patch crossed the bound,
+    // and the next handler never runs, so nothing observes the oversized value.
+    expect(error).toMatchObject({ code: "config_invalid", path: "$", plugin: "expander", hook: "config" })
+    expect(observedMembers).toEqual([])
+  })
+
   it("keeps post-waterfall config failures small, located, and value-free for journalling", async () => {
     const offendingValue = "journal-secret-value"
     const invalid = Object.assign(Object.create({ inherited: true }) as Record<string, unknown>, {

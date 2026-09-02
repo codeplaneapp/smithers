@@ -45,6 +45,15 @@ describe("bounded plugin admission", () => {
     }
   })
 
+  it("rejects whitespace-only names and versions at their declared paths", async () => {
+    expect(await refusal({ name: " \u00a0" })).toMatchObject({ code: "invalid_plugin", path: "$.name" })
+    expect(await refusal({ name: "versioned", version: "\u2003" })).toMatchObject({
+      code: "invalid_plugin",
+      plugin: "versioned",
+      path: "$.version"
+    })
+  })
+
   it("validates plugin versions with the bounded name rules and attributes the plugin", async () => {
     for (
       const version of [
@@ -63,7 +72,7 @@ describe("bounded plugin admission", () => {
     }
   })
 
-  it("validates every plugin field and hook entry before filtering", async () => {
+  it("validates structure before filtering and host-catalog names only after selection", async () => {
     const symbolic = { name: "symbolic", [Symbol("field")]: true }
     const bad: ReadonlyArray<unknown> = [
       true,
@@ -88,6 +97,30 @@ describe("bounded plugin admission", () => {
     // Exclusion cannot hide a malformed hook.
     const excluded = await refusal({ name: "excluded", apply: "harness", hooks: { config: 1 } })
     expect(excluded.code).toBe("invalid_plugin")
+  })
+
+  it("lets one preset carry host-specific hooks without weakening selected catalog checks", async () => {
+    const handler = () => Effect.void
+    const harnessPlugin = { name: "h", apply: "harness" as const, hooks: { harnessOnly: handler } }
+
+    const engine = await run(Resolve.resolve(harnessPlugin as never))
+    expect(engine.plugins).toEqual([])
+    expect(engine.handlers.size).toBe(0)
+
+    const harness = await run(Resolve.resolve(harnessPlugin as never, {
+      target: "harness",
+      hooks: { ...Hooks.engineHooks, harnessOnly: "sequential" }
+    }))
+    expect(harness.handlers.get("harnessOnly")?.[0]).toMatchObject({ plugin: "h", hook: "harnessOnly" })
+
+    const selected = await refusal({ name: "selected", hooks: { harnessOnly: handler } })
+    expect(selected).toMatchObject({
+      code: "unknown_hook",
+      message: "plugin \"selected\" declares unknown hook \"harnessOnly\"",
+      plugin: "selected",
+      hook: "harnessOnly",
+      path: "$.hooks.harnessOnly"
+    })
   })
 
   it("never invokes plugin, hook, or option accessors during validation", async () => {
@@ -241,6 +274,16 @@ describe("bounded plugin admission", () => {
       hooks: Object.fromEntries(Object.keys(hooks).map((hook) => [hook, handler]))
     }))
     expect(await refusal(contributors, { hooks })).toMatchObject({ code: "resource_limit" })
+
+    const excludedHooks = Object.fromEntries(
+      Array.from({ length: Resolve.maximumHandlers + 1 }, (_, index) => [`excluded${index}`, handler])
+    )
+    const excluded = await run(Resolve.resolve({
+      name: "excluded-handler-budget",
+      apply: "harness",
+      hooks: excludedHooks
+    } as never))
+    expect(excluded.plugins).toEqual([])
   })
 
   it("accepts the hook object form with and without an explicit order", async () => {
