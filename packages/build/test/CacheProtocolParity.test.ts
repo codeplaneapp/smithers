@@ -9,9 +9,10 @@
  * through all three.
  *
  * These assertions compare the two sources against each other. They cannot
- * prove the handlers behave identically, which is what a shared golden-vector
- * suite over both adapters would do, but they do fail the moment one side
- * changes a bound or drops a shared refusal the other still has.
+ * prove the handlers behave identically — the black-box conformance corpus in
+ * terraform/modules/cache/service/test/conformance_test.js runs the same
+ * requests through both handlers and does — but they do fail the moment one
+ * side changes a bound or drops a shared refusal the other still has.
  */
 import * as Fs from "node:fs"
 import * as NodePath from "node:path"

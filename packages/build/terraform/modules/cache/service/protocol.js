@@ -23,6 +23,7 @@
 const hexDigest = /^[0-9a-f]{64}$/
 const jsonContentType = /^application\/(?:[a-z0-9!#$&^_.+-]+\+)?json$/
 const decimalDigits = /^[0-9]+$/
+const numberLexeme = /[0-9eE+.-]/
 const controlCharacters = /[\u0000-\u001f\u007f]/
 
 const isWellFormedText = (value) => {
@@ -231,6 +232,72 @@ const readBody = async (request, limit) => {
   return { ok: true, bytes: bytes.subarray(0, length) }
 }
 
+/**
+ * Refuses JSON text whose parse is not reversible.
+ *
+ * `JSON.parse` collapses information the raw text carried: a duplicate member
+ * name keeps only the last value, and a number literal beyond IEEE-754 double
+ * precision becomes the nearest double. Conflict classification compares the
+ * parsed value, so two mathematically different published results would
+ * compare identical and answer `200` where the protocol promises `409`.
+ *
+ * The scan runs over text `JSON.parse` already accepted, so it may assume
+ * well-formed JSON, and it is linear in the body length, which the caller has
+ * already bounded. This is the translation of `irreversibleJson` in
+ * infra/worker/protocol.ts.
+ */
+const irreversibleJson = (text) => {
+  const scopes = []
+  // The member names of the object whose key comes next, or `null` when the
+  // next string is a value.
+  let keyScope = null
+  let index = 0
+  while (index < text.length) {
+    const character = text.charAt(index)
+    if (character === "{") {
+      keyScope = new Set()
+      scopes.push(keyScope)
+      index += 1
+    } else if (character === "[") {
+      scopes.push(null)
+      keyScope = null
+      index += 1
+    } else if (character === "}" || character === "]") {
+      scopes.pop()
+      keyScope = null
+      index += 1
+    } else if (character === ",") {
+      const enclosing = scopes.at(-1)
+      keyScope = enclosing instanceof Set ? enclosing : null
+      index += 1
+    } else if (character === ":") {
+      keyScope = null
+      index += 1
+    } else if (character === "\"") {
+      let end = index + 1
+      while (end < text.length && text.charAt(end) !== "\"") end += text.charAt(end) === "\\" ? 2 : 1
+      if (keyScope !== null) {
+        // The caller already parsed this text, so every string token in it
+        // parses on its own.
+        const name = JSON.parse(text.slice(index, end + 1))
+        if (keyScope.has(name)) return "body contains a duplicate object member name"
+        keyScope.add(name)
+      }
+      index = end + 1
+    } else if (character === "-" || (character >= "0" && character <= "9")) {
+      let end = index + 1
+      while (end < text.length && numberLexeme.test(text.charAt(end))) end += 1
+      const lexeme = text.slice(index, end)
+      const value = Number(lexeme)
+      if (!Number.isFinite(value) || Object.is(value, -0) || String(value) !== lexeme) {
+        return "body contains a JSON number that does not round-trip through a double"
+      }
+      index = end
+    } else index += 1
+  }
+  return null
+}
+
 /** Reads a bounded body and requires it to be a UTF-8 JSON document. */
 const readJson = async (request, limit) => {
   if (!jsonContentType.test(mediaType(request))) {
@@ -245,11 +312,15 @@ const readJson = async (request, limit) => {
   } catch {
     return { ok: false, response: json(400, { error: "body must be UTF-8 JSON" }) }
   }
+  let value
   try {
-    return { ok: true, text, value: JSON.parse(text) }
+    value = JSON.parse(text)
   } catch {
     return { ok: false, response: json(400, { error: "body must be valid JSON" }) }
   }
+  const irreversible = irreversibleJson(text)
+  if (irreversible !== null) return { ok: false, response: json(400, { error: irreversible }) }
+  return { ok: true, text, value }
 }
 
 const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value)

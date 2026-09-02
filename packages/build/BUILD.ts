@@ -67,7 +67,9 @@ export const test = Smithers.Vitest({
  *
  * It runs under Bun rather than the declared Node runtime because the service
  * is a Bun program: it hashes with `Bun.CryptoHasher` and its suites import
- * `bun:test`. Nothing here needs a database or a listener. `postgres_test.js`
+ * `bun:test`. The suite also runs the conformance corpus against
+ * `infra/worker/protocol.ts`, which is why that file is an input. Nothing here
+ * needs a database or a listener. `postgres_test.js`
  * is discovered too and guards itself with
  * `describe.skipIf(!process.env.SMITHERS_CACHE_TEST_DATABASE_URL)`, so it
  * skips here and runs only where an operator points it at a real Postgres.
@@ -80,7 +82,8 @@ export const cacheService = Smithers.NodeTest({
   runner: Smithers.testSuite(["terraform/modules/cache/service/test"]),
   srcs: [
     Smithers.glob("//packages/build/terraform/modules/cache/service/*.js"),
-    Smithers.glob("//packages/build/terraform/modules/cache/service/test/*.js")
+    Smithers.glob("//packages/build/terraform/modules/cache/service/test/*.js"),
+    Smithers.file("//packages/build/infra/worker/protocol.ts")
   ],
   deps: [],
   cwd: "packages/build"

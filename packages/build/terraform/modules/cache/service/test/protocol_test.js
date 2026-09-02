@@ -727,6 +727,44 @@ describe("action-cache request bounds", () => {
     expect(tooDeep.status).toBe(400)
   })
 
+  test("refuses JSON whose parse is not reversible", async () => {
+    const handler = makeHandler()
+    // JSON.parse keeps only the last member, so two divergent results would
+    // compare identical and answer 200 where 409 is promised.
+    const duplicate = await handler(
+      jsonRequest(`/ac/${keyDigest}`, `{"keyDigest":"${keyDigest}","result":{"a":1,"a":2}}`, { method: "PUT" })
+    )
+    const imprecise = await handler(
+      jsonRequest(`/ac/${keyDigest}`, `{"keyDigest":"${keyDigest}","result":{"n":9007199254740993}}`, {
+        method: "PUT"
+      })
+    )
+    const accepted = await handler(
+      jsonRequest(`/ac/${keyDigest}`, { keyDigest, result: { n: 9007199254740992, e: 1e21 } }, { method: "PUT" })
+    )
+
+    expect(duplicate.status).toBe(400)
+    await expect(duplicate.json()).resolves.toEqual({ error: "body contains a duplicate object member name" })
+    expect(imprecise.status).toBe(400)
+    await expect(imprecise.json()).resolves.toEqual({
+      error: "body contains a JSON number that does not round-trip through a double"
+    })
+    expect(accepted.status).toBe(201)
+  })
+
+  test("does not confuse a member name inside a string with a duplicate", async () => {
+    const handler = makeHandler()
+    const response = await handler(
+      jsonRequest(
+        `/ac/${keyDigest}`,
+        { keyDigest, result: { a: "\"a\":1,\"a\"", nested: { a: 1 }, list: [{ a: 1 }, { a: 2 }] } },
+        { method: "PUT" }
+      )
+    )
+
+    expect(response.status).toBe(201)
+  })
+
   test("bounds both empty and non-empty stream chunks", async () => {
     const handler = makeHandler()
     const oneByte = new Uint8Array([0x20])
