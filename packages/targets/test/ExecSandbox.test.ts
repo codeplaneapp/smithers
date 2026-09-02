@@ -6,6 +6,8 @@
  * is proven end to end in `@smthrs/build-cli`'s sandbox suites, which run the
  * host's own mechanism.
  */
+import * as NodeFs from "node:fs"
+import * as NodeOs from "node:os"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
 import * as ExecSandbox from "../src/ExecSandbox.ts"
@@ -379,6 +381,30 @@ describe("diagnose", () => {
     expect(note).toContain("sandbox: pkg/linkdir/target.txt is outside the declared write set")
     const rootDenied = ExecSandbox.diagnose(plan, "sh: line 1: cannot create out/note.txt: Read-only file system")
     expect(rootDenied).toContain("sandbox: pkg/out/note.txt is outside the declared write set")
+  })
+
+  it("reports a write that leaves the workspace through a symlink as outside the write set", () => {
+    // The declared output out.txt sits at the top level, so the write
+    // directory is the root itself and linkdir/target.txt is lexically
+    // covered; linkdir points outside the workspace, so the write escaped.
+    const root = NodeFs.realpathSync(NodeFs.mkdtempSync(NodePath.join(NodeOs.tmpdir(), "smthrs-ws-")))
+    const elsewhere = NodeFs.realpathSync(NodeFs.mkdtempSync(NodePath.join(NodeOs.tmpdir(), "smthrs-out-")))
+    try {
+      NodeFs.symlinkSync(elsewhere, NodePath.join(root, "linkdir"))
+      const plan: ExecSandbox.Plan = {
+        ...planned(linux, { reads: [], writes: ["out.txt"] }),
+        workspaceRoot: root,
+        cwd: root,
+        writes: [root]
+      }
+      const note = ExecSandbox.diagnose(plan, "/bin/sh: 1: cannot create linkdir/target.txt: Directory nonexistent")
+      expect(note).toMatch(/sandbox: linkdir\/target\.txt resolves to .* outside the declared write set/)
+      const inside = ExecSandbox.diagnose(plan, "/bin/sh: 1: cannot create sub/target.txt: Directory nonexistent")
+      expect(inside).toContain("sandbox: sub/target.txt was denied inside the declared set")
+    } finally {
+      NodeFs.rmSync(root, { recursive: true, force: true })
+      NodeFs.rmSync(elsewhere, { recursive: true, force: true })
+    }
   })
 
   it("reads relative paths against the working directory", () => {

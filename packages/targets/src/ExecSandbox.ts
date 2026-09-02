@@ -315,6 +315,26 @@ export const enforceable = (request: Request, hostFacts: Host): boolean => {
 
 const toPosix = (path: string): string => path.split(NodePath.sep).join("/")
 
+/**
+ * The path with the symlinks of its existing ancestors resolved. A path that
+ * does not exist yet keeps its unresolved tail below the deepest ancestor
+ * that does; a path with no existing ancestor is returned as given.
+ */
+const realized = (path: string): string => {
+  let head = path
+  const tail: Array<string> = []
+  while (head !== NodePath.dirname(head)) {
+    try {
+      const real = NodeFs.realpathSync(head)
+      return tail.length === 0 ? real : NodePath.join(real, ...tail)
+    } catch {
+      tail.unshift(NodePath.basename(head))
+      head = NodePath.dirname(head)
+    }
+  }
+  return path
+}
+
 const insideRoot = (root: string, candidate: string): boolean => {
   const relative = NodePath.relative(root, candidate)
   return relative === "" ||
@@ -727,8 +747,16 @@ export const diagnose = (confinement: Plan, text: string): string | undefined =>
     set.some((entry) => entry === path || path.startsWith(entry + NodePath.sep))
   const lines = [...named.entries()].sort(([left], [right]) => (left < right ? -1 : 1)).map(([path, write]) => {
     const relative = toPosix(NodePath.relative(confinement.workspaceRoot, path))
-    const readable = covered(path, confinement.reads) || covered(path, confinement.writes)
-    const writable = covered(path, confinement.writes) && !covered(path, confinement.readOnly)
+    // A path that lexically sits in the workspace can still leave it through
+    // a symlink in an existing ancestor; the declaration covers the tree, not
+    // wherever a link points.
+    const real = realized(path)
+    const escapes = !insideRoot(confinement.workspaceRoot, real)
+    const readable = !escapes && (covered(path, confinement.reads) || covered(path, confinement.writes))
+    const writable = !escapes && covered(path, confinement.writes) && !covered(path, confinement.readOnly)
+    if (escapes) {
+      return `sandbox: ${relative} resolves to ${real}, outside the declared ${write ? "write" : "read"} set`
+    }
     if (write) {
       return writable
         ? `sandbox: ${relative} was denied inside the declared set`
