@@ -1013,6 +1013,23 @@ export const declarationRejected = (id: string, site: SourceSite | undefined, ca
 const strictMake = { parseOptions: { onExcessProperty: "error" } } as const
 
 /**
+ * Identifies a declaration function by its source text alone, so the same
+ * definition evaluated in two processes hashes to the same value. A function
+ * declared with `Node.capture` keeps its capture-aware identity, which is
+ * stable too: it folds in the captured values, never a process nonce.
+ */
+const sourceIdentity = (operation: unknown): Node.FunctionIdentity => {
+  if (typeof operation !== "function") throw new TypeError("function identity requires a function")
+  const identity = Node.functionIdentity(operation)
+  if (identity.algorithm === "sha256-source-captures/v4") return identity
+  return {
+    _tag: "FunctionIdentity",
+    algorithm: "static-node/v1",
+    digest: createHash("sha256").update(Function.prototype.toString.call(operation)).digest("hex")
+  }
+}
+
+/**
  * Creates a target whose attrs are the Flow payload schema and whose
  * implementation is the Flow's required pure plan-time body.
  *
@@ -1037,18 +1054,25 @@ export const make = <
     success: Schema.toJsonSchemaDocument(successSchema),
     error: Schema.toJsonSchemaDocument(errorSchema)
   })
+  // The digest identifies the text of the functions a declaration passes in.
+  // `Node.functionIdentity` is the wrong tool for that: for an uncaptured
+  // function it folds in a per-process nonce, which is right for a plan node
+  // (two closures with one source may hold different state) and fatal here,
+  // because the digest is content-key material and a key that changes per
+  // process can never hit a cache another process filled. A captured
+  // function keeps its capture-aware identity; a plain one is its source.
   const functionIdentity = (operation: unknown): Node.FunctionIdentity | null =>
-    operation === undefined ? null : Node.functionIdentity(operation)
+    operation === undefined ? null : sourceIdentity(operation)
   const implementationDigest = createHash("sha256").update(JSON.stringify({
     implementation: functionIdentity(options.implementation),
     attrsForKind: functionIdentity(options.attrsForKind),
     cache: typeof options.cache === "function"
-      ? ["function", Node.functionIdentity(options.cache)]
+      ? ["function", sourceIdentity(options.cache)]
       : ["constant", options.cache ?? false],
     inputs: functionIdentity(options.inputs),
     outputs: functionIdentity(options.outputs),
     verbGate: typeof options.verbGate === "function"
-      ? Node.functionIdentity(options.verbGate)
+      ? sourceIdentity(options.verbGate)
       : options.verbGate ?? null,
     schemas: schemaIdentity
   })).digest("hex")

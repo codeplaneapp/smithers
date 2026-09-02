@@ -200,6 +200,29 @@ describe("Target metadata traversal", () => {
       .not.toBe(Target.metadata(NumberResult({ value: "x" })).implementationDigest)
   })
 
+  it("keeps implementation identity stable across separately created, textually identical definitions", () => {
+    // Content-key material: the same definition evaluated by two processes
+    // (here, two separate function objects with one source) must agree, or a
+    // cache filled by one run is unreadable by the next.
+    const first = Target.make("RuleTestStableIdentity", {
+      attrs: Schema.Struct({}),
+      kinds: ["build"],
+      implementation: () => Target.notImplemented("RuleTestStableIdentity")
+    })
+    const second = Target.make("RuleTestStableIdentity", {
+      attrs: Schema.Struct({}),
+      kinds: ["build"],
+      implementation: () => Target.notImplemented("RuleTestStableIdentity")
+    })
+    expect(Target.metadata(first({})).implementationDigest).toBe(Target.metadata(second({})).implementationDigest)
+    const changed = Target.make("RuleTestStableIdentity", {
+      attrs: Schema.Struct({}),
+      kinds: ["build"],
+      implementation: () => Target.notImplemented("RuleTestStableIdentityChanged")
+    })
+    expect(Target.metadata(changed({})).implementationDigest).not.toBe(Target.metadata(first({})).implementationDigest)
+  })
+
   it("changes implementation identity when cache admission policy changes", () => {
     const definition = (cache: boolean) =>
       Target.make("RuleTestCacheIdentity", {
