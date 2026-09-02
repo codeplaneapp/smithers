@@ -1168,6 +1168,43 @@ describe("recovering a run's earlier spend", () => {
     })
   })
 
+  it("keeps a text approximation of a write cause JSON cannot render", async () => {
+    const ledger = budgetLedger()
+    // A `BigInt` field is the shape `JSON.stringify` refuses outright, and a
+    // sink that reports a 64-bit offset is the realistic way one arrives. The
+    // rendering must not throw out of the accounting failure: an operator who
+    // is told "the error could not be printed" has lost the report that the
+    // ledger write failed at all.
+    class LedgerOverflow extends Error {
+      readonly offset = 2n ** 63n
+    }
+    const cause = new LedgerOverflow("the ledger offset exceeded its column")
+    const journal = Journal.make({
+      ...ledger.journal,
+      emitDurableUnfenced: (input) =>
+        input.eventType === Budget.usageEvent
+          ? Effect.fail(cause as unknown as Journal.JournalError)
+          : ledger.journal.emitDurableUnfenced(input)
+    })
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.gen(function*() {
+          const budget = yield* Budget.make({})
+          yield* budget.record("step-a", { totalTokens: 40 })
+        }).pipe(
+          Effect.provideService(Journal.Journal, journal),
+          Effect.provideService(FlowRuntime.FlowInstance, instanceFor("usage-write-bigint"))
+        )
+      )
+    )
+
+    const failure = failureOf(exit) as Budget.AccountingUnavailable
+    expect(failure._tag).toBe("flows/agent/BudgetAccountingUnavailable")
+    expect(failure.phase).toBe("record")
+    expect(typeof failure.cause).toBe("string")
+    expect(failure.cause).toContain("the ledger offset exceeded its column")
+  })
+
   it("fails closed when a counted call's cost has no durable form", async () => {
     const exit = await Effect.runPromise(
       Effect.exit(

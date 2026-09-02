@@ -67,11 +67,31 @@ const exportedDocs = (source, relative, prefix) => {
   return entries
 }
 
+/** The identifiers one `export { a, b as c } from "..."` clause publishes. */
+const reExportedNames = (clause) => {
+  const named = new Map()
+  for (const part of clause.split(",")) {
+    const trimmed = part.trim().replace(/^type\s+/, "")
+    if (trimmed === "") continue
+    const [source, alias] = trimmed.split(/\s+as\s+/)
+    named.set(source, alias ?? source)
+  }
+  return named
+}
+
 /**
  * Every documented export reachable from one module, following the barrel
  * re-exports the package publishes. A folder barrel contributes its members
  * under the namespace that re-exported it, so the rendered name is the one a
  * consumer writes.
+ *
+ * Named re-exports are followed as well as `export *`. `FlowEngineLike`
+ * publishes `defaultModelOverruns` from `src/internal` with an `export { }`
+ * clause, and a collector that read only the two other forms left that member
+ * out of the table while it stayed in the public surface. A named clause is
+ * NOT recursed through: it lists exactly what it publishes, so the target
+ * module's own documented declarations are matched against the list and
+ * nothing else travels.
  */
 const collect = (relative, prefix, seen) => {
   if (seen.has(relative)) return []
@@ -83,6 +103,24 @@ const collect = (relative, prefix, seen) => {
   for (const match of source.matchAll(/export \* (?:as (\w+) )?from "(\.[\w./-]+)"/g)) {
     const nested = match[1] === undefined ? prefix : `${prefix}${match[1]}.`
     entries.push(...collect(resolve(match[2]), nested, seen))
+  }
+  for (const match of source.matchAll(/export (?:type )?\{([^}]*)\} from "(\.[\w./-]+)"/g)) {
+    const named = reExportedNames(match[1])
+    const target = resolve(match[2])
+    for (const entry of exportedDocs(readModule(target), target, "")) {
+      const alias = named.get(entry.name)
+      if (alias === undefined) continue
+      named.delete(entry.name)
+      entries.push({ ...entry, name: `${prefix}${alias}` })
+    }
+    // A re-export the target module does not document is a public member with
+    // no row, which is the drift this generator exists to make impossible.
+    if (named.size > 0) {
+      throw new Error(
+        `agent docs: ${relative} re-exports ${[...named.keys()].join(", ")} from ${target}, ` +
+          "which documents no such declaration with an @category tag"
+      )
+    }
   }
   return entries
 }

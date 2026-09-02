@@ -63,6 +63,9 @@
 
 ### Changed
 
+- Production `Agent.run` now reports each failed `configResolved` observer as
+  one warning with only its stable code, plugin, and hook. Startup remains
+  nonfatal and the observer cause is never copied into the log record.
 - Renamed the cost field of the durable `flows.agent.usage.v1` payload from
   `tokens` to `spent`, and gave the payload an owning schema,
   `Budget.UsageRecord`. `@smthrs/journal`'s redactor strips one trailing plural
@@ -84,11 +87,42 @@
   seconds. The `retry-after` pattern made its unit optional, so a minute- or
   hour-scale wait woke sixty or thirty-six hundred times too early and burned
   every park the step was allowed.
+- Fixed the bare `Retry-After` pattern reading a PREFIX of a number whose unit
+  it does not know. Its trailing lookahead forbade a unit word but not a digit,
+  which a shorter capture satisfies: `Retry-After: 120ms` parked for twelve
+  seconds and `Retry after 12 days` for one. An unknown unit now falls back to
+  `defaultWaitMillis`, which is what the module always claimed it did.
+- Made `StandardFlows.clock` clamp an invalid `maxSeconds` to
+  `defaultMaxWaitSeconds` instead of comparing against it. `NaN` made every
+  ceiling test false and `Infinity` admitted an unbounded park, so a host could
+  remove the wait bound while the documentation said hosts may only lower it.
+- Bounded the remaining two trail fields at `AgentSession.maxTracedBytes`:
+  `cell-call-started`'s input and `cell-call-settled`'s failure message. A
+  `write` carries its whole file in the input and a test runner writes megabytes
+  of message, so only the result value was actually bounded.
+- Made `AgentSession.launch` carry the registry's typed failure on
+  `LaunchFailed.cause` rather than its `toString`. `body_unavailable` and
+  `body_unreadable` need different operator answers and a stringified cause
+  offers no field to route on.
+- Made `AgentSession.settlementFailure` render a non-JSON PRIMITIVE as text.
+  `JSON.stringify` does not refuse `Infinity` and `NaN`, it rewrites both to
+  `null`, so an arithmetic failure settled as the same recorded value as a run
+  that failed with a literal `null`. The JSON round trip is now reserved for
+  objects.
+- Made a child start that succeeds without creating a run row a
+  `ChildError { code: "failed" }`. `not_found` is the answer that tells a cell
+  the flow does not exist here, and the declaration had already been found, so
+  spending it on a runtime's refusal told the cell to give up on a flow it has.
 - Made a latched `skip-remaining` budget report the refusal it actually latched
   on. A latency latch previously answered every later call with a fabricated
   `tokens` scope and `max: 0`.
 - Added `cause` to `Budget.AccountingUnavailable`, so the journal error under an
   accounting failure keeps its tag and fields instead of being stringified.
+- Taught `packages/agent/scripts/docs.mjs` to follow named re-exports. It read
+  documented declarations and `export *` forms only, so
+  `FlowEngineLike.defaultModelOverruns`, published with an `export { }` clause,
+  had no row in the generated table. A re-exported member the target module does
+  not document now fails the generator rather than disappearing from the page.
 - Renamed the package from `@smthrs/engine-harness` to `@smthrs/agent`. The
   package is named for what it ships: the Smithers agent, plus the two adapters
   that run it.

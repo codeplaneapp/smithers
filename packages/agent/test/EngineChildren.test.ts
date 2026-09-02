@@ -379,7 +379,7 @@ describe("EngineChildren.spawn", () => {
       expect(Exit.isFailure(row)).toBe(true)
     })))
 
-  it("keeps not_found for a start attempt that succeeds without creating a child", () =>
+  it("reports a start attempt that succeeds without creating a child as a failed start", () =>
     run(Effect.gen(function*() {
       const runtime = yield* engine("children-missing-row")
       const rowless: FlowRuntime.FlowRuntime["Service"] = {
@@ -390,12 +390,19 @@ describe("EngineChildren.spawn", () => {
       yield* runtime.register(Parent, () =>
         port.spawn({ flow: Worker._tag, label: "missing" }).pipe(
           Effect.map((spawned) => spawned.child),
-          Effect.catch((error) => Effect.succeed(`${(error as ChildFlows.ChildError).code}`))
+          Effect.catch((error) =>
+            Effect.succeed(
+              `${(error as ChildFlows.ChildError).code}: ${(error as ChildFlows.ChildError).message}`
+            )
+          )
         ))
 
-      expect(yield* runtime.execute(Parent, { executionId: "spawn-missing-row", payload: {} })).toBe(
-        "not_found"
-      )
+      // The declaration was found before the start was attempted, so the flow
+      // exists on this host and `not_found` would be a lie a cell acts on: it
+      // is the answer that tells a cell to stop asking for this flow at all.
+      const answer = yield* runtime.execute(Parent, { executionId: "spawn-missing-row", payload: {} })
+      expect(answer.startsWith("failed:")).toBe(true)
+      expect(answer).toContain("rather than a missing flow")
     })))
 
   it("reports a child payload rejected by its schema as a failed start", () =>

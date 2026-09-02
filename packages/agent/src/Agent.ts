@@ -54,6 +54,7 @@ import * as Steering from "@smthrs/harness/Steering"
 import type * as MemorySource from "@smthrs/memory/Source"
 import type * as Model from "@smthrs/model/Model"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
+import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import type { FlowsHooks, PluginInput } from "@smthrs/plugin"
 import type { FlowsConfig, ResolvedConfig } from "@smthrs/plugin/Config"
 import type { PluginError } from "@smthrs/plugin/PluginError"
@@ -63,6 +64,7 @@ import type * as Registry from "@smthrs/registry/Registry"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
 import type * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
@@ -148,6 +150,8 @@ export interface Options {
    * something, and a run that only reads is the failure mode a flat frame
    * budget cannot see. A run that is meant to answer rather than act leaves it
    * unset.
+   *
+   * @since 1.0.0-rc.0
    */
   readonly readOnlyCap?: number | undefined
   /**
@@ -356,10 +360,20 @@ export interface Service {
  */
 export class Agent extends Context.Service<Agent, Service>()("@smthrs/agent/Agent") {}
 
-const runProduction: Service["run"] = (options) =>
+const runProductionUnmeasured: Service["run"] = (options) =>
   Stream.unwrap(
     Effect.gen(function*() {
       const kernel = yield* CellPlugin.make(options.plugins, options.config)
+      yield* Effect.forEach(
+        kernel.observerErrors,
+        (error) =>
+          Effect.annotateLogs(Effect.logWarning("A plugin configuration observer failed"), {
+            pluginErrorCode: error.code,
+            pluginName: error.plugin,
+            pluginHook: error.hook
+          }),
+        { discard: true }
+      )
       const layers = yield* compositionLayers(options, kernel.plugins, kernel.config)
       return Stream.unwrap(
         Effect.gen(function*() {
@@ -432,6 +446,16 @@ const runProduction: Service["run"] = (options) =>
         Stream.provide(kernel.layer)
       )
     })
+  )
+
+const runProduction: Service["run"] = (options) =>
+  Stream.scoped(
+    Stream.unwrap(
+      Effect.acquireRelease(
+        Metric.modify(ObservabilityMetric.activeSeats, 1),
+        () => Metric.modify(ObservabilityMetric.activeSeats, -1)
+      ).pipe(Effect.as(runProductionUnmeasured(options)))
+    )
   )
 
 /**

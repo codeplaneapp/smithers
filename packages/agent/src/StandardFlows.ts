@@ -237,6 +237,17 @@ class WaitRefused extends Schema.TaggedError<WaitRefused>()(
  * second wait immediately. The call identity is both unique per call and stable
  * across replay, which is exactly what the name has to be.
  *
+ * `options.maxSeconds` may only LOWER {@link defaultMaxWaitSeconds}. The
+ * ceiling is the one thing keeping a parked run distinguishable from a hung
+ * one, and a configuration read straight into the comparison could remove it
+ * without saying so: `NaN` makes every `seconds > maxSeconds` test false, and
+ * `Infinity` or an enormous finite value admits a wait no operator will
+ * outlive. Both are clamped to the default rather than refused, because the
+ * host has already been composed by the time this runs and a throw here would
+ * take down a composition over a wait it has not been asked to make yet. A
+ * value at or below zero is a host that means "no waiting", which is a
+ * coherent thing to ask for and is kept.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -244,7 +255,10 @@ export const clock = (
   services: Context.Context<Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
   options: { readonly maxSeconds?: number | undefined } = {}
 ): FlowBinding.Source => {
-  const maxSeconds = options.maxSeconds ?? defaultMaxWaitSeconds
+  const requested = options.maxSeconds
+  const maxSeconds = requested === undefined || !Number.isFinite(requested) || requested > defaultMaxWaitSeconds
+    ? defaultMaxWaitSeconds
+    : requested
   return FlowBinding.source("engine/clock", [
     FlowBinding.provide(
       FlowBinding.make({

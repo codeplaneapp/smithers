@@ -189,6 +189,18 @@ export const layerUnclassified = (): Layer.Layer<QuotaClassifier> => Layer.succe
  * the HTTP `Retry-After` seconds value. Anything else is left to
  * {@link Config.defaultWaitMillis}, since a misread number is a worse wait than
  * an honest guess.
+ *
+ * The bare form's trailing lookahead has to refuse a DIGIT as well as a
+ * letter. A lookahead that only forbids the unit word is satisfied by a
+ * shorter capture, and the engine will shorten one to make it pass: against
+ * `Retry-After: 120ms` a `(?!\s*[a-z])` tail backtracked the capture to `12`
+ * and parked for twelve seconds, and `Retry after 12 days` parked for one.
+ * Both are exactly the misread this comment says the module refuses to make.
+ * The dot is refused only when a digit follows it, so a truncated `1` out of
+ * `1.5ms` cannot pass while a sentence-ending `Retry-After: 3.` still reads
+ * as three seconds. Horizontal whitespace, not `\s`, separates the number
+ * from a unit word: a unit sits on the number's own line, so `Retry-After: 30`
+ * followed by a new line of prose keeps its thirty seconds.
  */
 const textualDelays: ReadonlyArray<{ readonly pattern: RegExp; readonly unitMillis: number }> = [
   { pattern: /(?:try|retry)\s+again\s+in\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i, unitMillis: 1_000 },
@@ -197,7 +209,7 @@ const textualDelays: ReadonlyArray<{ readonly pattern: RegExp; readonly unitMill
   { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i, unitMillis: 1_000 },
   { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i, unitMillis: 60_000 },
   { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i, unitMillis: 3_600_000 },
-  { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)(?!\s*[a-z])/i, unitMillis: 1_000 },
+  { pattern: /retry[- ]after[:=]?\s*(\d+(?:\.\d+)?)(?!\d|\.\d|[^\S\r\n]*[a-z])/i, unitMillis: 1_000 },
   { pattern: /resets?\s+in\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i, unitMillis: 1_000 },
   { pattern: /resets?\s+in\s+(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i, unitMillis: 60_000 },
   { pattern: /resets?\s+in\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i, unitMillis: 3_600_000 }

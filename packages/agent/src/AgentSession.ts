@@ -122,6 +122,8 @@ export interface Options {
    * Consecutive read-only frames a task run may spend before the controller
    * demands an edit or a justification, and twice that before it stops the
    * run. Defaults to `CellTurn.defaultReadOnlyFrames`.
+   *
+   * @since 1.0.0-rc.0
    */
   readonly readOnlyCap?: number | undefined
   /**
@@ -173,6 +175,8 @@ export interface Options {
    * neutral, it is near-zero thinking (the first SWE-bench runs recorded ~20
    * reasoning tokens per call while the same model under the Codex CLI ran
    * at medium and resolved four times as many instances).
+   *
+   * @since 1.0.0-rc.0
    */
   readonly reasoningEffort?: ModelRequest.ReasoningEffort | undefined
 }
@@ -409,9 +413,12 @@ export const trace = (
         payload: { language: event.cell.language, digest: event.cell.digest, text: tracedField(event.cell.text) }
       }
     case "cell-call-started":
+      // The input is bounded for the same reason the result is. A `write` call
+      // carries the whole file it is about to write, so the record that opens
+      // the call is as large as the one that settles it.
       return {
         eventType: "control.agent.cell-call-started",
-        payload: { flowName: event.call.flowName, input: event.call.input }
+        payload: { flowName: event.call.flowName, input: tracedField(event.call.input) }
       }
     case "cell-call-settled":
       return {
@@ -419,7 +426,9 @@ export const trace = (
         payload: {
           flowName: event.flowName,
           outcome: event.result.outcome,
-          message: event.result.message,
+          // A failure message is free text a handler chose, and a compiler or
+          // test runner writes megabytes of it.
+          message: event.result.message === undefined ? undefined : tracedField(event.result.message),
           value: tracedField(event.result.value)
         }
       }
@@ -690,6 +699,18 @@ const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(),
 }
 
 /**
+ * Keeps an `Error`'s message inside the settlement's JSON round trip.
+ *
+ * `message` is an own property of an `Error` but a NON-ENUMERABLE one, so
+ * `JSON.stringify` drops it: a failure carrying `{ cause: new Error("no such
+ * file") }` settled as `{ cause: {} }`, which records that something failed
+ * and nothing about what. A schema-declared `message` field is enumerable and
+ * already survives, so it is spread last and wins.
+ */
+const settlementReplacer = (_key: string, value: unknown): unknown =>
+  value instanceof Error && value.message !== "" ? Object.assign({ message: value.message }, value) : value
+
+/**
  * The failure the engine persists as this flow's settlement.
  *
  * `agent/run` declares `error: Schema.Unknown`, and `Schema.toCodecJson`
@@ -700,27 +721,42 @@ const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(),
  * stack beside the run's own `An agent run failed` (Phase 7 smoke observation
  * N1: two stack traces for one billing refusal).
  *
- * Values already accepted by the JSON codec retain their identity. A class
- * instance is then round-tripped through JSON so its enumerable refusal fields
- * — especially `_tag` — survive while its prototype and stack do not. Only a
- * value JSON cannot render falls back to `Cause.pretty`. That order keeps typed
+ * Values already accepted by the JSON codec retain their identity. An OBJECT
+ * the codec rejects is then round-tripped through JSON so its enumerable
+ * refusal fields, `_tag` above all, survive while its prototype and stack do
+ * not, and {@link settlementReplacer} carries an `Error`'s message across with
+ * them. Anything else falls back to `Cause.pretty`. That order keeps typed
  * failures machine-readable without letting a cycle throw from the failure
  * mapper, and a defect stays a defect because this maps the failure channel
  * only.
+ *
+ * The round trip is reserved for objects because `JSON.stringify` does not
+ * refuse the non-JSON PRIMITIVES, it rewrites them: `Infinity` and `NaN` both
+ * serialize to `null`, so a run that failed on an arithmetic result settled
+ * with the same recorded failure as one that failed with a literal `null`, and
+ * no reader could tell them apart. `Cause.pretty` is no better on one, printing
+ * `Error: null` for either, so a primitive is rendered directly.
  *
  * @category conversions
  * @since 1.0.0
  */
 export const settlementFailure = (error: unknown): unknown => {
   if (isJsonValue(error)) return error
+  // `null` is JSON and has already returned, so anything here that is not an
+  // object is a non-JSON primitive, and neither renderer below can carry one:
+  // `JSON.stringify` rewrites `Infinity` and `NaN` to `null`, and
+  // `Cause.pretty` prints a bare primitive as `Error: null`. The value prints
+  // itself instead.
+  if (typeof error !== "object") return `A failure of type ${typeof error}: ${String(error)}`
   try {
-    const rendered = JSON.stringify(error)
+    const rendered = JSON.stringify(error, settlementReplacer)
     if (rendered !== undefined) {
       const decoded: unknown = JSON.parse(rendered)
       if (isJsonValue(decoded)) return decoded
     }
   } catch {
-    // A cycle, BigInt, or excessive depth still has the text fallback below.
+    // A cycle, a BigInt field, or excessive depth still has the text fallback
+    // below.
   }
   try {
     return String(Cause.pretty(Cause.fail(error)))
@@ -1922,7 +1958,12 @@ export const make = (
               new LaunchFailed({
                 runId: input.run.runId,
                 message: `The body of flow ${flowId} could not be loaded`,
-                cause: String(cause)
+                // The typed registry failure travels whole. `LaunchFailed.cause`
+                // is `Schema.Defect`, so it carries the `RegistryError` with its
+                // `_tag` and `code` intact, and an operator reading the refusal
+                // can tell a deleted flow file from an unreadable one.
+                // `String(cause)` flattened both to the same sentence.
+                cause
               })
           )
         )

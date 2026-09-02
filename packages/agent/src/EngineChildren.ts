@@ -240,6 +240,13 @@ export const make = (
      * absent row at that point means the runtime refused to start the flow and
      * created nothing. Reading in the other order would race a child that
      * settles the instant it starts and report a working child as missing.
+     *
+     * Every refusal here is `failed`, never `not_found`. `declarationOf` has
+     * already proved the flow is one this port was given, so nothing about a
+     * start that produced no row says the flow is absent. `not_found` belongs
+     * to the one question it answers, "is there such a flow", and a cell that
+     * reads it decides never to ask again; spending it on an engine that
+     * declined to create a row told the cell to give up on a flow that exists.
      */
     const awaitStarted = (
       child: string,
@@ -261,9 +268,10 @@ export const make = (
             )
           }
           return yield* Effect.fail(
-            notFound(
-              `agent/spawn could not start ${flowName}: this host's runtime does not run it, ` +
-                `so the child run ${child} was never created.`
+            failed(
+              `agent/spawn could not start ${flowName}: this host's runtime answered without creating ` +
+                `the child run ${child}. The flow is declared here, so this is the runtime's refusal ` +
+                `to run it rather than a missing flow.`
             )
           )
         }

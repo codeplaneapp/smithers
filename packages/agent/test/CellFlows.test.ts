@@ -32,6 +32,7 @@ import type * as Route from "@smthrs/model/Route"
 import { Node } from "@smthrs/plan"
 import type { FlowsHooks, PluginInput } from "@smthrs/plugin"
 import { make as makePlugin } from "@smthrs/plugin"
+import type { ResolvedConfig } from "@smthrs/plugin/Config"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import * as TestRunner from "@smthrs/std/TestRunner"
@@ -643,6 +644,56 @@ ctx.done(refused.length + ":" + exact.waitedSeconds)`
     expect(scheduled).toHaveLength(1)
   })
 
+  it("clamps a host ceiling that would remove the bound instead of lowering it", async () => {
+    // The ceiling is what keeps a parked run distinguishable from a hung one,
+    // and a configured value read straight into the comparison can delete it
+    // silently: `NaN` makes every `seconds > maxSeconds` test false, and
+    // `Infinity` or a value above the default admits a wait no operator will
+    // outlive. Hosts may only LOWER the documented hour.
+    const waitOf = (maxSeconds: number, seconds: number) =>
+      Effect.gen(function*() {
+        const source = StandardFlows.clock(
+          Context.empty() as Context.Context<
+            Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
+          >,
+          { maxSeconds }
+        )
+        const bindings = yield* source.bindings()
+        return yield* bindings[0]!.run(
+          ({
+            flowName: "wait",
+            input: { seconds },
+            capabilities: [],
+            effects: {
+              reads: [],
+              writes: [],
+              mode: "expected",
+              onConflict: "serialize",
+              tier: "irreversible"
+            },
+            placement: Option.none(),
+            identity: {
+              session: "session-1",
+              frame: 0,
+              cell: "cell-digest",
+              ordinal: 0,
+              declaration: "wait-declaration",
+              layers: []
+            }
+          }) as unknown as Cell.Call
+        )
+      })
+
+    const beyond = StandardFlows.defaultMaxWaitSeconds + 1
+    for (const ceiling of [Number.NaN, Number.POSITIVE_INFINITY, 1e12, 86_400]) {
+      const refusal = await Effect.runPromise(waitOf(ceiling, beyond))
+      expect(refusal).toMatchObject({
+        outcome: "failure",
+        message: expect.stringContaining(String(StandardFlows.defaultMaxWaitSeconds))
+      })
+    }
+  })
+
   it("keeps two waits of the same duration apart, because a durable clock is named", async () => {
     // A durable clock is identified by its name — the deferred it awaits is
     // `DurableClock/<name>` — so a name derived from the duration would make
@@ -701,6 +752,28 @@ describe("plugin-contributed flows", () => {
       cellRegistry: "waterfall",
       cellFlows: "waterfall",
       cellModelRequest: "waterfall"
+    })
+  })
+
+  it("reports an unencodable composition identity as config_invalid", async () => {
+    // `@smthrs/plugin` admits config through a JSON gate of its own now, so a
+    // run started with a function-valued key is refused before it ever reaches
+    // this boundary and `Agent.test.ts` pins that earlier refusal. The check
+    // here stays because the gate and the digest are different seams: a hook
+    // that rewrites config during resolution, or any later widening of the
+    // gate, would hand this function a value the composition digest cannot
+    // hash, and it must answer with a typed `config_invalid` rather than a
+    // canonicalization defect. Reaching it needs a value the gate would have
+    // stopped, which is what the cast constructs.
+    const kernel = await Effect.runPromise(CellPlugin.make())
+    const invalid = { requestAudit: () => "not-json" } as unknown as ResolvedConfig
+    const failure = await Effect.runPromise(
+      CellPlugin.identity([], kernel.plugins, invalid).pipe(Effect.flip)
+    )
+
+    expect(failure).toMatchObject({
+      code: "config_invalid",
+      message: "The resolved cell composition cannot be used as durable identity"
     })
   })
 

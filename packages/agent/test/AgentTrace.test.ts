@@ -488,4 +488,58 @@ describe("trace", () => {
       payload: { flowName: "read", outcome: "success", message: undefined, value: small }
     })
   })
+
+  it("replaces an oversized call input with its byte count and full-value digest", () => {
+    // The record that OPENS a call is as large as the one that settles it: a
+    // `write` carries the whole file in its input, so bounding only the
+    // result left the durable trail unbounded on the way in.
+    const text = "y".repeat(5 * 1024 * 1024)
+    const input = { path: "/notes/log.md", text }
+    const projected = AgentSession.trace(
+      new AgentEvent.CellCallStarted({
+        eventType: "flows.harness.cell-call-started.v1",
+        call: new Cell.Call({ ...call, flowName: "write", input })
+      })
+    )
+
+    expect(projected).toEqual({
+      eventType: "control.agent.cell-call-started",
+      payload: {
+        flowName: "write",
+        input: {
+          truncated: true,
+          bytes: new TextEncoder().encode(CanonicalJson.stringify(input)).byteLength,
+          digest: Digest.digest(CanonicalJson.stringify(input))
+        }
+      }
+    })
+  })
+
+  it("replaces an oversized failure message with its byte count and full-value digest", () => {
+    // A failure message is free text the handler chose, and a compiler or a
+    // test runner writes megabytes of it into one failed call.
+    const message = "error: no such field\n".repeat(200_000)
+    const projected = AgentSession.trace(
+      new AgentEvent.CellCallSettled({
+        eventType: "flows.harness.cell-call-settled.v1",
+        flowName: "test/run",
+        identity,
+        result: new Cell.CallResult({ outcome: "failure", value: null, message })
+      })
+    )
+
+    expect(projected).toEqual({
+      eventType: "control.agent.cell-call-settled",
+      payload: {
+        flowName: "test/run",
+        outcome: "failure",
+        message: {
+          truncated: true,
+          bytes: new TextEncoder().encode(message).byteLength,
+          digest: Digest.digest(CanonicalJson.stringify(message))
+        },
+        value: null
+      }
+    })
+  })
 })

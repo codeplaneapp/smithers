@@ -22,6 +22,7 @@ import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import type * as Route from "@smthrs/model/Route"
+import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import { Node } from "@smthrs/plan"
 import { make as makePlugin } from "@smthrs/plugin"
 import type { FlowsHooks, PluginInput } from "@smthrs/plugin"
@@ -29,7 +30,7 @@ import type { FlowsConfig } from "@smthrs/plugin/Config"
 import type { PluginError } from "@smthrs/plugin/PluginError"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
-import { Cause, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Logger, Metric, Option, References, Schema, Scope, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
@@ -79,6 +80,19 @@ const recorded = (requests: Array<string>): Model.Model =>
         ])
       })
   })
+
+const recordedWithSeatSamples = (requests: Array<string>, samples: Array<number>): Model.Model => {
+  const delegate = recorded(requests)
+  return Model.make({
+    stream: (request) =>
+      Stream.unwrap(
+        Effect.map(Metric.value(ObservabilityMetric.activeSeats), (state) => {
+          samples.push(state.value)
+          return delegate.stream(request)
+        })
+      )
+  })
+}
 
 const recordedCells = (requests: Array<string>, cells: ReadonlyArray<string>): Model.Model => {
   let index = 0
@@ -238,6 +252,7 @@ const drive = <A, E>(
     return yield* Deferred.await(settled)
   }).pipe(
     Effect.provide(Layer.mergeAll(FlowEngine.layerMemory, NodeCrypto.layer, Safety.layer)),
+    Effect.provideService(Metric.MetricRegistry, new Map()),
     Effect.scoped,
     Effect.runPromise
   )
@@ -252,6 +267,7 @@ const collect = (options: {
   readonly plugins?: PluginInput<FlowsHooks> | undefined
   readonly config?: FlowsConfig | undefined
   readonly memory?: MemorySource.DeclaredText | undefined
+  readonly activeSeatSamples?: Array<number> | undefined
 }) =>
   Effect.gen(function*() {
     const agent = yield* Agent.Agent
@@ -277,6 +293,10 @@ const collect = (options: {
       Stream.runForEach((event) => Effect.sync(() => events.push(event))),
       Effect.provide(Agent.layerDefaults)
     )
+    if (options.activeSeatSamples !== undefined) {
+      const state = yield* Metric.value(ObservabilityMetric.activeSeats)
+      options.activeSeatSamples.push(state.value)
+    }
     return events
   }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
 
@@ -284,11 +304,13 @@ describe("Agent.run", () => {
   it("runs a whole cell frame on the assembled production stack", async () => {
     const requests: Array<string> = []
     const executed: Array<string> = []
+    const activeSeatSamples: Array<number> = []
     const outcome = await drive(
       collect({
         registry: registryOf(flows),
-        model: recorded(requests),
-        implementations: implementations(executed)
+        model: recordedWithSeatSamples(requests, activeSeatSamples),
+        implementations: implementations(executed),
+        activeSeatSamples
       })
     )
 
@@ -301,6 +323,7 @@ describe("Agent.run", () => {
     expect(tags.filter((tag) => tag === "cell-call-started")).toHaveLength(2)
     expect(executed).toEqual(["fs/list#0", "fs/write#1"])
     expect(requests).toHaveLength(1)
+    expect(activeSeatSamples).toEqual([1, 0])
 
     // The composition taught the model the cell contract and disclosed exactly
     // the registry's model-invocable catalog.
@@ -475,6 +498,42 @@ describe("Agent.run", () => {
     expect(requests[0]).not.toContain("excluded")
   })
 
+  it("reports config observer failures without exposing their causes or failing the run", async () => {
+    const logs: Array<{
+      readonly message: unknown
+      readonly annotations: Readonly<Record<string, unknown>>
+      readonly renderedCause: string
+    }> = []
+    const capture = Logger.make((entry) => {
+      if (String(entry.message).includes("plugin configuration observer")) {
+        logs.push({
+          message: entry.message,
+          annotations: entry.fiber.getRef(References.CurrentLogAnnotations),
+          renderedCause: String(entry.cause)
+        })
+      }
+    })
+    const outcome = await drive(
+      collect({
+        registry: registryOf([]),
+        model: recorded([]),
+        plugins: [makePlugin<FlowsHooks>({
+          name: "failing-observer",
+          hooks: { configResolved: () => Effect.fail({ secret: "must-not-log" }) }
+        })]
+      }).pipe(Effect.provide(Logger.layer([capture], { mergeWithExisting: false })))
+    )
+
+    expect(outcome._tag).toBe("completed")
+    expect(logs).toHaveLength(1)
+    expect(logs[0]?.annotations).toMatchObject({
+      pluginErrorCode: "hook_failed",
+      pluginName: "failing-observer",
+      pluginHook: "configResolved"
+    })
+    expect(JSON.stringify(logs)).not.toContain("must-not-log")
+  })
+
   it("injects only an explicitly selected memory snapshot and keeps it across a durable restart", async () => {
     const selectedText = "<flows_memory_context>\n[selected/fact] exact memory\n</flows_memory_context>"
     const selected = await Effect.runPromise(
@@ -559,19 +618,26 @@ describe("Agent.run", () => {
     })
   })
 
-  it("rejects non-JSON resolved config that cannot enter durable composition identity", async () => {
+  it("rejects non-JSON config before it enters durable composition identity", async () => {
     const outcome = await drive(
       collect({
         registry: registryOf([]),
         model: recorded([]),
-        config: { invalidIdentity: () => "not-json" }
+        config: { invalidIdentity: () => "not-json" } as unknown as FlowsConfig
       })
     )
 
+    // What this package owes its caller is that a config value the composition
+    // identity cannot hash never reaches the identity at all, and that the
+    // refusal names the key. `@smthrs/plugin` owns the admission gate that now
+    // raises it and owns the wording, so the sentence itself is asserted
+    // loosely: pinning a sibling's prose here turns a copy edit there into a
+    // red suite in this package.
     expect(outcome).toMatchObject({
       _tag: "failed",
-      error: { code: "config_invalid", message: "The resolved cell composition cannot be used as durable identity" }
+      error: { code: "config_invalid", path: "$.invalidIdentity" }
     })
+    expect((outcome as { readonly error: { readonly message: string } }).error.message).toContain("JSON")
   })
 
   it("puts ordered plugin and config semantics into every cell-call identity", async () => {

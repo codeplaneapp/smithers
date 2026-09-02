@@ -94,6 +94,7 @@
     "@smthrs/memory": "1.0.0-rc.0",
     "@smthrs/model": "1.0.0-rc.0",
     "@smthrs/notifications": "1.0.0-rc.0",
+    "@smthrs/observability": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
     "@smthrs/platform-browser": "1.0.0-rc.0",
     "@smthrs/plugin": "1.0.0-rc.0",

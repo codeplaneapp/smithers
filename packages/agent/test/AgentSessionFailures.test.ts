@@ -521,6 +521,13 @@ describe("the executor's registry seam", () => {
 
     expect(failure).toBeInstanceOf(LaunchFailed)
     expect((failure as LaunchFailed).message).toBe(`The body of flow ${flowId} could not be loaded`)
+    // The refusal carries the registry's own typed failure, not its toString.
+    // `body_unavailable` and `body_unreadable` need different operator answers,
+    // and a stringified cause offers no field to route on.
+    const cause = (failure as LaunchFailed).cause as RegistryError
+    expect(cause).toBeInstanceOf(RegistryError)
+    expect(cause.code).toBe("body_unavailable")
+    expect(cause.message).toBe("the flow file was deleted")
     expect(record.statuses).toEqual([])
   })
 
@@ -1317,12 +1324,36 @@ describe("the settlement a failure is persisted as", () => {
   })
 
   it("renders JSON-compatible projections before falling back to text", () => {
-    expect(AgentSession.settlementFailure(Number.POSITIVE_INFINITY)).toBeNull()
     expect(typeof AgentSession.settlementFailure(() => undefined)).toBe("string")
+    // `Error.message` is an own property but a non-enumerable one, so the
+    // round trip dropped it and a nested cause settled as `{}`: the record said
+    // something failed and nothing about what.
     expect(AgentSession.settlementFailure({ nested: { deep: new Error("boom") } })).toEqual({
-      nested: { deep: {} }
+      nested: { deep: { message: "boom" } }
     })
-    expect(AgentSession.settlementFailure([1, new Error("boom")])).toEqual([1, {}])
+    expect(AgentSession.settlementFailure([1, new Error("boom")])).toEqual([1, { message: "boom" }])
+    // A message-less error still renders to its enumerable fields alone.
+    expect(AgentSession.settlementFailure({ nested: new Error("") })).toEqual({ nested: {} })
+    // An object whose `toJSON` answers `undefined` renders to nothing at all
+    // rather than to a JSON value, which is the other way the round trip can
+    // decline a failure the text renderer still has to carry.
+    expect(typeof AgentSession.settlementFailure({ toJSON: () => undefined })).toBe("string")
+  })
+
+  it("renders a non-JSON primitive as text rather than letting JSON rewrite it", () => {
+    // `JSON.stringify` does not REFUSE `Infinity` and `NaN`, it rewrites both
+    // to `null`. Round-tripping them therefore settled an arithmetic failure
+    // with the same recorded value as a run that failed with a literal `null`,
+    // and nothing downstream could tell the two apart. The round trip is now
+    // reserved for objects, so these reach the text renderer.
+    for (const value of [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN]) {
+      const rendered = AgentSession.settlementFailure(value)
+      expect(typeof rendered).toBe("string")
+      expect(rendered).toContain(String(value))
+    }
+    expect(AgentSession.settlementFailure(null)).toBe(null)
+    expect(typeof AgentSession.settlementFailure(undefined)).toBe("string")
+    expect(typeof AgentSession.settlementFailure(10n)).toBe("string")
   })
 
   it("renders a cyclic or very deep value instead of throwing from the mapper", () => {

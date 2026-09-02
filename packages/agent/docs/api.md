@@ -28,6 +28,11 @@ underneath it.
 | `modelRetryPolicy`                              | The transport retry ladder one model call runs under. Defaults to the port's own; `Schedule.recurs(0)` turns it off. |
 | `maxQuotaParks`                                 | How many quota waits one step may take. Defaults to `QuotaPolicy.defaultMaxParks`, which is eight.                   |
 
+The plugin kernel treats `configResolved` as a nonfatal observer boundary.
+Production `Agent.run` logs one warning per observer failure with its stable
+error code, plugin name, and hook name. It deliberately omits the failure cause,
+which may contain provider or application configuration.
+
 ## Structured-output corrections
 
 The declared output schema is rendered into the run's system teaching and

@@ -10,12 +10,15 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
+import { HarnessError } from "@smthrs/harness/HarnessError"
 import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
+import { make as makePlugin } from "@smthrs/plugin"
+import type { FlowsHooks } from "@smthrs/plugin"
 import * as Registry from "@smthrs/registry/Registry"
-import { Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
+import { Cause, Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentAction from "../src/AgentAction.ts"
@@ -656,6 +659,47 @@ describe("AgentAction refusals that never reach the provider", () => {
     const rendered = JSON.stringify(exit)
     expect(rendered).toContain("SeatUnresolved")
     expect(rendered).toContain("No API key")
+    expect(requests).toEqual([])
+  })
+
+  it("keeps a text approximation of a request-plugin cause JSON cannot render", async () => {
+    const requests: Array<string> = []
+    // A request-audit plugin can report a database offset wider than JSON can
+    // represent. Its failure must survive the action encoder so the operator
+    // still learns which host extension stopped the model request.
+    class RequestAuditOverflow extends Error {
+      readonly offset = 2n ** 63n
+    }
+    const cause = new RequestAuditOverflow("the request audit offset exceeded its column")
+    const failingHost: AgentAction.Host = {
+      ...host,
+      plugins: [makePlugin<FlowsHooks>({
+        name: "request-audit",
+        hooks: {
+          cellModelRequest: () => Effect.fail(cause)
+        }
+      })]
+    }
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ReviewFlow.execute({ diff: "-  old" }, { executionId: "request-plugin-bigint" }).pipe(
+          Effect.provide(stack(
+            Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+            failingHost,
+            scripted([answering(`{"approved":true,"issues":[]}`)], requests)
+          ))
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    const failure = exit._tag === "Failure" ? Cause.squash(exit.cause) : undefined
+    expect(failure).toBeInstanceOf(HarnessError)
+    const harnessFailure = failure as HarnessError
+    expect(harnessFailure.code).toBe("engine_failed")
+    expect(harnessFailure.message).toBe("A cell model-request plugin failed")
+    expect(typeof harnessFailure.cause).toBe("string")
+    expect(harnessFailure.cause).toContain("hook \"cellModelRequest\" failed in plugin \"request-audit\"")
     expect(requests).toEqual([])
   })
 

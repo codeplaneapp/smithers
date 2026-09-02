@@ -211,7 +211,11 @@ export class AccountingUnavailable extends Schema.TaggedError<AccountingUnavaila
     /** The run whose ledger is unavailable. */
     runId: Schema.String,
     message: Schema.String,
-    /** The encodable storage or codec failure that made the ledger unavailable. */
+    /**
+     * The encodable storage or codec failure that made the ledger unavailable.
+     *
+     * @since 1.0.0-rc.0
+     */
     cause: Schema.optional(Schema.Unknown)
   }
 ) {}
@@ -530,7 +534,10 @@ const encodableCause = (cause: unknown): unknown => {
   try {
     return JSON.parse(JSON.stringify(cause))
   } catch {
-    /* v8 ignore next -- journal and schema failures in this module carry JSON-compatible fields; this arm keeps a future cyclic or BigInt-bearing failure from replacing the accounting error with a rendering defect */
+    // A cyclic object or a BigInt field. The text approximation keeps the
+    // accounting failure reportable: a rendering defect thrown from here would
+    // replace "the ledger could not be written" with "the error could not be
+    // printed", which is the one thing worse than a stringified cause.
     return String(cause)
   }
 }

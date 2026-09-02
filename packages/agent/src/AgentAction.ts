@@ -55,6 +55,7 @@ import * as StructuredOutput from "@smthrs/harness/StructuredOutput"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import type * as Model from "@smthrs/model/Model"
 import type * as ModelRequest from "@smthrs/model/ModelRequest"
+import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import type { FlowsHooks, PluginInput } from "@smthrs/plugin"
 import type { FlowsConfig } from "@smthrs/plugin/Config"
 import { PluginError } from "@smthrs/plugin/PluginError"
@@ -65,6 +66,7 @@ import type * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
 import type * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
@@ -460,7 +462,9 @@ const encodableFailure = (failure: AgentFailure): AgentFailure => {
     // own; only a value JSON cannot express at all reaches the arm below.
     rendered = JSON.parse(JSON.stringify(cause))
   } catch {
-    /* v8 ignore next -- `JSON.stringify` throws only on a cyclic object or a BigInt, and every cause reaching this boundary is a decoded provider or harness failure whose fields are primitives; the arm exists so a future cause shape cannot take the action down with a TypeError instead of reporting the failure it was carrying */
+    // Plugin hooks are third-party host code, so their failures can carry
+    // fields such as BigInt offsets that JSON cannot express. Keep the harness
+    // failure instead of replacing it with the renderer's TypeError.
     rendered = String(cause)
   }
   return new HarnessError({ code: failure.code, message: failure.message, cause: rendered })
@@ -594,6 +598,9 @@ export const make = <
                       wakeAt: park.value.wakeAt,
                       source: park.value.source
                     })
+                    // Count only the first execution of the sealed decision.
+                    // Replaying the recorded park must not count it again.
+                    yield* Metric.update(ObservabilityMetric.quotaParks, 1)
                     return park.value
                   })
                 })

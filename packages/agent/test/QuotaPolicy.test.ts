@@ -31,11 +31,12 @@ import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
+import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import * as Registry from "@smthrs/registry/Registry"
 import type * as Fixture from "@smthrs/testing/Fixture"
 import type * as ModelLike from "@smthrs/testing/ModelLike"
 import * as RecordedModel from "@smthrs/testing/RecordedModel"
-import { Cause, Effect, Exit, Fiber, Layer, Option, Schedule, Schema, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Metric, Option, Schedule, Schema, Stream } from "effect"
 import * as Clock from "effect/Clock"
 import type * as Crypto from "effect/Crypto"
 import type * as Scope from "effect/Scope"
@@ -217,7 +218,10 @@ const stores = Layer.mergeAll(
  */
 const durable = <A, E>(body: Effect.Effect<A, E, Crypto.Crypto | Scope.Scope>): Promise<A> =>
   Effect.runPromise(
-    Effect.scoped(Effect.provide(body, Layer.merge(NodeCrypto.layer, TestClock.layer()))).pipe(Effect.orDie)
+    Effect.scoped(Effect.provide(body, Layer.merge(NodeCrypto.layer, TestClock.layer()))).pipe(
+      Effect.provideService(Metric.MetricRegistry, new Map()),
+      Effect.orDie
+    )
   )
 
 /**
@@ -436,6 +440,29 @@ describe("the default classifier", () => {
     expect(QuotaPolicy.parseDelay("try again in -3 seconds")).toBeUndefined()
   })
 
+  it("refuses a bare Retry-After whose unit it does not know, rather than reading a prefix of the number", () => {
+    // The bare header pattern's trailing lookahead is the whole defence
+    // against a misread. A lookahead that forbids only a unit word is
+    // satisfiable by a SHORTER capture, and the engine shortens one to make
+    // it pass: `120ms` was read as `12` seconds and `12 days` as `1` second,
+    // both of which park for a duration the provider never named. An unknown
+    // unit has to reach `defaultWaitMillis` instead.
+    expect(QuotaPolicy.parseDelay("Retry-After: 120ms")).toBeUndefined()
+    expect(QuotaPolicy.parseDelay("Retry-After: 1.5ms")).toBeUndefined()
+    expect(QuotaPolicy.parseDelay("Retry after 12 days")).toBeUndefined()
+    expect(QuotaPolicy.parseDelay("retry-after: 3 weeks")).toBeUndefined()
+  })
+
+  it("keeps the bare Retry-After forms whose number is complete", () => {
+    // The digit guard must not cost the forms that were already right: a
+    // fractional value, a value ending a sentence, and a value whose line
+    // ends before the prose that explains it.
+    expect(QuotaPolicy.parseDelay("retry-after: 90.5")).toBe(90_500)
+    expect(QuotaPolicy.parseDelay("Retry-After: 3.")).toBe(3_000)
+    expect(QuotaPolicy.parseDelay("Retry-After: 30\nplease wait")).toBe(30_000)
+    expect(QuotaPolicy.parseDelay("retry-after=45")).toBe(45_000)
+  })
+
   it("reads the classifier a composition explicitly provides", async () => {
     const provided = await Effect.runPromise(
       QuotaPolicy.current.pipe(Effect.provide(QuotaPolicy.layerDefault()))
@@ -451,6 +478,7 @@ describe("a quota refusal at a model-backed step", () => {
     const observed = await durable(
       Effect.gen(function*() {
         const state = yield* DurableEngineState.DurableEngineState
+        const quotaParksBefore = yield* Metric.value(ObservabilityMetric.quotaParks)
         const wiring = yield* incarnation(
           "parking",
           capturing(refusingOnce(rateLimited, calls), captured),
@@ -467,7 +495,14 @@ describe("a quota refusal at a model-backed step", () => {
         const journal = yield* Journal.Journal
         yield* journal.flush
         const page = yield* journal.entries({ runId: "quota-park" as never, limit: 200 })
-        return { value, waiting, startedAt, records: parks(page.entries) }
+        return {
+          value,
+          waiting,
+          startedAt,
+          records: parks(page.entries),
+          quotaParksBefore,
+          quotaParks: yield* Metric.value(ObservabilityMetric.quotaParks)
+        }
       }).pipe(Effect.provide(stores))
     )
 
@@ -486,6 +521,7 @@ describe("a quota refusal at a model-backed step", () => {
     // wake. Nothing about the step's own budget was spent on the refusal.
     expect(calls).toHaveLength(2)
     expect(observed.records).toHaveLength(1)
+    expect(observed.quotaParks.count - observed.quotaParksBefore.count).toBe(1)
     expect(observed.records[0]).toMatchObject({
       action: "agent/test/quota/Reviewer",
       source: "retry-after"
@@ -576,6 +612,7 @@ describe("a quota refusal at a model-backed step", () => {
     const observed = await durable(
       Effect.gen(function*() {
         const state = yield* DurableEngineState.DurableEngineState
+        const quotaParksBefore = yield* Metric.value(ObservabilityMetric.quotaParks)
         const waiting = yield* Effect.scoped(
           Effect.gen(function*() {
             const wiring = yield* incarnation(
@@ -613,7 +650,14 @@ describe("a quota refusal at a model-backed step", () => {
         const journal = yield* Journal.Journal
         yield* journal.flush
         const page = yield* journal.entries({ runId: "quota-boundary" as never, limit: 500 })
-        return { waiting, parkedCalls, value, records: parks(page.entries) }
+        return {
+          waiting,
+          parkedCalls,
+          value,
+          records: parks(page.entries),
+          quotaParksBefore,
+          quotaParks: yield* Metric.value(ObservabilityMetric.quotaParks)
+        }
       }).pipe(Effect.provide(stores))
     )
 
@@ -630,6 +674,7 @@ describe("a quota refusal at a model-backed step", () => {
     // so the second engine replayed the deadline the first one chose instead
     // of classifying afresh and pushing the wake further out.
     expect(observed.records).toHaveLength(1)
+    expect(observed.quotaParks.count - observed.quotaParksBefore.count).toBe(1)
     expect(observed.waiting[0]?.wakeAt).toBe(
       (observed.records[0] as { readonly wakeAt: number }).wakeAt
     )
