@@ -693,7 +693,10 @@ const denialPatterns: ReadonlyArray<{ readonly pattern: RegExp; readonly write: 
     write: false
   },
   { pattern: /Read-only file system[^\n]*?[:\s]['"]?((?:\/|[A-Za-z]:\\)[^'"\s:]+)/g, write: true },
-  { pattern: /cannot (?:create|write|touch|mkdir|remove) (?:directory )?['"]?((?:\/|[A-Za-z]:\\|\.{0,2}\/?)[^'":\s]+)/g, write: true },
+  {
+    pattern: /cannot (?:create|write|touch|mkdir|remove) (?:directory )?['"]?((?:\/|[A-Za-z]:\\|\.{0,2}\/?)[^'":\s]+)/g,
+    write: true
+  },
   { pattern: /cannot (?:open|access|stat|read) ['"]?((?:\/|[A-Za-z]:\\|\.{0,2}\/?)[^'":\s]+)/g, write: false }
 ]
 
