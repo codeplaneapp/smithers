@@ -103,7 +103,12 @@ describe("Alerts.conditions", () => {
       // A refusal reports the HTTP status that refused the page. Read as
       // evidence it would close the very condition it paged about, and the
       // alert would fire again on the next tick, forever.
-      entry(2, 6_000, Alerts.failedEventType, { runId, condition: "waiting-approval", code: "sink_rejected", status: 503 }),
+      entry(2, 6_000, Alerts.failedEventType, {
+        runId,
+        condition: "waiting-approval",
+        code: "sink_rejected",
+        status: 503
+      }),
       entry(3, 7_000, Alerts.deliveredEventType, { runId, condition: "waiting-approval", status: 200 })
     ])
 

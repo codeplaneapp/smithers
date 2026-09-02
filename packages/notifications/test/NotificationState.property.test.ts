@@ -78,8 +78,7 @@ const notification = (admit: Admit, seq: number): Notification => {
   }
 }
 
-const ids = (state: NotificationState.State): ReadonlyArray<string> =>
-  state.items.map((item) => item.notification.id)
+const ids = (state: NotificationState.State): ReadonlyArray<string> => state.items.map((item) => item.notification.id)
 
 describe("NotificationState laws", () => {
   it("never exceeds the bound, and never reorders what it retains", () => {

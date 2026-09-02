@@ -493,7 +493,8 @@ export const layerWith = (
                 return yield* new NotificationError({
                   code: "notification_id_reused",
                   notificationId: admitted.id,
-                  message: `The journal identity for notification ${admitted.id} holds an event this queue did not write`
+                  message:
+                    `The journal identity for notification ${admitted.id} holds an event this queue did not write`
                 })
               }
               return {
@@ -556,8 +557,7 @@ export const layerWith = (
             if (record === undefined) {
               return yield* new NotificationError({
                 code: "notification_unavailable",
-                message:
-                  `The journal identity for boundary ${input.boundary} holds an event this queue did not write`
+                message: `The journal identity for boundary ${input.boundary} holds an event this queue did not write`
               })
             }
             return {

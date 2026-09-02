@@ -566,7 +566,7 @@ describe("NotificationQueue", () => {
         const queue = yield* NotificationQueue.NotificationQueue
         yield* queue.admit("run", notification)
         payload["body"] = "edited after the call returned"
-        ;(payload["tools"] as Array<string> ).push("write")
+        ;(payload["tools"] as Array<string>).push("write")
         return yield* queue.drain({
           runId: "run",
           targetLineageId: "run/root",

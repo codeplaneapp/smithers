@@ -43,9 +43,9 @@ export type Thinking = typeof Thinking.Type
 /**
  * A message inserted into the transcript at the next turn boundary.
  *
- * The body may be empty. An operator who steers an empty message has told the
- * run something — that a human is watching, and that the turn should continue
- * — and refusing it here would turn a deliberate nudge into a lost steer.
+ * The body may be empty. An operator who steers an empty message has still told
+ * the run something: that a human is watching, and that the turn should
+ * continue. Refusing it here would turn a deliberate nudge into a lost steer.
  *
  * @category models
  * @since 0.1.0
