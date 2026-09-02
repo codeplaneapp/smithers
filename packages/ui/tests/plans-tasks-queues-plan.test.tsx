@@ -1,8 +1,8 @@
 /** @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, useState, type ReactElement } from "react";
+import { act, type ReactElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   Plan,
   PlanAction,
@@ -14,8 +14,8 @@ import {
   PlanTitle,
   PlanTrigger,
 } from "../src/agentic/Plan";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -42,6 +42,23 @@ async function render(element: ReactElement): Promise<void> {
 }
 
 describe("Plan compound anatomy", () => {
+  test("every compound part rejects orphan rendering", () => {
+    const parts: ReadonlyArray<readonly [string, ReactElement]> = [
+      ["PlanHeader", <PlanHeader />],
+      ["PlanTitle", <PlanTitle />],
+      ["PlanDescription", <PlanDescription />],
+      ["PlanTrigger", <PlanTrigger />],
+      ["PlanContent", <PlanContent />],
+      ["PlanStep", <PlanStep label="Orphan" />],
+      ["PlanAction", <PlanAction />],
+      ["PlanFooter", <PlanFooter />],
+    ];
+
+    for (const [part, element] of parts) {
+      expect(() => renderToStaticMarkup(element)).toThrow(`${part} must render inside <Plan>`);
+    }
+  });
+
   test("renders header, title, description, trigger, content, steps, action, and footer", async () => {
     await render(
       <Plan>
@@ -131,11 +148,15 @@ describe("Plan compound anatomy", () => {
 
   test("PlanStep detail disclosure uses the controlled triple and defaults closed", async () => {
     await render(
-      <ol>
-        <PlanStep label="Deploy" status="failed">
-          <span>Rollback notes</span>
-        </PlanStep>
-      </ol>,
+      <Plan>
+        <PlanContent>
+          <ol>
+            <PlanStep label="Deploy" status="failed">
+              <span>Rollback notes</span>
+            </PlanStep>
+          </ol>
+        </PlanContent>
+      </Plan>,
     );
     const step = container!.querySelector('[data-slot="plan-step"]')!;
     expect(step.getAttribute("data-status")).toBe("failed");
@@ -152,9 +173,13 @@ describe("Plan compound anatomy", () => {
 
   test("PlanStep without detail renders no toggle", async () => {
     await render(
-      <ol>
-        <PlanStep label="Plain" />
-      </ol>,
+      <Plan>
+        <PlanContent>
+          <ol>
+            <PlanStep label="Plain" />
+          </ol>
+        </PlanContent>
+      </Plan>,
     );
     expect(container!.querySelector('[data-slot="plan-step-toggle"]')).toBeNull();
     expect(container!.querySelector('[data-status="pending"]')).not.toBeNull();

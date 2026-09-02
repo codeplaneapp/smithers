@@ -1,21 +1,22 @@
 /** @jsxImportSource react */
 import {
+  type ComponentProps,
   createContext,
+  type KeyboardEvent,
+  type ReactNode,
   useContext,
   useEffect,
   useId,
   useRef,
   useState,
-  type ComponentProps,
-  type KeyboardEvent,
-  type ReactNode,
 } from "react";
-import { cn } from "../cn";
 import { REASONING_TOOLS_CSS_ID, reasoningToolsCss } from "../agentic/reasoningToolsCss";
+import { cn } from "../cn";
+import { type CopyFailureCode, copyToClipboard } from "../internal/copyToClipboard";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { useInjectUiCss } from "../styles";
 
-export type HighlightedToken = { text: string; color?: string };
+export type HighlightedToken = { text: string; color?: string; };
 export type HighlightLine = readonly HighlightedToken[];
 export type CodeBlockHighlighter = (code: string, language: string | undefined) => readonly HighlightLine[] | null;
 
@@ -27,7 +28,8 @@ export type CodeBlockProps = Omit<ComponentProps<"div">, "onCopy" | "children"> 
   defaultWrap?: boolean;
   onWrapChange?: (wrap: boolean) => void;
   showCopy?: boolean;
-  onCopyCode?: (code: string) => void;
+  onCopyCode?: (code: string) => void | Promise<void>;
+  onCopyError?: (error: { code: CopyFailureCode; cause: unknown; }) => void;
   copiedDurationMs?: number;
   highlight?: CodeBlockHighlighter;
 };
@@ -42,6 +44,7 @@ export function CodeBlock({
   onWrapChange,
   showCopy = true,
   onCopyCode,
+  onCopyError,
   copiedDurationMs = 2_000,
   highlight,
   className,
@@ -51,18 +54,22 @@ export function CodeBlock({
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
   const [uncontrolledWrap, setUncontrolledWrap] = useState(defaultWrap);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const copyInFlightRef = useRef(false);
+  const mountedRef = useRef(false);
   const isWrapControlled = controlledWrap !== undefined;
   const wrap = isWrapControlled ? controlledWrap : uncontrolledWrap;
   const hasClipboard = typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
   const canCopy = showCopy && (onCopyCode !== undefined || hasClipboard);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   let highlighted: readonly HighlightLine[] | null = null;
   if (highlight) {
@@ -80,10 +87,21 @@ export function CodeBlock({
     onWrapChange?.(next);
   }
 
-  function copyCode() {
-    if (onCopyCode) onCopyCode(code);
-    else if (hasClipboard) void navigator.clipboard.writeText(code);
-
+  async function copyCode() {
+    if (copyInFlightRef.current) return;
+    copyInFlightRef.current = true;
+    const result = await copyToClipboard(code, onCopyCode);
+    copyInFlightRef.current = false;
+    if (!mountedRef.current) return;
+    if (!result.ok) {
+      if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = undefined;
+      setCopied(false);
+      setCopyFailed(true);
+      onCopyError?.({ code: result.code, cause: result.cause });
+      return;
+    }
+    setCopyFailed(false);
     setCopied(true);
     if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = setTimeout(() => {
@@ -99,6 +117,7 @@ export function CodeBlock({
       data-copied={copied ? "true" : "false"}
       className={cn("sui-codeblock", className)}
       {...props}
+      data-copy-failed={copyFailed ? "true" : undefined}
     >
       <div data-slot="code-block-header" className="sui-codeblock-header">
         {language !== undefined ? <span className="sui-codeblock-lang">{language}</span> : null}
@@ -113,17 +132,21 @@ export function CodeBlock({
           >
             {wrap ? "Unwrap" : "Wrap"}
           </button>
-          {canCopy ? (
-            <button
-              type="button"
-              data-slot="code-block-copy"
-              className="sui-codeblock-action"
-              aria-label="Copy code"
-              onClick={copyCode}
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          ) : null}
+          {canCopy ?
+            (
+              <button
+                type="button"
+                data-slot="code-block-copy"
+                className="sui-codeblock-action"
+                aria-label="Copy code"
+                onClick={() => {
+                  void copyCode();
+                }}
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            ) :
+            null}
         </span>
       </div>
       <pre
@@ -190,7 +213,7 @@ export type CodeBlockGroupItem = {
 };
 
 export type CodeBlockTabsProps = Omit<ComponentProps<"div">, "children"> & {
-  items: readonly { id: string; label: string }[];
+  items: readonly { id: string; label: string; }[];
   activeId: string;
   onActiveIdChange: (id: string) => void;
 };
@@ -311,16 +334,18 @@ export function CodeBlockGroup({
   return (
     <div data-slot="code-block-group" className={cn("sui-codeblock-group", className)} {...props}>
       <CodeBlockTabsIdContext.Provider value={baseId}>
-        {items.length ? (
-          <CodeBlockHeader className="sui-codeblock-group-header">
-            <CodeBlockTabs
-              items={items.map(({ id, label }) => ({ id, label }))}
-              activeId={active!.id}
-              onActiveIdChange={setActive}
-            />
-            {active!.filename !== undefined ? <CodeBlockFilename name={active!.filename} /> : null}
-          </CodeBlockHeader>
-        ) : null}
+        {items.length ?
+          (
+            <CodeBlockHeader className="sui-codeblock-group-header">
+              <CodeBlockTabs
+                items={items.map(({ id, label }) => ({ id, label }))}
+                activeId={active!.id}
+                onActiveIdChange={setActive}
+              />
+              {active!.filename !== undefined ? <CodeBlockFilename name={active!.filename} /> : null}
+            </CodeBlockHeader>
+          ) :
+          null}
         {items.map((item, index) => (
           <div
             key={item.id}

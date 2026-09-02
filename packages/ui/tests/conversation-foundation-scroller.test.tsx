@@ -2,10 +2,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
+import { CONVERSATION_FOUNDATION_CSS_ID } from "../src/chat/conversationFoundationCss";
 import {
   MessageScroller,
   MessageScrollerButton,
+  type MessageScrollerCommands,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
@@ -13,17 +14,15 @@ import {
   useMessageScroller,
   useMessageScrollerState,
   useMessageVisibility,
-  type MessageScrollerCommands,
 } from "../src/chat/MessageScroller";
-import { CONVERSATION_FOUNDATION_CSS_ID } from "../src/chat/conversationFoundationCss";
+import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import { installDarkThemeStyles, removeDarkThemeStyles } from "./theme-test-utils";
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-type Metrics = { scrollHeight: number; clientHeight: number; scrollTop: number };
+type Metrics = { scrollHeight: number; clientHeight: number; scrollTop: number; };
 
 const metricsByElement = new WeakMap<HTMLElement, Metrics>();
-const geometryByMessageId = new Map<string, { top: number; height: number }>();
+const geometryByMessageId = new Map<string, { top: number; height: number; }>();
 let defaultMetrics: Metrics = { scrollHeight: 0, clientHeight: 0, scrollTop: 0 };
 // Simulates the transcript sitting below page chrome: rect coordinates carry
 // this offset while scroll-content coordinates never do.
@@ -51,14 +50,16 @@ class ManualResizeObserver implements ResizeObserver {
 }
 
 beforeAll(() => {
-  for (const property of [
-    "scrollHeight",
-    "clientHeight",
-    "scrollTop",
-    "offsetTop",
-    "offsetHeight",
-    "getBoundingClientRect",
-  ]) {
+  for (
+    const property of [
+      "scrollHeight",
+      "clientHeight",
+      "scrollTop",
+      "offsetTop",
+      "offsetHeight",
+      "getBoundingClientRect",
+    ]
+  ) {
     originalDescriptors.set(property, Object.getOwnPropertyDescriptor(HTMLElement.prototype, property));
   }
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
@@ -239,7 +240,7 @@ describe("MessageScroller compound", () => {
   });
 
   test("scrollAnchor=bottom pins on mount and follows content growth", async () => {
-    const states: { atTop: boolean; atBottom: boolean; following: boolean }[] = [];
+    const states: { atTop: boolean; atBottom: boolean; following: boolean; }[] = [];
     function Probe() {
       states.push(useMessageScrollerState());
       return null;
@@ -268,15 +269,15 @@ describe("MessageScroller compound", () => {
   test("attaches growth follow when the viewport mounts one tick after its provider", async () => {
     const view = (viewportMounted: boolean) => (
       <MessageScrollerProvider scrollAnchor="bottom">
-        {viewportMounted ? (
-          <MessageScrollerViewport>
-            <MessageScrollerContent>
-              <MessageScrollerItem messageId="m1">hello</MessageScrollerItem>
-            </MessageScrollerContent>
-          </MessageScrollerViewport>
-        ) : (
-          <span>loading</span>
-        )}
+        {viewportMounted ?
+          (
+            <MessageScrollerViewport>
+              <MessageScrollerContent>
+                <MessageScrollerItem messageId="m1">hello</MessageScrollerItem>
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+          ) :
+          <span>loading</span>}
       </MessageScrollerProvider>
     );
     await renderWithLateViewport(view, { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
@@ -311,15 +312,15 @@ describe("MessageScroller compound", () => {
     try {
       const view = (viewportMounted: boolean) => (
         <MessageScrollerProvider>
-          {viewportMounted ? (
-            <MessageScrollerViewport>
-              <MessageScrollerContent>
-                <MessageScrollerItem messageId="m1">hello</MessageScrollerItem>
-              </MessageScrollerContent>
-            </MessageScrollerViewport>
-          ) : (
-            <span>loading</span>
-          )}
+          {viewportMounted ?
+            (
+              <MessageScrollerViewport>
+                <MessageScrollerContent>
+                  <MessageScrollerItem messageId="m1">hello</MessageScrollerItem>
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+            ) :
+            <span>loading</span>}
         </MessageScrollerProvider>
       );
       await renderWithLateViewport(view, { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
@@ -469,7 +470,7 @@ describe("MessageScroller compound", () => {
 
   test("jumping to a mid-transcript message disengages follow; later commits do not yank to bottom", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -502,7 +503,7 @@ describe("MessageScroller compound", () => {
 
   test("jumping to a message at the very end clamps to the max scroll and keeps following", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -739,7 +740,7 @@ describe("MessageScroller compound", () => {
 
   test("Provider/Scroller composition renders the required compound anatomy through the styled frame", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -797,6 +798,112 @@ describe("MessageScroller compound", () => {
     expect(latestState!.following).toBe(true);
   });
 
+  test("fade options reach flat and ambient viewports", async () => {
+    await render(
+      <>
+        <MessageScroller data-testid="flat" stickToBottom={false} fade={false}>
+          flat
+        </MessageScroller>
+        <MessageScrollerProvider>
+          <MessageScroller data-testid="ambient-false" fade={false}>
+            <MessageScrollerViewport />
+          </MessageScroller>
+        </MessageScrollerProvider>
+        <MessageScrollerProvider>
+          <MessageScroller data-testid="ambient-true" fade>
+            <MessageScrollerViewport />
+          </MessageScroller>
+        </MessageScrollerProvider>
+      </>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+
+    const flat = container!.querySelector<HTMLElement>('[data-testid="flat"]')!;
+    const ambientFalse = container!.querySelector<HTMLElement>('[data-testid="ambient-false"]')!;
+    const ambientTrue = container!.querySelector<HTMLElement>('[data-testid="ambient-true"]')!;
+    expect(flat.querySelector('[data-slot="message-scroller-viewport"]')!.classList).not.toContain("sui-scroll-fade");
+    expect(ambientFalse.querySelector('[data-slot="message-scroller-viewport"]')!.classList).not.toContain(
+      "sui-scroll-fade",
+    );
+    expect(ambientTrue.querySelector('[data-slot="message-scroller-viewport"]')!.classList).toContain(
+      "sui-scroll-fade",
+    );
+  });
+
+  test("hideJumpToLatest suppresses flat and ambient latest buttons", async () => {
+    await render(
+      <>
+        <MessageScroller data-testid="flat" stickToBottom={false} hideJumpToLatest>
+          flat
+        </MessageScroller>
+        <MessageScrollerProvider>
+          <MessageScroller data-testid="ambient" hideJumpToLatest>
+            <MessageScrollerViewport />
+            <MessageScrollerButton />
+          </MessageScroller>
+        </MessageScrollerProvider>
+      </>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+
+    expect(container!.querySelector('[data-testid="flat"] [data-slot="message-scroller-jump"]')).toBeNull();
+    expect(container!.querySelector('[data-testid="ambient"] [data-slot="message-scroller-button"]')).toBeNull();
+  });
+
+  test("jumpToLatestLabel labels flat and ambient latest buttons", async () => {
+    await render(
+      <>
+        <MessageScroller data-testid="flat" stickToBottom={false} jumpToLatestLabel="Go">
+          flat
+        </MessageScroller>
+        <MessageScrollerProvider>
+          <MessageScroller data-testid="ambient" jumpToLatestLabel="Go">
+            <MessageScrollerViewport />
+            <MessageScrollerButton />
+          </MessageScroller>
+        </MessageScrollerProvider>
+      </>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+
+    expect(
+      container!.querySelector('[data-testid="flat"] [data-slot="message-scroller-jump"]')!.getAttribute(
+        "aria-label",
+      ),
+    ).toBe("Go");
+    expect(
+      container!.querySelector('[data-testid="ambient"] [data-slot="message-scroller-button"]')!.getAttribute(
+        "aria-label",
+      ),
+    ).toBe("Go");
+  });
+
+  test("contentClassName reaches flat and ambient content", async () => {
+    await render(
+      <>
+        <MessageScroller data-testid="flat" stickToBottom={false} contentClassName="x">
+          flat
+        </MessageScroller>
+        <MessageScrollerProvider>
+          <MessageScroller data-testid="ambient" contentClassName="x">
+            <MessageScrollerViewport>
+              <MessageScrollerContent />
+            </MessageScrollerViewport>
+          </MessageScroller>
+        </MessageScrollerProvider>
+      </>,
+      { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
+    );
+
+    expect(container!.querySelector('[data-testid="flat"] [data-slot="message-scroller-content"]')!.classList)
+      .toContain(
+        "x",
+      );
+    expect(
+      container!.querySelector('[data-testid="ambient"] [data-slot="message-scroller-content"]')!.classList,
+    ).toContain("x");
+  });
+
   test("root and viewport expose data-autoscrolling only while a programmatic jump runs", async () => {
     let commands: MessageScrollerCommands | undefined;
     function Probe() {
@@ -826,7 +933,7 @@ describe("MessageScroller compound", () => {
     const originalScrollTo = viewport.scrollTo;
     Object.defineProperty(viewport, "scrollTo", {
       configurable: true,
-      value: ({ top }: { top: number }) => {
+      value: ({ top }: { top: number; }) => {
         metrics().scrollTop = Math.min(top, 600);
       },
     });
@@ -845,7 +952,7 @@ describe("MessageScroller compound", () => {
 
   test("a forward scrollbar drag that stops short reconciles on scrollend instead of hijacking growth", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -869,7 +976,7 @@ describe("MessageScroller compound", () => {
     const originalScrollTo = viewport.scrollTo;
     Object.defineProperty(viewport, "scrollTo", {
       configurable: true,
-      value: ({ top }: { top: number }) => {
+      value: ({ top }: { top: number; }) => {
         metrics().scrollTop = Math.min(top, 600);
       },
     });
@@ -892,7 +999,7 @@ describe("MessageScroller compound", () => {
 
   test("scrollend that lands at the bottom re-engages follow", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -931,7 +1038,7 @@ describe("MessageScroller compound", () => {
   });
 
   test("a newly appended scrollAnchor row anchors the turn near the top and lets follow take over once the reply fills the viewport", async () => {
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       latestState = useMessageScrollerState();
       return null;
@@ -942,14 +1049,16 @@ describe("MessageScroller compound", () => {
         <MessageScrollerViewport>
           <MessageScrollerContent>
             <MessageScrollerItem messageId="m1">history</MessageScrollerItem>
-            {withTurn ? (
-              <>
-                <MessageScrollerItem messageId="q" scrollAnchor>
-                  question
-                </MessageScrollerItem>
-                <MessageScrollerItem messageId="a">answer</MessageScrollerItem>
-              </>
-            ) : null}
+            {withTurn ?
+              (
+                <>
+                  <MessageScrollerItem messageId="q" scrollAnchor>
+                    question
+                  </MessageScrollerItem>
+                  <MessageScrollerItem messageId="a">answer</MessageScrollerItem>
+                </>
+              ) :
+              null}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <Probe />
@@ -984,7 +1093,7 @@ describe("MessageScroller compound", () => {
   });
 
   test("a short appended scrollAnchor turn clamps to the live edge and keeps following", async () => {
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       latestState = useMessageScrollerState();
       return null;
@@ -995,14 +1104,16 @@ describe("MessageScroller compound", () => {
         <MessageScrollerViewport>
           <MessageScrollerContent>
             <MessageScrollerItem messageId="m1">history</MessageScrollerItem>
-            {withTurn ? (
-              <>
-                <MessageScrollerItem messageId="q" scrollAnchor>
-                  question
-                </MessageScrollerItem>
-                <MessageScrollerItem messageId="a">answer</MessageScrollerItem>
-              </>
-            ) : null}
+            {withTurn ?
+              (
+                <>
+                  <MessageScrollerItem messageId="q" scrollAnchor>
+                    question
+                  </MessageScrollerItem>
+                  <MessageScrollerItem messageId="a">answer</MessageScrollerItem>
+                </>
+              ) :
+              null}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <Probe />
@@ -1051,12 +1162,14 @@ describe("MessageScroller compound", () => {
       <MessageScrollerProvider>
         <MessageScrollerViewport>
           <MessageScrollerContent>
-            {withItems ? (
-              <>
-                <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
-                <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
-              </>
-            ) : null}
+            {withItems ?
+              (
+                <>
+                  <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
+                  <MessageScrollerItem messageId="m2">two</MessageScrollerItem>
+                </>
+              ) :
+              null}
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <Probe />
@@ -1077,7 +1190,7 @@ describe("MessageScroller compound", () => {
 
   test("a smooth jump-to-latest re-targets the bottom when content grows mid-flight", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -1103,7 +1216,7 @@ describe("MessageScroller compound", () => {
     const originalScrollTo = viewport.scrollTo;
     Object.defineProperty(viewport, "scrollTo", {
       configurable: true,
-      value: ({ top }: { top: number }) => {
+      value: ({ top }: { top: number; }) => {
         metrics().scrollTop = Math.min(top, 600);
       },
     });
@@ -1121,7 +1234,7 @@ describe("MessageScroller compound", () => {
 
   test("a backward scrollbar drag mid-flight cancels the jump and stops re-targeting", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -1145,7 +1258,7 @@ describe("MessageScroller compound", () => {
     const originalScrollTo = viewport.scrollTo;
     Object.defineProperty(viewport, "scrollTo", {
       configurable: true,
-      value: ({ top }: { top: number }) => {
+      value: ({ top }: { top: number; }) => {
         metrics().scrollTop = Math.min(top, 600);
       },
     });
@@ -1164,7 +1277,7 @@ describe("MessageScroller compound", () => {
 
   test("a smooth jump to a bottom-region message survives mid-flight events and growth", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -1191,7 +1304,7 @@ describe("MessageScroller compound", () => {
     const originalScrollTo = viewport.scrollTo;
     Object.defineProperty(viewport, "scrollTo", {
       configurable: true,
-      value: ({ top }: { top: number }) => {
+      value: ({ top }: { top: number; }) => {
         metrics().scrollTop = Math.min(top, 600);
       },
     });
@@ -1212,7 +1325,7 @@ describe("MessageScroller compound", () => {
 
   test("a backward scrollbar drag cancels a smooth jump to a bottom-region message", async () => {
     let commands: MessageScrollerCommands | undefined;
-    let latestState: { atTop: boolean; atBottom: boolean; following: boolean } | undefined;
+    let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
       commands = useMessageScroller();
       latestState = useMessageScrollerState();
@@ -1237,7 +1350,7 @@ describe("MessageScroller compound", () => {
     const originalScrollTo = viewport.scrollTo;
     Object.defineProperty(viewport, "scrollTo", {
       configurable: true,
-      value: ({ top }: { top: number }) => {
+      value: ({ top }: { top: number; }) => {
         metrics().scrollTop = Math.min(top, 600);
       },
     });

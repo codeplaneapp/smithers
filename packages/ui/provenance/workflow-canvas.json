@@ -24,7 +24,7 @@
       "Upstream Canvas ReactFlow wrapper itself (pre-configured pan/zoom/selection/delete/fitView behaviors bound to the AI SDK data model)"
     ],
     "divergences": [
-      "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; the ReactFlow renderer lives in @smthrs/gateway-ui",
+      "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; a host owns the ReactFlow renderer",
       "WorkflowEdge and WorkflowConnection are legend/inline representations (from -> to, pending-connection validity) rather than ReactFlow edge/connection-line renderers",
       "WorkflowNodeStatus is a smithers addition (shared StatusPill) with no upstream equivalent",
       "WorkflowMinimap is a labelled seam frame with no upstream component; upstream parks ReactFlow's MiniMap as a Canvas child",

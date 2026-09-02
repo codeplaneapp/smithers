@@ -1,13 +1,13 @@
 /** @jsxImportSource react */
 import {
+  type ComponentProps,
+  type ComponentType,
   createContext,
+  type CSSProperties,
+  type ReactNode,
   useContext,
   useId,
   useMemo,
-  type ComponentProps,
-  type ComponentType,
-  type CSSProperties,
-  type ReactNode,
 } from "react";
 import * as RechartsPrimitive from "recharts";
 import { cn } from "../cn";
@@ -39,7 +39,7 @@ import { tokens as t } from "../tokens";
  * `#141417` surfaces. Never reorder, cycle, or append generated hues; past
  * eight series fold the tail into "Other" or facet.
  */
-export const CHART_SERIES: ReadonlyArray<{ readonly light: string; readonly dark: string }> = [
+export const CHART_SERIES: ReadonlyArray<{ readonly light: string; readonly dark: string; }> = [
   { light: "#2a78d6", dark: "#3987e5" }, // blue
   { light: "#eb6834", dark: "#d95926" }, // orange
   { light: "#1baf7a", dark: "#199e70" }, // aqua
@@ -52,7 +52,8 @@ export const CHART_SERIES: ReadonlyArray<{ readonly light: string; readonly dark
 
 /** Series color for a slot index, per theme. Indexes past the palette clamp to the last slot — fold extra series into "Other" instead of reaching it. */
 export function chartSeriesColor(index: number, theme: "light" | "dark" = "light"): string {
-  const slot = CHART_SERIES[Math.max(0, Math.min(index, CHART_SERIES.length - 1))]!;
+  const normalizedIndex = Number.isFinite(index) ? Math.trunc(index) : 0;
+  const slot = CHART_SERIES[Math.max(0, Math.min(normalizedIndex, CHART_SERIES.length - 1))]!;
   return theme === "dark" ? slot.dark : slot.light;
 }
 
@@ -60,14 +61,14 @@ export type ChartConfig = {
   [key: string]: {
     label?: ReactNode;
     icon?: ComponentType;
-  } & ({ color?: string; theme?: never } | { color?: never; theme: { light: string; dark: string } });
+  } & ({ color?: string; theme?: never; } | { color?: never; theme: { light: string; dark: string; }; });
 };
 
 /**
  * Build a {@link ChartConfig} from series keys alone, assigning palette slots
  * in fixed order — the common case for "one config entry per series".
  */
-export function chartConfig(series: ReadonlyArray<{ key: string; label?: ReactNode }>): ChartConfig {
+export function chartConfig(series: ReadonlyArray<{ key: string; label?: ReactNode; }>): ChartConfig {
   const config: ChartConfig = {};
   series.forEach((entry, index) => {
     config[entry.key] = {
@@ -81,7 +82,7 @@ export function chartConfig(series: ReadonlyArray<{ key: string; label?: ReactNo
   return config;
 }
 
-type ChartContextValue = { config: ChartConfig };
+type ChartContextValue = { config: ChartConfig; };
 
 const ChartContext = createContext<ChartContextValue | null>(null);
 
@@ -96,7 +97,7 @@ function useChart(): ChartContextValue {
  * {@link ChartLegendContent} outside a `<ChartContainer>` (custom overlays,
  * tests). `ChartContainer` uses it internally.
  */
-export function ChartProvider({ config, children }: { config: ChartConfig; children: ReactNode }) {
+export function ChartProvider({ config, children }: { config: ChartConfig; children: ReactNode; }) {
   const value = useMemo(() => ({ config }), [config]);
   return <ChartContext.Provider value={value}>{children}</ChartContext.Provider>;
 }
@@ -115,7 +116,7 @@ const UNSAFE_CSS_VALUE = /[;{}]|<\/style/i;
  * resolved theme (the house adapter convention: `useResolvedTheme` tracks the
  * `data-theme` stamp and the OS scheme, so a toggle re-renders the vars).
  */
-function ChartStyle({ id, config }: { id: string; config: ChartConfig }) {
+function ChartStyle({ id, config }: { id: string; config: ChartConfig; }) {
   const theme = useResolvedTheme();
   const css = useMemo(() => {
     if (!CSS_IDENTIFIER.test(id)) return "";
@@ -180,7 +181,7 @@ type TooltipItem = {
   name?: string | number;
   value?: number | string;
   color?: string;
-  payload?: Record<string, unknown> & { fill?: string };
+  payload?: Record<string, unknown> & { fill?: string; };
 };
 
 function itemConfig(config: ChartConfig, item: TooltipItem, fallbackKey?: string): ChartConfig[string] | undefined {
@@ -246,13 +247,15 @@ export function ChartTooltipContent({
                 )}
                 {name}
               </span>
-              {formatter && item.value !== undefined ? (
-                formatter(item.value, String(name), item, index)
-              ) : (
-                <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
-                  {typeof item.value === "number" ? item.value.toLocaleString() : item.value}
-                </span>
-              )}
+              {formatter && item.value !== undefined ?
+                (
+                  formatter(item.value, String(name), item, index)
+                ) :
+                (
+                  <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+                    {typeof item.value === "number" ? item.value.toLocaleString() : item.value}
+                  </span>
+                )}
             </div>
           );
         })}
@@ -268,7 +271,7 @@ export function ChartLegendContent({
   className,
   nameKey,
 }: {
-  payload?: ReadonlyArray<{ value?: string | number; dataKey?: string | number; color?: string }>;
+  payload?: ReadonlyArray<{ value?: string | number; dataKey?: string | number; color?: string; }>;
   className?: string;
   nameKey?: string;
 }) {

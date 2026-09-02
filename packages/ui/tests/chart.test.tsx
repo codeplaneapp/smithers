@@ -4,15 +4,15 @@
 // convention as the other heavy-widget adapters.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BarChart, Bar } from "recharts";
+import { Bar, BarChart } from "recharts";
 import {
   CHART_SERIES,
+  chartConfig,
   ChartContainer,
   ChartLegendContent,
   ChartProvider,
-  ChartTooltipContent,
-  chartConfig,
   chartSeriesColor,
+  ChartTooltipContent,
 } from "../src/adapters/chart";
 
 describe("chart palette", () => {
@@ -22,6 +22,24 @@ describe("chart palette", () => {
     expect(chartSeriesColor(1, "light")).toBe("#eb6834");
     expect(chartSeriesColor(99, "light")).toBe(CHART_SERIES.at(-1)!.light);
     expect(chartSeriesColor(-1, "light")).toBe(CHART_SERIES[0]!.light);
+  });
+
+  test("normalizes non-finite and fractional palette indexes in both themes", () => {
+    const cases: ReadonlyArray<readonly [number, number]> = [
+      [Number.NaN, 0],
+      [Number.POSITIVE_INFINITY, 0],
+      [Number.NEGATIVE_INFINITY, 0],
+      [-1, 0],
+      [0, 0],
+      [7, 7],
+      [8, 7],
+      [2.9, 2],
+    ];
+
+    for (const [input, slot] of cases) {
+      expect(chartSeriesColor(input, "light")).toBe(CHART_SERIES[slot]!.light);
+      expect(chartSeriesColor(input, "dark")).toBe(CHART_SERIES[slot]!.dark);
+    }
   });
 
   test("chartConfig maps keys to palette slots in order with both theme steps", () => {

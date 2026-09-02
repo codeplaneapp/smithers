@@ -8,11 +8,10 @@ import {
   SMITHERS_UI_STYLE_ATTR,
   TOOL_CALL_STATE_LABELS,
   ToolCall,
-  toolCallStatus,
   type ToolCallState,
+  toolCallStatus,
 } from "../src/index";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const states: readonly ToolCallState[] = [
   "input-streaming",
@@ -112,7 +111,7 @@ describe("ToolCall", () => {
     expect(formatJsonSafe({ count: 4n })).toContain('"4n"');
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    expect(formatJsonSafe(cyclic)).toStartWith("[unserializable: ");
+    expect(formatJsonSafe(cyclic)).toBe("[unserializable]");
 
     const html = renderToStaticMarkup(
       <ToolCall name="inspect" state="running" layout="expanded" args={{ count: 4n }} result={cyclic} />,

@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
-import { useInsertionEffect } from "react";
 import { DEFAULT_THEME_KEY, standaloneThemeCss, themeRegistry, workflowUiThemeCss } from "@smthrs/ui-styleguide";
+import { useInsertionEffect } from "react";
 import { smithersUiCss } from "./uiCss";
 
 export { smithersUiCss } from "./uiCss";
@@ -8,10 +8,10 @@ export { standaloneThemeCss };
 export { DEFAULT_THEME_KEY, themeRegistry };
 
 /**
- * Marker attribute carried by the injected/rendered style element. Both
- * delivery paths ({@link SmithersUiStyles} and the per-component
- * {@link useInjectUiCss} fallback) check for it, so the sheet lands exactly
- * once per document no matter how many components render.
+ * Marker attribute carried by injected and rendered style elements. The
+ * {@link useInjectUiCss} fallback checks for it and stands down when a rendered
+ * sheet is already present. {@link SmithersUiStyles} cannot dedupe across React
+ * or server-rendered trees; the host must render `<SmithersUiStyles/>` exactly once.
  */
 export const SMITHERS_UI_STYLE_ATTR = "data-smithers-ui";
 export const REDUCED_MOTION_MEDIA_QUERY = "(prefers-reduced-motion: reduce)";
@@ -61,7 +61,7 @@ export function composeSmithersUiStyles({ withTheme = false, extra }: SmithersUi
  */
 export function SmithersUiStyles(props: SmithersUiStylesProps = {}) {
   // Literal attribute: JSX attribute names must be static, so this cannot use
-  // SMITHERS_UI_STYLE_ATTR — keep the two in sync (useInjectUiCss dedupes on it).
+  // SMITHERS_UI_STYLE_ATTR; keep the two in sync because useInjectUiCss checks it.
   return <style data-smithers-ui="">{composeSmithersUiStyles(props)}</style>;
 }
 

@@ -7,6 +7,8 @@
 // at module-load time, so registering happy-dom here (after hoisted imports)
 // would be too late and portals would render nothing.
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -29,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
   SMITHERS_UI_STYLE_ATTR,
+  SmithersUiStyles,
   Tabs,
   TabsContent,
   TabsList,
@@ -38,8 +41,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../src/index";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -89,6 +91,44 @@ describe("style auto-injection", () => {
     const styles = document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`);
     expect(styles.length).toBe(1);
     expect(styles[0]!.textContent).toContain(".sui-button");
+  });
+
+  test("a rendered sheet makes a later component injection stand down", async () => {
+    await render(
+      <>
+        <SmithersUiStyles />
+        <Button>after sheet</Button>
+      </>,
+    );
+    const styles = document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`);
+    expect(styles).toHaveLength(1);
+    expect(container!.contains(styles[0]!)).toBe(true);
+  });
+
+  test("a rendered sheet added later does not remove the injected copy", async () => {
+    await render(<Button>before sheet</Button>);
+    const injected = document.head.querySelector(`style[${SMITHERS_UI_STYLE_ATTR}]`)!;
+    expect(injected).not.toBeNull();
+
+    const current = root!;
+    await act(async () =>
+      current.render(
+        <>
+          <Button>before sheet</Button>
+          <SmithersUiStyles />
+        </>,
+      )
+    );
+
+    const styles = document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`);
+    expect(styles).toHaveLength(2);
+    expect(document.head.contains(injected)).toBe(true);
+    expect(container!.querySelector(`style[${SMITHERS_UI_STYLE_ATTR}]`)).not.toBeNull();
+  });
+
+  test("documents that the host owns rendered-sheet multiplicity", () => {
+    const source = readFileSync(join(import.meta.dir, "..", "src", "styles.tsx"), "utf8");
+    expect(source).toContain("host must render `<SmithersUiStyles/>` exactly once");
   });
 });
 

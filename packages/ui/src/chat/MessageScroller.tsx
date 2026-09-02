@@ -1,7 +1,13 @@
 /** @jsxImportSource react */
 import {
+  type ComponentProps,
   createContext,
+  type CSSProperties,
   forwardRef,
+  type ForwardRefExoticComponent,
+  type ReactNode,
+  type Ref,
+  type RefAttributes,
   useCallback,
   useContext,
   useEffect,
@@ -11,16 +17,10 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type ComponentProps,
-  type CSSProperties,
-  type ForwardRefExoticComponent,
-  type ReactNode,
-  type Ref,
-  type RefAttributes,
 } from "react";
 import { cn } from "../cn";
-import { prefersReducedMotion, useInjectUiCss } from "../styles";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
+import { prefersReducedMotion, useInjectUiCss } from "../styles";
 import { CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss } from "./conversationFoundationCss";
 import { subscribeVisibility } from "./visibilitySubscriptionRegistry";
 
@@ -32,13 +32,12 @@ export type MessageScrollerCommands = {
   scrollToBottom(behavior?: ScrollBehavior): void;
   scrollToTop(behavior?: ScrollBehavior): void;
   /** Jump so the message's top sits `peekPx` below the viewport top. */
-  scrollToMessage(messageId: string, opts?: { behavior?: ScrollBehavior; peek?: boolean }): boolean;
+  scrollToMessage(messageId: string, opts?: { behavior?: ScrollBehavior; peek?: boolean; }): boolean;
 };
 
 export type MessageScrollerProviderProps = {
   /** 'bottom' pins and follows growth; 'none' (upstream default) never autoscrolls. */
   scrollAnchor?: "bottom" | "none";
-  streaming?: boolean;
   /** Saved-transcript restore: anchor this registered message on mount. */
   initialMessageId?: string;
   bottomThreshold?: number;
@@ -70,7 +69,7 @@ export type MessageScrollerItemProps = ComponentProps<"div"> & {
 };
 
 export type MessageScrollerButtonProps = Omit<ComponentProps<"button">, "onClick"> & {
-  target?: "latest" | "start" | { messageId: string };
+  target?: "latest" | "start" | { messageId: string; };
   behavior?: ScrollBehavior;
 };
 
@@ -102,7 +101,7 @@ type ScrollSnapshot = {
   scrollTop: number;
 };
 
-type ViewportState = { atTop: boolean; atBottom: boolean; following: boolean; autoscrolling: boolean };
+type ViewportState = { atTop: boolean; atBottom: boolean; following: boolean; autoscrolling: boolean; };
 
 type ScrollerContextValue = {
   commands: MessageScrollerCommands;
@@ -118,6 +117,15 @@ type ScrollerContextValue = {
 
 const ScrollerContext = createContext<ScrollerContextValue | null>(null);
 
+type ScrollerFrameOptions = {
+  fade: boolean;
+  hideJumpToLatest: boolean;
+  jumpToLatestLabel: string;
+  contentClassName?: string;
+};
+
+const ScrollerFrameOptionsContext = createContext<ScrollerFrameOptions | null>(null);
+
 function useScrollerContext(part: string): ScrollerContextValue {
   const ctx = useContext(ScrollerContext);
   if (!ctx) throw new Error(`${part} must be used inside <MessageScrollerProvider>`);
@@ -132,11 +140,10 @@ function useScrollerLaneCss(): void {
 const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown"]);
 
 /** Internal-only extension used by the flat compat wrapper (legacy prop). */
-type InternalProviderProps = MessageScrollerProviderProps & { firstItemKey?: string | number };
+type InternalProviderProps = MessageScrollerProviderProps & { firstItemKey?: string | number; };
 
 function MessageScrollerProviderImpl({
   scrollAnchor = "none",
-  streaming: _streaming = false,
   initialMessageId,
   bottomThreshold = 24,
   peekPx = 56,
@@ -153,10 +160,10 @@ function MessageScrollerProviderImpl({
   const followingRef = useRef(scrollAnchor === "bottom");
   const ignoreScrollUntilBottomRef = useRef(false);
   const restorePendingRef = useRef(initialMessageId !== undefined);
-  const turnAnchorRef = useRef<{ id: string; top: number } | null>(null);
+  const turnAnchorRef = useRef<{ id: string; top: number; } | null>(null);
   const pendingAnchorIdRef = useRef<string | null>(null);
   const ignoreNextScrollRef = useRef(false);
-  const queuedJumpRef = useRef<{ messageId: string; opts?: { behavior?: ScrollBehavior; peek?: boolean } } | null>(
+  const queuedJumpRef = useRef<{ messageId: string; opts?: { behavior?: ScrollBehavior; peek?: boolean; }; } | null>(
     null,
   );
   const snapshotRef = useRef<ScrollSnapshot>({ firstItemKey, scrollHeight: 0, scrollTop: 0 });
@@ -288,7 +295,7 @@ function MessageScrollerProviderImpl({
     if (visible) set.add(messageId);
     else set.delete(messageId);
     const listeners = visibilityListenersRef.current.get(messageId);
-    if (listeners) for (const listener of listeners) listener();
+    if (listeners) { for (const listener of listeners) listener(); }
   }, []);
 
   const recomputeVisibilityGeometric = useCallback(() => {
@@ -355,7 +362,7 @@ function MessageScrollerProviderImpl({
   );
 
   const scrollToMessage = useCallback(
-    (messageId: string, opts?: { behavior?: ScrollBehavior; peek?: boolean }): boolean => {
+    (messageId: string, opts?: { behavior?: ScrollBehavior; peek?: boolean; }): boolean => {
       const viewport = viewportRef.current;
       const el = itemsRef.current.get(messageId);
       if (!viewport) return false;
@@ -792,17 +799,19 @@ export function MessageScrollerProvider(props: MessageScrollerProviderProps) {
 export const MessageScrollerViewport: ForwardRefExoticComponent<
   MessageScrollerViewportProps & RefAttributes<HTMLDivElement>
 > = forwardRef<HTMLDivElement, MessageScrollerViewportProps>(function MessageScrollerViewport(
-  { fade = false, className, children, "aria-label": ariaLabel, ...props },
+  { fade, className, children, "aria-label": ariaLabel, ...props },
   ref,
 ) {
   useScrollerLaneCss();
+  const frameOptions = useContext(ScrollerFrameOptionsContext);
+  const resolvedFade = fade ?? frameOptions?.fade ?? false;
   const { registerViewport, handleViewportScroll } = useScrollerContext("MessageScrollerViewport");
   const { atTop, atBottom, autoscrolling } = useMessageScrollerState();
   const composedRef = useCallback(
     (el: HTMLDivElement | null) => {
       registerViewport(el);
       if (typeof ref === "function") ref(el);
-      else if (ref) (ref as { current: HTMLDivElement | null }).current = el;
+      else if (ref) (ref as { current: HTMLDivElement | null; }).current = el;
     },
     [registerViewport, ref],
   );
@@ -810,7 +819,7 @@ export const MessageScrollerViewport: ForwardRefExoticComponent<
     <div
       ref={composedRef}
       data-slot="message-scroller-viewport"
-      className={cn("sui-msg-scroller-viewport", fade && "sui-scroll-fade", className)}
+      className={cn("sui-msg-scroller-viewport", resolvedFade && "sui-scroll-fade", className)}
       data-fade-top={atTop ? "false" : "true"}
       data-fade-bottom={atBottom ? "false" : "true"}
       data-autoscrolling={autoscrolling ? "true" : undefined}
@@ -828,17 +837,18 @@ export const MessageScrollerViewport: ForwardRefExoticComponent<
 /** Message list container; defaults to role='log' (live-log semantics). */
 export function MessageScrollerContent({ className, role, ...props }: MessageScrollerContentProps) {
   useScrollerLaneCss();
+  const frameOptions = useContext(ScrollerFrameOptionsContext);
   return (
     <div
       data-slot="message-scroller-content"
       role={role ?? "log"}
-      className={cn("sui-msg-scroller-content", className)}
+      className={cn("sui-msg-scroller-content", frameOptions?.contentClassName, className)}
       {...props}
     />
   );
 }
 
-type ItemStyle = CSSProperties & { "--sui-msg-intrinsic"?: string };
+type ItemStyle = CSSProperties & { "--sui-msg-intrinsic"?: string; };
 
 /** One registered message wrapper with content-visibility optimization. */
 export function MessageScrollerItem({
@@ -869,7 +879,7 @@ export function MessageScrollerItem({
   );
 }
 
-type ScrollerButtonTarget = "latest" | "start" | { messageId: string };
+type ScrollerButtonTarget = "latest" | "start" | { messageId: string; };
 
 function targetKind(target: ScrollerButtonTarget): "end" | "start" | "message" {
   if (target === "start") return "start";
@@ -918,7 +928,8 @@ function MessageScrollerFrameButton({
   );
 }
 
-function MessageScrollerLatestButton(props: MessageScrollerButtonProps) {
+function MessageScrollerLatestButton({ "aria-label": ariaLabel, ...props }: MessageScrollerButtonProps) {
+  const frameOptions = useContext(ScrollerFrameOptionsContext);
   const { commands } = useScrollerContext("MessageScrollerButton");
   const { atBottom } = useMessageScrollerState();
   return (
@@ -926,7 +937,7 @@ function MessageScrollerLatestButton(props: MessageScrollerButtonProps) {
       {...props}
       target="latest"
       active={!atBottom}
-      label="Jump to latest"
+      label={ariaLabel ?? frameOptions?.jumpToLatestLabel ?? "Jump to latest"}
       onJump={() => commands.scrollToBottom(props.behavior ?? "smooth")}
     />
   );
@@ -949,7 +960,7 @@ function MessageScrollerStartButton(props: MessageScrollerButtonProps) {
 function MessageScrollerTargetButton({
   target,
   ...props
-}: MessageScrollerButtonProps & { target: { messageId: string } }) {
+}: MessageScrollerButtonProps & { target: { messageId: string; }; }) {
   const { commands } = useScrollerContext("MessageScrollerButton");
   const visible = useMessageVisibility(target.messageId);
   return (
@@ -965,7 +976,11 @@ function MessageScrollerTargetButton({
 
 /** Jump affordance; inert while already at the target region. */
 export function MessageScrollerButton({ target = "latest", ...props }: MessageScrollerButtonProps) {
-  if (target === "latest") return <MessageScrollerLatestButton {...props} />;
+  const frameOptions = useContext(ScrollerFrameOptionsContext);
+  if (target === "latest") {
+    if (frameOptions?.hideJumpToLatest) return null;
+    return <MessageScrollerLatestButton {...props} />;
+  }
   if (target === "start") return <MessageScrollerStartButton {...props} />;
   return <MessageScrollerTargetButton target={target} {...props} />;
 }
@@ -1000,7 +1015,7 @@ export function useMessageScrollerState(): ViewportState {
 /* Flat compat component (unchanged public surface)                           */
 /* -------------------------------------------------------------------------- */
 
-type FlatInnerProps = MessageScrollerProps & { handleRef: Ref<MessageScrollerHandle> };
+type FlatInnerProps = MessageScrollerProps & { handleRef: Ref<MessageScrollerHandle>; };
 
 function useScrollerHandle(handleRef: Ref<MessageScrollerHandle>): void {
   const ctx = useScrollerContext("MessageScroller");
@@ -1021,28 +1036,32 @@ function AmbientScrollerFrame({
   className,
   children,
   handleRef,
-  // Provider/parts own these in the compound anatomy; accepted and ignored so
-  // the flat props type can be shared.
-  fade: _fade,
-  hideJumpToLatest: _hideJumpToLatest,
-  jumpToLatestLabel: _jumpToLatestLabel,
-  contentClassName: _contentClassName,
+  fade = true,
+  hideJumpToLatest = false,
+  jumpToLatestLabel = "Jump to latest",
+  contentClassName,
   ...props
 }: FlatInnerProps) {
   useScrollerLaneCss();
   const { following, autoscrolling } = useMessageScrollerState();
   useScrollerHandle(handleRef);
+  const frameOptions = useMemo<ScrollerFrameOptions>(
+    () => ({ fade, hideJumpToLatest, jumpToLatestLabel, contentClassName }),
+    [contentClassName, fade, hideJumpToLatest, jumpToLatestLabel],
+  );
   return (
-    <div
-      data-slot="message-scroller"
-      className={cn("sui-msg-scroller", className)}
-      data-following={following ? "true" : "false"}
-      data-streaming={streaming ? "true" : "false"}
-      data-autoscrolling={autoscrolling ? "true" : undefined}
-      {...(props as ComponentProps<"div">)}
-    >
-      {children}
-    </div>
+    <ScrollerFrameOptionsContext.Provider value={frameOptions}>
+      <div
+        data-slot="message-scroller"
+        className={cn("sui-msg-scroller", className)}
+        data-following={following ? "true" : "false"}
+        data-streaming={streaming ? "true" : "false"}
+        data-autoscrolling={autoscrolling ? "true" : undefined}
+        {...(props as ComponentProps<"div">)}
+      >
+        {children}
+      </div>
+    </ScrollerFrameOptionsContext.Provider>
   );
 }
 
@@ -1076,17 +1095,19 @@ function FlatScrollerInner({
           {children}
         </div>
       </MessageScrollerViewport>
-      {!atBottom && !hideJumpToLatest ? (
-        <button
-          type="button"
-          data-slot="message-scroller-jump"
-          className="sui-msg-scroller-jump"
-          aria-label={jumpToLatestLabel}
-          onClick={() => ctx.commands.scrollToBottom("smooth")}
-        >
-          <span aria-hidden="true">↓</span>
-        </button>
-      ) : null}
+      {!atBottom && !hideJumpToLatest ?
+        (
+          <button
+            type="button"
+            data-slot="message-scroller-jump"
+            className="sui-msg-scroller-jump"
+            aria-label={jumpToLatestLabel}
+            onClick={() => ctx.commands.scrollToBottom("smooth")}
+          >
+            <span aria-hidden="true">↓</span>
+          </button>
+        ) :
+        null}
     </div>
   );
 }
@@ -1108,7 +1129,6 @@ export const MessageScroller: ForwardRefExoticComponent<MessageScrollerProps & R
     return (
       <MessageScrollerProviderImpl
         scrollAnchor={stickToBottom ? "bottom" : "none"}
-        streaming={streaming}
         bottomThreshold={bottomThreshold}
         firstItemKey={firstItemKey}
         onFollowChange={onFollowChange}

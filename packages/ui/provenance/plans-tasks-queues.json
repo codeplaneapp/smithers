@@ -1,12 +1,32 @@
 [
   {
     "file": "src/agentic/Plan.tsx",
-    "exports": ["Plan", "PlanHeader", "PlanTitle", "PlanDescription", "PlanTrigger", "PlanContent", "PlanStep", "PlanAction", "PlanFooter", "planStepStatus", "PlanProps", "PlanLegacyProps", "PlanCompoundProps", "PlanStepProps", "PlanStepStatus"],
+    "exports": [
+      "Plan",
+      "PlanHeader",
+      "PlanTitle",
+      "PlanDescription",
+      "PlanTrigger",
+      "PlanContent",
+      "PlanStep",
+      "PlanAction",
+      "PlanFooter",
+      "planStepStatus",
+      "PlanProps",
+      "PlanLegacyProps",
+      "PlanCompoundProps",
+      "PlanStepModel",
+      "PlanStepProps",
+      "PlanStepStatus"
+    ],
     "collection": "agentic/ai-elements",
     "registryItem": "https://elements.ai-sdk.dev/components/plan",
     "ported": "full-anatomy",
     "omissions": [],
-    "divergences": ["Upstream is a streaming Card compound; we retain the legacy step-array API alongside the new compound anatomy", "PlanStep is a merged value+type symbol: the type keeps the legacy step model, the value is the compound li"]
+    "divergences": [
+      "Upstream is a streaming Card compound; we retain the legacy step-array API alongside the new compound anatomy",
+      "PlanStepModel keeps the legacy step model while PlanStep names only the compound li"
+    ]
   },
   {
     "file": "src/agentic/TaskItem.tsx",
@@ -28,16 +48,42 @@
   },
   {
     "file": "src/agentic/Queue.tsx",
-    "exports": ["Queue", "QueueSection", "QueueSectionTrigger", "QueueSectionLabel", "QueueSectionContent", "QueueList", "QueueItem", "QueueItemIndicator", "QueueItemContent", "QueueItemDescription", "QueueSectionProps", "QueueSectionLabelProps", "QueueItemProps", "QueueItemIndicatorProps"],
+    "exports": [
+      "Queue",
+      "QueueSection",
+      "QueueSectionTrigger",
+      "QueueSectionLabel",
+      "QueueSectionContent",
+      "QueueList",
+      "QueueItem",
+      "QueueItemIndicator",
+      "QueueItemContent",
+      "QueueItemDescription",
+      "QueueSectionProps",
+      "QueueSectionLabelProps",
+      "QueueItemProps",
+      "QueueItemIndicatorProps"
+    ],
     "collection": "agentic/ai-elements",
     "registryItem": "https://elements.ai-sdk.dev/components/queue",
     "ported": "partial-anatomy",
     "omissions": ["QueueItemActions", "QueueItemAttachment", "QueueItemImage", "QueueItemFile"],
-    "divergences": ["Upstream documents a boolean-completed item model; our QueueItem takes a shared-vocabulary status string (status wins over completed)"]
+    "divergences": [
+      "Upstream documents a boolean-completed item model; our QueueItem takes a shared-vocabulary status string (status wins over completed)"
+    ]
   },
   {
     "file": "src/agentic/ActivityTimeline.tsx",
-    "exports": ["ActivityTimeline", "ActivityItem", "ActivityGroup", "ActivityKind", "ActivityItemModel", "ActivityTimelineProps", "ActivityItemProps", "ActivityGroupProps"],
+    "exports": [
+      "ActivityTimeline",
+      "ActivityItem",
+      "ActivityGroup",
+      "ActivityKind",
+      "ActivityItemModel",
+      "ActivityTimelineProps",
+      "ActivityItemProps",
+      "ActivityGroupProps"
+    ],
     "collection": "agentic/ai-elements",
     "registryItem": null,
     "ported": "full-anatomy",

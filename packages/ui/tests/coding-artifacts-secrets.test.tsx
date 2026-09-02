@@ -2,10 +2,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { SecretField } from "../src/artifacts/SecretField";
 import { EnvironmentVariable, EnvironmentVariables } from "../src/artifacts/EnvironmentVariables";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { SecretField } from "../src/artifacts/SecretField";
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -40,6 +39,25 @@ describe("SecretField", () => {
   test("mask length is fixed and unrelated to the value length", async () => {
     await render(<SecretField value="ab" maskLength={12} onCopy={() => {}} />);
     expect(container!.querySelector(".sui-secret-mask")!.textContent).toBe("••••••••••••");
+  });
+
+  test("maskLength is normalized and capped at 64 bullets", async () => {
+    const cases: ReadonlyArray<readonly [number, number]> = [
+      [Number.POSITIVE_INFINITY, 64],
+      [1e9, 64],
+      [Number.NaN, 8],
+      [0, 8],
+      [-5, 1],
+      [2.7, 2],
+      [8, 8],
+    ];
+
+    await render(<SecretField value="secret" maskLength={cases[0]![0]} onCopy={() => {}} />);
+    for (const [maskLength, expectedLength] of cases) {
+      const current = root!;
+      await act(async () => current.render(<SecretField value="secret" maskLength={maskLength} onCopy={() => {}} />));
+      expect(container!.querySelector(".sui-secret-mask")!.textContent).toHaveLength(expectedLength);
+    }
   });
 
   test("reveal toggles via aria-pressed and reports through onRevealedChange", async () => {

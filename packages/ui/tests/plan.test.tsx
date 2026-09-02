@@ -1,10 +1,9 @@
 /** @jsxImportSource react */
 import { afterEach, describe, expect, test } from "bun:test";
-import { act, useState, type ReactElement } from "react";
+import { act, type ReactElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Plan, planStepStatus, SMITHERS_UI_STYLE_ATTR, type PlanStep } from "../src/index";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { Plan, type PlanStepModel, planStepStatus, SMITHERS_UI_STYLE_ATTR } from "../src/index";
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -38,7 +37,7 @@ async function nativeKeyboardActivate(button: HTMLButtonElement, key: "Enter" | 
   });
 }
 
-const STEPS: readonly PlanStep[] = [
+const STEPS: readonly PlanStepModel[] = [
   { id: "one", label: "Inspect", status: "done", detail: <span>Inspected files</span> },
   { id: "two", label: "Implement", status: "active", detail: <span>Editing now</span> },
   { id: "three", label: "Test", status: "done" },
@@ -124,7 +123,9 @@ describe("Plan", () => {
 
   test("maps every plan status to the shared vocabulary", () => {
     expect(
-      ["pending", "active", "done", "failed", "skipped"].map((status) => planStepStatus(status as PlanStep["status"])),
+      ["pending", "active", "done", "failed", "skipped"].map((status) =>
+        planStepStatus(status as PlanStepModel["status"])
+      ),
     ).toEqual(["pending", "running", "complete", "failed", "skipped"]);
   });
 });

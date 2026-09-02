@@ -5,10 +5,17 @@ slots, CVA variant APIs, `asChild`, `data-slot` attributes) and Radix behavior,
 styled entirely through theme tokens so every component is correct in light and
 dark and honors `prefers-reduced-motion`.
 
-Styling ships as CSS-in-TS (`smithersUiCss`) because the gateway UI bundler
-drops `.css` imports. Render `<SmithersUiStyles />` once at the root; every
-component also self-injects the composed sheet plus its lane CSS fragment as a
-fallback. All classes are namespaced `sui-*`.
+`@smthrs/ui` is `private: true` and workspace-only at `1.0.0-rc.0`. It is not
+published to any registry: `apps/ui` and `apps/review` consume it through the
+workspace, and the Phase 4 UI port is what decides its public future
+(`docs/migration/disposition-ledger.md`, row `packages/ui`, disposition `keep`).
+Import it by its scoped name, `@smthrs/ui`; the unscoped `smthrs` package
+publishes only a deprecation notice whose module throws on import.
+
+Styling ships as CSS-in-TS (`smithersUiCss`) because the bundler this package
+is built for drops `.css` imports. Render `<SmithersUiStyles />` once at the
+root; every component also self-injects the composed sheet plus its lane CSS
+fragment as a fallback. All classes are namespaced `sui-*`.
 
 ```tsx
 import { SmithersUiStyles, Button, StatusPill } from "@smthrs/ui";
@@ -40,16 +47,39 @@ import { SmithersUiStyles, Button, StatusPill } from "@smthrs/ui";
 - Coding artifacts: `Artifact`, `Snippet`, `PackageInfo`, `SchemaDisplay`,
   `StackTrace`, `TestResults`, `Commit`, `ChangeSummary`,
   `EnvironmentVariables`, `SecretField`.
-- Sandbox previews: `Sandbox`/`SandboxHeader`/`SandboxStatus`/`SandboxActions`/`SandboxContent` (also exported as `AgentSandbox*` for back-compat), `WebPreview`, `JSXPreview`.
+- Sandbox previews: `Sandbox`/`SandboxHeader`/`SandboxStatus`/`SandboxActions`/`SandboxContent`
+  (also exported as `AgentSandbox*` for back-compat), `WebPreview`, `JSXPreview`.
 - Workflow canvas: `WorkflowCanvas` node/edge/controls/panel/toolbar/minimap
   anatomy.
+- Vault: `BacklinksPanel`, `OutlineView`, the `wikilinks` and `graphModel`
+  helpers, and the `createAutosaveDoc` / `useAutosaveDoc` autosave machine.
+- Time: `RelativeTime`, `useRelativeTime`, `formatRelativeTime`.
+- Calendar: `Calendar` with month, week, and day views.
 
-Heavy renderers stay behind `smthrs/ui/adapters/*` subpaths so
-the base barrel tree-shakes clean. Gateway-bound wrappers
-(`GatewayApprovalList`, `GatewayApprovalConfirmation`,
-`GatewayCheckpointControls`, `SmithersCanvasNode`) live in
-`smthrs/gateway-ui`.
+Heavy renderers stay behind `@smthrs/ui/adapters/*` subpaths so the base barrel
+tree-shakes clean: `pierre-diff-view`, `terminal`, `markdown-editor`, `chart`,
+`knowledge-graph`. `tests/barrel-weight.test.ts` is the ratchet that keeps them
+out of `src/index.ts`.
 
-Provenance for every ported family is recorded per lane under `provenance/`
-and aggregated in `shadcn-provenance.json`; `node scripts/check-ui-architecture.mjs`
-enforces the catalog.
+## Documentation
+
+- [`docs/architecture.md`](./docs/architecture.md) — layering, file layout, the
+  adapters rule, and the styling gotchas.
+- [`docs/contracts.md`](./docs/contracts.md) — failure codes, resource limits,
+  and the object-URL ownership rule.
+- [`CHANGELOG.md`](./CHANGELOG.md) — release history.
+- JSDoc on each exported symbol in `src/` is the API reference. There is no
+  page for this package under `docs/pages` while it stays private; see
+  [`docs/README.md`](./docs/README.md).
+
+## Gates
+
+```sh
+pnpm --filter @smthrs/ui test    # bun test tests
+pnpm --filter @smthrs/ui run check    # tsc -p tsconfig.json --noEmit
+```
+
+Both are declared in `BUILD.ts` as `//packages/ui:unitTests` and
+`//packages/ui:check`. This package does not run vitest, coverage thresholds,
+eslint or dprint: `BUILD.ts` records why, and the Phase 4 UI port is what moves
+it onto the 1.0 tooling baseline.

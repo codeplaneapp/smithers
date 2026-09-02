@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useState } from "react";
 import { cn } from "./cn";
 import { useInjectUiCss } from "./styles";
 
@@ -32,12 +32,12 @@ export type FileTreeProps = Omit<ComponentProps<"div">, "onSelect"> & {
    * component's rendered DOM from outside, which is the exact coupling a
    * pass-through prop exists to prevent (LIBRARY-CHANGE-REQUESTS §3).
    */
-  nodeProps?: (node: FileTreeNode) => ComponentProps<"button">;
+  nodeProps?: (node: FileTreeNode) => Omit<ComponentProps<"button">, "type" | "data-slot">;
   /** Start with every directory collapsed (default: expanded). */
   defaultCollapsed?: boolean;
 };
 
-type TreeDir = { name: string; path: string; dirs: TreeDir[]; files: FileTreeNode[] };
+type TreeDir = { name: string; path: string; dirs: TreeDir[]; files: FileTreeNode[]; };
 
 function toNode(item: FileTreeItem): FileTreeNode {
   return typeof item === "string" ? { path: item } : item;
@@ -92,7 +92,7 @@ function FileTreeLevel({
   onToggle: (path: string) => void;
   onSelect?: (path: string) => void;
   renderAffordance?: (node: FileTreeNode) => ReactNode;
-  nodeProps?: (node: FileTreeNode) => ComponentProps<"button">;
+  nodeProps?: (node: FileTreeNode) => Omit<ComponentProps<"button">, "type" | "data-slot">;
 }) {
   return (
     <>
@@ -129,24 +129,30 @@ function FileTreeLevel({
       {dir.files.map((node) => {
         const active = node.path === selected;
         const affordance = renderAffordance?.(node);
+        const { onClick: onNodeClick, className: nodeClassName, ...nodeButtonProps } = nodeProps?.(node) ?? {};
         return (
           <div className="sui-file-tree-row" data-slot="file-tree-row" key={`file:${node.path}`}>
             <button
+              title={node.path}
+              {...nodeButtonProps}
               type="button"
-              className="sui-file-tree-file"
+              className={cn("sui-file-tree-file", nodeClassName)}
               data-slot="file-tree-file"
               data-active={active ? "true" : undefined}
-              title={node.path}
-              onClick={() => onSelect?.(node.path)}
-              {...nodeProps?.(node)}
+              onClick={(event) => {
+                onNodeClick?.(event);
+                if (!event.defaultPrevented) onSelect?.(node.path);
+              }}
             >
               <span className="sui-file-tree-file-name">{leafLabel(node)}</span>
             </button>
-            {affordance != null && affordance !== false ? (
-              <span className="sui-file-tree-affordance" data-slot="file-tree-affordance">
-                {affordance}
-              </span>
-            ) : null}
+            {affordance != null && affordance !== false ?
+              (
+                <span className="sui-file-tree-affordance" data-slot="file-tree-affordance">
+                  {affordance}
+                </span>
+              ) :
+              null}
           </div>
         );
       })}
@@ -174,7 +180,7 @@ export function FileTree({
   const resolved = nodes.map(toNode);
   const root = buildTree(resolved);
   const [collapsed, setCollapsed] = useState<Set<string>>(() =>
-    defaultCollapsed ? new Set(directoryPaths(root)) : new Set(),
+    defaultCollapsed ? new Set(directoryPaths(root)) : new Set()
   );
   const onToggle = (path: string) => {
     setCollapsed((current) => {

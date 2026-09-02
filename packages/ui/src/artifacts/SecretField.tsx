@@ -1,20 +1,22 @@
 /** @jsxImportSource react */
-import { useState, type ComponentProps } from "react";
+import { type ComponentProps, useEffect, useRef, useState } from "react";
 import { cn } from "../cn";
-import { useInjectUiCss } from "../styles";
+import { type CopyFailureCode, copyToClipboard } from "../internal/copyToClipboard";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
-import { CODING_ARTIFACTS_CSS_ID, artifactsCss } from "./artifactsCss";
+import { useInjectUiCss } from "../styles";
+import { artifactsCss, CODING_ARTIFACTS_CSS_ID } from "./artifactsCss";
 
-export type SecretFieldProps = Omit<ComponentProps<"span">, "children"> & {
+export type SecretFieldProps = Omit<ComponentProps<"span">, "children" | "onCopy"> & {
   value: string;
   revealed?: boolean;
   defaultRevealed?: boolean;
   onRevealedChange?: (revealed: boolean) => void;
   /** Extra accessible context appended to the toggle/copy labels. */
   label?: string;
-  /** Fixed bullet count shown while masked (default 8); never tracks length. */
+  /** Fixed bullet count shown while masked (default 8, maximum 64); never tracks length. */
   maskLength?: number;
-  onCopy?: (value: string) => void;
+  onCopy?: (value: string) => void | Promise<void>;
+  onCopyError?: (error: { code: CopyFailureCode; cause: unknown; }) => void;
 };
 
 /**
@@ -30,18 +32,32 @@ export function SecretField({
   label,
   maskLength = 8,
   onCopy,
+  onCopyError,
   className,
   ...props
 }: SecretFieldProps) {
   useInjectUiCss();
   useInjectLaneCss(CODING_ARTIFACTS_CSS_ID, artifactsCss);
   const [uncontrolledRevealed, setUncontrolledRevealed] = useState(defaultRevealed);
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const copyInFlightRef = useRef(false);
+  const mountedRef = useRef(false);
   const isControlled = controlledRevealed !== undefined;
   const revealed = isControlled ? controlledRevealed : uncontrolledRevealed;
-  const hasClipboard =
-    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const hasClipboard = typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
   const canCopy = onCopy !== undefined || hasClipboard;
   const context = label !== undefined ? ` ${label}` : "";
+  const normalizedMaskLength = Math.min(64, Math.max(1, Math.trunc(maskLength) || 8));
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   function toggle() {
     const next = !revealed;
@@ -49,24 +65,42 @@ export function SecretField({
     onRevealedChange?.(next);
   }
 
-  function copy() {
-    if (onCopy) onCopy(value);
-    else if (hasClipboard) void navigator.clipboard.writeText(value);
+  async function copy() {
+    if (copyInFlightRef.current) return;
+    copyInFlightRef.current = true;
+    const result = await copyToClipboard(value, onCopy);
+    copyInFlightRef.current = false;
+    if (!mountedRef.current) return;
+    if (!result.ok) {
+      if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = undefined;
+      setCopied(false);
+      setCopyFailed(true);
+      onCopyError?.({ code: result.code, cause: result.cause });
+      return;
+    }
+    setCopyFailed(false);
+    setCopied(true);
+    if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => {
+      copiedTimerRef.current = undefined;
+      setCopied(false);
+    }, 2_000);
   }
 
   return (
     <span
       data-slot="secret-field"
       data-revealed={revealed ? "true" : "false"}
+      data-copied={copied ? "true" : "false"}
       className={cn("sui-secret", className)}
       {...props}
+      data-copy-failed={copyFailed ? "true" : undefined}
     >
-      {revealed ? (
-        <span className="sui-secret-value">{value}</span>
-      ) : (
+      {revealed ? <span className="sui-secret-value">{value}</span> : (
         <>
           <span className="sui-secret-mask" aria-hidden="true">
-            {"•".repeat(Math.max(1, maskLength))}
+            {"•".repeat(normalizedMaskLength)}
           </span>
           <span className="sui-sr-only">Hidden secret{context}</span>
         </>
@@ -81,17 +115,21 @@ export function SecretField({
       >
         {revealed ? "Hide" : "Reveal"}
       </button>
-      {canCopy ? (
-        <button
-          type="button"
-          data-slot="secret-field-copy"
-          className="sui-secret-copy"
-          aria-label={`Copy secret${context}`}
-          onClick={copy}
-        >
-          Copy
-        </button>
-      ) : null}
+      {canCopy ?
+        (
+          <button
+            type="button"
+            data-slot="secret-field-copy"
+            className="sui-secret-copy"
+            aria-label={`Copy secret${context}`}
+            onClick={() => {
+              void copy();
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        ) :
+        null}
     </span>
   );
 }

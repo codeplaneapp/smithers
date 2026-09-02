@@ -6,8 +6,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { FileTree, SMITHERS_UI_STYLE_ATTR } from "../src/index";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -122,5 +121,39 @@ describe("FileTree", () => {
     await click(dirToggles().find((t) => t.textContent?.includes("app"))!);
     const entry = files().find((file) => file.textContent === "Entry point");
     expect(entry).not.toBeUndefined();
+  });
+
+  test("composes nodeProps without surrendering selection or structural attributes", async () => {
+    const events: string[] = [];
+    await render(
+      <FileTree
+        nodes={["active.ts", "cancelled.ts"]}
+        selected="active.ts"
+        onSelect={(path) => events.push(`select:${path}`)}
+        nodeProps={(node) => ({
+          type: "submit",
+          className: "host-file",
+          "data-slot": "hostile-slot",
+          "data-active": "false",
+          onClick: (event) => {
+            events.push(`host:${node.path}`);
+            if (node.path === "cancelled.ts") event.preventDefault();
+          },
+        })}
+      />,
+    );
+
+    const active = container!.querySelector<HTMLButtonElement>('[title="active.ts"]')!;
+    expect(active.type).toBe("button");
+    expect(active.classList).toContain("sui-file-tree-file");
+    expect(active.classList).toContain("host-file");
+    expect(active.dataset.slot).toBe("file-tree-file");
+    expect(active.dataset.active).toBe("true");
+    await click(active);
+    expect(events).toEqual(["host:active.ts", "select:active.ts"]);
+
+    const cancelled = container!.querySelector<HTMLButtonElement>('[title="cancelled.ts"]')!;
+    await click(cancelled);
+    expect(events).toEqual(["host:active.ts", "select:active.ts", "host:cancelled.ts"]);
   });
 });

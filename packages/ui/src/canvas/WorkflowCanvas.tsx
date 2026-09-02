@@ -7,17 +7,17 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { cn } from "../cn";
 import { Badge } from "../badge";
-import { StatusPill } from "../status-pill";
-import { formatStatus, statusClass, type StatusClass } from "../status";
-import { useInjectUiCss } from "../styles";
+import { cn } from "../cn";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
+import { formatStatus, statusClass, type StatusClass } from "../status";
+import { StatusPill } from "../status-pill";
+import { useInjectUiCss } from "../styles";
 import { canvasCss, WORKFLOW_CANVAS_CSS_ID } from "./canvasCss";
 
 /**
  * Renderer-neutral workflow canvas anatomy: the visual language a graph
- * renderer (e.g. the gateway-ui ReactFlow layer) composes into its node/edge
+ * renderer (a ReactFlow layer, for example) composes into its node/edge
  * renderers. Purely presentational and props-driven — `@xyflow/react` never
  * enters this package. Geometry, pan/zoom, and selection behavior belong to
  * the renderer; these parts cover cards, legends, and overlay chrome only.
@@ -79,14 +79,13 @@ function useRovingTabIndex(ref: RefObject<HTMLElement | null>) {
     const current = items.indexOf(document.activeElement as HTMLElement);
     if (current === -1) return;
     event.preventDefault();
-    const next =
-      key === "Home"
-        ? 0
-        : key === "End"
-          ? items.length - 1
-          : key === "ArrowRight" || key === "ArrowDown"
-            ? (current + 1) % items.length
-            : (current - 1 + items.length) % items.length;
+    const next = key === "Home"
+      ? 0
+      : key === "End"
+      ? items.length - 1
+      : key === "ArrowRight" || key === "ArrowDown"
+      ? (current + 1) % items.length
+      : (current - 1 + items.length) % items.length;
     items.forEach((el, i) => {
       el.tabIndex = i === next ? 0 : -1;
     });
@@ -143,8 +142,7 @@ export type WorkflowNodeProps = Omit<ComponentProps<"div">, "children" | "title"
    * generic div role, where aria-selected is unsupported and stripped.
    * `role="option"` has a required context: the renderer MUST provide an
    * owning selection-model ancestor (e.g. `WorkflowCanvas role="listbox"`)
-   * or strip the option semantics (as the gateway-ui WorkflowGraph does via
-   * `SmithersCanvasNode` under its `role="region"` canvas), or the option is
+   * or strip the option semantics in its own node wrapper, or the option is
    * orphaned in the accessibility tree.
    */
   selected?: boolean;
@@ -172,17 +170,21 @@ export function WorkflowNode({ title, status, kind, selected, className, childre
       className={cn("sui-canvas-node", className)}
       {...props}
     >
-      {hasHeader ? (
-        <WorkflowNodeHeader>
-          {kind !== undefined ? (
-            <Badge variant="muted" className="sui-canvas-node-kind">
-              {kind}
-            </Badge>
-          ) : null}
-          {title != null ? <span className="sui-canvas-node-title">{title}</span> : null}
-          {status !== undefined ? <WorkflowNodeStatus status={status} /> : null}
-        </WorkflowNodeHeader>
-      ) : null}
+      {hasHeader ?
+        (
+          <WorkflowNodeHeader>
+            {kind !== undefined ?
+              (
+                <Badge variant="muted" className="sui-canvas-node-kind">
+                  {kind}
+                </Badge>
+              ) :
+              null}
+            {title != null ? <span className="sui-canvas-node-title">{title}</span> : null}
+            {status !== undefined ? <WorkflowNodeStatus status={status} /> : null}
+          </WorkflowNodeHeader>
+        ) :
+        null}
       {children}
     </div>
   );
@@ -240,23 +242,27 @@ export function WorkflowEdge({ from, to, label, status, className, ...props }: W
       className={cn("sui-canvas-edge", className)}
       {...props}
     >
-      {status !== undefined ? (
-        <>
-          <span aria-hidden className="sui-canvas-edge-glyph">
-            {STATUS_CLASS_GLYPH[statusClass(status)]}
-          </span>
-          <span className="sui-sr-only">{formatStatus(status)}</span>
-        </>
-      ) : null}
+      {status !== undefined ?
+        (
+          <>
+            <span aria-hidden className="sui-canvas-edge-glyph">
+              {STATUS_CLASS_GLYPH[statusClass(status)]}
+            </span>
+            <span className="sui-sr-only">{formatStatus(status)}</span>
+          </>
+        ) :
+        null}
       {from !== undefined ? <span className="sui-canvas-edge-end">{from}</span> : null}
-      {from !== undefined && to !== undefined ? (
-        <>
-          <span aria-hidden className="sui-canvas-edge-arrow">
-            →
-          </span>
-          <span className="sui-sr-only"> to </span>
-        </>
-      ) : null}
+      {from !== undefined && to !== undefined ?
+        (
+          <>
+            <span aria-hidden className="sui-canvas-edge-arrow">
+              →
+            </span>
+            <span className="sui-sr-only">to</span>
+          </>
+        ) :
+        null}
       {to !== undefined ? <span className="sui-canvas-edge-end">{to}</span> : null}
       {label != null ? <span className="sui-canvas-edge-label">{label}</span> : null}
     </span>
@@ -324,21 +330,27 @@ export function WorkflowControls({
       }}
       {...props}
     >
-      {onZoomIn ? (
-        <button type="button" aria-label="Zoom in" className="sui-canvas-controls-button" onClick={onZoomIn}>
-          <span aria-hidden>+</span>
-        </button>
-      ) : null}
-      {onZoomOut ? (
-        <button type="button" aria-label="Zoom out" className="sui-canvas-controls-button" onClick={onZoomOut}>
-          <span aria-hidden>−</span>
-        </button>
-      ) : null}
-      {onFitView ? (
-        <button type="button" aria-label="Fit view" className="sui-canvas-controls-button" onClick={onFitView}>
-          <span aria-hidden>⤢</span>
-        </button>
-      ) : null}
+      {onZoomIn ?
+        (
+          <button type="button" aria-label="Zoom in" className="sui-canvas-controls-button" onClick={onZoomIn}>
+            <span aria-hidden>+</span>
+          </button>
+        ) :
+        null}
+      {onZoomOut ?
+        (
+          <button type="button" aria-label="Zoom out" className="sui-canvas-controls-button" onClick={onZoomOut}>
+            <span aria-hidden>−</span>
+          </button>
+        ) :
+        null}
+      {onFitView ?
+        (
+          <button type="button" aria-label="Fit view" className="sui-canvas-controls-button" onClick={onFitView}>
+            <span aria-hidden>⤢</span>
+          </button>
+        ) :
+        null}
       {children}
     </div>
   );

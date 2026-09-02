@@ -1,10 +1,15 @@
 /** @jsxImportSource react */
-import { createContext, useContext, type ComponentProps, type ReactNode } from "react";
-import { cn } from "../cn";
-import { useInjectUiCss } from "../styles";
-import { useInjectLaneCss } from "../internal/useInjectLaneCss";
+/**
+ * Presentational rows for rc.0 checkpoints, which are pinned git trees taken
+ * per cell call. Optional actions are host wiring for `@smthrs/time-travel`
+ * library operations, not Smithers control-plane or CLI capabilities.
+ */
+import { type ComponentProps, createContext, type ReactNode, useContext } from "react";
 import { Button } from "../button";
+import { cn } from "../cn";
+import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { Spinner } from "../spinner";
+import { useInjectUiCss } from "../styles";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../tooltip";
 import { APPROVALS_CHECKPOINTS_CSS_ID, approvalsCss } from "./approvalsCss";
 
@@ -17,23 +22,16 @@ export type CheckpointModel = {
   messageCount?: number;
 };
 
-export type CheckpointActionKind = "restore" | "fork" | "replay" | "rewind" | "return-to-live";
+// Keep this vocabulary aligned with docs/migration/rc-contract.md sections 5.2 and 7.
+export type CheckpointActionKind = "fork" | "replay" | "rewind";
 
 const CHECKPOINT_ACTION_LABELS: Readonly<Record<CheckpointActionKind, string>> = {
-  restore: "Restore",
   fork: "Fork",
   replay: "Replay",
   rewind: "Rewind",
-  "return-to-live": "Return to live",
 };
 
-export const CHECKPOINT_ACTION_KINDS: readonly CheckpointActionKind[] = [
-  "restore",
-  "fork",
-  "replay",
-  "rewind",
-  "return-to-live",
-];
+export const CHECKPOINT_ACTION_KINDS: readonly CheckpointActionKind[] = ["fork", "replay", "rewind"];
 
 type CheckpointContextValue = {
   checkpoint: CheckpointModel;
@@ -56,10 +54,9 @@ export type CheckpointProps = Omit<ComponentProps<"div">, "children"> & {
 };
 
 /**
- * A durable checkpoint row (restore/fork/replay/rewind/return-to-live
- * semantics map onto Smithers snapshots and time-travel). With no children it
- * renders the default anatomy: icon + label + metadata. Compose
- * CheckpointIcon/CheckpointMetadata/CheckpointActions children for control.
+ * A presentational row over an rc.0 pinned-tree checkpoint. With no children
+ * it renders the default anatomy: icon, label, and metadata. Compose
+ * CheckpointIcon, CheckpointMetadata, and CheckpointActions for host controls.
  */
 export function Checkpoint({ checkpoint, current = false, children, className, ...props }: CheckpointProps) {
   useInjectUiCss();
@@ -118,11 +115,13 @@ export function CheckpointMetadata({ className, ...props }: ComponentProps<"div"
   return (
     <div data-slot="checkpoint-metadata" className={cn("sui-checkpoint-metadata", className)} {...props}>
       {checkpoint.frameNo !== undefined ? <span>frame {checkpoint.frameNo}</span> : null}
-      {checkpoint.timestampMs !== undefined ? (
-        <time dateTime={new Date(checkpoint.timestampMs).toISOString()}>
-          {new Date(checkpoint.timestampMs).toLocaleString()}
-        </time>
-      ) : null}
+      {checkpoint.timestampMs !== undefined ?
+        (
+          <time dateTime={new Date(checkpoint.timestampMs).toISOString()}>
+            {new Date(checkpoint.timestampMs).toLocaleString()}
+          </time>
+        ) :
+        null}
       {checkpoint.messageCount !== undefined ? <span>{checkpoint.messageCount} messages</span> : null}
     </div>
   );
@@ -172,7 +171,7 @@ export type CheckpointActionsProps = Omit<ComponentProps<"div">, "children"> & {
 };
 
 /**
- * The restore/fork/replay/rewind/return-to-live action group. `busy` disables
+ * Host-wired fork, replay, and rewind library operations. `busy` disables
  * every action and spins the busy one; `disabled` greys individual kinds.
  */
 export function CheckpointActions({

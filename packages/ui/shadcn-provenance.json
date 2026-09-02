@@ -349,7 +349,7 @@
       ]
     },
     {
-      "file": "src/agentic/CodeBlock.tsx",
+      "file": "src/agentic/CodeBlock.ts",
       "exports": [
         "CodeBlock",
         "CodeBlockHeader",
@@ -388,6 +388,7 @@
         "PlanProps",
         "PlanLegacyProps",
         "PlanCompoundProps",
+        "PlanStepModel",
         "PlanStepProps",
         "PlanStepStatus"
       ],
@@ -397,7 +398,7 @@
       "omissions": [],
       "divergences": [
         "Upstream is a streaming Card compound; we retain the legacy step-array API alongside the new compound anatomy",
-        "PlanStep is a merged value+type symbol: the type keeps the legacy step model, the value is the compound li"
+        "PlanStepModel keeps the legacy step model while PlanStep names only the compound li"
       ]
     },
     {
@@ -540,8 +541,8 @@
         "tooltip-only trigger variant without action group"
       ],
       "divergences": [
-        "CheckpointActionKind covers Smithers time-travel verbs: restore, fork, replay, rewind, return-to-live",
-        "CheckpointModel carries frameNo/messageIndex/messageCount for Smithers snapshots"
+        "CheckpointActionKind covers host-wired @smthrs/time-travel library operations: fork, replay, rewind",
+        "CheckpointModel carries presentational metadata for an rc.0 pinned-tree checkpoint row"
       ]
     },
     {
@@ -969,7 +970,7 @@
         "Upstream Canvas ReactFlow wrapper itself (pre-configured pan/zoom/selection/delete/fitView behaviors bound to the AI SDK data model)"
       ],
       "divergences": [
-        "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; the ReactFlow renderer lives in @smthrs/gateway-ui",
+        "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; a host owns the ReactFlow renderer",
         "WorkflowEdge and WorkflowConnection are legend/inline representations (from -> to, pending-connection validity) rather than ReactFlow edge/connection-line renderers",
         "WorkflowNodeStatus is a smithers addition (shared StatusPill) with no upstream equivalent",
         "WorkflowMinimap is a labelled seam frame with no upstream component; upstream parks ReactFlow's MiniMap as a Canvas child",

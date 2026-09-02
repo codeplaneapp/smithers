@@ -1,7 +1,7 @@
 /**
  * The calendar lane's data model. Pure data in, rendered chrome out — the
- * component never fetches; bindings (e.g. gateway-react's useCronSchedule)
- * expand their domain rows into these events.
+ * component never fetches; a host binding (a cron-schedule hook, say) expands
+ * its own domain rows into these events.
  */
 export type CalendarEvent = {
   /** Stable unique id (used for keys and click identity). */

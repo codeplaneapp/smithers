@@ -4,15 +4,15 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   Checkpoint,
+  CHECKPOINT_ACTION_KINDS,
+  type CheckpointActionKind,
   CheckpointActions,
   CheckpointIcon,
   CheckpointMetadata,
   CheckpointTrigger,
-  type CheckpointActionKind,
 } from "../src/approvals/Checkpoint";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/styles";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean; }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -103,28 +103,29 @@ describe("CheckpointTrigger", () => {
   });
 
   test("self-provides tooltip context when tooltip content is requested", async () => {
-    await render(<CheckpointTrigger tooltip="Restore this checkpoint" />);
+    await render(<CheckpointTrigger tooltip="Inspect this checkpoint" />);
     expect(container!.querySelector("[data-slot='checkpoint-trigger']")).not.toBeNull();
   });
 });
 
 describe("CheckpointActions", () => {
-  test("defaults to all five Smithers time-travel kinds", async () => {
+  test("exposes exactly the rc.0 time-travel library operations", async () => {
+    expect(CHECKPOINT_ACTION_KINDS).toEqual(["fork", "replay", "rewind"]);
     await render(
       <Checkpoint checkpoint={model}>
         <CheckpointActions onAction={() => {}} />
       </Checkpoint>,
     );
     const kinds = [...container!.querySelectorAll("[data-slot='checkpoint-action']")].map((el) =>
-      el.getAttribute("data-action"),
+      el.getAttribute("data-action")
     );
-    expect(kinds).toEqual(["restore", "fork", "replay", "rewind", "return-to-live"]);
+    expect(kinds).toEqual(["fork", "replay", "rewind"]);
     expect(container!.querySelector("[role='group']")!.getAttribute("aria-label")).toBe("Checkpoint actions");
   });
 
   test("fires onAction with the clicked kind", async () => {
     const fired: CheckpointActionKind[] = [];
-    await render(<CheckpointActions actions={["restore", "rewind"]} onAction={(kind) => fired.push(kind)} />);
+    await render(<CheckpointActions actions={["replay", "rewind"]} onAction={(kind) => fired.push(kind)} />);
     const rewind = container!.querySelector("[data-action='rewind']")!;
     await act(async () => {
       rewind.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
@@ -133,16 +134,16 @@ describe("CheckpointActions", () => {
   });
 
   test("busy disables every action and spins the busy one", async () => {
-    await render(<CheckpointActions actions={["restore", "fork"]} busy="fork" onAction={() => {}} />);
+    await render(<CheckpointActions actions={["replay", "fork"]} busy="fork" onAction={() => {}} />);
     const buttons = container!.querySelectorAll<HTMLButtonElement>("[data-slot='checkpoint-action']");
     buttons.forEach((button) => expect(button.disabled).toBe(true));
     expect(container!.querySelector("[data-action='fork'] [data-slot='spinner']")).not.toBeNull();
-    expect(container!.querySelector("[data-action='restore'] [data-slot='spinner']")).toBeNull();
+    expect(container!.querySelector("[data-action='replay'] [data-slot='spinner']")).toBeNull();
   });
 
   test("disabled greys individual kinds", async () => {
-    await render(<CheckpointActions actions={["restore", "rewind"]} disabled={["rewind"]} onAction={() => {}} />);
+    await render(<CheckpointActions actions={["replay", "rewind"]} disabled={["rewind"]} onAction={() => {}} />);
     expect(container!.querySelector<HTMLButtonElement>("[data-action='rewind']")!.disabled).toBe(true);
-    expect(container!.querySelector<HTMLButtonElement>("[data-action='restore']")!.disabled).toBe(false);
+    expect(container!.querySelector<HTMLButtonElement>("[data-action='replay']")!.disabled).toBe(false);
   });
 });

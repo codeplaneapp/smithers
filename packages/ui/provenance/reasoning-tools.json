@@ -86,7 +86,7 @@
     ]
   },
   {
-    "file": "src/agentic/CodeBlock.tsx",
+    "file": "src/agentic/CodeBlock.ts",
     "exports": ["CodeBlock", "CodeBlockHeader", "CodeBlockFilename", "CodeBlockGroup", "CodeBlockTabs"],
     "collection": "agentic/ai-elements",
     "registryItem": "https://elements.ai-sdk.dev/components/code-block",

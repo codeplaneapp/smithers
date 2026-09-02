@@ -1,14 +1,16 @@
 /** @jsxImportSource react */
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { type ComponentProps, useEffect, useRef, useState } from "react";
 import { cn } from "../cn";
-import { useInjectUiCss } from "../styles";
+import { type CopyFailureCode, copyToClipboard } from "../internal/copyToClipboard";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
-import { CODING_ARTIFACTS_CSS_ID, artifactsCss } from "./artifactsCss";
+import { useInjectUiCss } from "../styles";
+import { artifactsCss, CODING_ARTIFACTS_CSS_ID } from "./artifactsCss";
 
 export type SnippetProps = Omit<ComponentProps<"div">, "children"> & {
   code: string;
   language?: string;
-  onCopyCode?: (code: string) => void;
+  onCopyCode?: (code: string) => void | Promise<void>;
+  onCopyError?: (error: { code: CopyFailureCode; cause: unknown; }) => void;
 };
 
 /**
@@ -16,25 +18,40 @@ export type SnippetProps = Omit<ComponentProps<"div">, "children"> & {
  * CodeBlock: onCopyCode wins, else navigator.clipboard when available, else
  * the button is hidden.
  */
-export function Snippet({ code, language, onCopyCode, className, ...props }: SnippetProps) {
+export function Snippet({ code, language, onCopyCode, onCopyError, className, ...props }: SnippetProps) {
   useInjectUiCss();
   useInjectLaneCss(CODING_ARTIFACTS_CSS_ID, artifactsCss);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const hasClipboard =
-    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const copyInFlightRef = useRef(false);
+  const mountedRef = useRef(false);
+  const hasClipboard = typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
   const canCopy = onCopyCode !== undefined || hasClipboard;
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
       if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
-  function copyCode() {
-    if (onCopyCode) onCopyCode(code);
-    else if (hasClipboard) void navigator.clipboard.writeText(code);
+  async function copyCode() {
+    if (copyInFlightRef.current) return;
+    copyInFlightRef.current = true;
+    const result = await copyToClipboard(code, onCopyCode);
+    copyInFlightRef.current = false;
+    if (!mountedRef.current) return;
+    if (!result.ok) {
+      if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = undefined;
+      setCopied(false);
+      setCopyFailed(true);
+      onCopyError?.({ code: result.code, cause: result.cause });
+      return;
+    }
+    setCopyFailed(false);
     setCopied(true);
     if (copiedTimerRef.current !== undefined) clearTimeout(copiedTimerRef.current);
     copiedTimerRef.current = setTimeout(() => {
@@ -50,19 +67,24 @@ export function Snippet({ code, language, onCopyCode, className, ...props }: Sni
       data-copied={copied ? "true" : "false"}
       className={cn("sui-snippet", className)}
       {...props}
+      data-copy-failed={copyFailed ? "true" : undefined}
     >
       <code className="sui-snippet-code">{code}</code>
-      {canCopy ? (
-        <button
-          type="button"
-          data-slot="snippet-copy"
-          className="sui-snippet-copy"
-          aria-label="Copy code"
-          onClick={copyCode}
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      ) : null}
+      {canCopy ?
+        (
+          <button
+            type="button"
+            data-slot="snippet-copy"
+            className="sui-snippet-copy"
+            aria-label="Copy code"
+            onClick={() => {
+              void copyCode();
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        ) :
+        null}
     </div>
   );
 }

@@ -121,7 +121,8 @@ export const tokens = {
   /**
    * Font stacks routed through the styleguide's `--font-sans`/`--font-mono`
    * so hosts can theme typography; fallbacks are the canonical house stacks
-   * (identical in ui-styleguide and gateway-ui -- keep all three in sync).
+   * and must stay byte-equal to the `@smthrs/ui-styleguide` light values
+   * (pinned by tests/css-contract.test.ts).
    */
   fontSans:
     "var(--font-sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",

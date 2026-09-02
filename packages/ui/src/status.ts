@@ -93,8 +93,9 @@ const STATUS_CLASS_BY_STATUS = {
   error: "bad",
   denied: "bad",
   // A user-initiated cancel is a neutral outcome, not a failure. This matches
-  // the styleguide's `.badge.cancelled` and gateway-ui's RunEventLog; parity
-  // is pinned by tests/status-vocabulary-parity.test.ts.
+  // the styleguide's `.badge.cancelled`, and the run-event surfaces that used
+  // to carry their own copy of this table; parity is pinned by
+  // tests/status-vocabulary-parity.test.ts.
   cancelled: "muted",
   canceled: "muted",
   stale: "bad",
@@ -221,10 +222,10 @@ export function formatStatus(status: string | undefined): string {
   });
   return (
     labels[normalized] ??
-    normalized
-      .split("-")
-      .map((part) => (part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
-      .join(" ")
+      normalized
+        .split("-")
+        .map((part) => (part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part))
+        .join(" ")
   );
 }
 

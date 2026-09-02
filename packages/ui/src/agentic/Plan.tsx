@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { createContext, useContext, useId, useState, type ComponentProps, type ReactNode } from "react";
+import { type ComponentProps, createContext, type ReactNode, useContext, useId, useState } from "react";
 import { cn } from "../cn";
 import { useInjectLaneCss } from "../internal/useInjectLaneCss";
 import { formatStatus, statusClass } from "../status";
@@ -8,7 +8,7 @@ import { PLANS_TASKS_QUEUES_CSS_ID, plansTasksQueuesCss } from "./plansTasksQueu
 
 export type PlanStepStatus = "pending" | "active" | "done" | "failed" | "skipped";
 
-export type PlanStep = {
+export type PlanStepModel = {
   id: string;
   label: string;
   status: PlanStepStatus;
@@ -18,7 +18,7 @@ export type PlanStep = {
 
 export type PlanLegacyProps = Omit<ComponentProps<"section">, "children" | "title"> & {
   title?: string;
-  steps: readonly PlanStep[];
+  steps: readonly PlanStepModel[];
   streaming?: boolean;
   open?: boolean;
   defaultOpen?: boolean;
@@ -59,13 +59,13 @@ type PlanContextValue = {
   contentId: string | undefined;
 };
 
-const PlanContext = createContext<PlanContextValue>({
-  open: true,
-  toggle: () => {},
-  streaming: false,
-  triggerId: undefined,
-  contentId: undefined,
-});
+const PlanContext = createContext<PlanContextValue | null>(null);
+
+function usePlanContext(part: string): PlanContextValue {
+  const context = useContext(PlanContext);
+  if (!context) throw new Error(`${part} must render inside <Plan>`);
+  return context;
+}
 
 function usePlanCss(): void {
   useInjectUiCss();
@@ -75,13 +75,14 @@ function usePlanCss(): void {
 /** Header row of a compound Plan; hosts PlanTrigger, PlanTitle, PlanAction. */
 export function PlanHeader({ className, ...props }: ComponentProps<"div">) {
   usePlanCss();
+  usePlanContext("PlanHeader");
   return <div data-slot="plan-header" className={cn("sui-plan-header", className)} {...props} />;
 }
 
 /** Title text of a compound Plan; shimmers while the plan streams. */
 export function PlanTitle({ className, ...props }: ComponentProps<"div">) {
   usePlanCss();
-  const { streaming } = useContext(PlanContext);
+  const { streaming } = usePlanContext("PlanTitle");
   return (
     <div
       data-slot="plan-title"
@@ -95,13 +96,14 @@ export function PlanTitle({ className, ...props }: ComponentProps<"div">) {
 /** Optional descriptive text under the plan header. */
 export function PlanDescription({ className, ...props }: ComponentProps<"div">) {
   usePlanCss();
+  usePlanContext("PlanDescription");
   return <div data-slot="plan-description" className={cn("sui-plan-description", className)} {...props} />;
 }
 
 /** Compound-mode disclosure trigger toggling the Plan body. */
 export function PlanTrigger({ className, children, onClick, ...props }: ComponentProps<"button">) {
   usePlanCss();
-  const { open, toggle, triggerId, contentId } = useContext(PlanContext);
+  const { open, toggle, triggerId, contentId } = usePlanContext("PlanTrigger");
   return (
     <button
       type="button"
@@ -127,7 +129,7 @@ export function PlanTrigger({ className, children, onClick, ...props }: Componen
 /** Compound-mode body region of a Plan; mounted only while open. */
 export function PlanContent({ className, ...props }: ComponentProps<"div">) {
   usePlanCss();
-  const { open, triggerId, contentId } = useContext(PlanContext);
+  const { open, triggerId, contentId } = usePlanContext("PlanContent");
   if (!open) return null;
   return (
     <div
@@ -151,8 +153,7 @@ export type PlanStepProps = Omit<ComponentProps<"li">, "children" | "title"> & {
 };
 
 /**
- * A single collapsible plan step (compound anatomy). Merged with the PlanStep
- * step-model type: the type keeps its legacy shape, the value is this li.
+ * A single collapsible plan step in the compound anatomy.
  */
 export function PlanStep({
   label,
@@ -165,6 +166,7 @@ export function PlanStep({
   ...props
 }: PlanStepProps) {
   usePlanCss();
+  usePlanContext("PlanStep");
   const bodyId = useId();
   const isControlled = controlledOpen !== undefined;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
@@ -189,27 +191,33 @@ export function PlanStep({
     >
       <div className="sui-plan-step-row">
         <span className="sui-plan-step-dot" aria-hidden="true" />
-        <span className="sui-sr-only">{formatStatus(mapped)}: </span>
+        <span className="sui-sr-only">
+          {formatStatus(mapped)}:{" "}
+        </span>
         <span className="sui-plan-step-label">{label}</span>
-        {hasDetail ? (
-          <button
-            type="button"
-            data-slot="plan-step-toggle"
-            className="sui-plan-step-toggle"
-            aria-expanded={open}
-            aria-controls={bodyId}
-            aria-label={typeof label === "string" ? `Details: ${label}` : "Step details"}
-            onClick={toggleDetail}
-          >
-            Details
-          </button>
-        ) : null}
+        {hasDetail ?
+          (
+            <button
+              type="button"
+              data-slot="plan-step-toggle"
+              className="sui-plan-step-toggle"
+              aria-expanded={open}
+              aria-controls={bodyId}
+              aria-label={typeof label === "string" ? `Details: ${label}` : "Step details"}
+              onClick={toggleDetail}
+            >
+              Details
+            </button>
+          ) :
+          null}
       </div>
-      {hasDetail && open ? (
-        <div data-slot="plan-step-detail" id={bodyId} className="sui-plan-step-detail">
-          {children}
-        </div>
-      ) : null}
+      {hasDetail && open ?
+        (
+          <div data-slot="plan-step-detail" id={bodyId} className="sui-plan-step-detail">
+            {children}
+          </div>
+        ) :
+        null}
     </li>
   );
 }
@@ -217,6 +225,7 @@ export function PlanStep({
 /** A small ghost button for plan-level actions (header or footer). */
 export function PlanAction({ className, type, ...props }: ComponentProps<"button">) {
   usePlanCss();
+  usePlanContext("PlanAction");
   return (
     <button type={type ?? "button"} data-slot="plan-action" className={cn("sui-plan-action", className)} {...props} />
   );
@@ -225,6 +234,7 @@ export function PlanAction({ className, type, ...props }: ComponentProps<"button
 /** Footer row of a compound Plan. */
 export function PlanFooter({ className, ...props }: ComponentProps<"div">) {
   usePlanCss();
+  usePlanContext("PlanFooter");
   return <div data-slot="plan-footer" className={cn("sui-plan-footer", className)} {...props} />;
 }
 
@@ -233,7 +243,7 @@ function PlanStepRow({
   open,
   onOpenChange,
 }: {
-  step: PlanStep;
+  step: PlanStepModel;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -250,27 +260,33 @@ function PlanStepRow({
     >
       <div className="sui-plan-step-row">
         <span className="sui-plan-step-dot" aria-hidden="true" />
-        <span className="sui-sr-only">{formatStatus(mappedStatus)}: </span>
+        <span className="sui-sr-only">
+          {formatStatus(mappedStatus)}:{" "}
+        </span>
         <span className="sui-plan-step-label">{step.label}</span>
-        {step.detail !== undefined ? (
-          <button
-            type="button"
-            data-slot="plan-step-toggle"
-            className="sui-plan-step-toggle"
-            aria-expanded={open}
-            aria-controls={bodyId}
-            aria-label={`Details: ${step.label}`}
-            onClick={() => onOpenChange(!open)}
-          >
-            Details
-          </button>
-        ) : null}
+        {step.detail !== undefined ?
+          (
+            <button
+              type="button"
+              data-slot="plan-step-toggle"
+              className="sui-plan-step-toggle"
+              aria-expanded={open}
+              aria-controls={bodyId}
+              aria-label={`Details: ${step.label}`}
+              onClick={() => onOpenChange(!open)}
+            >
+              Details
+            </button>
+          ) :
+          null}
       </div>
-      {step.detail !== undefined && open ? (
-        <div data-slot="plan-step-detail" id={bodyId} className="sui-plan-step-detail">
-          {step.detail}
-        </div>
-      ) : null}
+      {step.detail !== undefined && open ?
+        (
+          <div data-slot="plan-step-detail" id={bodyId} className="sui-plan-step-detail">
+            {step.detail}
+          </div>
+        ) :
+        null}
     </li>
   );
 }
@@ -291,7 +307,7 @@ function LegacyPlan({
   const bodyId = useId();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const [uncontrolledOpenStepIds, setUncontrolledOpenStepIds] = useState<string[]>(() =>
-    steps.filter((step) => step.detail !== undefined && (step.defaultOpen ?? false)).map((step) => step.id),
+    steps.filter((step) => step.detail !== undefined && (step.defaultOpen ?? false)).map((step) => step.id)
   );
   const isControlled = controlledOpen !== undefined;
   const isStepsControlled = controlledOpenStepIds !== undefined;
@@ -342,18 +358,20 @@ function LegacyPlan({
           {done}/{steps.length} done
         </span>
       </div>
-      {open ? (
-        <ol data-slot="plan-steps" id={bodyId} className="sui-plan-steps">
-          {steps.map((step) => (
-            <PlanStepRow
-              key={step.id}
-              step={step}
-              open={openStepIds.includes(step.id)}
-              onOpenChange={(next) => setStepOpen(step.id, next)}
-            />
-          ))}
-        </ol>
-      ) : null}
+      {open ?
+        (
+          <ol data-slot="plan-steps" id={bodyId} className="sui-plan-steps">
+            {steps.map((step) => (
+              <PlanStepRow
+                key={step.id}
+                step={step}
+                open={openStepIds.includes(step.id)}
+                onOpenChange={(next) => setStepOpen(step.id, next)}
+              />
+            ))}
+          </ol>
+        ) :
+        null}
     </section>
   );
 }
