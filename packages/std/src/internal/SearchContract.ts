@@ -121,7 +121,7 @@ export const validatePattern = (pattern: string, fixedStrings: boolean): StdErro
  * @private
  * @since 0.1.0
  */
-export const escapeRegex = (value: string): string => value.replace(/[.*+^${}()|[\]\\]/g, "\\$&")
+export const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 /**
  * Compiles a pattern after common validation.

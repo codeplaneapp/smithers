@@ -1,9 +1,11 @@
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import { Cause, Effect, Exit, Layer, Option, Sink, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
 import { describe, expect, it } from "vitest"
 import * as Container from "../src/Container.ts"
+import { MAX_SHELL_OUTPUT_BYTES } from "../src/internal/Text.ts"
 import * as TestRun from "../src/TestRun.ts"
 import * as TestRunner from "../src/TestRunner.ts"
 
@@ -102,6 +104,57 @@ describe("TestRun", () => {
     expect(result.tail).toContain("Segmentation fault")
   })
 
+  it("classifies invalid probes only from the tail it returns", async () => {
+    const spawns: Array<ReadonlyArray<string>> = []
+    const output = `ModuleNotFoundError: No module named 'missing_probe'\n${
+      "x".repeat(
+        MAX_SHELL_OUTPUT_BYTES + 100
+      )
+    }`
+    const result = await execute(Effect.provide(
+      TestRun.run({}),
+      Layer.merge(host(spawns, [["pytest", { stdout: output, exitCode: 1 }]]), runner)
+    ))
+
+    expect(result.tailTruncated).toBe(true)
+    expect(result.tail).not.toContain("missing_probe")
+    expect(result.invalidProbe).toBeUndefined()
+  })
+
+  it("bounds captured output and includes capture loss in the returned tail count", async () => {
+    const spawns: Array<ReadonlyArray<string>> = []
+    const output = "x".repeat(8_000_100)
+    const result = await execute(Effect.provide(
+      TestRun.run({}),
+      Layer.merge(host(spawns, [["pytest", { stdout: output }]]), runner)
+    ))
+
+    expect(TestRun.MAX_CAPTURE_BYTES).toBe(8_000_000)
+    expect(result.tail).toHaveLength(MAX_SHELL_OUTPUT_BYTES)
+    expect(result.tailDroppedBytes).toBe(output.length - MAX_SHELL_OUTPUT_BYTES)
+  })
+
+  it("uses a ten-minute timeout when neither input nor runner supplies one", async () => {
+    const stalled = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
+      ChildProcessSpawner.makeNoop({ spawn: () => Effect.never })
+    )
+    const exit = await execute(
+      Effect.gen(function*() {
+        const fiber = yield* TestRun.run({}).pipe(
+          Effect.provide(Layer.merge(stalled, runner)),
+          Effect.forkChild
+        )
+        yield* Effect.yieldNow
+        yield* TestClock.adjust(600_000)
+        return fiber.pollUnsafe()
+      }).pipe(Effect.provide(TestClock.layer()))
+    )
+
+    expect(TestRun.DEFAULT_TIMEOUT_MS).toBe(600_000)
+    expect(exit).toBeDefined()
+    if (exit !== undefined) expect(failureOf(exit)?.code).toBe("timeout")
+  })
+
   it("runs the pristine base in a scratch worktree and attributes every failure", async () => {
     const spawns: Array<ReadonlyArray<string>> = []
     const result = await execute(Effect.provide(
@@ -132,9 +185,36 @@ describe("TestRun", () => {
     expect(result.fixed).toEqual([])
     const lines = spawns.map((argv) => argv.join(" "))
     expect(lines[1]).toBe(`git -C /repo rev-parse --verify --quiet ${TestRunner.captureBase}^{commit}`)
-    expect(lines[2]).toBe(`git -C /repo worktree add --detach --force /repo/${TestRun.scratchDirectory} abc123`)
-    expect(lines[3]).toBe(lines[0])
+    expect(lines[2]).toBe("git -C /repo config --local --get core.repositoryformatversion")
+    expect(lines[3]).toBe("git -C /repo config --local --get extensions.relativeWorktrees")
     expect(lines[4]).toBe(`git -C /repo worktree remove --force /repo/${TestRun.scratchDirectory}`)
+    expect(lines[5]).toBe(
+      `git -C /repo -c worktree.useRelativePaths=true worktree add --detach --force /repo/${TestRun.scratchDirectory} abc123`
+    )
+    expect(lines[6]).toBe(lines[0])
+    expect(lines[7]).toBe(`git -C /repo worktree remove --force /repo/${TestRun.scratchDirectory}`)
+  })
+
+  it("omits attribution when either side has an incomplete failure reading", async () => {
+    const spawns: Array<ReadonlyArray<string>> = []
+    const result = await execute(Effect.provide(
+      TestRun.run({ against: "base" }),
+      Layer.merge(
+        host(spawns, [
+          ["rev-parse", { stdout: "abc123\n" }],
+          ["worktree add", {}],
+          [TestRun.scratchDirectory, { stdout: "2 failed in 0.1s\n", exitCode: 1 }],
+          ["pytest", { stdout: "FAILED tests/a.py::mine - new\n1 failed in 0.1s\n", exitCode: 1 }]
+        ]),
+        runner
+      )
+    ))
+
+    expect(result.parsed).toBe(true)
+    expect(result.base?.parsed).toBe(false)
+    expect(Object.hasOwn(result, "introduced")).toBe(false)
+    expect(Object.hasOwn(result, "preexisting")).toBe(false)
+    expect(Object.hasOwn(result, "fixed")).toBe(false)
   })
 
   it("falls back from the capture base to HEAD, and says which it used", async () => {
@@ -217,6 +297,7 @@ describe("TestRun", () => {
       "exec",
       "-w",
       "/testbed",
+      "--",
       "swebench-1",
       "bash",
       "-lc",

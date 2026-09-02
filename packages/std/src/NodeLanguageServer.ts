@@ -21,6 +21,9 @@ import * as StdError from "./StdError.ts"
 /**
  * One host language-server process.
  *
+ * Response headers may contain at most 8 KiB, and response bodies may contain
+ * at most 8 MiB.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -39,58 +42,202 @@ interface JsonRpcMessage {
 }
 
 interface FrameDecoder {
-  readonly push: (chunk: Uint8Array) => ReadonlyArray<unknown>
+  readonly push: (chunk: Uint8Array) => ReadonlyArray<FrameEvent>
 }
+
+type FrameEvent =
+  | { readonly _tag: "Message"; readonly value: unknown }
+  | { readonly _tag: "Failure"; readonly error: StdError.StdError; readonly id?: number | undefined }
 
 const failure = (code: StdError.Code, message: string): StdError.StdError => new StdError.StdError({ code, message })
 
-const indexOfHeaderEnd = (bytes: Uint8Array): number => {
-  for (let index = 0; index <= bytes.length - 4; index++) {
-    if (
-      bytes[index] === 13
-      && bytes[index + 1] === 10
-      && bytes[index + 2] === 13
-      && bytes[index + 3] === 10
-    ) return index
-  }
-  return -1
-}
+const maximumHeaderBytes = 8 * 1024
+const maximumFrameBytes = 8 * 1024 * 1024
+const headerEnd = new Uint8Array([13, 10, 13, 10])
+const contentLengthPrefix = new TextEncoder().encode("Content-Length:")
 
-const append = (left: Uint8Array, right: Uint8Array): Uint8Array => {
+const concatenate = (left: Uint8Array, right: Uint8Array): Uint8Array => {
   const combined = new Uint8Array(left.length + right.length)
   combined.set(left)
   combined.set(right, left.length)
   return combined
 }
 
+interface ChunkBuffer {
+  readonly length: number
+  readonly push: (chunk: Uint8Array) => void
+  readonly indexOf: (needle: Uint8Array) => number
+  readonly take: (length: number) => Uint8Array
+  readonly discard: (length: number) => void
+}
+
+const makeChunkBuffer = (): ChunkBuffer => {
+  let chunks: Array<Uint8Array> = []
+  let head = 0
+  let headOffset = 0
+  let length = 0
+
+  const compact = (): void => {
+    if (head === chunks.length) {
+      chunks = []
+      head = 0
+      headOffset = 0
+    } else if (head >= 64 && head * 2 >= chunks.length) {
+      chunks = chunks.slice(head)
+      head = 0
+    }
+  }
+
+  const consume = (count: number, output?: Uint8Array): void => {
+    let remaining = count
+    let outputOffset = 0
+    while (remaining > 0) {
+      const chunk = chunks[head]
+      if (chunk === undefined) throw new RangeError("Chunk buffer underflow")
+      const available = chunk.byteLength - headOffset
+      const consumed = Math.min(available, remaining)
+      if (output !== undefined) {
+        output.set(chunk.subarray(headOffset, headOffset + consumed), outputOffset)
+        outputOffset += consumed
+      }
+      headOffset += consumed
+      length -= consumed
+      remaining -= consumed
+      if (headOffset === chunk.byteLength) {
+        head++
+        headOffset = 0
+      }
+    }
+    compact()
+  }
+
+  return {
+    get length() {
+      return length
+    },
+    push: (chunk) => {
+      if (chunk.byteLength === 0) return
+      chunks.push(chunk)
+      length += chunk.byteLength
+    },
+    indexOf: (needle) => {
+      let absolute = 0
+      let matched = 0
+      for (let chunkIndex = head; chunkIndex < chunks.length; chunkIndex++) {
+        const chunk = chunks[chunkIndex]
+        if (chunk === undefined) continue
+        const start = chunkIndex === head ? headOffset : 0
+        for (let index = start; index < chunk.byteLength; index++) {
+          const byte = chunk[index]
+          if (byte === needle[matched]) matched++
+          else matched = byte === needle[0] ? 1 : 0
+          if (matched === needle.byteLength) return absolute - needle.byteLength + 1
+          absolute++
+        }
+      }
+      return -1
+    },
+    take: (count) => {
+      if (count < 0 || count > length) throw new RangeError("Chunk buffer underflow")
+      const output = new Uint8Array(count)
+      consume(count, output)
+      return output
+    },
+    discard: (count) => {
+      if (count < 0 || count > length) throw new RangeError("Chunk buffer underflow")
+      consume(count)
+    }
+  }
+}
+
+const malformedId = (body: string): number | undefined => {
+  const match = /"id"\s*:\s*(\d+)/.exec(body)
+  if (match === null) return undefined
+  const id = Number(match[1])
+  return Number.isSafeInteger(id) ? id : undefined
+}
+
 const makeFrameDecoder = (): FrameDecoder => {
-  let pending: Uint8Array<ArrayBufferLike> = new Uint8Array()
+  const pending = makeChunkBuffer()
+  let bodyLength: number | undefined
+  let resynchronizing = false
   return {
     push: (chunk) => {
-      pending = append(pending, chunk)
-      const messages: Array<unknown> = []
-      while (pending.length > 0) {
-        const headerEnd = indexOfHeaderEnd(pending)
-        if (headerEnd < 0) break
-        const header = new TextDecoder().decode(pending.slice(0, headerEnd))
+      pending.push(chunk)
+      const events: Array<FrameEvent> = []
+      while (pending.length > 0 || bodyLength === 0) {
+        if (resynchronizing) {
+          const nextHeader = pending.indexOf(contentLengthPrefix)
+          if (nextHeader < 0) {
+            pending.discard(Math.max(0, pending.length - contentLengthPrefix.byteLength + 1))
+            break
+          }
+          pending.discard(nextHeader)
+          resynchronizing = false
+        }
+        if (bodyLength !== undefined) {
+          if (pending.length < bodyLength) break
+          const body = new TextDecoder().decode(pending.take(bodyLength))
+          bodyLength = undefined
+          try {
+            events.push({ _tag: "Message", value: JSON.parse(body) as unknown })
+          } catch {
+            events.push({
+              _tag: "Failure",
+              error: failure("request_failed", "Language server returned malformed JSON"),
+              id: malformedId(body)
+            })
+          }
+          continue
+        }
+        const delimiter = pending.indexOf(headerEnd)
+        if (delimiter < 0) {
+          if (pending.length > maximumHeaderBytes) {
+            events.push({
+              _tag: "Failure",
+              error: failure(
+                "request_failed",
+                `Language server frame header exceeded ${maximumHeaderBytes} bytes`
+              )
+            })
+            pending.discard(1)
+            resynchronizing = true
+            continue
+          }
+          break
+        }
+        if (delimiter > maximumHeaderBytes) {
+          events.push({
+            _tag: "Failure",
+            error: failure("request_failed", `Language server frame header exceeded ${maximumHeaderBytes} bytes`)
+          })
+          pending.discard(delimiter + headerEnd.byteLength)
+          resynchronizing = true
+          continue
+        }
+        const header = new TextDecoder().decode(pending.take(delimiter))
+        pending.discard(headerEnd.byteLength)
         const match = /(?:^|\r\n)Content-Length:\s*(\d+)(?:\r\n|$)/i.exec(header)
         if (match === null) {
-          pending = pending.slice(headerEnd + 4)
+          events.push({
+            _tag: "Failure",
+            error: failure("request_failed", "Language server frame omitted Content-Length")
+          })
+          resynchronizing = true
           continue
         }
         const length = Number(match[1])
-        const bodyStart = headerEnd + 4
-        if (!Number.isSafeInteger(length) || length < 0 || pending.length < bodyStart + length) break
-        const body = pending.slice(bodyStart, bodyStart + length)
-        pending = pending.slice(bodyStart + length)
-        try {
-          messages.push(JSON.parse(new TextDecoder().decode(body)) as unknown)
-        } catch {
-          // Invalid server frames are ignored; the matching request times out
-          // with the stable request failure below.
+        if (!Number.isSafeInteger(length) || length < 0 || length > maximumFrameBytes) {
+          events.push({
+            _tag: "Failure",
+            error: failure("request_failed", `Language server frame exceeded ${maximumFrameBytes} bytes`)
+          })
+          resynchronizing = true
+          continue
         }
+        bodyLength = length
       }
-      return messages
+      return events
     }
   }
 }
@@ -103,7 +250,7 @@ const asMessage = (value: unknown): JsonRpcMessage | undefined =>
 const frame = (message: unknown): Uint8Array => {
   const body = new TextEncoder().encode(JSON.stringify(message))
   const header = new TextEncoder().encode(`Content-Length: ${body.byteLength}\r\n\r\n`)
-  return append(header, body)
+  return concatenate(header, body)
 }
 
 const positionParams = (position: LanguageServer.Position) => ({
@@ -143,12 +290,32 @@ export const make = (
     const pending = new Map<number, Deferred.Deferred<unknown, StdError.StdError>>()
     const decoder = makeFrameDecoder()
     let nextId = 1
+    let terminalError: StdError.StdError | undefined
 
     const failPending = (error: StdError.StdError): Effect.Effect<void> =>
-      Effect.forEach(
-        pending.values(),
-        (deferred) => Deferred.fail(deferred, error),
-        { discard: true }
+      Effect.flatMap(
+        Effect.sync(() => {
+          const deferreds = [...pending.values()]
+          pending.clear()
+          return deferreds
+        }),
+        (deferreds) => Effect.forEach(deferreds, (deferred) => Deferred.fail(deferred, error), { discard: true })
+      )
+
+    const failRequest = (id: number, error: StdError.StdError): Effect.Effect<void> => {
+      const deferred = pending.get(id)
+      if (deferred === undefined) return Effect.void
+      pending.delete(id)
+      return Deferred.fail(deferred, error).pipe(Effect.asVoid)
+    }
+
+    const closeWith = (error: StdError.StdError): Effect.Effect<void> =>
+      Effect.flatMap(
+        Effect.sync(() => {
+          terminalError ??= error
+          return terminalError
+        }),
+        failPending
       )
 
     const receive = (value: unknown): Effect.Effect<void> => {
@@ -162,9 +329,29 @@ export const make = (
         : Deferred.fail(deferred, failure("request_failed", "Language server returned a JSON-RPC error"))
     }
 
+    const receiveFrame = (event: FrameEvent): Effect.Effect<void> =>
+      event._tag === "Message"
+        ? receive(event.value)
+        // A rejected frame has no trustworthy response id. Failing every
+        // waiter prevents another request from hanging behind corrupt framing.
+        : event.id === undefined
+        ? failPending(event.error)
+        : failRequest(event.id, event.error)
+
     yield* handle.stdout.pipe(
-      Stream.runForEach((chunk) => Effect.forEach(decoder.push(chunk), receive, { discard: true })),
-      Effect.catch(() => failPending(failure("request_failed", "Language server output stream failed"))),
+      Stream.runForEach((chunk) => Effect.forEach(decoder.push(chunk), receiveFrame, { discard: true })),
+      Effect.matchEffect({
+        onFailure: () => closeWith(failure("request_failed", "Language server output stream failed")),
+        onSuccess: () => closeWith(failure("request_failed", "Language server output stream closed"))
+      }),
+      Effect.forkScoped({ startImmediately: true })
+    )
+
+    yield* handle.exitCode.pipe(
+      Effect.flatMap((exitCode) =>
+        closeWith(failure("request_failed", `Language server process exited with code ${exitCode}`))
+      ),
+      Effect.catch(() => closeWith(failure("request_failed", "Language server process exited"))),
       Effect.forkScoped({ startImmediately: true })
     )
 
@@ -178,7 +365,11 @@ export const make = (
     )
 
     const send = (message: unknown): Effect.Effect<void, StdError.StdError> =>
-      Queue.offer(input, frame(message)).pipe(Effect.asVoid)
+      Effect.suspend(() =>
+        terminalError === undefined
+          ? Queue.offer(input, frame(message)).pipe(Effect.asVoid)
+          : Effect.fail(terminalError)
+      )
 
     const request = (
       method: string,
@@ -187,7 +378,12 @@ export const make = (
       Effect.gen(function*() {
         const id = nextId++
         const deferred = yield* Deferred.make<unknown, StdError.StdError>()
-        pending.set(id, deferred)
+        const closed = yield* Effect.sync(() => {
+          if (terminalError !== undefined) return terminalError
+          pending.set(id, deferred)
+          return undefined
+        })
+        if (closed !== undefined) return yield* Effect.fail(closed)
         yield* send({ jsonrpc: "2.0", id, method, params })
         return yield* Deferred.await(deferred).pipe(
           Effect.timeout(config.timeoutMs ?? 30_000),

@@ -29,8 +29,7 @@ export const name = "update_plan"
  * @since 0.1.0
  */
 export const description = "Updates the task plan.\n" +
-  "Provide an optional explanation and a list of plan items, each with a step and status.\n" +
-  "At most one step can be in_progress at a time.\n"
+  "Provide an optional explanation and a list of plan items, each with a step and status.\n"
 
 /**
  * Status of one plan step, matching Codex.
@@ -73,6 +72,17 @@ export const Output = Schema.Struct({
  * @since 0.1.0
  */
 export const effects = envelope({ tier: "sealed", mode: "hermetic", reads: [], writes: [] })
+
+/**
+ * Narrows the effect envelope for a decoded invocation.
+ *
+ * The flow touches nothing, so every invocation declares what the static
+ * envelope declares.
+ *
+ * @category effects
+ * @since 0.1.0
+ */
+export const effectsFor = (_input: typeof Input.Type) => effects
 
 /**
  * Capabilities required by the update_plan flow: none.

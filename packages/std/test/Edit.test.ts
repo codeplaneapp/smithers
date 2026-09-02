@@ -5,6 +5,23 @@ import { layer } from "./TestLayers.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
 
+const fileInfo = (mode: number, size = 0): FileSystem.File.Info => ({
+  type: "File",
+  mtime: Option.none(),
+  atime: Option.none(),
+  birthtime: Option.none(),
+  dev: 0,
+  ino: Option.none(),
+  mode,
+  nlink: Option.none(),
+  uid: Option.none(),
+  gid: Option.none(),
+  rdev: Option.none(),
+  size: FileSystem.Size(size),
+  blksize: Option.none(),
+  blocks: Option.none()
+})
+
 /** Applies one edit and returns the file as the same host then reads it. */
 const editThenRead = (
   files: Readonly<Record<string, string>>,
@@ -144,6 +161,29 @@ describe("Edit anchoring", () => {
     expect(content).toBe("one\nTWO\nthree\n")
   })
 
+  it("edits line 1 and the real last line of a trailing-newline file", async () => {
+    const first = await editThenRead(
+      { "/lines.txt": "first\nlast\n" },
+      { path: "/lines.txt", startLine: 1, endLine: 1, newString: "FIRST" }
+    )
+    const last = await editThenRead(
+      { "/lines.txt": "first\nlast\n" },
+      { path: "/lines.txt", startLine: 2, endLine: 2, newString: "LAST" }
+    )
+    expect(first.content).toBe("FIRST\nlast\n")
+    expect(last.content).toBe("first\nLAST\n")
+  })
+
+  it("uses the same trailing-newline line count as grep", async () => {
+    const { content, failure } = await refusal(
+      { "/lines.txt": "first\nlast\n" },
+      { path: "/lines.txt", startLine: 3, endLine: 3, newString: "phantom" }
+    )
+    expect(failure).toMatchObject({ code: "offset_out_of_range", path: "/lines.txt" })
+    expect(failure?.message).toContain("2 lines")
+    expect(content).toBe("first\nlast\n")
+  })
+
   it("refuses a line range whose contents moved, and shows what is there now", async () => {
     const { content, failure } = await refusal(
       { "/g.py": "one\ntwo\nthree\n" },
@@ -161,6 +201,37 @@ describe("Edit anchoring", () => {
       { path: "/h.py", startLine: 40, endLine: 41, newString: "x" }
     )
     expect(failure?.code).toBe("offset_out_of_range")
+  })
+
+  it("refuses an endLine past the real end instead of clamping it", async () => {
+    const { content, failure } = await refusal(
+      { "/h.py": "one\ntwo\n" },
+      { path: "/h.py", startLine: 2, endLine: 9, newString: "x" }
+    )
+    expect(failure).toMatchObject({ code: "offset_out_of_range", path: "/h.py" })
+    expect(failure?.message).toContain("endLine 9")
+    expect(failure?.message).toContain("2 lines")
+    expect(content).toBe("one\ntwo\n")
+  })
+
+  it("rejects expect when oldString is the anchor", async () => {
+    const { content, failure } = await refusal(
+      { "/ignored.py": "old\n" },
+      { path: "/ignored.py", oldString: "old", expect: "WRONG", newString: "new" }
+    )
+    expect(failure).toMatchObject({ code: "invalid_input", path: "/ignored.py" })
+    expect(failure?.message).toContain("expect")
+    expect(content).toBe("old\n")
+  })
+
+  it("rejects replaceAll when a line span is the anchor", async () => {
+    const { content, failure } = await refusal(
+      { "/ignored.py": "one\ntwo\n" },
+      { path: "/ignored.py", startLine: 1, endLine: 1, replaceAll: true, newString: "ONE" }
+    )
+    expect(failure).toMatchObject({ code: "invalid_input", path: "/ignored.py" })
+    expect(failure?.message).toContain("replaceAll")
+    expect(content).toBe("one\ntwo\n")
   })
 
   it("refuses inverted, doubled, and missing anchors", async () => {
@@ -196,30 +267,72 @@ describe("Edit anchoring", () => {
     }
   })
 
+  it.each([
+    { location: "before", bytes: new Uint8Array([0xff, 0x0a, ...new TextEncoder().encode("target\n")]) },
+    { location: "after", bytes: new Uint8Array([...new TextEncoder().encode("target\n"), 0xff, 0x0a]) }
+  ])("refuses invalid UTF-8 $location the target without changing bytes or mode", async ({ bytes }) => {
+    const original = bytes.slice()
+    let stored = bytes.slice()
+    let mode = 0o100644
+    let writes = 0
+    const host = Layer.succeed(FileSystem.FileSystem)(FileSystem.makeNoop({
+      stat: () => Effect.succeed(fileInfo(mode, stored.byteLength)),
+      readFile: () => Effect.succeed(stored.slice()),
+      readFileString: () => Effect.succeed(new TextDecoder().decode(stored)),
+      writeFileString: (_path, content) =>
+        Effect.sync(() => {
+          writes++
+          stored = new TextEncoder().encode(content)
+          mode = 0o100755
+        }),
+      chmod: (_path, value) =>
+        Effect.sync(() => {
+          mode = 0o100000 | value
+        })
+    }))
+    const exit = await execute(Effect.provide(
+      Effect.exit(Edit.run({ path: "/invalid.txt", oldString: "target", newString: "changed" })),
+      host
+    ))
+    const failure = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+    expect(failure).toMatchObject({ code: "binary_file", path: "/invalid.txt" })
+    expect(stored).toEqual(original)
+    expect(mode).toBe(0o100644)
+    expect(writes).toBe(0)
+  })
+
+  it("refuses a NUL-containing file before writing", async () => {
+    const original = new Uint8Array([...new TextEncoder().encode("target\n"), 0, 0x0a])
+    let stored = original.slice()
+    let writes = 0
+    const host = Layer.succeed(FileSystem.FileSystem)(FileSystem.makeNoop({
+      readFile: () => Effect.succeed(stored.slice()),
+      readFileString: () => Effect.succeed(new TextDecoder().decode(stored)),
+      writeFileString: (_path, content) =>
+        Effect.sync(() => {
+          writes++
+          stored = new TextEncoder().encode(content)
+        })
+    }))
+    const exit = await execute(Effect.provide(
+      Effect.exit(Edit.run({ path: "/nul.txt", oldString: "target", newString: "changed" })),
+      host
+    ))
+    const failure = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+    expect(failure).toMatchObject({ code: "binary_file", path: "/nul.txt" })
+    expect(stored).toEqual(original)
+    expect(writes).toBe(0)
+  })
+
   it("puts back permission bits the host's write moved", async () => {
     // Five graded SWE-bench patches shipped spurious 100644 -> 100755 sections
     // around their real edits. A patch is content; mode is not this library's
     // to change.
     const chmods: Array<{ readonly path: string; readonly mode: number }> = []
     let mode = 0o100644
-    const info = (value: number): FileSystem.File.Info => ({
-      type: "File",
-      mtime: Option.none(),
-      atime: Option.none(),
-      birthtime: Option.none(),
-      dev: 0,
-      ino: Option.none(),
-      mode: value,
-      nlink: Option.none(),
-      uid: Option.none(),
-      gid: Option.none(),
-      rdev: Option.none(),
-      size: FileSystem.Size(0),
-      blksize: Option.none(),
-      blocks: Option.none()
-    })
     const host = Layer.succeed(FileSystem.FileSystem)(FileSystem.makeNoop({
-      stat: () => Effect.succeed(info(mode)),
+      stat: () => Effect.succeed(fileInfo(mode)),
+      readFile: () => Effect.succeed(new TextEncoder().encode("value = 1\n")),
       readFileString: () => Effect.succeed("value = 1\n"),
       writeFileString: () =>
         Effect.sync(() => {

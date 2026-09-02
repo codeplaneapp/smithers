@@ -30,9 +30,13 @@ export const description = "Search the web through a configured provider and ret
  * @since 0.1.0
  */
 export const Input = Schema.Struct({
-  query: Schema.NonEmptyString,
-  numResults: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 }))),
-  freshness: Schema.optional(Schema.Literals(["day", "week", "month", "year"]))
+  query: Schema.NonEmptyString.annotate({ description: "Search query" }),
+  numResults: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 }))).annotate({
+    description: "Maximum number of results, from 1 through 20; defaults to 8"
+  }),
+  freshness: Schema.optional(Schema.Literals(["day", "week", "month", "year"])).annotate({
+    description: "Optional age limit for published results"
+  })
 })
 /**
  * One search hit, normalized across providers.
@@ -41,10 +45,12 @@ export const Input = Schema.Struct({
  * @since 0.1.0
  */
 export const Result = Schema.Struct({
-  title: Schema.String,
-  url: Schema.String,
-  snippet: Schema.String,
-  publishedAt: Schema.optional(Schema.String)
+  title: Schema.String.annotate({ description: "Result title" }),
+  url: Schema.String.annotate({ description: "Absolute result URL" }),
+  snippet: Schema.String.annotate({ description: "Provider-normalized result excerpt" }),
+  publishedAt: Schema.optional(Schema.String).annotate({
+    description: "Provider publication timestamp when available"
+  })
 })
 /**
  * What the `websearch` flow returns.
@@ -133,5 +139,9 @@ export const layerNoop: Layer.Layer<WebSearch> = Layer.succeed(WebSearch, makeNo
  * @category handlers
  * @since 0.1.0
  */
-export const run = (input: typeof Input.Type): Effect.Effect<typeof Output.Type, StdError.StdError, WebSearch> =>
-  Effect.flatMap(WebSearch, (provider) => provider.search(input))
+export const run = Effect.fn("WebSearch.run")(function*(
+  input: typeof Input.Type
+): Effect.fn.Return<typeof Output.Type, StdError.StdError, WebSearch> {
+  const provider = yield* WebSearch
+  return yield* provider.search(input)
+})

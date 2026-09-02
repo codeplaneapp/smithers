@@ -12,6 +12,7 @@ import * as StdError from "./StdError.ts"
 import * as WebSearch from "./WebSearch.ts"
 
 const maxResults = 20
+const requestTimeoutMs = 30_000
 const ExaResult = Schema.Struct({
   title: Schema.optional(Schema.String),
   url: Schema.String,
@@ -19,7 +20,7 @@ const ExaResult = Schema.Struct({
   publishedDate: Schema.optional(Schema.String)
 })
 const ExaResponse = Schema.Struct({
-  results: Schema.optional(Schema.Array(ExaResult))
+  results: Schema.Array(ExaResult)
 })
 const freshnessDays = {
   day: 1,
@@ -27,6 +28,11 @@ const freshnessDays = {
   month: 31,
   year: 365
 } as const
+
+const failure = (code: StdError.Code, message: string): StdError.StdError => new StdError.StdError({ code, message })
+
+const header = (headers: Readonly<Record<string, string | undefined>>, name: string): string | undefined =>
+  headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()]
 
 /**
  * Provides {@link WebSearch.WebSearch} backed by the Exa API, reading its
@@ -74,13 +80,39 @@ export const layer = (
               { "authorization": `Bearer ${Redacted.value(secret)}`, "content-type": "application/json" }
             )
             const response = yield* http.execute(request).pipe(
-              Effect.mapError(() =>
-                new StdError.StdError({ code: "request_failed", message: "Exa search request failed" })
+              Effect.timeout(requestTimeoutMs),
+              Effect.mapError((error) =>
+                error._tag === "TimeoutError"
+                  ? failure("timeout", "Exa search request timed out")
+                  : failure("request_failed", "Exa search request failed")
               )
             )
+            const retryAfter = header(response.headers, "retry-after")
+            if (response.status === 429 || retryAfter !== undefined) {
+              return yield* Effect.fail(
+                failure(
+                  "timeout",
+                  retryAfter === undefined
+                    ? "Exa search was throttled"
+                    : `Exa search was throttled; retry after ${retryAfter}`
+                )
+              )
+            }
+            if (response.status === 401 || response.status === 403) {
+              return yield* Effect.fail(failure("provider_unavailable", "Exa search authentication was rejected"))
+            }
+            if (response.status >= 500) {
+              return yield* Effect.fail(failure("provider_unavailable", `Exa search returned ${response.status}`))
+            }
+            if (response.status < 200 || response.status >= 300) {
+              return yield* Effect.fail(failure("request_failed", `Exa search returned ${response.status}`))
+            }
             const json = yield* response.json.pipe(
-              Effect.mapError(() =>
-                new StdError.StdError({ code: "request_failed", message: "Exa search response was invalid" })
+              Effect.timeout(requestTimeoutMs),
+              Effect.mapError((error) =>
+                error._tag === "TimeoutError"
+                  ? failure("timeout", "Exa search response timed out")
+                  : failure("request_failed", "Exa search response was invalid")
               )
             )
             const body = yield* Schema.decodeUnknownEffect(ExaResponse)(json).pipe(
@@ -89,7 +121,7 @@ export const layer = (
               )
             )
             return {
-              results: (body.results ?? []).slice(0, Math.min(input.numResults ?? 8, maxResults)).map((result) => ({
+              results: body.results.slice(0, Math.min(input.numResults ?? 8, maxResults)).map((result) => ({
                 title: result.title ?? result.url,
                 url: result.url,
                 snippet: (result.text ?? "").slice(0, 2_000),

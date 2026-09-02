@@ -138,21 +138,33 @@ interface Recogniser {
 const recognisers: ReadonlyArray<Recogniser> = [
   // unittest could not import or load the target it was given, so it
   // synthesises a placeholder case whose whole purpose is to report that.
-  { reason: "unknown-test", pattern: /unittest\.loader\._FailedTest/ },
+  {
+    reason: "unknown-test",
+    pattern: /^(?:ERROR|FAIL):[^\n]*\(unittest\.loader\._FailedTest(?:\.[^)\s]+)?\)\s*$/m
+  },
   // The class loaded and the method is not on it. This is the django case:
   // `type object 'AdminViewBasicTest' has no attribute 'test_catch_all_…'`.
   // The name must be shaped like a test method — `test_foo` or the older
   // `testFoo` — because `test` is also the start of ordinary attribute names
   // (`testing`, `tests`, `tested`) whose absence is an ordinary bug.
-  { reason: "unknown-test", pattern: /has no attribute '(?:test_[A-Za-z0-9_]*|test[A-Z][A-Za-z0-9_]*)'/ },
+  {
+    reason: "unknown-test",
+    pattern: /^(?:E[ \t]+)?AttributeError:[^\n]* has no attribute '(?:test_[A-Za-z0-9_]*|test[A-Z][A-Za-z0-9_]*)'\s*$/m
+  },
   // pytest resolved the file and could not resolve the node id inside it.
   { reason: "unknown-test", pattern: /^ERROR: not found:/m },
   { reason: "unknown-path", pattern: /^ERROR: file or directory not found:/m },
   // `python missing.py`, and every wrapper that shells out the same way.
-  { reason: "unknown-path", pattern: /can't open file '[^']*': \[Errno 2\]/ },
-  { reason: "unknown-module", pattern: /(?:ModuleNotFoundError|ImportError): No module named/ },
+  {
+    reason: "unknown-path",
+    pattern: /^[^\n:]+: can't open file '[^'\n]*': \[Errno 2\](?: No such file or directory)?\s*$/m
+  },
+  {
+    reason: "unknown-module",
+    pattern: /^(?:E[ \t]+)?(?:ModuleNotFoundError|ImportError): No module named(?:[ \t]+.*)?$/m
+  },
   // tox and nox both phrase a missing environment this way.
-  { reason: "unknown-environment", pattern: /unknown environment/i },
+  { reason: "unknown-environment", pattern: /^(?:ERROR:[ \t]+)?unknown environment\b[^\n]*$/im },
   // bash, sh and csh, which put the name first and the verdict last. Anchored
   // to the end of the line so the phrase quoted inside a test's own assertion
   // diff is not read as the shell having said it.

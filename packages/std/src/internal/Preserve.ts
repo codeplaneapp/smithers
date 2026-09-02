@@ -23,10 +23,15 @@ const permissions = 0o7777
 const mode = (
   fileSystem: FileSystem.FileSystem,
   path: string
-): Effect.Effect<number | undefined> =>
-  fileSystem.stat(path).pipe(
-    Effect.map((info) => info.mode & permissions),
-    Effect.orElseSucceed(() => undefined)
+): Effect.Effect<number, PlatformError.PlatformError> =>
+  fileSystem.stat(path).pipe(Effect.map((info) => info.mode & permissions))
+
+const initialMode = (
+  fileSystem: FileSystem.FileSystem,
+  path: string
+): Effect.Effect<number | undefined, PlatformError.PlatformError> =>
+  mode(fileSystem, path).pipe(
+    Effect.catch((error) => error.reason._tag === "NotFound" ? Effect.succeed(undefined) : Effect.fail(error))
   )
 
 /**
@@ -66,9 +71,9 @@ const around = (
   write: Effect.Effect<void, PlatformError.PlatformError>
 ): Effect.Effect<void, PlatformError.PlatformError> =>
   Effect.gen(function*() {
-    const before = yield* mode(fileSystem, path)
+    const before = yield* initialMode(fileSystem, path)
     yield* write
     if (before === undefined) return
     const after = yield* mode(fileSystem, path)
-    if (after !== undefined && after !== before) yield* Effect.ignore(fileSystem.chmod(path, before))
+    if (after !== before) yield* fileSystem.chmod(path, before)
   })

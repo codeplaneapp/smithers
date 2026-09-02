@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import * as Bash from "../src/Bash.ts"
+import * as Lsp from "../src/Lsp.ts"
 import * as Manifest from "../src/Manifest.ts"
 
 const expectedTiers = {
@@ -62,7 +63,14 @@ describe("effect tiers", () => {
     expect(Bash.effectsFor(input).tier).toBe("compensable")
   })
 
-  it("keeps Codex-clone descriptions byte-identical to the Codex CLI", () => {
+  it("keeps every lsp query on the static workspace read envelope", () => {
+    // A language server resolves imports, tsconfig, and dependency sources
+    // across the workspace, so one queried file under-declares its reads.
+    expect(Lsp.effectsFor({ operation: "hover", path: "/workspace/a.ts", line: 1, character: 1 }))
+      .toBe(Lsp.effects)
+  })
+
+  it("keeps Codex-clone descriptions at the approved wording", () => {
     expect(Manifest.flows.shell_command.description).toBe(
       "Runs a shell command and returns its output.\n- Always set the `workdir` param when using the shell_command function. Do not use `cd` unless absolutely necessary."
     )
@@ -70,7 +78,7 @@ describe("effect tiers", () => {
       "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON."
     )
     expect(Manifest.flows.update_plan.description).toBe(
-      "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\nAt most one step can be in_progress at a time.\n"
+      "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\n"
     )
   })
 

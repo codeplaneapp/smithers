@@ -61,6 +61,19 @@ describe("Probe.classify", () => {
     expect(failing("ERROR: unknown environment 'py313'")?.reason).toBe("unknown-environment")
   })
 
+  it.each([
+    ["unittest placeholder", "E   AssertionError: expected 'unittest.loader._FailedTest' in the diagnostic"],
+    ["missing method", "E   AssertionError: output contains \"has no attribute 'test_missing'\""],
+    [
+      "missing script",
+      "E   AssertionError: output contains \"python: can't open file '/repo/nope.py': [Errno 2]\""
+    ],
+    ["missing module", "E   AssertionError: output contains \"ModuleNotFoundError: No module named 'nope'\""],
+    ["missing environment", "E   AssertionError: output contains \"ERROR: unknown environment 'py313'\""]
+  ])("does not classify %s wording quoted in the middle of an assertion line", (_name, output) => {
+    expect(failing(output)).toBeUndefined()
+  })
+
   it("reads both shells' phrasing as a program that does not exist", () => {
     expect(failing("bash: line 1: pytest: command not found", 127)?.reason).toBe("unknown-command")
     expect(failing("sh: 1: pytest: not found", 127)?.reason).toBe("unknown-command")

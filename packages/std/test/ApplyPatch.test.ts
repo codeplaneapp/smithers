@@ -1,4 +1,4 @@
-import { Effect, Exit, FileSystem, Option } from "effect"
+import { Cause, Effect, Exit, FileSystem, Option, PlatformError } from "effect"
 import { describe, expect, it } from "vitest"
 import * as ApplyPatch from "../src/ApplyPatch.ts"
 import {
@@ -15,6 +15,23 @@ const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(
 const executeExit = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromiseExit(effect)
 
 const wrap = (body: string) => `*** Begin Patch\n${body}\n*** End Patch`
+
+const fileInfo = (mode: number, size = 0): FileSystem.File.Info => ({
+  type: "File",
+  mtime: Option.none(),
+  atime: Option.none(),
+  birthtime: Option.none(),
+  dev: 0,
+  ino: Option.none(),
+  mode,
+  nlink: Option.none(),
+  uid: Option.none(),
+  gid: Option.none(),
+  rdev: Option.none(),
+  size: FileSystem.Size(size),
+  blksize: Option.none(),
+  blocks: Option.none()
+})
 
 describe("parsePatch", () => {
   it("rejects a bad first line with Codex's message", () => {
@@ -404,24 +421,8 @@ describe("ApplyPatch.run", () => {
     // patch can fail on a mode section the agent never intended.
     const chmods: Array<{ readonly path: string; readonly mode: number }> = []
     let mode = 0o100644
-    const info = (value: number): FileSystem.File.Info => ({
-      type: "File",
-      mtime: Option.none(),
-      atime: Option.none(),
-      birthtime: Option.none(),
-      dev: 0,
-      ino: Option.none(),
-      mode: value,
-      nlink: Option.none(),
-      uid: Option.none(),
-      gid: Option.none(),
-      rdev: Option.none(),
-      size: FileSystem.Size(0),
-      blksize: Option.none(),
-      blocks: Option.none()
-    })
     const host = FileSystem.makeNoop({
-      stat: () => Effect.succeed(info(mode)),
+      stat: () => Effect.succeed(fileInfo(mode)),
       readFile: () => Effect.succeed(new TextEncoder().encode("old\n")),
       writeFile: () =>
         Effect.sync(() => {
@@ -443,6 +444,129 @@ describe("ApplyPatch.run", () => {
       layer()
     ))
     expect(chmods).toEqual([{ path: "/a.txt", mode: 0o644 }])
+  })
+
+  it.each([
+    { location: "before", bytes: new Uint8Array([0xff, 0x0a, ...new TextEncoder().encode("target\n")]) },
+    { location: "after", bytes: new Uint8Array([...new TextEncoder().encode("target\n"), 0xff, 0x0a]) }
+  ])("refuses invalid UTF-8 $location an update target without changing bytes or mode", async ({ bytes }) => {
+    const original = bytes.slice()
+    let stored = bytes.slice()
+    let mode = 0o100644
+    let writes = 0
+    const host = FileSystem.makeNoop({
+      stat: () => Effect.succeed(fileInfo(mode, stored.byteLength)),
+      readFile: () => Effect.succeed(stored.slice()),
+      writeFile: (_path, content) =>
+        Effect.sync(() => {
+          writes++
+          stored = content.slice()
+          mode = 0o100755
+        }),
+      chmod: (_path, value) =>
+        Effect.sync(() => {
+          mode = 0o100000 | value
+        })
+    })
+    const exit = await executeExit(Effect.provide(
+      Effect.provideService(
+        ApplyPatch.run({ input: wrap("*** Update File: /invalid.txt\n@@\n-target\n+changed") }),
+        FileSystem.FileSystem,
+        host
+      ),
+      layer()
+    ))
+    const failure = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+    expect(failure).toMatchObject({ code: "binary_file", path: "/invalid.txt" })
+    expect(stored).toEqual(original)
+    expect(mode).toBe(0o100644)
+    expect(writes).toBe(0)
+  })
+
+  it("refuses a NUL-containing update target before writing", async () => {
+    const original = new Uint8Array([...new TextEncoder().encode("target\n"), 0, 0x0a])
+    let stored = original.slice()
+    let writes = 0
+    const host = FileSystem.makeNoop({
+      readFile: () => Effect.succeed(stored.slice()),
+      writeFile: (_path, content) =>
+        Effect.sync(() => {
+          writes++
+          stored = content.slice()
+        })
+    })
+    const exit = await executeExit(Effect.provide(
+      Effect.provideService(
+        ApplyPatch.run({ input: wrap("*** Update File: /nul.txt\n@@\n-target\n+changed") }),
+        FileSystem.FileSystem,
+        host
+      ),
+      layer()
+    ))
+    const failure = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+    expect(failure).toMatchObject({ code: "binary_file", path: "/nul.txt" })
+    expect(stored).toEqual(original)
+    expect(writes).toBe(0)
+  })
+
+  it("preflights every update before adding, modifying, or deleting files", async () => {
+    const patch = wrap(
+      "*** Add File: /added.txt\n+added\n*** Update File: /valid.txt\n@@\n-valid\n+changed\n*** Update File: /miss.txt\n@@\n-missing\n+changed"
+    )
+    const result = await execute(Effect.provide(
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(ApplyPatch.run({ input: patch }))
+        const fileSystem = yield* FileSystem.FileSystem
+        return {
+          exit,
+          addedExists: yield* fileSystem.exists("/added.txt"),
+          valid: yield* fileSystem.readFileString("/valid.txt"),
+          missed: yield* fileSystem.readFileString("/miss.txt")
+        }
+      }),
+      layer({ files: { "/valid.txt": "valid\n", "/miss.txt": "present\n" } })
+    ))
+    const failure = Exit.isFailure(result.exit)
+      ? Option.getOrUndefined(Cause.findErrorOption(result.exit.cause))
+      : undefined
+    expect(failure).toMatchObject({ code: "no_match", path: "/miss.txt" })
+    expect(result.addedExists).toBe(false)
+    expect(result.valid).toBe("valid\n")
+    expect(result.missed).toBe("present\n")
+  })
+
+  it("reports completed paths when a later write fails", async () => {
+    let writes = 0
+    const host = FileSystem.makeNoop({
+      makeDirectory: () => Effect.void,
+      writeFile: (path) => {
+        writes++
+        return path === "/second.txt"
+          ? Effect.fail(PlatformError.systemError({
+            _tag: "PermissionDenied",
+            module: "FileSystem",
+            method: "writeFile",
+            pathOrDescriptor: path
+          }))
+          : Effect.void
+      }
+    })
+    const exit = await executeExit(Effect.provide(
+      Effect.provideService(
+        ApplyPatch.run({
+          input: wrap("*** Add File: /first.txt\n+first\n*** Add File: /second.txt\n+second")
+        }),
+        FileSystem.FileSystem,
+        host
+      ),
+      layer()
+    ))
+    const failure = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+    expect(failure).toMatchObject({ code: "command_failed", path: "/second.txt" })
+    expect(failure?.message).toContain("added=[\"/first.txt\"]")
+    expect(failure?.message).toContain("modified=[]")
+    expect(failure?.message).toContain("deleted=[]")
+    expect(writes).toBe(2)
   })
 
   it("fails with invalid_input and the Codex parse message", async () => {

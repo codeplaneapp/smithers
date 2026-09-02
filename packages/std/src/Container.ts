@@ -122,18 +122,27 @@ export const makeCommand = (options?: { readonly program?: string | undefined })
   const program = options?.program ?? "docker"
   return make({
     exec: (request) =>
-      Effect.succeed({
-        file: program,
-        args: [
-          "exec",
-          ...(request.stdin ? ["-i"] : []),
-          ...(request.cwd === undefined ? [] : ["-w", request.cwd]),
-          ...Object.entries(request.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
-          request.container,
-          request.file,
-          ...request.args
-        ]
-      })
+      request.container === "" || request.container.startsWith("-")
+        ? Effect.fail(
+          new StdError.StdError({
+            code: "invalid_input",
+            message: `Container name must be non-empty and cannot start with '-': ${request.container}`,
+            path: request.container
+          })
+        )
+        : Effect.succeed({
+          file: program,
+          args: [
+            "exec",
+            ...(request.stdin ? ["-i"] : []),
+            ...(request.cwd === undefined ? [] : ["-w", request.cwd]),
+            ...Object.entries(request.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
+            "--",
+            request.container,
+            request.file,
+            ...request.args
+          ]
+        })
   })
 }
 

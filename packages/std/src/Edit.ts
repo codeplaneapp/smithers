@@ -138,7 +138,8 @@ const lineSpan = (
   startLine: number,
   endLine: number
 ): { readonly start: number; readonly end: number } | StdError.StdError => {
-  const lines = content.split("\n")
+  const lines = content.length === 0 ? [] : content.split("\n")
+  if (content.endsWith("\n")) lines.pop()
   if (endLine < startLine) return invalid(path, `endLine ${endLine} is before startLine ${startLine}`)
   if (startLine > lines.length) {
     return new StdError.StdError({
@@ -147,7 +148,14 @@ const lineSpan = (
       path
     })
   }
-  const last = Math.min(endLine, lines.length)
+  if (endLine > lines.length) {
+    return new StdError.StdError({
+      code: "offset_out_of_range",
+      message: `Requested endLine ${endLine}, but ${path} has ${lines.length} lines`,
+      path
+    })
+  }
+  const last = endLine
   let start = 0
   for (let index = 0; index < startLine - 1; index++) start += lines[index]!.length + 1
   let end = start
@@ -188,11 +196,35 @@ export const run = Effect.fn("Edit.run")(function*(
       invalid(input.path, "oldString must not be empty; use the write flow to create a file")
     )
   }
-  const content = yield* fileSystem.readFileString(input.path).pipe(
+  if (input.oldString !== undefined && input.expect !== undefined) {
+    return yield* Effect.fail(invalid(input.path, "expect cannot be used with oldString"))
+  }
+  if (byLines && input.replaceAll !== undefined) {
+    return yield* Effect.fail(invalid(input.path, "replaceAll cannot be used with startLine/endLine"))
+  }
+  const bytes = yield* fileSystem.readFile(input.path).pipe(
     Effect.mapError(() =>
       new StdError.StdError({ code: "not_found", message: `File not found: ${input.path}`, path: input.path })
     )
   )
+  if (bytes.includes(0)) {
+    return yield* Effect.fail(
+      new StdError.StdError({
+        code: "binary_file",
+        message: `Cannot read binary file: ${input.path}`,
+        path: input.path
+      })
+    )
+  }
+  const content = yield* Effect.try({
+    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    catch: () =>
+      new StdError.StdError({
+        code: "binary_file",
+        message: `File is not valid UTF-8: ${input.path}`,
+        path: input.path
+      })
+  })
 
   const targets: Array<{ readonly start: number; readonly end: number }> = []
   if (input.oldString !== undefined) {
@@ -234,8 +266,14 @@ export const run = Effect.fn("Edit.run")(function*(
   }
   replaced += content.slice(cursor)
   yield* Preserve.writeFileString(fileSystem, input.path, replaced).pipe(
-    Effect.mapError(() =>
-      new StdError.StdError({ code: "command_failed", message: `Could not write ${input.path}`, path: input.path })
+    Effect.mapError((error) =>
+      new StdError.StdError({
+        code: "command_failed",
+        message: error.reason.method === "chmod"
+          ? `The content was written to ${input.path}, but its mode could not be restored by chmod`
+          : `Could not write ${input.path}`,
+        path: input.path
+      })
     )
   )
   const first = targets[0]!

@@ -13,6 +13,7 @@ import { Schema } from "effect"
  */
 export const Code = Schema.Literals([
   "not_found",
+  "not_a_directory",
   "not_a_file",
   "is_directory",
   "binary_file",

@@ -12,6 +12,7 @@ import * as Stream from "effect/Stream"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { capability, envelope } from "./internal/Declaration.ts"
 import { toMarkdown, toText } from "./internal/Html.ts"
+import { parseHttpUrl } from "./internal/Url.ts"
 import * as StdError from "./StdError.ts"
 
 const maxBytes = 5 * 1024 * 1024
@@ -37,9 +38,13 @@ export const description = "Fetch an HTTP URL and render its content as text, Ma
  * @since 0.1.0
  */
 export const Input = Schema.Struct({
-  url: Schema.String,
-  format: Schema.optional(Schema.Literals(["text", "markdown", "html"])),
-  timeout: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0)))
+  url: Schema.String.annotate({ description: "Absolute http or https URL to retrieve without user information" }),
+  format: Schema.optional(Schema.Literals(["text", "markdown", "html"])).annotate({
+    description: "Response rendering format; defaults to markdown"
+  }),
+  timeout: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))).annotate({
+    description: "Request and response body timeout in seconds, capped at 120"
+  })
 })
 /**
  * What the `webfetch` flow returns.
@@ -48,10 +53,10 @@ export const Input = Schema.Struct({
  * @since 0.1.0
  */
 export const Output = Schema.Struct({
-  url: Schema.String,
-  status: Schema.Int,
-  contentType: Schema.String,
-  content: Schema.String
+  url: Schema.String.annotate({ description: "Final URL after redirects" }),
+  status: Schema.Int.annotate({ description: "HTTP status code, including error statuses" }),
+  contentType: Schema.String.annotate({ description: "Response Content-Type header, or an empty string when absent" }),
+  content: Schema.String.annotate({ description: "Response body rendered in the requested format" })
 })
 /**
  * The declared effect envelope of the `webfetch` flow, before any input is known.
@@ -83,15 +88,8 @@ export const capabilities = [capability("net:get", "*")]
  */
 export const flow = Flow.make({ name, description, input: Input, output: Output, capabilities, effects })
 
-const parseUrl = (value: string): URL | undefined => {
-  try {
-    const url = new URL(value)
-    return url.protocol === "http:" || url.protocol === "https:" ? url : undefined
-  } catch {
-    return undefined
-  }
-}
-const error = (code: StdError.Code, message: string): StdError.StdError => new StdError.StdError({ code, message })
+const error = (code: StdError.Code, message: string, path?: string): StdError.StdError =>
+  new StdError.StdError({ code, message, ...(path === undefined ? {} : { path }) })
 const header = (headers: Readonly<Record<string, string | undefined>>, name: string): string | undefined =>
   headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()]
 
@@ -131,77 +129,82 @@ const readBounded = <E, R>(
  * @category handlers
  * @since 0.1.0
  */
-export const run = (
+export const run = Effect.fn("WebFetch.run")(function*(
   input: typeof Input.Type
-): Effect.Effect<typeof Output.Type, StdError.StdError, HttpClient.HttpClient> =>
-  Effect.gen(function*() {
-    let url = parseUrl(input.url)
-    if (url === undefined) return yield* Effect.fail(error("invalid_input", "URL must use http or https"))
-    const client = yield* HttpClient.HttpClient
-    const timeout = Math.min(input.timeout ?? 30, 120) * 1_000
-    let headers: Readonly<Record<string, string>> = {
-      accept: input.format === "html" ? "text/html, text/plain;q=0.8" : "text/markdown, text/plain, text/html;q=0.8"
-    }
-    for (let redirect = 0; redirect <= maxRedirects; redirect++) {
-      const response = yield* client.execute(
-        HttpClientRequest.setHeaders(HttpClientRequest.get(url.toString()), headers)
-      ).pipe(
-        Effect.timeout(timeout),
-        Effect.mapError((cause) =>
-          cause._tag === "TimeoutError"
-            ? error("timeout", `Web fetch timed out after ${timeout / 1_000} seconds`)
-            : error("request_failed", `Web fetch request failed: ${url}`)
-        )
+): Effect.fn.Return<typeof Output.Type, StdError.StdError, HttpClient.HttpClient> {
+  let url = parseHttpUrl(input.url)
+  if (url === undefined) {
+    return yield* Effect.fail(
+      error("invalid_input", "URL must use http or https without user information", input.url)
+    )
+  }
+  const client = yield* HttpClient.HttpClient
+  const timeout = Math.min(input.timeout ?? 30, 120) * 1_000
+  let headers: Readonly<Record<string, string>> = {
+    accept: input.format === "html" ? "text/html, text/plain;q=0.8" : "text/markdown, text/plain, text/html;q=0.8"
+  }
+  for (let redirect = 0; redirect <= maxRedirects; redirect++) {
+    const response = yield* client.execute(
+      HttpClientRequest.setHeaders(HttpClientRequest.get(url.toString()), headers)
+    ).pipe(
+      Effect.timeout(timeout),
+      Effect.mapError((cause) =>
+        cause._tag === "TimeoutError"
+          ? error("timeout", `Web fetch timed out after ${timeout / 1_000} seconds`)
+          : error("request_failed", `Web fetch request failed: ${url}`)
       )
-      const location = header(response.headers, "location")
-      if (response.status >= 300 && response.status < 400 && location !== undefined) {
-        const next = parseUrl(new URL(location, url).toString())
-        if (next === undefined) {
-          return yield* Effect.fail(error("invalid_input", "Redirect target must use http or https"))
-        }
-        if (next.origin !== url.origin) {
-          headers = Object.fromEntries(
-            Object.entries(headers).filter(([key]) =>
-              key.toLowerCase() !== "authorization" && key.toLowerCase() !== "cookie"
-            )
-          )
-        }
-        url = next
-        continue
-      }
-      const contentType = header(response.headers, "content-type") ?? ""
-      const normalizedContentType = contentType.toLowerCase()
-      if (
-        !normalizedContentType.startsWith("text/")
-        && !normalizedContentType.includes("json")
-        && !normalizedContentType.includes("xml")
-      ) {
+    )
+    const location = header(response.headers, "location")
+    if (response.status >= 300 && response.status < 400 && location !== undefined) {
+      const next = parseHttpUrl(location, url)
+      if (next === undefined) {
         return yield* Effect.fail(
-          error("unsupported_content_type", `Unsupported content type: ${contentType || "unknown"}`)
+          error("invalid_input", "Redirect target must use http or https without user information", location)
         )
       }
-      const length = Number(header(response.headers, "content-length"))
-      if (Number.isFinite(length) && length > maxBytes) {
-        return yield* Effect.fail(error("response_too_large", "Response exceeds the 5 MiB limit"))
-      }
-      const body = yield* readBounded(response.stream).pipe(
-        Effect.timeout(timeout),
-        Effect.mapError((cause) =>
-          cause instanceof StdError.StdError
-            ? cause
-            : cause._tag === "TimeoutError"
-            ? error("timeout", `Web fetch timed out after ${timeout / 1_000} seconds`)
-            : error("request_failed", "Web fetch response could not be read")
+      if (next.origin !== url.origin) {
+        headers = Object.fromEntries(
+          Object.entries(headers).filter(([key]) =>
+            key.toLowerCase() !== "authorization" && key.toLowerCase() !== "cookie"
+          )
         )
-      )
-      const raw = new TextDecoder().decode(body)
-      const format = input.format ?? "markdown"
-      const content = format === "html" || !normalizedContentType.includes("html")
-        ? raw
-        : format === "text"
-        ? toText(raw)
-        : toMarkdown(raw)
-      return { url: url.toString(), status: response.status, contentType, content }
+      }
+      url = next
+      continue
     }
-    return yield* Effect.fail(error("request_failed", "Web fetch exceeded the redirect limit"))
-  })
+    const contentType = header(response.headers, "content-type") ?? ""
+    const normalizedContentType = contentType.toLowerCase()
+    if (
+      !normalizedContentType.startsWith("text/")
+      && !normalizedContentType.includes("json")
+      && !normalizedContentType.includes("xml")
+    ) {
+      return yield* Effect.fail(
+        error("unsupported_content_type", `Unsupported content type: ${contentType || "unknown"}`)
+      )
+    }
+    const length = Number(header(response.headers, "content-length"))
+    if (Number.isFinite(length) && length > maxBytes) {
+      return yield* Effect.fail(error("response_too_large", "Response exceeds the 5 MiB limit"))
+    }
+    const body = yield* readBounded(response.stream).pipe(
+      Effect.timeout(timeout),
+      Effect.mapError((cause) =>
+        cause instanceof StdError.StdError
+          ? cause
+          : cause._tag === "TimeoutError"
+          ? error("timeout", `Web fetch timed out after ${timeout / 1_000} seconds`)
+          : error("request_failed", "Web fetch response could not be read")
+      )
+    )
+    const raw = new TextDecoder().decode(body)
+    const format = input.format ?? "markdown"
+    const content = format === "html" || !normalizedContentType.includes("html")
+      ? raw
+      : format === "text"
+      ? toText(raw)
+      : toMarkdown(raw)
+    return { url: url.toString(), status: response.status, contentType, content }
+  }
+  return yield* Effect.fail(error("request_failed", "Web fetch exceeded the redirect limit"))
+})

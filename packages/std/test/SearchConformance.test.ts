@@ -14,6 +14,7 @@ import * as NativeSearch from "../src/NativeSearch.ts"
 import * as PortableSearch from "../src/PortableSearch.ts"
 
 const root = mkdtempSync(join(tmpdir(), "flows-search-conformance-"))
+const linkedRoot = join(root, "linked-root")
 const file = (relative: string, content: string | Uint8Array): void => {
   const target = join(root, relative)
   mkdirSync(dirname(target), { recursive: true })
@@ -56,6 +57,17 @@ beforeAll(() => {
   file("edge/long.txt", "x".repeat(600))
   file("edge/symlink-target.txt", "needle symlink target\n")
   symlinkSync(join(root, "edge/symlink-target.txt"), join(root, "edge/symlink.txt"))
+  file("literal/metacharacters.txt", "foo?\nfoo\nfo\na+b\nab\nx*y\nxy\n[z]\nz\n?\n")
+  file("linked-target/a.ts", "linked root\n")
+  symlinkSync(join(root, "linked-target"), linkedRoot)
+  file("max-count/one.txt", "needle one\nneedle two\n")
+  file("max-count/two.txt", "needle three\nneedle four\n")
+  file("weird-names/line\nbreak.txt", "")
+  file("weird-names/carriage\rreturn.txt", "")
+  file("weird-names/tab\tname.txt", "")
+  file("weird-names/éclair.txt", "")
+  file("weird-names/-leading.txt", "")
+  file("brace-ceiling/a0wm.ts", "")
   file("globs/a.ts", "")
   file("globs/nested/a.ts", "")
   file("globs/nested/deeper/dd.ts", "")
@@ -190,6 +202,34 @@ for (const [peer, implementation] of peers) {
       expect(regex.matches.map((match) => match.line)).toEqual([1, 2, 3])
     })
 
+    it("treats every fixed-string metacharacter literally, including a bare question mark", async () => {
+      const searchRoot = join(root, "literal/metacharacters.txt")
+      const cases = [
+        ["foo?", [1]],
+        ["a+b", [4]],
+        ["x*y", [6]],
+        ["[z]", [8]],
+        ["?", [1, 10]]
+      ] as const
+      const contents = ["foo?", "foo", "fo", "a+b", "ab", "x*y", "xy", "[z]", "z", "?"]
+      for (const [pattern, lines] of cases) {
+        const result = await grep({ pattern, root: searchRoot, fixedStrings: true })
+        expect(result, pattern).toEqual({
+          matches: lines.map((line) => ({
+            file: searchRoot,
+            line,
+            text: contents[line - 1],
+            before: [],
+            after: []
+          })),
+          files: [],
+          filesSearched: 1,
+          skippedBinary: 0,
+          truncated: false
+        })
+      }
+    })
+
     it("aligns CRLF anchors, Unicode scalars, and replacement-decoded non-UTF8 bytes", async () => {
       const crlf = await grep({ pattern: "foo$", root: join(root, "edge/crlf.txt") })
       const unicode = await grep({ pattern: "^.$", root: join(root, "edge/unicode.txt") })
@@ -204,6 +244,17 @@ for (const [peer, implementation] of peers) {
       expect(invalidUtf8.matches).toEqual([
         { file: join(root, "edge/invalid-utf8.txt"), line: 1, text: "needle �", before: [], after: [] }
       ])
+    })
+
+    it("normalizes CRLF match and context previews without retaining carriage returns", async () => {
+      const result = await grep({ pattern: "bar", root: join(root, "edge/crlf.txt"), beforeContext: 1 })
+      expect(result.matches).toEqual([{
+        file: join(root, "edge/crlf.txt"),
+        line: 2,
+        text: "bar",
+        before: [{ line: 1, text: "foo" }],
+        after: []
+      }])
     })
 
     it("skips and counts NUL-bearing files and rejects an explicitly named binary root", async () => {
@@ -232,11 +283,40 @@ for (const [peer, implementation] of peers) {
       expect(symlink.files).not.toContain(join(root, "edge/symlink.txt"))
     })
 
+    it("searches a directory symlink when the caller names it as the root", async () => {
+      const paths = await glob({ pattern: "*.ts", root: linkedRoot })
+      const matches = await grep({ pattern: "linked root", root: linkedRoot, filesWithMatches: true })
+      expect(paths.paths).toEqual([join(linkedRoot, "a.ts")])
+      expect(matches.files).toEqual([join(linkedRoot, "a.ts")])
+    })
+
+    it.skip("streams a file larger than available memory (skipped: a hermetic test cannot exhaust its runner)", () => {})
+
     it("discloses global truncation and notice semantics", async () => {
       const result = await grep({ pattern: "needle", root: join(root, "src"), globs: ["*.ts"], limit: 1 })
       expect(result).toMatchObject({ truncated: true })
       expect(result.matches).toHaveLength(1)
       expect(result.notice).toBe("Showing 1 of 3 matches; output was truncated.")
+    })
+
+    it("treats limit zero as a truncated result with no returned entries", async () => {
+      const grepResult = await grep({ pattern: "needle", root: join(root, "src"), globs: ["*.ts"], limit: 0 })
+      const globResult = await glob({ pattern: "*.ts", root: join(root, "globs"), limit: 0 })
+      expect(grepResult).toMatchObject({ matches: [], files: [], truncated: true })
+      expect(grepResult.notice).toBe("Showing 0 of 3 matches; output was truncated.")
+      expect(globResult).toMatchObject({ paths: [], total: 5, truncated: true })
+      expect(globResult.notice).toBe("Showing 0 of 5 entries; output was truncated.")
+    })
+
+    it("combines per-file max-count with files-with-matches", async () => {
+      const result = await grep({
+        pattern: "needle",
+        root: join(root, "max-count"),
+        maxCount: 1,
+        filesWithMatches: true
+      })
+      expect(result.matches).toEqual([])
+      expect(result.files).toEqual([join(root, "max-count/one.txt"), join(root, "max-count/two.txt")])
     })
 
     it("keeps hidden search opt-in and fixed skip roots explicit", async () => {
@@ -271,6 +351,29 @@ for (const [peer, implementation] of peers) {
       expect(hidden.paths).toContain(join(root, "src/.secret.ts"))
       expect(hidden.paths).not.toContain(join(root, "src/.git/objects/object.ts"))
       expect(explicit.paths).toEqual([join(root, "src/node_modules/pkg/index.ts")])
+    })
+
+    it("preserves legal path bytes that line-delimited output cannot represent", async () => {
+      const result = await glob({ pattern: "*.txt", root: join(root, "weird-names") })
+      expect(result).toEqual({
+        paths: [
+          join(root, "weird-names/-leading.txt"),
+          join(root, "weird-names/carriage\rreturn.txt"),
+          join(root, "weird-names/line\nbreak.txt"),
+          join(root, "weird-names/tab\tname.txt"),
+          join(root, "weird-names/éclair.txt")
+        ].sort(),
+        total: 5,
+        truncated: false
+      })
+    })
+
+    it("accepts a brace glob at the 256-expansion ceiling", async () => {
+      const result = await glob({
+        pattern: "{a,b,c,d,e,f,g,h}{0,1,2,3}{w,x,y,z}{m,n}.ts",
+        root: join(root, "brace-ceiling")
+      })
+      expect(result.paths).toEqual([join(root, "brace-ceiling/a0wm.ts")])
     })
 
     it("implements root-anchored globs and ripgrep's UTF-8 byte width for ?", async () => {
@@ -574,7 +677,7 @@ it("the native peer keeps what rg produced when it only skipped what it could no
   ))
   const listed = await Effect.runPromise(Effect.provide(
     Glob.run({ pattern: "*.ts", root: join(root, "src") }),
-    scriptedNative({ stdout: "a.ts\n", exitCode: 2 })
+    scriptedNative({ stdout: "a.ts\0", exitCode: 2 })
   ))
   const rejected = await Effect.runPromise(Effect.exit(Effect.provide(
     Glob.run({ pattern: "*.ts", root: join(root, "src") }),

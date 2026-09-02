@@ -100,11 +100,26 @@ export const run = Effect.fn("Write.run")(function*(
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const existed = yield* fileSystem.exists(input.path).pipe(Effect.orElseSucceed(() => false))
+  if (existed) {
+    const info = yield* fileSystem.stat(input.path).pipe(
+      Effect.mapError(() => writeError(input.path, `Could not inspect ${input.path} before writing`))
+    )
+    if (info.type === "Directory") {
+      return yield* Effect.fail(writeError(input.path, `Cannot write a file over directory ${input.path}`))
+    }
+  }
   yield* fileSystem.makeDirectory(path.dirname(input.path), { recursive: true }).pipe(
     Effect.mapError(() => writeError(input.path, `Could not create the parent directory of ${input.path}`))
   )
   yield* Preserve.writeFileString(fileSystem, input.path, input.content).pipe(
-    Effect.mapError(() => writeError(input.path, `Could not write ${input.path}`))
+    Effect.mapError((error) =>
+      writeError(
+        input.path,
+        error.reason.method === "chmod"
+          ? `The content was written to ${input.path}, but its mode could not be restored by chmod`
+          : `Could not write ${input.path}`
+      )
+    )
   )
   return {
     path: input.path,

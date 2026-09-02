@@ -69,15 +69,12 @@ export const effects = envelope({
   writes: []
 })
 /**
- * Narrows {@link effects} to what this particular input actually touches.
+ * Returns the workspace-wide envelope every language-server query needs.
  *
  * @category effects
  * @since 0.1.0
  */
-export const effectsFor = (input: typeof Input.Type) =>
-  input.path === undefined
-    ? effects
-    : envelope({ tier: "sealed", mode: "hermetic", reads: [input.path], writes: [] })
+export const effectsFor = (_input: typeof Input.Type) => effects
 /**
  * The authority the `lsp` flow requires.
  *

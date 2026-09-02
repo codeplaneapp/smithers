@@ -32,7 +32,7 @@ export const MAX_ENTRIES = 1_000
 export const MAX_GREP_MATCHES = 200
 
 /**
- * Maximum number of characters displayed for a single line.
+ * Maximum number of Unicode scalar values displayed for a single line.
  *
  * @category constants
  * @since 0.1.0
@@ -64,6 +64,7 @@ export const MAX_SHELL_OUTPUT_BYTES = 30_000
 export interface Truncation {
   readonly text: string
   readonly truncated: boolean
+  readonly keptBytes: number
   readonly droppedBytes: number
 }
 
@@ -81,9 +82,7 @@ export interface Page {
 }
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder("utf-8")
-
-const byteLength = (text: string): number => encoder.encode(text).byteLength
+const fatalDecoder = new TextDecoder("utf-8", { fatal: true })
 
 /**
  * Trims a string to a UTF-8 byte budget without splitting a code point.
@@ -102,19 +101,39 @@ export const truncateBytes = (
 ): Truncation => {
   const bytes = encoder.encode(text)
   if (bytes.byteLength <= maxBytes) {
-    return { text, truncated: false, droppedBytes: 0 }
+    return { text, truncated: false, keptBytes: bytes.byteLength, droppedBytes: 0 }
   }
-  const kept = options.keep === "head"
-    ? bytes.subarray(0, maxBytes)
-    : bytes.subarray(bytes.byteLength - maxBytes)
-  // Decoding with replacement characters disabled is not available, so the
-  // partial code point at the cut is removed by re-encoding the decoded value.
-  const decoded = decoder.decode(kept).replace(options.keep === "head" ? /�+$/ : /^�+/, "")
-  return {
-    text: decoded,
-    truncated: true,
-    droppedBytes: bytes.byteLength - byteLength(decoded)
+  let start = options.keep === "head" ? 0 : bytes.byteLength - maxBytes
+  let end = options.keep === "head" ? maxBytes : bytes.byteLength
+  for (let adjustment = 0; adjustment <= 3; adjustment++) {
+    try {
+      const decoded = fatalDecoder.decode(bytes.subarray(start, end))
+      const keptBytes = end - start
+      return {
+        text: decoded,
+        truncated: true,
+        keptBytes,
+        droppedBytes: bytes.byteLength - keptBytes
+      }
+    } catch {
+      if (adjustment === 3) break
+      if (options.keep === "head") end--
+      else start++
+    }
   }
+  return { text: "", truncated: true, keptBytes: 0, droppedBytes: bytes.byteLength }
+}
+
+/**
+ * Splits text into source lines without counting a terminal newline as a line.
+ *
+ * @category parsing
+ * @since 0.1.0
+ */
+export const sourceLines = (text: string): ReadonlyArray<string> => {
+  const lines = text.length === 0 ? [] : text.split(/\r?\n/)
+  if (text.endsWith("\n")) lines.pop()
+  return lines
 }
 
 /**
@@ -127,7 +146,7 @@ export const slice = (
   text: string,
   options: { readonly offset: number; readonly limit: number }
 ): Page => {
-  const lines = text.split("\n")
+  const lines = sourceLines(text)
   const totalLines = lines.length
   const startLine = Math.max(1, options.offset)
   const endLine = Math.min(totalLines, startLine + Math.max(0, options.limit) - 1)

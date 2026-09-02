@@ -75,6 +75,39 @@ export const handlers = Object.freeze({
 })
 
 /**
+ * Frozen name-to-narrowing registry: the entry point for `effectsFor`.
+ *
+ * Every flow declares a registry-time worst case in `flow.effects`, and every
+ * module also narrows that declaration for one decoded input. Without this map
+ * a host holding a flow name and a decoded input has no generic way to reach
+ * the narrowing, so it would have to serialize conflicts against the worst case
+ * for every call. Explore is included even though it has no handler entry: it
+ * is a declaration a seat can be offered, and its envelope narrows the same way.
+ *
+ * @category registries
+ * @since 0.1.0
+ */
+export const effectsFor = Object.freeze({
+  [Read.name]: Read.effectsFor,
+  [Write.name]: Write.effectsFor,
+  [Edit.name]: Edit.effectsFor,
+  [Ls.name]: Ls.effectsFor,
+  [Glob.name]: Glob.effectsFor,
+  [Grep.name]: Grep.effectsFor,
+  [Bash.name]: Bash.effectsFor,
+  [TestRun.name]: TestRun.effectsFor,
+  [ShellCommand.name]: ShellCommand.effectsFor,
+  [ApplyPatch.name]: ApplyPatch.effectsFor,
+  [UpdatePlan.name]: UpdatePlan.effectsFor,
+  [Fetch.name]: Fetch.effectsFor,
+  [HttpPost.name]: HttpPost.effectsFor,
+  [Explore.name]: Explore.effectsFor,
+  [WebFetch.name]: WebFetch.effectsFor,
+  [WebSearch.name]: WebSearch.effectsFor,
+  [Lsp.name]: Lsp.effectsFor
+})
+
+/**
  * Frozen standard flow names in registry order.
  *
  * @category metadata

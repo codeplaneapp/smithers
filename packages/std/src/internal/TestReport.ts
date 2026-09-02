@@ -27,6 +27,7 @@
 export interface Report {
   readonly passed: number
   readonly failed: ReadonlyArray<string>
+  readonly reportedFailed: number | undefined
   readonly parsed: boolean
 }
 
@@ -55,17 +56,27 @@ const count = (text: string, pattern: RegExp): number | undefined => {
  * passed-count available when the tally was cut off by a capture limit.
  */
 const pytest = (text: string): Report | undefined => {
-  const failed = unique([
-    // A test id never opens with a bracket, and `FAILED (failures=1)` is
-    // unittest's summary line rather than a pytest id.
-    ...collect(text, /^(?:FAILED|ERROR)[ \t]+([^\s(][^\s]*)/gm),
-    ...collect(text, /^([^\s(][^\s]*)[ \t]+(?:FAILED|ERROR)\b/gm)
-  ])
+  const summaryFailed = collect(text, /^(?:FAILED|ERROR)[ \t]+(.+?)(?:[ \t]+-[ \t]+.*)?$/gm)
+  const outcomes = [...text.matchAll(/^(.+?)[ \t]+(PASSED|FAILED|ERROR)(?:[ \t]+.*)?$/gm)]
+  const verboseFailed = outcomes.flatMap((match) => match[2] === "FAILED" || match[2] === "ERROR" ? [match[1]!] : [])
+  const verbosePassed = unique(outcomes.flatMap((match) => match[2] === "PASSED" ? [match[1]!] : [])).length
+  const failed = unique([...summaryFailed, ...verboseFailed])
   const tally = count(text, /\b(\d+) passed\b/)
-  const verbose = collect(text, /^(\S+)[ \t]+PASSED\b/gm).length
   const failures = count(text, /\b(\d+) failed\b/)
-  if (tally === undefined && verbose === 0 && failed.length === 0 && failures === undefined) return undefined
-  return { passed: tally ?? verbose, failed, parsed: true }
+  const errors = count(text, /\b(\d+) errors?\b/)
+  const hasTally = tally !== undefined || failures !== undefined || errors !== undefined
+  const reportedFailed = hasTally
+    ? (failures ?? 0) + (errors ?? 0)
+    : outcomes.length > 0
+    ? unique(verboseFailed).length
+    : undefined
+  if (!hasTally && outcomes.length === 0 && summaryFailed.length === 0) return undefined
+  return {
+    passed: tally ?? verbosePassed,
+    failed,
+    reportedFailed,
+    parsed: reportedFailed !== undefined && failed.length === reportedFailed
+  }
 }
 
 /**
@@ -75,9 +86,21 @@ const pytest = (text: string): Report | undefined => {
 const unittest = (text: string): Report | undefined => {
   const ran = count(text, /^Ran (\d+) tests?\b/m)
   const outcomes = [...text.matchAll(/^(?:FAIL|ERROR):[ \t]+(\S+)[ \t]+\(([^)\s]+)\)/gm)]
-  if (ran === undefined && outcomes.length === 0) return undefined
+  const summary = /^FAILED \(([^)]*)\)\s*$/m.exec(text)?.[1]
+  const ok = /^OK(?: \([^)]*\))?\s*$/m.test(text)
+  if (ran === undefined && outcomes.length === 0 && summary === undefined && !ok) return undefined
   const failed = unique(outcomes.map((match) => `${match[2]}.${match[1]}`))
-  return { passed: Math.max(0, (ran ?? failed.length) - failed.length), failed, parsed: true }
+  const reportedFailed = summary === undefined
+    ? ok ? 0 : undefined
+    : [...summary.matchAll(/(?:failures|errors)=(\d+)/g)].reduce((total, match) => total + Number(match[1]), 0)
+  const passed = ran === undefined || reportedFailed === undefined ? 0 : Math.max(0, ran - reportedFailed)
+  return {
+    passed,
+    failed,
+    reportedFailed,
+    parsed: ran !== undefined && reportedFailed !== undefined && failed.length === reportedFailed &&
+      passed + failed.length === ran
+  }
 }
 
 /**
@@ -87,7 +110,7 @@ const tap = (text: string): Report | undefined => {
   const failed = unique(collect(text, /^not ok\b[ \t]*\d*[ \t]*-?[ \t]*(.*\S)?/gm))
   const passed = collect(text, /^ok\b[ \t]*\d*[ \t]*-?[ \t]*(.*)$/gm).length
   if (passed === 0 && failed.length === 0) return undefined
-  return { passed, failed, parsed: true }
+  return { passed, failed, reportedFailed: failed.length, parsed: true }
 }
 
 /**
@@ -104,7 +127,7 @@ export const parse = (text: string): Report => {
     const report = reader(text)
     if (report !== undefined) return report
   }
-  return { passed: 0, failed: [], parsed: false }
+  return { passed: 0, failed: [], reportedFailed: undefined, parsed: false }
 }
 
 /**
@@ -114,18 +137,19 @@ export const parse = (text: string): Report => {
  * @since 0.1.0
  */
 export const attribute = (
-  current: ReadonlyArray<string>,
-  base: ReadonlyArray<string>
+  current: Report,
+  base: Report
 ): {
   readonly introduced: ReadonlyArray<string>
   readonly preexisting: ReadonlyArray<string>
   readonly fixed: ReadonlyArray<string>
-} => {
-  const before = new Set(base)
-  const now = new Set(current)
+} | undefined => {
+  if (!current.parsed || !base.parsed) return undefined
+  const before = new Set(base.failed)
+  const now = new Set(current.failed)
   return {
-    introduced: current.filter((id) => !before.has(id)),
-    preexisting: current.filter((id) => before.has(id)),
-    fixed: base.filter((id) => !now.has(id))
+    introduced: current.failed.filter((id) => !before.has(id)),
+    preexisting: current.failed.filter((id) => before.has(id)),
+    fixed: base.failed.filter((id) => !now.has(id))
   }
 }

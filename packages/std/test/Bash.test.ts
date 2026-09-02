@@ -1,10 +1,12 @@
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import { Cause, Effect, Exit, Layer, Option, Path, Sink, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Option, Path, Schema, Sink, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as Bash from "../src/Bash.ts"
 import * as Container from "../src/Container.ts"
+import * as Exec from "../src/internal/Exec.ts"
 import { MAX_SHELL_OUTPUT_BYTES } from "../src/internal/Text.ts"
 import { layer } from "./TestLayers.ts"
 
@@ -113,6 +115,29 @@ describe("Bash", () => {
     expect(result.stderrDroppedBytes).toBe(encoder.encode(stderr).byteLength - encoder.encode(result.stderr).byteLength)
   })
 
+  it("passes the shell output budget into capture before reading oversized streams", async () => {
+    const exec = vi.spyOn(Exec, "exec")
+    try {
+      const stdout = `${"prefix".repeat(20_000)}TAIL`
+      const result = await execute(Effect.provide(
+        Bash.run({ mode: "unhermetic", command: "oversized-capture" }),
+        layer({ commands: { "oversized-capture": { stdout, exitCode: 0 } } })
+      ))
+
+      expect(exec).toHaveBeenCalledWith(
+        "oversized-capture",
+        expect.objectContaining({ maxCaptureBytes: MAX_SHELL_OUTPUT_BYTES })
+      )
+      expect(new TextEncoder().encode(result.stdout).byteLength).toBeLessThanOrEqual(MAX_SHELL_OUTPUT_BYTES)
+      expect(result.stdout.endsWith("TAIL")).toBe(true)
+      expect(result.stdoutDroppedBytes).toBe(
+        new TextEncoder().encode(stdout).byteLength - new TextEncoder().encode(result.stdout).byteLength
+      )
+    } finally {
+      exec.mockRestore()
+    }
+  })
+
   it("maps shell timeouts to the typed timeout error", async () => {
     // A process that never exits, so the handler's own deadline is the only
     // thing that can end the run.
@@ -134,6 +159,37 @@ describe("Bash", () => {
     if (Exit.isFailure(exit)) {
       const failure = Cause.findErrorOption(exit.cause)
       expect(Option.isSome(failure) && failure.value.code).toBe("timeout")
+    }
+  })
+
+  it("ends a stalled command at the ten-minute default timeout", async () => {
+    const expectedDefault = 600_000
+    const stalled = ChildProcessSpawner.makeNoop({ spawn: () => Effect.never })
+    const outcome = await execute(
+      Effect.gen(function*() {
+        const fiber = yield* Effect.race(
+          Effect.exit(Bash.run({ mode: "unhermetic", command: "stalled-default" })),
+          Effect.sleep(expectedDefault + 1).pipe(Effect.as("still-running" as const))
+        ).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* TestClock.adjust(expectedDefault + 1)
+        return yield* Fiber.join(fiber)
+      }).pipe(
+        Effect.provide(Layer.mergeAll(
+          Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(stalled),
+          Path.layer
+        )),
+        Effect.provide(TestClock.layer())
+      )
+    )
+
+    expect(Bash.DEFAULT_TIMEOUT_MS).toBe(expectedDefault)
+    expect(outcome).not.toBe("still-running")
+    if (outcome !== "still-running") {
+      expect(Exit.isFailure(outcome)).toBe(true)
+      if (Exit.isFailure(outcome)) {
+        const failure = Cause.findErrorOption(outcome.cause)
+        expect(Option.isSome(failure) && failure.value.code).toBe("timeout")
+      }
     }
   })
 
@@ -304,6 +360,237 @@ describe("Bash", () => {
     }
   })
 
+  it.each([
+    { name: "rm", script: "echo hi\nrm -rf /work/target\n", path: "/work/target" },
+    { name: "mv", script: "echo hi\nmv /work/a /work/b\n", path: "/work/b" },
+    { name: "tee", script: "echo hi\ntee /work/out\n", path: "/work/out" }
+  ])("refuses an undeclared $name write on the second script line", async ({ script, path }) => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({
+        mode: "hermetic",
+        script,
+        reads: ["/work/**"],
+        writes: []
+      })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        code: "outside_declared_writes",
+        path
+      })
+    }
+    expect(spawns).toEqual([])
+  })
+
+  it("selects the command behind an env prefix before classifying writes", async () => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({
+        mode: "hermetic",
+        command: "env FOO=bar rm /work/target",
+        reads: ["/work/**"],
+        writes: []
+      })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        code: "outside_declared_writes",
+        path: "/work/target"
+      })
+    }
+    expect(spawns).toEqual([])
+  })
+
+  it("spawns a multi-line hermetic script when every line is declared", async () => {
+    const spawns: Array<Spawned> = []
+    const script = "cat /work/input\nrm /work/target\nmv /work/a /work/b\ntee /work/out\n"
+    const result = await execute(Effect.provide(
+      Bash.run({
+        mode: "hermetic",
+        script,
+        reads: ["/work/input", "/work/a"],
+        writes: ["/work/target", "/work/b", "/work/out"]
+      }),
+      recorder(spawns)
+    ))
+
+    expect(result.exitCode).toBe(0)
+    expect(spawns).toHaveLength(1)
+    expect(spawns[0]?.stdin).toBe(script)
+  })
+
+  it("ignores path-like text on a shell comment line", async () => {
+    const spawns: Array<Spawned> = []
+    const script = "#comment /outside/ignored\necho ready\n"
+    const result = await execute(Effect.provide(
+      Bash.run({ mode: "hermetic", script, reads: [], writes: [] }),
+      recorder(spawns)
+    ))
+
+    expect(result.exitCode).toBe(0)
+    expect(spawns).toHaveLength(1)
+  })
+
+  it.each([
+    { label: "bare directory", reads: ["/work"] },
+    { label: "recursive glob", reads: ["/work/**"] }
+  ])("refuses an absolute dot-dot escape from a $label declaration", async ({ reads }) => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({
+        mode: "hermetic",
+        command: "cat /work/../outside/x",
+        reads,
+        writes: []
+      })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        code: "outside_declared_reads",
+        path: "/outside/x"
+      })
+    }
+    expect(spawns).toEqual([])
+  })
+
+  it("normalizes a dev path before deciding whether it is exempt", async () => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({
+        mode: "hermetic",
+        command: "cat /dev/../etc/passwd",
+        reads: [],
+        writes: []
+      })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        code: "outside_declared_reads",
+        path: "/etc/passwd"
+      })
+    }
+    expect(spawns).toEqual([])
+  })
+
+  it("keeps a canonical dev path exempt from the filesystem envelope", async () => {
+    const spawns: Array<Spawned> = []
+    const result = await execute(Effect.provide(
+      Bash.run({
+        mode: "hermetic",
+        command: "cat /dev/null",
+        reads: [],
+        writes: []
+      }),
+      recorder(spawns)
+    ))
+
+    expect(result.exitCode).toBe(0)
+    expect(spawns).toHaveLength(1)
+  })
+
+  it("refuses a relative dot-dot escape from the working directory", async () => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({
+        mode: "hermetic",
+        command: "cat ../outside/x",
+        cwd: "/work/project",
+        reads: ["/work/project"],
+        writes: []
+      })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        code: "outside_declared_reads",
+        path: "/work/outside/x"
+      })
+    }
+    expect(spawns).toEqual([])
+  })
+
+  it("resolves a relative declaration and path against the same working directory", async () => {
+    const spawns: Array<Spawned> = []
+    const result = await execute(Effect.provide(
+      Bash.run({
+        mode: "hermetic",
+        command: "cat ../shared/input",
+        cwd: "/work/project",
+        reads: [".", "../shared"],
+        writes: []
+      }),
+      recorder(spawns)
+    ))
+
+    expect(result.exitCode).toBe(0)
+    expect(spawns).toHaveLength(1)
+  })
+
+  it("normalizes repeated separators in declarations and command paths", async () => {
+    const spawns: Array<Spawned> = []
+    const result = await execute(Effect.provide(
+      Bash.run({
+        mode: "hermetic",
+        command: "cat /work//input",
+        cwd: "/work",
+        reads: ["/work/"],
+        writes: []
+      }),
+      recorder(spawns)
+    ))
+
+    expect(result.exitCode).toBe(0)
+    expect(spawns).toHaveLength(1)
+  })
+
+  it("does not let an empty read declaration authorize an absolute path", async () => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({
+        mode: "hermetic",
+        command: "cat /etc/shadow",
+        reads: [""],
+        writes: []
+      })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        code: "outside_declared_reads",
+        path: "/etc/shadow"
+      })
+    }
+    expect(spawns).toEqual([])
+  })
+
+  it("rejects empty hermetic declarations at the schema boundary", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Bash.Input)({
+        mode: "hermetic",
+        command: "cat /etc/shadow",
+        reads: [""],
+        writes: []
+      })
+    ).toThrow()
+  })
+
   it("hands a script to its interpreter as data, never as a quoted line", async () => {
     const spawns: Array<Spawned> = []
     const script = "import sys\nprint('single ' + \"double\" + `back` + '''triple''')\n"
@@ -397,6 +684,7 @@ describe("Bash", () => {
         "/testbed",
         "-e",
         "PYTHONHASHSEED=0",
+        "--",
         "swebench-1",
         "bash",
         "-lc",
@@ -412,7 +700,7 @@ describe("Bash", () => {
     })
     expect(spawns[1]).toMatchObject({
       file: "docker",
-      args: ["exec", "-w", "/testbed", "swebench-1", "bash", "-lc", "pytest -q tests/test_x.py"],
+      args: ["exec", "-w", "/testbed", "--", "swebench-1", "bash", "-lc", "pytest -q tests/test_x.py"],
       stdin: undefined
     })
   })
@@ -428,7 +716,7 @@ describe("Bash", () => {
     ))
     expect(spawns[0]).toMatchObject({
       file: "docker",
-      args: ["exec", "-i", "swebench-1", "bash", "-lc", `exec "$@"`, "bash", "bash", "-s"],
+      args: ["exec", "-i", "--", "swebench-1", "bash", "-lc", `exec "$@"`, "bash", "bash", "-s"],
       stdin: "echo hello"
     })
   })

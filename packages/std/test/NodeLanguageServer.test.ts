@@ -1,5 +1,5 @@
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import { Effect, Queue, Sink, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Queue, Sink, Stream } from "effect"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
 import { describe, expect, it } from "vitest"
@@ -21,6 +21,70 @@ const encodeFrame = (value: unknown): Uint8Array => {
   return frame
 }
 
+const malformedFrame = (body: string): Uint8Array => {
+  const bytes = new TextEncoder().encode(body)
+  const header = new TextEncoder().encode(`Content-Length: ${bytes.byteLength}\r\n\r\n`)
+  const frame = new Uint8Array(header.length + bytes.length)
+  frame.set(header)
+  frame.set(bytes, header.length)
+  return frame
+}
+
+const failure = <A>(exit: Exit.Exit<A, unknown>): { readonly code: unknown; readonly message: unknown } | undefined => {
+  if (!Exit.isFailure(exit)) return undefined
+  const reason = exit.cause.reasons.find(Cause.isFailReason)
+  if (reason === undefined || typeof reason.error !== "object" || reason.error === null) return undefined
+  const record = reason.error as { readonly code?: unknown; readonly message?: unknown }
+  return { code: record.code, message: record.message }
+}
+
+const respond = (
+  output: Queue.Queue<Uint8Array, Cause.Done>,
+  value: unknown
+): Effect.Effect<void, Cause.Done> => Queue.offer(output, encodeFrame(value)).pipe(Effect.asVoid)
+
+const scriptedSpawner = (
+  responder: (
+    request: Readonly<Record<string, unknown>>,
+    output: Queue.Queue<Uint8Array, Cause.Done>
+  ) => Effect.Effect<void, Cause.Done>,
+  exitCode: Effect.Effect<ExitCode> = Effect.never
+) =>
+  ChildProcessSpawner.makeNoop({
+    spawn: (command) =>
+      Effect.gen(function*() {
+        const standard = command as ChildProcess.StandardCommand
+        const stdinConfig = standard.options.stdin as ChildProcess.StdinConfig
+        const stdin = stdinConfig.stream as Stream.Stream<Uint8Array>
+        const output = yield* Queue.unbounded<Uint8Array, Cause.Done>()
+        yield* stdin.pipe(
+          Stream.runForEach((bytes) => responder(decodeFrame(bytes), output)),
+          Effect.forkScoped({ startImmediately: true })
+        )
+        return makeHandle({
+          pid: ProcessId(1),
+          exitCode,
+          isRunning: Effect.succeed(true),
+          kill: () => Effect.void,
+          stdin: Sink.drain,
+          stdout: Stream.fromQueue(output),
+          stderr: Stream.empty,
+          all: Stream.fromQueue(output),
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void)
+        })
+      })
+  })
+
+/**
+ * The transport cases below run a scripted process and assert the failure the
+ * transport itself raises, so the request deadline is set far above any of them
+ * rather than at a few milliseconds: a short deadline races the failure it is
+ * meant to leave alone, and on a loaded machine the deadline wins and the case
+ * reports `timeout` for a frame that was refused correctly. A regression still
+ * fails the case, just slower.
+ */
 describe("NodeLanguageServer", () => {
   it("spawns through the protected spawner and performs framed JSON-RPC requests", async () => {
     const requests: Array<Readonly<Record<string, unknown>>> = []
@@ -53,7 +117,7 @@ describe("NodeLanguageServer", () => {
                 )
                 return makeHandle({
                   pid: ProcessId(1),
-                  exitCode: Effect.succeed(ExitCode(0)),
+                  exitCode: Effect.never,
                   isRunning: Effect.succeed(true),
                   kill: () => Effect.void,
                   stdin: Sink.drain,
@@ -89,5 +153,131 @@ describe("NodeLanguageServer", () => {
     expect(requests[2]?.params).toMatchObject({
       position: { line: 1, character: 2 }
     })
+  })
+
+  it("decodes a multibyte response fragmented across individual bytes", async () => {
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const spawner = scriptedSpawner((request, output) => {
+        const response = request.method === "textDocument/hover"
+          ? { jsonrpc: "2.0", id: request.id, result: { contents: "héllo 😀" } }
+          : { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } }
+        const bytes = encodeFrame(response)
+        return Effect.forEach(
+          Array.from(bytes, (_, index) => bytes.slice(index, index + 1)),
+          (chunk) => Queue.offer(output, chunk),
+          { discard: true }
+        )
+      })
+      const server = yield* NodeLanguageServer.make({
+        command: "language-server",
+        cwd: "/workspace"
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      return yield* server.hover({ path: "/workspace/a.ts", line: 0, character: 0 })
+    })))
+    expect(result).toEqual({ contents: "héllo 😀" })
+  })
+
+  it("rejects a header that exceeds 8 KiB without a delimiter", async () => {
+    const unterminated = new Uint8Array(8 * 1024 + 1).fill(120)
+    unterminated.set(new TextEncoder().encode("Content-Length: 2\r\n"))
+    const spawner = scriptedSpawner((_request, output) => Queue.offer(output, unterminated).pipe(Effect.asVoid))
+    const exit = await Effect.runPromise(Effect.exit(Effect.scoped(
+      NodeLanguageServer.make({ command: "language-server", cwd: "/workspace", timeoutMs: 10_000 }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      )
+    )))
+    expect(failure(exit)).toEqual({
+      code: "request_failed",
+      message: "Language server frame header exceeded 8192 bytes"
+    })
+  })
+
+  it("rejects an oversized frame and resynchronizes at the next header", async () => {
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const spawner = scriptedSpawner((request, output) => {
+        if (request.method === "initialize") {
+          return respond(output, { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } })
+        }
+        if (request.method === "textDocument/hover") {
+          return Queue.offer(
+            output,
+            new TextEncoder().encode(`Content-Length: ${8 * 1024 * 1024 + 1}\r\n\r\n`)
+          ).pipe(Effect.asVoid)
+        }
+        return respond(output, { jsonrpc: "2.0", id: request.id, result: [{ uri: "file:///workspace/a.ts" }] })
+      })
+      const server = yield* NodeLanguageServer.make({
+        command: "language-server",
+        cwd: "/workspace",
+        timeoutMs: 10_000
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      const oversized = yield* Effect.exit(server.hover({ path: "/workspace/a.ts", line: 0, character: 0 }))
+      const definition = yield* server.definition({ path: "/workspace/a.ts", line: 0, character: 0 })
+      return { definition, oversized }
+    })))
+    expect(failure(result.oversized)?.code).toBe("request_failed")
+    expect(result.definition).toEqual([{ uri: "file:///workspace/a.ts" }])
+  })
+
+  it("fails malformed JSON without waiting for the request timeout", async () => {
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const spawner = scriptedSpawner((request, output) =>
+        request.method === "initialize"
+          ? respond(output, { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } })
+          : Queue.offer(output, malformedFrame(`{"jsonrpc":"2.0","id":${String(request.id)},`)).pipe(Effect.asVoid)
+      )
+      const server = yield* NodeLanguageServer.make({
+        command: "language-server",
+        cwd: "/workspace",
+        timeoutMs: 10_000
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      return yield* Effect.exit(server.hover({ path: "/workspace/a.ts", line: 0, character: 0 }))
+    })))
+    expect(failure(result)?.code).toBe("request_failed")
+  })
+
+  it("fails an outstanding request when stdout closes", async () => {
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const spawner = scriptedSpawner((request, output) =>
+        request.method === "initialize"
+          ? respond(output, { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } })
+          : Queue.end(output)
+      )
+      const server = yield* NodeLanguageServer.make({
+        command: "language-server",
+        cwd: "/workspace",
+        timeoutMs: 10_000
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      return yield* Effect.exit(server.hover({ path: "/workspace/a.ts", line: 0, character: 0 }))
+    })))
+    expect(failure(result)?.code).toBe("request_failed")
+  })
+
+  it("fails every outstanding request when the process exits", async () => {
+    const exits = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const terminated = yield* Deferred.make<ExitCode>()
+      let requests = 0
+      const spawner = scriptedSpawner(
+        (request, output) => {
+          if (request.method === "initialize") {
+            return respond(output, { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } })
+          }
+          requests++
+          return requests === 2 ? Deferred.succeed(terminated, ExitCode(17)).pipe(Effect.asVoid) : Effect.void
+        },
+        Deferred.await(terminated)
+      )
+      const server = yield* NodeLanguageServer.make({
+        command: "language-server",
+        cwd: "/workspace",
+        timeoutMs: 10_000
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      const position = { path: "/workspace/a.ts", line: 0, character: 0 }
+      return yield* Effect.all([
+        Effect.exit(server.hover(position)),
+        Effect.exit(server.definition(position))
+      ], { concurrency: "unbounded" })
+    })))
+    expect(exits.map((exit) => failure(exit)?.code)).toEqual(["request_failed", "request_failed"])
   })
 })

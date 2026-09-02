@@ -33,9 +33,11 @@ const repository = (): string => {
     join(root, "runtests.sh"),
     [
       "#!/bin/bash",
-      "if grep -q FIXED mod.py; then echo 'tests/test_a.py::test_a PASSED';",
-      "else echo 'FAILED tests/test_a.py::test_a - boom'; fi",
-      "if grep -q BROKEN mod.py; then echo 'FAILED tests/test_b.py::test_b - boom'; fi",
+      "passed=0; failed=0",
+      "if grep -q FIXED mod.py; then echo 'tests/test_a.py::test_a PASSED'; passed=$((passed + 1));",
+      "else echo 'FAILED tests/test_a.py::test_a - boom'; failed=$((failed + 1)); fi",
+      "if grep -q BROKEN mod.py; then echo 'FAILED tests/test_b.py::test_b - boom'; failed=$((failed + 1)); fi",
+      "echo \"$failed failed, $passed passed\"",
       "printf '%s\\n' \"$@\" > selection.txt",
       ""
     ].join("\n"),
@@ -97,6 +99,19 @@ describe("TestRun over a real repository", () => {
 
     expect(output.base?.ref).toBe("HEAD")
     expect(output.fixed).toEqual(["tests/test_a.py::test_a"])
+  }, 60_000)
+
+  it("replaces a stale baseline worktree left by an interrupted run", async () => {
+    const root = repository()
+    const scratch = join(root, TestRun.scratchDirectory)
+    git(root, ["worktree", "add", "--detach", scratch, "HEAD"])
+    writeFileSync(join(root, "mod.py"), "FIXED\n")
+
+    const output = await run({ against: "base" }, { command: "bash ./runtests.sh", cwd: root, root })
+
+    expect(output.base?.parsed).toBe(true)
+    expect(output.fixed).toEqual(["tests/test_a.py::test_a"])
+    expect(git(root, ["worktree", "list"])).not.toContain(TestRun.scratchDirectory)
   }, 60_000)
 
   it("refuses a declared base ref that does not resolve rather than baselining the wrong tree", async () => {

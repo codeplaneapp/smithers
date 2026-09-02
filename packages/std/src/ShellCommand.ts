@@ -100,6 +100,17 @@ export const Output = Schema.Struct({
 export const effects = envelope({ tier: "irreversible", mode: "expected", reads: [], writes: [] })
 
 /**
+ * Narrows the effect envelope for a decoded invocation.
+ *
+ * A command line carries no declared envelope, so an invocation says nothing
+ * the registry-time worst case does not already say.
+ *
+ * @category effects
+ * @since 0.1.0
+ */
+export const effectsFor = (_input: typeof Input.Type) => effects
+
+/**
  * Capabilities required by the shell_command flow.
  *
  * @category capabilities

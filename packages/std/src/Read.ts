@@ -117,6 +117,17 @@ export const capabilities = [capability("fs:read", "/**")]
  */
 export const flow = Flow.make({ name, description, input: Input, output: Output, capabilities, effects })
 
+const clipLine = (line: string): string => {
+  let scalars = 0
+  let end = 0
+  for (const scalar of line) {
+    if (scalars === MAX_LINE_CHARS) return line.slice(0, end)
+    scalars++
+    end += scalar.length
+  }
+  return line
+}
+
 const fileError = (path: string) =>
   new StdError.StdError({
     code: "not_found",
@@ -177,7 +188,10 @@ export const run = Effect.fn("Read.run")(function*(
   })
   const offset = input.offset ?? 1
   const page = slice(text, { offset, limit: input.limit ?? DEFAULT_READ_LIMIT })
-  if (offset > page.totalLines) {
+  // An empty file has no lines, and reading one is not an out-of-range read:
+  // the caller asked for the first page and there is nothing on it. Only an
+  // offset past the first line of a file that has none is out of range.
+  if (offset > Math.max(page.totalLines, 1)) {
     return yield* Effect.fail(
       new StdError.StdError({
         code: "offset_out_of_range",
@@ -186,7 +200,7 @@ export const run = Effect.fn("Read.run")(function*(
       })
     )
   }
-  const lines = page.lines.map((line) => line.length > MAX_LINE_CHARS ? line.slice(0, MAX_LINE_CHARS) : line)
+  const lines = page.lines.map(clipLine)
   const longLinesTruncated = lines.some((line, index) => line !== page.lines[index])
   const rendered = truncateBytes(lines.join("\n"), MAX_OUTPUT_BYTES, { keep: "head" })
   // A byte budget cuts mid-line. A partial line reads like an anchor and is not
@@ -198,7 +212,7 @@ export const run = Effect.fn("Read.run")(function*(
   const endLine = page.startLine + Math.max(0, shown - 1)
   const truncated = longLinesTruncated || rendered.truncated || page.endLine < page.totalLines
   const clipped = longLinesTruncated
-    ? ` Lines longer than ${MAX_LINE_CHARS} characters are clipped, so such a line is not an edit anchor.`
+    ? ` Lines longer than ${MAX_LINE_CHARS} Unicode scalar values are clipped, so such a line is not an edit anchor.`
     : ""
   return {
     content: whole,

@@ -58,6 +58,22 @@ export const description =
 export const scratchDirectory = ".flows-test-base"
 
 /**
+ * Default wall-clock budget for one test run.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const DEFAULT_TIMEOUT_MS = 600_000
+
+/**
+ * Maximum bytes retained from each stream while a test run executes.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_CAPTURE_BYTES = 8_000_000
+
+/**
  * Input schema for the test flow.
  *
  * @category schemas
@@ -86,7 +102,8 @@ export const Outcome = Schema.Struct({
   passed: Schema.Number.annotate({ description: "Tests reported passing; 0 when parsed is false" }),
   failed: Schema.Array(Schema.String).annotate({ description: "Ids of the tests reported failing or erroring" }),
   parsed: Schema.Boolean.annotate({
-    description: "Whether the runner's report could be read; when false, tail is all there is"
+    description:
+      "Whether the runner's complete report could be read; when false, tail is all there is. Base attribution is omitted unless both reports are complete"
   }),
   tail: Schema.String.annotate({ description: "The end of the runner's combined output" }),
   // `<field>Truncated` beside `<field>` is the wire convention
@@ -183,7 +200,11 @@ const execute = (
     readonly cwd: string | undefined
     readonly timeoutMs: number | undefined
   }
-): Effect.Effect<typeof Outcome.Type, StdError.StdError, ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<
+  { readonly outcome: typeof Outcome.Type; readonly report: TestReport.Report },
+  StdError.StdError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
   Effect.gen(function*() {
     const plan = invocation(runner, options.selection)
     const routed = runner.container === undefined ? plan : Option.isNone(transport)
@@ -201,7 +222,8 @@ const execute = (
       args: [...routed.args],
       ...(options.cwd === undefined || runner.container !== undefined ? {} : { cwd: options.cwd }),
       ...(runner.env === undefined || runner.container !== undefined ? {} : { env: runner.env }),
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs })
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      maxCaptureBytes: MAX_CAPTURE_BYTES
     }).pipe(
       Effect.mapError((error) =>
         failed(
@@ -219,17 +241,23 @@ const execute = (
       : `${result.stdout}\n${result.stderr}`
     const tail = truncateBytes(combined, MAX_SHELL_OUTPUT_BYTES, { keep: "tail" })
     const report = TestReport.parse(combined)
-    const probe = Probe.classify({ exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr })
+    // Classify only the text this call returns, so every evidence line remains
+    // quotable after capture and output truncation.
+    const probe = Probe.classify({ exitCode: result.exitCode, stdout: tail.text, stderr: "" })
+    const capturedDroppedBytes = result.stdoutDroppedBytes + result.stderrDroppedBytes
     return {
-      command: quoted,
-      exitCode: result.exitCode,
-      passed: report.passed,
-      failed: report.failed,
-      parsed: report.parsed,
-      tail: tail.text,
-      tailTruncated: tail.truncated,
-      tailDroppedBytes: tail.droppedBytes,
-      ...(probe === undefined ? {} : { invalidProbe: probe })
+      outcome: {
+        command: quoted,
+        exitCode: result.exitCode,
+        passed: report.passed,
+        failed: report.failed,
+        parsed: report.parsed,
+        tail: tail.text,
+        tailTruncated: capturedDroppedBytes > 0 || tail.truncated,
+        tailDroppedBytes: capturedDroppedBytes + tail.droppedBytes,
+        ...(probe === undefined ? {} : { invalidProbe: probe })
+      },
+      report
     }
   })
 
@@ -240,6 +268,52 @@ const git = (
   Exec.exec("git", { args: ["-C", root, ...args] }).pipe(
     Effect.mapError((error) => failed(`git could not run: ${error.message}`))
   )
+
+interface RepositoryFormat {
+  readonly version: string | undefined
+  readonly marked: boolean
+}
+
+/** Repository format keys a relative worktree checkout can rewrite. */
+const formatState = (
+  root: string
+): Effect.Effect<RepositoryFormat, StdError.StdError, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function*() {
+    const version = yield* git(root, ["config", "--local", "--get", "core.repositoryformatversion"])
+    const marker = yield* git(root, ["config", "--local", "--get", "extensions.relativeWorktrees"])
+    return {
+      version: version.exitCode === 0 ? version.stdout.trim() : undefined,
+      marked: marker.exitCode === 0
+    }
+  })
+
+/** Restores only the repository format keys the relative checkout introduced. */
+const restoreFormat = (
+  root: string,
+  before: RepositoryFormat
+): Effect.Effect<void, StdError.StdError, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function*() {
+    if (before.marked) return
+    const marker = yield* git(root, ["config", "--local", "--get", "extensions.relativeWorktrees"])
+    if (marker.exitCode !== 0) return
+    const unset = yield* git(root, ["config", "--local", "--unset", "extensions.relativeWorktrees"])
+    if (unset.exitCode !== 0) {
+      return yield* Effect.fail(
+        failed(`Could not restore the repository format after checking out a baseline: ${unset.stderr.trim()}`)
+      )
+    }
+    const version = yield* git(root, [
+      "config",
+      "--local",
+      "core.repositoryformatversion",
+      before.version ?? "0"
+    ])
+    if (version.exitCode !== 0) {
+      return yield* Effect.fail(
+        failed(`Could not restore the repository format after checking out a baseline: ${version.stderr.trim()}`)
+      )
+    }
+  })
 
 /** The commit a baseline runs against, and the ref it was named by. */
 const baseCommit = (
@@ -291,13 +365,13 @@ export const run = Effect.fn("TestRun.run")(function*(
   const runner = yield* declaration.declared
   const transport = yield* Effect.serviceOption(Container.Container)
   const selection = input.selection ?? []
-  const timeoutMs = input.timeoutMs ?? runner.timeoutMs
+  const timeoutMs = input.timeoutMs ?? runner.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const current = yield* execute(runner, transport, {
     selection,
     cwd: runner.cwd,
     timeoutMs
   })
-  if (input.against !== "base") return current
+  if (input.against !== "base") return current.outcome
 
   const root = runner.root ?? runner.cwd
   if (root === undefined) {
@@ -310,8 +384,22 @@ export const run = Effect.fn("TestRun.run")(function*(
   }
   const base = yield* baseCommit(root, runner.baseRef)
   const scratch = `${root.replace(/\/+$/, "")}/${scratchDirectory}`
-  const outcome = yield* Effect.acquireUseRelease(
-    git(root, ["worktree", "add", "--detach", "--force", scratch, base.commit]).pipe(
+  const discard = Effect.ignore(git(root, ["worktree", "remove", "--force", scratch]))
+  const before = yield* formatState(root)
+  const baseline = yield* Effect.acquireUseRelease(
+    discard.pipe(
+      // Keep this checkout aligned with Checkpoints.materialize: stale
+      // worktrees survive SIGKILL, and containers need a relative .git pointer.
+      Effect.andThen(git(root, [
+        "-c",
+        "worktree.useRelativePaths=true",
+        "worktree",
+        "add",
+        "--detach",
+        "--force",
+        scratch,
+        base.commit
+      ])),
       Effect.flatMap((added) =>
         added.exitCode === 0
           ? Effect.void
@@ -319,17 +407,19 @@ export const run = Effect.fn("TestRun.run")(function*(
       )
     ),
     () =>
-      execute(runner, transport, {
-        selection,
-        cwd: runner.cwd === undefined ? scratch : `${runner.cwd.replace(/\/+$/, "")}/${scratchDirectory}`,
-        timeoutMs
-      }),
-    () => Effect.ignore(git(root, ["worktree", "remove", "--force", scratch]))
+      restoreFormat(root, before).pipe(
+        Effect.andThen(execute(runner, transport, {
+          selection,
+          cwd: runner.cwd === undefined ? scratch : `${runner.cwd.replace(/\/+$/, "")}/${scratchDirectory}`,
+          timeoutMs
+        }))
+      ),
+    () => discard
   )
-  const difference = TestReport.attribute(current.failed, outcome.failed)
+  const difference = TestReport.attribute(current.report, baseline.report)
   return {
-    ...current,
-    base: { ...outcome, ref: base.ref, commit: base.commit },
-    ...difference
+    ...current.outcome,
+    base: { ...baseline.outcome, ref: base.ref, commit: base.commit },
+    ...(difference === undefined ? {} : difference)
   }
 })

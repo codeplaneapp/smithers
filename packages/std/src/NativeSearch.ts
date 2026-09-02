@@ -275,7 +275,7 @@ const glob = (
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const root = yield* resolveRoot(input.root)
-    const args: Array<string> = ["--files", "--no-ignore", "--no-messages", "--sort", "path"]
+    const args: Array<string> = ["--files", "--null", "--no-ignore", "--no-messages", "--sort", "path"]
     if (input.hidden) args.push("--hidden")
     args.push("--glob", Contract.canonicalGlob(input.pattern))
     for (const glob of [...(input.hidden ? [] : hiddenGlobs), ...skipGlobs]) args.push("--glob", glob)
@@ -285,7 +285,7 @@ const glob = (
     if (rejected !== undefined) {
       return yield* Effect.fail(new StdError.StdError({ code: "invalid_pattern", message: rejected }))
     }
-    const paths = result.stdout.split(/\r?\n/).filter((value) => value.length > 0).map(root.absolute).sort()
+    const paths = nulSeparated(result.stdout).map(root.absolute).sort()
     const shown = paths.slice(0, input.limit)
     const unsatisfiable = paths.length > 0 ? undefined : yield* Contract.unsatisfiableNotice({
       fileSystem,

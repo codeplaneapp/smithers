@@ -61,6 +61,10 @@ export interface ExecResult {
   readonly stdout: string
   readonly stderr: string
   readonly exitCode: number
+  /** UTF-8 bytes dropped from the head of stdout to stay inside the capture bound. */
+  readonly stdoutDroppedBytes: number
+  /** UTF-8 bytes dropped from the head of stderr to stay inside the capture bound. */
+  readonly stderrDroppedBytes: number
 }
 
 /**
@@ -87,7 +91,88 @@ export interface ExecOptions {
    * probe failures and one instance's most expensive frame.
    */
   readonly stdin?: string | undefined
+  /**
+   * Bytes retained per captured stream. A stream that prints more keeps its
+   * tail and reports what it dropped, so a command printing gigabytes costs a
+   * bounded amount of memory rather than the whole of what it printed.
+   *
+   * Absent means unbounded, which is what a caller wants when it needs every
+   * byte a tool produced (`rg --files`, `git worktree list`).
+   */
+  readonly maxCaptureBytes?: number | undefined
 }
+
+/** One captured stream: the text kept, and the bytes dropped to keep it bounded. */
+interface Capture {
+  readonly text: string
+  readonly droppedBytes: number
+}
+
+interface Tail {
+  chunks: Array<Uint8Array>
+  bytes: number
+  dropped: number
+}
+
+const decoder = new TextDecoder("utf-8")
+
+/**
+ * Joins the retained chunks and decodes them, skipping the partial code point a
+ * dropped head can leave behind.
+ *
+ * A UTF-8 continuation byte is `10xxxxxx`, and a code point is at most four
+ * bytes, so at most three leading continuation bytes can precede the first
+ * whole character. Skipping them is counted as dropped rather than decoded to a
+ * replacement character the process never printed.
+ */
+const decodeTail = (state: Tail): Capture => {
+  const bytes = new Uint8Array(state.bytes)
+  let offset = 0
+  for (const chunk of state.chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  if (state.dropped === 0) return { text: decoder.decode(bytes), droppedBytes: 0 }
+  let start = 0
+  while (start < bytes.byteLength && start < 3 && (bytes[start]! & 0b1100_0000) === 0b1000_0000) start++
+  return { text: decoder.decode(bytes.subarray(start)), droppedBytes: state.dropped + start }
+}
+
+const boundedTail = <E>(
+  stream: Stream.Stream<Uint8Array, E>,
+  maxBytes: number
+): Effect.Effect<Capture, E> =>
+  Stream.runFold(
+    stream,
+    (): Tail => ({ chunks: [], bytes: 0, dropped: 0 }),
+    (state, chunk) => {
+      if (chunk.byteLength === 0) return state
+      state.chunks.push(chunk)
+      state.bytes += chunk.byteLength
+      while (state.bytes > maxBytes && state.chunks.length > 0) {
+        const excess = state.bytes - maxBytes
+        const first = state.chunks[0]!
+        if (first.byteLength <= excess) {
+          state.chunks.shift()
+          state.bytes -= first.byteLength
+          state.dropped += first.byteLength
+        } else {
+          state.chunks[0] = first.subarray(excess)
+          state.bytes -= excess
+          state.dropped += excess
+        }
+      }
+      return state
+    }
+  ).pipe(Effect.map(decodeTail))
+
+const capture = <E>(
+  stream: Stream.Stream<Uint8Array, E>,
+  maxBytes: number | undefined
+): Effect.Effect<Capture, E> =>
+  maxBytes === undefined
+    ? Effect.map(Stream.mkString(Stream.decodeText(stream)), (text) => ({ text, droppedBytes: 0 }))
+    : boundedTail(stream, maxBytes)
 
 const unbounded = (
   command: string,
@@ -113,13 +198,19 @@ const unbounded = (
     // for exit first would deadlock on any output larger than the buffer.
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
-        Stream.mkString(Stream.decodeText(handle.stdout)),
-        Stream.mkString(Stream.decodeText(handle.stderr)),
+        capture(handle.stdout, options.maxCaptureBytes),
+        capture(handle.stderr, options.maxCaptureBytes),
         handle.exitCode
       ],
       { concurrency: "unbounded" }
     )
-    return { stdout, stderr, exitCode: exitCode }
+    return {
+      stdout: stdout.text,
+      stderr: stderr.text,
+      exitCode,
+      stdoutDroppedBytes: stdout.droppedBytes,
+      stderrDroppedBytes: stderr.droppedBytes
+    }
   }).pipe(
     Effect.scoped,
     Effect.mapError((error) =>

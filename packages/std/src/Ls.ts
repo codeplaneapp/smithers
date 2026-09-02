@@ -27,7 +27,7 @@ export const name = "ls"
  * @since 0.1.0
  */
 export const description =
-  "List a directory with directories first and trailing /; use 1-based offset and limit to page large listings."
+  "List a directory with directories first, trailing /, and locale-independent UTF-16 code-unit ordering; use 1-based offset and limit to page large listings."
 
 /**
  * What the `ls` flow accepts.
@@ -95,10 +95,13 @@ export const capabilities = [capability("fs:read", "/**")]
  */
 export const flow = Flow.make({ name, description, input: Input, output: Output, capabilities, effects })
 
+// localeCompare changes with host locale and ICU data. Code-unit comparisons
+// keep journalled directory listings identical on every host.
+const byText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
+
 /**
  * Lists a directory deterministically. A file supplied as `path` is reported
- * as `not_a_file`, the closest available standard error for this inverse kind
- * mismatch.
+ * as `not_a_directory`.
  *
  * @category handlers
  * @since 0.1.0
@@ -120,7 +123,7 @@ export const run = Effect.fn("Ls.run")(function*(
   if (info.type !== "Directory") {
     return yield* Effect.fail(
       new StdError.StdError({
-        code: "not_a_file",
+        code: "not_a_directory",
         message: `Cannot list a file: ${input.path}`,
         path: input.path
       })
@@ -135,13 +138,29 @@ export const run = Effect.fn("Ls.run")(function*(
       })
     )
   )
+  const sortedNames = [...names].sort(byText)
+  const offset = input.offset ?? 1
+  // An empty directory is not an out-of-range listing: the caller asked for
+  // the first page and there is nothing on it. This matches `read`, which
+  // answers an empty page for an empty file and refuses only a real overshoot.
+  if (offset > Math.max(sortedNames.length, 1)) {
+    return yield* Effect.fail(
+      new StdError.StdError({
+        code: "offset_out_of_range",
+        message: `Entry offset ${offset} is outside ${input.path}, which has ${sortedNames.length} entries`,
+        path: input.path
+      })
+    )
+  }
+  const limit = Math.min(input.limit ?? DEFAULT_READ_LIMIT, MAX_ENTRIES)
+  const selectedNames = sortedNames.slice(offset - 1, offset - 1 + limit)
   // A per-entry stat can fail on a name the directory legitimately
   // contains — a dangling symlink, or a file the guarded filesystem refuses
   // to describe. The name is still real (readDirectory returned it), so the
   // listing reports it as a plain entry instead of dying: one broken link in
   // a repository root used to fail the whole `ls` and cost the agent a frame
   // per attempt.
-  const entries = yield* Effect.forEach(names, (entry) =>
+  const entries = yield* Effect.forEach(selectedNames, (entry) =>
     fileSystem.stat(path.join(input.path, entry)).pipe(
       Effect.map((entryInfo) => ({
         name: entryInfo.type === "Directory" ? `${entry}/` : entry,
@@ -149,17 +168,14 @@ export const run = Effect.fn("Ls.run")(function*(
       })),
       Effect.catch(() => Effect.succeed({ name: entry, kind: "file" as const }))
     ))
-  const sorted = entries.sort((left, right) =>
-    left.kind === right.kind ? left.name.localeCompare(right.name) : left.kind === "directory" ? -1 : 1
+  const selected = entries.sort((left, right) =>
+    left.kind === right.kind ? byText(left.name, right.name) : left.kind === "directory" ? -1 : 1
   )
-  const offset = input.offset ?? 1
-  const limit = Math.min(input.limit ?? DEFAULT_READ_LIMIT, MAX_ENTRIES)
-  const selected = sorted.slice(Math.max(0, offset - 1), Math.max(0, offset - 1) + limit)
-  const truncated = offset - 1 + selected.length < sorted.length
+  const truncated = offset - 1 + selected.length < sortedNames.length
   return {
     entries: selected,
-    total: sorted.length,
+    total: sortedNames.length,
     truncated,
-    ...(truncated ? { notice: notice("entries", selected.length, sorted.length) } : {})
+    ...(truncated ? { notice: notice("entries", selected.length, sortedNames.length) } : {})
   }
 })

@@ -51,6 +51,17 @@ export const name = "bash"
 export const description =
   "Run a shell command, or an interpreter over a script passed as data instead of quoted into a line. container routes it through the host's container transport. mode:hermetic pre-checks path tokens."
 
+/**
+ * Default command timeout in milliseconds.
+ *
+ * Ten minutes lets full builds and test suites finish while ensuring a stalled
+ * process eventually releases the flow.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const DEFAULT_TIMEOUT_MS = 600_000
+
 const Command = Schema.optional(Schema.String.annotate({
   description: "Shell command line to execute; give this or script, never both"
 }))
@@ -77,7 +88,7 @@ const Env = Schema.optional(
   Schema.Record(Schema.String, Schema.String).annotate({ description: "Environment variables for the command" })
 )
 const TimeoutMs = Schema.optional(
-  Schema.Number.annotate({ description: "Wall-clock timeout in milliseconds" })
+  Schema.Number.annotate({ description: "Wall-clock timeout in milliseconds; defaults to 600000 ms" })
 )
 
 /**
@@ -102,8 +113,8 @@ export const Input = Schema.Union([
     args: Args,
     stdin: Stdin,
     container: ContainerName,
-    reads: Schema.Array(Schema.String).annotate({ description: "Paths or path globs the command may read" }),
-    writes: Schema.Array(Schema.String).annotate({ description: "Paths or path globs the command may write" }),
+    reads: Schema.Array(Schema.NonEmptyString).annotate({ description: "Paths or path globs the command may read" }),
+    writes: Schema.Array(Schema.NonEmptyString).annotate({ description: "Paths or path globs the command may write" }),
     cwd: Cwd,
     env: Env,
     timeoutMs: TimeoutMs
@@ -243,13 +254,16 @@ interface PathReference {
   readonly value: string
 }
 
-const commandSeparators = new Set(["&&", "||", ";", "|", "&"])
+const commandSeparators = new Set(["&&", "||", ";", "|", "&", "\n"])
 const redirections = new Set([">", ">>", "<", "<<"])
 const writeCommands = new Set(["chmod", "chown", "mkdir", "rm", "rmdir", "tee", "touch", "truncate", "unlink"])
 const destinationCommands = new Set(["cp", "install", "mv"])
+const prefixWrappers = new Set(["env", "nice", "time", "sudo", "nohup", "xargs", "command", "exec"])
 
+// Shell spaces may disappear, but a physical line ends one command. Retaining
+// LF prevents a command on line one from classifying every later line's paths.
 const tokenize = (command: string): ReadonlyArray<string> =>
-  command.match(/"(?:\\.|[^"\\])*"|'[^']*'|>>|<<|&&|\|\||[<>;|&]|[^\s<>;|&]+/g) ?? []
+  command.match(/\n|"(?:\\.|[^"\\])*"|'[^']*'|>>|<<|&&|\|\||[<>;|&]|[^\s<>;|&]+/g) ?? []
 
 const unquote = (token: string): string => {
   const first = token[0]
@@ -274,17 +288,31 @@ const isPathToken = (path: Path.Path, token: string): boolean =>
   token.includes("/")
 
 const segmentReferences = (path: Path.Path, tokens: ReadonlyArray<string>): ReadonlyArray<PathReference> => {
-  const commandIndex = tokens.findIndex((token) =>
+  const commentIndex = tokens.findIndex((token) => token.startsWith("#"))
+  const active = commentIndex === -1 ? tokens : tokens.slice(0, commentIndex)
+  const hasWrapper = active.some((token) => prefixWrappers.has(path.basename(pathValue(token))))
+  let commandIndex = active.findIndex((token) =>
     !redirections.has(token) &&
     !token.includes("=") &&
+    !prefixWrappers.has(path.basename(pathValue(token))) &&
+    !token.startsWith("-") &&
     token !== ""
   )
+  if (hasWrapper) {
+    // Wrapper options can carry their own values. Prefer a later known
+    // mutating command so an option value cannot lend it a read classification.
+    const mutatingIndex = active.findIndex((token) => {
+      const command = path.basename(pathValue(token))
+      return writeCommands.has(command) || destinationCommands.has(command)
+    })
+    if (mutatingIndex !== -1) commandIndex = mutatingIndex
+  }
   if (commandIndex === -1) return []
 
-  const command = path.basename(pathValue(tokens[commandIndex]!))
+  const command = path.basename(pathValue(active[commandIndex]!))
   const candidates: Array<{ readonly index: number; readonly value: string }> = []
-  for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index]!
+  for (let index = 0; index < active.length; index++) {
+    const token = active[index]!
     if (index === commandIndex || redirections.has(token) || token.startsWith("-")) continue
     const value = pathValue(token)
     if (value !== "" && isPathToken(path, value)) candidates.push({ index, value })
@@ -294,20 +322,14 @@ const segmentReferences = (path: Path.Path, tokens: ReadonlyArray<string>): Read
     ? candidates[candidates.length - 1]?.index
     : undefined
 
-  return candidates
-    // /dev/* is the process plumbing every shell one-liner leans on —
-    // `2>/dev/null`, `cat /dev/stdin` — not a workspace effect. Requiring it
-    // in the declared write set taught agents to redeclare boilerplate one
-    // refused frame at a time.
-    .filter(({ value }) => !value.startsWith("/dev/"))
-    .map(({ index, value }) => {
-      const previous = tokens[index - 1]
-      const access: Access = previous === ">" || previous === ">>" ||
-          writeCommands.has(command) || destinationIndex === index
-        ? "write"
-        : "read"
-      return { access, value }
-    })
+  return candidates.map(({ index, value }) => {
+    const previous = active[index - 1]
+    const access: Access = previous === ">" || previous === ">>" ||
+        writeCommands.has(command) || destinationIndex === index
+      ? "write"
+      : "read"
+    return { access, value }
+  })
 }
 
 const commandReferences = (path: Path.Path, command: string): ReadonlyArray<PathReference> => {
@@ -325,11 +347,22 @@ const commandReferences = (path: Path.Path, command: string): ReadonlyArray<Path
   return references
 }
 
+const resolvePath = (
+  path: Path.Path,
+  cwd: string,
+  value: string
+): string => path.isAbsolute(value) ? path.normalize(value) : path.resolve(cwd, value)
+
 const isDeclared = (
+  path: Path.Path,
+  cwd: string,
   declared: ReadonlyArray<string>,
-  source: string,
-  resolved: string
-): boolean => withinEnvelope(declared, source) || withinEnvelope(declared, resolved)
+  source: string
+): boolean =>
+  withinEnvelope(
+    declared.map((entry) => resolvePath(path, cwd, entry)),
+    resolvePath(path, cwd, source)
+  )
 
 const outsideEnvelope = (
   input: Extract<Input, { readonly mode: "hermetic" }>,
@@ -346,7 +379,7 @@ const outsideEnvelope = (
   // forty-eight tool calls re-issuing the same command after
   // "Working directory is outside declared reads: <the workspace root>". A
   // cwd that points somewhere else is still declared or refused.
-  if (input.cwd !== undefined && cwd !== base && !isDeclared(input.reads, input.cwd, cwd)) {
+  if (input.cwd !== undefined && cwd !== base && !isDeclared(path, cwd, input.reads, cwd)) {
     return new StdError.StdError({
       code: "outside_declared_reads",
       message: `Working directory is outside declared reads: ${cwd}`,
@@ -359,11 +392,13 @@ const outsideEnvelope = (
   // explicit path tokens. It cannot prove confinement; a kernel/host sandbox
   // must eventually enforce and report the complete read and write sets.
   for (const reference of commandReferences(path, text)) {
-    const resolved = path.isAbsolute(reference.value)
-      ? path.normalize(reference.value)
-      : path.resolve(cwd, reference.value)
+    const resolved = resolvePath(path, cwd, reference.value)
+    // /dev/* is the process plumbing every shell one-liner leans on:
+    // `2>/dev/null`, `cat /dev/stdin`. Normalize first so a dot-dot segment
+    // cannot disguise an ordinary filesystem path as process plumbing.
+    if (resolved.startsWith("/dev/")) continue
     const declared = reference.access === "write" ? input.writes : input.reads
-    if (!isDeclared(declared, reference.value, resolved)) {
+    if (!isDeclared(path, cwd, declared, resolved)) {
       const code = reference.access === "write" ? "outside_declared_writes" : "outside_declared_reads"
       return new StdError.StdError({
         code,
@@ -544,7 +579,8 @@ export const run = Effect.fn("Bash.run")(function*(
   const result = yield* Exec.exec(spawned.file, {
     ...(input.cwd === undefined || contained ? {} : { cwd: input.cwd }),
     ...(input.env === undefined || contained ? {} : { env: input.env }),
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxCaptureBytes: MAX_SHELL_OUTPUT_BYTES,
     ...(spawned.args === undefined ? {} : { args: spawned.args }),
     ...(spawned.stdin === undefined ? {} : { stdin: spawned.stdin })
   }).pipe(Effect.mapError((error) => hostError(spawned.quoted, error)))
@@ -558,10 +594,10 @@ export const run = Effect.fn("Bash.run")(function*(
     exitCode: result.exitCode,
     stdout: stdout.text,
     stderr: stderr.text,
-    stdoutTruncated: stdout.truncated,
-    stderrTruncated: stderr.truncated,
-    stdoutDroppedBytes: stdout.droppedBytes,
-    stderrDroppedBytes: stderr.droppedBytes,
+    stdoutTruncated: result.stdoutDroppedBytes > 0 || stdout.truncated,
+    stderrTruncated: result.stderrDroppedBytes > 0 || stderr.truncated,
+    stdoutDroppedBytes: result.stdoutDroppedBytes + stdout.droppedBytes,
+    stderrDroppedBytes: result.stderrDroppedBytes + stderr.droppedBytes,
     ...(probe === undefined ? {} : { invalidProbe: probe })
   }
 })

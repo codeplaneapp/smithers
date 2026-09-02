@@ -4,9 +4,34 @@
  * @since 0.1.0
  */
 
-const skipped = /<(head|script|style|noscript|iframe|object|embed)\b[^>]*>[\s\S]*?<\/\1\s*>/gi
 const comments = /<!--[\s\S]*?-->/g
 const entities: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " }
+
+const dropSkipped = (html: string): string => {
+  const lower = html.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+  const opening = /<(head|script|style|noscript|iframe|object|embed)\b/gi
+  let output = ""
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = opening.exec(html)) !== null) {
+    if (match.index < cursor) continue
+    output += html.slice(cursor, match.index)
+    const marker = `</${match[1]!.toLowerCase()}`
+    let close = lower.indexOf(marker, opening.lastIndex)
+    while (close !== -1) {
+      let end = close + marker.length
+      while (/\s/.test(lower[end] ?? "")) end++
+      if (lower[end] === ">") {
+        cursor = end + 1
+        opening.lastIndex = cursor
+        break
+      }
+      close = lower.indexOf(marker, close + marker.length)
+    }
+    if (close === -1) return output
+  }
+  return output + html.slice(cursor)
+}
 
 const decode = (value: string): string =>
   value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
@@ -15,12 +40,17 @@ const decode = (value: string): string =>
         entity.slice(entity[1]?.toLowerCase() === "x" ? 2 : 1),
         entity[1]?.toLowerCase() === "x" ? 16 : 10
       )
-      return Number.isFinite(number) ? String.fromCodePoint(number) : match
+      return Number.isInteger(number)
+          && number >= 0
+          && number <= 0x10ffff
+          && !(number >= 0xd800 && number <= 0xdfff)
+        ? String.fromCodePoint(number)
+        : match
     }
     return entities[entity.toLowerCase()] ?? match
   })
 
-const source = (html: string): string => html.replace(comments, "").replace(skipped, "")
+const source = (html: string): string => dropSkipped(html.replace(comments, ""))
 
 /**
  * Extracts readable text while dropping executable and presentation-only elements.

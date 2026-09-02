@@ -43,6 +43,9 @@ export * as Grep from "./Grep.ts"
 /** @category services @since 0.1.0 */
 export * as Search from "./Search.ts"
 
+/** @category services @since 0.1.0 */
+export * as SearchContract from "./SearchContract.ts"
+
 /** @category layers @since 0.1.0 */
 export * as PortableSearch from "./PortableSearch.ts"
 
