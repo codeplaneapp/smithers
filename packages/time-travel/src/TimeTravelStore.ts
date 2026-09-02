@@ -162,9 +162,12 @@ export const auditPatchKeys: ReadonlyArray<string> = ["status", "rateLimit", "de
  */
 export const validateAuditPatch = (patch: AuditPatch): Effect.Effect<AuditPatch, TimeTravelError> => {
   const unknown = Object.keys(patch).find((key) => !auditPatchKeys.includes(key))
-  return unknown === undefined
-    ? Effect.succeed(patch)
-    : Effect.fail(error("invalid", `audit patch contains unknown key ${unknown}`))
+  if (unknown !== undefined) {
+    return Effect.fail(error("invalid", `audit patch contains unknown key ${unknown}`))
+  }
+  return Schema.decodeUnknownEffect(AuditPatch)(patch).pipe(
+    Effect.mapError((cause) => error("invalid", `invalid audit patch ${JSON.stringify(patch)}`, cause))
+  )
 }
 /**
  * The refusal both stores raise for a fork whose frame addresses no record.
@@ -312,16 +315,19 @@ export interface Service {
    * archive rather than deleting them, and persisting the compensation
    * `receipts` that justified the truncation.
    *
-   * The mutation is fenced on the caller's ownership of the run: the commit
-   * re-checks `flows_runs` for `owner` inside the same transaction, and a
-   * superseded owner is refused with a typed `fence_lost` error instead of
-   * truncating history behind the live owner.
+   * The mutation is fenced on the caller's ownership of the run and every
+   * non-terminal attached child. The commit re-checks `flows_runs` for
+   * `owner`, and checks each attached child against `childOwners`, inside the
+   * same transaction. A missing or terminal child needs no child fence; every
+   * other child must have the exact owner supplied in `childOwners`, or the
+   * whole mutation is refused with `fence_lost`.
    */
   readonly archiveAndTruncate: (
     runId: string,
     frame: Frame,
     receipts: ReadonlyArray<Receipt>,
-    owner: OwnerId
+    owner: OwnerId,
+    childOwners?: ReadonlyMap<string, OwnerId> | undefined
   ) => Effect.Effect<ArchiveResult, TimeTravelError>
   /**
    * Whether the archive holds a record at `(runId, seq)`. This is recovery's

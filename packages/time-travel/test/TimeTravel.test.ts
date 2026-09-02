@@ -375,6 +375,7 @@ describe("TimeTravel wiring", () => {
             }
             return { _tag: "Activated" as const }
           }),
+        heartbeat: () => Effect.never,
         transitionOwned: (_runId, claimant, status) =>
           Effect.sync(() => {
             if (current.owner?.nonce !== claimant.nonce) return { _tag: "FenceLost" as const }
@@ -415,7 +416,7 @@ describe("TimeTravel wiring", () => {
         currentTimeNanos: Effect.succeed(1_000_000_000n),
         monotonicTimeNanosUnsafe: () => 1_000_000_000n,
         monotonicTimeNanos: Effect.succeed(1_000_000_000n),
-        sleep: () => Effect.void
+        sleep: () => Effect.yieldNow
       }
 
       const result = yield* (

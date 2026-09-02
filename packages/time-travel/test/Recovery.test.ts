@@ -166,10 +166,41 @@ describe("Recovery", () => {
       const outcomes = yield* runRecovery(store, runs, jj, registry, false)
 
       expect(outcomes).toEqual([{ _tag: "Completed", auditId: "audit-archive_committed" }])
-      expect(runs.state()).toMatchObject({ status: "suspended", owner: null })
+      expect(runs.state()).toMatchObject({ status: "suspended", owner: null, stateJson: "{\"cursor\":7}" })
       expect(store.state().audits).toMatchObject([
         { id: "audit-archive_committed", status: "completed" }
       ])
+    }))
+
+  it.effect("restores the state at the rewind frame after an archive commit", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({
+        records: [{
+          runId: "run",
+          seq: 0,
+          eventId: "state-at-frame",
+          lineageId: frame.lineageId,
+          eventType: "flows.engine.run-decision",
+          payload: { state: { cursor: 0 } }
+        }]
+      })
+      seed(store, audit("archive_committed"))
+      const runs = makeRuns()
+
+      const outcomes = yield* runRecovery(
+        store,
+        runs,
+        Jj.makeNoop({}),
+        EffectHandlerRegistry.makeNoop(),
+        false
+      )
+
+      expect(outcomes).toEqual([{ _tag: "Completed", auditId: "audit-archive_committed" }])
+      expect(runs.state()).toMatchObject({
+        status: "suspended",
+        owner: null,
+        stateJson: JSON.stringify({ cursor: 0 })
+      })
     }))
 
   it.effect("restores jj and handler receipts when the archive transaction did not commit", () =>
@@ -209,6 +240,48 @@ describe("Recovery", () => {
       expect(store.state().audits).toMatchObject([
         { id: "audit-compensated", status: "failed" }
       ])
+    }))
+
+  it.effect("persists a successful rollback before a busy restoration and never repeats it", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make()
+      seed(store, audit("compensated", compensation))
+      let rollbacks = 0
+      const registry = Effect.runSync(
+        EffectHandlerRegistry.make([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "message residue",
+          revert: () => Effect.succeed({ value: "sent" }),
+          rollback: () => Effect.sync(() => (rollbacks += 1))
+        }])
+      )
+      const stuck = makeRuns({
+        transitionOwned: () => Effect.succeed({ _tag: "FenceLost" as const })
+      })
+
+      const first = yield* runRecovery(store, stuck, Jj.makeNoop({ restore: () => Effect.void }), registry, true)
+
+      expect(first[0]).toMatchObject({ _tag: "Busy", error: { code: "busy" } })
+      const firstOutcome = first[0]
+      expect(firstOutcome?._tag === "Busy" ? firstOutcome.error.message : "").toContain(
+        "run run lost its rollback fence"
+      )
+      expect(rollbacks).toBe(1)
+      expect(store.state().audits[0]).toMatchObject({ status: "in_progress" })
+      expect((store.state().audits[0]!.detail as AuditDetail).compensation).toBeUndefined()
+
+      const second = yield* runRecovery(
+        store,
+        makeRuns(),
+        Jj.makeNoop({ restore: () => Effect.void }),
+        registry,
+        true
+      )
+
+      expect(second).toEqual([{ _tag: "RolledBack", auditId: "audit-compensated" }])
+      expect(rollbacks).toBe(1)
     }))
 
   it.effect("records an unrecoverable typed terminal failure without inventing a run status", () =>
@@ -291,6 +364,85 @@ describe("Recovery", () => {
       const afterReturn = pulses.length
       yield* TestClock.adjust(Ownership.heartbeatInterval)
       expect(pulses).toHaveLength(afterReturn)
+    }))
+
+  it.effect("lets ownership restoration finish after intentional release stops the heartbeat", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make()
+      seed(store, audit("archive_committed"))
+      const transitionEntered = yield* Deferred.make<void>()
+      const releaseTransition = yield* Deferred.make<void>()
+      const heartbeatLost = yield* Deferred.make<void>()
+      const runs = makeRuns({
+        heartbeat: () =>
+          Deferred.succeed(heartbeatLost, undefined).pipe(
+            Effect.as({ _tag: "FenceLost" as const })
+          ),
+        transitionOwned: () =>
+          Deferred.succeed(transitionEntered, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseTransition)),
+            Effect.as({ _tag: "Transitioned" as const })
+          )
+      })
+      const fiber = yield* Effect.forkChild(
+        runRecovery(store, runs, Jj.makeNoop({}), EffectHandlerRegistry.makeNoop(), false),
+        { startImmediately: true }
+      )
+
+      yield* Deferred.await(transitionEntered)
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
+      yield* Deferred.await(heartbeatLost)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseTransition, undefined)
+      const outcomes = yield* Fiber.join(fiber)
+
+      expect(outcomes).toEqual([{ _tag: "Completed", auditId: "audit-archive_committed" }])
+      expect(store.state().audits[0]).toMatchObject({ status: "completed" })
+    }))
+
+  it.effect("fails owned recovery work when the heartbeat loses its fence", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make()
+      seed(store, audit("archive_committed"))
+      const entered = yield* Deferred.make<void>()
+      const lost = yield* Deferred.make<void>()
+      const blockingStore = {
+        ...store,
+        stateAt: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+      }
+      const runs = makeRuns({
+        heartbeat: () =>
+          Deferred.succeed(lost, undefined).pipe(
+            Effect.as({ _tag: "FenceLost" as const })
+          )
+      })
+      const program = Recovery.recover({ owner }).pipe(
+        Effect.provide(Layer.succeed(TimeTravelStore, blockingStore)),
+        Effect.provide(Layer.succeed(RunStore.RunStore, runs)),
+        Effect.provide(Layer.succeed(Journal.Journal, journal(false))),
+        Effect.provide(Layer.succeed(Jj.Jj, Jj.makeNoop({}))),
+        Effect.provide(
+          Layer.succeed(EffectHandlerRegistry.EffectHandlerRegistry, EffectHandlerRegistry.makeNoop())
+        )
+      )
+      const fiber = yield* Effect.forkChild(program, { startImmediately: true })
+
+      yield* Deferred.await(entered)
+      yield* Effect.yieldNow
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
+      yield* Effect.yieldNow
+      yield* Deferred.await(lost)
+      const outcomes = yield* Fiber.join(fiber)
+
+      expect(outcomes[0]).toMatchObject({
+        _tag: "Failed",
+        error: { code: "fence_lost", message: "run run lost its ownership lease" }
+      })
+      expect(runs.state()).toMatchObject({ status: "suspended", owner: null })
+      expect(store.state().audits[0]).toMatchObject({
+        status: "failed",
+        detail: { phase: "terminal_failure" }
+      })
     }))
 
   it.effect("isolates malformed audits so one terminal failure does not block later recovery", () =>

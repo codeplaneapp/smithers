@@ -15,6 +15,7 @@
  * @since 0.1.0
  */
 import type { OwnerId } from "@smthrs/journal/OwnerId"
+import { isTerminalRunStatus, type RunStatus } from "@smthrs/run-store/RunStore"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { forkCreatedEventType, type Frame, type LineageEdge } from "./Frame.ts"
@@ -74,6 +75,8 @@ export interface MemoryState {
   readonly liveRuns: ReadonlySet<string>
   /** The owner each run records, which is what `archiveAndTruncate` fences on. */
   readonly runOwners: ReadonlyMap<string, OwnerId>
+  /** The status each seeded run row records; an absent run id models a missing row. */
+  readonly runStatuses: ReadonlyMap<string, RunStatus>
 }
 /**
  * The history a memory store starts life holding, plus the one knob that makes
@@ -104,6 +107,14 @@ export interface Options {
    * from the map records no owner and so has no fence to lose.
    */
   readonly runOwners?: ReadonlyMap<string, OwnerId>
+  /**
+   * The status each seeded run row records.
+   *
+   * Attached children absent from this map model missing run rows and need no
+   * fence. Non-terminal children must also have an exact owner in
+   * {@link Options.runOwners}; terminal children may be archived without one.
+   */
+  readonly runStatuses?: ReadonlyMap<string, RunStatus>
   /**
    * Throws an `unknown`-coded {@link TimeTravelError} at the named internal
    * step, so a test can interrupt a rewind mid-flight and then assert that
@@ -191,6 +202,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
   let snapshots = [...(options.snapshots ?? [])]
   const liveRuns = new Set(options.liveRuns ?? [])
   const runOwners = new Map(options.runOwners ?? [])
+  const runStatuses = new Map(options.runStatuses ?? [])
   let sequence = 0
   const fail = (step: string): void => {
     if (options.failAt === step) throw error("unknown", `injected failure at ${step}`)
@@ -203,7 +215,8 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     receipts: clone([...receipts], "receipts"),
     snapshots: [...snapshots],
     liveRuns: new Set(liveRuns),
-    runOwners: new Map(runOwners)
+    runOwners: new Map(runOwners),
+    runStatuses: new Map(runStatuses)
   })
   /**
    * The lineage-filtered prefix of one record type, mirroring the SQL store.
@@ -346,43 +359,61 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     pendingAudits: Effect.fn("TimeTravelStore.pendingAudits")(() =>
       Effect.sync(() => clone(audits.filter((audit) => audit.status === "in_progress"), "audits"))
     ),
-    archiveAndTruncate: Effect.fn("TimeTravelStore.archiveAndTruncate")((runId, frame, newReceipts, owner) =>
-      Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
-        Effect.andThen(atomic(() => {
-          fail("archiveAndTruncate:start")
-          // The same commit-time owner predicate the SQL store asserts: a
-          // superseded rewinder never truncates history behind the live owner.
-          const recorded = runOwners.get(runId)
-          if (
-            recorded !== undefined &&
-            (recorded.hostId !== owner.hostId || recorded.pid !== owner.pid || recorded.nonce !== owner.nonce)
-          ) {
-            throw error(
-              "fence_lost",
-              `run ${runId} is no longer owned by ${owner.hostId}:${owner.pid}:${owner.nonce}`
-            )
-          }
-          const descendants = descendantsFrom(edges, runId, frame)
-          const doomed = records.filter((record) =>
-            (record.runId === runId && record.seq > frame.seq) ||
-            descendants.attachedRunIds.has(record.runId)
-          )
-          fail("archiveAndTruncate:before-archive")
-          archived.push(...doomed)
-          fail("archiveAndTruncate:before-truncate")
-          records = records.filter((record) =>
-            !(
+    archiveAndTruncate: Effect.fn("TimeTravelStore.archiveAndTruncate")(
+      (runId, frame, newReceipts, owner, childOwners) =>
+        Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
+          Effect.andThen(atomic(() => {
+            fail("archiveAndTruncate:start")
+            // The same commit-time owner predicate the SQL store asserts: a
+            // superseded rewinder never truncates history behind the live owner.
+            const recorded = runOwners.get(runId)
+            if (
+              recorded !== undefined &&
+              (recorded.hostId !== owner.hostId || recorded.pid !== owner.pid || recorded.nonce !== owner.nonce)
+            ) {
+              throw error(
+                "fence_lost",
+                `run ${runId} is no longer owned by ${owner.hostId}:${owner.pid}:${owner.nonce}`
+              )
+            }
+            const descendants = descendantsFrom(edges, runId, frame)
+            for (const childRunId of descendants.attachedRunIds) {
+              const status = runStatuses.get(childRunId)
+              if (status === undefined || isTerminalRunStatus(status)) {
+                continue
+              }
+              const expectedOwner = childOwners?.get(childRunId)
+              const actualOwner = runOwners.get(childRunId)
+              if (
+                expectedOwner === undefined ||
+                actualOwner === undefined ||
+                actualOwner.hostId !== expectedOwner.hostId ||
+                actualOwner.pid !== expectedOwner.pid ||
+                actualOwner.nonce !== expectedOwner.nonce
+              ) {
+                throw error("fence_lost", `attached child ${childRunId} is not owned by this rewind`)
+              }
+            }
+            const doomed = records.filter((record) =>
               (record.runId === runId && record.seq > frame.seq) ||
               descendants.attachedRunIds.has(record.runId)
             )
-          )
-          const attachedChildren = new Set(descendants.attached.map((edge) => edge.childRunId))
-          edges = edges.filter((edge) => !attachedChildren.has(edge.childRunId))
-          receipts.push(...clone([...newReceipts], "receipts"))
-          fail("archiveAndTruncate:commit")
-          return { archived: doomed.length, orphaned: descendants.detached }
-        }))
-      )
+            fail("archiveAndTruncate:before-archive")
+            archived.push(...doomed)
+            fail("archiveAndTruncate:before-truncate")
+            records = records.filter((record) =>
+              !(
+                (record.runId === runId && record.seq > frame.seq) ||
+                descendants.attachedRunIds.has(record.runId)
+              )
+            )
+            const attachedChildren = new Set(descendants.attached.map((edge) => edge.childRunId))
+            edges = edges.filter((edge) => !attachedChildren.has(edge.childRunId))
+            receipts.push(...clone([...newReceipts], "receipts"))
+            fail("archiveAndTruncate:commit")
+            return { archived: doomed.length, orphaned: descendants.detached }
+          }))
+        )
     ),
     archivedAt: Effect.fn("TimeTravelStore.archivedAt")((runId, seq) =>
       Effect.annotateCurrentSpan({ runId, seq }).pipe(Effect.andThen(

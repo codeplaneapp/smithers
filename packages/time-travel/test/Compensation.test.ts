@@ -248,6 +248,55 @@ describe("Compensation.compensate", () => {
       expect(failure.message).toContain("could not compensate first")
     }))
 
+  it.effect("rolls back collected receipts when their durability callback fails", () =>
+    Effect.gen(function*() {
+      for (const rollbackFails of [false, true]) {
+        const durable: Array<ReadonlyArray<string>> = []
+        const rolledBack: Array<string> = []
+        const layer = registryOf([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "residue",
+          revert: (effect) => Effect.succeed({ voided: effect.id }),
+          rollback: (effect) =>
+            Effect.sync(() => rolledBack.push(effect.id)).pipe(
+              Effect.andThen(
+                rollbackFails
+                  ? Effect.fail(error("compensation_failed", "rollback refused"))
+                  : Effect.void
+              )
+            )
+        }])
+        const plan = yield* Compensation.assess([irreversible("send", 1)]).pipe(
+          Effect.provide(cache()),
+          Effect.provide(layer)
+        )
+
+        const failure = yield* Effect.flip(
+          Compensation.compensate(
+            plan,
+            (receipts) =>
+              Effect.sync(() => durable.push(receipts.map((receipt) => receipt.id))).pipe(
+                Effect.andThen(Effect.fail(error("unknown", "audit write failed")))
+              )
+          ).pipe(Effect.provide(layer))
+        )
+
+        expect(durable).toEqual([["send:rollback"]])
+        expect(rolledBack).toEqual(["send"])
+        expect(failure).toMatchObject({
+          code: "compensation_failed",
+          message: "could not persist compensation receipt for send: audit write failed"
+        })
+        if (rollbackFails) {
+          expect(failure.cause).toMatchObject({ rollback: expect.anything() })
+        } else {
+          expect(failure.cause).toMatchObject({ rollback: undefined })
+        }
+      }
+    }))
+
   it.effect("reports the rollback failure alongside the compensation failure", () =>
     Effect.gen(function*() {
       const layer = registryOf([{

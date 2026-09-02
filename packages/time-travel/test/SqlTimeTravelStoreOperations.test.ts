@@ -614,7 +614,7 @@ describe("SqlTimeTravelStore.archiveAndTruncate attempts", () => {
       const rows = yield* run((store, sql) =>
         Effect.gen(function*() {
           yield* insertOwnedRun(sql, "attempt-parent")
-          yield* insertRun(sql, "attempt-child")
+          yield* insertRun(sql, "attempt-child", { status: "completed" })
           for (const [seq, digest] of [[1, "survives"], [5, "future"]] as const) {
             yield* sql`
               INSERT INTO flows_journal_events

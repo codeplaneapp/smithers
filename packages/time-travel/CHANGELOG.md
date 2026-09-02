@@ -38,19 +38,21 @@
   folding the run-decision records, and copies only the attempts the copied
   prefix can explain, instead of copying the parent's current row and every
   attempt it ever wrote.
-- A rewind holds its ownership lease with a heartbeat for the whole protocol.
+- A rewind holds its ownership lease with a supervised heartbeat for the whole protocol.
   It previously activated the run once and never pulsed again, so any
   compensation, workspace restore, or archive slower than the staleness window
-  was stolen by a co-located engine mid-flight.
+  was stolen by a co-located engine mid-flight. Losing that heartbeat now stops
+  the owned work with `fence_lost` instead of letting it continue unfenced.
 - A rewind resolves attached descendants as well as detached ones. A live
   attached child now refuses the rewind under the default `block` policy
   instead of having its journal archived out from under it.
-- Compensation receipts are persisted before the workspace restore, so a crash
-  between a handler succeeding and the audit advancing still leaves recovery
-  something to roll back.
-- The planned child cancellations are written to the audit detail before the
-  archive commit, so a crash mid-cancellation is finished by the next recovery
-  pass rather than silently dropped.
+- Compensation receipts are persisted after each successful handler and before
+  the next handler starts, so a crash mid-compensation still leaves recovery
+  every landed receipt to roll back.
+- The planned child cancellations are written with the `compensated` audit
+  phase before the archive. Each child is then claimed before the commit and
+  fenced inside the archive transaction; cancellation remains post-commit, so
+  a crash is finished by recovery without truncating a foreign-owned child.
 - A rewind writes the run's state AT the frame when it suspends, instead of
   leaving `state_json` from the truncated future, and truncation prunes the
   `flows_attempts` rows the truncated journal no longer explains.
@@ -80,6 +82,12 @@
 - Startup recovery restores the ownership it acquired on every failure path,
   and claims a suspended run before rolling its compensation back, instead of
   restoring a workspace under a run another process may claim mid-rollback.
+- Startup recovery suspends an archive-committed rewind with the state derived
+  at its surviving frame, not the post-frame state from the run row.
+- Successful compensation rollback is removed from an open audit before run
+  restoration, so a later recovery pass cannot repeat a non-idempotent handler.
+- Recovery leaves an audit pending when it cannot return acquired ownership,
+  instead of closing the audit under a recovery owner whose lease will expire.
 - The rewind failure branch no longer closes an audit as `rolled_back` when the
   run-state restoration itself failed.
 - A `RunStore` failure while reading a child is propagated instead of being
@@ -88,6 +96,10 @@
   `hasMore`, instead of treating it as the end of history.
 - `RewindOptions.detachedChildren` is decoded, so a misspelled policy is
   refused `invalid` rather than silently selecting the destructive one.
+- Audit patch values are runtime-decoded in both stores, so an invalid status is
+  refused consistently instead of reaching SQLite's constraint alone.
+- Empty-journal validation now carries an explicit empty-tail expectation into
+  the owned rewind, so a newly appended first record is refused as a moved tail.
 - A migration failure names the object whose statement raised it, so a driver
   error like "views may not be indexed" is actionable.
 

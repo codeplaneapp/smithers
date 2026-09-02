@@ -129,7 +129,7 @@ export const AuditDetail = Schema.Struct({
   cancelledChildren: Schema.Array(Schema.NonEmptyString),
   /**
    * The children this rewind still owes a cancellation, written with the
-   * archive commit and emptied as each one lands.
+   * `compensated` phase before the archive and emptied as each one lands.
    *
    * Cancellation runs after the commit point because it is terminal, so the
    * plan has to be durable before the commit: an audit that recorded only the
@@ -166,9 +166,11 @@ export interface Options {
    * Validation runs before the claim, so another executor can claim the idle
    * row, append records, and release it inside that window; the later claim
    * then succeeds and the truncation deletes records validation would have
-   * refused. Threading the observed tail through binds the two together.
+   * refused. Threading the observed tail through binds the two together. The
+   * wrapper distinguishes no expectation from a validated empty journal,
+   * whose expected `tail` is `undefined`.
    */
-  readonly expectedTail?: Tail | undefined
+  readonly expectedTail?: { readonly tail: Tail | undefined } | undefined
   readonly pageSize?: number | undefined
   readonly detachedChildPolicy?: DetachedChildPolicy | undefined
   readonly rateLimit?: (options: {
@@ -219,6 +221,12 @@ interface ClaimedRun {
 interface ChildPlan {
   readonly edge: LineageEdge
   readonly row: RunStore.RunRow
+}
+
+interface ClaimedChild {
+  readonly plan: ChildPlan
+  readonly owner: OwnerId
+  readonly claimedAtMs: number
 }
 
 const runStoreFailure = (
@@ -478,13 +486,12 @@ const terminal = (status: RunStore.RunStatus): boolean =>
  * Resolves every descendant a rewind crosses: cancel it, disclose it, or refuse.
  *
  * ATTACHED CHILDREN ARE RESOLVED TOO. `archiveAndTruncate` archives and deletes
- * every attached child's whole journal and removes its edges, fencing only the
- * parent, and nothing here used to read those children at all: a suspended
- * parent durably waiting on a running attached child had that child's journal
- * emptied under it while the child kept executing and emitting into it. The
- * store contract says exactly this - attached children "are the ones a rewind
- * must resolve" - so a live one refuses under `block` and is cancelled under
- * `cancel`, on the same evidence a detached one is.
+ * every attached child's whole journal and removes its edges. That mutation
+ * used to fence only the parent, and nothing here read those children at all:
+ * a suspended parent durably waiting on a running attached child had that
+ * child's journal emptied under it while the child kept executing. Assessment
+ * now resolves the child, and the archive transaction independently fences
+ * every non-terminal attached child under the rewind's claimed child owner.
  *
  * A child reached by more than one edge is resolved once. The edge union reads
  * the same run twice whenever two sources describe it, and cancelling a run
@@ -554,11 +561,11 @@ const assessChildren = (
     return { warnings, cancellable }
   })
 
-const cancelChild = (
+const claimChild = (
   runs: RunStore.Service,
   options: Options,
   plan: ChildPlan
-): Effect.Effect<void, TimeTravelFailure> =>
+): Effect.Effect<ClaimedChild, TimeTravelFailure> =>
   Effect.gen(function*() {
     const nowMs = yield* Clock.currentTimeMillis
     const childOwner: OwnerId = {
@@ -611,16 +618,25 @@ const cancelChild = (
         error("live_child", `child ${plan.edge.childRunId} lost its cancellation claim`)
       )
     }
+    return { plan, owner: childOwner, claimedAtMs: claim.claimedAtMs }
+  })
+
+const cancelClaimedChild = (
+  runs: RunStore.Service,
+  claimed: ClaimedChild
+): Effect.Effect<void, TimeTravelFailure> =>
+  Effect.gen(function*() {
+    const childRunId = claimed.plan.edge.childRunId
     const cancelled = yield* runs.transitionOwned(
-      plan.edge.childRunId,
-      childOwner,
+      childRunId,
+      claimed.owner,
       "cancelled"
     ).pipe(
-      Effect.mapError((cause) => runStoreFailure(`cancel child ${plan.edge.childRunId}`, cause))
+      Effect.mapError((cause) => runStoreFailure(`cancel child ${childRunId}`, cause))
     )
     if (cancelled._tag !== "Transitioned") {
       return yield* Effect.fail(
-        error("live_child", `child ${plan.edge.childRunId} lost its cancellation fence`)
+        error("live_child", `child ${childRunId} lost its cancellation fence`)
       )
     }
   })
@@ -698,17 +714,20 @@ export const rewind = (
 
       let claimed: ClaimedRun | undefined
       let beat: Fiber.Fiber<never, never> | undefined
+      let leaseReleased = false
       let archiveCommitted = false
       let compensation: Compensation.Result = { handlerReceipts: [] }
       let detail: AuditDetail | undefined
       const cancelledChildren: Array<string> = []
+      const claimedChildren: Array<ClaimedChild> = []
 
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function*() {
           const protocol = restore(
             Effect.gen(function*() {
-              claimed = yield* claimRun(runs, options, nowMs)
-              const originalStatus = claimed.row.status
+              const claimedRun = yield* claimRun(runs, options, nowMs)
+              claimed = claimedRun
+              const originalStatus = claimedRun.row.status
               /**
                * THE LEASE IS HELD FOR THE WHOLE PROTOCOL.
                *
@@ -721,202 +740,235 @@ export const rewind = (
                * pulses until the fence is lost and then interrupts itself, so
                * losing ownership is still observed rather than papered over.
                */
-              beat = yield* Effect.forkChild(
+              const heartbeat = yield* Effect.forkChild(
                 Ownership.heartbeatLoop(options.runId, options.owner),
                 { startImmediately: true }
               )
+              beat = heartbeat
 
-              // The frame was validated before the claim, so another executor
-              // could have claimed the idle row, appended records, and released
-              // it in that window. Re-reading the tail under the claim is what
-              // binds the two together; a moved tail is `busy`, not a silent
-              // truncation of records validation would have refused.
-              const observed = yield* scan(journal, options, "revalidation")
-              if (options.expectedTail !== undefined) {
-                if (
-                  observed.tail === undefined ||
-                  observed.tail.seq !== options.expectedTail.seq ||
-                  observed.tail.lineageId !== options.expectedTail.lineageId
-                ) {
-                  return yield* Effect.fail(error("busy", `journal tail moved for ${options.runId}`))
-                }
-              }
+              return yield* Effect.raceFirst(
+                Effect.gen(function*() {
+                  // The frame was validated before the claim, so another executor
+                  // could have claimed the idle row, appended records, and released
+                  // it in that window. Re-reading the tail under the claim is what
+                  // binds the two together; a moved tail is `busy`, not a silent
+                  // truncation of records validation would have refused.
+                  const observed = yield* scan(journal, options, "revalidation")
+                  if (options.expectedTail !== undefined) {
+                    const expected = options.expectedTail.tail
+                    if (
+                      expected === undefined
+                        ? observed.tail !== undefined
+                        : observed.tail === undefined ||
+                          observed.tail.seq !== expected.seq ||
+                          observed.tail.lineageId !== expected.lineageId
+                    ) {
+                      return yield* Effect.fail(error("busy", `journal tail moved for ${options.runId}`))
+                    }
+                  }
 
-              const rateLimit = options.rateLimit?.({
-                runId: options.runId,
-                frame: options.frame,
-                nowMs
-              }) ?? Effect.succeed({ allowed: true } as const)
-              const decision = yield* rateLimit
-              const auditDetail = initialDetail(originalStatus)
-              const audit: Audit = {
-                id: auditId,
-                runId: options.runId,
-                frame: options.frame,
-                status: "in_progress",
-                rateLimit: "detail" in decision && decision.detail !== undefined
-                  ? decision.detail
-                  : { allowed: decision.allowed, checkedAtMs: nowMs },
-                detail: auditDetail
-              }
-              yield* store.writeAudit(audit)
-              detail = auditDetail
+                  const rateLimit = options.rateLimit?.({
+                    runId: options.runId,
+                    frame: options.frame,
+                    nowMs
+                  }) ?? Effect.succeed({ allowed: true } as const)
+                  const decision = yield* rateLimit
+                  const auditDetail = initialDetail(originalStatus)
+                  const audit: Audit = {
+                    id: auditId,
+                    runId: options.runId,
+                    frame: options.frame,
+                    status: "in_progress",
+                    rateLimit: "detail" in decision && decision.detail !== undefined
+                      ? decision.detail
+                      : { allowed: decision.allowed, checkedAtMs: nowMs },
+                    detail: auditDetail
+                  }
+                  yield* store.writeAudit(audit)
+                  detail = auditDetail
 
-              yield* runHook(options, "claim-run")
-              yield* runHook(options, "rate-limit")
-              if (!decision.allowed) {
-                return yield* Effect.fail(error("rate_limited", `rewind rate limit exceeded for ${options.runId}`))
-              }
-              yield* runHook(options, "write-audit")
+                  yield* runHook(options, "claim-run")
+                  yield* runHook(options, "rate-limit")
+                  if (!decision.allowed) {
+                    return yield* Effect.fail(error("rate_limited", `rewind rate limit exceeded for ${options.runId}`))
+                  }
+                  yield* runHook(options, "write-audit")
 
-              const snapshot = yield* store.snapshotAt(options.runId, options.frame)
-              const descendants = yield* store.descendants(options.runId, options.frame)
-              const suffix = yield* readSuffix(
-                journal,
-                options.runId,
-                options.frame,
-                options.pageSize ?? 100
-              )
-              const effects = yield* EffectBoundary.fromEntries(suffix)
-              yield* runHook(options, "load-suffix")
+                  const snapshot = yield* store.snapshotAt(options.runId, options.frame)
+                  const descendants = yield* store.descendants(options.runId, options.frame)
+                  const suffix = yield* readSuffix(
+                    journal,
+                    options.runId,
+                    options.frame,
+                    options.pageSize ?? 100
+                  )
+                  const effects = yield* EffectBoundary.fromEntries(suffix)
+                  yield* runHook(options, "load-suffix")
 
-              const childAssessment = yield* assessChildren(
-                runs,
-                descendants.attached,
-                descendants.detached,
-                options.detachedChildPolicy ?? "block"
-              )
-              const plan = yield* Compensation.assess(effects, snapshot?.changeId)
-              const blocking = plan.assessments.filter(
-                (assessment) => assessment.classification === "blocking"
-              )
-              if (blocking.length > 0) {
-                // The cause carries identity and verdict, never the effect's
-                // `input` or `output`. `TimeTravelError` is a `Schema.TaggedError`
-                // that ENCODES its cause, so a raw record put whatever the
-                // adapter was called with - credentials, oversized blobs - on the
-                // wire and in the logs. The full records stay on the audit
-                // detail, which is privileged storage.
-                return yield* Effect.fail(
-                  error(
-                    "irreversible",
-                    `rewind is blocked by ${blocking.length} effect(s)`,
-                    blocking.map(blockingSummary)
+                  const childAssessment = yield* assessChildren(
+                    runs,
+                    descendants.attached,
+                    descendants.detached,
+                    options.detachedChildPolicy ?? "block"
+                  )
+                  const plannedChildren = [...childAssessment.cancellable].sort(
+                    (left, right) => right.edge.parentSeq - left.edge.parentSeq
+                  )
+                  const pendingChildren = plannedChildren.map((child) => child.edge.childRunId)
+                  const plan = yield* Compensation.assess(effects, snapshot?.changeId)
+                  const blocking = plan.assessments.filter(
+                    (assessment) => assessment.classification === "blocking"
+                  )
+                  if (blocking.length > 0) {
+                    // The cause carries identity and verdict, never the effect's
+                    // `input` or `output`. `TimeTravelError` is a `Schema.TaggedError`
+                    // that ENCODES its cause, so a raw record put whatever the
+                    // adapter was called with - credentials, oversized blobs - on the
+                    // wire and in the logs. The full records stay on the audit
+                    // detail, which is privileged storage.
+                    return yield* Effect.fail(
+                      error(
+                        "irreversible",
+                        `rewind is blocked by ${blocking.length} effect(s)`,
+                        blocking.map(blockingSummary)
+                      )
+                    )
+                  }
+                  detail = {
+                    ...detail,
+                    phase: "preflight_complete",
+                    suffixCount: suffix.length,
+                    ...(suffix.at(-1) === undefined ? {} : { suffixTailSeq: suffix.at(-1)!.seq }),
+                    ...(snapshot === undefined ? {} : { targetChangeId: snapshot.changeId }),
+                    warnings: childAssessment.warnings
+                  }
+                  yield* store.updateAudit(auditId, { detail })
+                  yield* runHook(options, "assess-boundary")
+
+                  const handlerReceipts = yield* Compensation.compensate(plan, (receipts) => {
+                    const nextDetail: AuditDetail = {
+                      ...detail!,
+                      compensation: { handlerReceipts: receipts }
+                    }
+                    return store.updateAudit(auditId, { detail: nextDetail }).pipe(
+                      Effect.tap(() => Effect.sync(() => (detail = nextDetail)))
+                    )
+                  })
+                  compensation = { handlerReceipts }
+                  // The receipts reach durable storage BEFORE the next irreversible
+                  // step. They used to land only after `restoreWorkspace`, so a
+                  // process death between a handler succeeding and that write left
+                  // the audit at `preflight_complete` with no compensation on it:
+                  // recovery then skipped the rollback, restored the run, and the
+                  // run later resumed against external state the handlers had
+                  // already reversed.
+                  detail = { ...detail, compensation }
+                  yield* store.updateAudit(auditId, { detail })
+                  yield* runHook(options, "compensate-effects")
+
+                  // `restoreWorkspace` owns these receipts: every failure path in
+                  // it rolls them back before failing. The tracked compensation is
+                  // therefore emptied so the outer failure branch cannot roll them
+                  // back a SECOND time. A handler's `rollback` re-performs the
+                  // effect the revert undid and nothing requires it to be
+                  // idempotent, so the duplicate was a duplicated side effect.
+                  const restored = yield* Effect.exit(Compensation.restoreWorkspace(plan, handlerReceipts))
+                  if (Exit.isFailure(restored)) {
+                    compensation = { handlerReceipts: [] }
+                    return yield* Effect.failCause(restored.cause)
+                  }
+                  compensation = restored.value
+                  yield* runHook(options, "restore-workspace")
+                  detail = {
+                    ...detail,
+                    phase: "compensated",
+                    compensation,
+                    cancelledChildren: [...cancelledChildren],
+                    pendingChildren
+                  }
+                  yield* store.updateAudit(auditId, { detail })
+
+                  // Claims are reversible, unlike cancellation, so every child is
+                  // owned before the commit and only transitioned terminal after
+                  // it. The exact owners are also the archive transaction's child
+                  // fences; any newly live or re-owned attached child refuses the
+                  // whole mutation.
+                  for (const child of plannedChildren) {
+                    claimedChildren.push(yield* claimChild(runs, options, child))
+                  }
+
+                  yield* runHook(options, "archive-and-truncate")
+                  const archive = yield* store.archiveAndTruncate(
+                    options.runId,
+                    options.frame,
+                    Compensation.toStoreReceipts(auditId, compensation),
+                    // The rewind claimed and activated the run with this owner;
+                    // the store re-checks it at commit, so a superseded rewind
+                    // never truncates behind the live owner.
+                    options.owner,
+                    new Map(claimedChildren.map((child) => [child.plan.edge.childRunId, child.owner]))
+                  )
+                  archiveCommitted = true
+                  // The cancellation plan was written with `compensated`, before
+                  // the commit. This update records only that the archive landed.
+                  detail = { ...detail, phase: "archive_committed", pendingChildren }
+                  yield* store.updateAudit(auditId, { detail })
+
+                  for (const child of claimedChildren) {
+                    yield* cancelClaimedChild(runs, child)
+                    cancelledChildren.push(child.plan.edge.childRunId)
+                    detail = {
+                      ...detail,
+                      cancelledChildren: [...cancelledChildren],
+                      pendingChildren: pendingChildren.filter((runId) => !cancelledChildren.includes(runId))
+                    }
+                    yield* store.updateAudit(auditId, { detail })
+                  }
+
+                  // The run suspends with the state AT the frame, not the state the
+                  // truncated future left on the row. `createFork` already derives
+                  // it this way for a child; a rewound parent that kept the later
+                  // payload resumed from a future its journal no longer records.
+                  const frameState = yield* store.stateAt(options.runId, options.frame)
+                  // From here, losing the heartbeat is expected: this transition
+                  // intentionally releases the ownership the supervisor watches.
+                  leaseReleased = true
+                  const suspended = yield* runs.transitionOwned(
+                    options.runId,
+                    options.owner,
+                    "suspended",
+                    frameState ?? claimedRun.row.stateJson
+                  ).pipe(
+                    Effect.mapError((cause) => runStoreFailure("suspend rewound run", cause))
+                  )
+                  if (suspended._tag !== "Transitioned") {
+                    return yield* Effect.fail(
+                      error("busy", `run ${options.runId} lost ownership before suspension`)
+                    )
+                  }
+
+                  detail = { ...detail, phase: "completed" }
+                  yield* store.updateAudit(auditId, {
+                    status: "completed",
+                    detail
+                  })
+                  return {
+                    auditId,
+                    frame: options.frame,
+                    archive,
+                    assessments: plan.assessments,
+                    warnings: childAssessment.warnings,
+                    cancelledChildren: [...cancelledChildren]
+                  }
+                }),
+                Fiber.await(heartbeat).pipe(
+                  Effect.flatMap(() =>
+                    leaseReleased
+                      ? Effect.never
+                      : Effect.fail(error("fence_lost", `run ${options.runId} lost its ownership lease`))
                   )
                 )
-              }
-              detail = {
-                ...detail,
-                phase: "preflight_complete",
-                suffixCount: suffix.length,
-                ...(suffix.at(-1) === undefined ? {} : { suffixTailSeq: suffix.at(-1)!.seq }),
-                ...(snapshot === undefined ? {} : { targetChangeId: snapshot.changeId }),
-                warnings: childAssessment.warnings
-              }
-              yield* store.updateAudit(auditId, { detail })
-              yield* runHook(options, "assess-boundary")
-
-              const handlerReceipts = yield* Compensation.compensate(plan)
-              compensation = { handlerReceipts }
-              // The receipts reach durable storage BEFORE the next irreversible
-              // step. They used to land only after `restoreWorkspace`, so a
-              // process death between a handler succeeding and that write left
-              // the audit at `preflight_complete` with no compensation on it:
-              // recovery then skipped the rollback, restored the run, and the
-              // run later resumed against external state the handlers had
-              // already reversed.
-              detail = { ...detail, compensation }
-              yield* store.updateAudit(auditId, { detail })
-              yield* runHook(options, "compensate-effects")
-
-              // `restoreWorkspace` owns these receipts: every failure path in
-              // it rolls them back before failing. The tracked compensation is
-              // therefore emptied so the outer failure branch cannot roll them
-              // back a SECOND time. A handler's `rollback` re-performs the
-              // effect the revert undid and nothing requires it to be
-              // idempotent, so the duplicate was a duplicated side effect.
-              const restored = yield* Effect.exit(Compensation.restoreWorkspace(plan, handlerReceipts))
-              if (Exit.isFailure(restored)) {
-                compensation = { handlerReceipts: [] }
-                return yield* Effect.failCause(restored.cause)
-              }
-              compensation = restored.value
-              yield* runHook(options, "restore-workspace")
-              detail = {
-                ...detail,
-                phase: "compensated",
-                compensation,
-                cancelledChildren: [...cancelledChildren]
-              }
-              yield* store.updateAudit(auditId, { detail })
-
-              yield* runHook(options, "archive-and-truncate")
-              const archive = yield* store.archiveAndTruncate(
-                options.runId,
-                options.frame,
-                Compensation.toStoreReceipts(auditId, compensation),
-                // The rewind claimed and activated the run with this owner;
-                // the store re-checks it at commit, so a superseded rewind
-                // never truncates behind the live owner.
-                options.owner
               )
-              archiveCommitted = true
-              // Child cancellation is terminal and has no inverse, so it runs
-              // only after the commit point - and the PLAN for it has to be
-              // durable before that point. An audit that recorded only the
-              // children it had already cancelled let recovery close an
-              // `archive_committed` row as complete while the cancellations the
-              // operator asked for were silently dropped.
-              const plannedChildren = [...childAssessment.cancellable].sort(
-                (left, right) => right.edge.parentSeq - left.edge.parentSeq
-              )
-              const pendingChildren = plannedChildren.map((child) => child.edge.childRunId)
-              detail = { ...detail, phase: "archive_committed", pendingChildren }
-              yield* store.updateAudit(auditId, { detail })
-
-              for (const child of plannedChildren) {
-                yield* cancelChild(runs, options, child)
-                cancelledChildren.push(child.edge.childRunId)
-                detail = {
-                  ...detail,
-                  cancelledChildren: [...cancelledChildren],
-                  pendingChildren: pendingChildren.filter((runId) => !cancelledChildren.includes(runId))
-                }
-                yield* store.updateAudit(auditId, { detail })
-              }
-
-              // The run suspends with the state AT the frame, not the state the
-              // truncated future left on the row. `createFork` already derives
-              // it this way for a child; a rewound parent that kept the later
-              // payload resumed from a future its journal no longer records.
-              const frameState = yield* store.stateAt(options.runId, options.frame)
-              const suspended = yield* runs.transitionOwned(
-                options.runId,
-                options.owner,
-                "suspended",
-                frameState ?? claimed.row.stateJson
-              ).pipe(
-                Effect.mapError((cause) => runStoreFailure("suspend rewound run", cause))
-              )
-              if (suspended._tag !== "Transitioned") {
-                return yield* Effect.fail(
-                  error("busy", `run ${options.runId} lost ownership before suspension`)
-                )
-              }
-
-              detail = { ...detail, phase: "completed" }
-              yield* store.updateAudit(auditId, {
-                status: "completed",
-                detail
-              })
-              return {
-                auditId,
-                frame: options.frame,
-                archive,
-                assessments: plan.assessments,
-                warnings: childAssessment.warnings,
-                cancelledChildren: [...cancelledChildren]
-              }
             })
           )
 
@@ -926,6 +978,14 @@ export const rewind = (
 
           if (!archiveCommitted) {
             const rollbackExit = yield* Effect.exit(Compensation.rollback(compensation))
+            if (Exit.isSuccess(rollbackExit) && detail?.compensation !== undefined) {
+              const { compensation: _, ...stripped } = detail
+              detail = stripped
+              // Handler rollback is not required to be idempotent. Record its
+              // success before run-state restoration can fail, otherwise a
+              // later recovery pass repeats the same external side effects.
+              yield* store.updateAudit(auditId, { detail })
+            }
             /**
              * THE RESTORATION HAS TO SUCCEED BEFORE THE AUDIT IS CLOSED.
              *
@@ -936,7 +996,29 @@ export const rewind = (
              * pass would revisit. A restoration that did not return
              * `Transitioned` keeps the audit open instead, and says so.
              */
-            let restorationProblem: string | undefined
+            const restorationProblems: Array<string> = []
+            for (const child of claimedChildren) {
+              const childRunId = child.plan.edge.childRunId
+              const restoredChild = yield* runs.transitionOwned(
+                childRunId,
+                child.owner,
+                // `transitionOwned` cannot target `pending`, while targeting
+                // `running` deliberately retains the current owner. Suspended
+                // is therefore the only reversible status that clears the
+                // dead rewind identity: it exactly restores suspended children
+                // and safely parks children claimed from pending or running.
+                "suspended",
+                child.plan.row.stateJson
+              ).pipe(
+                Effect.mapError((cause) => runStoreFailure(`restore child ${childRunId}`, cause)),
+                Effect.exit
+              )
+              if (Exit.isFailure(restoredChild)) {
+                restorationProblems.push(toFailure(restoredChild.cause).message)
+              } else if (restoredChild.value._tag !== "Transitioned") {
+                restorationProblems.push(`restore child ${childRunId} returned ${restoredChild.value._tag}`)
+              }
+            }
             if (claimed !== undefined) {
               const restored = yield* runs.transitionOwned(
                 options.runId,
@@ -948,14 +1030,17 @@ export const rewind = (
                 Effect.exit
               )
               if (Exit.isFailure(restored)) {
-                restorationProblem = toFailure(restored.cause).message
+                restorationProblems.push(toFailure(restored.cause).message)
                 if (detail === undefined) {
                   yield* Effect.ignore(runs.abandonClaim(options.runId, options.owner, claimed.claimedAtMs))
                 }
               } else if (restored.value._tag !== "Transitioned") {
-                restorationProblem = `restore run state returned ${restored.value._tag}`
+                restorationProblems.push(`restore run state returned ${restored.value._tag}`)
               }
             }
+            const restorationProblem = restorationProblems.length === 0
+              ? undefined
+              : restorationProblems.join("; ")
             if (detail !== undefined && restorationProblem !== undefined) {
               return yield* Effect.fail(
                 error(

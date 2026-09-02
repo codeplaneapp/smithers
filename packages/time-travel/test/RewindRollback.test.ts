@@ -3,6 +3,7 @@ import * as Jj from "@smthrs/jj"
 import { Journal } from "@smthrs/journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
 import { RunStore } from "@smthrs/run-store"
+import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import { CacheStore } from "@smthrs/step-cache"
 import * as Cause from "effect/Cause"
@@ -12,6 +13,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { TestClock } from "effect/testing"
 import * as EffectBoundary from "../src/EffectBoundary.ts"
 import type { LineageEdge } from "../src/Frame.ts"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
@@ -581,6 +583,169 @@ describe("Rewind protocol fault matrix", () => {
         auditId: "audit-recover-persisted-receipts"
       }])
       expect(rollbacks).toEqual(["send"])
+    }))
+
+  it.effect("persists the first handler receipt before a later handler fails", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({
+        records: [
+          stored(0, "baseline", {}),
+          stored(1, EffectBoundary.eventType, {
+            version: 1,
+            effect: crossed("second-handler", "send", "irreversible")
+          }),
+          stored(2, EffectBoundary.eventType, {
+            version: 1,
+            effect: crossed("first-handler", "send", "irreversible")
+          })
+        ]
+      })
+      let durableDuringSecond: Rewind.AuditDetail | undefined
+      const registry = Effect.runSync(
+        EffectHandlerRegistry.make([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "message residue",
+          revert: (effect) =>
+            effect.id === "first-handler"
+              ? Effect.succeed({ value: effect.id })
+              : Effect.sync(() => {
+                durableDuringSecond = store.state().audits[0]!.detail as Rewind.AuditDetail
+              }).pipe(Effect.andThen(Effect.fail(error("compensation_failed", "second handler stopped")))),
+          rollback: () => Effect.void
+        }])
+      )
+
+      const failure = yield* Effect.flip(
+        provide(
+          Rewind.rewind({ runId: "run", frame, owner, auditId: "audit-per-handler-receipts" }),
+          { store, runs: makeRuns(runRow()), jj: makeJj().service, registry }
+        )
+      )
+
+      expect(failure).toMatchObject({ code: "compensation_failed" })
+      expect(durableDuringSecond?.compensation?.handlerReceipts).toHaveLength(1)
+      expect(durableDuringSecond?.compensation?.handlerReceipts[0]?.effect.id).toBe("first-handler")
+    }))
+
+  it.effect("strips rolled-back receipts before a failed run restoration can leave the audit open", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({
+        records: records(),
+        snapshots: [{ runId: "run", frame, changeId: "target" }]
+      })
+      let rollbacks = 0
+      const registry = Effect.runSync(
+        EffectHandlerRegistry.make([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "message residue",
+          revert: () => Effect.succeed({ value: "sent" }),
+          rollback: () => Effect.sync(() => (rollbacks += 1))
+        }])
+      )
+      const stuckRuns = makeRuns(runRow(), {
+        transitionOwned: () => Effect.succeed({ _tag: "FenceLost" as const })
+      })
+
+      const failure = yield* Effect.flip(
+        provide(
+          Rewind.rewind({
+            runId: "run",
+            frame,
+            owner,
+            auditId: "audit-stripped-before-restore",
+            hooks: {
+              beforeStep: (step) =>
+                step === "archive-and-truncate" ? Effect.fail(new Error("stop before commit")) : Effect.void
+            }
+          }),
+          { store, runs: stuckRuns, jj: makeJj().service, registry }
+        )
+      )
+
+      expect(failure.message).toContain("restore run state returned FenceLost")
+      expect(rollbacks).toBe(1)
+      expect(store.state().audits[0]).toMatchObject({ status: "in_progress" })
+      expect((store.state().audits[0]!.detail as Rewind.AuditDetail).compensation).toBeUndefined()
+
+      const recoveryRuns = makeRuns({
+        ...runRow(),
+        status: "running",
+        owner,
+        heartbeatAtMs: 1
+      })
+      const outcomes = yield* provide(
+        Recovery.recover({ owner }),
+        { store, runs: recoveryRuns, jj: makeJj().service, registry }
+      )
+
+      expect(outcomes).toEqual([{ _tag: "RolledBack", auditId: "audit-stripped-before-restore" }])
+      expect(rollbacks).toBe(1)
+    }))
+
+  it.effect("stops owned rewind work and rolls back when the heartbeat loses its fence", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({
+        records: records(),
+        snapshots: [{ runId: "run", frame, changeId: "target" }]
+      })
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const lost = yield* Deferred.make<void>()
+      let rollbacks = 0
+      const registry = Effect.runSync(
+        EffectHandlerRegistry.make([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "message residue",
+          revert: () => Effect.succeed({ value: "sent" }),
+          rollback: () => Effect.sync(() => (rollbacks += 1))
+        }])
+      )
+      const runs = makeRuns(runRow(), {
+        heartbeat: () =>
+          Deferred.succeed(lost, undefined).pipe(
+            Effect.as({ _tag: "FenceLost" as const })
+          )
+      })
+      const fiber = yield* Effect.forkChild(
+        provide(
+          Rewind.rewind({
+            runId: "run",
+            frame,
+            owner,
+            auditId: "audit-heartbeat-lost",
+            hooks: {
+              beforeStep: (step) =>
+                step === "archive-and-truncate"
+                  ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+                  : Effect.void
+            }
+          }),
+          { store, runs, jj: makeJj().service, registry }
+        ),
+        { startImmediately: true }
+      )
+
+      yield* Deferred.await(entered)
+      yield* Effect.yieldNow
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
+      yield* Effect.yieldNow
+      yield* Deferred.await(lost)
+      yield* Effect.yieldNow
+      const failure = yield* Effect.flip(Fiber.join(fiber))
+
+      expect(failure).toMatchObject({
+        code: "fence_lost",
+        message: "run run lost its ownership lease"
+      })
+      expect(rollbacks).toBe(1)
+      expect(runs.state()).toEqual(runRow())
+      expect(store.state().audits[0]).toMatchObject({ status: "failed", detail: { phase: "rolled_back" } })
     }))
 
   it.effect("leaves the audit recoverable when restoring run ownership fails or loses its fence", () =>

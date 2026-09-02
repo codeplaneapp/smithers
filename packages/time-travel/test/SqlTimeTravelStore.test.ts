@@ -17,9 +17,10 @@ describe("SqlTimeTravelStore", () => {
 
           const store = yield* SqlTimeTravelStore.make
           for (const runId of ["parent", "child", "grandchild", "detached"]) {
+            const status = runId === "child" || runId === "grandchild" ? "completed" : "suspended"
             yield* sql`
             INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
-            VALUES (${runId}, 'suspended', 0, '{}')
+            VALUES (${runId}, ${status}, 0, '{}')
           `
           }
           // The truncation is owner-fenced: the archive only commits while
@@ -148,5 +149,63 @@ describe("SqlTimeTravelStore", () => {
       expect(result.failure).toMatchObject({ code: "fence_lost" })
       expect(result.remaining).toEqual([{ seq: 2 }])
       expect(result.archived).toEqual([])
+    }))
+
+  it.effect("archives an attached child held by the supplied child owner", () =>
+    Effect.gen(function*() {
+      const childOwner = { ...owner, nonce: "child-owner" }
+      const result = yield* (
+        Effect.gen(function*() {
+          yield* Migrations.run
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          const store = yield* SqlTimeTravelStore.make
+          for (const [runId, runOwner] of [["parent", owner], ["child", childOwner]] as const) {
+            yield* sql`
+              INSERT INTO flows_runs
+                (run_id, status, created_at_ms, state_json,
+                 owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms)
+              VALUES (${runId}, 'running', 0, '{}',
+                      ${runOwner.hostId}, ${runOwner.pid}, ${runOwner.nonce}, 0)
+            `
+          }
+          for (const [runId, seq] of [["parent", 0], ["parent", 2], ["child", 0]] as const) {
+            yield* sql`
+              INSERT INTO flows_journal_events
+                (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                 event_type, payload_json, meta_json)
+              VALUES (${runId}, ${seq}, ${`${runId}-${seq}`}, 'source', ${seq}, 0, 'test', '{}', '{}')
+            `
+          }
+          yield* sql`
+            INSERT INTO flows_time_travel_edges
+              (parent_run_id, parent_seq, child_run_id, kind, attached)
+            VALUES
+              ('parent', 2, 'child', 'child', 1),
+              ('parent', 2, 'missing-child', 'child', 1)
+          `
+
+          const archive = yield* store.archiveAndTruncate(
+            "parent",
+            { lineageId: "parent/root", seq: 0 },
+            [],
+            owner,
+            new Map([["child", childOwner]])
+          )
+          const live = yield* sql<{ readonly run_id: string; readonly seq: number }>`
+            SELECT run_id, seq FROM flows_journal_events ORDER BY run_id, seq
+          `
+          const archived = yield* sql<{ readonly run_id: string; readonly seq: number }>`
+            SELECT run_id, seq FROM flows_time_travel_archive ORDER BY run_id, seq
+          `
+          return { archive, live, archived }
+        }).pipe(Effect.provide(TestDatabase.layer))
+      )
+
+      expect(result.archive.archived).toBe(2)
+      expect(result.live).toEqual([{ run_id: "parent", seq: 0 }])
+      expect(result.archived).toEqual([
+        { run_id: "child", seq: 0 },
+        { run_id: "parent", seq: 2 }
+      ])
     }))
 })

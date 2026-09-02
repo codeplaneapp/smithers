@@ -674,7 +674,7 @@ describe("Rewind", () => {
               frame,
               owner,
               auditId: "audit-tail-moved",
-              expectedTail
+              expectedTail: { tail: expectedTail }
             })
           )
         ),
@@ -684,6 +684,41 @@ describe("Rewind", () => {
       expect(failure).toMatchObject({ code: "busy", message: "journal tail moved for run" })
       expect(store.state().audits).toEqual([])
       expect(store.state().archived).toEqual([])
+    }))
+
+  it.effect("refuses a record appended after validating an empty frame-zero journal", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make()
+      const entries: Array<JournalEvent.Entry> = []
+      const journal = Journal.makeNoop({
+        entries: ({ after }) =>
+          Effect.sync(() => ({
+            entries: entries.filter((entry) => entry.seq > (after ?? -1)),
+            hasMore: false
+          }))
+      })
+
+      const failure = yield* Effect.flip(provide(
+        Rewind.validate({ runId: "run", frame }).pipe(
+          Effect.flatMap((expectedTail) =>
+            Effect.sync(() => entries.push(journalEntry(0))).pipe(
+              Effect.andThen(
+                Rewind.rewind({
+                  runId: "run",
+                  frame,
+                  owner,
+                  auditId: "audit-empty-tail-moved",
+                  expectedTail: { tail: expectedTail }
+                })
+              )
+            )
+          )
+        ),
+        { store, runs: makeRuns([row("run")]), jj: makeJj("current").service, journal }
+      ))
+
+      expect(failure).toMatchObject({ code: "busy", message: "journal tail moved for run" })
+      expect(store.state().audits).toEqual([])
     }))
 
   it.effect("suspends with state derived at the rewind frame", () =>
@@ -758,6 +793,42 @@ describe("Rewind", () => {
       const afterReturn = pulses.length
       yield* TestClock.adjust(Ownership.heartbeatInterval)
       expect(pulses).toHaveLength(afterReturn)
+    }))
+
+  it.effect("lets the fenced suspension finish after intentional lease release stops the heartbeat", () =>
+    Effect.gen(function*() {
+      const transitionEntered = yield* Deferred.make<void>()
+      const releaseTransition = yield* Deferred.make<void>()
+      const heartbeatLost = yield* Deferred.make<void>()
+      const runs = makeRuns([row("run")], {
+        heartbeat: () =>
+          Deferred.succeed(heartbeatLost, undefined).pipe(
+            Effect.as({ _tag: "FenceLost" as const })
+          ),
+        transitionOwned: () =>
+          Deferred.succeed(transitionEntered, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseTransition)),
+            Effect.as({ _tag: "Transitioned" as const })
+          )
+      })
+      const store = MemoryTimeTravelStore.make({ records: [baseline()] })
+      const fiber = yield* Effect.forkChild(
+        provide(
+          Rewind.rewind({ runId: "run", frame, owner, auditId: "audit-intentional-release" }),
+          { store, runs, jj: makeJj("current").service }
+        ),
+        { startImmediately: true }
+      )
+
+      yield* Deferred.await(transitionEntered)
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
+      yield* Deferred.await(heartbeatLost)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseTransition, undefined)
+      const result = yield* Fiber.join(fiber)
+
+      expect(result.auditId).toBe("audit-intentional-release")
+      expect(store.state().audits[0]).toMatchObject({ status: "completed" })
     }))
 
   it.effect("persists every still-pending child when post-commit cancellation fails", () =>

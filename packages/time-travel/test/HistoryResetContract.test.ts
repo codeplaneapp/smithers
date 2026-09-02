@@ -52,9 +52,10 @@ const observeSql = (seq: number) =>
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const store = yield* SqlTimeTravelStore.make
     for (const runId of ["parent", "at-boundary", "after-boundary", "detached"]) {
+      const status = runId === "at-boundary" || runId === "after-boundary" ? "completed" : "suspended"
       yield* sql`
           INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
-          VALUES (${runId}, 'suspended', 0, '{}')
+          VALUES (${runId}, ${status}, 0, '{}')
         `
     }
     // The truncation is owner-fenced: the archive only commits while

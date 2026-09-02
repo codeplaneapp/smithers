@@ -242,7 +242,7 @@ describe("Recovery ownership arbitration", () => {
       expect(calls).toEqual(["claim:recovery-owner", "activate:5", "transitionOwned"])
     }))
 
-  it.effect("drains persisted child cancellations before completing a committed audit", () =>
+  it.effect("drains a compensated audit's persisted child plan when its archive committed", () =>
     Effect.gen(function*() {
       const childRunId = "pending-child"
       const rows = new Map<string, RunStore.RunRow>([
@@ -291,10 +291,18 @@ describe("Recovery ownership arbitration", () => {
             return { _tag: "Transitioned" as const }
           })
       })
-      const store = seeded(auditRow(
+      const store = MemoryTimeTravelStore.make({
+        records: [
+          { runId: "run", seq: 0, eventId: "event-0", payload: {} },
+          { runId: "run", seq: 1, eventId: "event-1", payload: {} }
+        ],
+        runOwners: new Map([["run", owner]])
+      })
+      yield* store.archiveAndTruncate("run", frame, [], owner)
+      yield* store.writeAudit(auditRow(
         {
           version: 1,
-          phase: "archive_committed",
+          phase: "compensated",
           originalStatus: "suspended",
           suffixCount: 1,
           suffixTailSeq: 1,
@@ -360,6 +368,58 @@ describe("Recovery ownership arbitration", () => {
         status: "completed",
         detail: { pendingChildren: [], cancelledChildren: [] }
       })
+    }))
+
+  it.effect("keeps a non-busy failure pending when acquired ownership cannot be returned", () =>
+    Effect.gen(function*() {
+      const childRunId = "release-child"
+      const store = seeded(auditRow(
+        {
+          version: 1,
+          phase: "archive_committed",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          warnings: [],
+          cancelledChildren: [],
+          pendingChildren: [childRunId]
+        } satisfies AuditDetail
+      ))
+      const firstRuns = RunStore.makeNoop({
+        get: (runId) =>
+          runId === "run"
+            ? Effect.succeed(baseRow({ status: "running", owner }))
+            : Effect.fail(runError("read child")),
+        transitionOwned: () => Effect.fail(runError("release ownership"))
+      })
+
+      const first = yield* runRecovery(firstRuns, { store })
+
+      expect(first.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "busy" } })
+      const firstMessage = first.outcomes[0]?._tag === "Busy" ? first.outcomes[0].error.message : ""
+      expect(firstMessage).toContain(`read pending child ${childRunId} failed`)
+      expect(firstMessage).toContain("could not give ownership back")
+      expect(firstMessage).toContain("release ownership failed")
+      expect(first.audits[0]).toMatchObject({
+        status: "in_progress",
+        detail: { pendingChildren: [childRunId] }
+      })
+
+      const parent = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
+      const secondRuns = RunStore.makeNoop({
+        ...parent,
+        get: (runId) =>
+          runId === "run"
+            ? parent.get(runId)
+            : Effect.succeed({
+              ...baseRow({ status: "cancelled", owner: null, heartbeatAtMs: null }),
+              runId
+            })
+      })
+      const second = yield* runRecovery(secondRuns, { store })
+
+      expect(second.outcomes).toEqual([{ _tag: "Completed", auditId: "audit" }])
+      expect(second.audits[0]).toMatchObject({ status: "completed", detail: { phase: "completed" } })
     }))
 
   it.effect("propagates a pending child read failure that is not a missing row", () =>
@@ -933,8 +993,11 @@ describe("Recovery ownership arbitration", () => {
 
       expect(outcomes[0]).toMatchObject({
         _tag: "Busy",
-        error: { code: "busy", message: "run run lost its recovery fence" }
+        error: { code: "busy" }
       })
+      expect(outcomes[0]?._tag === "Busy" ? outcomes[0].error.message : "").toContain(
+        "run run lost its recovery fence"
+      )
       expect(audits[0]).toMatchObject({ status: "in_progress", detail: { phase: "archive_committed" } })
     }))
 
@@ -972,14 +1035,14 @@ describe("Recovery ownership arbitration", () => {
         }
       )
 
-      expect(finish.outcomes[0]).toMatchObject({
-        _tag: "Failed",
-        error: { code: "unknown", message: "finish recovered suspension failed" }
-      })
-      expect(rollback.outcomes[0]).toMatchObject({
-        _tag: "Failed",
-        error: { code: "unknown", message: "restore recovered run failed" }
-      })
+      expect(finish.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "busy" } })
+      expect(finish.outcomes[0]?._tag === "Busy" ? finish.outcomes[0].error.message : "").toContain(
+        "finish recovered suspension failed"
+      )
+      expect(rollback.outcomes[0]).toMatchObject({ _tag: "Busy", error: { code: "busy" } })
+      expect(rollback.outcomes[0]?._tag === "Busy" ? rollback.outcomes[0].error.message : "").toContain(
+        "restore recovered run failed"
+      )
     }))
 
   it.effect("records a terminal failure when the rollback fence is lost", () =>
@@ -1024,8 +1087,11 @@ describe("Recovery ownership arbitration", () => {
 
       expect(outcomes[0]).toMatchObject({
         _tag: "Busy",
-        error: { code: "busy", message: "run run lost its rollback fence" }
+        error: { code: "busy" }
       })
+      expect(outcomes[0]?._tag === "Busy" ? outcomes[0].error.message : "").toContain(
+        "run run lost its rollback fence"
+      )
     }))
 
   it.effect("rolls back without consulting the journal when the rewind archived nothing", () =>

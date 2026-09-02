@@ -221,13 +221,19 @@ const assertExecutable = (plan: Plan): Effect.Effect<void, TimeTravelError> => {
  * Runs resolved tier-3 handlers in reverse journal order.
  *
  * A handler failure rolls back every earlier handler receipt before the typed
- * failure escapes.
+ * failure escapes. When `onReceipts` is supplied, it runs after each successful
+ * revert and before the next handler starts; a callback failure rolls back all
+ * receipts collected so far. A receipt is therefore considered durable only
+ * after its callback has succeeded.
  *
  * @since 0.1.0
  * @category compensation
  */
 export const compensate = (
-  plan: Plan
+  plan: Plan,
+  onReceipts?: (
+    receipts: ReadonlyArray<RollbackReceipt>
+  ) => Effect.Effect<void, TimeTravelError>
 ): Effect.Effect<
   ReadonlyArray<RollbackReceipt>,
   TimeTravelError,
@@ -264,6 +270,22 @@ export const compensate = (
             )
           }
           receipts.push(revertExit.value)
+          if (onReceipts !== undefined) {
+            const durableExit = yield* Effect.exit(onReceipts([...receipts]))
+            if (Exit.isFailure(durableExit)) {
+              const rollbackExit = yield* Effect.exit(rollbackHandlers(registry, receipts))
+              return yield* Effect.fail(
+                error(
+                  "compensation_failed",
+                  `could not persist compensation receipt for ${effect.id}: ${causeMessage(durableExit.cause)}`,
+                  {
+                    compensation: durableExit.cause,
+                    rollback: Exit.isFailure(rollbackExit) ? rollbackExit.cause : undefined
+                  }
+                )
+              )
+            }
+          }
         }
         return receipts
       })
