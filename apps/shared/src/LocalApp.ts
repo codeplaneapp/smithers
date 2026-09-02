@@ -409,6 +409,14 @@ export const splitLabel = (label: string): { readonly package: string; readonly 
  * reaches the renderer: the session answer carries only what a person sees.
  */
 export const CLOUD_ROUTE_PREFIX = "/api/cloud/"
+/*
+ * Lane citc: the workspace-terminal WebSocket tunnel. A browser upgrade can
+ * carry no custom header, so this route authorizes like `/ws` — the local
+ * session capability rides the subprotocol — and Bun bridges the socket to
+ * the cloud API's terminal WebSocket with the Bun-held bearer and plue's
+ * `terminal` subprotocol attached upstream.
+ */
+export const CLOUD_WS_ROUTE_PREFIX = "/api/cloud-ws/"
 export const CLOUD_AUTH_START_PATH = "/api/cloud-auth/start"
 export const CLOUD_AUTH_SESSION_PATH = "/api/cloud-auth/session"
 export const CLOUD_AUTH_SIGN_OUT_PATH = "/api/cloud-auth/sign-out"
