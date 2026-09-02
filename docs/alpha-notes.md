@@ -105,6 +105,8 @@ only.
 | `migrate` | `migrates a single-file JSX project through the bin (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
 | `migrate` | `records what a single-file project could not settle (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
 | `migrate` | `refuses what it cannot translate in a multi-workflow pack (${reason})` | `it.skip` when `SMITHERS_MIGRATE_SEAT` names no funded seat |
+| `std` | `streams a file larger than available memory (skipped: a hermetic test cannot exhaust its runner)` | `it.skip` |
+| `testing` | `registers a skipped layered Effect body` | `test.skip` |
 
 **`migrate`: apply against a real model.** The three cases in
 `packages/migrate/test/flow/MigrateFlow.live.e2e.test.ts` drive the migration
@@ -175,6 +177,26 @@ it regresses: nothing in this repository; a scaffolded project inherits a
 skipped test it can enable with its own endpoint. It is listed because the pin
 register scans package directories, not vitest include globs, and a pin the
 scanner can see is a pin the register documents.
+
+
+**`std`: the larger-than-memory stream.** `SearchConformance.test.ts` pins one
+`it.skip` whose title says why: the conformance suite proves `Grep` streams a
+file instead of reading it whole, and the only direct proof is a file larger
+than the runner's memory, which a hermetic test cannot create without
+exhausting the process that runs it. The bounded-window and truncation cases
+around it prove the same property on files that fit. What breaks if it
+regresses: a search over a large file reads it whole and the runner, not the
+caller, runs out of memory. Closing it means a dedicated runner with a
+tmpfs larger than its heap, which the RC does not provision.
+
+**`testing`: the skip registration case.** `Vitest.test.ts` pins one
+`test.skip` on purpose: `@smthrs/testing/Vitest` wraps vitest's `test` with
+Effect bodies, and the case proves that `.skip` on that wrapper registers a
+skipped test rather than running the `Effect.die` it is handed. It is a test
+of the skip form itself, so it can never execute. What breaks if it regresses:
+a `.skip` on the wrapper runs the body, and a suite that parked a live case
+starts paying for it. It stays a pin because vitest reports a skipped test
+only by skipping it.
 
 ### Resolved: the database open-retry pin
 
