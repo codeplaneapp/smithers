@@ -49,7 +49,7 @@ const GraphCardBody = lazy(() =>
   import("./cards/GraphCard").then((module) => ({ default: module.GraphCardBody }))
 )
 
-const pillStatus = (card: Card): string => {
+export const pillStatus = (card: Card): string => {
   if (card.status === "error") return "failed"
   if (card.kind === "approval") {
     if (card.status === "acted") return card.payload.decision ?? "approved"
@@ -121,8 +121,14 @@ const pillStatus = (card: Card): string => {
   }
   if (card.kind === "sync-ops") {
     if (card.payload.error !== undefined) return "failed"
-    if (card.payload.runState === "failed") return "failed"
-    return card.payload.runState === "running" ? "running" : "done"
+    /*
+     * The run state comes from the sync-run DTO alone; until plue#468/#470
+     * ship it is null, and null is an outcome the app cannot see — it wears
+     * the neutral pill, never "done" (review finding 3: a sync that had just
+     * started read as finished).
+     */
+    if (card.payload.runState === null) return "pending"
+    return card.payload.runState
   }
   if (
     card.kind === "issue-list" ||

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { timeLabel } from "./Timestamps"
+import { ageLabel, timeLabel, untilLabel } from "./Timestamps"
 
 /*
  * §28.9: the transcript is persisted, so a stamp is read on days other than
@@ -34,5 +34,35 @@ describe("a transcript stamp says which day it belongs to", () => {
 
   test("a stamp from later today is still the time alone — a clock skew is not a day", () => {
     expect(timeLabel(at("2026-08-19T23:00:00"), now)).not.toContain("Yesterday")
+  })
+})
+
+/*
+ * ADR 0005 "Rate limits": a reset is always ahead. `ageLabel` clamps a future
+ * instant to "just now" (review finding 2 — the line read "resets just now"
+ * for a reset minutes away), so the future has its own vocabulary.
+ */
+describe("a distance to an instant ahead", () => {
+  const now = at("2026-09-02T12:28:00")
+
+  test("minutes ahead count down, rounded up so the reset is never claimed early", () => {
+    expect(untilLabel("2026-09-02T12:40:00", now)).toBe("in 12 min")
+    expect(untilLabel("2026-09-02T12:39:30", now)).toBe("in 12 min")
+    expect(untilLabel("2026-09-02T12:28:30", now)).toBe("in under a minute")
+  })
+
+  test("an hour or more ahead reads as the clock time", () => {
+    const label = untilLabel("2026-09-02T14:05:00", now)
+    expect(label).toStartWith("at ")
+    expect(label).toMatch(/2:05/)
+  })
+
+  test("an instant already reached reads now; an unparseable stamp renders verbatim", () => {
+    expect(untilLabel("2026-09-02T12:20:00", now)).toBe("now")
+    expect(untilLabel("soon", now)).toBe("soon")
+  })
+
+  test("the age vocabulary still clamps the future — which is why the reset never uses it", () => {
+    expect(ageLabel("2026-09-02T12:40:00", now)).toBe("just now")
   })
 })

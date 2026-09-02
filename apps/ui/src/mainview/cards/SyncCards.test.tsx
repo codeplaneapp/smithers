@@ -3,13 +3,16 @@ import type { StorageApi } from "@tanstack/db"
 import { afterAll, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
+import { pillStatus } from "../ChatCards"
 import { ControllerTestProvider } from "../ControllerContext"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "../state/AppController"
 import type { AppController } from "../state/AppController"
 import type { Card } from "../state/AppState"
 import { createAppStore } from "../state/AppStore"
-import { ConnectorSetupCardBody, SyncOpsCardBody } from "./SyncCards"
+import { IssueCardBody } from "./IssueCards"
+import { RepoImportCardBody } from "./RepoImportCard"
+import { ConnectorSetupCardBody, rateLimitHeldUntil, SyncOpsCardBody } from "./SyncCards"
 
 /*
  * The lane-sync cards (ADR 0005): the Linear wizard renders its steps, the
@@ -127,10 +130,26 @@ const renderSetup = (
   return { host, commands }
 }
 
-const click = (host: HTMLElement, text: string): void => {
+const buttonNamed = (host: HTMLElement, text: string): HTMLButtonElement => {
   const button = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent?.includes(text))
   if (button === undefined) throw new Error(`no button named ${text}`)
-  flushSync(() => button.click())
+  return button
+}
+
+const click = (host: HTMLElement, text: string): void => {
+  flushSync(() => buttonNamed(host, text).click())
+}
+
+/** An ISO stamp a number of minutes from now — the rate-limit line reads against the real clock. */
+const minutesFromNow = (minutes: number): string => new Date(Date.now() + minutes * 60_000).toISOString()
+
+const renderWith = (controller: AppController, node: React.ReactNode) => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  flushSync(() => {
+    createRoot(host).render(<ControllerTestProvider controller={controller}>{node}</ControllerTestProvider>)
+  })
+  return host
 }
 
 const controllerWithRepositories = async (): Promise<AppController> => {
@@ -228,12 +247,79 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
     expect(host.textContent).toContain("ENG · Engineering → will/smithers")
     click(host, "Sync now")
     click(host, "Activity")
-    click(host, "Disconnect")
     expect(commands).toEqual([
       { name: "linear.sync", args: "7" },
-      { name: "linear.activity", args: "7" },
-      { name: "linear.disconnect", args: "7" }
+      { name: "linear.activity", args: "7" }
     ])
+  })
+
+  test("Disconnect arms a confirm row; only its second click runs the flow, with the team key typed back", () => {
+    /*
+     * Review finding 4: one click on a ghost button deleted the integration.
+     * The card-level confirm is the workspace card's rule — the act itself
+     * carries the team key as its own input, so a slash cannot skip it either.
+     */
+    const { host, commands } = renderSetup(
+      setupCard({
+        phase: "connected",
+        integration: { id: 7, teamKey: "ENG", teamName: "Engineering", active: true, lastSyncAt: null }
+      })
+    )
+
+    expect(host.textContent).not.toContain("Disconnect Linear ENG from will/smithers?")
+    click(host, "Disconnect")
+    expect(commands).toEqual([])
+    expect(host.textContent).toContain("Disconnect Linear ENG from will/smithers?")
+
+    click(host, "Disconnect ENG")
+    expect(commands).toEqual([{ name: "linear.disconnect", args: "7 ENG" }])
+  })
+})
+
+describe("the frame pill of a sync-ops card", () => {
+  test("a null run state (no run DTO yet, plue#468/#470) is never done", () => {
+    /* Review finding 3: null fell into "done", so a sync that had just started wore a finished pill. */
+    expect(pillStatus(syncOpsCard({ runState: null, trigger: "sync started" }))).toBe("pending")
+    expect(pillStatus(syncOpsCard({ runState: "running" }))).toBe("running")
+    expect(pillStatus(syncOpsCard({ runState: "done" }))).toBe("done")
+    expect(pillStatus(syncOpsCard({ runState: "failed" }))).toBe("failed")
+    expect(pillStatus(syncOpsCard({ runState: null, error: "Starting the sync failed (500)" }))).toBe("failed")
+  })
+})
+
+describe("IssueCardBody — the Linear link (lane sync)", () => {
+  const issueCard = (url: string): Extract<Card, { kind: "issue" }> => ({
+    id: "issue-will/smithers-90",
+    kind: "issue",
+    title: "#90",
+    status: "acted",
+    createdAt: 0,
+    ordinal: 0,
+    payload: {
+      repo: "will/smithers",
+      number: 90,
+      title: "Flaky test",
+      state: "open",
+      author: "ana",
+      issueBody: "",
+      labels: [],
+      comments: [],
+      linear: { identifier: "ENG-482", url }
+    }
+  })
+
+  test("an https linear.app URL off the DTO is the link; any other scheme or host renders the identifier as text", async () => {
+    /* Review finding 10: the href was rendered straight off the DTO while the install URL was origin-vetted. */
+    const controller = await controllerWithRepositories()
+    const linked = renderWith(controller, <IssueCardBody card={issueCard("https://linear.app/acme/issue/ENG-482/flaky")} onRunCommand={() => {}} />)
+    expect(linked.querySelector("a")?.getAttribute("href")).toBe("https://linear.app/acme/issue/ENG-482/flaky")
+    expect(linked.textContent).toContain("Linear ENG-482")
+
+    for (const hostile of ["javascript:alert(1)", "http://linear.app/acme/issue/ENG-482", "https://linear.app.evil.example/x", "not a url"]) {
+      const host = renderWith(controller, <IssueCardBody card={issueCard(hostile)} onRunCommand={() => {}} />)
+      expect(host.querySelector("a")).toBeNull()
+      expect(host.textContent).toContain("Linear ENG-482")
+    }
   })
 })
 
@@ -263,17 +349,86 @@ describe("ConnectorSetupCardBody — the GitHub card", () => {
     expect(installed.commands).toEqual([{ name: "github.reconcile", args: "will/smithers" }])
   })
 
-  test("the rate-limit line follows the ADR", () => {
-    const { host } = renderSetup(
-      setupCard({
-        connector: "github",
-        steps: [],
-        rateLimit: { limit: 5000, remaining: 0, resetAt: "2026-09-02T13:00:00Z" }
-      })
+  test("the rate-limit line follows the ADR: a reset ahead reads as time ahead, never as an age", () => {
+    /* Review finding 2: the age label clamped a future reset to "resets just now". */
+    const ahead = renderSetup(
+      setupCard({ connector: "github", steps: [], rateLimit: { limit: 5000, remaining: 0, resetAt: minutesFromNow(12) } })
+    )
+    expect(ahead.host.textContent).toContain("GitHub rate limit reached · 0 of 5,000 · resets in 12 min · Retry after")
+    expect(ahead.host.textContent).not.toContain("just now")
+
+    const later = renderSetup(
+      setupCard({ connector: "github", steps: [], rateLimit: { limit: 5000, remaining: 0, resetAt: minutesFromNow(90) } })
+    )
+    expect(later.host.textContent).toMatch(/resets at \d{1,2}:\d{2}/)
+
+    const behind = renderSetup(
+      setupCard({ connector: "github", steps: [], rateLimit: { limit: 5000, remaining: 0, resetAt: minutesFromNow(-4) } })
+    )
+    expect(behind.host.textContent).toContain("reset 4 min ago")
+  })
+
+  test("a refused call holds Re-check and Reconcile until the reset, with the time on them", () => {
+    /* Review finding 5: every retry stayed clickable through the window, re-posting and re-failing. */
+    const resetAt = minutesFromNow(12)
+    const held = renderSetup(
+      setupCard({ connector: "github", steps: [], rateLimit: { limit: 5000, remaining: 0, resetAt }, error: "GitHub rate limit exhausted" })
+    )
+    const clock = new Date(resetAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    const recheck = buttonNamed(held.host, "Re-check")
+    const reconcile = buttonNamed(held.host, "Reconcile")
+    expect(recheck.disabled).toBe(true)
+    expect(reconcile.disabled).toBe(true)
+    expect(recheck.textContent).toContain(`Re-check after ${clock}`)
+    expect(reconcile.textContent).toContain(`Reconcile after ${clock}`)
+    flushSync(() => recheck.click())
+    expect(held.commands).toEqual([])
+
+    /* A low-but-positive budget shows the line and holds nothing; a reset behind us holds nothing. */
+    const low = renderSetup(
+      setupCard({ connector: "github", steps: [], rateLimit: { limit: 5000, remaining: 40, resetAt } })
+    )
+    expect(buttonNamed(low.host, "Re-check").disabled).toBe(false)
+    const passed = renderSetup(
+      setupCard({ connector: "github", steps: [], rateLimit: { limit: 5000, remaining: 0, resetAt: minutesFromNow(-1) } })
+    )
+    expect(buttonNamed(passed.host, "Re-check").disabled).toBe(false)
+    expect(rateLimitHeldUntil({ limit: 5000, remaining: 0, resetAt: null })).toBeNull()
+  })
+})
+
+describe("RepoImportCardBody — the rate-limited retry", () => {
+  test("a structured 429 holds Try again until the reset, with the time on it", () => {
+    const resetAt = minutesFromNow(12)
+    const commands: Array<{ name: string; args?: string }> = []
+    const { host } = render(
+      <RepoImportCardBody
+        card={{
+          id: "repo-import-will/flows",
+          kind: "repo-import",
+          title: "Import · will/flows",
+          status: "error",
+          createdAt: 0,
+          ordinal: 0,
+          payload: {
+            repo: "will/flows",
+            jobId: null,
+            phase: "failed",
+            detail: "GitHub rate limit exhausted",
+            rateLimit: { limit: 5000, remaining: 0, resetAt }
+          }
+        }}
+        onRunCommand={(name, args) => commands.push({ name, args })}
+      />
     )
 
-    expect(host.textContent).toContain("GitHub rate limit reached · 0 of 5,000")
-    expect(host.textContent).toContain("Retry after")
+    const clock = new Date(resetAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    const retry = buttonNamed(host, "Try again")
+    expect(retry.disabled).toBe(true)
+    expect(retry.textContent).toContain(`Try again after ${clock}`)
+    expect(host.textContent).toContain("resets in 12 min")
+    flushSync(() => retry.click())
+    expect(commands).toEqual([])
   })
 })
 

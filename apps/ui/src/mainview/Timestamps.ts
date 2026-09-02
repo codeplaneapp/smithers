@@ -46,3 +46,22 @@ export const ageLabel = (iso: string, now: number = Date.now()): string => {
   if (hours < 24) return `${hours} h ago`
   return timeLabel(at, now)
 }
+
+/*
+ * A short distance to an instant still AHEAD (`in 12 min`, `at 12:40`) — the
+ * vocabulary for a rate-limit reset (ADR 0005 "Rate limits"). `ageLabel`
+ * clamps a future instant to "just now", which told the user a limit had
+ * already reset while GitHub would still refuse the call; a reset is always
+ * ahead, so it needs its own words. An instant already reached reads `now`;
+ * an unparseable stamp renders verbatim rather than a lie.
+ */
+export const untilLabel = (iso: string, now: number = Date.now()): string => {
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return iso
+  const seconds = Math.round((at - now) / 1000)
+  if (seconds <= 0) return "now"
+  if (seconds < 60) return "in under a minute"
+  const minutes = Math.ceil(seconds / 60)
+  if (minutes < 60) return `in ${minutes} min`
+  return `at ${timeLabel(at, now)}`
+}

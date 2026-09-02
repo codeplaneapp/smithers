@@ -11,8 +11,9 @@
 import { Badge, Button } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
 import { Check, Circle, ExternalLink, Plug, RefreshCw, Unplug, X } from "lucide-react"
+import { useCallback, useState, useSyncExternalStore } from "react"
 import { useController } from "../ControllerContext"
-import { ageLabel } from "../Timestamps"
+import { ageLabel, timeLabel, untilLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
 
 export interface SyncCardActions {
@@ -21,18 +22,63 @@ export interface SyncCardActions {
 
 type ConnectorSetupCard = Extract<Card, { kind: "connector-setup" }>
 type SyncOpsCard = Extract<Card, { kind: "sync-ops" }>
+type RateLimit = { readonly limit: number; readonly remaining: number; readonly resetAt: string | null }
 
-/** The ADR's rate-limit line; the reset reads as a clock/age, never invented. */
-export const RateLimitLine = ({
-  rateLimit
-}: {
-  readonly rateLimit: { readonly limit: number; readonly remaining: number; readonly resetAt: string | null }
-}) => (
-  <p className="world-card-path">
-    {`GitHub rate limit reached · ${rateLimit.remaining.toLocaleString()} of ${rateLimit.limit.toLocaleString()}`}
-    {rateLimit.resetAt !== null ? ` · resets ${ageLabel(rateLimit.resetAt)}` : ""} · Retry after
-  </p>
-)
+/*
+ * The clock a rate-limit line reads against. A reset still ahead re-renders
+ * the subscriber at each minute boundary and once more at the reset itself,
+ * so `resets in 12 min` counts down and a held Retry re-enables on time. An
+ * external clock subscription (useSyncExternalStore), never a lifecycle
+ * effect; the snapshot is the whole minutes left, so a tick always changes it.
+ */
+const useClockUntil = (iso: string | null): void => {
+  const at = iso === null ? Number.NaN : Date.parse(iso)
+  const subscribe = useCallback((onTick: () => void) => {
+    const remaining = at - Date.now()
+    if (Number.isNaN(remaining) || remaining <= 0) return () => {}
+    const timer = setTimeout(onTick, remaining % 60_000 || 60_000)
+    return () => clearTimeout(timer)
+  }, [at])
+  const snapshot = (): number => (Number.isNaN(at) ? -1 : Math.max(0, Math.ceil((at - Date.now()) / 60_000)))
+  useSyncExternalStore(subscribe, snapshot, snapshot)
+}
+
+/**
+ * The instant a refused call's Retry waits on (ADR 0005 "Rate limits": the
+ * Retry action is disabled until the reset): an exhausted budget with its
+ * reset still ahead. Null when Retry may run now — a low-but-positive budget
+ * shows the line and holds nothing.
+ */
+export const rateLimitHeldUntil = (rateLimit: RateLimit, now: number = Date.now()): number | null => {
+  if (rateLimit.remaining > 0 || rateLimit.resetAt === null) return null
+  const at = Date.parse(rateLimit.resetAt)
+  return Number.isNaN(at) || at <= now ? null : at
+}
+
+/** The clock time a card's Retry is held until, or null when it may run; re-renders when the hold lifts. */
+export const useRetryHold = (rateLimit: RateLimit | undefined): string | null => {
+  useClockUntil(rateLimit?.resetAt ?? null)
+  if (rateLimit === undefined) return null
+  const until = rateLimitHeldUntil(rateLimit)
+  return until === null ? null : timeLabel(until)
+}
+
+/** The ADR's rate-limit line; a reset ahead reads `resets in 12 min` / `resets at 12:40`, one behind `reset 4 min ago`. */
+export const RateLimitLine = ({ rateLimit }: { readonly rateLimit: RateLimit }) => {
+  useClockUntil(rateLimit.resetAt)
+  const now = Date.now()
+  const reset = rateLimit.resetAt === null
+    ? ""
+    : Date.parse(rateLimit.resetAt) > now
+    ? ` · resets ${untilLabel(rateLimit.resetAt, now)}`
+    : ` · reset ${ageLabel(rateLimit.resetAt, now)}`
+  return (
+    <p className="world-card-path">
+      {`GitHub rate limit reached · ${rateLimit.remaining.toLocaleString()} of ${rateLimit.limit.toLocaleString()}`}
+      {reset} · Retry after
+    </p>
+  )
+}
 
 const stepIcon = (state: "pending" | "active" | "done" | "error") => {
   switch (state) {
@@ -81,6 +127,13 @@ const RepositoryPick = ({
 /** The Linear wizard and, on confirm, the connected state (the SAME card). */
 const LinearSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetupCard } & SyncCardActions) => {
   const { repo, steps, teams, teamId, setupKey, integration } = card.payload
+  /*
+   * Disconnect's card-level confirm (the workspace card's rule): the first
+   * click arms a confirm row, the second sends the team key back as the
+   * flow's own input, so one click never disconnects. Armed-or-not is
+   * transient chrome state, never a store fact.
+   */
+  const [disconnectArmed, setDisconnectArmed] = useState(false)
   if (card.payload.phase === "connected" && integration !== undefined) {
     return (
       <div className="world-card-list">
@@ -101,10 +154,25 @@ const LinearSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetup
           <Button size="sm" variant="ghost" data-flow="linear.activity" onClick={() => onRunCommand("linear.activity", String(integration.id))}>
             Activity
           </Button>
-          <Button size="sm" variant="ghost" data-flow="linear.disconnect" onClick={() => onRunCommand("linear.disconnect", String(integration.id))}>
+          <Button size="sm" variant="ghost" data-flow="linear.disconnect" onClick={() => setDisconnectArmed((armed) => !armed)}>
             <Unplug size={14} /> Disconnect
           </Button>
         </div>
+        {disconnectArmed ?
+          (
+            <div className="world-card-row">
+              <span className="world-card-path">{`Disconnect Linear ${integration.teamKey} from ${repo}?`}</span>
+              <Button
+                size="sm"
+                variant="destructive"
+                data-flow="linear.disconnect"
+                onClick={() => onRunCommand("linear.disconnect", `${integration.id} ${integration.teamKey}`)}
+              >
+                {`Disconnect ${integration.teamKey}`}
+              </Button>
+            </div>
+          ) :
+          null}
         {card.payload.rateLimit !== undefined ? <RateLimitLine rateLimit={card.payload.rateLimit} /> : null}
         {card.payload.error !== undefined ? <p className="world-card-path">{card.payload.error}</p> : null}
       </div>
@@ -166,6 +234,8 @@ const LinearSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetup
 const GitHubSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetupCard } & SyncCardActions) => {
   const { repo, phase, installationId, configured, installUrl } = card.payload
   const connected = phase === "connected"
+  /* A refused call holds Re-check and Reconcile until the reset, with the time on them (ADR "Rate limits"). */
+  const heldUntil = useRetryHold(card.payload.rateLimit)
   return (
     <div className="world-card-list">
       <div className="world-card-row">
@@ -187,11 +257,11 @@ const GitHubSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetup
             </Button>
           ) :
           null}
-        <Button size="sm" variant="ghost" data-flow="github.app" onClick={() => onRunCommand("github.app", repo)}>
-          <RefreshCw size={14} /> Re-check
+        <Button size="sm" variant="ghost" data-flow="github.app" disabled={heldUntil !== null} onClick={() => onRunCommand("github.app", repo)}>
+          <RefreshCw size={14} /> {heldUntil === null ? "Re-check" : `Re-check after ${heldUntil}`}
         </Button>
-        <Button size="sm" variant="ghost" data-flow="github.reconcile" onClick={() => onRunCommand("github.reconcile", repo)}>
-          Reconcile
+        <Button size="sm" variant="ghost" data-flow="github.reconcile" disabled={heldUntil !== null} onClick={() => onRunCommand("github.reconcile", repo)}>
+          {heldUntil === null ? "Reconcile" : `Reconcile after ${heldUntil}`}
         </Button>
       </div>
       {card.payload.rateLimit !== undefined ? <RateLimitLine rateLimit={card.payload.rateLimit} /> : null}

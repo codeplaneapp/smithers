@@ -10,7 +10,7 @@
 import { Badge, Button } from "@smthrs/ui"
 import { CloudDownload, RefreshCw } from "lucide-react"
 import type { Card } from "../state/AppState"
-import { RateLimitLine } from "./SyncCards"
+import { RateLimitLine, useRetryHold } from "./SyncCards"
 
 const PHASE_VARIANT = {
   starting: "outline",
@@ -27,6 +27,8 @@ export const RepoImportCardBody = ({
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
   const { repo, jobId, phase, detail, counts, repository, workspaceId, rateLimit } = card.payload
+  /* A refused GitHub call holds Try again until the reset, with the time on it (ADR 0005 "Rate limits"). */
+  const heldUntil = useRetryHold(rateLimit)
   return (
     <div className="world-card-list">
       <div className="world-card-row">
@@ -70,9 +72,10 @@ export const RepoImportCardBody = ({
               size="sm"
               variant="outline"
               data-flow={jobId !== null ? "repos.import.retry" : "repos.import"}
+              disabled={heldUntil !== null}
               onClick={() => (jobId !== null ? onRunCommand("repos.import.retry", jobId) : onRunCommand("repos.import", repo))}
             >
-              <RefreshCw size={14} /> Try again
+              <RefreshCw size={14} /> {heldUntil === null ? "Try again" : `Try again after ${heldUntil}`}
             </Button>
           </div>
         ) :

@@ -62,6 +62,7 @@ const PRESENTATION_ONLY = [
   "onDismissDrawer(", // graph card detail drawer close: local presentation state (which node is focused)
   "setOpenLog(", // run timeline log panel: which row's log is open — local presentation state
   "setDeleteDraft", // workspace card delete: the typed-confirm row's open state and its draft — local presentation state; the act itself rides workspace.delete
+  "setDisconnectArmed", // connector-setup card disconnect: the confirm row's open state — local presentation state; the act itself rides linear.disconnect
   "onRunCommand(", // delegated: App.tsx binds it to the registry's runCommand/runCommandArgs
   // Card maximize/minimize: each calls the delegated onMaximize/onMinimize (bound to card.maximize /
   // card.minimize at the App.tsx and CardTabBody binding sites) and then hands focus to the button
@@ -184,11 +185,12 @@ describe("launch-law parity: every affordance is a command", () => {
       /*
        * Lane sync (ADR 0005): the connector-setup card's Open Linear, the
        * per-team picks, the repository pick, Connect, the connected state's
-       * Sync now / Activity / Disconnect, the GitHub card's Open GitHub /
-       * Re-check / Reconcile, and the sync-ops card's Retry / Show more —
-       * all through onRunCommand with data-flow set.
+       * Sync now / Activity / Disconnect (the arming click and the confirm
+       * row's typed-key send), the GitHub card's Open GitHub / Re-check /
+       * Reconcile, and the sync-ops card's Retry / Show more — all through
+       * onRunCommand with data-flow set.
        */
-      "../cards/SyncCards.tsx": 12,
+      "../cards/SyncCards.tsx": 13,
       /* The /theme picker: nine swatches, one shared handler through onRunCommand. */
       "../cards/ThemePickerCard.tsx": 1,
       /*
