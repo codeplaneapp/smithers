@@ -11,6 +11,11 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, PlatformError, Ref } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { spawn as spawnNode } from "node:child_process"
+import { once } from "node:events"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { cancelGuard, cancelledStatus, cancelMarker, hostKillScript, killScript } from "../src/internal/killScript.ts"
 import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
@@ -127,9 +132,10 @@ describe("RemoteChildProcessSpawner kill", () => {
 describe("guest kill scripts", () => {
   it("pins the pidfile-waiting guest script", () => {
     expect(killScript("/tmp/.smthrs-sbx/0.pid", "TERM")).toBe(
-      "n=0; while [ ! -s /tmp/.smthrs-sbx/0.pid ] && [ \"$n\" -lt 5 ]; do sleep 1; n=$((n+1)); done; "
+      ": > /tmp/.smthrs-sbx/0.pid.cancel || exit 1; "
+        + "n=0; while [ ! -s /tmp/.smthrs-sbx/0.pid ] && [ \"$n\" -lt 5 ]; do sleep 1; n=$((n+1)); done; "
         + "p=$(cat /tmp/.smthrs-sbx/0.pid 2>/dev/null); "
-        + "if [ -z \"$p\" ]; then : > /tmp/.smthrs-sbx/0.pid.cancel && exit 0; exit 1; fi; "
+        + "if [ -z \"$p\" ]; then exit 0; fi; "
         + "kids() { t=$1; for d in /proc/[0-9]*; do read -r s 2>/dev/null < \"$d/stat\" || continue; "
         + "r=${s##*) }; set -- $r; [ \"$2\" = \"$t\" ] || continue; "
         + "c=${d#/proc/}; ( kids \"$c\" ); echo \"$c\"; done; }; "
@@ -139,6 +145,61 @@ describe("guest kill scripts", () => {
         + "kill -0 \"$p\" 2>/dev/null || exit 0; "
         + "exit 1"
     )
+  })
+
+  it("plants cancellation before reading an empty pidfile", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "smthrs-kill-order-"))
+    const bin = join(directory, "bin")
+    const pidfile = join(directory, "command.pid")
+    const read = join(directory, "cat-read")
+    const release = join(directory, "release-cat")
+    const ran = join(directory, "command-ran")
+    mkdirSync(bin)
+    writeFileSync(pidfile, "\n")
+    writeFileSync(
+      join(bin, "cat"),
+      "#!/bin/sh\n/bin/cat \"$1\"\n: > \"$SMTHRS_READ\"\n"
+        + "while [ ! -e \"$SMTHRS_RELEASE\" ]; do /bin/sleep 0.01; done\n"
+    )
+    chmodSync(join(bin, "cat"), 0o755)
+
+    const killer = spawnNode("/bin/sh", ["-c", killScript(pidfile, "TERM")], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+        SMTHRS_READ: read,
+        SMTHRS_RELEASE: release
+      },
+      stdio: "ignore"
+    })
+    let wrapperCode: number | null = null
+    let commandRan = false
+    try {
+      // The intercepted cat has already read the old newline, which command
+      // substitution turns into an empty pid, but it holds the kill before
+      // the following shell statement so the wrapper can take the old window.
+      for (let attempts = 0; !existsSync(read) && attempts < 200; attempts++) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect(existsSync(read)).toBe(true)
+      const wrapper = spawnNode(
+        "/bin/sh",
+        ["-c", `echo $$ > ${pidfile}; ${cancelGuard(pidfile)}; : > ${ran}`],
+        { stdio: "ignore" }
+      )
+      const wrapperExit = await once(wrapper, "exit") as [number | null, NodeJS.Signals | null]
+      wrapperCode = wrapperExit[0]
+      commandRan = existsSync(ran)
+      writeFileSync(release, "")
+      await once(killer, "exit")
+    } finally {
+      if (!existsSync(release)) writeFileSync(release, "")
+      if (killer.exitCode === null) killer.kill()
+      rmSync(directory, { recursive: true, force: true })
+    }
+
+    expect(wrapperCode).toBe(cancelledStatus)
+    expect(commandRan).toBe(false)
   })
 
   it("pins the host-side script and its pgrep-or-proc descent", () => {
@@ -158,9 +219,9 @@ describe("guest kill scripts", () => {
   })
 
   it("pins the cancellation marker the two halves agree on", () => {
-    // The kill writes this path when no pid was recorded yet and the wrapper
-    // reads it before becoming the command. They are two programs on two
-    // machines; only this literal keeps them talking about the same file.
+    // The kill writes this path before it reads any pid and the wrapper reads
+    // it before becoming the command. They are two programs on two machines;
+    // only this literal keeps them talking about the same file.
     expect(cancelMarker("/tmp/.smthrs-sbx/7.pid")).toBe("/tmp/.smthrs-sbx/7.pid.cancel")
     expect(cancelGuard("/tmp/.smthrs-sbx/7.pid")).toBe(
       "if [ -e /tmp/.smthrs-sbx/7.pid.cancel ]; then exit 143; fi"

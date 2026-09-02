@@ -115,7 +115,16 @@ const joined = (chunks: ReadonlyArray<Uint8Array>, length: number): Uint8Array =
  * accumulator per chunk cost O(n^2) bytes moved, roughly 32 GiB for a 16 MiB
  * input arriving in 4 KiB pieces. Counting as the chunks arrive fails the
  * spawn on the first chunk that would cross the bound, which interrupts the
- * producer, and the retained chunks are copied exactly once on success.
+ * producer.
+ *
+ * Each accepted chunk is copied when it arrives rather than retained. A
+ * producer with a fixed read buffer — the ordinary shape for anything reading
+ * a file or a socket into scratch space — emits the same `Uint8Array` again
+ * with new contents, so retaining the references and copying them at the end
+ * delivered the last chunk's bytes in every earlier chunk's place: an input
+ * of `[1, 2]` reached the provider as `[2, 2]`. The copy is the only moment
+ * the bytes are demonstrably the caller's, and two linear passes over an
+ * input this seam already holds whole cost nothing next to that.
  */
 const collectStdin = (
   command: string,
@@ -142,7 +151,7 @@ const collectStdin = (
               )
             )
           }
-          chunks.push(part)
+          chunks.push(part.slice())
           length += part.length
           return Effect.void
         })
@@ -284,12 +293,24 @@ const handleOf = (
       // the provider's own release finalizer tears down whatever it owns. A
       // process this side has already seen exit is left alone: the pid it
       // named may belong to someone else by now.
+      //
+      // `running` is what this side has SEEN, and it lags what happened.
+      // `ChildProcessSpawner.string` and `lines` are `Stream.mkString` and
+      // `Stream.runCollect` over stdout alone: they close the process scope
+      // the moment the output ends, which is before the forked observation of
+      // the exit has landed, so a command that finished cleanly is signalled
+      // anyway. That signal is harmless, but waiting on it is not — a provider
+      // whose `kill` is slow charged every `string` caller the full
+      // `signalWithin` bound after its command had already exited. So the wait
+      // also ends the moment the exit observation arrives: the signal is still
+      // sent for a process that may still be alive, and a process that turns
+      // out to have finished stops costing anybody time.
       yield* Effect.addFinalizer(() =>
         running
           ? Effect.ignore(
             Effect.raceFirst(
               kill(process, rightmostOptions(child).killSignal ?? defaultSignal),
-              elapsed(signalWithin)
+              Effect.raceFirst(Effect.ignore(Deferred.await(completed)), elapsed(signalWithin))
             )
           )
           : Effect.void

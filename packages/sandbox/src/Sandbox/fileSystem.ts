@@ -77,8 +77,17 @@ interface ProbeResult {
  * machine's workspace, contradicting this module's own promise. `glob` is
  * absent on purpose: its first argument is a pattern, not a path, and
  * `makeTempDirectory` and its siblings take no path at all.
+ *
+ * `symlink` is `"second"` rather than `2`. Its first argument is the text
+ * stored inside the link, not a path to reach, and POSIX resolves a relative
+ * one against the directory the LINK sits in. Rooting it changed where the
+ * link pointed: `symlink("../shared", "sub/link")` in `/work` means
+ * `/work/shared`, while the rooted `/work/../shared` is written into the link
+ * as `/shared` and names something one directory outside the workspace.
+ * `link` and `rename` keep both arguments rooted, because both of theirs are
+ * paths the machine has to reach.
  */
-const pathArity: Readonly<Record<string, 1 | 2>> = {
+const pathArity: Readonly<Record<string, 1 | 2 | "second">> = {
   access: 1,
   chmod: 1,
   chown: 1,
@@ -98,7 +107,7 @@ const pathArity: Readonly<Record<string, 1 | 2>> = {
   sink: 1,
   stat: 1,
   stream: 1,
-  symlink: 2,
+  symlink: "second",
   truncate: 1,
   utimes: 1,
   watch: 1,
@@ -118,6 +127,8 @@ const rooted = (
     const call = override as (...args: ReadonlyArray<unknown>) => unknown
     wrapped[name] = paths === 1
       ? (path: string, ...rest: ReadonlyArray<unknown>) => call(resolve(path), ...rest)
+      : paths === "second"
+      ? (target: string, to: string, ...rest: ReadonlyArray<unknown>) => call(target, resolve(to), ...rest)
       : (from: string, to: string, ...rest: ReadonlyArray<unknown>) => call(resolve(from), resolve(to), ...rest)
   }
   return wrapped

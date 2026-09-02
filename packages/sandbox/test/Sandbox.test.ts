@@ -645,6 +645,47 @@ describe("Sandbox.fileSystem", () => {
       expect(String(outcome)).toContain("the override gave up")
     }))
 
+  // `symlink(fromPath, toPath)` is the one operation whose leading argument is
+  // not a path to reach: it is the text stored inside the link, and POSIX
+  // resolves a relative one against the LINK's directory rather than any
+  // working directory. Rooting it moved the link's meaning — `../shared` from
+  // `/work/sub/link` names `/work/shared`, while the rooted `/shared` names
+  // something else entirely, one directory outside the workspace.
+  it.effect("roots where a symlink is made without rewriting what it points at", () =>
+    Effect.gen(function*() {
+      const seen: Array<ReadonlyArray<string>> = []
+      const provider = Sandbox.TestSession.make({ workdir: "/work", script: () => ({ exitCode: 0 }) })
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const session = yield* provider.acquire("probe")
+          const files = Sandbox.fileSystem({
+            ...session,
+            files: {
+              symlink: (from, to) =>
+                Effect.sync(() => {
+                  seen.push(["symlink", from, to])
+                }),
+              // A hard link is two real paths, so both of its arguments are
+              // rooted: the contrast is the point.
+              link: (from, to) =>
+                Effect.sync(() => {
+                  seen.push(["link", from, to])
+                })
+            }
+          })
+          yield* files.symlink("../shared", "sub/link")
+          yield* files.symlink("/absolute/target", "./other")
+          yield* files.link("existing.txt", "hard.txt")
+        })
+      )
+
+      expect(seen).toEqual([
+        ["symlink", "../shared", "/work/sub/link"],
+        ["symlink", "/absolute/target", "/work/other"],
+        ["link", "/work/existing.txt", "/work/hard.txt"]
+      ])
+    }))
+
   it.effect("prefers a session's native override to the probe", () =>
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make()

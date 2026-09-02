@@ -229,7 +229,9 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
           "exec",
           name,
           "--",
-          "sh",
+          // The absolute path prevents a Pod-wide PATH override from
+          // disabling the provider's own workspace-preparation shell.
+          "/bin/sh",
           "-c",
           `mkdir -p ${CommandLine.quote(workdir)} && rm -rf ${pidDirectory} && mkdir -p ${pidDirectory}`
         ])
@@ -242,7 +244,16 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
             : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
         const deliver = (pidfile: string, signal: string): Effect.Effect<void, ProviderError> =>
           Effect.flatMap(
-            run(["exec", name, "--", "sh", "-c", killScript(pidfile, signal.replace(/^SIG/, ""))]),
+            run([
+              "exec",
+              name,
+              "--",
+              // The absolute path prevents a Pod-wide PATH override from
+              // disabling the provider's own signal-delivery shell.
+              "/bin/sh",
+              "-c",
+              killScript(pidfile, signal.replace(/^SIG/, ""))
+            ]),
             (result) =>
               result.code === 0 ? Effect.void : Effect.fail(
                 new ProviderError({
@@ -258,12 +269,20 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
             const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
             const stdin = spawnOptions.stdin
-            const environment = Object.entries(spawnOptions.env ?? {}).flatMap(([key, value]) =>
-              value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)]
-            )
+            const entries = Object.entries(spawnOptions.env ?? {})
+            const environment = [
+              ...entries.flatMap(([key, value]) => value === undefined ? ["-u", CommandLine.quote(key)] : []),
+              ...entries.flatMap(([key, value]) => value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)])
+            ]
             // `env(1)`, not `export`: export requires a shell identifier and
             // aborts the whole chain for a key Node accepts (`a-b=1`), while
-            // env passes any name through. The shell after it is absolute for
+            // env passes any name through. GNU coreutils, busybox, and BSD
+            // `env` all support `-u`, so an undefined value deletes a variable
+            // the Pod was created with instead of keeping it, which is what
+            // `undefined` means for a local command too. Every `-u` precedes
+            // every assignment, because `env` stops reading options at the
+            // first operand and `env A=1 -u B prog` runs `-u` as the program.
+            // The shell after the prefix is absolute for
             // the reason the prefix exists at all: `env` resolves its program
             // through the environment it just built, so a caller's `PATH`
             // override would keep a bare `sh` from ever starting. The pid
@@ -287,7 +306,9 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
                 ...stdin === undefined ? [] : ["--stdin"],
                 name,
                 "--",
-                "sh",
+                // The absolute path prevents a Pod-wide PATH override from
+                // disabling the provider's own command-wrapper shell.
+                "/bin/sh",
                 "-c",
                 script
               ], stdin === undefined ? {} : { stdin: Stream.make(stdin) })
@@ -328,7 +349,9 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
                 "exec",
                 name,
                 "--",
-                "sh",
+                // The absolute path prevents a Pod-wide PATH override from
+                // disabling the provider's own file-read shell.
+                "/bin/sh",
                 "-c",
                 // Redirected, not positional: BSD `base64` takes no file
                 // operand, and the redirect reads the same on every guest.
@@ -354,7 +377,18 @@ export const make = (options: KubernetesSandboxOptions): Provider => {
                   ? `base64 -d > ${CommandLine.quote(path)}`
                   : `mkdir -p ${CommandLine.quote(parent)} && base64 -d > ${CommandLine.quote(path)}`
                 const handle = yield* options.spawner.spawn(
-                  ChildProcess.make(program, [...globals, "exec", "-i", name, "--", "sh", "-c", script], {
+                  ChildProcess.make(program, [
+                    ...globals,
+                    "exec",
+                    "-i",
+                    name,
+                    "--",
+                    // The absolute path prevents a Pod-wide PATH override
+                    // from disabling the provider's own file-write shell.
+                    "/bin/sh",
+                    "-c",
+                    script
+                  ], {
                     stdin: Stream.make(encodeBase64Bytes(content))
                   })
                 ).pipe(Effect.mapError(providerFailure("spawn_error", `the write to ${path} could not start`)))

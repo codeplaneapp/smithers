@@ -259,12 +259,40 @@ describe("ContainerSandbox", () => {
       expect(calls[2]!.args).toEqual([
         "exec",
         session.remoteId,
-        "sh",
+        "/bin/sh",
         "-c",
         `mkdir -p '${spaced}' && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx`
       ])
       expect(calls[3]!.args).toEqual(["rm", "--force", session.remoteId])
     }))
+
+  it.effect("uses /bin/sh for every provider-owned helper", () =>
+    Effect.gen(function*() {
+      const fake = engine()
+      const provider = ContainerSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          yield* session.writeFile(`${workdir}/helper.bin`, new Uint8Array([1]))
+          yield* session.readFile(`${workdir}/helper.bin`)
+          yield* output(session, "true")
+          yield* Effect.scoped(
+            Effect.gen(function*() {
+              const process = yield* session.spawn(sleeps, {})
+              yield* session.kill!(process, "SIGTERM")
+              yield* process.exitCode
+            })
+          )
+        }))
+      // A container-wide PATH can omit `sh`, so every provider-owned shell
+      // argv must use the absolute path before that environment can apply.
+      const helpers = fake.calls.filter((call) => call.args.includes("-c"))
+      expect(helpers.length).toBeGreaterThan(0)
+      for (const helper of helpers) {
+        const shell = helper.args[helper.args.indexOf("-c") - 1]
+        expect(shell).toBe("/bin/sh")
+        expect(helper.args).not.toContain("sh")
+      }
+    }), 30_000)
 
   it.effect("reattaches the container a crashed run left behind, workspace intact", () =>
     Effect.gen(function*() {
@@ -350,14 +378,14 @@ describe("ContainerSandbox", () => {
       }
     }))
 
-  it.effect("spawns with stdin, a rooted cwd, and only defined environment", () =>
+  it.effect("spawns with stdin, a rooted cwd, and an environment deletion", () =>
     Effect.gen(function*() {
       const { calls, spawner } = engine()
-      const provider = ContainerSandbox.make({ spawner, image: "img", workdir })
+      const provider = ContainerSandbox.make({ spawner, image: "img", workdir, env: { DROP: "base" } })
       yield* acquired(provider, (session) =>
         Effect.gen(function*() {
           const greeting = yield* output(session, `printf 'hello from %s' "$WHO"`, {
-            env: { WHO: "guest", DROPPED: undefined }
+            env: { KEEP: "1", DROP: undefined, WHO: "guest" }
           })
           expect(greeting).toEqual({ stdout: "hello from guest", code: 0 })
           // A bare spawn runs in the workdir; a relative cwd is rooted there.
@@ -381,12 +409,16 @@ describe("ContainerSandbox", () => {
         "/bin/sh",
         "-c",
         "echo $$ > /tmp/.smthrs-sbx/0.pid; if [ -e /tmp/.smthrs-sbx/0.pid.cancel ]; then exit 143; fi; "
-        + `exec env WHO=guest /bin/sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
+        // Every `-u` before every assignment: `env` stops reading options at
+        // the first operand, so `env KEEP=1 -u DROP prog` would run `-u`.
+        + `exec env -u DROP KEEP=1 WHO=guest /bin/sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
       ])
       // The caller's variables never reach the exec environment, so they can
       // never break the wrapper the exec starts.
       expect(spawns[0]!.args).not.toContain("--env")
-      expect(spawns[0]!.args.at(-1)).not.toContain("DROPPED")
+      // This fake does not retain create-time environment, so the rendered
+      // argv is the proof that a real inherited value is deleted.
+      expect(spawns[0]!.args.at(-1)).toContain("env -u DROP KEEP=1")
       expect(spawns[1]!.args.slice(0, 3)).toEqual(["exec", "--workdir", workdir])
       expect(spawns[3]!.args.slice(1, 3)).toEqual(["--workdir", `${workdir}/sub/nested`])
       const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin"))!

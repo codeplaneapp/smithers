@@ -44,12 +44,19 @@ interface Fault {
 
 type ListTasksInput = Parameters<AwsSandbox.Sdk["listTasks"]>[0]
 
+interface FakeTask {
+  readonly arn: string
+  readonly startedBy: string
+  lastStatus: string
+  desiredStatus: NonNullable<ListTasksInput["desiredStatus"]>
+}
+
 interface FakeEcs {
   readonly runInputs: Array<RunTaskInput>
   readonly describeInputs: Array<DescribeTasksInput>
   readonly listInputs: Array<ListTasksInput>
   /** Tasks RunTask started and StopTask has not yet stopped, by startedBy. */
-  readonly running: Array<{ readonly arn: string; readonly startedBy: string }>
+  readonly running: Array<FakeTask>
   readonly stopInputs: Array<StopTaskInput>
   readonly registerInputs: Array<RegisterTaskDefinitionInput>
   readonly deregisterInputs: Array<DeregisterTaskDefinitionInput>
@@ -85,17 +92,31 @@ const fakeEcs = (): FakeEcs => ({
 
 const managed = (name = "ExecuteCommandAgent", lastStatus = "RUNNING") => ({ name, lastStatus })
 
-const taskFor = (taskArn: string, container: string, step: DescribeStep): Task => {
-  if (step === "stopped") return { taskArn, lastStatus: "STOPPED", enableExecuteCommand: true }
-  if (step === "pending") return { taskArn, lastStatus: "PENDING", enableExecuteCommand: false }
-  if (step === "no-containers") return { taskArn, lastStatus: "RUNNING", enableExecuteCommand: true }
+const taskFor = (
+  taskArn: string,
+  container: string,
+  step: DescribeStep,
+  desiredStatus: NonNullable<ListTasksInput["desiredStatus"]> = "RUNNING"
+): Task => {
+  if (step === "stopped") return { taskArn, lastStatus: "STOPPED", desiredStatus, enableExecuteCommand: true }
+  if (step === "pending") return { taskArn, lastStatus: "PENDING", desiredStatus, enableExecuteCommand: false }
+  if (step === "no-containers") {
+    return { taskArn, lastStatus: "RUNNING", desiredStatus, enableExecuteCommand: true }
+  }
   if (step === "no-agents") {
-    return { taskArn, lastStatus: "RUNNING", enableExecuteCommand: true, containers: [{ name: container }] }
+    return {
+      taskArn,
+      lastStatus: "RUNNING",
+      desiredStatus,
+      enableExecuteCommand: true,
+      containers: [{ name: container }]
+    }
   }
   if (step === "wrong-agent") {
     return {
       taskArn,
       lastStatus: "RUNNING",
+      desiredStatus,
       enableExecuteCommand: true,
       containers: [{
         name: container,
@@ -107,6 +128,7 @@ const taskFor = (taskArn: string, container: string, step: DescribeStep): Task =
     return {
       taskArn,
       lastStatus: "RUNNING",
+      desiredStatus,
       enableExecuteCommand: true,
       containers: [{ name: "another", managedAgents: [managed()] }]
     }
@@ -114,6 +136,7 @@ const taskFor = (taskArn: string, container: string, step: DescribeStep): Task =
   return {
     taskArn: step === "fallback-ready" ? `${taskArn}-reported` : taskArn,
     lastStatus: "RUNNING",
+    desiredStatus,
     enableExecuteCommand: true,
     containers: [{ name: container, managedAgents: [managed()] }]
   }
@@ -138,8 +161,15 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     if (fake.runWithoutArn === true) {
       return { tasks: [{ lastStatus: "PROVISIONING" }], failures: [{ reason: "MISSING_ARN" }] }
     }
-    fake.running.push({ arn: taskArn, startedBy: input.startedBy })
-    return { tasks: [{ taskArn, lastStatus: "PROVISIONING", enableExecuteCommand: true }] }
+    fake.running.push({
+      arn: taskArn,
+      startedBy: input.startedBy,
+      lastStatus: "PROVISIONING",
+      desiredStatus: "RUNNING"
+    })
+    return {
+      tasks: [{ taskArn, lastStatus: "PROVISIONING", desiredStatus: "RUNNING", enableExecuteCommand: true }]
+    }
   },
   async listTasks(input) {
     fake.listInputs.push(input)
@@ -147,7 +177,12 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     const fault = takeFault(fake, "listFault")
     if (fault !== undefined) throw fault
     if (fake.listWithoutArns === true) return {}
-    return { taskArns: fake.running.filter((task) => task.startedBy === input.startedBy).map((task) => task.arn) }
+    const desiredStatus = input.desiredStatus ?? "RUNNING"
+    return {
+      taskArns: fake.running
+        .filter((task) => task.startedBy === input.startedBy && task.desiredStatus === desiredStatus)
+        .map((task) => task.arn)
+    }
   },
   async describeTasks(input): Promise<DescribeTasksOutput> {
     fake.describeInputs.push(input)
@@ -160,7 +195,17 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     // The step decides the first task; anything described beside it is a
     // leftover duplicate, and a duplicate that is merely there is ready.
     return {
-      tasks: input.tasks.map((task, index) => taskFor(task, fake.lastContainer, index === 0 ? step : "ready"))
+      tasks: input.tasks.map((task, index) => {
+        const stored = fake.running.find(({ arn }) => arn === task)
+        const described = taskFor(
+          task,
+          fake.lastContainer,
+          index === 0 ? step : "ready",
+          stored?.desiredStatus ?? "RUNNING"
+        )
+        if (stored !== undefined && described.lastStatus !== undefined) stored.lastStatus = described.lastStatus
+        return described
+      })
     }
   },
   async stopTask(input) {
@@ -429,7 +474,7 @@ describe("AwsSandbox", () => {
       // readiness for `runner` is observable without an environment override.
       fake.lastContainer = "runner"
       const cli = fakeCli()
-      const provider = transportProvider(fake, cli, { container: "runner" }, {
+      const provider = transportProvider(fake, cli, { container: "runner", env: { DROP: "base" } }, {
         program: "aws-wrapper",
         globalArgs: ["--profile", "sandbox"],
         chunkBytes: 5
@@ -441,9 +486,16 @@ describe("AwsSandbox", () => {
           expect(cli.calls[0]!.remote).toContain("mkdir -p")
           const greeting = yield* output(session, `printf 'hello\\nfrom %s' "$WHO"`, {
             cwd: root,
-            env: { WHO: "fargate", DROP: undefined }
+            env: { KEEP: "1", DROP: undefined, WHO: "fargate" }
           })
           expect(greeting).toEqual({ stdout: "hello\nfrom fargate", code: 0 })
+          // The AWS fake records task environment but its local guest shell is
+          // not that task, so the shipped command line is the fidelity boundary
+          // that proves the inherited value is explicitly deleted.
+          const greetingCall = cli.calls.find((call) => call.remote.includes("hello"))!
+          // Every `-u` before every assignment: `env` stops reading options at
+          // the first operand, so `env KEEP=1 -u DROP prog` would run `-u`.
+          expect(greetingCall.remote).toContain("env -u DROP KEEP=1 WHO=fargate /bin/sh -c")
           expect(yield* output(session, "pwd")).toEqual({ stdout: `${root}\n`, code: 0 })
           expect((yield* output(session, "exit 23")).code).toBe(23)
           expect((yield* output(session, "true")).stdout).toBe("")
@@ -498,6 +550,9 @@ describe("AwsSandbox", () => {
         expect(args.slice(12, 14)).toEqual(["--interactive", "--command"])
       }
       expect(cli.calls.every((call) => call.file === "aws-wrapper")).toBe(true)
+      // Every shipped helper uses the absolute shell path, which prevents a
+      // task-level PATH override from disabling the provider's own plumbing.
+      expect(cli.calls.every((call) => call.remote.startsWith("/bin/sh -c "))).toBe(true)
       // Twelve bytes at five per slice is three commands for the first write.
       const writes = cli.calls.filter((call) => call.remote.includes("base64 -d"))
       expect(writes.filter((call) => call.remote.includes("deep/tree/out.bin"))).toHaveLength(3)
@@ -780,11 +835,14 @@ describe("AwsSandbox", () => {
       const second = yield* acquired(provider, (session) => Effect.succeed(session.remoteId), "aws/resume")
       expect(second).toBe(first.remoteId)
       expect(fake.runInputs).toHaveLength(1)
-      // Both desired statuses are asked for, because a task that has not
-      // reached RUNNING is exactly what a crash between RunTask and the
-      // finalizer leaves behind.
-      expect(fake.listInputs.slice(0, 2).map(({ desiredStatus }) => desiredStatus)).toEqual(["RUNNING", "PENDING"])
-      expect(fake.listInputs[0]).toMatchObject({ cluster: "cluster-arn", desiredStatus: "RUNNING" })
+      // `startedBy` must be the only ListTasks filter. Omitting desiredStatus
+      // also uses ECS's RUNNING desired-status default, which includes a task
+      // whose lastStatus is still PENDING.
+      expect(fake.listInputs).toHaveLength(2)
+      for (const input of fake.listInputs) {
+        expect(input).toEqual({ cluster: "cluster-arn", startedBy: fake.runInputs[0]!.startedBy })
+        expect(Object.hasOwn(input, "desiredStatus")).toBe(false)
+      }
       // Releasing the adopting scope stops the adopted task like any other.
       expect(fake.stopInputs).toHaveLength(1)
       yield* Scope.close(leaked, Exit.void)
@@ -794,7 +852,14 @@ describe("AwsSandbox", () => {
       const notReady = fakeEcs()
       const notReadyProvider = transportProvider(notReady, fakeCli())
       const leakedToo = yield* Scope.make()
-      yield* Effect.provideService(notReadyProvider.acquire("aws/pending"), Scope.Scope, leakedToo)
+      const pendingSession = yield* Effect.provideService(
+        notReadyProvider.acquire("aws/pending"),
+        Scope.Scope,
+        leakedToo
+      )
+      const pendingTask = notReady.running.find(({ arn }) => arn === pendingSession.remoteId)!
+      pendingTask.lastStatus = "PENDING"
+      pendingTask.desiredStatus = "RUNNING"
       notReady.describeSteps.push("pending")
       const described = notReady.describeInputs.length
       yield* acquired(notReadyProvider, () => Effect.void, "aws/pending")
@@ -804,6 +869,30 @@ describe("AwsSandbox", () => {
       expect(notReady.stopInputs).toHaveLength(1)
       yield* Scope.close(leakedToo, Exit.void)
 
+      // A task whose desired status is STOPPED is excluded by the faithful
+      // ListTasks default and cannot be adopted merely because its last status
+      // still says PENDING.
+      const stopping = fakeEcs()
+      const stoppingProvider = transportProvider(stopping, fakeCli())
+      const stoppingLeak = yield* Scope.make()
+      const stoppingSession = yield* Effect.provideService(
+        stoppingProvider.acquire("aws/stopping"),
+        Scope.Scope,
+        stoppingLeak
+      )
+      const stoppingTask = stopping.running.find(({ arn }) => arn === stoppingSession.remoteId)!
+      stoppingTask.lastStatus = "PENDING"
+      stoppingTask.desiredStatus = "STOPPED"
+      const replacement = yield* acquired(
+        stoppingProvider,
+        (session) => Effect.succeed(session.remoteId),
+        "aws/stopping"
+      )
+      expect(replacement).not.toBe(stoppingSession.remoteId)
+      expect(stopping.runInputs).toHaveLength(2)
+      expect(stopping.listInputs).toHaveLength(2)
+      yield* Scope.close(stoppingLeak, Exit.void)
+
       // Two machines under one key collapse to one: the lowest ARN is adopted
       // and the duplicate is stopped before anything else is provisioned.
       const duplicated = fakeEcs()
@@ -811,7 +900,12 @@ describe("AwsSandbox", () => {
       const leakedTwice = yield* Scope.make()
       yield* Effect.provideService(duplicatedProvider.acquire("aws/duplicate"), Scope.Scope, leakedTwice)
       const orphan = "arn:aws:ecs:us-west-2:123456789012:task/cluster/task-99"
-      duplicated.running.push({ arn: orphan, startedBy: duplicated.runInputs[0]!.startedBy })
+      duplicated.running.push({
+        arn: orphan,
+        startedBy: duplicated.runInputs[0]!.startedBy,
+        lastStatus: "RUNNING",
+        desiredStatus: "RUNNING"
+      })
       yield* acquired(duplicatedProvider, () => Effect.void, "aws/duplicate")
       expect(duplicated.runInputs).toHaveLength(1)
       expect(duplicated.stopInputs.map(({ task }) => task)).toContain(orphan)
@@ -922,7 +1016,7 @@ describe("AwsSandbox", () => {
           )
           expect(error).toMatchObject({ code: "spawn_error" })
           expect((error as ProviderError).message).toContain("ExecTransport.chunkBytes")
-          expect((error as ProviderError).message).toContain("at least 1")
+          expect((error as ProviderError).message).toContain("from 1 to 65536")
           expect((error as ProviderError).message).toContain(String(chunkBytes))
         }
 
@@ -941,6 +1035,23 @@ describe("AwsSandbox", () => {
       }),
     60_000
   )
+
+  it.effect("accepts a 65536-byte write slice and refuses 65537", () =>
+    Effect.gen(function*() {
+      yield* acquired(
+        transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes: 65_536 }),
+        () => Effect.void
+      )
+      const error = yield* Effect.flip(
+        acquired(
+          transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes: 65_537 }),
+          () => Effect.void
+        )
+      )
+      expect(error).toMatchObject({ code: "spawn_error" })
+      expect((error as ProviderError).message).toContain("from 1 to 65536")
+      expect((error as ProviderError).message).toContain("65537")
+    }))
 
   it.effect("provisions rather than adopting when every task the key names has stopped", () =>
     Effect.gen(function*() {
@@ -992,16 +1103,17 @@ describe("AwsSandbox", () => {
         const first = cli.calls[0]!
         expect(first.args.at(-2)).toBe("--command")
         expect(framing(first.args.at(-1)!)).toBe(
-          "sh -c '( mkdir -p <workdir> && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx ); "
+          "/bin/sh -c '( mkdir -p <workdir> && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx ); "
             + "printf '\\''\\n__smthrs_exit_0_%s__\\n'\\'' \"$?\"'"
         )
         // A spawned command records its pid, honors a cancellation left before
         // it started, and prints the same sentinel with its own nonce.
         const spawned = cli.calls.find((call) => call.args.at(-1)?.includes("echo framed") === true)!
         expect(framing(spawned.args.at(-1)!)).toBe(
-          "sh -c 'if [ -e /tmp/.smthrs-sbx/1.pid.cancel ]; then c=143; "
+          "/bin/sh -c 'if [ -e /tmp/.smthrs-sbx/1.pid.cancel ]; then c=143; "
             + "elif cd <workdir>; then /bin/sh -c '\\''echo framed; exit 4'\\'' & p=$!; "
-            + "echo \"$p\" > /tmp/.smthrs-sbx/1.pid; wait \"$p\"; c=$?; else c=127; fi; "
+            + "echo \"$p\" > /tmp/.smthrs-sbx/1.pid; if [ -e /tmp/.smthrs-sbx/1.pid.cancel ]; "
+            + "then kill -s TERM \"$p\" 2>/dev/null; fi; wait \"$p\"; c=$?; else c=127; fi; "
             + "printf '\\''\\n__smthrs_exit_1_%s__\\n'\\'' \"$c\"'"
         )
       }),

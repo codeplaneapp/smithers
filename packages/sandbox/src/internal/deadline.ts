@@ -40,16 +40,23 @@ export const elapsed = (duration: Duration.Input): Effect.Effect<void> =>
  * @since 0.1.0
  */
 export const expired = (deadline: Duration.Input): Effect.Effect<never, ProviderError> =>
-  Effect.flatMap(
-    elapsed(deadline),
-    () =>
-      Effect.fail(
-        new ProviderError({
-          code: "timeout",
-          message: `the check did not finish within ${Duration.toMillis(deadline)} milliseconds`
-        })
-      )
-  )
+  Effect.flatMap(elapsed(deadline), () => Effect.fail(timedOut(deadline)))
+
+/**
+ * The failure a check that ran out of time reports.
+ *
+ * Shared with {@link expired} so a suite that abandons a hung check rather
+ * than racing it still convicts it with the same sentence an adapter author
+ * has learned to read.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const timedOut = (deadline: Duration.Input): ProviderError =>
+  new ProviderError({
+    code: "timeout",
+    message: `the check did not finish within ${Duration.toMillis(deadline)} milliseconds`
+  })
 
 /**
  * How long any single conformance check may take before it is convicted as

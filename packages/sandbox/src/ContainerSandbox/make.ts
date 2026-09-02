@@ -167,7 +167,9 @@ export const make = (options: ContainerSandboxOptions): Provider => {
         yield* step(`the workspace ${workdir} could not be prepared in ${name}`, [
           "exec",
           name,
-          "sh",
+          // The absolute path prevents a container-wide PATH override from
+          // disabling the provider's own workspace-preparation shell.
+          "/bin/sh",
           "-c",
           `mkdir -p ${CommandLine.quote(workdir)} && rm -rf ${pidDirectory} && mkdir -p ${pidDirectory}`
         ])
@@ -182,7 +184,15 @@ export const make = (options: ContainerSandboxOptions): Provider => {
             : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
         const deliver = (pidfile: string, signal: string): Effect.Effect<void, ProviderError> =>
           Effect.flatMap(
-            run(["exec", name, "sh", "-c", killScript(pidfile, signal.replace(/^SIG/, ""))]),
+            run([
+              "exec",
+              name,
+              // The absolute path prevents a container-wide PATH override
+              // from disabling the provider's own signal-delivery shell.
+              "/bin/sh",
+              "-c",
+              killScript(pidfile, signal.replace(/^SIG/, ""))
+            ]),
             (result) =>
               result.code === 0 ? Effect.void : Effect.fail(
                 new ProviderError({
@@ -198,15 +208,24 @@ export const make = (options: ContainerSandboxOptions): Provider => {
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
             const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
             const stdin = spawnOptions.stdin
-            // The caller's variables reach the COMMAND, never the wrapper. As
+            // The caller's variables reach the command, never the wrapper. As
             // `--env` they were part of the exec environment, so a `PATH`
-            // override broke the wrapper's own `sh` one layer in — the same
+            // override broke the wrapper's own `sh` one layer in. This is the
             // failure the absolute `/bin/sh` below exists to prevent, moved
             // rather than fixed. `env(1)` also passes a name `export` would
             // refuse (`a-b=1`), which is what the session contract accepts.
-            const environment = Object.entries(spawnOptions.env ?? {}).flatMap(([key, value]) =>
-              value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)]
-            )
+            // GNU coreutils, busybox, and BSD `env` all support `-u`, so an
+            // undefined value deletes a variable the container was created
+            // with instead of silently keeping it: `undefined` means the same
+            // "remove this one" here that it means for a local command. Every
+            // `-u` precedes every assignment, because `env` stops reading
+            // options at the first operand and `env A=1 -u B prog` runs `-u`
+            // as the program.
+            const entries = Object.entries(spawnOptions.env ?? {})
+            const environment = [
+              ...entries.flatMap(([key, value]) => value === undefined ? ["-u", CommandLine.quote(key)] : []),
+              ...entries.flatMap(([key, value]) => value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)])
+            ]
             const args = [
               "exec",
               // The exec has a real input channel; it is asked for only when
@@ -267,7 +286,9 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               run([
                 "exec",
                 name,
-                "sh",
+                // The absolute path prevents a container-wide PATH override
+                // from disabling the provider's own file-read shell.
+                "/bin/sh",
                 "-c",
                 `test -e ${CommandLine.quote(path)} || exit 9; cat ${CommandLine.quote(path)}`
               ]),
@@ -293,7 +314,16 @@ export const make = (options: ContainerSandboxOptions): Provider => {
                   ? `cat > ${CommandLine.quote(path)}`
                   : `mkdir -p ${CommandLine.quote(parent)} && cat > ${CommandLine.quote(path)}`
                 const handle = yield* options.spawner.spawn(
-                  ChildProcess.make(program, ["exec", "--interactive", name, "sh", "-c", script], {
+                  ChildProcess.make(program, [
+                    "exec",
+                    "--interactive",
+                    name,
+                    // The absolute path prevents a container-wide PATH
+                    // override from disabling the provider's own file-write shell.
+                    "/bin/sh",
+                    "-c",
+                    script
+                  ], {
                     stdin: Stream.make(content)
                   })
                 ).pipe(Effect.mapError(providerFailure("spawn_error", `the write to ${path} could not start`)))

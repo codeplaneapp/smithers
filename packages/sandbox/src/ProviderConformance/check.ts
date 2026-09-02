@@ -6,11 +6,12 @@
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { defaultCheckTimeout, expired } from "../internal/deadline.ts"
+import { defaultCheckTimeout, elapsed, timedOut } from "../internal/deadline.ts"
 import { layer } from "../RemoteChildProcessSpawner/layer.ts"
 import type { Provider } from "../RemoteChildProcessSpawner/Provider.ts"
 import { fromProvider } from "../SandboxHealth/fromProvider.ts"
@@ -30,13 +31,33 @@ const shown = (exit: Exit.Exit<unknown, unknown>): string =>
  * consumption included: every one of `open`, `spawn`, a stdout stream that
  * never ends, `ping`, and `kill` can hang, and only the wait after a
  * successful kill was ever bounded.
+ *
+ * The check runs in a detached fiber and the deadline is a race against
+ * WAITING for it, not against the check itself. Racing the check directly
+ * bounded only its body: losing the race interrupts it, interruption closes
+ * the process scope, and that scope's finalizer sends the signal the provider
+ * is already failing to answer, uninterruptibly and under its own separate
+ * five-second bound. A caller who asked for a hundred-millisecond deadline
+ * waited five seconds and more per hung check, and the suite convicted checks
+ * that were still queued behind that wait. So the fiber is abandoned instead:
+ * the interruption is started and left to finish on its own, which is what
+ * bounding a signal rather than waiting on it means one layer down.
  */
 const inSession = <A>(
   provider: Provider,
   deadline: Duration.Input,
   effect: Effect.Effect<A, unknown, ChildProcessSpawner>
 ): Effect.Effect<Exit.Exit<A, unknown>> =>
-  Effect.exit(Effect.raceFirst(Effect.provide(effect, layer(provider)), expired(deadline)))
+  Effect.gen(function*() {
+    const running = yield* Effect.forkDetach(Effect.exit(Effect.provide(effect, layer(provider))))
+    const settled = yield* Effect.raceFirst(
+      Effect.map(Fiber.join(running), (exit) => ({ exit })),
+      Effect.as(elapsed(deadline), undefined)
+    )
+    if (settled !== undefined) return settled.exit
+    yield* Effect.forkDetach(Fiber.interrupt(running))
+    return Exit.fail(timedOut(deadline))
+  })
 
 const writesItsOutput = (
   provider: Provider,

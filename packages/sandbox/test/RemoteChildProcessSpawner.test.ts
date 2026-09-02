@@ -560,6 +560,32 @@ describe("RemoteChildProcessSpawner", () => {
     30_000
   )
 
+  // A producer that fills one buffer and emits it again is an ordinary shape
+  // for a reader with a fixed read buffer, and the collector used to retain
+  // the references and copy them only once the stream had ended, by which
+  // time every retained reference named the same, last-written bytes: input
+  // `[1, 2]` reached the provider as `[2, 2]`. The copy has to happen when the
+  // chunk arrives, because that is the only moment its contents are the
+  // caller's.
+  it.effect("copies each chunk as it arrives, so a reused producer buffer is not corrupted", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })
+      const scratch = new Uint8Array(1)
+      function* reused(): Generator<Uint8Array> {
+        scratch[0] = 1
+        yield scratch
+        scratch[0] = 2
+        yield scratch
+      }
+
+      yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(
+          ChildProcess.make("cat", [], { stdin: Stream.fromIterable(reused(), { chunkSize: 1 }) })
+        )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+
+      expect(Array.from(provider.state.inputs[0]!)).toEqual([1, 2])
+    }))
+
   it.effect("accepts standard input of exactly the bound and refuses one byte more", () =>
     Effect.gen(function*() {
       const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })

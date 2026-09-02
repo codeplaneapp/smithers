@@ -10,8 +10,15 @@ import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts
 import * as SandboxHealth from "../src/SandboxHealth/index.ts"
 
 // Real process startup and V8 coverage can contend with other Vitest workers;
-// every case remains bounded without treating normal loaded-machine work as a hang.
-const testBudget = 20_000
+// every case remains bounded without treating normal loaded-machine work as a
+// hang. Sixty seconds, not twenty: the megabyte-scale case below spawns a real
+// Node process and streams a megabyte through it under an instrumented
+// runtime, and at twenty it failed on a machine running the rest of this suite
+// in parallel while passing on its own — a budget that convicts the machine
+// rather than the code. Nothing here waits on a hang: a genuinely stuck case
+// is one this file's provider never answers, and it fails just as surely at
+// sixty.
+const testBudget = 60_000
 const pollBudget = 5_000
 
 interface ChildExit {

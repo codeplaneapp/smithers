@@ -137,12 +137,14 @@ interface Leftover {
  *
  * `RunTask` tags every task with `startedBy`, which is derived from the key,
  * so a crash-interrupted run can find its machine again instead of starting a
- * second one beside it. PENDING counts, not only RUNNING: a host that died
- * between `RunTask` and the acquire's finalizer left a task that had not
- * reached readiness yet, and skipping it — on the theory that a provisioning
- * task belongs to whatever is still driving it — is exactly the assumption a
- * crash falsifies. That task then reached RUNNING on `sleep infinity` with no
- * owner, no finalizer, and nothing to stop it.
+ * second one beside it. The AWS
+ * [ListTasks](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_ListTasks.html)
+ * documentation says a PENDING desired-status filter does not return results
+ * because ECS never sets a task's desired status to PENDING; only `lastStatus`
+ * may be PENDING. It also says `startedBy` must be the only filter when it is
+ * specified. This call therefore supplies only `startedBy`. The default desired
+ * status is RUNNING, which recovers a crash-left task whose desired status is
+ * RUNNING even while its `lastStatus` is still PENDING.
  *
  * The list is ordered by ARN so two racing acquires adopt the same one, and
  * everything after the first is `stale`: a duplicate the caller stops before
@@ -154,16 +156,12 @@ const leftoverTasks = (
   container: string | undefined
 ): Effect.Effect<{ readonly adopt: Leftover | undefined; readonly stale: ReadonlyArray<string> }, ProviderError> =>
   Effect.gen(function*() {
-    const arns: Array<string> = []
-    for (const desiredStatus of ["RUNNING", "PENDING"] as const) {
-      const listed = yield* attempt(
-        () => options.sdk.listTasks({ cluster: options.cluster, startedBy, desiredStatus }),
-        "unavailable",
-        `could not list tasks started by ${startedBy}`
-      )
-      arns.push(...listed.taskArns ?? [])
-    }
-    const unique = [...new Set(arns)].sort()
+    const listed = yield* attempt(
+      () => options.sdk.listTasks({ cluster: options.cluster, startedBy }),
+      "unavailable",
+      `could not list tasks started by ${startedBy}`
+    )
+    const unique = [...new Set(listed.taskArns ?? [])].sort()
     if (unique.length === 0) return { adopt: undefined, stale: [] }
     const described = yield* attempt(
       () => options.sdk.describeTasks({ cluster: options.cluster, tasks: unique }),
@@ -184,6 +182,17 @@ const leftoverTasks = (
 const defaultChunkBytes = 3072
 
 /**
+ * The largest write slice that stays safely below every known argv boundary.
+ *
+ * Each slice travels as base64 inside one `--command` argument of the
+ * `aws ecs execute-command` process this provider spawns. Base64 expands by
+ * four thirds, and Linux caps one argv entry at 128 KiB (`MAX_ARG_STRLEN`, 32
+ * pages), so a 64 KiB payload plus its framing stays inside the smallest known
+ * limit on the path. AWS does not publish a separate SSM document limit.
+ */
+const maxChunkBytes = 64 * 1024
+
+/**
  * The validated write-slice size.
  *
  * `chunkBytes` is the increment of the loop that splits a file into commands,
@@ -191,18 +200,19 @@ const defaultChunkBytes = 3072
  * negative number never advances the offset and spins forever on empty slices,
  * and `NaN` makes the offset `NaN` after one iteration, ending the loop having
  * emitted a single empty slice — a silently truncated file rather than an
- * error. The upper end is left to the service: the SSM document bounds the
- * command length, and a slice too large for it fails the write with the
- * service's own message rather than a limit invented here.
+ * error. Values above {@link maxChunkBytes} can exceed Linux's single-argument
+ * limit after base64 expansion and framing, so acquisition rejects them before
+ * the remote service can fail later with a transport error.
  */
 const chunkBytesOf = (transport: ExecTransport): Effect.Effect<number, ProviderError> => {
   const chunkBytes = transport.chunkBytes ?? defaultChunkBytes
-  return Number.isSafeInteger(chunkBytes) && chunkBytes >= 1
+  return Number.isSafeInteger(chunkBytes) && chunkBytes >= 1 && chunkBytes <= maxChunkBytes
     ? Effect.succeed(chunkBytes)
     : Effect.fail(
       new ProviderError({
         code: "spawn_error",
-        message: `ExecTransport.chunkBytes must be a whole number of bytes of at least 1, not ${chunkBytes}`
+        message:
+          `ExecTransport.chunkBytes must be a whole number of bytes from 1 to ${maxChunkBytes}, not ${chunkBytes}`
       })
     )
 }
@@ -423,20 +433,33 @@ const unframe = (run: GatheredRun, nonce: number): Unframed => {
  * (`WITH-DASH=1`), while `env` passes any name through. The program after the
  * prefix is absolute, because `env` resolves it through the environment it has
  * just built and a caller's `PATH` override would otherwise keep a bare `sh`
- * from ever starting.
+ * from ever starting. GNU coreutils, busybox, and BSD `env` all support `-u`,
+ * so an undefined value explicitly deletes a variable the task definition put
+ * in the environment instead of silently keeping it: `undefined` means the
+ * same "remove this one" for a remote command that it means for a local one.
+ *
+ * Every `-u` comes before every assignment, because `env` stops reading
+ * options at the first operand: `env A=1 -u B prog` hands `-u` to `env` as
+ * the program to run and fails with `env: -u: No such file or directory`.
  */
 const envPrefix = (env: Readonly<Record<string, string | undefined>> | undefined): string => {
-  const assignments = Object.entries(env ?? {})
-    .flatMap(([name, value]) => value === undefined ? [] : [CommandLine.quote(`${name}=${value}`)])
-  return assignments.length === 0 ? "" : `env ${assignments.join(" ")} `
+  const entries = Object.entries(env ?? {})
+  const removals = entries.flatMap(([name, value]) => value === undefined ? ["-u", CommandLine.quote(name)] : [])
+  const assignments = entries.flatMap(([name, value]) =>
+    value === undefined ? [] : [CommandLine.quote(`${name}=${value}`)]
+  )
+  const prefix = [...removals, ...assignments]
+  return prefix.length === 0 ? "" : `env ${prefix.join(" ")} `
 }
 
 /**
  * Wraps a one-shot guest script so its status comes back in-band. The
- * subshell keeps an `exit` inside the script from skipping the sentinel.
+ * subshell keeps an `exit` inside the script from skipping the sentinel. The
+ * absolute shell path prevents a task-level PATH override from disabling the
+ * provider's own framing, read, write, kill, or preparation plumbing.
  */
 const framedScript = (script: string, nonce: number): string =>
-  `sh -c ${CommandLine.quote(`( ${script} ); printf '\\n${sentinel(nonce)}%s__\\n' "$?"`)}`
+  `/bin/sh -c ${CommandLine.quote(`( ${script} ); printf '\\n${sentinel(nonce)}%s__\\n' "$?"`)}`
 
 /**
  * Wraps a spawned command so it can be signalled and still report its status.
@@ -445,7 +468,8 @@ const framedScript = (script: string, nonce: number): string =>
  * the wrapper waits for it, so a signal delivered to the command lets the
  * wrapper print `128 + signal` rather than taking the sentinel down with it.
  * A `cd` that fails reports 127 the way a shell reports a command it could
- * not start.
+ * not start. The absolute wrapper shell prevents a task-level PATH override
+ * from disabling the provider's own process framing.
  */
 const spawnScript = (
   command: string,
@@ -454,14 +478,16 @@ const spawnScript = (
   pidfile: string,
   nonce: number
 ): string =>
-  `sh -c ${
+  `/bin/sh -c ${
     CommandLine.quote(
-      // The cancellation marker is read BEFORE the command starts, because the
-      // pid is only recorded after it does: a kill delivered in that window
-      // has nothing to signal and leaves the marker instead.
+      // The first marker check handles a cancellation planted before start. A
+      // kill can also plant the marker after this guard, then read an empty
+      // pidfile between `cmd & p=$!` and `echo`. Rechecking immediately after
+      // the pid write signals that now-recorded command and closes that window.
       `if [ -e ${cancelMarker(pidfile)} ]; then c=${cancelledStatus}; ` +
         `elif cd ${CommandLine.quote(cwd)}; then ${envPrefix(env)}/bin/sh -c ${CommandLine.quote(command)} & p=$!; ` +
-        `echo "$p" > ${pidfile}; wait "$p"; c=$?; else c=127; fi; printf '\\n${sentinel(nonce)}%s__\\n' "$c"`
+        `echo "$p" > ${pidfile}; if [ -e ${cancelMarker(pidfile)} ]; then kill -s TERM "$p" 2>/dev/null; fi; ` +
+        `wait "$p"; c=$?; else c=127; fi; printf '\\n${sentinel(nonce)}%s__\\n' "$c"`
     )
   }`
 

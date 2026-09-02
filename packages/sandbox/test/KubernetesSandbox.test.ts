@@ -324,7 +324,9 @@ describe("KubernetesSandbox", () => {
         `pod/${session.remoteId}`,
         "--timeout=300s"
       ])
-      expect(localCalls.find((args) => args.at(-1)?.startsWith("mkdir -p") === true)!.at(-1)).toBe(
+      const prepared = localCalls.find((args) => args.at(-1)?.startsWith("mkdir -p") === true)!
+      expect(prepared.slice(-3, -1)).toEqual(["/bin/sh", "-c"])
+      expect(prepared.at(-1)).toBe(
         `mkdir -p '${spaced}' && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx`
       )
       expect(localCalls.find((args) => args[0] === "delete")).toEqual([
@@ -435,6 +437,34 @@ describe("KubernetesSandbox", () => {
       expect(noWorkspace.pods.size).toBe(0)
     }))
 
+  it.effect("uses /bin/sh for every provider-owned helper", () =>
+    Effect.gen(function*() {
+      const fake = cluster()
+      const provider = KubernetesSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          yield* session.writeFile(`${workdir}/helper.bin`, new Uint8Array([1]))
+          yield* session.readFile(`${workdir}/helper.bin`)
+          yield* output(session, "true")
+          yield* Effect.scoped(
+            Effect.gen(function*() {
+              const process = yield* session.spawn(sleeps, {})
+              yield* session.kill!(process, "SIGTERM")
+              yield* process.exitCode
+            })
+          )
+        }))
+      // A Pod-wide PATH can omit `sh`, so every provider-owned shell argv
+      // must use the absolute path before that environment can apply.
+      const helpers = fake.calls.filter((call) => call.args.includes("-c"))
+      expect(helpers.length).toBeGreaterThan(0)
+      for (const helper of helpers) {
+        const shell = helper.args[helper.args.indexOf("-c") - 1]
+        expect(shell).toBe("/bin/sh")
+        expect(helper.args).not.toContain("sh")
+      }
+    }), 30_000)
+
   it.effect("refuses create failures and restates transport failures", () =>
     Effect.gen(function*() {
       // No workdir given: the default applies, and the refused create keeps
@@ -463,11 +493,16 @@ describe("KubernetesSandbox", () => {
     }))
 
   it.effect(
-    "spawns with a rooted cwd, env(1) environment, and stdin through the exec channel",
+    "spawns with a rooted cwd, env(1) deletion, and stdin through the exec channel",
     () =>
       Effect.gen(function*() {
         const fake = cluster()
-        const provider = KubernetesSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+        const provider = KubernetesSandbox.make({
+          spawner: fake.spawner,
+          image: "img",
+          workdir,
+          env: { DROP: "base" }
+        })
         yield* acquired(provider, (session) =>
           Effect.gen(function*() {
             // A bare spawn runs in the workdir; kubectl exec itself starts
@@ -478,10 +513,14 @@ describe("KubernetesSandbox", () => {
             expect((yield* output(session, "pwd", { cwd: root })).stdout).toBe(`${root}\n`)
             // `env(1)` delivers keys `export` would refuse, dropping only the
             // explicitly undefined ones.
-            const delivered = yield* output(session, `printf '%s:%s' "$KEPT" "$(printenv WITH-DASH)"`, {
-              env: { "KEPT": "two words", "WITH-DASH": "delivered", "DROPPED": undefined }
-            })
-            expect(delivered).toEqual({ stdout: "two words:delivered", code: 0 })
+            const delivered = yield* output(
+              session,
+              `printf '%s:%s:%s' "$KEEP" "$(printenv WITH-DASH)" "\${DROP-unset}"`,
+              {
+                env: { "KEEP": "two words", "WITH-DASH": "delivered", "DROP": undefined }
+              }
+            )
+            expect(delivered).toEqual({ stdout: "two words:delivered:unset", code: 0 })
             // Standard input arrives on the exec's own input channel, verified
             // through the file the command writes.
             const bytes = new Uint8Array([0, 1, 2, 255, 254, 10, 13, 0, 7])
@@ -493,15 +532,16 @@ describe("KubernetesSandbox", () => {
           "exec",
           spawns[0]!.args[1]!,
           "--",
-          "sh",
+          "/bin/sh",
           "-c",
           `cd ${workdir} && echo $$ > /tmp/.smthrs-sbx/0.pid`
           + " && if [ -e /tmp/.smthrs-sbx/0.pid.cancel ]; then exit 143; fi"
           + " && exec /bin/sh -c pwd"
         ])
         const withEnv = spawns.find((call) => call.args.at(-1)?.includes("env ") === true)!
-        expect(withEnv.args.at(-1)).toContain(`exec env 'KEPT=two words' WITH-DASH=delivered /bin/sh -c`)
-        expect(withEnv.args.at(-1)).not.toContain("DROPPED")
+        // Every `-u` before every assignment: `env` stops reading options at
+        // the first operand, so `env KEEP=1 -u DROP prog` would run `-u`.
+        expect(withEnv.args.at(-1)).toContain(`exec env -u DROP 'KEEP=two words' WITH-DASH=delivered /bin/sh -c`)
         expect(withEnv.args.at(-1)).not.toContain("export")
         const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin") === true)!
         expect(fed.args.slice(0, 2)).toEqual(["exec", "--stdin"])

@@ -68,11 +68,12 @@ export const cancelledStatus = 143
  * starts, which is before the guest wrapper is guaranteed to have run
  * `echo $$ > pidfile`. A kill issued in that window, or on a machine slow
  * enough that the wrapper takes longer than {@link killScript}'s wait to be
- * scheduled at all, had nothing to signal and reported success anyway — so the
+ * scheduled at all, had nothing to signal and reported success anyway, so the
  * command started afterwards and ran unsupervised. The marker gives that kill
- * something to latch onto, and this guard is what honors it. The order is
- * pid first, then guard: a kill that reads the pid signals it, and a kill that
- * does not find one leaves the marker this guard is about to read.
+ * something to latch onto, and this guard is what honors it. The wrapper writes
+ * its pid before this guard. Therefore a wrapper that has not written a pid has
+ * not passed the guard, while a wrapper that has passed the guard has left a pid
+ * the kill can signal.
  *
  * @category constructors
  * @since 0.1.0
@@ -84,21 +85,28 @@ export const cancelGuard = (pidfile: string): string =>
  * Builds a POSIX shell script that signals one recorded pid and all of its
  * descendants in a single `kill` invocation.
  *
- * This is the guest-side script for Linux guests: it waits for the pidfile
- * the spawned command writes first, then walks `/proc`.
+ * This is the guest-side script for Linux guests. It plants
+ * {@link cancelMarker} before waiting for or reading the pidfile, then walks
+ * `/proc` when a pid is present. Writing the marker first closes the read-then-
+ * mark race that let a wrapper write its pid, pass its guard, and start the
+ * command after the kill had already read an empty file but before it wrote the
+ * marker. A wrapper that has not written its pid has not reached its guard and
+ * must see the marker. A wrapper that already passed the guard has written a pid
+ * for this script to signal.
  *
- * A pidfile that never appears is NOT reported as a delivered signal. The
- * script leaves {@link cancelMarker} instead, which {@link cancelGuard} makes
- * the not-yet-started wrapper honor, and only the failure to leave even that
- * exits non-zero.
+ * An empty pid still reports success because the planted marker makes the
+ * pending wrapper cancel itself. Leaving the marker after a successful signal
+ * is harmless because every spawn has a unique pidfile name and acquisition
+ * recreates the entire pidfile directory.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const killScript = (pidfile: string, signal: string): string =>
+  `: > ${cancelMarker(pidfile)} || exit 1; ` +
   `n=0; while [ ! -s ${pidfile} ] && [ "$n" -lt ${pidfileWaitSeconds} ]; do sleep 1; n=$((n+1)); done; ` +
   `p=$(cat ${pidfile} 2>/dev/null); ` +
-  `if [ -z "$p" ]; then : > ${cancelMarker(pidfile)} && exit 0; exit 1; fi; ` +
+  `if [ -z "$p" ]; then exit 0; fi; ` +
   `${procKids}; ` +
   signalCollected(signal)
 
