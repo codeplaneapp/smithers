@@ -12,6 +12,35 @@ export interface WorkflowController {
     card: Extract<Card, { kind: "approval" }>,
     decision: "approved" | "denied"
   ) => Promise<void>
+  /*
+   * Lane runs shares the workflow lane's launch path: the run inbox's open,
+   * resume, and rerun acts provision the same workspace, launch through the
+   * same seam, and record the run on the same card, rather than growing a
+   * second launch that could drift from the one `flow.run` proves.
+   */
+  readonly workflowIdentityGuard: () => string | undefined
+  readonly workflowTargetRepo: (preferred?: string) => { readonly repo: string } | { readonly error: string }
+  readonly provisionWorkspace: (repo: string) => Promise<true | string>
+  readonly upsertRunCard: (args: {
+    readonly runId: string
+    readonly repo: string
+    readonly workflow: string
+    readonly title: string
+    readonly firstStep: string
+    readonly input?: Record<string, unknown>
+  }) => string
+  readonly launchWorkflow: (args: {
+    readonly repo: string
+    readonly workflow: string
+    readonly input: Record<string, unknown>
+    readonly title: string
+  }) => Promise<{ readonly runId: string } | string>
+  /** A decision made on the workspace approvals inbox, for a gate whose own card never landed. */
+  readonly forwardInboxApprovalDecision: (
+    cardId: string,
+    requestId: string,
+    decision: "approved" | "denied"
+  ) => Promise<void>
 }
 
 export const createWorkflowController = (
@@ -168,6 +197,7 @@ export const createWorkflowController = (
     readonly workflow: string
     readonly title: string
     readonly firstStep: string
+    readonly input?: Record<string, unknown>
   }): string => {
     const cardId = `flow-run-${args.runId}`
     const existing = store.collections.cards.get(cardId)
@@ -185,7 +215,8 @@ export const createWorkflowController = (
         phase: "running",
         steps: [args.firstStep],
         result: null,
-        lastSeq: 0
+        lastSeq: 0,
+        ...(args.input === undefined ? {} : { input: args.input })
       }
     }
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
@@ -207,7 +238,8 @@ export const createWorkflowController = (
       repo: args.repo,
       workflow: args.workflow,
       title: args.title,
-      firstStep: `Started ${args.workflow} on ${args.repo} (run ${runId}).`
+      firstStep: `Started ${args.workflow} on ${args.repo} (run ${runId}).`,
+      input: args.input
     })
     return { runId }
   }
@@ -425,11 +457,60 @@ export const createWorkflowController = (
       decidedAt: Date.now()
     })
   }
+  /**
+   * A decision made on the workspace approvals inbox (lane runs §5).
+   *
+   * The gate the decision names belongs to a run whose approval card may
+   * never have landed in this transcript — the inbox is how the human reaches
+   * it anyway. The row carries the submit-ready envelope the gateway
+   * published, so the decision goes back with it unchanged; the card freezes
+   * from the server's answer, never from local optimism, exactly as
+   * `forwardApprovalDecision` does for a per-run approval card.
+   */
+  const forwardInboxApprovalDecision = async (
+    cardId: string,
+    requestId: string,
+    decision: "approved" | "denied"
+  ): Promise<void> => {
+    const card = store.collections.cards.get(cardId)
+    if (card === undefined || card.kind !== "approvals-inbox") return
+    const row = card.payload.approvals.find((entry) => entry.requestId === requestId)
+    if (row === undefined) return
+    const submitted = await gateway.submitApproval(
+      card.payload.repo,
+      row.approval as Parameters<typeof gateway.submitApproval>[1],
+      decision === "approved" ? "approve" : "deny"
+    )
+    store.dispatch({
+      type: "card.updated",
+      actor: submitted.status === "ok" ? "user" : "system",
+      id: cardId,
+      patch: {
+        payload: {
+          ...card.payload,
+          approvals: card.payload.approvals.map((entry) =>
+            entry.requestId === requestId
+              ? submitted.status === "ok"
+                ? { ...entry, decision, decisionError: undefined }
+                : { ...entry, decisionError: submitted.message }
+              : entry
+          )
+        },
+        ...(submitted.status === "ok" ? { status: "acted" as const } : {})
+      }
+    })
+  }
   return {
     createWorkflow,
     listWorkspaceWorkflows,
     runWorkflow,
     chooseWorkflowRepo,
-    forwardApprovalDecision
+    forwardApprovalDecision,
+    workflowIdentityGuard,
+    workflowTargetRepo,
+    provisionWorkspace,
+    upsertRunCard,
+    launchWorkflow,
+    forwardInboxApprovalDecision
   }
 }

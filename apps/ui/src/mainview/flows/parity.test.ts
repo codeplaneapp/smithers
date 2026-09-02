@@ -161,8 +161,10 @@ describe("launch-law parity: every affordance is a command", () => {
       "../ConnectorsSurface.tsx": 6,
       // 23 − the three recommendation-card affordances the deleted reco
       // feature carried (accept / edit / dismiss), + the maximized card's
-      // "Open in tab" (docs/LOCAL-APP.md "Cards").
-      "../ChatCards.tsx": 17,
+      // "Open in tab" (docs/LOCAL-APP.md "Cards"), + the run card's lane-runs
+      // acts: the three facet tabs, Resume, Stop, Run again, and the steer
+      // row's send.
+      "../ChatCards.tsx": 24,
       "../DevtoolsPanel.tsx": 1,
       "../SurfaceChrome.tsx": 3,
       "../ToastStack.tsx": 1,
@@ -184,6 +186,13 @@ describe("launch-law parity: every affordance is a command", () => {
        */
       "../cards/GraphCard.tsx": 4,
       "../cards/RunTimelineCard.tsx": 1,
+      /*
+       * Lane runs: the run inbox's Open per row, its All/status filter chips,
+       * and the Stop-all footer (all through onRunCommand), plus the
+       * approvals inbox's two decision acts (approval.approve / approval.deny
+       * through the delegated onDecideApproval).
+       */
+      "../cards/RunsCards.tsx": 6,
       "../cards/RunHistoryCard.tsx": 1,
       "../cards/AffectedCard.tsx": 1,
       /* Connection, world and browser card interactions. */

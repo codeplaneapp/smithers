@@ -4,14 +4,16 @@
  * Every call goes to the product Worker's relay, which holds the per-user
  * gateway credential a browser can never hold and writes the gateway's own RPC
  * frame. The names here are the gateway's names — `Plan`, `Run`, `Cancel`,
- * `List`, `Projection.Snapshot`, `Approval.Submit` — so there is one
- * vocabulary between this file, the Worker, and the engine.
+ * `Resume`, `Steer`, `Signal`, `List`, `Projection.Snapshot`,
+ * `Approval.Submit` — so there is one vocabulary between this file, the
+ * Worker, and the engine.
  *
  * The row types are imported from `@smthrs/gateway`, type-only, so a change to
  * a served projection fails this app's typecheck instead of reaching a user as
  * an undefined field.
  */
-import type { ApprovalRow, NodeOutputRow, RunSummaryRow } from "@smthrs/gateway/GatewayProjection"
+import type { ControlEvent, SteerMessage } from "@smthrs/control/ControlSchema"
+import type { ApprovalRow, NodeOutputRow, RunSummaryRow, TranscriptRow } from "@smthrs/gateway/GatewayProjection"
 import { WORKFLOW_RPC_PATH } from "smithers-shared/AgentApiRoutes"
 
 /** What one relayed call answered. */
@@ -28,7 +30,7 @@ export interface FlowSummary {
   readonly description: string | null
 }
 
-export type { ApprovalRow, NodeOutputRow, RunSummaryRow }
+export type { ApprovalRow, ControlEvent, NodeOutputRow, RunSummaryRow, TranscriptRow }
 
 /** How the seam reaches the relay. */
 export interface GatewayTransport {
@@ -41,8 +43,10 @@ const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
 
 /**
- * The Plue floor, as this app's own seam: list flows, launch, read a run, list
- * and decide approvals, read a node's output, explain a run, and cancel it.
+ * The Plue floor, as this app's own seam: list flows and runs, launch, read a
+ * run, list and decide approvals (one run's or the workspace inbox), resume,
+ * steer, signal, read a node's output or a run's transcript and events,
+ * explain a run, and cancel it.
  *
  * @param transport how to reach the relay
  */
@@ -196,8 +200,99 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
       }),
 
     /** Stop a run. Durable: the next read of it says cancelled. */
-    cancel: (repo: string, runId: string): Promise<GatewayResult<unknown>> =>
-      call(repo, "Cancel", { runId, idempotencyKey: `cancel:${runId}`, reason: "the human stopped it" })
+    cancel: (repo: string, runId: string, reason?: string): Promise<GatewayResult<unknown>> =>
+      call(repo, "Cancel", {
+        runId,
+        idempotencyKey: `cancel:${runId}`,
+        reason: reason === undefined || reason.trim() === "" ? "the human stopped it" : reason
+      }),
+
+    /*
+     * Lane runs — the run lifecycle beyond launch and cancel.
+     *
+     * Every mutation mints one idempotency key per invocation: the relay may
+     * replay a lost answer with the same frame, and the engine deduplicates
+     * on the key, so a repeat lands one effect and two deliberate clicks land
+     * two (a second resume of a live run is the gateway's own ClaimLost).
+     */
+
+    /** Restart a parked run (or tell the run's owner to). */
+    resume: (repo: string, runId: string, reason?: string): Promise<GatewayResult<unknown>> =>
+      call(repo, "Resume", {
+        runId,
+        idempotencyKey: `resume:${runId}:${Date.now()}`,
+        ...(reason === undefined ? {} : { reason })
+      }),
+
+    /** Deliver a named signal to a run parked on a wait. */
+    signal: (repo: string, runId: string, name: string, payload: unknown): Promise<GatewayResult<unknown>> =>
+      call(repo, "Signal", {
+        runId,
+        signal: { name, payload: payload ?? {} },
+        idempotencyKey: `signal:${runId}:${name}:${Date.now()}`
+      }),
+
+    /**
+     * Steer a running agent. The steer envelope's principal is the server's
+     * to stamp (`ControlServer` overwrites it with the authenticated one on
+     * every steer that arrives over RPC), so the placeholder here never
+     * reaches a journal as authority.
+     */
+    steer: (
+      repo: string,
+      runId: string,
+      item:
+        | { readonly kind: "Message"; readonly body: string }
+        | { readonly kind: "Seat"; readonly seat: string }
+        | { readonly kind: "Thinking"; readonly thinking: string }
+        | { readonly kind: "Tools"; readonly toolNames: ReadonlyArray<string> }
+    ): Promise<GatewayResult<unknown>> => {
+      const now = Date.now()
+      const envelope = {
+        messageId: `steer-${runId}-${now}`,
+        runId,
+        principal: { id: "app-operator", kind: "user", stampedAt: now },
+        createdAt: now
+      }
+      const message = (
+        item.kind === "Message"
+          ? { ...envelope, kind: "Message", body: item.body }
+          : item.kind === "Seat"
+          ? { ...envelope, kind: "Seat", seat: item.seat }
+          : item.kind === "Thinking"
+          ? { ...envelope, kind: "Thinking", thinking: item.thinking }
+          : { ...envelope, kind: "Tools", toolNames: [...item.toolNames] }
+      ) as SteerMessage
+      return call(repo, "Steer", { runId, message, idempotencyKey: `steer:${runId}:${now}` })
+    },
+
+    /** Every run on the workspace, one summary row each (the run inbox's read). */
+    workspaceRuns: async (repo: string): Promise<GatewayResult<ReadonlyArray<RunSummaryRow>>> =>
+      map(
+        await projection(repo, { _tag: "workspace-runs" }),
+        (value) => rowsOf(value) as ReadonlyArray<RunSummaryRow>
+      ),
+
+    /** The approvals inbox: every pending gate across the workspace's runs. */
+    approvalsInbox: async (repo: string): Promise<GatewayResult<ReadonlyArray<ApprovalRow>>> =>
+      map(
+        await projection(repo, { _tag: "approvals" }),
+        (value) => rowsOf(value) as ReadonlyArray<ApprovalRow>
+      ),
+
+    /** One run's turn-by-turn transcript. */
+    transcript: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<TranscriptRow>>> =>
+      map(
+        await projection(repo, { _tag: "transcript", runId }),
+        (value) => rowsOf(value) as ReadonlyArray<TranscriptRow>
+      ),
+
+    /** One run's raw control events, in journal order. */
+    runEvents: async (repo: string, runId: string): Promise<GatewayResult<ReadonlyArray<ControlEvent>>> =>
+      map(
+        await projection(repo, { _tag: "run-events", runId }),
+        (value) => rowsOf(value) as ReadonlyArray<ControlEvent>
+      )
   }
 }
 

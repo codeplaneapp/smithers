@@ -750,11 +750,13 @@ describe("wave 11 — workflows are presented", () => {
     }
     /*
      * NO INVENTION: the three conversational commands stay the whole of the
-     * agent-facing surface. Wave 12 adds three HIDDEN card bindings (the
-     * which-repo answer and a quiet run's stop/retry) — affordances the
-     * brief names, invisible to the slash menu and the tool catalog alike.
+     * agent-facing flow.* surface. Wave 12 added three HIDDEN card bindings
+     * (the which-repo answer and a quiet run's stop/retry); lane runs added
+     * the hidden stop-all — affordances the briefs name, invisible to the
+     * slash menu and the tool catalog alike. The runs.* lifecycle commands
+     * are their own namespace, pinned in the registry test.
      */
-    expect(controller.commands.all().filter((command) => command.name.startsWith("flow."))).toHaveLength(6)
+    expect(controller.commands.all().filter((command) => command.name.startsWith("flow."))).toHaveLength(7)
     expect(
       controller.commands
         .all()

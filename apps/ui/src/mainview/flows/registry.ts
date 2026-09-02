@@ -236,6 +236,8 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "tab", label: "Tabs", summary: "Terminals, agents, and card tabs" },
   { id: "target", label: "Targets", summary: "Build targets, runs, graph, CI" },
   { id: "flow", label: "Workflows", summary: "Create, list, and run workflows" },
+  { id: "runs", label: "Runs", summary: "The runs on your workspace: open, resume, steer, stop" },
+  { id: "approvals", label: "Run approvals", summary: "The workspace's pending gates" },
   { id: "issues", label: "Issues", summary: "GitHub issues" },
   { id: "prs", label: "Pull requests", summary: "GitHub pull requests" },
   { id: "files", label: "Files", summary: "Read repository files" },

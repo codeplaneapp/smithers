@@ -155,14 +155,39 @@ export const parseRecommendations = (
 }
 
 /**
- * The rule the agent replaces and falls back to: the repo step first (the
- * onboarding pill), then the registry's recommendation order, capped. While a
- * turn streams the pills are disabled anyway, so the row is empty then.
+ * The rule the agent replaces and falls back to: a pending gate or a live run
+ * leads (lane runs — the next click when the workspace waits on the human is
+ * the gate, and when runs are moving it is the inbox), then the repo step
+ * (the onboarding pill), then the registry's recommendation order, capped.
+ * While a turn streams the pills are disabled anyway, so the row is empty then.
  */
-export const ruleSuggestions = (input: Pick<RecommendInput, "state" | "catalog" | "repoStep">): ReadonlyArray<Suggestion> => {
+export const ruleSuggestions = (
+  input: Pick<RecommendInput, "state" | "catalog" | "repoStep"> & Partial<Pick<RecommendInput, "cards">>
+): ReadonlyArray<Suggestion> => {
   if (input.state.typing) return []
   const byName = new Map(offerable(input.catalog).map((command) => [command.name, command]))
-  const lead = repoSuggestion(input.repoStep)
+  const cards = input.cards ?? []
+  const gateOpen = cards.some((card) => card.kind === "approval" && card.status === "active")
+  const runLive = cards.some((card) => card.kind === "flow-run" && card.status === "active")
+  const lifecycle: Array<Suggestion> = []
+  if (gateOpen && byName.has("approvals.list")) {
+    lifecycle.push({
+      id: "reco-approvals.list",
+      label: "Decide approvals",
+      flow: "approvals.list",
+      emphasis: "primary",
+      why: "A run is parked on your decision."
+    })
+  } else if (runLive && byName.has("runs.list")) {
+    lifecycle.push({
+      id: "reco-runs.list",
+      label: "See your runs",
+      flow: "runs.list",
+      emphasis: "primary",
+      why: "Runs are live on your workspace."
+    })
+  }
+  const lead = [...lifecycle, ...repoSuggestion(input.repoStep)]
   const rest = recommendedNames(input.state)
     .filter((name) => byName.has(name) && !lead.some((suggestion) => suggestion.flow === name))
     .map((name): Suggestion => ({

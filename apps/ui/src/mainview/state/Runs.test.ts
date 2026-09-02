@@ -1,0 +1,629 @@
+/*
+ * Lane runs — the run lifecycle beyond launch, through the real controller
+ * against a relay double speaking the wire's own shapes.
+ *
+ * Pinned here: the run inbox (runs.list, its filters, and the honest by=
+ * refusal — the wire records no launcher), opening a run as a card, the
+ * lifecycle acts (resume, rerun with its launch input or the honest refusal,
+ * signal, the steer family), the facets (transcript with follow, the
+ * verbose-gated events tab), stop-all, and the approvals inbox — including
+ * the `inboxCardId:requestId` decision routing that lets a human decide a
+ * gate whose own approval card never landed.
+ */
+import type { StorageApi } from "@tanstack/db"
+import { describe, expect, test } from "bun:test"
+import type { Card } from "smithers-shared/Cards"
+import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import { createAppController } from "./AppController"
+import type { AppServices } from "./AppController"
+import { createAppStore } from "./AppStore"
+
+const memoryStorage = (): StorageApi => {
+  const data = new Map<string, string>()
+  return {
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => void data.set(key, value),
+    removeItem: (key) => void data.delete(key)
+  }
+}
+
+const webStore = () => createAppStore({ kind: "localStorage", storage: memoryStorage() })
+
+const unavailableRepositories: NativeRepositories = {
+  available: false,
+  pickLocalRepository: async () => ({
+    status: "error",
+    code: "native-required",
+    message: "Local repositories can only be connected from the Smithers native app."
+  })
+}
+
+const silentAgent = (): NativeAgent => ({
+  available: true,
+  startTurn: async () => ({ status: "started" }),
+  cancelTurn: async () => {},
+  subscribe: () => () => {}
+})
+
+const json = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+
+const settle = async (ticks = 12): Promise<void> => {
+  for (let index = 0; index < ticks; index += 1) await new Promise((resolve) => setTimeout(resolve, 1))
+}
+
+const waitFor = async (condition: () => boolean, timeoutMs = 2_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2))
+  }
+  if (!condition()) throw new Error("condition never held")
+}
+
+const REPO = "codeplanesmithers/smithers-demo"
+
+const said = (outcome: { status: string; value?: string; error?: string }): string =>
+  outcome.status === "failed" ? (outcome.error ?? "") : (outcome.value ?? "")
+
+interface SummarySpec {
+  readonly runId: string
+  readonly flowId: string
+  readonly status: string
+  readonly waitingReason?: string
+  readonly lineageId?: string
+  readonly steeringPending?: number
+  readonly createdAt?: number
+  readonly turns?: number
+  readonly calls?: number
+}
+
+const summaryRow = (spec: SummarySpec) => ({
+  runId: spec.runId,
+  flowId: spec.flowId,
+  status: spec.status,
+  createdAt: spec.createdAt ?? 1,
+  updatedAt: 2,
+  ...(spec.waitingReason === undefined ? {} : { waitingReason: spec.waitingReason }),
+  ...(spec.lineageId === undefined ? {} : { lineageId: spec.lineageId }),
+  ...(spec.steeringPending === undefined ? {} : { steeringPending: spec.steeringPending }),
+  turns: spec.turns ?? 0,
+  calls: spec.calls ?? 0,
+  callsFailed: 0,
+  editsAttempted: 0,
+  editsSucceeded: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+  verdict: spec.status,
+  diagnosis: "Verdict   done."
+})
+
+const approvalRow = (runId: string, requestId: string, title: string) => ({
+  runId,
+  requestId,
+  title,
+  request: { question: title },
+  payload: {
+    target: {
+      _tag: "Node",
+      runId,
+      requestId,
+      digest: "sha256:test",
+      envelope: { capabilities: [], flows: [], budget: {} }
+    },
+    scope: "run",
+    idempotencyKey: `approve:${requestId}`
+  },
+  requestedAt: 1500,
+  status: "pending"
+})
+
+/** A relay double that speaks every selector and procedure the lane rides. */
+const relay = (options: {
+  readonly runs?: ReadonlyArray<SummarySpec>
+  readonly approvals?: ReadonlyArray<ReturnType<typeof approvalRow>>
+  readonly transcriptLines?: ReadonlyArray<{ sequence: number; turn: number; at: number; kind: string; text: string }>
+  readonly events?: ReadonlyArray<Record<string, unknown>>
+  readonly refusals?: Readonly<Record<string, string>>
+} = {}) => {
+  const calls: Array<{ path: string; method: string; body: unknown }> = []
+  const state = {
+    launched: [] as Array<{ workflow: string; input: unknown; repo: string }>,
+    resumed: [] as Array<{ runId: string; reason?: string }>,
+    signaled: [] as Array<{ runId: string; signal: unknown }>,
+    steered: [] as Array<{ runId: string; message: Record<string, unknown> }>,
+    cancelled: [] as Array<{ runId: string; reason?: string }>,
+    submitted: [] as Array<{ approval: unknown; decision: string }>
+  }
+  let runCounter = 0
+  let planned: { flowId: string; input: unknown } | undefined
+
+  const rowsAnswer = (projection: string, rows: ReadonlyArray<unknown>): Response =>
+    json(200, { ok: true, payload: { cursor: { projection, runId: null, value: 0 }, rows } })
+
+  const procedure = (repo: string, name: string, payload: Record<string, unknown>): Response => {
+    const refusal = options.refusals?.[name]
+    if (refusal !== undefined) return json(200, { ok: false, error: { message: refusal } })
+    switch (name) {
+      case "List":
+        return json(200, {
+          ok: true,
+          payload: { _tag: "flows", items: [{ flowId: "review-pr", description: "" }] }
+        })
+      case "Plan":
+        planned = { flowId: String(payload.flowId), input: payload.input }
+        return json(200, {
+          ok: true,
+          payload: {
+            planId: "plan-1",
+            flowId: planned.flowId,
+            digest: "digest-1",
+            envelope: { capabilities: [], flows: [], budget: {} },
+            inputSummary: "",
+            deployClass: false,
+            nodes: []
+          }
+        })
+      case "Run": {
+        runCounter += 1
+        state.launched.push({ workflow: planned?.flowId ?? "?", input: planned?.input, repo })
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "r", runId: `run-${runCounter}` } })
+      }
+      case "Resume":
+        state.resumed.push({ runId: String(payload.runId), reason: payload.reason as string | undefined })
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "re" } })
+      case "Signal":
+        state.signaled.push({ runId: String(payload.runId), signal: payload.signal })
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "s" } })
+      case "Steer":
+        state.steered.push({ runId: String(payload.runId), message: payload.message as Record<string, unknown> })
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "st" } })
+      case "Cancel":
+        state.cancelled.push({ runId: String(payload.runId), reason: payload.reason as string | undefined })
+        return json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "c" } })
+      case "Approval.Submit": {
+        // The seam sends the envelope spread flat beside the decision.
+        const { decision, ...approval } = payload
+        state.submitted.push({ approval, decision: String(decision) })
+        return json(200, { ok: true, payload: { decision: { _tag: "Accepted", receiptId: "a" } } })
+      }
+      case "Projection.Snapshot": {
+        const selector = (payload.selector ?? {}) as { _tag?: string; runId?: string }
+        switch (selector._tag) {
+          case "workspace-runs":
+            return rowsAnswer("workspace-runs", (options.runs ?? []).map(summaryRow))
+          case "run-summary": {
+            const spec = (options.runs ?? []).find((run) => run.runId === selector.runId)
+            return rowsAnswer("run-summary", spec === undefined ? [] : [summaryRow(spec)])
+          }
+          case "approvals": {
+            const rows = (options.approvals ?? []).filter((row) =>
+              selector.runId === undefined || row.runId === selector.runId
+            )
+            return rowsAnswer("approvals", rows)
+          }
+          case "transcript":
+            return rowsAnswer("transcript", options.transcriptLines ?? [])
+          case "run-events":
+            return rowsAnswer("run-events", options.events ?? [])
+          default:
+            return rowsAnswer(String(selector._tag), [])
+        }
+      }
+      default:
+        return json(200, { ok: false, error: { message: `no ${name}` } })
+    }
+  }
+
+  const services: AppServices = {
+    workflowPollMs: 1,
+    toastDebounceMs: 0,
+    toastAutoDismissMs: 10_000,
+    fetchImpl: async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+      const absolute = new URL(url, "https://app.test")
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+      calls.push({ path: absolute.pathname + absolute.search, method: init?.method ?? "GET", body })
+      if (absolute.pathname === "/api/workflow/provision") {
+        return json(200, { status: "ready", repo: body?.repo, gatewayId: "gw-1" })
+      }
+      if (absolute.pathname === "/api/workflow/rpc") {
+        return procedure(String(body.repo), String(body.procedure), (body.payload ?? {}) as Record<string, unknown>)
+      }
+      return json(404, { status: "error", message: `no stub for ${absolute.pathname}` })
+    }
+  }
+
+  return { services, calls, state }
+}
+
+const signIn = async (store: Awaited<ReturnType<typeof webStore>>, loaded: Array<string> = [REPO]) => {
+  store.dispatch({
+    type: "identity.session.loaded",
+    actor: "system",
+    state: "signed-in",
+    login: "codeplanesmithers",
+    allowlisted: true,
+    admin: false,
+    scopesPlain: null
+  })
+  store.dispatch({
+    type: "repositories.loaded",
+    actor: "system",
+    repositories: loaded.map((fullName) => ({
+      id: fullName,
+      org: fullName.split("/")[0] ?? "",
+      ownerKind: "user",
+      name: fullName.split("/")[1] ?? "",
+      head: null
+    }))
+  })
+  await settle(2)
+}
+
+const runListCard = (store: Awaited<ReturnType<typeof webStore>>): Extract<Card, { kind: "run-list" }> | undefined => {
+  const card = store.collections.cards.get(`run-list-${REPO}`)
+  return card?.kind === "run-list" ? card : undefined
+}
+
+const inboxCard = (
+  store: Awaited<ReturnType<typeof webStore>>
+): Extract<Card, { kind: "approvals-inbox" }> | undefined => {
+  const card = store.collections.cards.get(`approvals-inbox-${REPO}`)
+  return card?.kind === "approvals-inbox" ? card : undefined
+}
+
+describe("runs.list — the run inbox", () => {
+  test("lists the workspace's runs as a card, filtered and sorted newest first", async () => {
+    const store = await webStore()
+    const double = relay({
+      runs: [
+        { runId: "run-old", flowId: "review-pr", status: "completed", createdAt: 1, turns: 4, calls: 9 },
+        { runId: "run-new", flowId: "deploy", status: "parked", waitingReason: "approval", createdAt: 5, turns: 1, calls: 2 },
+        { runId: "run-mid", flowId: "review-pr", status: "accepted", createdAt: 3 }
+      ]
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    const listed = await controller.commands.run("runs.list")
+    expect(said(listed)).toContain("3 runs")
+    const card = runListCard(store)
+    expect(card?.payload.runs.map((run) => run.runId)).toEqual(["run-new", "run-mid", "run-old"])
+    // The parked run names its wait; the accepted one names the executor convention.
+    expect(card?.payload.runs[0]).toMatchObject({ waiting: "approval" })
+    expect(card?.payload.runs[1]).toMatchObject({ waiting: "executor" })
+    expect(card?.payload.runs[2]?.waiting).toBeUndefined()
+    expect(double.calls.some((call) =>
+      JSON.stringify(call.body).includes("\"workspace-runs\"")
+    )).toBe(true)
+
+    const filtered = await controller.commands.run("runs.list", "parked")
+    expect(said(filtered)).toContain("1 run")
+    expect(runListCard(store)?.payload.runs.map((run) => run.runId)).toEqual(["run-new"])
+    expect(runListCard(store)?.payload.status).toBe("parked")
+  })
+
+  test("by= refuses honestly — the wire records no launcher — and asks nothing", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-1", flowId: "review-pr", status: "running" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    const before = double.calls.length
+    const refused = await controller.commands.run("runs.list", "by=octocat")
+    expect(said(refused)).toContain("no by=")
+    expect(double.calls.length).toBe(before)
+    expect(runListCard(store)).toBeUndefined()
+  })
+
+  test("signed-out is the identity guard's refusal, not a workspace call", async () => {
+    const store = await webStore()
+    const double = relay()
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    const refused = await controller.commands.run("runs.list")
+    expect(said(refused)).toContain("Sign in with GitHub first")
+    expect(double.calls).toHaveLength(0)
+  })
+})
+
+describe("runs.open / resume / signal / steer — the run's acts", () => {
+  test("runs.open materializes the run's card from its summary", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-9", flowId: "deploy", status: "running" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    const opened = await controller.commands.run("runs.open", "run-9")
+    expect(said(opened)).toContain("run-opened run=run-9")
+    const card = store.collections.cards.get("flow-run-run-9")
+    expect(card?.kind === "flow-run" && card.payload.workflow).toBe("deploy")
+    expect(card?.kind === "flow-run" && card.payload.repo).toBe(REPO)
+  })
+
+  test("runs.open names the miss honestly", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    const opened = await controller.commands.run("runs.open", "run-absent")
+    expect(said(opened)).toContain("no run run-absent")
+  })
+
+  test("runs.resume sends the control Resume with an idempotency key", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-2", flowId: "review-pr", status: "parked", waitingReason: "quota" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    const resumed = await controller.commands.run("runs.resume", "run-2")
+    expect(said(resumed)).toContain("resume-requested run=run-2")
+    expect(double.state.resumed).toEqual([{ runId: "run-2", reason: undefined }])
+  })
+
+  test("a resume refusal crosses as the flow's error", async () => {
+    const store = await webStore()
+    const double = relay({
+      runs: [{ runId: "run-2", flowId: "review-pr", status: "completed" }],
+      refusals: { Resume: "Terminal: the run is completed" }
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    const resumed = await controller.commands.run("runs.resume", "run-2")
+    expect(resumed.status).toBe("failed")
+    expect(said(resumed)).toContain("Terminal: the run is completed")
+  })
+
+  test("runs.signal parses the JSON payload; invalid JSON refuses without a call", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-3", flowId: "deploy", status: "parked", waitingReason: "event" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    const sent = await controller.commands.run("runs.signal", `run-3 deploy-done {"ok":true}`)
+    expect(said(sent)).toContain("signal-sent")
+    expect(double.state.signaled).toEqual([{ runId: "run-3", signal: { name: "deploy-done", payload: { ok: true } } }])
+
+    const before = double.state.signaled.length
+    const refused = await controller.commands.run("runs.signal", "run-3 deploy-done {not json}")
+    expect(said(refused)).toContain("isn't JSON")
+    expect(double.state.signaled.length).toBe(before)
+  })
+
+  test("the steer family sends the steer envelope; the card notes the queued steer", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-4", flowId: "review-pr", status: "running" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("runs.open", "run-4")
+
+    const steered = await controller.commands.run("runs.steer", "run-4 use the smaller diff")
+    expect(said(steered)).toContain("steered run=run-4")
+    expect(double.state.steered[0]?.message).toMatchObject({ kind: "Message", body: "use the smaller diff", runId: "run-4" })
+
+    await controller.commands.run("runs.seat", "run-4 anthropic:claude-opus-4-1")
+    expect(double.state.steered[1]?.message).toMatchObject({ kind: "Seat", seat: "anthropic:claude-opus-4-1" })
+    await controller.commands.run("runs.tools", "run-4 bash, edit")
+    expect(double.state.steered[2]?.message).toMatchObject({ kind: "Tools", toolNames: ["bash", "edit"] })
+
+    const card = store.collections.cards.get("flow-run-run-4")
+    expect(card?.kind === "flow-run" && card.payload.steeringPending).toBe(true)
+  })
+})
+
+describe("runs.rerun — the same flow, the same input, or the honest refusal", () => {
+  test("a run launched from here reruns with its recorded input as a NEW run", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    await controller.commands.run("flow.run", "review-pr")
+    await waitFor(() => double.state.launched.length === 1)
+    // Launch carries no input for flow.run; give the card one as flow.create would.
+    const firstRunId = "run-1"
+    store.dispatch({
+      type: "card.updated",
+      actor: "system",
+      id: `flow-run-${firstRunId}`,
+      patch: {
+        payload: {
+          ...(store.collections.cards.get(`flow-run-${firstRunId}`) as Extract<Card, { kind: "flow-run" }>).payload,
+          input: { prompt: "summarize my open issues" }
+        }
+      }
+    })
+
+    const reran = await controller.commands.run("runs.rerun", firstRunId)
+    expect(said(reran)).toContain("run-started")
+    expect(double.state.launched).toHaveLength(2)
+    expect(double.state.launched[1]).toMatchObject({
+      workflow: "review-pr",
+      input: { prompt: "summarize my open issues" },
+      repo: REPO
+    })
+  })
+
+  test("a run whose input was never recorded refuses instead of guessing", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-5", flowId: "deploy", status: "completed" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    // Opened from the inbox: the client never saw this run's launch input.
+    await controller.commands.run("runs.open", "run-5")
+    const before = double.state.launched.length
+    const refused = await controller.commands.run("runs.rerun", "run-5")
+    expect(said(refused)).toContain("nothing faithful to rerun")
+    expect(double.state.launched.length).toBe(before)
+  })
+})
+
+describe("the run card's facets — transcript, follow, and the verbose events tab", () => {
+  const lines = [
+    { sequence: 1, turn: 1, at: 100, kind: "agent.turn.started", text: "turn 1 begins" },
+    { sequence: 2, turn: 1, at: 200, kind: "control.approval.requested", text: "asks: deploy?" }
+  ]
+
+  test("runs.logs shows the transcript; --follow toggles the live merge", async () => {
+    const store = await webStore()
+    const double = relay({
+      runs: [{ runId: "run-6", flowId: "deploy", status: "running" }],
+      transcriptLines: lines
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("runs.open", "run-6")
+
+    const shown = await controller.commands.run("runs.logs", "run-6")
+    expect(said(shown)).toContain("transcript run=run-6")
+    let card = store.collections.cards.get("flow-run-run-6")
+    expect(card?.kind === "flow-run" && card.payload.facet).toBe("transcript")
+    expect(card?.kind === "flow-run" && card.payload.follow).toBe(false)
+    expect(card?.kind === "flow-run" && card.payload.transcriptRows?.map((row) => row.text))
+      .toEqual(["turn 1 begins", "asks: deploy?"])
+
+    const followed = await controller.commands.run("runs.logs", "run-6 --follow")
+    expect(said(followed)).toContain("following run=run-6")
+    card = store.collections.cards.get("flow-run-run-6")
+    expect(card?.kind === "flow-run" && card.payload.follow).toBe(true)
+    // The pump merges the transcript on its own cycle while follow holds.
+    await waitFor(() => {
+      const current = store.collections.cards.get("flow-run-run-6")
+      return current?.kind === "flow-run" && (current.payload.transcriptRows?.length ?? 0) === 2
+    })
+    // Following again unfollows.
+    await controller.commands.run("runs.logs", "run-6 --follow")
+    card = store.collections.cards.get("flow-run-run-6")
+    expect(card?.kind === "flow-run" && card.payload.follow).toBe(false)
+    // And the Steps tab is the way back.
+    await controller.commands.run("runs.steps", "run-6")
+    card = store.collections.cards.get("flow-run-run-6")
+    expect(card?.kind === "flow-run" && card.payload.facet).toBe("steps")
+  })
+
+  test("runs.events exists only where verbose does", async () => {
+    const store = await webStore()
+    const double = relay({
+      runs: [{ runId: "run-7", flowId: "deploy", status: "running" }],
+      events: [{ kind: "control.run.accepted", payload: {}, sequence: 1, occurredAt: 100 }]
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("runs.open", "run-7")
+
+    const refused = await controller.commands.run("runs.events", "run-7")
+    expect(said(refused)).toContain("/debug.verbose")
+
+    await controller.commands.run("debug.verbose")
+    const shown = await controller.commands.run("runs.events", "run-7")
+    expect(said(shown)).toContain("events run=run-7")
+    const card = store.collections.cards.get("flow-run-run-7")
+    expect(card?.kind === "flow-run" && card.payload.facet).toBe("events")
+    expect(card?.kind === "flow-run" && card.payload.events).toHaveLength(1)
+  })
+})
+
+describe("flow.run.stop-all — every live run, cancelled", () => {
+  test("cancels each live run card's run and reports the count", async () => {
+    const store = await webStore()
+    const double = relay({
+      runs: [
+        { runId: "run-a", flowId: "deploy", status: "running" },
+        { runId: "run-b", flowId: "review-pr", status: "running" }
+      ]
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("runs.open", "run-a")
+    await controller.commands.run("runs.open", "run-b")
+
+    const stopped = await controller.commands.run("flow.run.stop-all")
+    expect(said(stopped)).toContain("stopped=2 of 2")
+    expect(double.state.cancelled.map((entry) => entry.runId).sort()).toEqual(["run-a", "run-b"])
+    expect(double.state.cancelled[0]?.reason).toContain("every run")
+  })
+
+  test("with nothing live there is nothing to stop", async () => {
+    const store = await webStore()
+    const double = relay()
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    const stopped = await controller.commands.run("flow.run.stop-all")
+    expect(said(stopped)).toContain("No runs are live")
+    expect(double.state.cancelled).toHaveLength(0)
+  })
+})
+
+describe("the approvals inbox — list, open, and the row decision", () => {
+  test("approvals.list upserts the workspace's pending gates as one card", async () => {
+    const store = await webStore()
+    const double = relay({
+      approvals: [approvalRow("run-a", "req-1", "Run the deploy script?"), approvalRow("run-b", "req-2", "Push the branch?")]
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    const listed = await controller.commands.run("approvals.list")
+    expect(said(listed)).toContain("2 approvals pending")
+    const card = inboxCard(store)
+    expect(card?.payload.approvals.map((row) => row.title)).toEqual(["Run the deploy script?", "Push the branch?"])
+    // The inbox selected WITHOUT a run id — the whole workspace's gates.
+    expect(double.calls.some((call) =>
+      JSON.stringify(call.body).includes("\"_tag\":\"approvals\"}") ||
+      JSON.stringify(call.body).includes("\"selector\":{\"_tag\":\"approvals\"}")
+    )).toBe(true)
+  })
+
+  test("a row decision submits the gateway's own envelope unchanged and freezes the row", async () => {
+    const store = await webStore()
+    const double = relay({ approvals: [approvalRow("run-a", "req-1", "Run the deploy script?")] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("approvals.list")
+
+    // The exact dispatch the card's Approve button makes (approval.approve with the row id).
+    const decided = await controller.commands.run("approval.approve", `approvals-inbox-${REPO}:req-1`)
+    await settle(4)
+    expect(decided.status).not.toBe("failed")
+    expect(double.state.submitted).toHaveLength(1)
+    expect(double.state.submitted[0]?.decision).toBe("approve")
+    // The envelope went back byte-for-byte: no client reconstructs authority.
+    expect(double.state.submitted[0]?.approval).toEqual(approvalRow("run-a", "req-1", "Run the deploy script?").payload)
+    const card = inboxCard(store)
+    expect(card?.payload.approvals[0]?.decision).toBe("approved")
+    expect(card?.payload.approvals[0]?.decisionError).toBeUndefined()
+  })
+
+  test("a refused decision lands on the row as the error, never a fake freeze", async () => {
+    const store = await webStore()
+    const double = relay({
+      approvals: [approvalRow("run-a", "req-1", "Run the deploy script?")],
+      refusals: { "Approval.Submit": "Stale: the gate was already decided" }
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("approvals.list")
+    await controller.commands.run("approval.deny", `approvals-inbox-${REPO}:req-1`)
+    await settle(4)
+    const card = inboxCard(store)
+    expect(card?.payload.approvals[0]?.decision).toBeUndefined()
+    expect(card?.payload.approvals[0]?.decisionError).toContain("Stale")
+  })
+
+  test("approvals.open materializes a run's pending gates as ordinary approval cards", async () => {
+    const store = await webStore()
+    const double = relay({ approvals: [approvalRow("run-a", "req-1", "Run the deploy script?")] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+
+    const opened = await controller.commands.run("approvals.open", "run-a")
+    expect(said(opened)).toContain("1 approval opened for run run-a")
+    const card = store.collections.cards.get("approval-run-a-req-1")
+    expect(card?.kind === "approval" && card.payload.runId).toBe("run-a")
+    expect(card?.kind === "approval" && card.payload.repo).toBe(REPO)
+
+    // And those cards decide through the ordinary per-card path.
+    await controller.commands.run("approval.approve", "approval-run-a-req-1")
+    await settle(4)
+    expect(double.state.submitted).toHaveLength(1)
+  })
+})

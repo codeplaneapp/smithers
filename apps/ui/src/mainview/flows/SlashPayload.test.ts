@@ -72,3 +72,82 @@ describe("the target reference", () => {
     expect(payloadFor("target.run", "r1")).toEqual({ error: "target.run needs a repository id and a target label" })
   })
 })
+
+/*
+ * Lane runs — the run inbox and its acts. The filters take any order, the
+ * signal's JSON keeps its spacing, and every id-scoped act refuses a blank.
+ */
+describe("the runs grammar", () => {
+  test("runs.list takes its filters in any order, positionals last", () => {
+    expect(payloadFor("runs.list", "")).toEqual({ payload: {} })
+    expect(payloadFor("runs.list", "parked review-pr")).toEqual({
+      payload: { status: "parked", flow: "review-pr" }
+    })
+    expect(payloadFor("runs.list", "lineage=lin-1 parked will/flows")).toEqual({
+      payload: { lineage: "lin-1", status: "parked", repo: "will/flows" }
+    })
+    expect(payloadFor("runs.list", "by=octocat")).toEqual({ payload: { by: "octocat" } })
+    expect(payloadFor("runs.list", "a b c")).toEqual({
+      error: "runs.list takes [status] [flow] [by=…] [lineage=…] [owner/repo]"
+    })
+  })
+
+  test("runs.open takes a run id and an optional repo", () => {
+    expect(payloadFor("runs.open", "run-1")).toEqual({ payload: { runId: "run-1" } })
+    expect(payloadFor("runs.open", "run-1 will/flows")).toEqual({ payload: { runId: "run-1", repo: "will/flows" } })
+    expect(payloadFor("runs.open", "")).toEqual({
+      error: "runs.open needs a run id: /runs.open <runId> [owner/repo]"
+    })
+  })
+
+  test("runs.signal keeps the JSON payload verbatim", () => {
+    expect(payloadFor("runs.signal", "run-1 deploy-done")).toEqual({
+      payload: { runId: "run-1", name: "deploy-done" }
+    })
+    expect(payloadFor("runs.signal", `run-1 deploy-done {"ok": true}`)).toEqual({
+      payload: { runId: "run-1", name: "deploy-done", payload: `{"ok": true}` }
+    })
+    expect(payloadFor("runs.signal", "run-1")).toEqual({
+      error: "runs.signal needs the signal's name: /runs.signal <runId> <name> [json]"
+    })
+  })
+
+  test("runs.steer keeps the whole message after the run id", () => {
+    expect(payloadFor("runs.steer", "run-1 use the smaller diff")).toEqual({
+      payload: { runId: "run-1", body: "use the smaller diff" }
+    })
+    expect(payloadFor("runs.steer", "run-1")).toEqual({ error: "runs.steer needs the message to deliver" })
+  })
+
+  test("runs.logs takes --follow anywhere and nothing else", () => {
+    expect(payloadFor("runs.logs", "run-1")).toEqual({ payload: { runId: "run-1" } })
+    expect(payloadFor("runs.logs", "run-1 --follow")).toEqual({ payload: { runId: "run-1", follow: true } })
+    expect(payloadFor("runs.logs", "--follow run-1")).toEqual({ payload: { runId: "run-1", follow: true } })
+    expect(payloadFor("runs.logs", "run-1 extra")).toEqual({
+      error: "runs.logs takes a run id and optionally --follow"
+    })
+  })
+
+  test("flow.run.stop takes an optional reason after the card id", () => {
+    expect(payloadFor("flow.run.stop", "card-1")).toEqual({ payload: { cardId: "card-1" } })
+    expect(payloadFor("flow.run.stop", "card-1 it hung")).toEqual({
+      payload: { cardId: "card-1", reason: "it hung" }
+    })
+    expect(payloadFor("flow.run.stop", "")).toEqual({ error: "flow.run.stop needs the card id" })
+  })
+
+  test("the id-scoped acts refuse a blank run id", () => {
+    for (const name of ["runs.resume", "runs.rerun", "runs.events", "runs.steps", "approvals.open"]) {
+      expect(payloadFor(name, "")).toEqual({ error: `${name} needs a run id` })
+    }
+  })
+
+  test("approvals.list takes just an owner/repo", () => {
+    expect(payloadFor("approvals.list", "")).toEqual({ payload: {} })
+    expect(payloadFor("approvals.list", "will/flows")).toEqual({ payload: { repo: "will/flows" } })
+    expect(payloadFor("approvals.list", "will/flows extra")).toEqual({
+      error: "approvals.list takes just an owner/repo name"
+    })
+  })
+})
+

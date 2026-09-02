@@ -34,7 +34,8 @@ import type { TargetGraphController } from "./controller/targetGraph"
 import { createTargetGraphDevFixtures } from "../dev/fixtureRunStream"
 import { createTurnController } from "./controller/turns"
 import { createWorkflowPumpController } from "./controller/workflow-pump"
-import { createWorkflowController } from "./controller/workflows"
+import { createWorkflowController, type WorkflowController } from "./controller/workflows"
+import { createRunsController, type RunsController } from "./controller/runs"
 import { createWorldController } from "./controller/world"
 import { createAppStatusSeam } from "./seams/AppStatusSeam"
 import type { AppStatusSeam } from "./seams/AppStatusSeam"
@@ -118,10 +119,26 @@ export interface AppController {
   /* Wave 12 §2 — the answer to "which loaded repository?" (one act). */
   readonly chooseWorkflowRepo: (fullName: string) => Promise<string | void | { readonly value: string }>
   /* Wave 12 §3 — the two acts a run that has gone quiet offers. */
-  readonly stopWatchingRun: (cardId: string) => string | void
+  readonly stopWatchingRun: (cardId: string, reason?: string) => string | void
   readonly retryRunWatch: (cardId: string) => string | void
   /** Boot reconciliation: resume the event pump for any run card still live. */
   readonly resumeWorkflowRuns: () => void
+  /* Lane runs — the run lifecycle beyond launch (see controller/runs.ts). */
+  readonly listRuns: RunsController["listRuns"]
+  readonly openRun: RunsController["openRun"]
+  readonly resumeRun: RunsController["resumeRun"]
+  readonly rerunRun: RunsController["rerunRun"]
+  readonly signalRun: RunsController["signalRun"]
+  readonly steerRun: RunsController["steerRun"]
+  readonly steerRunSeat: RunsController["steerRunSeat"]
+  readonly steerRunThinking: RunsController["steerRunThinking"]
+  readonly steerRunTools: RunsController["steerRunTools"]
+  readonly showRunLogs: RunsController["showRunLogs"]
+  readonly showRunSteps: RunsController["showRunSteps"]
+  readonly showRunEvents: RunsController["showRunEvents"]
+  readonly stopAllRuns: RunsController["stopAllRuns"]
+  readonly listApprovals: RunsController["listApprovals"]
+  readonly openApproval: RunsController["openApproval"]
   /* Card maximize/minimize — the user's presentation transition (§2d′). */
   readonly maximizeCard: (id: string) => string | void
   readonly minimizeCard: () => void
@@ -564,13 +581,16 @@ export const createAppController = (
     resumeWorkflowRuns
   } = createWorkflowPumpController(ctx, nextTranscriptOrdinal)
 
+  const workflowController: WorkflowController = createWorkflowController(ctx, nextTranscriptOrdinal, pumpWorkflowRun)
   const {
     createWorkflow,
     listWorkspaceWorkflows,
     runWorkflow,
     chooseWorkflowRepo,
-    forwardApprovalDecision
-  } = createWorkflowController(ctx, nextTranscriptOrdinal, pumpWorkflowRun)
+    forwardApprovalDecision,
+    forwardInboxApprovalDecision
+  } = workflowController
+  const runs = createRunsController(ctx, nextTranscriptOrdinal, workflowController)
   const {
     subscribeToAgent,
     send,
@@ -581,7 +601,8 @@ export const createAppController = (
   } = createTurnController(ctx, {
     settleTurnBilling,
     surfaceCommandFailure,
-    forwardApprovalDecision
+    forwardApprovalDecision,
+    forwardInboxApprovalDecision
   })
   const {
     clearConversation,
@@ -799,6 +820,21 @@ export const createAppController = (
     stopWatchingRun,
     retryRunWatch,
     resumeWorkflowRuns,
+    listRuns: runs.listRuns,
+    openRun: runs.openRun,
+    resumeRun: runs.resumeRun,
+    rerunRun: runs.rerunRun,
+    signalRun: runs.signalRun,
+    steerRun: runs.steerRun,
+    steerRunSeat: runs.steerRunSeat,
+    steerRunThinking: runs.steerRunThinking,
+    steerRunTools: runs.steerRunTools,
+    showRunLogs: runs.showRunLogs,
+    showRunSteps: runs.showRunSteps,
+    showRunEvents: runs.showRunEvents,
+    stopAllRuns: runs.stopAllRuns,
+    listApprovals: runs.listApprovals,
+    openApproval: runs.openApproval,
     maximizeCard,
     minimizeCard,
     frameBack,
@@ -1009,6 +1045,21 @@ export const createAppController = (
     stopWatchingRun,
     retryRunWatch,
     resumeWorkflowRuns,
+    listRuns: runs.listRuns,
+    openRun: runs.openRun,
+    resumeRun: runs.resumeRun,
+    rerunRun: runs.rerunRun,
+    signalRun: runs.signalRun,
+    steerRun: runs.steerRun,
+    steerRunSeat: runs.steerRunSeat,
+    steerRunThinking: runs.steerRunThinking,
+    steerRunTools: runs.steerRunTools,
+    showRunLogs: runs.showRunLogs,
+    showRunSteps: runs.showRunSteps,
+    showRunEvents: runs.showRunEvents,
+    stopAllRuns: runs.stopAllRuns,
+    listApprovals: runs.listApprovals,
+    openApproval: runs.openApproval,
     maximizeCard,
     minimizeCard,
     frameBack,

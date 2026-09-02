@@ -115,8 +115,91 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
    */
   "flow.create": (args) => ok({ description: trimmed(args) }),
   "flow.repo.choose": (args) => required("repo", args, "flow.repo.choose needs a repository name"),
-  "flow.run.stop": (args) => required("cardId", args, "flow.run.stop needs the card id"),
+  "flow.run.stop": (args) => {
+    const [cardId, ...rest] = tokensOf(args)
+    if (cardId === undefined) return no("flow.run.stop needs the card id")
+    const reason = rest.join(" ").trim()
+    return ok(reason === "" ? { cardId } : { cardId, reason })
+  },
   "flow.run.retry": (args) => required("cardId", args, "flow.run.retry needs the card id"),
+  /*
+   * Lane runs — the run inbox and its acts. `runs.list` takes its filters in
+   * any order: `by=`/`lineage=` name theirs, a trailing owner/repo names the
+   * workspace, and the remaining positionals are [status] [flow].
+   */
+  "runs.list": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    const payload: Record<string, string> = {}
+    const positional: Array<string> = []
+    for (const token of tokensOf(rest)) {
+      const keyed = /^(by|lineage)=(.+)$/.exec(token)
+      if (keyed !== null) payload[keyed[1]!] = keyed[2]!
+      else positional.push(token)
+    }
+    if (positional.length > 2) return no("runs.list takes [status] [flow] [by=…] [lineage=…] [owner/repo]")
+    const [status, flow] = positional
+    if (status !== undefined) payload["status"] = status
+    if (flow !== undefined) payload["flow"] = flow
+    if (repo !== undefined) payload["repo"] = repo
+    return ok(payload)
+  },
+  "runs.open": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    const runId = rest.trim()
+    if (runId === "" || /\s/.test(runId)) return no("runs.open needs a run id: /runs.open <runId> [owner/repo]")
+    return ok(repo === undefined ? { runId } : { runId, repo })
+  },
+  "runs.resume": (args) => required("runId", args, "runs.resume needs a run id"),
+  "runs.rerun": (args) => required("runId", args, "runs.rerun needs a run id"),
+  "runs.signal": (args) => {
+    const [runId, name] = tokensOf(args)
+    if (runId === undefined) return no("runs.signal needs a run id")
+    if (name === undefined) return no("runs.signal needs the signal's name: /runs.signal <runId> <name> [json]")
+    // The payload keeps its original spacing — JSON is whitespace-sensitive to a reader.
+    const payload = trimmed(args).slice(runId.length).trim().slice(name.length).trim()
+    return ok(payload === "" ? { runId, name } : { runId, name, payload })
+  },
+  "runs.steer": (args) => {
+    const [runId, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.steer needs a run id")
+    const body = rest.join(" ").trim()
+    if (body === "") return no("runs.steer needs the message to deliver")
+    return ok({ runId, body })
+  },
+  "runs.seat": (args) => {
+    const [runId, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.seat needs a run id")
+    const seat = rest.join(" ").trim()
+    if (seat === "") return no("runs.seat needs the seat to move the run to")
+    return ok({ runId, seat })
+  },
+  "runs.thinking": (args) => {
+    const [runId, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.thinking needs a run id")
+    const thinking = rest.join(" ").trim()
+    if (thinking === "") return no("runs.thinking needs the thinking level")
+    return ok({ runId, thinking })
+  },
+  "runs.tools": (args) => {
+    const [runId, ...rest] = tokensOf(args)
+    if (runId === undefined) return no("runs.tools needs a run id")
+    const toolNames = rest.join(" ").trim()
+    if (toolNames === "") return no("runs.tools needs the tool names, comma-separated")
+    return ok({ runId, toolNames })
+  },
+  "runs.logs": (args) => {
+    const tokens = tokensOf(args)
+    const follow = tokens.includes("--follow")
+    const [runId, ...rest] = tokens.filter((token) => token !== "--follow")
+    if (runId === undefined) return no("runs.logs needs a run id: /runs.logs <runId> [--follow]")
+    if (rest.length > 0) return no("runs.logs takes a run id and optionally --follow")
+    return ok(follow ? { runId, follow } : { runId })
+  },
+  "runs.events": (args) => required("runId", args, "runs.events needs a run id"),
+  "runs.steps": (args) => required("runId", args, "runs.steps needs a run id"),
+  "approvals.list": (args) => repoOnly("approvals.list", args),
+  "flow.run.stop-all": (args) => repoOnly("flow.run.stop-all", args),
+  "approvals.open": (args) => required("runId", args, "approvals.open needs a run id"),
   "flow.run": (args) => {
     const tokens = tokensOf(args)
     if (tokens.length > 2) return no("flow.run takes a workflow name and optionally an owner/repo")

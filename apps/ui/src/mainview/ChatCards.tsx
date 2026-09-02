@@ -36,6 +36,7 @@ import { RepoImportCardBody } from "./cards/RepoImportCard"
 import { RunHistoryCardBody } from "./cards/RunHistoryCard"
 import { RunTimelineCardBody } from "./cards/RunTimelineCard"
 import { RepoPluginCardBody } from "./cards/RepoPluginCard"
+import { ApprovalsInboxCardBody, RunListCardBody } from "./cards/RunsCards"
 import { HtmlCardBody, RepoCardBody, TargetRunCardBody, TargetsCardBody } from "./cards/TargetCards"
 import { ThemePickerCardBody } from "./cards/ThemePickerCard"
 import type { Card, WorldDocument } from "./state/AppState"
@@ -103,6 +104,8 @@ const pillStatus = (card: Card): string => {
     return "running"
   }
   if (card.kind === "workflow-list") return "done"
+  /* Lane runs: the inboxes are listings — they settle the moment they render. */
+  if (card.kind === "run-list" || card.kind === "approvals-inbox") return "done"
   if (card.kind === "repo-import") {
     if (card.payload.phase === "done") return "done"
     if (card.payload.phase === "failed") return "failed"
@@ -390,6 +393,11 @@ export interface CardViewProps {
    * routes through the registry at the App.tsx binding site.
    */
   readonly onRunCommand: (name: string, args?: string) => void
+  /*
+   * Lane runs — the session's verbose flag, so the run card's Events tab (the
+   * raw journal, a debug surface) exists only where verbose does.
+   */
+  readonly debugVerbose?: boolean
 }
 
 
@@ -412,21 +420,101 @@ const WORKFLOW_RUN_PHASE_WORDS: Readonly<Record<string, string>> = {
   "no-capacity": "No workspace capacity right now."
 }
 
-const WorkflowRunCardBody = ({
+export const WorkflowRunCardBody = ({
   card,
   onStopRun,
-  onRetryRun
+  onRetryRun,
+  onRunCommand,
+  debugVerbose = false
 }: {
   readonly card: Extract<Card, { kind: "flow-run" }>
   readonly onStopRun: (cardId: string) => void
   readonly onRetryRun: (cardId: string) => void
+  readonly onRunCommand: (name: string, args?: string) => void
+  readonly debugVerbose?: boolean
 }) => {
-  const { phase, steps, result, error } = card.payload
+  const { phase, steps, result, error, runId } = card.payload
+  const facet = card.payload.facet ?? "steps"
   return (
     <div className="flow-run-card">
       {result !== null ? <Markdown className="smithers-card-markdown" content={result} /> : null}
       <p className="smithers-card-note">{WORKFLOW_RUN_PHASE_WORDS[phase] ?? phase}</p>
-      {steps.length > 0 ?
+      {/* Lane runs: why a live run is not moving, in the control plane's word. */}
+      {card.payload.waiting !== undefined ?
+        (
+          <p className="smithers-card-note" data-testid={`flow-run-waiting-${runId}`}>
+            {card.payload.waiting === "executor"
+              ? "Accepted — nothing is driving it yet. /runs.resume starts it."
+              : `Waiting on ${card.payload.waiting}.`}
+          </p>
+        ) :
+        null}
+      {card.payload.steeringPending === true ?
+        <p className="smithers-card-note">steering pending · delivered at the next turn</p> :
+        null}
+      {/*
+       * The facets the card grows (lane runs): the steps tail by default, the
+       * transcript on demand (runs.logs), the raw journal only where verbose
+       * is on (runs.events). Each tab is a registered flow, never local state.
+       */}
+      <div className="flow-run-actions" role="tablist" aria-label="Run views">
+        <Button
+          size="sm"
+          variant={facet === "steps" ? "default" : "outline"}
+          data-flow="runs.steps"
+          data-testid={`flow-run-facet-steps-${runId}`}
+          onClick={() => onRunCommand("runs.steps", runId)}
+        >
+          Steps
+        </Button>
+        <Button
+          size="sm"
+          variant={facet === "transcript" ? "default" : "outline"}
+          data-flow="runs.logs"
+          data-testid={`flow-run-facet-transcript-${runId}`}
+          onClick={() => onRunCommand("runs.logs", runId)}
+        >
+          Transcript
+        </Button>
+        {debugVerbose ?
+          (
+            <Button
+              size="sm"
+              variant={facet === "events" ? "default" : "outline"}
+              data-flow="runs.events"
+              data-testid={`flow-run-facet-events-${runId}`}
+              onClick={() => onRunCommand("runs.events", runId)}
+            >
+              Events
+            </Button>
+          ) :
+          null}
+      </div>
+      {facet === "transcript" ?
+        card.payload.transcriptRows === undefined || card.payload.transcriptRows.length === 0 ?
+          <p className="smithers-card-note">The transcript is empty so far.</p> :
+          (
+            <ul className="flow-run-steps" data-testid={`flow-run-transcript-${runId}`}>
+              {card.payload.transcriptRows.map((row) => (
+                <li key={row.sequence}>
+                  {row.turn !== undefined ? `turn ${row.turn} · ` : ""}{row.text}
+                </li>
+              ))}
+            </ul>
+          ) :
+        null}
+      {facet === "events" ?
+        card.payload.events === undefined || card.payload.events.length === 0 ?
+          <p className="smithers-card-note">No events recorded yet.</p> :
+          (
+            <ul className="flow-run-steps" data-testid={`flow-run-events-${runId}`}>
+              {card.payload.events.map((event, index) => (
+                <li key={index}>{JSON.stringify(event)}</li>
+              ))}
+            </ul>
+          ) :
+        null}
+      {facet === "steps" && steps.length > 0 ?
         (
           <ul className="flow-run-steps">
             {steps.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}
@@ -458,6 +546,172 @@ const WorkflowRunCardBody = ({
           </p>
         ) :
         null}
+      {/*
+       * Lane runs — the lifecycle acts. Stop is available on every
+       * non-terminal phase (the flow confirms); Resume answers a wait the
+       * control plane named (anything but an approval, which the approval
+       * card below answers); Run again relaunches a settled run with the
+       * same input and refuses honestly when this client never recorded one.
+       */}
+      {LIVE_RUN_PHASES.has(phase) ?
+        (
+          <div className="flow-run-actions">
+            {card.payload.waiting !== undefined && card.payload.waiting !== "approval" ?
+              (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-flow="runs.resume"
+                  data-testid={`flow-run-resume-${runId}`}
+                  onClick={() => onRunCommand("runs.resume", runId)}
+                >
+                  Resume
+                </Button>
+              ) :
+              null}
+            <Button
+              size="sm"
+              variant="outline"
+              data-flow="flow.run.stop"
+              data-testid={`flow-run-stop-${runId}`}
+              onClick={() => onStopRun(card.id)}
+            >
+              Stop
+            </Button>
+          </div>
+        ) :
+        null}
+      {TERMINAL_RUN_PHASES.has(phase) ?
+        (
+          <div className="flow-run-actions">
+            <Button
+              size="sm"
+              variant="outline"
+              data-flow="runs.rerun"
+              data-testid={`flow-run-rerun-${runId}`}
+              onClick={() => onRunCommand("runs.rerun", runId)}
+            >
+              Run again
+            </Button>
+          </div>
+        ) :
+        null}
+      {LIVE_RUN_PHASES.has(phase) ? <RunSteerRow runId={runId} onRunCommand={onRunCommand} /> : null}
+    </div>
+  )
+}
+
+/** The phases a run can still be steered, resumed, or stopped in. */
+const LIVE_RUN_PHASES: ReadonlySet<string> = new Set(["launching", "running", "waiting-approval", "reconnecting"])
+/** The phases a Run again answers. */
+const TERMINAL_RUN_PHASES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "no-capacity", "stopped"])
+
+/** The thinking levels a steer may name — the wire's own vocabulary (@smthrs/notifications). */
+const THINKING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const
+
+/*
+ * Lane runs §5 — the steer row: an operator message into the next turn, and
+ * the mono strip of the other three steer kinds. Every submit is the flow
+ * (runs.steer / runs.seat / runs.thinking / runs.tools); the text under the
+ * pointer is presentation state, cleared the moment its flow takes it.
+ */
+const RunSteerRow = ({
+  runId,
+  onRunCommand
+}: {
+  readonly runId: string
+  readonly onRunCommand: (name: string, args?: string) => void
+}) => {
+  const [message, setMessage] = useState("")
+  const [seat, setSeat] = useState("")
+  const [tools, setTools] = useState("")
+  const sendMessage = (): void => {
+    const body = message.trim()
+    if (body === "") return
+    onRunCommand("runs.steer", `${runId} ${body}`)
+    setMessage("")
+  }
+  const sendSeat = (): void => {
+    const value = seat.trim()
+    if (value === "") return
+    onRunCommand("runs.seat", `${runId} ${value}`)
+    setSeat("")
+  }
+  const sendTools = (): void => {
+    const value = tools.trim()
+    if (value === "") return
+    onRunCommand("runs.tools", `${runId} ${value}`)
+    setTools("")
+  }
+  const onEnter = (submit: () => void) => (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault()
+      submit()
+    }
+  }
+  return (
+    <div className="flow-run-steer" data-testid={`flow-run-steer-${runId}`}>
+      <div className="flow-run-actions">
+        <input
+          className="flow-run-steer-input"
+          aria-label="Steer this run"
+          placeholder="Steer this run — a message for the next turn"
+          value={message}
+          data-testid={`flow-run-steer-input-${runId}`}
+          onInput={(event) => setMessage(event.currentTarget.value)}
+          onKeyDown={onEnter(sendMessage)}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          data-flow="runs.steer"
+          disabled={message.trim() === ""}
+          onClick={() => {
+            if (message.trim() === "") return
+            onRunCommand("runs.steer", `${runId} ${message.trim()}`)
+            setMessage("")
+          }}
+        >
+          Steer
+        </Button>
+      </div>
+      <div className="flow-run-actions flow-run-steer-strip">
+        <input
+          className="flow-run-steer-input flow-run-steer-small"
+          aria-label="Move the run to a seat"
+          placeholder="seat — provider:model"
+          value={seat}
+          onInput={(event) => setSeat(event.currentTarget.value)}
+          onKeyDown={onEnter(sendSeat)}
+        />
+        <select
+          className="flow-run-steer-select"
+          aria-label="Change the thinking level"
+          data-testid={`flow-run-thinking-${runId}`}
+          value=""
+          onChange={(event) => {
+            const level = event.currentTarget.value
+            if (level !== "") onRunCommand("runs.thinking", `${runId} ${level}`)
+          }}
+        >
+          <option value="" disabled>
+            thinking ▾
+          </option>
+          {THINKING_LEVELS.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </select>
+        <input
+          className="flow-run-steer-input flow-run-steer-small"
+          aria-label="Add tools to the run"
+          placeholder="tools — comma-separated"
+          value={tools}
+          onInput={(event) => setTools(event.currentTarget.value)}
+          onKeyDown={onEnter(sendTools)}
+        />
+      </div>
     </div>
   )
 }
@@ -644,7 +898,8 @@ export function CardView({
   onChooseWorkflowRepo,
   worldDocuments,
   onChangeWorldDocument,
-  onRunCommand
+  onRunCommand,
+  debugVerbose
 }: CardViewProps) {
   /*
    * Maximize and minimize replace each other in the header, so the button
@@ -799,7 +1054,19 @@ export function CardView({
             null}
           {card.kind === "browser" ? <BrowserCardBody card={card} /> : null}
           {card.kind === "flow-run" ?
-            <WorkflowRunCardBody card={card} onStopRun={onStopRun} onRetryRun={onRetryRun} /> :
+            (
+              <WorkflowRunCardBody
+                card={card}
+                onStopRun={onStopRun}
+                onRetryRun={onRetryRun}
+                onRunCommand={onRunCommand}
+                debugVerbose={debugVerbose}
+              />
+            ) :
+            null}
+          {card.kind === "run-list" ? <RunListCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "approvals-inbox" ?
+            <ApprovalsInboxCardBody card={card} onDecideApproval={onDecideApproval} /> :
             null}
           {card.kind === "workflow-list" ? <WorkflowListCardBody card={card} onRunWorkflow={onRunWorkflow} /> : null}
           {card.kind === "workflow-repo" ?

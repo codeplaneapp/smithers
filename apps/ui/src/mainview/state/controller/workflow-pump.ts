@@ -4,7 +4,7 @@ import type { ApprovalRow, RunStatus, RunSummaryRow } from "./gateway"
 
 export interface WorkflowPumpController {
   readonly pumpWorkflowRun: (cardId: string) => Promise<void>
-  readonly stopWatchingRun: (cardId: string) => string | void
+  readonly stopWatchingRun: (cardId: string, reason?: string) => string | void
   readonly retryRunWatch: (cardId: string) => string | void
   readonly resumeWorkflowRuns: () => void
   readonly stopWorkflowPumps: () => void
@@ -207,6 +207,41 @@ export const createWorkflowPumpController = (
           }
         }
 
+        /*
+         * Lane runs — the card's transcript follows the live run while the
+         * human asked it to (`runs.logs --follow`): each cycle re-reads the
+         * projection and replaces the rows, one round trip bound to the pump
+         * the card already pays for. Unfollowing stops the merge, and a
+         * terminal run keeps its last transcript standing.
+         */
+        let transcriptRows: Extract<Card, { kind: "flow-run" }>["payload"]["transcriptRows"]
+        if (card.payload.follow === true) {
+          const transcript = await gateway.transcript(repo, runId)
+          if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
+          if (transcript.status === "ok") {
+            transcriptRows = transcript.value.map((line) => ({
+              sequence: line.sequence,
+              turn: line.turn,
+              at: line.at,
+              kind: line.kind,
+              text: line.text
+            }))
+          }
+        }
+
+        /*
+         * Why the run is not moving, in the control plane's word. `accepted`
+         * reads "executor" — the CLI's own render-time convention for a run
+         * nothing is driving yet — and a parked run names its wait. A moving
+         * run names nothing.
+         */
+        const waiting = row.status === "accepted"
+          ? "executor"
+          : row.status === "parked"
+          ? row.waitingReason ?? "parked"
+          : undefined
+        const steeringPending = (row.steeringPending ?? 0) > 0
+
         const phase = PHASE_OF_STATUS[row.status]
         if (TERMINAL_PHASES.has(phase)) {
           const steps = [...card.payload.steps, ...newSteps].slice(-RUN_STEPS_TAIL)
@@ -214,7 +249,7 @@ export const createWorkflowPumpController = (
             // The run summary's own verdict, which is what `whatHappened`
             // used to answer out of the engine database.
             const result = row.verdict
-            patchRunCard(cardId, { phase, steps, lastSeq: row.updatedAt, result }, "acted")
+            patchRunCard(cardId, { phase, steps, lastSeq: row.updatedAt, result, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }) }, "acted")
             store.dispatch({ type: "message.appended", actor: "system", text: result })
           } else {
             // Lead with the run's own diagnosis; the generic line is the
@@ -225,7 +260,7 @@ export const createWorkflowPumpController = (
               : "The run was cancelled."
             patchRunCard(
               cardId,
-              { phase, steps, lastSeq: row.updatedAt, ...(detail === undefined ? {} : { error: detail }) },
+              { phase, steps, lastSeq: row.updatedAt, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(detail === undefined ? {} : { error: detail }) },
               "error"
             )
             store.dispatch({ type: "message.appended", actor: "system", text: message })
@@ -251,7 +286,10 @@ export const createWorkflowPumpController = (
             ? "waiting-approval"
             : phase,
           steps: [...card.payload.steps, ...newSteps].slice(-RUN_STEPS_TAIL),
-          lastSeq: row.updatedAt
+          lastSeq: row.updatedAt,
+          waiting,
+          steeringPending,
+          ...(transcriptRows === undefined ? {} : { transcriptRows })
         })
         await pokeableWait(cardId, RUN_POLL_MS)
       }
@@ -285,14 +323,14 @@ export const createWorkflowPumpController = (
    * say so. This one does: the gateway's `Cancel` is durable and cross-process,
    * so the card can honestly say the run was stopped.
    */
-  const stopWatchingRun = (cardId: string): string | void => {
+  const stopWatchingRun = (cardId: string, reason?: string): string | void => {
     const card = runCardFor(cardId)
     if (card === undefined) return "That isn't a run card."
     const pump = ctx.runPumps.get(cardId)
     if (pump !== undefined) pump.stopped = true
     ctx.runPumps.delete(cardId)
     ctx.pumpPokes.get(cardId)?.()
-    void gateway.cancel(card.payload.repo, card.payload.runId).then((cancelled) => {
+    void gateway.cancel(card.payload.repo, card.payload.runId, reason).then((cancelled) => {
       patchRunCard(cardId, {
         phase: cancelled.status === "ok" ? "cancelled" : "stopped",
         steps: [

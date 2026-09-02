@@ -41,6 +41,12 @@ export interface TurnControllerDependencies {
     card: Extract<Card, { kind: "approval" }>,
     decision: "approved" | "denied"
   ) => Promise<void>
+  /** A decision clicked on the workspace approvals inbox (lane runs §5), addressed `inboxCardId:requestId`. */
+  readonly forwardInboxApprovalDecision: (
+    cardId: string,
+    requestId: string,
+    decision: "approved" | "denied"
+  ) => Promise<void>
 }
 
 export interface TurnController {
@@ -57,7 +63,7 @@ export const createTurnController = (
   dependencies: TurnControllerDependencies
 ): TurnController => {
   const { store, repositories, agent } = ctx
-  const { settleTurnBilling, surfaceCommandFailure, forwardApprovalDecision } = dependencies
+  const { settleTurnBilling, surfaceCommandFailure, forwardApprovalDecision, forwardInboxApprovalDecision } = dependencies
 
   const handleCardFrame = (frame: Extract<AgentTurnFrame, { type: "card" | "card.update" }>): void => {
     if (frame.type === "card") {
@@ -761,6 +767,22 @@ export const createTurnController = (
   }
 
   const decideApproval = (id: string, decision: "approved" | "denied"): void => {
+    /*
+     * An approvals-inbox row addresses its decision `inboxCardId:requestId`
+     * (lane runs §5): the gate's own approval card may never have landed in
+     * this transcript, so the row forwards through the inbox card, which
+     * carries the submit-ready envelope the gateway published.
+     */
+    const separator = id.indexOf(":")
+    if (separator > 0) {
+      const inboxCardId = id.slice(0, separator)
+      const requestId = id.slice(separator + 1)
+      const inbox = store.collections.cards.get(inboxCardId)
+      if (inbox?.kind === "approvals-inbox") {
+        void forwardInboxApprovalDecision(inboxCardId, requestId, decision)
+        return
+      }
+    }
     const card = store.collections.cards.get(id)
     if (card === undefined || card.kind !== "approval" || card.status === "acted") return
     if (card.payload.pending === true) return

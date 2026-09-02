@@ -18,7 +18,8 @@ export function CardTabBody({ cardId }: { readonly cardId: string }) {
   const { data: sessionRows } = useLiveQuery((q) =>
     q.from({ session: collections.sessions }).select(({ session }) => ({
       id: session.id,
-      maximizedCardId: session.maximizedCardId
+      maximizedCardId: session.maximizedCardId,
+      verbose: session.verbose
     }))
   )
   const card = cardRows.find((candidate) => candidate.id === cardId)
@@ -46,6 +47,7 @@ export function CardTabBody({ cardId }: { readonly cardId: string }) {
         onStopRun={(id) => controller.runCommandArgs("flow.run.stop", id)}
         onRetryRun={(id) => controller.runCommandArgs("flow.run.retry", id)}
         onChooseWorkflowRepo={(name) => controller.runCommandArgs("flow.repo.choose", name)}
+        debugVerbose={sessionRows[0]?.verbose === true}
         worldDocuments={worldDocuments}
         onChangeWorldDocument={(id, body) => controller.changeWorldDocument(id, body)}
         onRunCommand={(name, commandArgs) =>

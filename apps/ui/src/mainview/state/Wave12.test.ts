@@ -545,13 +545,19 @@ describe("wave 12 §2 — flow.create asks WHICH loaded repo", () => {
 
   test("the model may not answer the human's question for them (review)", async () => {
     /*
-     * Review pass: the three card bindings were `hidden` but not `trigger:
+     * Review pass: the card bindings were `hidden` but not `trigger:
      * "user"`, and hidden only keeps a command out of the tool CATALOG — the
      * commands tool executes anything by name that is not user-only. So the
      * model could have picked the repository itself, provisioning on ITS guess
      * against the very thing §2 exists for (wave 10 §2a: a deterministic
-     * affordance must not route through the model), and could have stopped the
-     * human's watch on a run. The trigger axis is what makes that structural.
+     * affordance must not route through the model). The trigger axis is what
+     * makes that structural.
+     *
+     * Lane runs changed flow.run.stop's stance deliberately: stopping a run
+     * is consequential rather than browser mechanics, so the model may ASK
+     * (confirm turns its invocation into a confirmation message; nothing runs
+     * until the human clicks) while flow.repo.choose and flow.run.retry stay
+     * user-only.
      */
     const store = await webStore()
     const double = relay()
@@ -561,13 +567,20 @@ describe("wave 12 §2 — flow.create asks WHICH loaded repo", () => {
     await controller.commands.run("flow.create", "summarize my open issues")
     expect(store.collections.cards.get("workflow-repo")).toBeDefined()
 
-    for (const name of ["flow.repo.choose", "flow.run.stop", "flow.run.retry"]) {
+    for (const name of ["flow.repo.choose", "flow.run.retry"]) {
       const refused = await controller.commands.executeForAgent({
         name: "commands",
         arguments: JSON.stringify({ action: "execute", name, args: OTHER_REPO })
       })
       expect(refused).toContain("user-only")
     }
+    // A stop the model asks for is a question, never an act: nothing was cancelled.
+    const asked = await controller.commands.executeForAgent({
+      name: "commands",
+      arguments: JSON.stringify({ action: "execute", name: "flow.run.stop", args: "flow-run-run-1" })
+    })
+    expect(asked).toContain("confirm")
+    expect(double.calls.some((call) => JSON.stringify(call.body).includes("\"Cancel\""))).toBe(false)
     // The question is still open and nothing was provisioned on the model's say-so.
     const card = store.collections.cards.get("workflow-repo")
     expect(card?.kind === "workflow-repo" && card.payload.chosen).toBeNull()

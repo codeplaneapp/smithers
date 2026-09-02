@@ -453,19 +453,23 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     /*
-     * Wave 12 §3 — the acts a run that has gone quiet offers. Both are the
-     * human's decision about their own watch, bound to the card's buttons:
-     * hidden from the slash menu and the catalog, and user-only so the model
-     * cannot stop (or restart) a watch on the human's behalf.
+     * Wave 12 §3 — the acts a run that has gone quiet offers, bound to the
+     * card's buttons. Hidden from the slash menu and the catalog. Stopping a
+     * run is consequential (the cancel is durable), so the model may ASK but
+     * never perform it: `confirm` turns an agent invocation into a
+     * confirmation message whose button runs the stop as the user.
      */
     name: "flow.run.stop",
-    summary: "Stop watching a run",
+    summary: "Stop a run",
     runtime: ["jjhub"],
     hidden: true,
-    userOnly: true,
-    args: "<cardId>",
-    input: CardTarget,
-    handler: ({ cardId }) => actions.stopWatchingRun(cardId)
+    confirm: "stop the run",
+    args: "<cardId> [reason]",
+    input: Schema.Struct({
+      cardId: Schema.String,
+      reason: Schema.optional(Schema.String)
+    }),
+    handler: ({ cardId, reason }) => actions.stopWatchingRun(cardId, reason)
   }),
   flow({
     name: "flow.run.retry",
@@ -497,6 +501,172 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
       repo: Schema.optional(Schema.String)
     }),
     handler: ({ name, repo }) => actions.runWorkflow(name, repo)
+  }),
+  /*
+   * Lane runs — the run lifecycle beyond launch.
+   *
+   * The inbox (runs.list) answers from the workspace-runs projection; every
+   * act is a control procedure over the gateway seam. What the wire does not
+   * carry, the flow refuses in words: `by=` names a launcher the run summary
+   * does not record, so it is a refusal, never a silently dropped filter.
+   */
+  flow({
+    name: "runs.list",
+    summary: "List the runs on your workspace",
+    runtime: ["jjhub"],
+    args: "[status] [flow] [by=principal] [lineage=id] [owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      status: Schema.optional(Schema.String),
+      flow: Schema.optional(Schema.String),
+      lineage: Schema.optional(Schema.String),
+      by: Schema.optional(Schema.String),
+      repo: Schema.optional(Schema.String)
+    }),
+    handler: (payload) => actions.listRuns(payload)
+  }),
+  flow({
+    name: "runs.open",
+    summary: "Open a run as a card that tracks it",
+    runtime: ["jjhub"],
+    args: "<runId> [owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      runId: Schema.String,
+      repo: Schema.optional(Schema.String)
+    }),
+    handler: ({ runId, repo }) => actions.openRun(runId, repo)
+  }),
+  flow({
+    name: "runs.resume",
+    summary: "Resume a parked run",
+    runtime: ["jjhub"],
+    args: "<runId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String }),
+    handler: ({ runId }) => actions.resumeRun(runId)
+  }),
+  flow({
+    /* A relaunch is real work on the user's workspace: the launch capability. */
+    name: "runs.rerun",
+    summary: "Run a run's flow again with the same input",
+    runtime: ["jjhub"],
+    args: "<runId>",
+    requires: ["signed-in"],
+    capabilities: ["outbound:launch"],
+    input: Schema.Struct({ runId: Schema.String }),
+    handler: ({ runId }) => actions.rerunRun(runId)
+  }),
+  flow({
+    name: "runs.signal",
+    summary: "Deliver a named signal to a waiting run",
+    runtime: ["jjhub"],
+    args: "<runId> <name> [json]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      runId: Schema.String,
+      name: Schema.String,
+      payload: Schema.optional(Schema.String)
+    }),
+    handler: ({ runId, name, payload }) => actions.signalRun(runId, name, payload)
+  }),
+  flow({
+    name: "runs.steer",
+    summary: "Send an operator message into a running run",
+    runtime: ["jjhub"],
+    args: "<runId> <message>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String, body: Schema.String }),
+    handler: ({ runId, body }) => actions.steerRun(runId, body)
+  }),
+  flow({
+    name: "runs.seat",
+    summary: "Move a run to a different model seat",
+    runtime: ["jjhub"],
+    args: "<runId> <seat>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String, seat: Schema.String }),
+    handler: ({ runId, seat }) => actions.steerRunSeat(runId, seat)
+  }),
+  flow({
+    name: "runs.thinking",
+    summary: "Change a run's thinking level",
+    runtime: ["jjhub"],
+    args: "<runId> <level>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String, thinking: Schema.String }),
+    handler: ({ runId, thinking }) => actions.steerRunThinking(runId, thinking)
+  }),
+  flow({
+    name: "runs.tools",
+    summary: "Add tools to a run's active set",
+    runtime: ["jjhub"],
+    args: "<runId> <names,comma-separated>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String, toolNames: Schema.String }),
+    handler: ({ runId, toolNames }) => actions.steerRunTools(runId, toolNames)
+  }),
+  flow({
+    name: "runs.logs",
+    summary: "Show a run's transcript on its card (--follow keeps it live)",
+    runtime: ["jjhub"],
+    args: "<runId> [--follow]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      runId: Schema.String,
+      follow: Schema.optional(Schema.Boolean)
+    }),
+    handler: ({ runId, follow }) => actions.showRunLogs(runId, follow)
+  }),
+  flow({
+    /* The run card's Steps tab: the card's own presentation act, so it stays hidden. */
+    name: "runs.steps",
+    summary: "Show a run's steps on its card",
+    runtime: ["jjhub"],
+    hidden: true,
+    args: "<runId>",
+    input: Schema.Struct({ runId: Schema.String }),
+    handler: ({ runId }) => actions.showRunSteps(runId)
+  }),
+  flow({
+    /* The raw journal is a debug surface; the controller gates it on verbose. */
+    name: "runs.events",
+    summary: "Show a run's raw events on its card (verbose)",
+    runtime: ["jjhub"],
+    args: "<runId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String }),
+    handler: ({ runId }) => actions.showRunEvents(runId)
+  }),
+  flow({
+    /* Stopping every run is consequential: agent invocations confirm first. */
+    name: "flow.run.stop-all",
+    summary: "Stop every live run on your workspace",
+    runtime: ["jjhub"],
+    hidden: true,
+    confirm: "stop every run",
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ repo: Schema.optional(Schema.String) }),
+    handler: ({ repo }) => actions.stopAllRuns(repo)
+  }),
+  flow({
+    name: "approvals.list",
+    summary: "List the workspace's pending approvals",
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ repo: Schema.optional(Schema.String) }),
+    handler: ({ repo }) => actions.listApprovals(repo)
+  }),
+  flow({
+    name: "approvals.open",
+    summary: "Open a run's pending approvals as cards",
+    runtime: ["jjhub"],
+    args: "<runId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String }),
+    handler: ({ runId }) => actions.openApproval(runId)
   }),
   flow({
     /* Maximize is the user's explicit act alone (THE EMBED LAW). */

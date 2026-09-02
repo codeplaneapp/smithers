@@ -133,7 +133,8 @@ function App() {
       activeTabId: session.activeTabId,
       tabMenuOpen: session.tabMenuOpen,
       addMenuOpen: session.addMenuOpen,
-      resetConfirmOpen: session.resetConfirmOpen
+      resetConfirmOpen: session.resetConfirmOpen,
+      verbose: session.verbose
     }))
   )
   const { data: worldDocumentRows } = useLiveQuery(collections.worldDocuments)
@@ -463,6 +464,7 @@ function App() {
                     onStopRun={(id) => controller.runCommandArgs("flow.run.stop", id)}
                     onRetryRun={(id) => controller.runCommandArgs("flow.run.retry", id)}
                     onChooseWorkflowRepo={(name) => controller.runCommandArgs("flow.repo.choose", name)}
+                    debugVerbose={session.verbose === true}
                     worldDocuments={worldDocuments}
                     onChangeWorldDocument={(id, body) => controller.changeWorldDocument(id, body)}
                     onRunCommand={(name, commandArgs) =>
