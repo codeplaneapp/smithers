@@ -133,7 +133,13 @@ describe("derived typecheck commands over hostile tsconfig names", () => {
       const record = join(root, "argv.txt")
       writeFileSync(
         join(bin, "tsc"),
-        `#!/bin/sh\nfor arg in "$@"; do printf '%s\\x1f' "$arg" >> ${JSON.stringify(record)}; done\nprintf '\\x1e' >> ${
+        // Octal, not hex. `\\x1f` is a bash extension to printf: `/bin/sh` is
+        // bash on macOS and accepts it, and dash on Debian and Ubuntu, where it
+        // emits the five literal characters `\\x1f` instead of the byte. The
+        // separators then never appear, the split below finds one field
+        // holding every argument of every call, and the case failed only on
+        // Linux. POSIX printf takes `\\0ooo`, which both shells read the same.
+        `#!/bin/sh\nfor arg in "$@"; do printf '%s\\037' "$arg" >> ${JSON.stringify(record)}; done\nprintf '\\036' >> ${
           JSON.stringify(record)
         }\n`
       )
@@ -152,8 +158,8 @@ describe("derived typecheck commands over hostile tsconfig names", () => {
         )
 
         expect(result.typecheck.map((entry) => entry.exitCode)).toEqual(result.typecheck.map(() => 0))
-        const calls = readFileSync(record, "utf8").split("\x1e").filter((call) => call !== "").map((call) =>
-          call.split("\x1f").filter((arg) => arg !== "")
+        const calls = readFileSync(record, "utf8").split("\u001e").filter((call) => call !== "").map((call) =>
+          call.split("\u001f").filter((arg) => arg !== "")
         )
         for (const path of paths) expect(calls).toContainEqual(["--noEmit", "-p", path])
         expect(calls).toHaveLength(commands.typecheck.length)
