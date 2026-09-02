@@ -160,6 +160,13 @@ describe("CiToolchain.Nix", () => {
     )
     expect(() => CiToolchain.Nix({ environment: {} as never })).toThrowError(/must be an S.Nix.Environment/)
     expect(() => CiToolchain.Nix({ environment, publicKey: "key" as never })).toThrowError(/must be an S.Secret/)
+    // The substituter is checked on its own rather than only through the
+    // pairing rule below it: a cache URL written as a bare string would
+    // otherwise reach the workflow as a literal instead of a secret read.
+    expect(() => CiToolchain.Nix({ environment, substituter: "https://cache.example" as never })).toThrowError(
+      /substituter must be an S.Secret/
+    )
+    expect(() => CiToolchain.Nix(null as never)).toThrowError(/options must be an object/)
   })
 
   it("refuses a job that installs both the environment and a per-tool setup", () => {

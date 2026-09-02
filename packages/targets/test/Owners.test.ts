@@ -152,3 +152,35 @@ describe("the generated-file rules", () => {
     expect(() => Smithers.Owners.Codeowners({ org: "not an org" } as never)).toThrow()
   })
 })
+
+describe("Owners pattern lists", () => {
+  // `patternList` guards every glob a declaration carries, and the agents map
+  // is the path that reaches it with an author-supplied value. A pattern list
+  // that is not a list, is longer than the bound, or holds something that is
+  // not a usable glob has to be refused where it is written: a policy keyed on
+  // a pattern nobody can match is a rule that silently applies to nothing.
+  const base = { owners: ["will"] } as const
+
+  it("refuses a policy whose patterns are not an array", () => {
+    expect(() => Owners.declare({ ...base, agents: { deny: "a/**" as never } })).toThrow(
+      /agents deny must be an array of glob patterns/
+    )
+  })
+
+  it("refuses more patterns than the bound one policy may carry", () => {
+    const patterns = Array.from({ length: Owners.maximumPatterns + 1 }, (_, index) => `p${index}/**`)
+
+    expect(() => Owners.declare({ ...base, agents: { deny: patterns } })).toThrow(
+      new RegExp(`agents deny lists more than ${Owners.maximumPatterns} patterns`)
+    )
+  })
+
+  it.each([
+    ["", "an empty string"],
+    ["a\0b", "a NUL byte"]
+  ])("refuses a pattern that is %j, which is %s", (pattern) => {
+    expect(() => Owners.declare({ ...base, agents: { deny: [pattern] } })).toThrow(
+      /agents deny pattern must be a non-empty string/
+    )
+  })
+})

@@ -218,6 +218,36 @@ describe("run", () => {
     ).toContain("sensitive environment name is not portable")
   })
 
+  it("names the payload member a caller left out rather than decoding around it", async () => {
+    // `requiredDataMember` is what stands between a half-written payload and a
+    // schema decode that would report the absence as a type mismatch three
+    // layers down. The member is named so the author knows which one to add.
+    const incomplete = payload(["node", "-e", "0"]) as Record<string, unknown>
+    delete incomplete["timeoutMs"]
+
+    expect((await failed(incomplete as Exec.Payload)).stderr).toContain("exec payload.timeoutMs is missing")
+  })
+
+  it("refuses a list longer than the bound its member declares", async () => {
+    // Each list in the payload carries its own bound, and the refusal names the
+    // list rather than the payload, so a caller generating exit codes in a loop
+    // is pointed at the loop.
+    const tooManyExitCodes = {
+      ...payload(["node", "-e", "0"]),
+      expectedExitCodes: Array.from({ length: 257 }, (_, index) => index)
+    }
+
+    expect((await failed(tooManyExitCodes)).stderr).toContain("exec expected exit codes has more than 256 entries")
+  })
+
+  it("refuses more sensitive environment names than it will fold", async () => {
+    const names = Array.from({ length: 4_097 }, (_, index) => `SENSITIVE_${index}`)
+
+    expect(
+      (await failed(payload(["node", "-e", "0"]), { workspaceRoot: root, sensitiveEnv: names })).stderr
+    ).toContain("too many sensitive environment names")
+  })
+
   it("rejects duplicate secret bindings and conflicts with declared environment", async () => {
     const credential = Secret.HttpSecret(Secret.Secret("EXEC_TEST_TOKEN"), ["https://example.test"])
     expect(

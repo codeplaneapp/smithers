@@ -87,3 +87,20 @@ describe("ManifestJson collection refusals", () => {
     expect(() => ManifestJson.cloneValue(nested)).toThrow(/maximum manifest JSON depth/)
   })
 })
+
+describe("ManifestJson array shape", () => {
+  it("refuses a sparse array, which JSON would fill with nulls", () => {
+    const sparse = ["first", "second"]
+    delete sparse[0]
+
+    expect(() => ManifestJson.cloneValue(sparse)).toThrow(TypeError)
+    expect(() => ManifestJson.cloneValue(sparse)).toThrow(/sparse array or carries extra own properties/)
+  })
+
+  it("refuses an array carrying an own property beside its members", () => {
+    const decorated: Array<string> = ["first"]
+    Object.defineProperty(decorated, "extra", { value: "kept", enumerable: true, configurable: true })
+
+    expect(() => ManifestJson.cloneValue(decorated)).toThrow(/sparse array or carries extra own properties/)
+  })
+})

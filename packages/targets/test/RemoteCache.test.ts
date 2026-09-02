@@ -230,3 +230,26 @@ describe("RemoteCache public read tokens and jjhub", () => {
     expect(RemoteCache.isRemoteCache(forged)).toBe(false)
   })
 })
+
+describe("RemoteCache input guards", () => {
+  // These three normalizers are exported, so a workspace declaration reaches
+  // them with whatever an author wrote. Each refuses the shape before it
+  // becomes part of a cache key or a request, where the same value would fail
+  // as something much harder to read.
+  it("refuses a public read token that is not a string", () => {
+    expect(() => RemoteCache.normalizePublicReadToken(42 as never)).toThrow(
+      /publicReadToken must be a string/
+    )
+  })
+
+  it("refuses an endpoint that is not a string", () => {
+    expect(() => RemoteCache.normalizeEndpoint(null as never)).toThrow(/endpoint must be a string/)
+  })
+
+  it("refuses options carrying a symbol property, which a plain-object check alone would pass", () => {
+    const options = { endpoint: "https://cache.example.test/" }
+    Object.defineProperty(options, Symbol("hidden"), { value: "kept", enumerable: true })
+
+    expect(() => RemoteCache.make(options)).toThrow(/must not contain symbol properties/)
+  })
+})
