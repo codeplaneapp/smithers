@@ -30,7 +30,9 @@ import {
   CLOUD_AUTH_SIGN_OUT_PATH,
   CLOUD_AUTH_START_PATH,
   CLOUD_ROUTE_PREFIX,
-  CLOUD_WS_ROUTE_PREFIX
+  CLOUD_WS_ROUTE_PREFIX,
+  LINEAR_AUTH_SESSION_PATH,
+  LINEAR_AUTH_START_PATH
 } from "smithers-shared/LocalApp"
 import {
   isLocalSessionToken,
@@ -44,6 +46,7 @@ import { createCloudAgent } from "./CloudAgent"
 import type { CloudAgent } from "./CloudAgent"
 import { createCloudAuth } from "./CloudAuth"
 import type { CloudAuth, CloudKeychain } from "./CloudAuth"
+import { createLinearAuth } from "./LinearAuth"
 import { detectHarnesses } from "./Harnesses"
 import { findNode } from "./Node"
 import type { NodeSidecar } from "./Node"
@@ -641,6 +644,26 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     return json({ ok: true })
   })
 
+  /*
+   * The Linear OAuth handoff (lane sync, ADR 0005): start listens for the
+   * setup-key callback and answers the OAuth start URL through the cloud
+   * proxy; the session answer carries the key only once authorized. The
+   * handoff needs the cloud seam (its URL rides the proxy), so offline
+   * answers 501 like the cloud login.
+   */
+  const linearAuth = cloudUpstream === null
+    ? undefined
+    : createLinearAuth({ origin: () => `http://127.0.0.1:${server.port}`, log })
+  router.add("POST", LINEAR_AUTH_START_PATH, async () => {
+    if (linearAuth === undefined) return jsonError(501, "not_implemented", "The cloud seam is disabled in this build.")
+    const started = await linearAuth.start()
+    return "error" in started ? jsonError(409, "linear_auth_unavailable", started.error) : json(started)
+  })
+  router.add("GET", LINEAR_AUTH_SESSION_PATH, () =>
+    linearAuth === undefined
+      ? json({ state: "idle" })
+      : json(linearAuth.session()))
+
   // The runtime error ingest the SPA posts to (state/ClientErrors.ts holds
   // the client half of this contract): logged, never persisted.
   router.add("POST", CLIENT_ERRORS_PATH, async ({ request }) => {
@@ -1033,6 +1056,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       // Every child dies with the server; nothing keeps a shell alive past the app.
       closeCloudBridges(1001, "the local app is shutting down")
       await cloudAuth?.stop()
+      await linearAuth?.stop()
       await pty.killAll()
       repositoryAuthority.clear()
       server.stop(true)

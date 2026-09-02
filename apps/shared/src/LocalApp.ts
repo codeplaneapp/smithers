@@ -436,6 +436,29 @@ export type CloudSession = z.infer<typeof CloudSessionSchema>
 export const CloudAuthStartResponseSchema = z.object({ url: z.string() })
 export type CloudAuthStartResponse = z.infer<typeof CloudAuthStartResponseSchema>
 
+/*
+ * Lane sync (ADR 0005): the Linear OAuth handoff on the local origin. The
+ * backend's OAuth callback cannot redirect to the app (its redirect URI is
+ * fixed at the API host), so the local origin runs the receiver the settled
+ * team-pick flow needs: `start` listens on 127.0.0.1:<random> and answers
+ * the OAuth start URL (through the `/api/cloud/*` proxy, so the Bun-held
+ * bearer authenticates it) with `callback_port` attached — the same shape
+ * the CLI login already speaks. `callback` records the `?setup=<key>` the
+ * callback redirects with; `session` answers it to the renderer. The key is
+ * an opaque, one-time, user-bound handle (plue#469) — never a token.
+ */
+export const LINEAR_AUTH_START_PATH = "/api/linear-auth/start"
+export const LINEAR_AUTH_SESSION_PATH = "/api/linear-auth/session"
+export const LinearAuthSessionSchema = z.object({
+  state: z.enum(["idle", "waiting", "authorized"]),
+  /** Present only in the authorized state. */
+  setupKey: z.string().optional()
+})
+export type LinearAuthSession = z.infer<typeof LinearAuthSessionSchema>
+/** `POST /api/linear-auth/start` */
+export const LinearAuthStartResponseSchema = z.object({ url: z.string() })
+export type LinearAuthStartResponse = z.infer<typeof LinearAuthStartResponseSchema>
+
 /** `GET /api/harnesses` */
 export const HarnessesResponseSchema = z.object({ harnesses: z.array(HarnessSchema) })
 /** `GET /api/repos` */
