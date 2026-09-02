@@ -167,6 +167,44 @@ export type CloudWorkspaceInput = Pick<
   "id" | "repoId" | "name" | "targetBookmark" | "status" | "provisioningStage" | "suspendedAt" | "createdAt"
 >
 
+/*
+ * Lane change (ADR 0003 — the change is the unit): one change as the app
+ * knows it, keyed `${repoId}#${changeId}` because a change id is per-repo and
+ * a changeset's members span repos. The row carries what plue's change DTO
+ * carries today — one `commitId`, no revisions — so `currentSeq` and
+ * `revisionCount` stay null until plue#450 records them; nothing is inferred
+ * from timestamps. Pinned cards (file, diff) read this collection to learn
+ * when a newer revision exists.
+ */
+export const ChangeRowSchema = z.object({
+  /** `${repoId}#${changeId}`. */
+  id: z.string(),
+  /** `org/repo`. */
+  repoId: z.string(),
+  changeId: z.string(),
+  commitId: z.string().nullable(),
+  description: z.string(),
+  authorName: z.string().nullable(),
+  timestamp: z.string().nullable(),
+  hasConflict: z.boolean(),
+  parentChangeIds: z.array(z.string()),
+  /** null until plue#450 records revisions. */
+  currentSeq: z.number().int().positive().nullable(),
+  revisionCount: z.number().int().nonnegative().nullable(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type ChangeRow = z.infer<typeof ChangeRowSchema>
+
+/** The fields a change load writes (the reducer adds updatedAt/revision). */
+export type ChangeInput = Pick<
+  ChangeRow,
+  "id" | "repoId" | "changeId" | "commitId" | "description" | "authorName" | "timestamp" | "hasConflict" | "parentChangeIds" | "currentSeq" | "revisionCount"
+>
+
+/** The changes collection key for one repo's change. */
+export const changeRowId = (repoId: string, changeId: string): string => `${repoId}#${changeId}`
+
 /** The working-copy id of a local checkout: the pin key, stable across reopens. */
 export const localCopyIdOf = (path: string): string => repoKeyOf(path)
 
@@ -1143,6 +1181,16 @@ export type AppTransition =
     type: "workspace.updated"
     actor: "system"
     workspace: CloudWorkspaceInput
+  }
+  /*
+   * Lane change: one change read through the ChangeSeam (change.view, a
+   * land's re-read). Upsert only — the collection answers "what is the
+   * current revision of this change" for the pinned cards.
+   */
+  | {
+    type: "change.loaded"
+    actor: "system"
+    change: ChangeInput
   }
   /* The sidebar's pinned repositories: opening pins, unpinning forgets, selecting names the active one. */
   | { type: "repo.pinned"; actor: Actor; pin: PinnedRepo }

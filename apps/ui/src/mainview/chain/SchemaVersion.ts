@@ -114,7 +114,8 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-cloud-repositories",
   "app-cloud-sessions",
   "app-working-copies",
-  "app-cloud-workspaces"
+  "app-cloud-workspaces",
+  "app-changes"
 ]
 
 /** The storage keys the gate clears on a mismatch. */

@@ -20,6 +20,7 @@ import {
   CardSchema,
   cardFrameId,
   ChainEventRecordSchema,
+  ChangeRowSchema,
   CloudRepositorySchema,
   CloudSessionRowSchema,
   CloudWorkspaceRowSchema,
@@ -68,6 +69,7 @@ import type {
   Branch,
   Card,
   ChainEventRecord,
+  ChangeRow,
   CloudRepository,
   CloudSessionRow,
   CloudWorkspaceRow,
@@ -286,7 +288,9 @@ const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
   { id: "app-working-copies", schema: WorkingCopySchema },
   { id: "app-cloud-sessions", schema: CloudSessionRowSchema },
   /* Lane citc: the cloud workspaces (the authority the workspace copies derive from). */
-  { id: "app-cloud-workspaces", schema: CloudWorkspaceRowSchema }
+  { id: "app-cloud-workspaces", schema: CloudWorkspaceRowSchema },
+  /* Lane change: the changes the app has read (ADR 0003). */
+  { id: "app-changes", schema: ChangeRowSchema }
 ]
 /** Attempts spent waiting out a locked access-handle pool. See `openOpfsDatabase`. */
 const OPFS_OPEN_ATTEMPTS = 5
@@ -524,6 +528,8 @@ export interface AppCollections {
   readonly cloudSessions: ReturnType<typeof createCloudSessionCollection>
   /** Lane citc: the cloud workspaces (ADR 0002), the authority behind the workspace working copies. */
   readonly cloudWorkspaces: ReturnType<typeof createCloudWorkspaceCollection>
+  /** Lane change: the changes the app has read (ADR 0003), keyed `${repoId}#${changeId}`. */
+  readonly changes: ReturnType<typeof createChangeCollection>
 }
 
 export interface WorldStateSnapshot {
@@ -735,6 +741,13 @@ const createCloudWorkspaceCollection = (backend: PersistenceBackend) =>
     schema: CloudWorkspaceRowSchema
   })
 
+const createChangeCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-changes",
+    getKey: (change: ChangeRow) => change.id,
+    schema: ChangeRowSchema
+  })
+
 /** The strip's order: main first, then creation order. */
 const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =>
   [...collections.tabs.values()].sort((left, right) => left.ordinal - right.ordinal)
@@ -765,7 +778,8 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.repositories.preload(),
     collections.workingCopies.preload(),
     collections.cloudSessions.preload(),
-    collections.cloudWorkspaces.preload()
+    collections.cloudWorkspaces.preload(),
+    collections.changes.preload()
   ])
 
   if (collections.sessions.get(SESSION_ID) === undefined) {
@@ -1005,7 +1019,8 @@ export const createAppStore = async (
     repositories: createRepositoriesCollection(resolvedBackend),
     workingCopies: createWorkingCopyCollection(resolvedBackend),
     cloudSessions: createCloudSessionCollection(resolvedBackend),
-    cloudWorkspaces: createCloudWorkspaceCollection(resolvedBackend)
+    cloudWorkspaces: createCloudWorkspaceCollection(resolvedBackend),
+    changes: createChangeCollection(resolvedBackend)
   }
 
   await seed(collections)
@@ -1078,7 +1093,8 @@ export const createAppStore = async (
         collections.repositories.utils.acceptMutations(transaction),
         collections.workingCopies.utils.acceptMutations(transaction),
         collections.cloudSessions.utils.acceptMutations(transaction),
-        collections.cloudWorkspaces.utils.acceptMutations(transaction)
+        collections.cloudWorkspaces.utils.acceptMutations(transaction),
+        collections.changes.utils.acceptMutations(transaction)
       ])
     /*
      * One atomic commit per logical transition: SQLite batches row changes in
@@ -2527,6 +2543,21 @@ export const createAppStore = async (
           else {
             collections.workingCopies.update(copyId, (draft) => {
               Object.assign(draft, copy)
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        /* Lane change: one change upsert; pinned cards read the current revision from here. */
+        case "change.loaded": {
+          const change = transition.change
+          const row: ChangeRow = { ...change, updatedAt: createdAt, revision }
+          if (collections.changes.get(change.id) === undefined) collections.changes.insert(row)
+          else {
+            collections.changes.update(change.id, (draft) => {
+              Object.assign(draft, row)
             })
           }
           collections.sessions.update(SESSION_ID, (draft) => {
