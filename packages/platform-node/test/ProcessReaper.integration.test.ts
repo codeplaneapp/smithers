@@ -488,6 +488,19 @@ describe("ProcessReaper", () => {
     expect(withPs(psShim("wordy", "not a number")).ownGroup()).toBeNull()
     expect(withPs(psShim("mute", "")).ownGroup()).toBeNull()
     expect(withPs(psShim("absent", "", 1)).ownGroup()).toBeNull()
+    // A PREFIX that parses is the dangerous shape, because it answers with a
+    // number that is not this host's group: the own-group comparison then
+    // passes on a false identity, and because the answer is not `null` the
+    // `own-group-unknown` refusal that reports an unmade comparison never
+    // fires either. Every one of these is a group the host does not have.
+    expect(withPs(psShim("prefixed", "12 34")).ownGroup()).toBeNull()
+    expect(withPs(psShim("suffixed", "12abc")).ownGroup()).toBeNull()
+    expect(withPs(psShim("hexadecimal", "0x10")).ownGroup()).toBeNull()
+    expect(withPs(psShim("signed", "-1")).ownGroup()).toBeNull()
+    // No live process leads group zero, and a group past the safe-integer range
+    // is a number the comparison could not be trusted with.
+    expect(withPs(psShim("zero", "0")).ownGroup()).toBeNull()
+    expect(withPs(psShim("enormous", "9007199254740993")).ownGroup()).toBeNull()
 
     // A nonzero exit is how `ps` says "no such pid", and also how a `ps` that
     // rejected the column, or is not a `ps` at all, answers about a pid that is
@@ -496,6 +509,30 @@ describe("ProcessReaper", () => {
     expect(withPs(psShim("refusing", "", 2)).startedAtMs(process.pid)).toEqual({ _tag: "unavailable" })
     expect(withPs(psShim("refusing", "", 2)).startedAtMs(2_147_483_646)).toEqual({ _tag: "gone" })
   })
+
+  /**
+   * The probe blocks the event loop while a host is being built, so its
+   * deadline has to be one the process it runs cannot decline. `spawnSync`'s
+   * `timeout` sends `SIGTERM`, and then keeps waiting for a child that ignores
+   * it, which is not a deadline at all: a `ps` that traps `TERM` held layer
+   * construction for as long as it liked. The signal is `SIGKILL` instead.
+   *
+   * The bound covers the process the probe starts, not its descendants: a
+   * child of that child inherits the stdout pipe and `spawnSync` waits for the
+   * pipe to close. `/bin/ps` starts nothing, so that is the whole of what this
+   * has to hold for.
+   */
+  it("bounds the probe even when the process it runs ignores SIGTERM", () => {
+    const stubborn = `process.on("SIGTERM", () => {}); setTimeout(() => {}, 60000);`
+    const executable = join(
+      shimBin("ps-stubborn", "ps", `#!/bin/sh\nexec '${process.execPath}' -e '${stubborn}'\n`),
+      "ps"
+    )
+    const started = Date.now()
+    // No answer, and the absence of one keeps the record rather than killing.
+    expect(withPs(executable).startedAtMs(process.pid)).toEqual({ _tag: "unavailable" })
+    expect(Date.now() - started).toBeLessThan(30_000)
+  }, 90_000)
 
   it("refuses to signal a durable record whose numbers name nothing it may kill", () => {
     const row = (pid: number, pgid: number | null) => target(pid, pgid, "target")
@@ -527,6 +564,54 @@ describe("ProcessReaper", () => {
     expect(ProcessReaper.windowsSystem.killTree(row(4321, 4321))).toBe("failed")
     // This process is still here, which is what the zero check exists for.
     expect(ProcessReaper.posixSystem.isAlive(process.pid)).toBe("alive")
+  })
+
+  /**
+   * `reap` reads this host's identity once and compares every record against
+   * it, but both systems are EXPORTED and `killTree` is the one place a stored
+   * number becomes a signal. A caller that reaches it directly has made no such
+   * comparison, so the function makes its own: `process.kill(-pgid)` does not
+   * care which way the number arrived.
+   *
+   * Every number below is past the range a pid can take, so a regression that
+   * removed a guard signals nothing on this machine; it answers `already-gone`
+   * instead of `failed`, which is what fails the assertion.
+   */
+  it("refuses to kill a target naming the host, reached through the exported seam", () => {
+    const host = 2_147_483_645
+    const claimed = 2_147_483_646
+    const row = (pid: number, pgid: number | null) => target(pid, pgid, "seam")
+    const posix = ProcessReaper.posixSystemWith({
+      ownerPid: host,
+      psExecutable: psShim("own-group-seam", String(claimed))
+    })
+
+    // The host's own pid, as the record's pid and as the group it claims.
+    expect(posix.killTree(row(host, host))).toBe("failed")
+    // The group the probe reports for this process.
+    expect(posix.killTree(row(claimed, claimed))).toBe("failed")
+    // A group the probe cannot read is a comparison that did not happen, which
+    // is not the same as one that ran and passed.
+    expect(
+      ProcessReaper.posixSystemWith({ ownerPid: host, psExecutable: psShim("mute-group-seam", "") })
+        .killTree(row(2_147_483_644, 2_147_483_644))
+    ).toBe("failed")
+    // A probe that answers with something a prefix parse would turn into a
+    // number is the same absence of an answer. Reading `"2147483646 x"` as the
+    // group would have let the record naming `2_147_483_644` through on a
+    // comparison against a group this host does not have.
+    expect(
+      ProcessReaper.posixSystemWith({
+        ownerPid: host,
+        psExecutable: psShim("prefixed-group-seam", `${claimed} x`)
+      }).killTree(row(2_147_483_644, 2_147_483_644))
+    ).toBe("failed")
+
+    // `taskkill /T` walks the tree DOWNWARD from the pid it is handed, so a
+    // record naming this host takes the host and everything it started.
+    const windows = ProcessReaper.windowsSystemWith({ ownerPid: host })
+    expect(withTaskkill(0, () => windows.killTree(row(host, null)))).toBe("failed")
+    expect(withTaskkill(0, () => windows.killTree(row(4321, null)))).toBe("signalled")
   })
 
   it("tells a group that settled apart from a signal that never left the process", () => {

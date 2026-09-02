@@ -11,6 +11,7 @@ import { Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { execFile } from "node:child_process"
 import {
   chmod,
+  glob,
   link,
   lstat,
   mkdir,
@@ -597,10 +598,10 @@ describe("Node atomic filesystem", () => {
     }), 30_000)
 
   /**
-   * The helper cannot call Node's globber, so it translates the pattern into a
-   * regular expression itself. That translation is only correct if it agrees
-   * with the globber it replaces, exclusions included, so it is compared
-   * against it rather than against a hand-written expectation.
+   * The helper cannot call Node's globber, so it implements the grammar itself.
+   * That grammar is only correct if it agrees with the globber it replaces,
+   * exclusions included, so it is compared against it rather than against a
+   * hand-written expectation.
    */
   it.live("selects and excludes the same paths the native globber does", () =>
     Effect.gen(function*() {
@@ -612,6 +613,13 @@ describe("Node atomic filesystem", () => {
         ["**/*.txt", ["**/deep/**"]],
         ["nested/*", ["*.log"]],
         ["nested/*", ["nested/*.log"]],
+        // The root is not an entry in its own walk, so deciding its exclusion
+        // only while filtering results leaks every child the caller forbade.
+        ["**/*.txt", ["."]],
+        ["**/*.txt", [""]],
+        ["**/*.txt", [root]],
+        ["**/*.txt", [`${root}/`]],
+        ["**", [root]],
         ["nested/?id.txt", undefined],
         ["**/*.[tl]??", undefined],
         ["**/*.[!l]??", undefined],
@@ -636,6 +644,11 @@ describe("Node atomic filesystem", () => {
         ["**/*.{txt,log}", undefined],
         ["{nested,.}/*.txt", undefined],
         ["nested/{deep,}/*", undefined],
+        // A group with no top-level comma is literal text, but a group inside
+        // it is still an alternation: "{{a,b}}" is "{a}" and "{b}".
+        ["{{top,a-b}}.txt", undefined],
+        ["{{top,a-b}}", undefined],
+        ["{top,{a-b,nested}}", undefined],
         // An unbalanced brace is literal text, not a failure.
         ["{a,b", undefined],
         ["*.tx[t", undefined],
@@ -645,12 +658,32 @@ describe("Node atomic filesystem", () => {
         ["nested/", undefined],
         ["nested/**", undefined],
         ["nested/**/", undefined],
+        // A trailing `**` names a non-directory anchor only when every segment
+        // before it is literal.
+        ["*/**", undefined],
+        ["*/**/", undefined],
+        ["t*.txt/**", undefined],
+        ["nested/*/**", undefined],
+        ["**/mid.txt/**", undefined],
+        ["**/top.txt/**", undefined],
+        ["{nested,x}/mid.txt/**", undefined],
+        ["{nested,*}/mid.txt/**", undefined],
+        ["nested/mid.txt/**", undefined],
+        // Parentheses inside a character class are members, not extglob
+        // delimiters.
+        ["[!(]*", undefined],
+        ["**/[!(]*.txt", undefined],
+        ["[?(].txt", undefined],
+        // Node drops backslashes from an absolute selector and from excludes,
+        // leaving the following wildcard active.
+        ["\\*.txt", undefined],
+        ["**/*.txt", ["\\a-b.txt"]],
+        ["**/*.txt", [join(root, "\\top.txt")]],
         ["**", undefined],
         ["**/**", undefined],
         ["*", undefined],
         ["[tn]*", undefined],
         ["**/*", undefined],
-        ["top.txt/**", undefined],
         ["nested/../*.txt", undefined],
         ["./*.txt", undefined],
         // The dotfile rule: a wildcard never reaches into a name that starts
@@ -660,6 +693,37 @@ describe("Node atomic filesystem", () => {
         [".hidden/*", undefined],
         ["[.]dot.txt", undefined],
         ["[.]*", undefined],
+        // A one-member positive class is literal text to the globber, so `[.]`
+        // is a `.` segment and not a name no directory holds. It survives the
+        // cleanup a SPELLED `.` does not, and a LAST one names whatever the
+        // segments before it addressed.
+        ["[.]", undefined],
+        ["nested/[.]", undefined],
+        [".hidden/[.]", undefined],
+        ["{top.txt,nested}/mid.txt/[.]", undefined],
+        ["nested/deep/[.]", undefined],
+        // Only a directory, unless every segment before it is literal, which is
+        // the same rule a trailing `**` follows. A `**` immediately before it
+        // is the exception: nothing addresses the path for it.
+        ["*/[.]", undefined],
+        ["t*.txt/[.]", undefined],
+        ["**/[.]", undefined],
+        ["**/deep/[.]", undefined],
+        // Anywhere but last it names an entry called `.`, and finds none.
+        ["[.]/*", undefined],
+        ["nested/[.]/mid.txt", undefined],
+        ["nested/[.]/", undefined],
+        // An exclusion never addresses a path, so it never reaches the anchor.
+        ["**/*.txt", ["nested/[.]"]],
+        ["[t]op.txt", undefined],
+        ["[]]*", undefined],
+        ["**/[m]id.txt", undefined],
+        // A NEGATED class happens to match a dot, and still must not reach one:
+        // asking whether the class matches the dot is the wrong question.
+        ["[!a]*", undefined],
+        ["[^t]*", undefined],
+        ["[!.]*", undefined],
+        ["**/[!.]*", undefined],
         // Excluding a directory's contents leaves the directory entry itself,
         // which is the native globber's own asymmetry between a trailing "**"
         // used to select and one used to exclude.
@@ -672,6 +736,8 @@ describe("Node atomic filesystem", () => {
         await mkdir(join(root, ".hidden"), { recursive: true })
         await writeFile(join(root, "top.txt"), "")
         await writeFile(join(root, "a-b.txt"), "")
+        await writeFile(join(root, "(.txt"), "")
+        await writeFile(join(root, "?.txt"), "")
         await writeFile(join(root, ".dot.txt"), "")
         await writeFile(join(root, ".hidden", "in.txt"), "")
         await writeFile(join(root, "nested", "mid.txt"), "")
@@ -710,53 +776,230 @@ describe("Node atomic filesystem", () => {
       expect(yield* matches((root, effect) => run(root, effect))).toEqual(
         yield* matches((_root, effect) => effect.pipe(Effect.provide(NodeFileSystem.layer)))
       )
-    }), 60_000)
+    }), 120_000)
 
   /**
-   * Two grammar answers are pinned here rather than against the native
-   * globber, because the native globber does not agree with ITSELF about them
-   * across the supported Node range: on 22.19.0 a dotted segment after `**`
-   * matches nothing at all, and on 24 it matches the dotfiles. The adapter
-   * follows the newer reading, which is the one a caller can reason about: a
-   * pattern that spells the dot finds the dotfile, wherever it sits.
-   *
-   * Everything the adapter does NOT implement is pinned here too, as one
-   * documented answer instead of a silent partial one: extglob (`+(a|b)`),
-   * POSIX classes (`[[:digit:]]`), numeric brace ranges (`{1..3}`), and
-   * backslash escaping all read as ordinary characters and match nothing.
+   * An exclusion is a traversal boundary, so names below it must consume none
+   * of the listing budget. Filtering only after the walk made a tiny selected
+   * result fail because an ignored subtree exhausted the bound first. The root
+   * never enters that walk, so excluding it must stop before listing begins.
+   */
+  it.live("prunes an excluded subtree before charging the glob walk", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const ignored = join(root, "ignored")
+      yield* Effect.promise(() => mkdir(ignored))
+      yield* Effect.promise(() => writeFile(join(root, "selected.txt"), ""))
+      // Measured against the helper: twelve names with 32-byte suffixes exhaust
+      // a 512-byte listing, while the selected result and rejection both fit.
+      yield* Effect.promise(() =>
+        Promise.all(
+          Array.from({ length: 12 }, (_, index) => writeFile(join(ignored, `entry-${index}-${"x".repeat(32)}.txt`), ""))
+        )
+      )
+
+      const outcome = yield* run(
+        root,
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          return {
+            rootPruned: yield* fs.glob(join(root, "**/*.txt"), { exclude: ["."], root }),
+            pruned: yield* fs.glob(join(root, "**/*.txt"), { exclude: ["ignored"], root }),
+            unpruned: yield* Effect.flip(fs.glob(join(root, "**/*.txt"), { root }))
+          }
+        }),
+        AtomicFileSystem.layerWith({ limits: { response: 512 } })
+      )
+
+      expect(outcome.rootPruned).toEqual([])
+      expect(outcome.pruned).toEqual([join(root, "selected.txt")])
+      expect(outcome.unpruned).toMatchObject({ reason: { _tag: "BadResource" } })
+    }))
+
+  /**
+   * Native answers vary with the host, the selecting pattern's shape, and the
+   * supported Node release. Those are not a stable oracle, so these rows pin
+   * the adapter's host-independent case rule, one exclusion answer for every
+   * selector, and the newer dotted-segment reading.
    */
   it.live("pins the glob answers the native globber cannot be compared on", () =>
     Effect.gen(function*() {
       const root = yield* Effect.promise(() => temporaryDirectory())
-      yield* Effect.promise(() => mkdir(join(root, "nested")))
-      yield* Effect.promise(() => writeFile(join(root, "a.txt"), ""))
-      yield* Effect.promise(() => writeFile(join(root, "1.txt"), ""))
+      yield* Effect.promise(() => mkdir(join(root, "nested", "deep"), { recursive: true }))
+      yield* Effect.promise(() => mkdir(join(root, ".hidden")))
+      yield* Effect.promise(() => writeFile(join(root, "top.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "a-b.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "(.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "?.txt"), ""))
       yield* Effect.promise(() => writeFile(join(root, ".dot.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, ".hidden", "in.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "nested", "mid.txt"), ""))
       yield* Effect.promise(() => writeFile(join(root, "nested", ".deep.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "nested", "deep", "low.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "nested", "skip.log"), ""))
 
       const found = yield* run(
         root,
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
-          const glob = (pattern: string) =>
-            Effect.map(fs.glob(join(root, pattern), { root }), (rows) => rows.map((v) => relative(root, v)).sort())
+          const glob = (pattern: string, exclude?: ReadonlyArray<string>) =>
+            Effect.map(
+              fs.glob(join(root, pattern), exclude === undefined ? { root } : { exclude, root }),
+              (rows) => rows.map((v) => relative(root, v) || ".").sort()
+            )
           return {
+            caseSelector: yield* glob("**/*.TXT"),
+            caseExclude: yield* glob("**/*.txt", ["**/*.TXT"]),
+            trailingGlobstarWildcardSelector: yield* glob("**/*", ["nested/**"]),
+            trailingGlobstarBareSelector: yield* glob("**", ["nested/**"]),
+            trailingGlobstarRoot: yield* glob("**", ["**"]),
+            directoryOnlyExclusion: yield* glob("**", ["**/"]),
+            directoryOnlyTextExclusion: yield* glob("**/*.txt", ["**/"]),
             dottedAfterGlobstar: yield* glob("**/.*"),
-            dottedLeafAfterGlobstar: yield* glob("**/.deep.txt"),
-            extglob: yield* glob("+(a|b).txt"),
-            posixClass: yield* glob("[[:digit:]].txt"),
-            braceRange: yield* glob("{1..3}.txt"),
-            escaped: yield* glob("\\a.txt")
+            dottedLeafAfterGlobstar: yield* glob("**/.deep.txt")
           }
         })
       )
 
-      expect(found.dottedAfterGlobstar).toEqual([".dot.txt", "nested/.deep.txt"])
+      expect(found.caseSelector).toEqual([])
+      expect(found.caseExclude).toEqual([
+        "(.txt",
+        "?.txt",
+        "a-b.txt",
+        "nested/deep/low.txt",
+        "nested/mid.txt",
+        "top.txt"
+      ])
+      expect(found.trailingGlobstarWildcardSelector).toEqual([
+        "(.txt",
+        "?.txt",
+        "a-b.txt",
+        "nested",
+        "top.txt"
+      ])
+      expect(found.trailingGlobstarBareSelector).toEqual([
+        "(.txt",
+        ".",
+        "?.txt",
+        "a-b.txt",
+        "nested",
+        "top.txt"
+      ])
+      expect(found.trailingGlobstarRoot).toEqual(["."])
+      expect(found.directoryOnlyExclusion).toEqual(["(.txt", ".", "?.txt", "a-b.txt", "top.txt"])
+      expect(found.directoryOnlyTextExclusion).toEqual(["(.txt", "?.txt", "a-b.txt", "top.txt"])
+      expect(found.dottedAfterGlobstar).toEqual([".dot.txt", ".hidden", "nested/.deep.txt"])
       expect(found.dottedLeafAfterGlobstar).toEqual(["nested/.deep.txt"])
-      expect(found.extglob).toEqual([])
-      expect(found.posixClass).toEqual([])
-      expect(found.braceRange).toEqual([])
-      expect(found.escaped).toEqual([])
+    }))
+
+  /**
+   * Three constructs mean something to `node:fs.glob` that this grammar does
+   * not implement. Reading them as ordinary characters would not fail, it
+   * would answer a DIFFERENT question: `+(private|secret)/**` passed as an
+   * exclusion excluded nothing at all, and the caller received every file
+   * under the directories it had just forbidden. That is the same failure an
+   * unrelativized absolute exclude used to cause, so it gets the same answer:
+   * a typed refusal, in the selector and in the exclusion alike.
+   */
+  it.live("refuses the glob syntax it does not implement, in a pattern and in an exclude", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      yield* Effect.promise(() => mkdir(join(root, "private")))
+      yield* Effect.promise(() => writeFile(join(root, "a.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "1.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "private", "secret.txt"), ""))
+
+      const unsupported = ["+(a|b).txt", "[[:digit:]].txt", "{1..3}.txt"]
+      const refusals = yield* run(
+        root,
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const asPattern: Array<unknown> = []
+          const asExclude: Array<unknown> = []
+          for (const pattern of unsupported) {
+            asPattern.push((yield* Effect.flip(fs.glob(join(root, pattern), { root }))).reason._tag)
+            asExclude.push(
+              (yield* Effect.flip(fs.glob(join(root, "**/*.txt"), { exclude: [pattern], root }))).reason._tag
+            )
+          }
+          return { asExclude, asPattern }
+        })
+      )
+
+      expect(refusals.asPattern).toEqual(unsupported.map(() => "BadArgument"))
+      expect(refusals.asExclude).toEqual(unsupported.map(() => "BadArgument"))
+    }))
+
+  it.live("preserves the native empty answer for a relative selector containing a backslash", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      yield* Effect.promise(() => writeFile(join(root, "a.txt"), ""))
+      const native = yield* Effect.promise(async () => {
+        const rows: Array<string> = []
+        for await (const row of glob("\\*.txt", { cwd: root })) rows.push(row)
+        return rows
+      })
+      const atomic = yield* Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const extension = (fs as KernelFileSystem.AtomicHostFileSystem)[KernelFileSystem.AtomicFileSystemTypeId]
+        return yield* extension.execute<Array<string>>({
+          operation: "glob",
+          boundaryRoot: root,
+          logicalRoot: root,
+          options: { exclude: [] },
+          pattern: "\\*.txt",
+          root
+        })
+      }).pipe(Effect.provide(AtomicFileSystem.layer))
+
+      expect(atomic).toEqual(native)
+      expect(atomic).toEqual([])
+    }))
+
+  /**
+   * The pending brace work is bounded before it can consume one Python frame
+   * per group. This pattern is exactly at the documented 4096-character cap,
+   * so it must be rejected as caller input rather than as a boundary failure.
+   */
+  it.live("refuses brace expansion before pending work reaches Python's recursion limit", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const pattern = "{,a}".repeat(1024)
+      // Drive the atomic extension directly because the kernel turns a
+      // relative pattern into an absolute capability resource first, which
+      // puts this exact-cap helper case over the kernel's separate bound.
+      const failures = yield* Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const atomic = (fs as KernelFileSystem.AtomicHostFileSystem)[KernelFileSystem.AtomicFileSystemTypeId]
+        const request = (selected: string, exclude: ReadonlyArray<string>) =>
+          atomic.execute<Array<string>>({
+            operation: "glob",
+            boundaryRoot: root,
+            logicalRoot: root,
+            options: { exclude },
+            pattern: selected,
+            root
+          })
+        return {
+          asPattern: yield* Effect.flip(request(pattern, [])),
+          asExclude: yield* Effect.flip(request("**", [pattern]))
+        }
+      }).pipe(Effect.provide(AtomicFileSystem.layer))
+
+      expect(failures).toMatchObject({
+        asPattern: {
+          reason: {
+            _tag: "BadArgument",
+            description: expect.stringContaining("expands past 64 alternatives")
+          }
+        },
+        asExclude: {
+          reason: {
+            _tag: "BadArgument",
+            description: expect.stringContaining("expands past 64 alternatives")
+          }
+        }
+      })
     }))
 
   it.live("classifies flag, encoding, and errno failures the way the native filesystem does", () =>

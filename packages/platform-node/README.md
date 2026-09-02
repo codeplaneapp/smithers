@@ -60,8 +60,10 @@ its numbers name something this platform can signal (`pgid == pid` above 1 on
 POSIX, `pgid: null` on Windows), that target is neither this process's pid nor
 its real process group, the owner that wrote it is provably gone (`ESRCH`, never
 `EPERM`), the record was written during this boot, and the pid's start time still
-matches the record. A host that cannot ASK for the start time refuses too: no
-evidence never authorizes a `SIGKILL`.
+matches the record. Two of those guards are questions put to `ps`: this
+process's own group, and when the recorded pid started. A host that cannot ASK
+either one refuses too, because a guard that did not run is not a guard that
+passed: no evidence never authorizes a `SIGKILL`.
 
 Each refusal decides whether the record is retired through
 `flows.host.process-reap-skipped.v1` or left inherited for the next incarnation:
@@ -70,6 +72,7 @@ Each refusal decides whether the record is retired through
 | --------------------- | ----------------------------------------------------------- | ------- |
 | `owner-alive`         | the incarnation that started it is still running            | no      |
 | `identity-unverified` | this host could not read the pid's start time               | no      |
+| `own-group-unknown`   | this host could not read its own process group              | no      |
 | `kill-failed`         | the signal was refused, so it is tried again                | no      |
 | `no-group`            | it shared its owner's group, so there is no group to signal | yes     |
 | `own-group`           | it named this host's own group or pid                       | yes     |
@@ -163,12 +166,12 @@ The barrel exports three namespaces: `NodeHost`, `HostLiveness`, and
 as `NodeHost.AtomicFileSystem` or through the `@smthrs/platform-node/AtomicFileSystem`
 subpath.
 
-| Module             | What it provides                                                                                                                                                                                                                          |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NodeHost`         | The complete closed Host bundle: `layer`, `layerAt`, `layerContained`, `layerContainedAt`, `ContainedOptions`; re-exports `AtomicFileSystem`, `ProcessReaper`, `NodeCrypto`, and Effect's raw `NodeFileSystem`, spawner, and `HttpClient` |
-| `AtomicFileSystem` | Descriptor-relative/no-follow Node filesystem layer: `layer`, `layerWith`, `Options`, `Limits`, `defaultExecutable`, `defaultLimits`, `defaultConcurrency`, `defaultTimeoutMs`, `program`                                                 |
-| `HostLiveness`     | Whether a recorded run owner is still alive: `isAlive`, `Owner`, `Options`                                                                                                                                                                |
-| `ProcessReaper`    | Killing the process groups a dead incarnation of this host abandoned: `reap`, `layer`, `System`, `SystemOptions`, `StartTime`, `Refusal`, `posixSystem`, `posixSystemWith`, `windowsSystem`, `systemFor`, `defaultPsExecutable`           |
+| Module             | What it provides                                                                                                                                                                                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NodeHost`         | The complete closed Host bundle: `layer`, `layerAt`, `layerContained`, `layerContainedAt`, `ContainedOptions`; re-exports `AtomicFileSystem`, `ProcessReaper`, `NodeCrypto`, and Effect's raw `NodeFileSystem`, spawner, and `HttpClient`            |
+| `AtomicFileSystem` | Descriptor-relative/no-follow Node filesystem layer: `layer`, `layerWith`, `Options`, `Limits`, `defaultExecutable`, `defaultLimits`, `defaultConcurrency`, `defaultTimeoutMs`, `program`                                                            |
+| `HostLiveness`     | Whether a recorded run owner is still alive: `isAlive`, `Owner`, `Options`                                                                                                                                                                           |
+| `ProcessReaper`    | Killing the process groups a dead incarnation of this host abandoned: `reap`, `layer`, `System`, `SystemOptions`, `StartTime`, `Refusal`, `posixSystem`, `posixSystemWith`, `windowsSystem`, `windowsSystemWith`, `systemFor`, `defaultPsExecutable` |
 
 `NodeCrypto` is re-exported for a different reason than the rest: `Crypto` is not
 a Host service, so it is not in the closed list, but every durable composition
@@ -187,14 +190,35 @@ a wide fan-out rather than reading a directory one entry at a time.
 `?` within a segment, `[...]` classes with `!` or `^` negation, `**` across zero
 or more whole segments, `{a,b}` alternation, a trailing `/` for directory-only
 matching, and the dotfile rule, which keeps a wildcard out of a leading dot while
-letting a segment that spells the dot match one. Exclusions prune whole subtrees,
-an absolute exclude is rewritten against the glob root, and a trailing `**` in an
-exclude leaves the directory entry itself. A pattern past 4096 characters, or one
-whose braces expand past 64 alternatives, is a `BadArgument`. Extglob
-(`+(a|b)`), POSIX classes (`[[:digit:]]`), numeric brace ranges (`{1..3}`), and
-backslash escaping are not implemented and match nothing. The parity suite
-compares every supported row against `@effect/platform-node`'s own globber; the
-two answers Node itself gives differently on 22 and 24 are pinned separately.
+letting a segment that spells the dot match one. Exclusions prune the walk, so an
+excluded directory costs no listing and nothing below it is charged against the
+entry or response ceilings, and an absolute exclude is rewritten against the glob
+root. A trailing `**` spans zero segments, so it names its own anchor: a
+directory always, and a non-directory only when every segment before it is
+literal (`top.txt/**` names the file, `t*.txt/**` names nothing). A pattern past
+4096 characters, or one whose braces expand past 64 alternatives, is a
+`BadArgument`, and both bounds are checked before any expansion or walking, so
+the answer is the typed refusal and never a fail-closed transport error. So are
+the three constructs this grammar does not implement: extglob (`+(a|b)`), POSIX
+classes (`[[:digit:]]`), and brace ranges (`{1..3}`). They
+mean something to the native globber, so reading them as ordinary characters
+would not fail, it would answer a different question, and in an exclude that
+means handing back the paths the caller forbade. The refusal covers the exclude
+list as well as the pattern, and it reads a character class as a class, so
+`[!(]*` is a negated class and not an extglob.
+
+Backslashes use Node's POSIX behavior: absolute selectors and all excludes drop
+them while leaving following wildcard magic active, and a relative selector
+containing one matches nothing.
+
+The parity suite compares every supported row against `@effect/platform-node`'s
+own globber. Three answers are pinned instead, because the native globber gives
+no single answer to copy: matching is case-sensitive on every host, where Node's
+globber is case-insensitive for magic segments on macOS and Windows only
+(`nocase: isMacOS || isWindows`, `nocaseMagicOnly: true`); a trailing `**` in an
+exclude leaves the directory entry itself, where Node's own answer depends on
+the selecting pattern's shape; and a dotted segment after `**` follows the
+Node 24 reading rather than the 22.19.0 one.
 
 `HostLiveness.isAlive` is the answer `EngineStore` steals runs on. An owner
 from a different host is alive, because a pid means nothing across machines; an
@@ -207,6 +231,16 @@ import { HostLiveness } from "@smthrs/platform-node"
 
 const isAlive = HostLiveness.isAlive({ hostId: "engine-1" })
 ```
+
+`@smthrs/run-store`'s `Ownership.sameHostPidProbe` fills the same slot and gives
+the OPPOSITE answer on two inputs: an owner recorded on a different `hostId`,
+which it calls reclaimable and this calls alive, and a signal error that is
+neither `ESRCH` nor `EPERM`, which it reads as dead and this reads as alive.
+`@smthrs/flows`' `NodeRuntime` defaults to this function while `@smthrs/cli`'s
+`NodeControl` passes `sameHostPidProbe`, so which answer a deployment gets
+depends on the entry point it used, and this one returns a ONE-argument function
+that silently discards the `context` its sibling reads. Reconciling the two is
+open work, tracked as B-09 in `docs/pages/release/support-matrix.md`.
 
 **Node-only by construction.** The bundle resolves `node:child_process` and
 friends; `scripts/browser-check.mjs` at the repository root pins that.

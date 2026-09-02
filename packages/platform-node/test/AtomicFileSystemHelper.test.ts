@@ -1038,6 +1038,33 @@ describe("atomic special files", () => {
     }))
 
   /**
+   * The grammar used to be translated into a regular expression, where every
+   * `*` became an independent greedy `[^/]*`. A pattern built from repeated
+   * `*<char>` fragments made that regex backtrack exponentially: thirteen of
+   * them against forty characters did not finish in over a hundred seconds,
+   * and the compiled matcher then ran against every listed name, so one
+   * authorized `glob` was a CPU exhaustion. The segment matcher that replaced
+   * it is linear in the candidate's length, and the budget below is what says
+   * so: no backtracking translator meets it.
+   */
+  it.live("answers a pattern of repeated wildcards within a fixed budget", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      // Forty characters carrying no `b` at all, so every alignment of every
+      // fragment has to be ruled out before the name is refused.
+      yield* Effect.promise(() => writeFile(join(root, `${"a".repeat(40)}.txt`), ""))
+      const started = Date.now()
+      const matched = yield* run(
+        root,
+        Effect.flatMap(FileSystem.FileSystem, (fs) => fs.glob(join(root, `${"*a".repeat(13)}*b.txt`), { root }))
+      )
+      expect(matched).toEqual([])
+      // One CPython fork plus a two-entry listing. The bound is generous by two
+      // orders of magnitude and still a hundred times under the blowup.
+      expect(Date.now() - started).toBeLessThan(10_000)
+    }), 60_000)
+
+  /**
    * Every operation is one CPython fork, so without a ceiling an unbounded
    * `Effect.forEach` starts one interpreter per entry and pins every core. The
    * ceiling is one semaphore for the whole layer, which is the only arrangement
@@ -1114,7 +1141,15 @@ describe("atomic special files", () => {
           Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.exists(join(root, "any.txt")))),
           AtomicFileSystem.layerWith(options)
         )
-      for (const options of [{ concurrency: 0 }, { concurrency: 1.5 }, { timeoutMs: 0 }, { timeoutMs: -1 }]) {
+      for (
+        const options of [
+          { concurrency: 0 },
+          { concurrency: 1.5 },
+          { timeoutMs: 0 },
+          { timeoutMs: -1 },
+          { timeoutMs: 2_147_483_648 }
+        ]
+      ) {
         expect(yield* attempt(options)).toMatchObject({ reason: { _tag: "BadArgument" } })
       }
     }))

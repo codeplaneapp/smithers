@@ -75,7 +75,11 @@ GLOBSTAR = object()
 
 # The syscall the operation in flight would name in a Node ErrnoException.
 # Effect's own Node adapter sets syscall on every system error it reports, so a
-# caller that switches on it reads the same field from either adapter.
+# caller that switches on it reads a populated field from either adapter. It
+# names the syscall the OPERATION is, narrowed where an operation has two
+# answers (remove_at picks unlink or rmdir); it is not a claim that a given
+# failure is attributed to the same call Node would attribute it to, which
+# depends on which of an operation's several syscalls raised.
 SYSCALLS = {
     "readFile": "open", "readFileString": "open",
     "writeFile": "open", "writeFileString": "open",
@@ -204,7 +208,7 @@ def open_file(root, path, flags, mode=0o666):
         raise
     return fd
 
-def list_dir(root, path, recursive, budget, with_kind=False):
+def list_dir(root, path, recursive, budget, with_kind=False, prune=None):
     if not parts(path):
         fd = os.dup(root)
     else:
@@ -236,6 +240,17 @@ def list_dir(root, path, recursive, budget, with_kind=False):
             for item in iterator:
                 entry = item.name
                 relative = os.path.join(prefix, entry) if prefix else entry
+                info = item.stat(follow_symlinks=False)
+                # The lstat makes S_ISDIR false for a link to a directory, so
+                # this descends only into real subdirectories. The kind travels
+                # with the name because glob needs it for directory-only
+                # patterns and for pruning without a second metadata lookup.
+                directory = stat.S_ISDIR(info.st_mode)
+                # An excluded entry consumes none of the retained-entry or
+                # response bounds. A directory is decided here so its contents
+                # are never visited in the first place.
+                if prune is not None and prune(relative, directory):
+                    continue
                 entries[0] += 1
                 if entries[0] > ENTRY_CAP:
                     raise OSError(errno.EFBIG, "directory listing has too many entries", path)
@@ -245,15 +260,9 @@ def list_dir(root, path, recursive, budget, with_kind=False):
                 total[0] += len(json.dumps(relative, ensure_ascii=False).encode("utf-8")) + 1
                 if total[0] > budget:
                     raise OSError(errno.EFBIG, "directory listing exceeds the response limit", path)
-                names.append((entry, relative))
+                names.append((entry, relative, directory))
         names.sort(key=lambda item: item[0])
-        for entry, relative in names:
-            info = os.stat(entry, dir_fd=current, follow_symlinks=False)
-            # The lstat makes S_ISDIR false for a link to a directory, so this
-            # descends only into real subdirectories — and the kind travels with
-            # the name, because glob needs it to answer a directory-only pattern
-            # without lstatting every candidate a second time.
-            directory = stat.S_ISDIR(info.st_mode)
+        for entry, relative, directory in names:
             result.append((relative, directory))
             if recursive and directory:
                 child = os.open(entry, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=current)
@@ -290,18 +299,34 @@ def split_alternatives(body):
     members.append("".join(current))
     return members
 
+def refuse_brace_range(body):
+    """Refuses a brace body this grammar does not implement.
+
+    A body with no top-level comma is literal text here, so "{1..3}" would
+    quietly match a file literally named "{1..3}" while the globber this
+    adapter mirrors expands it to 1, 2, and 3. Answering a DIFFERENT question
+    from the one the caller asked is the failure this whole path exists to
+    stop, and it is worse in an exclude, where it hands back paths the caller
+    forbade. So it is refused rather than reinterpreted."""
+    if ".." in body:
+        raise BadArgument("glob brace ranges are not implemented: {%s}" % body)
+
 def expand_braces(pattern):
     """A pattern's brace alternations expanded into whole patterns.
 
-    Bounded by BRACE_CAP, because expansion is the one part of the grammar
-    whose cost is multiplicative in the pattern's own length. An UNBALANCED
-    brace is literal text rather than an error: that is what the globber this
-    adapter replaces does with it, and it matches nothing."""
+    The bound includes pending work because checking only finished leaves lets
+    a long chain consume one interpreter frame per group before producing its
+    first leaf. An UNBALANCED brace is literal text rather than an error: that
+    is what the globber this adapter replaces does with it, and it matches
+    nothing."""
     out = []
-    def walk(text):
+    queue = [pattern]
+    while queue:
+        text = queue.pop()
         index = 0
         depth = 0
         start = -1
+        expanded = False
         while index < len(text):
             char = text[index]
             if char == "{":
@@ -311,16 +336,31 @@ def expand_braces(pattern):
             elif char == "}" and depth > 0:
                 depth -= 1
                 if depth == 0:
-                    members = split_alternatives(text[start + 1:index])
-                    if members is not None:
-                        for member in members:
-                            walk(text[:start] + member + text[index + 1:])
-                        return
+                    body = text[start + 1:index]
+                    members = split_alternatives(body)
+                    if members is None:
+                        refuse_brace_range(body)
+                        # A group with no top-level comma is literal text, but a
+                        # group INSIDE it can still be an alternation: the
+                        # native globber expands "{{a,b}}" to "{a}" and "{b}".
+                        # So the scan resumes just inside this group instead of
+                        # continuing past it.
+                        index = start + 1
+                        depth = 0
+                        start = -1
+                        continue
+                    for member in members:
+                        queue.append(text[:start] + member + text[index + 1:])
+                    expanded = True
+                    break
             index += 1
+        if expanded:
+            if len(out) + len(queue) > BRACE_CAP:
+                raise BadArgument("glob pattern expands past %d alternatives" % BRACE_CAP)
+            continue
         if len(out) >= BRACE_CAP:
             raise BadArgument("glob pattern expands past %d alternatives" % BRACE_CAP)
         out.append(text)
-    walk(pattern)
     return out
 
 def class_token(segment, index):
@@ -338,6 +378,11 @@ def class_token(segment, index):
         # what makes "[]]" a class holding one bracket.
         if char == "]" and not first:
             return (CLASS, negated, tuple(ranges)), cursor + 1
+        # "[[:digit:]]" is a POSIX class the globber this adapter mirrors
+        # expands. Reading it as the members "[", ":", "d" ... would answer a
+        # different question from the one asked, so it is refused instead.
+        if char == "[" and segment[cursor + 1:cursor + 2] == ":":
+            raise BadArgument("glob POSIX character classes are not implemented: %s" % segment)
         first = False
         if cursor + 2 < len(segment) and segment[cursor + 1] == "-" and segment[cursor + 2] != "]":
             ranges.append((char, segment[cursor + 2]))
@@ -368,6 +413,12 @@ def compile_segment(segment):
             tokens.append((ANY,))
         elif char == "[":
             token, index = class_token(segment, index)
+            # The native matcher reduces a singleton positive class to literal
+            # text before it removes dot path parts. Without the same collapse,
+            # "[.]" stays magic and asks the walk for an impossible "." entry.
+            if (token[0] == CLASS and not token[1] and len(token[2]) == 1
+                    and token[2][0][0] == token[2][0][1]):
+                token = (LITERAL, token[2][0][0])
             tokens.append(token)
             continue
         else:
@@ -387,15 +438,19 @@ def token_matches(token, char):
 def allows_leading_dot(tokens):
     """Whether a segment SPELLS its leading dot rather than wildcarding it.
 
-    A literal "." does, and so does a character class that admits one: the
-    native globber matches ".dot.txt" with "[.]dot.txt". A "*", a "?", and a
-    class that does not admit "." do not, which is the whole dotfile rule."""
+    A literal "." does, and so does a POSITIVE character class that contains
+    one: the native globber matches ".dot.txt" with "[.]dot.txt". A "*", a "?",
+    and a class that does not spell the dot do not, which is the whole dotfile
+    rule. A NEGATED class is the case worth naming: "[!a]" happens to match a
+    dot, but the globber still keeps it out of a leading one, so asking whether
+    the class MATCHES the dot is the wrong question."""
     if not tokens:
         return False
     first = tokens[0]
     if first[0] == LITERAL:
         return first[1] == "."
-    return first[0] == CLASS and token_matches(first, ".")
+    return (first[0] == CLASS and not first[1]
+            and any(low <= "." <= high for low, high in first[2]))
 
 def match_segment(compiled, text):
     tokens, allows_dot = compiled
@@ -429,13 +484,15 @@ def match_segment(compiled, text):
     return position == count
 
 def parse_pattern(pattern):
-    """A brace-free pattern as (segments, directory_only).
+    """A brace-free pattern as (segments, directory_only, literal_core, dot_anchor).
 
     A trailing "/" is not noise: it makes the pattern name directories only,
     which is the whole difference between "**/" and "**"."""
     directory_only = pattern.endswith("/")
+    raws = pattern.split("/")
     segments = []
-    for raw in pattern.split("/"):
+    dot_anchor = False
+    for position, raw in enumerate(raws):
         if raw in ("", "."):
             continue
         if raw == "**":
@@ -443,10 +500,27 @@ def parse_pattern(pattern):
                 segments.append(GLOBSTAR)
             continue
         tokens = compile_segment(raw)
+        # A class that COLLAPSES to "." is not the same thing as a spelled one.
+        # The globber this adapter mirrors drops a spelled "." before it parses
+        # the pattern and collapses "[.]" to "." only afterwards, so the
+        # collapsed one survives as a segment naming an entry called ".". As the
+        # LAST segment it names whatever the segments before it addressed, which
+        # is the same shortcut a trailing "**" gets. Anywhere else it names an
+        # entry no directory holds, so it stays a segment and matches nothing.
+        if (all(token[0] == LITERAL for token in tokens)
+                and "".join(token[1] for token in tokens) == "."
+                and position == len(raws) - 1):
+            dot_anchor = True
+            continue
         segments.append((tokens, allows_leading_dot(tokens)))
-    return segments, directory_only
+    trailing = not dot_anchor and bool(segments) and segments[-1] is GLOBSTAR
+    core = segments[:-1] if trailing else segments
+    literal_core = all(segment is not GLOBSTAR and
+                       all(token[0] == LITERAL for token in segment[0])
+                       for segment in core)
+    return segments, directory_only, literal_core, dot_anchor
 
-def match_segments(segments, directory_only, names, is_dir, anchor):
+def match_segments(segments, directory_only, literal_core, dot_anchor, names, is_dir, anchor):
     """Whether one parsed pattern names one entry.
 
     The walk over "**" is a reachable-state sweep rather than a backtracking
@@ -458,8 +532,9 @@ def match_segments(segments, directory_only, names, is_dir, anchor):
     # "nested". As an EXCLUDE it does not, which is the native globber's own
     # asymmetry: excluding "nested/**" removes what is below "nested" and leaves
     # the directory entry itself in the result.
-    trailing = bool(segments) and segments[-1] is GLOBSTAR
+    trailing = not dot_anchor and bool(segments) and segments[-1] is GLOBSTAR
     core = segments[:-1] if trailing else segments
+    globstar_last = bool(core) and core[-1] is GLOBSTAR
     def advance(index, out):
         while True:
             if index in out:
@@ -471,7 +546,20 @@ def match_segments(segments, directory_only, names, is_dir, anchor):
             return
     def accepts(consumed):
         if consumed == len(names):
-            return anchor or not trailing
+            if dot_anchor:
+                # A trailing "." names what the segments before it addressed,
+                # under the same rule a trailing "**" gets, plus one more: the
+                # globber reaches a "." only from a directory it has QUEUED, and
+                # a "**" immediately before it queues nothing, so "**/[.]" names
+                # nothing while "**/deep/[.]" names the directory. An EXCLUSION
+                # has no such reach, because nothing addresses a path for it.
+                return anchor and not globstar_last and (is_dir or literal_core)
+            if not trailing:
+                return True
+            # Node stats the joined path when every core segment is literal.
+            # That shortcut is why "top.txt/**" names its file anchor while
+            # "t*.txt/**" does not, even when both core patterns find it.
+            return anchor and (is_dir or literal_core)
         # Only a trailing "**" may span what is left, and it never crosses a
         # dotted segment.
         return trailing and all(not part.startswith(".") for part in names[consumed:])
@@ -497,31 +585,83 @@ def match_segments(segments, directory_only, names, is_dir, anchor):
             return True
     return False
 
+EXTGLOB_OPERATORS = ("?", "*", "+", "@", "!")
+
+def refuse_unimplemented_pattern(pattern):
+    """Refuses the syntax this grammar reads differently from the globber it
+    mirrors.
+
+    An extglob group means something to the native globber. Reading it as
+    ordinary characters does not fail, it answers a different question: as a
+    selector it silently returns the wrong set, and as an exclusion it hands
+    the caller the very paths it forbade. Backslashes are normalized separately
+    by relative_pattern because Node gives them context-sensitive semantics."""
+    for segment in pattern.split("/"):
+        index = 0
+        while index < len(segment):
+            char = segment[index]
+            if char == "[":
+                cursor = index + 1
+                if cursor < len(segment) and segment[cursor] in ("!", "^"):
+                    cursor += 1
+                first = True
+                while cursor < len(segment):
+                    if segment[cursor] == "]" and not first:
+                        index = cursor + 1
+                        break
+                    first = False
+                    cursor += 1
+                else:
+                    # An unclosed bracket is an ordinary character, so syntax
+                    # after it still has to be inspected.
+                    index += 1
+                continue
+            if char in EXTGLOB_OPERATORS and segment[index + 1:index + 2] == "(":
+                raise BadArgument("glob extended patterns are not implemented: %s" % pattern)
+            index += 1
+
 class GlobMatcher:
     """A compiled glob pattern, with its brace alternations expanded.
 
     "anchor" is False for an exclusion, where a trailing "**" names what is
     below a directory but not the directory entry itself."""
     def __init__(self, pattern, anchor=True):
+        if pattern is None:
+            self.alternatives = []
+            self.anchor = anchor
+            return
         if len(pattern) > PATTERN_CAP:
             raise BadArgument("glob pattern is longer than %d characters" % PATTERN_CAP)
+        refuse_unimplemented_pattern(pattern)
         self.alternatives = [parse_pattern(expanded) for expanded in expand_braces(pattern)]
         self.anchor = anchor
     def matches(self, names, is_dir):
-        for segments, directory_only in self.alternatives:
-            if match_segments(segments, directory_only, names, is_dir, self.anchor):
+        for segments, directory_only, literal_core, dot_anchor in self.alternatives:
+            if match_segments(segments, directory_only, literal_core, dot_anchor, names, is_dir, self.anchor):
                 return True
         return False
 
-def relative_pattern(pattern, root_path):
+def relative_pattern(pattern, root_path, exclusion=False):
     """A pattern rewritten relative to the glob root.
 
     Both relpath and normpath drop a trailing slash, so it is put back: it is
     the directory-only marker. Excludes go through this too, which is what
     makes an ABSOLUTE exclude the caller passed apply to the same names the
     selecting pattern is matched against."""
+    if len(pattern) > PATTERN_CAP:
+        raise BadArgument("glob pattern is longer than %d characters" % PATTERN_CAP)
+    absolute = os.path.isabs(pattern)
     directory_only = pattern.endswith("/")
-    relative = (os.path.relpath(pattern, root_path) if os.path.isabs(pattern)
+    # Node's POSIX globber drops backslashes from absolute selectors and from
+    # every exclusion, leaving any following magic active. A relative selector
+    # containing one matches nothing. The public adapter supplies an absolute
+    # selector, while direct protocol callers still receive the native empty
+    # answer for the relative form.
+    if "\\" in pattern:
+        if not exclusion and not absolute:
+            return None
+        pattern = pattern.replace("\\", "")
+    relative = (os.path.relpath(pattern, root_path) if absolute
                 else os.path.normpath(pattern))
     if relative == ".":
         relative = ""
@@ -549,11 +689,14 @@ def remove_tree(directory, name):
     recursion limit or the process descriptor limit and a wide one was
     materialized in full: both failed AFTER deleting part of the tree, with no
     stated policy. The policy is stated here instead. Depth is bounded by
-    REMOVE_DEPTH_CAP, the total number of entries visited by ENTRY_CAP, and each
-    directory is read incrementally through scandir so a hostile wide directory
-    is refused after ENTRY_CAP names rather than allocated whole. Progress is
-    still partial on refusal — entries already unlinked stay unlinked — and
-    every descriptor is closed on every exit, refusal and interruption alike."""
+    REMOVE_DEPTH_CAP and the total number of entries visited by ENTRY_CAP, and
+    the count is checked DURING each scandir, so a hostile wide directory is
+    refused after ENTRY_CAP names rather than allocated whole. One directory's
+    names are read before any of its entries is unlinked, because unlinking
+    from a directory while iterating it is not defined; the cap is what bounds
+    the names held across the whole walk. Progress is still partial on refusal —
+    entries already unlinked stay unlinked — and every descriptor is closed on
+    every exit, refusal and interruption alike."""
     visited = [0]
     stack = []
     try:
@@ -797,26 +940,23 @@ def main(request, content_limit, response_limit):
             # absolute could never match a root-relative name, so the caller
             # received the paths it had forbidden.
             selected = GlobMatcher(relative_pattern(request["pattern"], root_path))
-            excluded = [GlobMatcher(relative_pattern(item, root_path), False)
+            excluded = [GlobMatcher(relative_pattern(item, root_path, True), False)
                         for item in options.get("exclude", [])]
-            entries = list_dir(root, confined(root_path), True, response_limit, True)
+            # The root is the only directory the walk never emits. Deciding it
+            # after listing leaks every child and charges work for a tree the
+            # caller forbade, so the same pruning question must stop the walk.
+            if any(pattern.matches([], True) for pattern in excluded):
+                return []
+            def prunes(name, is_dir):
+                segments = name.split("/")
+                return any(pattern.matches(segments, is_dir) for pattern in excluded)
+            entries = list_dir(root, confined(root_path), True, response_limit, True, prunes)
             matches = []
             total = 32
-            pruned = set()
             # The pinned root is a candidate in its own right: "**" and "**/"
             # both name it, exactly as the native globber returns "." for it.
             for name, is_dir in [("", True)] + entries:
                 segments = name.split("/") if name else []
-                # An excluded directory takes its whole subtree with it, which
-                # is what excluding a directory means and what the native
-                # globber does. The listing is pre-order, so a parent is always
-                # decided before the entries below it.
-                if segments and "/".join(segments[:-1]) in pruned:
-                    pruned.add(name)
-                    continue
-                if any(pattern.matches(segments, is_dir) for pattern in excluded):
-                    pruned.add(name)
-                    continue
                 if not selected.matches(segments, is_dir):
                     continue
                 match = os.path.join(root_path, name) if name else root_path
@@ -1043,6 +1183,8 @@ const protocol = "flows-atomic/1"
 const frameHeaderBytes = 64
 /** The helper enforces the same ceiling before it trusts a declared limit. */
 const hardLimitBytes = 256 * 1024 * 1024
+/** `setTimeout` clamps a longer delay to 1 ms, so a bigger backstop is none. */
+const maxTimeoutMs = 2_147_483_647
 /** An inert working directory: nothing the helper could import lives there. */
 const inertDirectory = "/"
 const decimal = /^[0-9]+$/
@@ -1097,8 +1239,11 @@ const failure = (
     method,
     pathOrDescriptor: request.path ?? request.from ?? request.pattern,
     // `@effect/platform-node` sets `syscall` on every system error it reports,
-    // so a consumer that switches on it has to read the same field here. A
-    // transport failure names no syscall, because no syscall ran.
+    // so a consumer that switches on it has to read a populated field here too.
+    // It names the operation's own syscall rather than whichever of the calls
+    // that operation makes actually raised, so it says what was attempted, not
+    // which step failed. A transport failure names no syscall at all, because
+    // no syscall ran.
     syscall: rejection?.syscall ?? undefined,
     _tag: code === undefined ? "PermissionDenied" : reasons[code] ?? "Unknown",
     // The cause is repeated into the description because a fail-closed refusal
@@ -1177,8 +1322,8 @@ const resolveSettings = (options: Options): Settings | { readonly invalid: unkno
       throw new Error("atomic helper concurrency must be a positive integer")
     }
     const timeoutMs = options.timeoutMs ?? defaultTimeoutMs
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-      throw new Error("atomic helper timeoutMs must be a positive integer")
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > maxTimeoutMs) {
+      throw new Error("atomic helper timeoutMs must be a positive integer no greater than 2147483647")
     }
     return { limits, timeoutMs, semaphore: Semaphore.makeUnsafe(concurrency) }
   } catch (invalid) {

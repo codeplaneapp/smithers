@@ -188,6 +188,9 @@ export const defaultPsExecutable = "/bin/ps"
 /** How long the probe may take before it counts as an answer nobody gave. */
 const psTimeoutMs = 5000
 
+/** A whole number and nothing else, which is all a `pgid` column may be. */
+const decimal = /^[0-9]+$/
+
 /**
  * One `ps` column for one pid.
  *
@@ -227,16 +230,27 @@ const ps = (
  * Node exposes no `getpgrp`, so the answer comes from `ps`, which both BSD and
  * procps spell `pgid`. A host that cannot read it answers `null` and loses one
  * guard, which is why the pid comparison below is kept as well.
+ *
+ * The text is required to be one run of decimal digits naming a real group,
+ * rather than run through `Number.parseInt`, which reads a PREFIX: `"12 34"`,
+ * `"12abc"`, and `"0x10"` all become a number that is not this host's group. A
+ * wrong number is worse here than no number at all. It silently passes the
+ * own-group comparison in {@link refuse}, and because it is not `null` it also
+ * suppresses the `own-group-unknown` refusal that exists to say the comparison
+ * could not be made, so the guard neither runs nor reports that it did not run
+ * and a `SIGKILL` goes out on it. Anything else answers `null`, which refuses.
  */
 const ownGroup = (executable: string) => (): number | null => {
   const answer = ps(executable, "pgid", process.pid)
   if (answer._tag !== "printed") return null
-  const parsed = Number.parseInt(answer.text, 10)
-  return Number.isNaN(parsed) ? null : parsed
+  if (!decimal.test(answer.text)) return null
+  const parsed = Number(answer.text)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
 }
 
 /**
- * How a POSIX {@link System} asks the operating system its questions.
+ * How a {@link System} asks the operating system its questions, and whose
+ * identity it must never signal.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -246,7 +260,8 @@ export interface SystemOptions {
    * The absolute `ps` the identity probe runs. Default
    * {@link defaultPsExecutable}. It is configuration for a host that installs
    * `ps` somewhere else, and the seam the probe's own parsing is driven
-   * through; it is never a `PATH` lookup.
+   * through; it is never a `PATH` lookup. Windows has no such probe and
+   * ignores it.
    */
   readonly psExecutable?: string | undefined
   /**
