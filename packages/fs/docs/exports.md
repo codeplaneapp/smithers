@@ -2,7 +2,7 @@
 
 # Exported members
 
-8 namespaces and 43 documented members. An export without an
+8 namespaces and 44 documented members. An export without an
 `@category` tag is not part of this generated contract.
 
 ## `Command`
@@ -79,9 +79,10 @@
 
 `@smthrs/fs/Incur`
 
-| Export      | Kind  | Category     | Summary                                                                     |
-| ----------- | ----- | ------------ | --------------------------------------------------------------------------- |
-| `createCli` | const | constructors | Projects routes onto an Incur CLI while preserving metadata-only discovery. |
+| Export        | Kind  | Category     | Summary                                                                     |
+| ------------- | ----- | ------------ | --------------------------------------------------------------------------- |
+| `selfSegment` | const | constants    | The reserved child segment that invokes a route which also has children.    |
+| `createCli`   | const | constructors | Projects routes onto an Incur CLI while preserving metadata-only discovery. |
 
 ## `Route`
 

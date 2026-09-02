@@ -154,6 +154,12 @@ describe("Route boundary", () => {
     }
   })
 
+  it("canonicalizes route identity to NFC", async () => {
+    const route = await Effect.runPromise(Route.snapshot(makeRoute("cafe\u0301/list")))
+    expect(route.name).toBe("caf\u00e9/list")
+    expect(route.segments).toEqual(["caf\u00e9", "list"])
+  })
+
   it("classifies executable routes and returns typed loader failures", async () => {
     expect(Route.isCommandRoute(makeRoute("visible"))).toBe(true)
     expect(Route.isCommandRoute(makeRoute("hidden", undefined, { modelInvocable: false }))).toBe(false)
@@ -162,7 +168,15 @@ describe("Route boundary", () => {
     expect((await errorOf(Route.load(makeRoute("markdown", undefined, { kind: "markdown" })))).code).toBe(
       "unsupported_body"
     )
-    expect((await errorOf(Route.load(makeRoute("invalid", invalidModule)))).code).toBe("load_failed")
-    expect((await errorOf(Route.load(makeRoute("missing", "/definitely/missing/flow.ts")))).code).toBe("load_failed")
+    // One stable code, two descriptions: a caller can tell a bad path from a
+    // module that loads but exports no flow.
+    expect(await errorOf(Route.load(makeRoute("invalid", invalidModule)))).toMatchObject({
+      code: "load_failed",
+      description: "The selected flow module has no default flow export"
+    })
+    expect(await errorOf(Route.load(makeRoute("missing", "/definitely/missing/flow.ts")))).toMatchObject({
+      code: "load_failed",
+      description: "The selected flow module could not be imported"
+    })
   })
 })

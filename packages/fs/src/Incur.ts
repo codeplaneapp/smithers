@@ -9,7 +9,7 @@ import * as Option from "effect/Option"
 import { Cli as IncurCli } from "incur"
 import * as CommandTree from "./CommandTree.ts"
 import * as FlowInvoker from "./FlowInvoker.ts"
-import type { FsError } from "./FsError.ts"
+import { FsError } from "./FsError.ts"
 import * as SchemaBridge from "./internal/SchemaBridge.ts"
 import * as Route from "./Route.ts"
 
@@ -31,10 +31,28 @@ type SelectedRoute = {
   readonly schema: SchemaBridge.CommandSchema
 }
 
+type Selection = SelectedRoute & {
+  readonly dispatch: ReadonlyArray<string>
+}
+
+/**
+ * The reserved child segment that invokes a route which also has children.
+ *
+ * Incur cannot represent a node that is both runnable and a command group, so
+ * `domains` alongside `domains/list` is advertised and dispatched as
+ * `domains self` on the CLI and `/domains/self` over HTTP. The bare name keeps
+ * dispatching to the same route.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const selfSegment = "self"
+
 const discoveryFlags = new Set(["--help", "-h", "--llms", "--llms-full", "--schema", "--version"])
 
 const isDiscovery = (argv: ReadonlyArray<string>): boolean =>
-  process.env.COMPLETE !== undefined || argv.includes("--mcp") || argv.some((token) => discoveryFlags.has(token))
+  // Incur itself tests truthiness, so `COMPLETE=""` must not divert a run.
+  Boolean(process.env.COMPLETE) || argv.includes("--mcp") || argv.some((token) => discoveryFlags.has(token))
 
 const isFetchDiscovery = (pathname: string): boolean =>
   pathname === "/mcp" || pathname === "/openapi.json" || pathname === "/openapi.yml" ||
@@ -57,6 +75,57 @@ const commandTokens = (argv: ReadonlyArray<string>): ReadonlyArray<string> => {
   }
   return Object.freeze(tokens)
 }
+
+type RequestPath = {
+  /** Segments exactly as Incur's own matcher will see them. */
+  readonly raw: ReadonlyArray<string>
+  /** The same segments decoded, which is what route resolution compares. */
+  readonly decoded: ReadonlyArray<string>
+}
+
+const requestPath = (pathname: string): RequestPath | undefined => {
+  const raw: Array<string> = []
+  const decoded: Array<string> = []
+  for (const segment of pathname.split("/")) {
+    if (segment.length === 0) continue
+    try {
+      // Splitting before decoding keeps `%2F` inside one segment, so an encoded
+      // slash can never invent a path boundary.
+      decoded.push(decodeURIComponent(segment))
+    } catch {
+      return undefined
+    }
+    raw.push(segment)
+  }
+  return { raw: Object.freeze(raw), decoded: Object.freeze(decoded) }
+}
+
+const malformedPath = (): FsError =>
+  new FsError({
+    code: "parse_failed",
+    method: "Incur.fetch",
+    description: "The request path contains a malformed percent escape"
+  })
+
+const errorEnvelope = (error: FsError): string =>
+  JSON.stringify({ ok: false, error: { code: error.code, message: error.description } }, null, 2)
+
+const reportServe = (error: FsError, options: IncurCli.serve.Options): void => {
+  const write = options.stdout ?? ((value: string) => {
+    process.stdout.write(value)
+  })
+  write(`${errorEnvelope(error)}\n`)
+  const exit = options.exit ?? ((code: number) => {
+    process.exit(code)
+  })
+  exit(1)
+}
+
+const reportFetch = (error: FsError): Response =>
+  new Response(errorEnvelope(error), {
+    status: 400,
+    headers: { "content-type": "application/json" }
+  })
 
 const runOptions = (request: Request | undefined): { readonly signal: AbortSignal } | undefined =>
   request === undefined ? undefined : { signal: request.signal }
@@ -120,53 +189,118 @@ const selectedDefinition = (
   }
 })
 
-const buildCli = (
+const metadataCli = (
   name: string,
   tree: CommandTree.CommandTree,
   runEffect: <A, E>(
     effect: Effect.Effect<A, E, FlowInvoker.FlowInvoker>,
     options?: { readonly signal: AbortSignal } | undefined
-  ) => Promise<A>,
-  selected?: SelectedRoute
+  ) => Promise<A>
 ): IncurCli.Cli => {
   const cli = IncurCli.create(name)
   const mountChildren = (parent: IncurCli.Cli, node: CommandTree.CommandTree): void => {
     for (const [segment, child] of node.children) {
       const route = Option.getOrUndefined(child.route)
-      const selectedHere = route !== undefined && selected?.route === route
-      if (child.children.size > 0 && !selectedHere) {
-        const group = IncurCli.create(segment, {
-          description: route === undefined ? undefined : descriptionOf(route)
-        })
-        mountChildren(group, child)
-        parent.command(group)
-      } else {
-        // A trie node without children is always the leaf of a route; a node
-        // with children reaches this arm only when its own route was selected.
-        const commandRoute = route!
-        parent.command(
-          segment,
-          selectedHere && selected !== undefined
-            ? selectedDefinition(selected, runEffect)
-            : metadataDefinition(commandRoute, runEffect)
-        )
+      if (child.children.size === 0) {
+        // A trie node without children is always the leaf of a route.
+        parent.command(segment, metadataDefinition(route!, runEffect))
+        continue
       }
+      const group = IncurCli.create(segment, {
+        description: route === undefined ? undefined : descriptionOf(route)
+      })
+      mountChildren(group, child)
+      // Incur cannot represent a node that is both runnable and a group, so a
+      // route carrying children is advertised under the reserved segment
+      // instead of disappearing from every discovery surface.
+      if (route !== undefined) group.command(selfSegment, metadataDefinition(route, runEffect))
+      parent.command(group)
     }
   }
   mountChildren(cli, tree)
   return cli
 }
 
+const dispatchCli = (
+  name: string,
+  selection: Selection,
+  runEffect: <A, E>(
+    effect: Effect.Effect<A, E, FlowInvoker.FlowInvoker>,
+    options?: { readonly signal: AbortSignal } | undefined
+  ) => Promise<A>
+): IncurCli.Cli => {
+  const cli = IncurCli.create(name)
+  // The rebuilt CLI serves exactly one request, so it mounts only the tokens
+  // that request actually consumed. Mounting the caller's own spelling is what
+  // lets a percent-encoded or decomposed name reach Incur's raw matcher.
+  const definition = selectedDefinition(selection, runEffect)
+  let parent = cli
+  for (let index = 0; index < selection.dispatch.length - 1; index++) {
+    const group = IncurCli.create(selection.dispatch[index]!)
+    parent.command(group)
+    parent = group
+  }
+  parent.command(selection.dispatch[selection.dispatch.length - 1]!, definition)
+  return cli
+}
+
+const groupedRoutes = (tree: CommandTree.CommandTree): Effect.Effect<ReadonlySet<Route.Route>, FsError> =>
+  Effect.suspend(() => {
+    const grouped = new Set<Route.Route>()
+    const stack: Array<CommandTree.CommandTree> = [tree]
+    while (stack.length > 0) {
+      const node = stack.pop()!
+      const route = Option.getOrUndefined(node.route)
+      if (route !== undefined && node.children.size > 0) {
+        if (node.children.has(selfSegment)) {
+          return Effect.fail(
+            new FsError({
+              code: "duplicate_route",
+              method: "Incur.createCli",
+              description: "A child route claims the reserved self segment",
+              path: `${route.name}/${selfSegment}`
+            })
+          )
+        }
+        grouped.add(route)
+      }
+      for (const child of node.children.values()) stack.push(child)
+    }
+    return Effect.succeed(grouped)
+  })
+
 const hydrate = (
   tree: CommandTree.CommandTree,
-  argv: ReadonlyArray<string>
-): Effect.Effect<SelectedRoute, FsError> =>
-  Effect.gen(function*() {
-    const resolved = yield* CommandTree.resolve(tree, commandTokens(argv))
-    const flow = yield* Route.load(resolved.route)
-    const schema = yield* SchemaBridge.toCommandSchema(resolved.route.input, flow.input)
-    return Object.freeze({ route: resolved.route, flow, schema })
-  })
+  grouped: ReadonlySet<Route.Route>,
+  tokens: ReadonlyArray<string>,
+  dispatchTokens: ReadonlyArray<string>
+): Effect.Effect<Option.Option<Selection>, FsError> =>
+  CommandTree.resolve(tree, tokens).pipe(
+    Effect.matchEffect({
+      // Only an unmatched name may fall back to metadata: every other typed
+      // failure has to reach the caller.
+      onFailure: (error: FsError) =>
+        error.code === "unknown_command"
+          ? Effect.succeed(Option.none<Selection>())
+          : Effect.fail(error),
+      // A name that resolves but cannot be loaded or projected keeps its typed
+      // failure: it is reported, never softened into help output.
+      onSuccess: (resolved) =>
+        Effect.gen(function*() {
+          const consumed = tokens.length - resolved.rest.length
+          const viaSelf = resolved.rest.length === 1 && resolved.rest[0] === selfSegment &&
+            grouped.has(resolved.route)
+          const flow = yield* Route.load(resolved.route)
+          const schema = yield* SchemaBridge.toCommandSchema(resolved.route.input, flow.input)
+          return Option.some<Selection>({
+            route: resolved.route,
+            flow,
+            schema,
+            dispatch: Object.freeze(dispatchTokens.slice(0, viaSelf ? consumed + 1 : consumed))
+          })
+        })
+    })
+  )
 
 /**
  * Projects routes onto an Incur CLI while preserving metadata-only discovery.
@@ -185,31 +319,54 @@ export const createCli = (
     const validated = yield* CommandTree.make(routes)
     const executable = CommandTree.traverse(validated).filter(Route.isCommandRoute)
     const tree = yield* CommandTree.make(executable)
+    const grouped = yield* groupedRoutes(tree)
     const services = yield* Effect.context<FlowInvoker.FlowInvoker>()
     const runEffect = Effect.runPromiseWith(services)
-    const cli = buildCli(name, tree, runEffect)
+    const cli = metadataCli(name, tree, runEffect)
     const metadataServe = cli.serve.bind(cli)
     const metadataFetch = cli.fetch.bind(cli)
+
+    const select = (
+      tokens: ReadonlyArray<string>,
+      dispatchTokens: ReadonlyArray<string>,
+      options?: { readonly signal: AbortSignal } | undefined
+    ): Promise<
+      { readonly _tag: "Selection"; readonly selection: Option.Option<Selection> } | {
+        readonly _tag: "Error"
+        readonly error: FsError
+      }
+    > =>
+      runEffect(
+        hydrate(tree, grouped, tokens, dispatchTokens).pipe(
+          Effect.match({
+            onFailure: (error: FsError) => ({ _tag: "Error" as const, error }),
+            onSuccess: (selection) => ({ _tag: "Selection" as const, selection })
+          })
+        ),
+        options
+      )
 
     cli.serve = async (argv = process.argv.slice(2), options = {}) => {
       if (isDiscovery(argv)) return metadataServe(argv, options)
       const normalized = normalizeArgv(argv)
-      const selected = await runEffect(Effect.option(hydrate(tree, normalized)))
-      return Option.isNone(selected)
+      const tokens = commandTokens(normalized)
+      const outcome = await select(tokens, tokens)
+      if (outcome._tag === "Error") return reportServe(outcome.error, options)
+      return Option.isNone(outcome.selection)
         ? metadataServe([...normalized], options)
-        : buildCli(name, tree, runEffect, selected.value).serve([...normalized], options)
+        : dispatchCli(name, outcome.selection.value, runEffect).serve([...normalized], options)
     }
 
     cli.fetch = async (request) => {
       const url = new URL(request.url)
       if (isFetchDiscovery(url.pathname)) return metadataFetch(request)
-      const selected = await runEffect(
-        Effect.option(hydrate(tree, url.pathname.split("/").filter(Boolean))),
-        { signal: request.signal }
-      )
-      return Option.isNone(selected)
+      const path = requestPath(url.pathname)
+      if (path === undefined) return reportFetch(malformedPath())
+      const outcome = await select(path.decoded, path.raw, { signal: request.signal })
+      if (outcome._tag === "Error") return reportFetch(outcome.error)
+      return Option.isNone(outcome.selection)
         ? metadataFetch(request)
-        : buildCli(name, tree, runEffect, selected.value).fetch(request)
+        : dispatchCli(name, outcome.selection.value, runEffect).fetch(request)
     }
 
     return cli

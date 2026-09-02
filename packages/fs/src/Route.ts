@@ -310,8 +310,11 @@ export const snapshot = (input: Route): Effect.Effect<Route, FsError> =>
       ) {
         throw invalidRoute(segments.ok ? "$.segments" : `$.segments${segments.path.slice(1)}`)
       }
-      const name = text(data.name, { path: "$.name", maximum: maximumRouteNameLength })
-      if (name !== segments.value.join("/")) {
+      // A directory name arrives decomposed on macOS and composed from a
+      // browser or an agent, so one canonical form decides route identity.
+      const normalized = Object.freeze(segments.value.map((segment) => segment.normalize("NFC")))
+      const name = text(data.name, { path: "$.name", maximum: maximumRouteNameLength }).normalize("NFC")
+      if (name !== normalized.join("/")) {
         throw invalidRoute("$.name", "Route name must equal its slash-joined segments")
       }
       if (data.kind !== "module" && data.kind !== "markdown" && data.kind !== "skill") throw invalidRoute("$.kind")
@@ -326,7 +329,7 @@ export const snapshot = (input: Route): Effect.Effect<Route, FsError> =>
 
       return Object.freeze({
         name,
-        segments: segments.value,
+        segments: normalized,
         kind: data.kind,
         sourcePath,
         description: optionText(data.description, "$.description", maximumPathLength),
@@ -351,12 +354,16 @@ export const snapshot = (input: Route): Effect.Effect<Route, FsError> =>
  */
 export const isCommandRoute = (route: Route): boolean => route.kind === "module" && route.modelInvocable
 
-const loadFailed = (): FsError =>
+const loadFailed = (description: string): FsError =>
   new FsError({
     code: "load_failed",
     method: "Route.load",
-    description: "The selected flow module could not be loaded"
+    description
   })
+
+const importFailed = (): FsError => loadFailed("The selected flow module could not be imported")
+
+const exportMissing = (): FsError => loadFailed("The selected flow module has no default flow export")
 
 /**
  * Materializes the flow behind a route.
@@ -381,8 +388,8 @@ export const load = (input: Route): Effect.Effect<Flow.Any, FsError> =>
     }
     const module = yield* Effect.tryPromise({
       try: () => import(/* @vite-ignore */ fileSpecifier(route.sourcePath)) as Promise<{ readonly default?: unknown }>,
-      catch: loadFailed
+      catch: importFailed
     })
-    if (!isFlow(module.default)) return yield* Effect.fail(loadFailed())
+    if (!isFlow(module.default)) return yield* Effect.fail(exportMissing())
     return module.default
   })

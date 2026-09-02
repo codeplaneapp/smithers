@@ -208,7 +208,11 @@ export const resolve = (tree: CommandTree, input: ReadonlyArray<string>): Effect
     let node = tree
     let matched: { readonly route: Route.Route; readonly consumed: number } | undefined
     for (let index = 0; index < argv.length; index++) {
-      const child = node.children.get(argv[index]!)
+      // Route identity is canonicalized to NFC in `Route.snapshot`, so a name
+      // typed or transmitted in decomposed form still selects the same route.
+      // Only the lookup key is normalized: unconsumed argument text is left
+      // exactly as the caller supplied it.
+      const child = node.children.get(argv[index]!.normalize("NFC"))
       if (child === undefined) break
       node = child
       if (Option.isSome(child.route)) matched = { route: child.route.value, consumed: index + 1 }

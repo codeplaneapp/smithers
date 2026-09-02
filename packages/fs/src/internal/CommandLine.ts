@@ -57,7 +57,9 @@ const resourceLimit = (description: string): FsError =>
  * Splits a command string into argv without invoking a shell.
  *
  * Quotes and backslashes only affect tokenization. Shell syntax, including
- * substitutions and variable references, remains literal text.
+ * substitutions and variable references, remains literal text. Single quotes
+ * are literal, so a backslash inside them is an ordinary character; unquoted
+ * and double-quoted text honour backslash escapes.
  *
  * @private
  * @since 0.1.0
@@ -87,6 +89,13 @@ export const lex = (commandString: string): Effect.Effect<ReadonlyArray<string>,
     }
 
     for (const character of commandString) {
+      // Single quotes suppress escaping, as in every POSIX shell, so a Windows
+      // path or a regular expression survives `'...'` unchanged.
+      if (quote === "single") {
+        if (character === "'") quote = undefined
+        else current += character
+        continue
+      }
       if (escaping) {
         current += character
         started = true
@@ -96,11 +105,6 @@ export const lex = (commandString: string): Effect.Effect<ReadonlyArray<string>,
       if (character === "\\") {
         escaping = true
         started = true
-        continue
-      }
-      if (quote === "single") {
-        if (character === "'") quote = undefined
-        else current += character
         continue
       }
       if (quote === "double") {

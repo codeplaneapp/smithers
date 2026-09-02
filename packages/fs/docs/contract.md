@@ -34,6 +34,46 @@ Absolute filesystem paths are converted with the registry's file-specifier
 encoder, so spaces, Unicode, percent signs, hashes, and query characters name
 the intended file rather than URL structure.
 
+Route names and segments are canonicalized to Unicode NFC when a route is
+snapshotted, and a resolution token is normalized the same way before it is
+looked up. A decomposed directory name from the filesystem and a composed name
+from a browser or an agent therefore select the same route. Only the lookup key
+is normalized: unconsumed argument text stays exactly as the caller wrote it.
+
+## Command groups and the reserved `self` segment
+
+Incur cannot represent a node that is both runnable and a command group. A
+route that also has children, such as `domains` beside `domains/list`, is
+therefore advertised and dispatched under the reserved child segment `self`:
+`domains self` on the CLI and `/domains/self` over HTTP. Both forms appear in
+`--llms`, `--schema`, the OpenAPI document, and the MCP tool list, so nothing
+executable is left undiscoverable. The bare name keeps dispatching to the same
+route, because a request naming it exactly does not need its children mounted.
+A child route literally named `self` under such a route is rejected with
+`duplicate_route`.
+
+## Request paths
+
+Each HTTP path segment is split first and percent-decoded afterwards, so `%2F`
+decodes inside one segment and can never invent a path boundary; no route
+segment may contain a slash, so such a request simply matches nothing. A
+malformed percent escape fails `parse_failed` rather than raising a decoder
+defect.
+
+Only `unknown_command` falls back to metadata and help output. A resolution
+that exceeds its resource bounds, a malformed request path, or a route that
+resolves but cannot be loaded or projected is reported as its own typed
+`FsError` on both the CLI and HTTP surfaces.
+
+`serve` treats a non-empty `COMPLETE` environment variable as a request for
+completion and metadata output, matching Incur. An empty value is ignored.
+
+## Command lexing
+
+Single quotes are literal: a backslash inside them is an ordinary character, so
+a Windows path or a regular expression survives unchanged. Unquoted and
+double-quoted text honour backslash escapes. Shell syntax is never evaluated.
+
 ## Snapshot semantics
 
 Routes, trie nodes, maps, scan results, warnings, command inputs, decoded
@@ -76,12 +116,12 @@ to one route declaration.
 | `invalid_root`           | The root or scan configuration is invalid.                       |
 | `read_failed`            | Discovery or companion inspection could not read the filesystem. |
 | `discovery_failed`       | Registry discovery failed without a more specific category.      |
-| `parse_failed`           | Command token or option grammar was invalid.                     |
+| `parse_failed`           | Command token, option grammar, or request path was invalid.      |
 | `unknown_command`        | No visible route, or no exact route, matched.                    |
-| `duplicate_route`        | Two source paths produced one command identity.                  |
+| `duplicate_route`        | Two routes claimed one command identity, `self` included.        |
 | `invalid_route`          | Route metadata violated its immutable contract.                  |
 | `resource_limit`         | A bounded command, scan, trie, or value exceeded its limit.      |
-| `load_failed`            | The selected module could not load or did not export a flow.     |
+| `load_failed`            | The selected module could not be imported or exports no flow.    |
 | `unsupported_body`       | A non-module route was sent to the loader.                       |
 | `unsupported_schema`     | A schema locator cannot describe command input.                  |
 | `decode_failed`          | Input failed descriptor or Effect schema decoding.               |

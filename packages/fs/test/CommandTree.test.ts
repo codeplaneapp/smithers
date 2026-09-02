@@ -84,6 +84,14 @@ describe("CommandTree", () => {
     expect((await failure(CommandTree.resolve(tree, tokens))).code).toBe("resource_limit")
   })
 
+  it("resolves a decomposed token against a composed route name", async () => {
+    const tree = await Effect.runPromise(CommandTree.make([makeRoute("caf\u00e9/list")]))
+    const resolved = await Effect.runPromise(CommandTree.resolve(tree, ["cafe\u0301", "list", "cafe\u0301"]))
+    expect(resolved.route.name).toBe("caf\u00e9/list")
+    // Only the lookup key is normalized; argument text is left untouched.
+    expect(resolved.rest).toEqual(["cafe\u0301"])
+  })
+
   it("does not echo unknown argv into errors", async () => {
     const tree = await Effect.runPromise(CommandTree.make([makeRoute("known")]))
     const error = await failure(CommandTree.resolve(tree, ["missing", "--api-key=TOP-SECRET"]))

@@ -33,6 +33,16 @@ describe("Command", () => {
     })
   })
 
+  it("keeps single-quoted text literal and honours escapes elsewhere", async () => {
+    expect(await Effect.runPromise(CommandLine.lex("x 'a\\nb' 'C:\\path'"))).toEqual([
+      "x",
+      "a\\nb",
+      "C:\\path"
+    ])
+    expect(await Effect.runPromise(CommandLine.lex("\"a\\\"b\""))).toEqual(["a\"b"])
+    expect(await Effect.runPromise(CommandLine.lex("a\\'b"))).toEqual(["a'b"])
+  })
+
   it("does not evaluate shell syntax", async () => {
     const argv = await Effect.runPromise(CommandLine.lex("review '$HOME' \"$(whoami)\" `uname`"))
     expect(argv).toEqual(["review", "$HOME", "$(whoami)", "`uname`"])
