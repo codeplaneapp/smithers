@@ -97,46 +97,25 @@ export const covers = (envelope: string, path: string): boolean => {
 }
 
 /**
- * Returns the paths no envelope entry covers, in code-unit order. The union of
- * both lists is indexed once, so each path is read a bounded number of times
- * and the check itself is a merge of two rank lists plus one interval walk per
- * covering envelope pattern.
- */
-const outside = (envelope: ReadonlyArray<string>, paths: ReadonlyArray<string>): ReadonlyArray<string> => {
-  const indexed = Index.indexPaths([envelope, paths])
-  return Index.outsideRanks(indexed, Index.rankPaths(indexed, envelope), Index.rankPaths(indexed, paths))
-    .map((rank) => indexed.paths[rank]!)
-}
-
-/**
  * Verifies that a step declaration stays within an enclosing flow envelope.
  *
  * Read and write paths must be covered independently. A step may tighten
  * `expected` to `hermetic`, but cannot widen `hermetic` to `expected`.
  * Effect tiers narrow from irreversible to compensable to sealed.
  *
+ * The envelope's lists are prepared once: exact entries go into a set and
+ * covering patterns collapse to their outermost prefixes, sorted, so each step
+ * path costs one dot-segment scan, one lookup, and one binary search ending in
+ * one prefix comparison, whatever the envelope's width or how many of its
+ * patterns nest. `Graph.build` prepares each envelope once for every node it
+ * encloses.
+ *
  * @category validation
  * @since 0.0.0
  * @slop
  */
-export const narrow = (envelope: Declaration, step: Declaration): NarrowResult => {
-  const paths = normalize([...outside(envelope.reads, step.reads), ...outside(envelope.writes, step.writes)])
-  if (paths.length > 0) {
-    return { ok: false, code: "effect_outside_envelope", paths }
-  }
-  if (envelope.mode === "hermetic" && step.mode === "expected") {
-    return { ok: false, code: "effect_mode_widening", paths: [] }
-  }
-  const tierRank = {
-    sealed: 0,
-    compensable: 1,
-    irreversible: 2
-  } as const
-  if (tierRank[step.tier ?? "sealed"] > tierRank[envelope.tier ?? "sealed"]) {
-    return { ok: false, code: "effect_tier_widening", paths: [] }
-  }
-  return { ok: true }
-}
+export const narrow = (envelope: Declaration, step: Declaration): NarrowResult =>
+  Index.narrowPrepared(Index.prepareEnvelope(envelope), step)
 
 /**
  * Returns the concrete or narrower write declarations shared by two effect

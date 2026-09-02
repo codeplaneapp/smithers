@@ -378,12 +378,18 @@ export const maximumEffectPathLength = 4096
 /**
  * Maximum number of patterns, entries ending in `*`, one read list or one
  * write list of an effect declaration may carry before {@link build} refuses
- * the plan with `plan_too_large`. Matching two declarations costs their
- * combined length plus one interval search per pattern, so 128 keeps the
- * pattern term of a comparison, 128 searches of at most 16 steps each, no
- * larger than the linear term of two declarations at {@link maximumEffectPaths}
- * while still letting a declaration name a subtree per package of a large
- * monorepo.
+ * the plan with `plan_too_large`. A pattern never costs a match more than a
+ * literal path does: its prefix is located once by binary search, patterns
+ * nested under another collapse into the outermost before the paths they
+ * cover are enumerated, and every match after that is an integer comparison.
+ * What a pattern costs beyond a literal is that search, two binary searches
+ * of at most 16 comparisons each over a plan at {@link maximumPlanEffectPaths},
+ * every comparison reading up to {@link maximumEffectPathLength} code units.
+ * 128 keeps that term, 4,096 comparisons per list, below the sort that admits
+ * a list of {@link maximumEffectPaths} literal paths, while still letting one
+ * declaration name a subtree per package of a large monorepo. The count is
+ * read from the last character of each path as it is admitted, so a pattern
+ * past the limit costs one character read.
  *
  * @category limits
  * @since 1.0.0-rc.0
@@ -457,7 +463,7 @@ const copyPaths = (
   if (Array.isArray(paths)) {
     const length = paths.length
     if (length > limit) throw refuse()
-    for (let index = 0; index < length; index++) admit(paths[index]!)
+    for (let index = 0; index < length; index++) admit(paths[index])
     return copy
   }
   for (const path of paths) {
@@ -1322,8 +1328,15 @@ const nodeAst = (value: unknown, nodeId: string): NodeAst => {
 const freezeDeep = (value: unknown, seen: WeakSet<object> = new WeakSet()): void => {
   if (typeof value !== "object" || value === null || seen.has(value)) return
   seen.add(value)
-  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
-    if ("value" in descriptor) freezeDeep(descriptor.value, seen)
+  if (Array.isArray(value)) {
+    // A graph-owned array holds only indexed data members, so they are read
+    // in place: describing each would allocate one record per path of every
+    // conflict's list and every diagnostic's list only to discard it.
+    for (const member of value) freezeDeep(member, seen)
+  } else {
+    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+      if ("value" in descriptor) freezeDeep(descriptor.value, seen)
+    }
   }
   Object.freeze(value)
 }
@@ -1428,6 +1441,20 @@ export const build = (
     )
     planEffectPaths += effects.reads.length + effects.writes.length
     return effects
+  }
+
+  // An envelope is graph-owned and reaches every node it encloses as the same
+  // object, so it is prepared once and each enclosed declaration is checked
+  // against the prepared form: a wide envelope costs its size once per build
+  // rather than once per node that narrows it.
+  const preparedEnvelopes = new Map<Effects.Declaration, EffectIndex.PreparedEnvelope>()
+  const narrowAgainst = (envelope: Effects.Declaration, step: Effects.Declaration): Effects.NarrowResult => {
+    let prepared = preparedEnvelopes.get(envelope)
+    if (prepared === undefined) {
+      prepared = EffectIndex.prepareEnvelope(envelope)
+      preparedEnvelopes.set(envelope, prepared)
+    }
+    return EffectIndex.narrowPrepared(prepared, step)
   }
 
   const recordNode = (node: InternalNode): void => {
@@ -1661,7 +1688,7 @@ export const build = (
     }
 
     if (envelope !== undefined && declaredEffects !== undefined) {
-      const narrowed = Effects.narrow(envelope, declaredEffects)
+      const narrowed = narrowAgainst(envelope, declaredEffects)
       if (!narrowed.ok) {
         observedDiagnostics.push(new GraphBuildError({ code: narrowed.code, paths: [...narrowed.paths], nodeId: id }))
       }

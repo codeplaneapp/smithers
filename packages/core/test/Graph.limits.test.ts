@@ -262,6 +262,20 @@ describe("Graph width limits", () => {
     ])
   })
 
+  it("never pairs a pattern writer with a dotted path under its prefix, but pairs two writers naming it", () => {
+    const graph = Graph.build(Node.all({
+      escaped: writer("repo/../secret"),
+      glob: writer("repo/**"),
+      other: writer("repo/../secret"),
+      plain: writer("repo/plain")
+    }))
+
+    expect(Graph.conflicts(graph).map((conflict) => [conflict.nodes, conflict.paths])).toEqual([
+      [["root.all.escaped", "root.all.other"], ["repo/../secret"]],
+      [["root.all.glob", "root.all.plain"], ["repo/plain"]]
+    ])
+  })
+
   it("records one conflict for literal writers that share several paths", () => {
     const shared = (): Node.Any =>
       Node.withEffects(
@@ -300,9 +314,148 @@ describe("Graph effect path limits", () => {
 
   const pad = (index: number): string => String(index).padStart(4, "0")
 
+  /** A value that answers only `length`; reading anything else throws a plain Error. */
+  const lengthOnly = (length: number): string =>
+    new Proxy({ length }, {
+      get: (target, key) => {
+        if (key !== "length") throw new Error(`read ${String(key)} of an over-long path`)
+        return target.length
+      }
+    }) as unknown as string
+
+  const globs = (count: number, prefix: string): Array<string> =>
+    Array.from({ length: count }, (_, index) => `${prefix}/${pad(index)}/**`)
+
+  const nested = (count: number): Array<string> => Array.from({ length: count }, (_, index) => `x${"0".repeat(index)}*`)
+
   it("exports fixed effect path limits", () => {
     expect(Graph.maximumEffectPaths).toBe(1024)
     expect(Graph.maximumPlanEffectPaths).toBe(65_536)
+    expect(Graph.maximumEffectPathLength).toBe(4096)
+    expect(Graph.maximumEffectGlobs).toBe(128)
+  })
+
+  it("builds a path of exactly maximumEffectPathLength code units and refuses a longer one by its length alone", () => {
+    const longest = `${"a".repeat(Graph.maximumEffectPathLength - 4)}/out`
+    expect(longest).toHaveLength(Graph.maximumEffectPathLength)
+    const graph = Graph.build(Node.all({ w: declaring([longest], [longest]) }))
+    expect(Graph.effects(graph)[0]?.declared).toMatchObject({ reads: [longest], writes: [longest] })
+
+    // The over-long path answers only `length`, so any per-character work on
+    // it would surface as a plain Error instead of the refusal.
+    const error = thrown(() =>
+      Graph.build(Node.all({ w: assembled([], [lengthOnly(Graph.maximumEffectPathLength + 1)]) }))
+    )
+    expect(error).toBeInstanceOf(Graph.GraphBuildError)
+    expect(error).toMatchObject({ code: "plan_too_large", paths: [], nodeId: "root.all.w" })
+    expect(thrown(() => Graph.build(assembled([lengthOnly(Graph.maximumEffectPathLength + 1)], [])))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "root"
+    })
+  })
+
+  it("refuses an over-long path of a flow placed in a plan value with payload_too_large by its length alone", () => {
+    const carrying = (path: string): Node.Any =>
+      Node.succeed({
+        flow: Flow.make({ effects: { reads: [path], writes: [], mode: "hermetic", onConflict: "serialize" } })
+      })
+
+    expect(() => Graph.build(carrying("a".repeat(Graph.maximumEffectPathLength)))).not.toThrow()
+    const error = thrown(() => Graph.build(carrying(lengthOnly(Graph.maximumEffectPathLength + 1))))
+    expect(error).toBeInstanceOf(Graph.GraphBuildError)
+    expect(error).toMatchObject({ code: "payload_too_large", paths: ["$.flow.effects"], nodeId: "root" })
+  })
+
+  it("builds a list of exactly maximumEffectGlobs patterns and refuses one more before reading the next path", () => {
+    const graph = Graph.build(
+      Node.all({ w: declaring(globs(Graph.maximumEffectGlobs, "in"), globs(Graph.maximumEffectGlobs, "out")) })
+    )
+    expect(Graph.effects(graph)[0]?.declared?.reads).toHaveLength(Graph.maximumEffectGlobs)
+    expect(Graph.effects(graph)[0]?.declared?.writes).toHaveLength(Graph.maximumEffectGlobs)
+
+    const read: Array<number> = []
+    const observed = new Proxy([...globs(Graph.maximumEffectGlobs + 1, "out"), "out/literal"], {
+      get: (target, key) => {
+        if (typeof key === "string" && /^\d+$/.test(key)) read.push(Number(key))
+        return Reflect.get(target, key)
+      }
+    })
+    const error = thrown(() => Graph.build(Node.all({ w: assembled([], observed) })))
+    expect(error).toBeInstanceOf(Graph.GraphBuildError)
+    expect(error).toMatchObject({ code: "plan_too_large", paths: [], nodeId: "root.all.w" })
+    expect(Math.max(...read)).toBe(Graph.maximumEffectGlobs)
+    expect(thrown(() => Graph.build(assembled(globs(Graph.maximumEffectGlobs + 1, "in"), [])))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "root"
+    })
+  })
+
+  it("refuses 16 writers of 1,024 nested patterns and builds 16 writers of the widest nested declaration under 2 s", () => {
+    // The widest declaration the limits admit with every pattern nested: 128
+    // patterns, each covering the next, over 896 literal paths under the
+    // innermost, so every path of every pair overlaps.
+    const widest = [
+      ...nested(Graph.maximumEffectGlobs),
+      ...Array.from(
+        { length: Graph.maximumEffectPaths - Graph.maximumEffectGlobs },
+        (_, index) => `x${"0".repeat(Graph.maximumEffectGlobs - 1)}/${pad(index)}`
+      )
+    ]
+    const started = performance.now()
+    expect(thrown(() => Graph.build(siblings(16, () => declaring([], nested(1024)))))).toMatchObject({
+      code: "plan_too_large",
+      paths: [],
+      nodeId: "root.all.n0000"
+    })
+    const graph = Graph.build(siblings(16, () => declaring([], widest)))
+    const elapsed = performance.now() - started
+
+    expect(Graph.conflicts(graph)).toHaveLength(16 * 15 / 2)
+    expect(Graph.conflicts(graph).every((conflict) => conflict.paths.length === Graph.maximumEffectPaths)).toBe(true)
+    expect(elapsed).toBeLessThan(2_000)
+  })
+
+  it("narrows a wide envelope of longest paths against every enclosed node in time linear in both", () => {
+    const shared = "p".repeat(Graph.maximumEffectPathLength - 8)
+    const inside = Array.from(
+      { length: Graph.maximumEffectPaths },
+      (_, index) => `${shared}${pad(index)}`.padEnd(Graph.maximumEffectPathLength, "z")
+    )
+    const envelope = Effects.make({ reads: inside, writes: [], mode: "hermetic", onConflict: "serialize" })
+    const children = Graph.maximumGraphNodes - 1
+    const plan = Node.withEffects(
+      siblings(children, (index) => declaring([inside[index % inside.length]!], [])),
+      envelope
+    )
+
+    const started = performance.now()
+    const graph = Graph.build(plan)
+    const elapsed = performance.now() - started
+
+    expect(Graph.diagnostics(graph)).toEqual([])
+    expect(Graph.effects(graph)).toHaveLength(children + 1)
+    expect(elapsed).toBeLessThan(2_000)
+  })
+
+  it("records a wide shared-literal conflict set and its diagnostics within a bounded time", () => {
+    // 128 writers sharing 181 literal paths: 8,128 conflicts, each listing
+    // 181 paths, and one write_conflict diagnostic per conflict listing them
+    // again, so the graph freezes 2.9 million path entries. The widest set the
+    // limits admit, 362 such writers, is eight times this.
+    const writers = 128
+    const shared = paths(181, "s")
+    const plan = siblings(writers, () => declaring([], shared, "fail"))
+
+    const started = performance.now()
+    const graph = Graph.build(plan)
+    const elapsed = performance.now() - started
+
+    expect(Graph.conflicts(graph)).toHaveLength(writers * (writers - 1) / 2)
+    expect(Graph.conflicts(graph)[0]?.paths).toEqual([...shared].sort())
+    expect(Graph.diagnostics(graph)).toHaveLength(writers * (writers - 1) / 2)
+    expect(elapsed).toBeLessThan(5_000)
   })
 
   it("refuses two writers that share 20,001 literal paths before any overlap work", () => {

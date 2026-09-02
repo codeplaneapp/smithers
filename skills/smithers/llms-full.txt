@@ -7297,13 +7297,45 @@ array-backed declaration is refused by its lengths without reading a member;
 a caller-assembled iterable, which has no length to refuse by, is copied one
 path at a time and refused as soon as it exceeds the limit.
 
-The write-conflict pass buckets literal writers by path, so disjoint literal
-writers cost linear time. A writer whose path ends in `*` is compared against
-every later writer, so its cost grows with the number of nodes that declare
-effects. `Effects.overlaps` and `Effects.narrow` index exact paths in a set
-and find the paths a glob covers by binary search over the sorted
-declaration, so comparing two declarations costs their combined length plus
-the matches rather than their product.
+`Graph.maximumEffectPathLength` bounds one effect path at 4096 UTF-16 code
+units, `PATH_MAX` on Linux, so no path that names a file a supported host can
+open is refused. `Graph.maximumEffectGlobs` bounds the patterns, entries
+ending in `*`, one read list or one write list may carry at 128, enough for a
+subtree per package of a large monorepo. Both refuse with `plan_too_large`
+naming the node, or with `payload_too_large` naming the value path when the
+declaration belongs to a flow placed inside a plan value. Both are read as the
+path is admitted, from its length and from its last character, before any
+character of it is scanned and before the write-conflict pass compares any
+pair, so an over-long path or a pattern past the limit costs one property
+read.
+
+Inside the limits the cost of a build is bounded on every axis an author or
+an agent controls. Each distinct path is scanned once for a dot segment and
+sorted once, so the character work of a build is at most
+`maximumPlanEffectPaths` paths of `maximumEffectPathLength` code units plus
+the comparisons that sort them; 64 writers of 1024 such paths sharing a
+4000-character prefix build in about one second. A pattern's prefix is located
+once by binary search, patterns nested under another collapse into the
+outermost before the paths they cover are enumerated, and every match after
+that is an integer comparison, so `Effects.overlaps` costs the two
+declarations plus their matches however many patterns nest: two declarations
+of 1024 nested patterns overlap in milliseconds, and 16 writers of the widest
+nested declaration the limits admit, 128 nested patterns over 896 literal
+paths, build in well under a second. An envelope is prepared once, its exact
+entries in a set and its covering patterns collapsed to disjoint sorted
+prefixes, and every node it encloses is checked against the prepared form, so
+`Effects.narrow` inside a build costs the envelope once plus one lookup and
+one binary search per enclosed path; an envelope of 1024 longest paths
+narrowed by 4095 nodes builds in well under a second. The write-conflict pass
+marks candidate pairs from one index of every writer's paths, so disjoint
+literal writers cost linear time and the overlap of a pair is computed at
+most once per recorded conflict. Its pattern term is one step per path a
+pattern covers per writer holding that path, at most `maximumGraphNodes`
+times `maximumPlanEffectPaths` steps for a plan of universal writers, about
+two seconds before the conflict limit refuses it. The widest shared-literal
+conflict set the limits admit, 362 writers sharing 181 paths under
+`onConflict: "fail"`, builds in about two seconds including its 65,341
+diagnostics.
 
 ### Agent Skills validation
 
@@ -7447,6 +7479,8 @@ Pure graph introspection for flow declarations.
 | `isFatalDiagnostic` (const) | predicates | Reports whether a diagnostic blocks `keyMaterial`. |
 | `keyMaterial` (const) | getters | Returns node-associated, digest-free key material in topological dependency order. |
 | `LayerRequest` (interface) | models | Information supplied to the planner's pure per-node layer resolver. |
+| `maximumEffectGlobs` (const) | limits | Maximum number of patterns, entries ending in `*`, one read list or one write list of an effect declaration may carry before `build` refuses the plan with `plan_too_large`. |
+| `maximumEffectPathLength` (const) | limits | Maximum length, in UTF-16 code units, of one effect path `build` admits before it refuses the plan with `plan_too_large`. |
 | `maximumEffectPaths` (const) | limits | Maximum number of read and write paths, summed, one effect declaration may list before `build` refuses the plan with `plan_too_large`. |
 | `maximumGraphConflicts` (const) | limits | Maximum number of write conflicts `build` records before it refuses the plan. |
 | `maximumGraphDepth` (const) | limits | Maximum structural nesting accepted by `build`. |

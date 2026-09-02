@@ -58,6 +58,10 @@ describe("Effects", () => {
       code: "effect_outside_envelope",
       paths: [escaped]
     })
+    // An envelope pattern whose own prefix carries a dot segment covers
+    // nothing, not even the identical entry.
+    expect(Effects.narrow(declaration({ writes: ["../**", "repo/**"] }), declaration({ writes: ["../**", "repo/a"] })))
+      .toEqual({ ok: false, code: "effect_outside_envelope", paths: ["../**"] })
   })
 
   it("reports paths outside the envelope", () => {
@@ -118,6 +122,18 @@ describe("Effects", () => {
     expect(Effects.overlaps(escaped, escaped)).toEqual(["repo/../secret"])
   })
 
+  it("bounds a pattern whose prefix ends in the highest code unit", () => {
+    // No string follows every string under a prefix ending in U+FFFF, so the
+    // block it covers runs to the end of the sorted paths or, when a lower
+    // code unit precedes the run, to that code unit's successor.
+    const writes = ["a\uffff\uffff", "a\uffffb", "b", "\uffff", "\uffffx"]
+
+    expect(Effects.overlaps(declaration({ writes: ["a\uffff*"] }), declaration({ writes })))
+      .toEqual(["a\uffff\uffff", "a\uffffb"].sort())
+    expect(Effects.overlaps(declaration({ writes: ["\uffff*"] }), declaration({ writes })))
+      .toEqual(["\uffff", "\uffffx"])
+  })
+
   it("seals a declaration without changing the original", () => {
     const original = declaration({
       reads: ["src/**"],
@@ -162,6 +178,57 @@ describe("Effects", () => {
 
     expect(result).toEqual({ ok: false, code: "effect_outside_envelope", paths: ["outside/read", "outside/write"] })
     expect(elapsed).toBeLessThan(1_000)
+  })
+
+  it("examines each path a bounded number of times however many patterns of the other side cover it", () => {
+    // Every per-character operation the matcher can apply to a path goes
+    // through one of these methods; sorting and set lookups are native and
+    // cost each path at most one comparison per binary-search step. Counting
+    // calls per receiver shows each path is scanned a constant number of
+    // times, not once per pattern that covers it.
+    const methods = ["indexOf", "lastIndexOf", "charCodeAt", "startsWith", "endsWith", "slice"] as const
+    const counted = <A>(body: () => A): { readonly result: A; readonly calls: ReadonlyMap<string, number> } => {
+      const calls = new Map<string, number>()
+      const originals = methods.map((name) => [name, String.prototype[name]] as const)
+      for (const [name, original] of originals) {
+        Object.defineProperty(String.prototype, name, {
+          configurable: true,
+          writable: true,
+          value: function(this: string, ...args: Array<unknown>) {
+            calls.set(this, (calls.get(this) ?? 0) + 1)
+            return (original as (this: string, ...args: Array<unknown>) => unknown).apply(this, args)
+          }
+        })
+      }
+      try {
+        return { result: body(), calls }
+      } finally {
+        for (const [name, original] of originals) {
+          Object.defineProperty(String.prototype, name, { configurable: true, writable: true, value: original })
+        }
+      }
+    }
+    const nested = (count: number): Array<string> =>
+      Array.from({ length: count }, (_, index) => `x${"0".repeat(index)}*`)
+    const most = (calls: ReadonlyMap<string, number>, paths: ReadonlyArray<string>): number =>
+      Math.max(...paths.map((path) => calls.get(path) ?? 0))
+    const bound = 8
+
+    for (const count of [32, 512]) {
+      const globs = nested(count)
+      const outside = Array.from({ length: count }, (_, index) => `y/${index}`)
+      const patterned = declaration({ reads: globs, writes: globs })
+      const escaping = declaration({ reads: outside, writes: outside })
+
+      const overlapping = counted(() => Effects.overlaps(patterned, patterned))
+      expect(overlapping.result).toEqual([...globs].sort())
+      expect(most(overlapping.calls, globs)).toBeLessThanOrEqual(bound)
+
+      const narrowing = counted(() => Effects.narrow(patterned, escaping))
+      expect(narrowing.result).toEqual({ ok: false, code: "effect_outside_envelope", paths: [...outside].sort() })
+      expect(most(narrowing.calls, globs)).toBeLessThanOrEqual(bound)
+      expect(most(narrowing.calls, outside)).toBeLessThanOrEqual(bound)
+    }
   })
 
   it("matches globs of a caller-assembled declaration exactly as covers does", () => {

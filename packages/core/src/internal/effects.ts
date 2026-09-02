@@ -8,7 +8,10 @@
  * paths are sorted and each pattern's prefix is located. After that a path is
  * an integer rank and every match is an integer comparison, so matching two
  * declarations costs their combined length plus the matches, whatever the
- * paths' lengths or how many patterns nest.
+ * paths' lengths or how many patterns nest. An envelope is prepared once for
+ * every step it encloses: its exact entries go into a set and its covering
+ * patterns collapse to disjoint sorted prefixes, so a step path costs one
+ * lookup and one binary search however wide the envelope is.
  *
  * Governing contract: `packages/core/docs/api.md`, published as
  * https://smithers.sh/api/core.
@@ -196,9 +199,7 @@ export const rankPaths = (index: PathIndex, paths: ReadonlyArray<string>): Ranke
   for (const rank of unique) {
     if (index.glob[rank] === 1 && index.low[rank]! < index.high[rank]!) candidates.push(rank)
   }
-  candidates.sort((left, right) =>
-    index.low[left]! - index.low[right]! || index.high[right]! - index.high[left]!
-  )
+  candidates.sort((left, right) => index.low[left]! - index.low[right]! || index.high[right]! - index.high[left]!)
   const globs: Array<number> = []
   let coveredTo = -1
   for (const rank of candidates) {
@@ -290,41 +291,159 @@ export const overlapRanks = (index: PathIndex, a: Ranked, b: Ranked): Array<numb
   return union([exact, covered, covering])
 }
 
+/** The first position in a sorted list whose entry is greater than `value`. */
+const upperBound = (sorted: ReadonlyArray<string>, value: string): number => {
+  let low = 0
+  let high = sorted.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (sorted[middle]! <= value) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  return low
+}
+
 /**
- * The ranks of `paths` that no entry of `envelope` names or covers, ascending.
- * A path carrying a dot segment is never covered.
+ * One envelope list prepared for repeated coverage checks: its distinct
+ * entries, matched exactly through a set, and the prefixes of its covering
+ * patterns with every pattern nested under another collapsed into the
+ * outermost. The kept prefixes are disjoint and sorted, so the only prefix
+ * that can cover a path is the greatest one not greater than the path, and
+ * one binary search finds it.
  *
  * @since 1.0.0-rc.0
  * @private
  */
-export const outsideRanks = (index: PathIndex, envelope: Ranked, paths: Ranked): Array<number> => {
-  const covered = new Uint8Array(index.paths.length)
-  let left = 0
-  let right = 0
-  while (left < envelope.ranks.length && right < paths.ranks.length) {
-    const x = envelope.ranks[left]!
-    const y = paths.ranks[right]!
-    if (x === y) {
-      covered[x] = 1
-      left++
-      right++
-    } else if (x < y) {
-      left++
-    } else {
-      right++
-    }
+export interface Prepared {
+  readonly exact: ReadonlySet<string>
+  readonly prefixes: ReadonlyArray<string>
+}
+
+/**
+ * Prepares one envelope list. Each entry is read a bounded number of times:
+ * once into the set, once to detect a pattern, and for a pattern once to take
+ * its prefix and once to test that prefix for a dot segment, plus the
+ * comparisons that sort the prefixes and one prefix comparison that collapses
+ * a nested one.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const prepare = (paths: ReadonlyArray<string>): Prepared => {
+  const exact = new Set(paths)
+  const candidates: Array<string> = []
+  for (const entry of exact) {
+    if (!isGlob(entry)) continue
+    const prefix = globPrefix(entry)
+    if (!inertPrefix(prefix)) candidates.push(prefix)
   }
-  for (const glob of envelope.globs) {
-    const high = index.high[glob]!
-    for (let position = lowerBoundRank(paths.ranks, index.low[glob]!); position < paths.ranks.length; position++) {
-      const rank = paths.ranks[position]!
-      if (rank >= high) break
-      if (index.dotted[rank] === 0) covered[rank] = 1
-    }
+  candidates.sort()
+  const prefixes: Array<string> = []
+  for (const prefix of candidates) {
+    // Strings that start with a prefix are contiguous in code-unit order, so
+    // every prefix nested under the last kept one follows it directly.
+    if (prefixes.length > 0 && prefix.startsWith(prefixes[prefixes.length - 1]!)) continue
+    prefixes.push(prefix)
   }
-  const outside: Array<number> = []
-  for (const rank of paths.ranks) {
-    if (index.dotted[rank] === 1 || covered[rank] === 0) outside.push(rank)
+  return { exact, prefixes }
+}
+
+/**
+ * Whether a prepared list names or covers `path`. A path carrying a dot
+ * segment is never covered, so the path is scanned once for one and, when
+ * clean, looked up once and compared against at most one prefix.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const covered = (prepared: Prepared, path: string): boolean => {
+  if (hasDotSegment(path)) return false
+  if (prepared.exact.has(path)) return true
+  const position = upperBound(prepared.prefixes, path) - 1
+  return position >= 0 && path.startsWith(prepared.prefixes[position]!)
+}
+
+/**
+ * The fields of a declaration that narrowing reads. Structural, so this module
+ * needs nothing from the public module built on it.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export interface DeclarationLike {
+  readonly reads: ReadonlyArray<string>
+  readonly writes: ReadonlyArray<string>
+  readonly mode: "hermetic" | "expected"
+  readonly tier?: "sealed" | "compensable" | "irreversible" | undefined
+}
+
+/**
+ * An envelope prepared once for every step it encloses.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export interface PreparedEnvelope {
+  readonly reads: Prepared
+  readonly writes: Prepared
+  readonly mode: "hermetic" | "expected"
+  readonly tier: "sealed" | "compensable" | "irreversible"
+}
+
+/**
+ * The outcome of narrowing a step against a prepared envelope, shaped as the
+ * public `NarrowResult`.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export type NarrowOutcome =
+  | { readonly ok: true }
+  | {
+    readonly ok: false
+    readonly code: "effect_outside_envelope" | "effect_mode_widening" | "effect_tier_widening"
+    readonly paths: ReadonlyArray<string>
   }
-  return outside
+
+/**
+ * Prepares both lists of an envelope.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const prepareEnvelope = (envelope: DeclarationLike): PreparedEnvelope => ({
+  reads: prepare(envelope.reads),
+  writes: prepare(envelope.writes),
+  mode: envelope.mode,
+  tier: envelope.tier ?? "sealed"
+})
+
+const tierRank = { sealed: 0, compensable: 1, irreversible: 2 } as const
+
+const outside = (prepared: Prepared, paths: ReadonlyArray<string>): Array<string> =>
+  paths.filter((path) => !covered(prepared, path))
+
+/**
+ * Verifies that a step stays within a prepared envelope: every read and write
+ * path must be covered by the matching list, the mode may only tighten, and
+ * the tier may only narrow. Each step path costs one coverage check.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const narrowPrepared = (envelope: PreparedEnvelope, step: DeclarationLike): NarrowOutcome => {
+  const paths = [...new Set([...outside(envelope.reads, step.reads), ...outside(envelope.writes, step.writes)])].sort()
+  if (paths.length > 0) {
+    return { ok: false, code: "effect_outside_envelope", paths }
+  }
+  if (envelope.mode === "hermetic" && step.mode === "expected") {
+    return { ok: false, code: "effect_mode_widening", paths: [] }
+  }
+  if (tierRank[step.tier ?? "sealed"] > tierRank[envelope.tier]) {
+    return { ok: false, code: "effect_tier_widening", paths: [] }
+  }
+  return { ok: true }
 }

@@ -13,6 +13,13 @@
   the paths admitted across a plan. `Graph.build` refuses either with
   `plan_too_large` naming the node before it copies a path and before the
   write-conflict pass runs.
+- Added `Graph.maximumEffectPathLength` and `Graph.maximumEffectGlobs`, the
+  bounds on the length of one effect path (4096 code units, `PATH_MAX`) and on
+  the patterns one read or write list may carry (128). `Graph.build` refuses
+  either with `plan_too_large` naming the node, or `payload_too_large` for a
+  flow placed inside a plan value, reading only the path's length or last
+  character, so every per-character cost of a build is bounded by the two
+  limits together with `Graph.maximumPlanEffectPaths`.
 - Added `Markdown.validateSkillFrontmatter` and the `Markdown.SkillFrontmatter`
   shape, so a caller holding already-parsed frontmatter can apply the Agent
   Skills rules without a document, and the `skill_invalid_name`,
@@ -44,6 +51,23 @@
   covers by binary search over the sorted declaration, and `Graph.build`
   bounds the paths it admits. A flow placed inside a plan value now charges
   its effect paths to the member budget instead of copying them unbounded.
+- Fixed `Effects.overlaps`, `Effects.narrow`, and the write-conflict pass,
+  whose cost inside the limits still grew with the product of two
+  declarations when their patterns nested, because every candidate under a
+  pattern's prefix was compared as a string and rescanned for a dot segment:
+  two writers of 1024 nested patterns took a second to compare and 16 of them
+  minutes to build. Paths are now indexed once per comparison, each scanned
+  once for a dot segment and located by rank, nested patterns collapse into
+  the outermost, and every match is an integer comparison, so the same pair
+  compares in milliseconds and 16 writers of the widest nested declaration
+  the limits admit build in well under a second. An envelope is prepared once
+  for every node it encloses instead of being re-sorted per node, so a wide
+  envelope of long paths narrowed by thousands of nodes builds in under a
+  second instead of several. Reachability in the conflict pass is answered
+  from a transitive closure computed once, and a graph's conflict and
+  diagnostic path lists are frozen in place instead of through allocated
+  property descriptors, so the widest shared-literal conflict set the limits
+  admit builds in about two seconds instead of eight.
 
 ## [1.0.0-rc.0] - 2026-08-31
 
