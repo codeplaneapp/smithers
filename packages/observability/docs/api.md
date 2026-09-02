@@ -47,6 +47,13 @@ exactly like a working one and simply never deliver.
 Repeated trailing separators are normalized away, so `http://host//` and
 `http://host` both post to `http://host/v1/traces`.
 
+A value carrying a space or any C0 control is refused rather than repaired.
+`new URL` strips leading and trailing padding and removes tab, newline, and
+carriage return from anywhere in its input, so an endpoint read from a file
+with a trailing newline, or pasted with a leading space, parses cleanly while
+the untrimmed original is what the exporter would post to. Trim the value
+before handing it to a builder.
+
 ## Journal forwarding
 
 `JournalLogger.layerJournalForwarding` snapshots, bounds, and redacts a log

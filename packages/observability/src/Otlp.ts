@@ -62,8 +62,9 @@ export interface Options {
   /**
    * The collector base URL, for example `http://localhost:4318`. Signals are
    * posted below it at `/v1/logs`, `/v1/metrics`, and `/v1/traces`. It must be
-   * an absolute `http:` or `https:` URL without credentials; anything else
-   * fails layer acquisition with {@link Endpoint.InvalidExporterEndpoint}.
+   * an absolute `http:` or `https:` URL without credentials and free of spaces
+   * and control characters; anything else fails layer acquisition with
+   * {@link Endpoint.InvalidExporterEndpoint}.
    */
   readonly baseUrl: string
   /** Overrides {@link defaultServiceName} as the `service.name` attribute. */

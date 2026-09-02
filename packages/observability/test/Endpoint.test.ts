@@ -15,6 +15,12 @@ const failureOf = async <A, E>(layer: Layer.Layer<A, E>) => {
   return failure as Endpoint.InvalidExporterEndpoint
 }
 
+const base = "http://collector.invalid:4318"
+
+/** Two C0 controls the URL parser strips, written without a source escape. */
+const verticalTab = String.fromCharCode(11)
+const nul = String.fromCharCode(0)
+
 describe("Endpoint", () => {
   /**
    * The exporter absorbs delivery failure by design, so a builder that accepts
@@ -43,6 +49,41 @@ describe("Endpoint", () => {
       const fromNode = await failureOf(NodeOtel.layerOtel({ endpoint, resource }))
       expect(fromNode.code).toBe("invalid_exporter_endpoint")
       expect(fromNode.path).toBe("endpoint")
+    }
+  })
+
+  /**
+   * The WHATWG URL parser strips leading and trailing C0 controls and spaces
+   * and removes tab, newline, and carriage return from anywhere in its input,
+   * so `new URL` reports every value below as a well-formed endpoint while the
+   * unrepaired original is what a builder would hand its exporter. A trailing
+   * newline off a config file or a leading space off a paste is the most
+   * common shape of the mistake, and it produces exactly the silent
+   * no-delivery this refusal exists to prevent.
+   */
+  it("refuses an endpoint the URL parser would silently repair", async () => {
+    const padded = [
+      `${base} `,
+      ` ${base}`,
+      `\t${base}`,
+      `${base}\n`,
+      `${base}\r\n`,
+      `${base}\t`,
+      `${base}/ `,
+      `${base}${verticalTab}`,
+      `${base}${nul}`,
+      "http://collector\t.invalid:4318",
+      "http://collector.invalid:4318/ba\nse"
+    ]
+
+    for (const endpoint of padded) {
+      // The parser repairing it is the precondition that makes this a hole.
+      expect(() => new URL(endpoint), JSON.stringify(endpoint)).not.toThrow()
+
+      const fromOtlp = await failureOf(Otlp.layerFetch({ baseUrl: endpoint }))
+      expect(fromOtlp.path, JSON.stringify(endpoint)).toBe("baseUrl")
+      const fromNode = await failureOf(NodeOtel.layerOtel({ endpoint, resource }))
+      expect(fromNode.path, JSON.stringify(endpoint)).toBe("endpoint")
     }
   })
 
@@ -77,5 +118,30 @@ describe("Endpoint", () => {
     expect(await Effect.runPromise(Endpoint.decode("https://collector.invalid:4318//", "baseUrl"))).toBe(
       "https://collector.invalid:4318"
     )
+  })
+
+  /**
+   * Every accepted endpoint has to survive the one operation the exporters
+   * perform on it, so no value this schema admits can produce a signal URL the
+   * host's own URL parser then rejects or rewrites.
+   */
+  it("keeps every accepted endpoint parseable once a signal path is appended", async () => {
+    const accepted = [
+      "http://localhost:4318",
+      "http://127.0.0.1:4318/",
+      "https://collector.invalid",
+      "https://collector.invalid/base//",
+      "https://collector.invalid:4318/tenant/9",
+      `https://collector.invalid/${"p".repeat(Endpoint.maximumEndpointLength - 30)}`
+    ]
+
+    for (const endpoint of accepted) {
+      const decoded = await Effect.runPromise(Endpoint.decode(endpoint, "baseUrl"))
+      for (const signal of ["traces", "metrics", "logs"] as const) {
+        const url = Endpoint.signalUrl(decoded, signal)
+        expect(new URL(url).href, url).toBe(url)
+        expect(url.endsWith(`/v1/${signal}`), url).toBe(true)
+      }
+    }
   })
 })

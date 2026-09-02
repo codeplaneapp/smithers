@@ -20,7 +20,30 @@ import * as Schema from "effect/Schema"
  */
 export const maximumEndpointLength = 2_048
 
+/** The largest code unit the WHATWG URL parser repairs away: the space. */
+const largestRepairedCodeUnit = 0x20
+
+/**
+ * Reports whether the URL parser would repair the value rather than parse it
+ * as written. It strips leading and trailing C0 controls and spaces and
+ * removes tab, newline, and carriage return from anywhere in its input, and
+ * every one of those sits at or below {@link largestRepairedCodeUnit}.
+ */
+const repairedByUrlParser = (value: string): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    if (value.charCodeAt(index) <= largestRepairedCodeUnit) return true
+  }
+  return false
+}
+
 const isAbsoluteHttpUrl = (value: string): boolean => {
+  // `new URL` alone is not a validator here. It strips padding and inline
+  // control characters before parsing, so it reports a copy-pasted
+  // `"http://collector:4318\n"` as well formed while the untrimmed original is
+  // what a builder would hand its exporter: either an unusable URL or a
+  // request to a host nobody typed. No legal collector endpoint carries one of
+  // these, so refusing them costs nothing and closes the silent case.
+  if (repairedByUrlParser(value)) return false
   let url: URL
   try {
     url = new URL(value)
@@ -33,7 +56,7 @@ const isAbsoluteHttpUrl = (value: string): boolean => {
 
 /**
  * Runtime schema for an absolute `http:` or `https:` collector endpoint that
- * carries no credentials.
+ * carries no credentials, no spaces, and no control characters.
  *
  * @category schemas
  * @since 1.0.0-rc.0
@@ -87,7 +110,8 @@ export const decode = (
       new InvalidExporterEndpoint({
         code: "invalid_exporter_endpoint",
         path,
-        message: `OTLP collector ${path} must be an absolute http or https URL without credentials`
+        message:
+          `OTLP collector ${path} must be an absolute http or https URL carrying no credentials, spaces, or control characters`
       })
     )
   )

@@ -26,7 +26,8 @@ import type { Configuration as ResourceConfiguration } from "./Resource.ts"
 export interface Options {
   /**
    * The collector base URL. It must be an absolute `http:` or `https:` URL
-   * without credentials; anything else fails layer acquisition with
+   * without credentials and free of spaces and control characters; anything
+   * else fails layer acquisition with
    * {@link Endpoint.InvalidExporterEndpoint}.
    */
   readonly endpoint: string

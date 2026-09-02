@@ -10,11 +10,11 @@ Observability for flows: the default OTLP export wiring plus the Effect-native l
 
 The store packages define and update their own metric handles (`JournalMetrics`, `RunStoreMetrics`, `CacheStoreMetrics`, `ArtifactStoreMetrics`, `DatabaseMetrics`) and open spans through Effect's tracer; this package is the exporter they deliberately leave out. `Otlp` only composes what `effect` already ships, so it is browser-bundleable. The remaining modules are the fuller stack folded in from the agent workspace: a structured `Logger`, a `JournalLogger` that mirrors log events into the run journal, `Metric` helpers, the `Resource` descriptor, and the `Otel` layer the OpenTelemetry SDK wiring installs behind.
 
-`NodeOtel` and `BrowserOtel` are deliberately NOT re-exported here. Each resolves a host-specific OpenTelemetry SDK. `NodeOtel` reaches Node built-ins through `@effect/opentelemetry/NodeSdk`, so re-exporting either would put a `node:` import in the root entry and break the browser bundle this package guarantees. Import them by subpath instead: `@smthrs/observability/NodeOtel`.
+`NodeOtel` and `BrowserOtel` are deliberately NOT re-exported here. Each resolves a host-specific OpenTelemetry SDK. `NodeOtel` reaches Node-only host modules through `@effect/opentelemetry/NodeSdk` and `@opentelemetry/sdk-trace-node`, including the bare `async_hooks` specifier `@opentelemetry/context-async-hooks` imports, so re-exporting it would put a module a browser bundler cannot resolve in the root entry and break the browser bundle this package guarantees. Import them by subpath instead: `@smthrs/observability/NodeOtel`.
 
 ## Runtime and platform contract
 
-The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Logger`,
+The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Endpoint`, `Logger`,
 `JournalLogger`, `Metric`, `Otel`, and `Resource` are reachable from the root
 barrel. `Otlp.layerFetch` uses Effect's HTTP exporter and the host's global
 `fetch`, so that subpath is browser-safe and does not require an OpenTelemetry
@@ -22,9 +22,11 @@ SDK.
 
 The package as a whole is not Effect-only. `Otel` and `Resource` bridge the
 OpenTelemetry API, while `NodeOtel` and `BrowserOtel` use the SDK packages
-declared in this package's manifest. `NodeOtel` reaches Node-specific SDK code
-and must not enter a browser graph. `BrowserOtel` accepts processors and
-readers created by the application and contains no Node built-in.
+declared in this package's manifest. `NodeOtel` resolves Node-only host modules,
+including the bare `async_hooks` specifier that `@opentelemetry/sdk-trace-node`
+reaches through `@opentelemetry/context-async-hooks`, so it does not bundle for
+a browser and must not enter a browser graph. `BrowserOtel` accepts processors
+and readers created by the application and contains no Node module.
 
 ## Resource validation
 
@@ -42,6 +44,30 @@ values are not retained in the error.
 - NUL and unpaired UTF-16 surrogates are refused. Valid astral Unicode is
   preserved.
 
+## Collector endpoints
+
+`Otlp.layer`, `Otlp.layerFetch`, and `NodeOtel.layerOtel` decode their collector
+endpoint the same way they decode a resource. It must be an absolute `http:` or
+`https:` URL of at most 2,048 characters carrying no userinfo. Anything else
+fails layer acquisition with `Endpoint.InvalidExporterEndpoint`, code
+`invalid_exporter_endpoint`, and the name of the option it arrived on:
+`baseUrl` for `Otlp`, `endpoint` for `NodeOtel`. The rejected value is not
+retained in the error.
+
+Acquisition is the only place this can be reported. Export failure is absorbed
+by design, so a layer built against an unusable endpoint would otherwise look
+exactly like a working one and simply never deliver.
+
+Repeated trailing separators are normalized away, so `http://host//` and
+`http://host` both post to `http://host/v1/traces`.
+
+A value carrying a space or any C0 control is refused rather than repaired.
+`new URL` strips leading and trailing padding and removes tab, newline, and
+carriage return from anywhere in its input, so an endpoint read from a file
+with a trailing newline, or pasted with a leading space, parses cleanly while
+the untrimmed original is what the exporter would post to. Trim the value
+before handing it to a builder.
+
 ## Journal forwarding
 
 `JournalLogger.layerJournalForwarding` snapshots, bounds, and redacts a log
@@ -55,23 +81,50 @@ The queue defaults to 256 records and accepts a configured capacity from 1
 through 65,536. A snapshot accepts at most 1 MiB of encoded data, 4,096
 container members, and 64 container edges. Unreadable values become
 `[Unrenderable]`; values past a ceiling become `[Truncated]`; deep values become
-`[Deep]`. The same journal redaction rules used for durable events run before
-queue admission.
+`[Deep]`. Container-shaped fields keep their shape: annotations whose snapshot
+spent the budget arrive as `{ "[Truncated]": "[Truncated]" }` rather than as a
+scalar. A projection that still fails `TelemetryLog` degrades to a total record
+with an empty cause, so every durable `telemetry.log` row decodes with the
+exported schema. Text is bounded in one pass that never cuts a surrogate pair.
+The same journal redaction rules used for durable events run before queue
+admission.
 
-The callback never blocks. A full queue drops the new record. Journal delivery
-failure is absorbed because reporting it through the same logger would recurse.
-Closing the layer interrupts the worker and can drop records queued behind an
-in-flight write. Invalid run ids or capacities fail layer acquisition with
-`InvalidJournalLoggerOptions`; they are never routed through the lossy worker.
+The callback never blocks. A full queue drops the new record. A journal
+delivery failure is reported as a warning annotated with the run id, and a
+defect raised by a journal implementation is reported the same way and the
+worker keeps draining; interruption still ends it. Each of those three losses
+advances `Metric.droppedLogRecords`. Reporting is safe because the worker is
+forked before the logger it feeds is installed, so its ambient logger set never
+contains that logger. Closing the layer interrupts the worker and can drop
+records queued behind an in-flight write. Invalid run ids or capacities fail
+layer acquisition with `InvalidJournalLoggerOptions`; they are never routed
+through the lossy worker.
+
+The layer replaces the ambient logger set unless `mergeWithExisting` is `true`.
+It provides `References.MinimumLogLevel` only when `minimumLogLevel` is given,
+so an application that chose a level elsewhere keeps it and Effect's own `Info`
+default applies otherwise.
+
+## Logger layers
+
+`Logger.layerPrettyDev`, `Logger.layerStructuredJson`, and `Logger.layer` follow
+the same two rules. `mergeWithExisting` defaults to `false`, matching Effect's
+own `Logger.layer`, so installing one of them replaces the ambient logger set.
+`minimumLogLevel` is applied only when the caller names it. `Logger.layerNoop`
+is the exception: silencing is its purpose, so it pins `None` unless the caller
+names another level.
 
 ## Runtime metrics
 
-`Metric` exports three cross-package runtime signals. `runThroughput` advances
-only after `RunStore.transitionOwned` commits a terminal transition.
-`activeSeats` is a gauge held for the lifetime of a production `Agent.run`
-stream and released on success, failure, or interruption. `quotaParks`
-advances when the sealed quota decision is first executed, not when that
-decision is replayed after a wake or process restart.
+`Metric` exports three cross-package runtime signals and one of its own.
+`runThroughput` advances only after `RunStore.transitionOwned` commits a
+terminal transition. `activeSeats` is a gauge held for the lifetime of a
+production `Agent.run` stream and released on success, failure, or
+interruption. `quotaParks` advances when the sealed quota decision is first
+executed, not when that decision is replayed after a wake or process restart.
+`droppedLogRecords` counts operational log records lost before durable
+delivery, one per queue overflow, per journal delivery failure, and per defect
+the forwarding worker recovers from.
 
 Step-cache lookup and write counters remain owned by `@smthrs/step-cache`.
 This package does not duplicate those handles.
@@ -105,6 +158,19 @@ modules are subpath-only so the browser-safe root never resolves Node code.
 | `layer` (const) | layers | Creates the OTLP logs, metrics, and traces layer with flows resource defaults, JSON-serialized. |
 | `layerFetch` (const) | layers | Provides `layer` over the host's global `fetch`, the default wiring for a Node host, and browser-safe by construction because it never touches a `node:` built-in. |
 | `layerNoop` (const) | layers | Exports nothing. |
+
+### Endpoint
+
+`@smthrs/observability/Endpoint`, [src/Endpoint.ts](https://github.com/smithersai/smithers/blob/main/packages/observability/src/Endpoint.ts).
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `maximumEndpointLength` (const) | constants | Largest collector endpoint accepted by a builder. |
+| `Endpoint` (const) | schemas | Runtime schema for an absolute `http:` or `https:` collector endpoint that carries no credentials, no spaces, and no control characters. |
+| `InvalidExporterEndpoint` (class) | errors | Stable exporter-endpoint refusal shared by every OTLP builder. |
+| `normalize` (const) | conversions | Removes the repeated trailing separators that would otherwise produce a double slash in a signal URL. |
+| `decode` (const) | decoding | Decodes one collector endpoint into its normalized form without retaining the rejected value. |
+| `signalUrl` (const) | conversions | Builds the OTLP/HTTP URL one signal is posted to below a decoded endpoint. |
 
 ### JournalLogger
 
@@ -152,6 +218,7 @@ modules are subpath-only so the browser-safe root never resolves Node code.
 | `runThroughput` (const) | metrics | Counts flow runs that reached a terminal state. |
 | `activeSeats` (const) | metrics | The number of execution seats currently held. |
 | `quotaParks` (const) | metrics | Counts runs parked because a quota was exhausted. |
+| `droppedLogRecords` (const) | metrics | Counts operational log records lost before durable delivery. |
 | `registry` (const) | registry | All metrics declared by this package. |
 
 ### Otel

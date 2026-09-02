@@ -633,15 +633,22 @@ describe("JournalLogger", () => {
             }
             encodeOnce()
             const unit = Math.min(encodeOnce(), encodeOnce(), encodeOnce())
-            const started = performance.now()
-            emit(astral)
-            const cost = performance.now() - started
+            // The measured side takes the same minimum of three samples as the
+            // reference unit does. A single sample against a min-of-three
+            // denominator inflates the ratio whenever a loaded CI box preempts
+            // that one sample, which is a flake, not a regression.
+            const snapshotOnce = () => {
+              const at = performance.now()
+              emit(astral)
+              return performance.now() - at
+            }
+            const cost = Math.min(snapshotOnce(), snapshotOnce(), snapshotOnce())
             emit(escaped)
             emit(malformed)
             return cost / unit
           })
         )
-        const entries = yield* entriesEventually(journal, id, 3)
+        const entries = yield* entriesEventually(journal, id, 5)
         return {
           elapsed: measured,
           payloads: entries.map((entry) => Schema.decodeUnknownSync(TelemetryLog)(entry.payload))
@@ -653,7 +660,9 @@ describe("JournalLogger", () => {
 
     // The binary search this replaced re-encoded the value about twenty times:
     // 122 ms against a 2.0 ms single pass for this input, or nine reference
-    // encodes for the search alone before the rest of the snapshot ran.
+    // encodes for the search alone before the rest of the snapshot ran. The
+    // bound sits far below that and far above the one-pass cost, so it names a
+    // regression rather than a slow machine.
     expect(elapsed, `snapshot cost in reference encodes: ${elapsed.toFixed(1)}`).toBeLessThan(12)
     for (const payload of payloads) {
       const message = payload.message as string
@@ -661,10 +670,10 @@ describe("JournalLogger", () => {
       expect(new TextEncoder().encode(JSON.stringify(payload)).byteLength).toBeLessThanOrEqual(maximumSnapshotBytes)
     }
     // A cut inside a surrogate pair would leave text this package's own
-    // `Resource` validator refuses. The third input was malformed on arrival,
-    // so only the first two carry that guarantee.
+    // `Resource` validator refuses. The last input was malformed on arrival,
+    // so only the astral and escaped records carry that guarantee.
     expect(loneSurrogate.test(payloads[0]!.message as string)).toBe(false)
-    expect(loneSurrogate.test(payloads[1]!.message as string)).toBe(false)
+    expect(loneSurrogate.test(payloads[3]!.message as string)).toBe(false)
   })
 
   it("reports and counts a journal delivery failure, then keeps forwarding", async () => {
