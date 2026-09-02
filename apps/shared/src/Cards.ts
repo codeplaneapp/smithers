@@ -293,7 +293,35 @@ export const CardSchema = z.discriminatedUnion("kind", [
       error: z.string().optional(),
       lastSeq: z.number().int().nonnegative(),
       /** How long the run had gone without progress when it went quiet. */
-      quietForMs: z.number().int().nonnegative().optional()
+      quietForMs: z.number().int().nonnegative().optional(),
+      /*
+       * Lane runs — the run lifecycle the card surfaces. All optional so
+       * cards persisted before the lane parse.
+       */
+      /** The launch input, so `runs.rerun` relaunches the same flow with the same arguments. */
+      input: z.record(z.string(), z.unknown()).optional(),
+      /** Why a live run is not moving, in the control plane's word ("approval", "timer", "executor" when accepted). */
+      waiting: z.string().optional(),
+      /** Whether an operator steer is queued for the run. */
+      steeringPending: z.boolean().optional(),
+      /** Which body tab the card shows; the steps tail by default. */
+      facet: z.enum(["steps", "transcript", "events"]).optional(),
+      /** Whether the transcript keeps following the live run. */
+      follow: z.boolean().optional(),
+      /** The transcript tab's rows, merged from the transcript projection while the card follows. */
+      transcriptRows: z
+        .array(
+          z.object({
+            sequence: z.number(),
+            turn: z.number().optional(),
+            at: z.number().optional(),
+            kind: z.string(),
+            text: z.string()
+          })
+        )
+        .optional(),
+      /** The events tab's records: the run's raw control events in journal order. */
+      events: z.array(z.record(z.string(), z.unknown())).optional()
     })
   }),
   /* The workspace's workflows as an embedded card (flow.list). */
@@ -304,6 +332,57 @@ export const CardSchema = z.discriminatedUnion("kind", [
       repo: z.string(),
       workflows: z.array(
         z.object({ key: z.string(), description: z.string().nullable() })
+      )
+    })
+  }),
+  /*
+   * Lane runs §2 — the run inbox: every run on the workspace, one summary row
+   * each, with the filters the listing was cut at so the card states what it
+   * shows. A row opens its run card; the filters are the flow's arguments,
+   * never hidden state.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("run-list"),
+    payload: z.object({
+      repo: z.string(),
+      status: z.string().optional(),
+      flow: z.string().optional(),
+      lineage: z.string().optional(),
+      runs: z.array(
+        z.object({
+          runId: z.string(),
+          flowId: z.string(),
+          status: z.string(),
+          waiting: z.string().optional(),
+          createdAt: z.number(),
+          turns: z.number().int().nonnegative(),
+          calls: z.number().int().nonnegative()
+        })
+      )
+    })
+  }),
+  /*
+   * Lane runs §5 — the approvals inbox: every pending gate across the
+   * workspace's runs. Each row carries the submit-ready envelope the gateway
+   * published, so a decision goes back with it unchanged — the client never
+   * reconstructs authority.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("approvals-inbox"),
+    payload: z.object({
+      repo: z.string(),
+      approvals: z.array(
+        z.object({
+          runId: z.string(),
+          requestId: z.string(),
+          title: z.string(),
+          approval: z.record(z.string(), z.unknown()),
+          requestedAt: z.number(),
+          decision: z.enum(["approved", "denied"]).optional(),
+          decisionError: z.string().optional()
+        })
       )
     })
   }),
