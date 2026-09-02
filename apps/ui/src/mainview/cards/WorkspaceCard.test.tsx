@@ -113,7 +113,7 @@ describe("the workspace card", () => {
     )
     expect(host.textContent).toContain("golden")
     click(host, "Make template")
-    expect(commands[0]).toEqual({ name: "workspace.template", args: "snap-1 golden ws-1" })
+    expect(commands[0]).toEqual({ name: "workspace.template", args: "snap-1 ws-1 --name golden" })
     click(host, "Delete snapshot golden")
     expect(commands[1]).toEqual({ name: "workspace.snapshot.delete", args: "snap-1 ws-1" })
     host.remove()

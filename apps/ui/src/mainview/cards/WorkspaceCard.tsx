@@ -9,7 +9,7 @@
  * onRunCommand and carries data-flow (parity.test.ts gates this).
  */
 import { useState } from "react"
-import { Badge, Button, StatusPill } from "@smthrs/ui"
+import { Button, StatusPill } from "@smthrs/ui"
 import { Camera, Copy, Monitor, Play, Square, TerminalSquare, Trash2 } from "lucide-react"
 import type { Card } from "../state/AppState"
 
@@ -64,7 +64,7 @@ const WorkspaceFacetBody = ({
                 data-flow="workspace.template"
                 aria-label={`Create a template from ${snapshot.name}`}
                 onClick={() =>
-                  onRunCommand("workspace.template", `${snapshot.id} ${snapshot.name} ${payload.workspaceId}`)}
+                  onRunCommand("workspace.template", `${snapshot.id} ${payload.workspaceId} --name ${snapshot.name}`)}
               >
                 Make template
               </Button>
@@ -264,9 +264,6 @@ export const WorkspaceCardBody = ({
           </p>
         ) :
         null}
-      <p className="world-card-path">
-        <Badge variant="outline">{payload.workspaceId}</Badge>
-      </p>
     </div>
   )
 }

@@ -350,12 +350,29 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok(workspaceId === undefined ? { snapshotId } : { snapshotId, workspaceId })
   },
   "workspace.template": (args) => {
-    const [snapshotId, name, workspaceId, ...rest] = tokensOf(args)
-    if (snapshotId === undefined || name === undefined) {
+    /*
+     * Two spellings: `<snapshotId> <one-word-name> [workspaceId]`, and
+     * `<snapshotId> [workspaceId] --name <the rest of the line>` for a
+     * multi-word name (the Snapshots facet's button emits the second, since a
+     * snapshot's own name may carry spaces).
+     */
+    const tokens = tokensOf(args)
+    const flag = tokens.indexOf("--name")
+    const positional = flag === -1 ? tokens : tokens.slice(0, flag)
+    const flagged = flag === -1 ? undefined : tokens.slice(flag + 1).join(" ").trim()
+    const [snapshotId, second, third, ...rest] = positional
+    if (flagged !== undefined) {
+      if (snapshotId === undefined || flagged === "") {
+        return no("workspace.template needs a snapshot id and a name: /workspace.template <snapshotId> [workspaceId] --name <name>")
+      }
+      if (third !== undefined || rest.length > 0) return no("workspace.template takes a snapshot id, optionally a workspace id, then --name <name>")
+      return ok(second === undefined ? { snapshotId, name: flagged } : { snapshotId, name: flagged, workspaceId: second })
+    }
+    if (snapshotId === undefined || second === undefined) {
       return no("workspace.template needs a snapshot id and a name: /workspace.template <snapshotId> <name> [workspaceId]")
     }
-    if (rest.length > 0) return no("workspace.template takes a snapshot id, a one-word name, and optionally a workspace id")
-    return ok(workspaceId === undefined ? { snapshotId, name } : { snapshotId, name, workspaceId })
+    if (rest.length > 0) return no("workspace.template takes a snapshot id, a one-word name, and optionally a workspace id (use --name for a multi-word name)")
+    return ok(third === undefined ? { snapshotId, name: second } : { snapshotId, name: second, workspaceId: third })
   },
   "workspace.sessions": (args) => optional("workspaceId", args),
   "workspace.session.destroy": (args) => {
