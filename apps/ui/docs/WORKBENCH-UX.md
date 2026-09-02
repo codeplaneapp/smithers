@@ -470,6 +470,27 @@ Rows that became a card: Workspace (`workspace`), Change (`change`, `diff`,
 matrix, Tasks, Files. No row needed a page. The claim in §0 holds on paper;
 tracer bullets A, B, and C test it.
 
+### 3.13 Runs (the agent's work on the workspace)
+
+**Job.** Every run on the workspace is visible, reachable, and steerable from
+the conversation — the operator never needs the CLI to see what their agents
+are doing or to unblock one.
+
+**Shipped (lane runs, `workbench-lanes/runs.md`).** Three embedded cards, all
+over the workspace gateway's own projections and procedures: the `run-list`
+inbox (`/runs.list`, count line by status, filter chips, Stop-all footer), the
+`approvals-inbox` (`/approvals.list` — the workspace's pending gates, each
+decidable in place because the row carries the gateway's submit-ready
+envelope), and the `flow-run` card's grown lifecycle: Stop (confirming,
+optional reason) on every live phase, Resume when the control plane names a
+wait, Run again with the recorded launch input when settled, the steer row
+(message, seat, thinking, tools) with `steering pending · delivered at the
+next turn` until delivered, and Steps/Transcript/Events facet tabs —
+Transcript follows the live run on `/runs.logs --follow`, Events is the raw
+journal under `/debug.verbose`. What the wire does not carry is refused in
+words, never invented: `by=` (no launcher on the run summary) and the wait's
+reset time (no clock on `waitingReason`).
+
 ## 4. Wireframes
 
 Embedded `workspace` card, Desktop facet, not attached:

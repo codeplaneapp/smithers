@@ -151,6 +151,42 @@ labels, bridge messages, or action handlers. Historical HTML cards remain
 decodable for migration and render in a CSP-restricted inert iframe with
 scripts and network access denied.
 
+## Cards
+
+Every capability's output is an embedded card in the transcript (THE EMBED
+LAW); maximizing one is a presentation transition of the same component. The
+run lifecycle (lane `runs`, `docs/workbench-lanes/runs.md`) adds three
+surfaces, all over the workspace gateway's own projections and procedures:
+
+- **`run-list`** (`/runs.list [status] [flow] [by=] [lineage=] [owner/repo]`) —
+  the workspace's runs from the `workspace-runs` projection, newest first, a
+  mono count line by status in the header and filter chips that re-invoke
+  `runs.list` with the chip's argument. A row's Open materializes the run's
+  own card (`/runs.open <runId>`); the footer's `Stop all N` runs
+  `/flow.run.stop-all` (a confirming flow). `by=` refuses honestly: the wire's
+  run summary records no launcher.
+- **`approvals-inbox`** (`/approvals.list [owner/repo]`) — every pending gate
+  across the workspace's runs (the `approvals` projection with no run id).
+  Each row carries the submit-ready envelope the gateway published, so its
+  Approve/Deny dispatch the ordinary `approval.approve` / `approval.deny`
+  flows addressed `inboxCardId:requestId` and the decision goes back
+  unchanged. `/approvals.open <runId>` materializes one run's gates as
+  ordinary approval cards.
+- **`flow-run`** — the run card grows the lifecycle beyond launch: Stop on
+  every non-terminal phase (`/flow.run.stop <cardId> [reason]`, confirming),
+  Resume when the control plane names a wait other than an approval
+  (`/runs.resume`), Run again when settled (`/runs.rerun` — the launch input
+  recorded on the card at launch; an honest refusal when this client never
+  saw it), and a steer row (`/runs.steer`, `/runs.seat`, `/runs.thinking`,
+  `/runs.tools`) whose queued state reads `steering pending · delivered at
+  the next turn`. A waiting run names the control plane's reason:
+  `accepted · nothing is driving it` for an accepted run, the wait's word for
+  a parked one. Three facet tabs switch the body: Steps (default),
+  Transcript (`/runs.logs <runId> [--follow]` — follow merges the
+  `transcript` projection on the pump's own cycle), and Events
+  (`/runs.events <runId>` — the raw journal, rendered only where
+  `/debug.verbose` is on).
+
 ## Navigation and persistence
 
 Durable routes use `/w/:workspace/b/:branch/f/:frame`. Browser back/forward,
