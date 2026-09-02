@@ -58,18 +58,18 @@ describe("Monitor.run defaults", () => {
   it("beats ten times a second apart when it is given nothing but a run id", async () => {
     const report = await run(Effect.gen(function*() {
       const runId = yield* start("defaults")
-      const fiber = yield* Effect.fork(Monitor.run({ runId }))
+      const fiber = yield* Monitor.run({ runId }).pipe(Effect.forkChild({ startImmediately: true }))
       // Nine sleeps separate ten beats. Advancing less than that would leave
       // the loop mid-interval, which is how a default that silently became
       // zero would still pass.
       yield* TestClock.adjust("8 seconds")
-      const early = yield* Fiber.poll(fiber)
+      const early = fiber.pollUnsafe()
       yield* TestClock.adjust("2 seconds")
       const finished = yield* Fiber.join(fiber)
       return { early, finished }
     }))
 
-    expect(report.early._tag).toBe("None")
+    expect(report.early).toBeUndefined()
     expect(report.finished.beats.map((beat) => beat.beat)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
   })
 
@@ -107,7 +107,11 @@ describe("Monitor.run defaults", () => {
     }))
 
     expect(observed.report.beats[0]?.health).toBe("failing")
-    expect(observed.report.beats[0]?.healed).toBe("cancel")
+    // The default remedy for a failing run is `Control.cancel`, and a run the
+    // control plane has already settled answers it `Terminal`: the remedy ran,
+    // and it healed nothing, which is exactly what the beat records.
+    expect(observed.report.beats[0]?.receipt?._tag).toBe("Terminal")
+    expect(observed.report.beats[0]?.healed).toBeUndefined()
     expect(observed.after.status).toBe("failed")
   })
 
@@ -127,12 +131,10 @@ describe("Monitor.run defaults", () => {
     const failure = await Effect.runPromise(
       Effect.gen(function*() {
         const runId = yield* start("unwritable")
-        const sql = yield* SqlClient.SqlClient
-        // A journal whose table is gone is the shape of a control plane whose
-        // storage went away underneath a live monitor.
-        yield* sql`DROP TABLE flows_journal_events`.pipe(Effect.orDie)
-        return yield* Effect.flip(Monitor.run({ runId, intervalMs: 0, maxChecks: 1 }))
-      }).pipe(Effect.provide(durable()), Effect.scoped)
+        // A monitor id that is not well-formed text cannot be canonicalized
+        // into a journal payload, so the beat cannot be recorded.
+        return yield* Effect.flip(Monitor.run({ runId, monitorId: "\ud800", intervalMs: 0, maxChecks: 1 }))
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
     )
 
     expect(failure).toBeInstanceOf(PersistenceError)

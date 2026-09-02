@@ -172,8 +172,41 @@ describe("NodeControl.makeConfig", () => {
       const absent = join(directory, "absent.json")
       expect(() => NodeControl.makeConfig(["--mcp-config", absent], {}, "/work"))
         .toThrow(`--mcp-config ${absent}: file not found`)
+
+      // Each way the file can be wrong names the file and says which way, so
+      // an operator fixes the config instead of reading an ENOENT or a bare
+      // SyntaxError with a byte offset in it.
+      const unparseable = join(directory, "unparseable.json")
+      await writeFile(unparseable, "{ not json")
+      expect(() => NodeControl.makeConfig(["--mcp-config", unparseable], {}, "/work"))
+        .toThrow(`--mcp-config ${unparseable} is not valid JSON`)
+
+      const notAnArray = join(directory, "object.json")
+      await writeFile(notAnArray, JSON.stringify({ server: "docs", command: "docs-mcp" }))
+      expect(() => NodeControl.makeConfig(["--mcp-config", notAnArray], {}, "/work"))
+        .toThrow("must contain a JSON array of MCP server entries")
+
+      const scalarEntry = join(directory, "scalars.json")
+      await writeFile(scalarEntry, JSON.stringify(["docs-mcp", null]))
+      expect(() => NodeControl.makeConfig(["--mcp-config", scalarEntry], {}, "/work"))
+        .toThrow("must contain a JSON array of MCP server entries")
+
+      // A directory exists, so the missing-file refusal does not apply and the
+      // read is what fails.
+      expect(() => NodeControl.makeConfig(["--mcp-config", directory], {}, "/work"))
+        .toThrow(`--mcp-config ${directory} could not be read`)
     } finally {
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses a remote whose scheme is not http or https", () => {
+    // The transports this configures are HTTP and WebSocket-over-HTTP, so a
+    // scheme neither can dial is a usage error at parse time rather than a
+    // connection failure on the first command.
+    for (const remote of ["ftp://control.test", "file:///control", "ws://control.test"]) {
+      expect(() => NodeControl.makeConfig(["--remote", remote], {}, "/work"))
+        .toThrow(`--remote must be an http:// or https:// URL; got ${JSON.stringify(remote)}`)
     }
   })
 })
@@ -193,6 +226,26 @@ describe("NodeControl.config", () => {
       process.argv = argv
       if (previous === undefined) delete process.env.SMITHERS_REMOTE
       else process.env.SMITHERS_REMOTE = previous
+    }
+  })
+
+  it("preserves a configuration usage error as a typed failure", async () => {
+    const argv = process.argv
+    try {
+      process.argv = [process.execPath, "smithers", "--remote", "nota", "ps"]
+      const exit = await Effect.runPromise(Effect.exit(NodeControl.config))
+
+      // The entrypoint reports this one and exits 2. Letting the raw
+      // `TypeError: Invalid URL` out of the layer builder instead told an
+      // operator nothing about which flag they mistyped.
+      expect(exit._tag).toBe("Failure")
+      const failure = exit._tag === "Failure" ? Cause.squash(exit.cause) : undefined
+      expect(failure).toBeInstanceOf(CliError.UsageError)
+      expect((failure as CliError.UsageError).message).toBe(
+        "--remote must be an http:// or https:// URL; got \"nota\""
+      )
+    } finally {
+      process.argv = argv
     }
   })
 })

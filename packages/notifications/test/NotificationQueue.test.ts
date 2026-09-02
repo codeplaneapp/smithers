@@ -28,7 +28,7 @@ const item = (
 }
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, NotificationQueue.NotificationQueue>
+  effect: Effect.Effect<A, E, NotificationQueue.NotificationQueue | Journal.Journal>
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
@@ -50,6 +50,14 @@ const runAt = <A, E>(
       Effect.scoped
     )
   )
+
+/** Narrows the queue's own failure out of the union its methods can fail with. */
+const refusal = (
+  error: Journal.JournalError | NotificationQueue.NotificationError
+): NotificationQueue.NotificationError => {
+  expect(error._tag).toBe("/notifications/NotificationError")
+  return error as NotificationQueue.NotificationError
+}
 
 /** Whatever the caller passes, so a case can hand `admit` a value no type allows. */
 const untyped = (value: unknown): Notification => value as Notification
@@ -420,12 +428,13 @@ describe("NotificationQueue", () => {
       })
     )
 
-    expect(observed.error.code).toBe("notification_invalid")
-    expect(observed.error.notificationId).toBe("bad")
-    expect(observed.error.path).toBeUndefined()
+    const error = refusal(observed.error)
+    expect(error.code).toBe("notification_invalid")
+    expect(error.notificationId).toBe("bad")
+    expect(error.path).toBeUndefined()
     // A refusal reports the shape it wanted, bounded, and never the value.
-    expect(observed.error.message.length).toBeLessThanOrEqual(200)
-    expect(observed.error.message.endsWith("...")).toBe(true)
+    expect(error.message.length).toBeLessThanOrEqual(200)
+    expect(error.message.endsWith("...")).toBe(true)
     expect(observed.entries).toBe(0)
   })
 
@@ -481,7 +490,8 @@ describe("NotificationQueue", () => {
       })
     )
 
-    for (const error of [observed.text, observed.nothing, observed.numeric]) {
+    for (const raw of [observed.text, observed.nothing, observed.numeric]) {
+      const error = refusal(raw)
       expect(error.code).toBe("notification_invalid")
       expect(error.notificationId).toBeUndefined()
     }
@@ -502,8 +512,8 @@ describe("NotificationQueue", () => {
     )
 
     expect(observed.identified).toMatchObject({ code: "notification_invalid", notificationId: "deep" })
-    expect(observed.identified.message).toContain("256")
-    expect(observed.anonymous.notificationId).toBeUndefined()
+    expect(refusal(observed.identified).message).toContain("256")
+    expect(refusal(observed.anonymous).notificationId).toBeUndefined()
   })
 
   it("admits a payload that stops one level short of the bound", async () => {
