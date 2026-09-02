@@ -188,7 +188,12 @@ describe("folding declared files into directories", () => {
   }
   const files = ["/work/ws/src/lib/a.ts", "/work/ws/src/lib/b.ts", "/work/ws/src/lib/deep/e.ts", "/work/ws/src/c.ts"]
   const listingHost: ExecSandbox.Host = {
-    ...host("darwin", { "/usr/bin/sandbox-exec": "/usr/bin/sandbox-exec" }, [...files, "/work/ws/package.json"], Object.keys(listing)),
+    ...host(
+      "darwin",
+      { "/usr/bin/sandbox-exec": "/usr/bin/sandbox-exec" },
+      [...files, "/work/ws/package.json"],
+      Object.keys(listing)
+    ),
     entries: (directory) => listing[directory]
   }
   const reads = ["src/lib/a.ts", "src/lib/b.ts", "src/lib/deep/e.ts", "src/c.ts"]
@@ -199,7 +204,9 @@ describe("folding declared files into directories", () => {
     expect(plan.readDenies).toEqual(["/work/ws/src/d.ts", "/work/ws/src/__generated__"])
     const profile = ExecSandbox.seatbelt(plan)
     const grant = profile.indexOf("(subpath \"/work/ws/src\")")
-    const close = profile.indexOf("(deny file-read* (subpath \"/work/ws/src/d.ts\") (subpath \"/work/ws/src/__generated__\"))")
+    const close = profile.indexOf(
+      "(deny file-read* (subpath \"/work/ws/src/d.ts\") (subpath \"/work/ws/src/__generated__\"))"
+    )
     expect(grant).toBeGreaterThan(0)
     expect(close).toBeGreaterThan(grant)
     expect(profile).not.toContain("a.ts")
@@ -220,7 +227,9 @@ describe("folding declared files into directories", () => {
   it("leaves a directory alone when an uncovered entry still holds declared files below it", () => {
     const sparse: ExecSandbox.Host = {
       ...listingHost,
-      entries: (directory) => (directory === "/work/ws/src/lib" ? ["a.ts", "b.ts", "deep", "n1", "n2", "n3", "n4"] : listing[directory])
+      entries: (
+        directory
+      ) => (directory === "/work/ws/src/lib" ? ["a.ts", "b.ts", "deep", "n1", "n2", "n3", "n4"] : listing[directory])
     }
     const plan = planned(sparse, { reads, writes: [] })
     // lib: three covered entries (a, b, and the folded deep) against four uncovered ones: not folded.
