@@ -8,16 +8,15 @@
  * only to tell an upgrading project where the code went. Importing the module
  * throws instead of resolving to a silently different API.
  *
+ * The module exports nothing. Evaluation always throws, so a declared export
+ * would be a name the published types offer and the runtime can never hand
+ * back.
+ *
  * @since 1.0.0-rc.0
  */
 
-/**
- * What an importer of `smthrs` is told.
- *
- * @category constructors
- * @since 1.0.0-rc.0
- */
-export const notice: string = [
+/** What an importer of `smthrs` is told. */
+const notice: string = [
   "smthrs 1.0 is a migration notice, not a runtime.",
   "Smithers 1.0 ships as @smthrs/* packages. Install @smthrs/flows (authoring and engine)",
   "and @smthrs/cli (the `smithers` command), then run `smithers migrate` in a 0.x project.",
