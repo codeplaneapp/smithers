@@ -37,8 +37,9 @@ export interface CloudTerminalClientOptions {
   /**
    * Reconnect dials the whole client may make per rolling minute, every
    * session together. plue admits 20 terminal opens per user per minute
-   * (internal/middleware/rate_limit.go); the client's redials stay under
-   * half of it so the user's own opens are never the ones refused.
+   * (internal/middleware/rate_limit.go), and a refused upgrade's status-recovery
+   * GET counts the same, so the client's redials stay well under half of it
+   * and the user's own opens are never the ones refused.
    */
   readonly maxReconnectsPerMinute?: number
   /** A socket that stayed open this long was healthy: its drop redials promptly instead of continuing the backoff. */
@@ -50,7 +51,8 @@ const MAX_PENDING = 256
 
 const DEFAULT_RECONNECT_MS = 1000
 const DEFAULT_MAX_RECONNECT_MS = 30_000
-const DEFAULT_MAX_RECONNECTS_PER_MINUTE = 8
+// Each refused upgrade also costs one status-recovery GET against the SAME 20/min per-user budget, so 6 dials + 6 recoveries leaves headroom for the human's own opens.
+const DEFAULT_MAX_RECONNECTS_PER_MINUTE = 6
 const DEFAULT_HEALTHY_MS = 30_000
 const MINUTE_MS = 60_000
 
