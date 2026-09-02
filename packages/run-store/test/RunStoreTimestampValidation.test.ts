@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { DurableWriter } from "@smthrs/database"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Duration, Effect, Exit } from "effect"
+import { Clock, Duration, Effect, Exit } from "effect"
 import { TestClock } from "effect/testing"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Migrations from "../src/Migrations.ts"
@@ -90,7 +90,8 @@ describe("RunStore caller timestamp validation", () => {
       yield* migrated(Effect.gen(function*() {
         const store = yield* RunStore
         yield* store.create("recover-claimed-at-validation", "{}")
-        const nowMs = Duration.toMillis(heartbeatStaleAfter) + 1
+        yield* TestClock.adjust(Duration.millis(Duration.toMillis(heartbeatStaleAfter) + 1))
+        const nowMs = yield* Clock.currentTimeMillis
         const evidence: LivenessEvidence = {
           expectedOwner: ownerA,
           checkedAtMs: nowMs,
@@ -118,7 +119,6 @@ describe("RunStore caller timestamp validation", () => {
     Effect.gen(function*() {
       yield* migrated(Effect.gen(function*() {
         const store = yield* RunStore
-        const nowMs = Duration.toMillis(heartbeatStaleAfter) + 1
 
         yield* store.create("evidence-running", "{}")
         yield* store.claimAndOwn("evidence-running", pending, ownerA, 0)
@@ -136,6 +136,11 @@ describe("RunStore caller timestamp validation", () => {
 
         yield* store.create("evidence-claim", "{}")
         yield* store.claim("evidence-claim", pending, ownerA, 0)
+
+        // The rows are genuinely stale and the reading is the store's own, so
+        // the evidence is the only thing left for validation to refuse.
+        yield* TestClock.adjust(Duration.millis(Duration.toMillis(heartbeatStaleAfter) + 1))
+        const nowMs = yield* Clock.currentTimeMillis
 
         const exits = [
           [

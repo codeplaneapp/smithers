@@ -10,12 +10,21 @@
  * Operations that accept or verify `LivenessEvidence` (`claim`,
  * `claimAndOwn`, `steal`, `heartbeat`, `requestCancel`, and `recoverClaim`)
  * take the caller's `nowMs` and judge it literally, including the lease cutoff
- * and exact `evidence.checkedAtMs === nowMs` rule. Lifecycle stamps use the
- * Effect `Clock`: `create` writes `created_at_ms`, `activate` writes
- * `started_at_ms` and `heartbeat_at_ms`, and `transitionOwned` writes
- * `finished_at_ms`. A row can therefore carry readings from two clocks. The
- * store trusts the caller's clock, which is right for an in-process library
- * over local SQLite and must not cross a trust boundary.
+ * and exact `evidence.checkedAtMs === nowMs` rule. The lease operations
+ * (`claim`, `claimAndOwn`, `steal`, `heartbeat`, and `recoverClaim`) also
+ * refuse a `nowMs` that runs ahead of the injected Effect `Clock` by more than
+ * `heartbeatSkewAllowance`: no composition produces one honestly, because the
+ * caller and the store share a process, and such a reading is the one lever
+ * that steals a fresh owner or pins a lease past the cutoff. A reading behind
+ * the clock is admitted, since it only makes staleness judgments more
+ * conservative and the monotonic heartbeat absorbs it. `requestCancel` keeps
+ * the literal reading because its timestamp is request data, never a lease
+ * predicate. Lifecycle stamps use the Effect `Clock`: `create` writes
+ * `created_at_ms`, `activate` writes `started_at_ms` and `heartbeat_at_ms`,
+ * and `transitionOwned` writes `finished_at_ms`. A row can therefore carry
+ * readings from two clocks. Within the allowance the store trusts the caller's
+ * clock, which is right for an in-process library over local SQLite and must
+ * not cross a trust boundary.
  *
  * @since 0.1.0
  */
@@ -25,7 +34,7 @@ import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import { Cause, Clock, Context, Duration, Effect, Layer, Metric, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlError from "effect/unstable/sql/SqlError"
-import { heartbeatStaleAfter } from "./Heartbeat.ts"
+import { heartbeatSkewAllowance, heartbeatStaleAfter } from "./Heartbeat.ts"
 import * as Boundary from "./internal/Boundary.ts"
 import type { LivenessEvidence } from "./Ownership.ts"
 import * as RunStoreMetrics from "./RunStoreMetrics.ts"
@@ -400,6 +409,12 @@ export interface Service {
   readonly get: (runId: string) => Effect.Effect<RunRow, RunStoreError>
   /** Records an unfenced cancellation request that later guarded transitions observe. */
   readonly requestCancel: (runId: string, nowMs: number) => Effect.Effect<RequestCancelOutcome, RunStoreError>
+  /**
+   * Claims an exact pending or suspended snapshot for a later `activate`.
+   * `nowMs` becomes `claimed_at_ms`, so it must not run ahead of the Effect
+   * `Clock` by more than `heartbeatSkewAllowance`; a reading that does fails
+   * with `invalid_run`.
+   */
   readonly claim: (
     runId: string,
     expected: RunSnapshot,
@@ -411,7 +426,10 @@ export interface Service {
    * Replacing a different running owner also requires matching liveness evidence.
    * A composition builds that `LivenessEvidence` with a `LivenessProbe`.
    * `evidence.checkedAtMs` must equal `nowMs` exactly, so evidence probed at T
-   * is refused when this operation is called at T+1.
+   * is refused when this operation is called at T+1. `nowMs` is the lease
+   * cutoff and the new heartbeat, so it must not run ahead of the Effect
+   * `Clock` by more than `heartbeatSkewAllowance`; a reading that does fails
+   * with `invalid_run`.
    */
   readonly claimAndOwn: (
     runId: string,
@@ -435,7 +453,11 @@ export interface Service {
    * Recovers an exact stale claim after matching its claimant and liveness
    * evidence. A composition builds `LivenessEvidence` with a `LivenessProbe`.
    * `evidence.checkedAtMs` must equal `nowMs` exactly, so evidence probed at T
-   * is refused when this operation is called at T+1.
+   * is refused when this operation is called at T+1. `nowMs` is the staleness
+   * cutoff, so it must not run ahead of the Effect `Clock` by more than
+   * `heartbeatSkewAllowance`; a reading that does fails with `invalid_run`.
+   * `claimedAtMs` is the fence token compared against the row and carries no
+   * such bound.
    */
   readonly recoverClaim: (
     runId: string,
@@ -445,6 +467,13 @@ export interface Service {
     nowMs: number,
     evidence: LivenessEvidence
   ) => Effect.Effect<RecoverClaimOutcome, RunStoreError>
+  /**
+   * Renews the owner's lease. The write is monotonic, so a reading behind the
+   * persisted heartbeat still reports `Updated` without moving it back. `nowMs`
+   * must not run ahead of the Effect `Clock` by more than
+   * `heartbeatSkewAllowance`; a reading that does fails with `invalid_run`
+   * instead of pinning the lease past the cutoff.
+   */
   readonly heartbeat: (
     runId: string,
     owner: OwnerId,
@@ -463,7 +492,9 @@ export interface Service {
    * `LivenessProbe`. `evidence.checkedAtMs` must equal `nowMs` exactly, so
    * evidence probed at T is refused when this operation is called at T+1.
    * `LivenessUnconfirmed` means the evidence did not match and no
-   * compare-and-swap ran.
+   * compare-and-swap ran. `nowMs` is the staleness cutoff, so it must not run
+   * ahead of the Effect `Clock` by more than `heartbeatSkewAllowance`; a
+   * reading that does fails with `invalid_run` before any comparison.
    */
   readonly steal: (
     runId: string,
@@ -554,6 +585,7 @@ const observeExit = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, 
  * in the `Heartbeat` leaf both can reach.
  */
 const heartbeatStaleAfterMs = Duration.toMillis(heartbeatStaleAfter)
+const heartbeatSkewAllowanceMs = Duration.toMillis(heartbeatSkewAllowance)
 const terminalStatuses: ReadonlySet<RunStatus> = new Set(["completed", "failed", "cancelled"])
 
 const DatabaseRunRow = Schema.Struct({
@@ -684,6 +716,38 @@ const snapshotTimestamp = (
     : Effect.fail(
       invalidRunError(method, cause ?? field, "must be a non-negative safe integer")
     )
+
+/**
+ * Admits a caller's lease reading. Once admitted the reading is authoritative:
+ * it is the cutoff the lease predicate compares against and the stamp the row
+ * keeps. The store refuses only a reading that runs ahead of its own `Clock`
+ * by more than `heartbeatSkewAllowance`, because no composition produces one
+ * honestly (the caller and the store share a process) and it is the one lever
+ * that steals a fresh owner or pins a lease past the cutoff. A reading behind
+ * the clock is admitted: it makes every staleness judgment more conservative,
+ * and `heartbeat`'s monotonic write absorbs it.
+ */
+const snapshotLeaseReading = (
+  method: string,
+  field: string,
+  input: unknown,
+  cause: Readonly<Record<string, unknown>>
+): Effect.Effect<number, RunStoreError> =>
+  Effect.gen(function*() {
+    const nowMs = yield* snapshotTimestamp(method, field, input, cause)
+    const clockMs = yield* Clock.currentTimeMillis
+    if (nowMs > clockMs + heartbeatSkewAllowanceMs) {
+      return yield* Effect.fail(
+        invalidRunError(method, {
+          ...cause,
+          field,
+          clockMs,
+          detail: "runs ahead of the store clock by more than the heartbeat skew allowance"
+        })
+      )
+    }
+    return nowMs
+  })
 
 const snapshotState = (
   method: string,
@@ -1177,7 +1241,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const runId = yield* snapshotRunId("claim", runIdInput)
       const expected = yield* snapshotExpected("claim", expectedInput)
       const claimant = yield* snapshotOwner("claim", "claimant", claimantInput)
-      const nowMs = yield* snapshotTimestamp(
+      const nowMs = yield* snapshotLeaseReading(
         "claim",
         "nowMs",
         nowMsInput,
@@ -1233,7 +1297,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const runId = yield* snapshotRunId("claimAndOwn", runIdInput)
       const expected = yield* snapshotExpected("claimAndOwn", expectedInput)
       const owner = yield* snapshotOwner("claimAndOwn", "owner", ownerInput)
-      const nowMs = yield* snapshotTimestamp(
+      const nowMs = yield* snapshotLeaseReading(
         "claimAndOwn",
         "nowMs",
         nowMsInput,
@@ -1426,7 +1490,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         timestampCause
       )
       const observer = yield* snapshotOwner("recoverClaim", "observer", observerInput)
-      const nowMs = yield* snapshotTimestamp("recoverClaim", "nowMs", nowMsInput, timestampCause)
+      const nowMs = yield* snapshotLeaseReading("recoverClaim", "nowMs", nowMsInput, timestampCause)
       const evidence = yield* snapshotEvidence("recoverClaim", evidenceInput)
       yield* Effect.annotateCurrentSpan({ runId, observerHostId: observer.hostId })
       return yield* Effect.suspend((): Effect.Effect<RecoverClaimOutcome, RunStoreError> => {
@@ -1472,7 +1536,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       const runId = yield* snapshotRunId("heartbeat", runIdInput)
       const owner = yield* snapshotOwner("heartbeat", "owner", ownerInput)
-      const nowMs = yield* snapshotTimestamp(
+      const nowMs = yield* snapshotLeaseReading(
         "heartbeat",
         "nowMs",
         nowMsInput,
@@ -1615,7 +1679,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const runId = yield* snapshotRunId("steal", runIdInput)
       const expected = yield* snapshotExpected("steal", expectedInput)
       const claimant = yield* snapshotOwner("steal", "claimant", claimantInput)
-      const nowMs = yield* snapshotTimestamp(
+      const nowMs = yield* snapshotLeaseReading(
         "steal",
         "nowMs",
         nowMsInput,

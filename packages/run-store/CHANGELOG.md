@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `RunStore.claim`, `claimAndOwn`, `steal`, `heartbeat`, and `recoverClaim`
+  refuse a `nowMs` that runs ahead of the Effect `Clock` by more than
+  `heartbeatSkewAllowance` with `invalid_run`, so a runaway caller clock can
+  neither steal a run from a fresh owner nor pin a lease past the stale
+  cutoff. A reading behind the clock is still admitted, `requestCancel` keeps
+  its literal timestamp, and `claimedAtMs` fence tokens stay unbounded.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

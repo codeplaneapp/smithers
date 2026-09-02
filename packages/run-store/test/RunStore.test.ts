@@ -441,7 +441,8 @@ describe("RunStore", () => {
         expect(
           yield* store.transitionOwned(running.runId, ownerA, "suspended")
         ).toEqual({ _tag: "Transitioned" })
-        const staleNowMs = Duration.toMillis(heartbeatStaleAfter) + 1
+        yield* TestClock.adjust(Duration.millis(Duration.toMillis(heartbeatStaleAfter) + 1))
+        const staleNowMs = yield* Clock.currentTimeMillis
         const stale = yield* store.claimAndOwn(
           running.runId,
           expectedSnapshot,
@@ -472,11 +473,12 @@ describe("RunStore", () => {
         expect(
           yield* store.transitionOwned(running.runId, ownerA, "completed")
         ).toEqual({ _tag: "Transitioned" })
+        yield* TestClock.adjust(Duration.millis(Duration.toMillis(heartbeatStaleAfter) + 1))
         const outcome = yield* store.claimAndOwn(
           running.runId,
           expectedSnapshot,
           ownerB,
-          Duration.toMillis(heartbeatStaleAfter) + 1
+          yield* Clock.currentTimeMillis
         )
         return { outcome, row: yield* store.get(running.runId) }
       }))
@@ -1276,7 +1278,8 @@ describe("RunStore", () => {
         const running = yield* activateNew(store, "run-terminal-steal", ownerA)
         const expectedSnapshot = snapshot(running)
         yield* store.transitionOwned(running.runId, ownerA, "completed")
-        const nowMs = Duration.toMillis(heartbeatStaleAfter) + 1
+        yield* TestClock.adjust(Duration.millis(Duration.toMillis(heartbeatStaleAfter) + 1))
+        const nowMs = yield* Clock.currentTimeMillis
         const outcome = yield* store.steal(
           running.runId,
           expectedSnapshot,
@@ -1378,22 +1381,33 @@ describe("RunStore ownership evidence boundaries", () => {
 
   it.effect("rejects stale checkedAtMs values and same-host/cross-host evidence kind mismatches", () =>
     Effect.gen(function*() {
-      const nowMs = Duration.toMillis(heartbeatStaleAfter) + 1
       const variants = [
         {
           name: "wrong-time",
           observer: ownerB,
-          evidence: { expectedOwner: ownerA, checkedAtMs: nowMs - 1, kind: "same-host-pid-dead" }
+          evidence: (nowMs: number): LivenessEvidence => ({
+            expectedOwner: ownerA,
+            checkedAtMs: nowMs - 1,
+            kind: "same-host-pid-dead"
+          })
         },
         {
           name: "same-host-cross-kind",
           observer: ownerB,
-          evidence: { expectedOwner: ownerA, checkedAtMs: nowMs, kind: "cross-host-unreachable-stale" }
+          evidence: (nowMs: number): LivenessEvidence => ({
+            expectedOwner: ownerA,
+            checkedAtMs: nowMs,
+            kind: "cross-host-unreachable-stale"
+          })
         },
         {
           name: "cross-host-same-kind",
           observer: ownerC,
-          evidence: { expectedOwner: ownerA, checkedAtMs: nowMs, kind: "same-host-pid-dead" }
+          evidence: (nowMs: number): LivenessEvidence => ({
+            expectedOwner: ownerA,
+            checkedAtMs: nowMs,
+            kind: "same-host-pid-dead"
+          })
         }
       ] as const
 
@@ -1405,35 +1419,40 @@ describe("RunStore ownership evidence boundaries", () => {
           readonly steal: string
         }> = []
         for (const variant of variants) {
+          // Each variant's rows go genuinely stale before the calls, so the
+          // evidence mismatch is the only thing left to refuse them.
           const direct = yield* activateNew(store, `evidence-direct-${variant.name}`, ownerA)
+          const claimRunId = `evidence-claim-${variant.name}`
+          yield* store.create(claimRunId, "{}")
+          const pending = snapshot(yield* store.get(claimRunId))
+          const claimedAtMs = yield* Clock.currentTimeMillis
+          yield* store.claim(claimRunId, pending, ownerA, claimedAtMs)
+          const running = yield* activateNew(store, `evidence-steal-${variant.name}`, ownerA)
+          yield* TestClock.adjust(Duration.millis(Duration.toMillis(heartbeatStaleAfter) + 1))
+          const nowMs = yield* Clock.currentTimeMillis
+          const evidence = variant.evidence(nowMs)
+
           const claimAndOwn = yield* store.claimAndOwn(
             direct.runId,
             snapshot(direct),
             variant.observer,
             nowMs,
-            variant.evidence
+            evidence
           )
-
-          const claimRunId = `evidence-claim-${variant.name}`
-          yield* store.create(claimRunId, "{}")
-          const pending = snapshot(yield* store.get(claimRunId))
-          yield* store.claim(claimRunId, pending, ownerA, 0)
           const recoverClaim = yield* store.recoverClaim(
             claimRunId,
             ownerA,
-            0,
+            claimedAtMs,
             variant.observer,
             nowMs,
-            variant.evidence
+            evidence
           )
-
-          const running = yield* activateNew(store, `evidence-steal-${variant.name}`, ownerA)
           const steal = yield* store.steal(
             running.runId,
             snapshot(running),
             variant.observer,
             nowMs,
-            variant.evidence
+            evidence
           )
           result.push({ claimAndOwn: claimAndOwn._tag, recoverClaim: recoverClaim._tag, steal: steal._tag })
         }
@@ -1455,6 +1474,9 @@ describe("RunStore ownership evidence boundaries", () => {
         const store = yield* RunStore
         const behind = yield* activateNew(store, "skew-behind", ownerA)
         const ahead = yield* activateNew(store, "skew-ahead", ownerA)
+        // Both leases are exactly one millisecond past stale by the store's
+        // own clock; the peers read ten seconds either side of it.
+        yield* TestClock.adjust(Duration.millis(staleAtMs))
         const behindAtMs = staleAtMs - skewMs
         const aheadAtMs = staleAtMs + skewMs
         return {
@@ -1477,8 +1499,12 @@ describe("RunStore ownership evidence boundaries", () => {
         }
       }))
 
-      // CONTRACT: the store judges the supplied wall-clock instant literally;
-      // heartbeatLoop's write-tolerance budget, not the SQL predicate, absorbs skew.
+      // CONTRACT: inside the skew allowance the store judges the supplied
+      // wall-clock instant literally, so a peer ten seconds ahead steals at
+      // the edge and a peer ten seconds behind still sees a fresh lease;
+      // heartbeatLoop's write-tolerance budget, not the SQL predicate, absorbs
+      // that skew. One millisecond past the allowance the reading is refused
+      // (RunStoreLeaseOrdering.test.ts).
       expect(skewMs).toBe(10_000)
       expect(result.behindAtMs).toBe(20_001)
       expect(result.behind).toEqual({ _tag: "HeartbeatFresh" })

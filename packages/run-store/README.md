@@ -50,8 +50,18 @@ writes `created_at_ms`, `activate` writes `started_at_ms` and
 therefore carry readings from two clocks, so a composition must give both
 sources the same reading.
 
-Every `nowMs` is validated as a non-negative safe integer, and a valid reading
-is then trusted completely: the store cannot tell a slow clock from a lie.
+Every `nowMs` is validated as a non-negative safe integer. The lease operations
+(`claim`, `claimAndOwn`, `steal`, `heartbeat`, and `recoverClaim`) then bound
+it from above: a reading that runs ahead of the store's `Clock` by more than
+`heartbeatSkewAllowance` fails with `invalid_run` before any predicate runs,
+because no composition produces one honestly and it is the one lever that
+steals a fresh owner or pins a lease past the cutoff. A reading behind the
+clock is admitted: it makes every staleness judgment more conservative, and
+the monotonic heartbeat absorbs it. `requestCancel` keeps the literal reading,
+since its timestamp is request data rather than a lease predicate, and the
+`claimedAtMs` fence tokens of `activate`, `abandonClaim`, and `recoverClaim`
+are compared against the row rather than bounded. Inside the allowance a
+reading is trusted completely: the store cannot tell a slow clock from a lie.
 That is the right contract for an in-process library over a local SQLite file
 whose caller can issue raw SQL itself, and it must not cross a trust boundary.
 The evidence binding is exact equality: `claimAndOwn`, `recoverClaim`, and
