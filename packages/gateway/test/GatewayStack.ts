@@ -11,8 +11,10 @@
  * with production.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import type * as ControlError from "@smthrs/control/ControlError"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import * as ControlLive from "@smthrs/control/ControlLive"
+import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import * as SqlControlRuntime from "@smthrs/control/SqlControlRuntime"
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
@@ -100,6 +102,34 @@ export const defaultCadenceStack = Layer.unwrap(
       Layer.provideMerge(Layer.merge(storage(filename), NodeCrypto.layer))
     ))
 )
+
+/**
+ * The fence a driver writes a launched run's status under.
+ *
+ * Every suite here launches through the noop executor, and `ControlLive`
+ * releases a launch its executor declines: the run keeps its public `accepted`
+ * status and loses its owner, so it stays available to whichever executor
+ * takes it up. A fixture that writes a status is that executor, so it claims
+ * the run first, the way a real driver does, and fences under the claim it
+ * won. A run this process already owns — one an accepting executor is driving
+ * — is fenced directly, because a driver does not re-claim its own run.
+ *
+ * @param runId the run to fence
+ */
+export const driverFence = (
+  runId: string
+): Effect.Effect<
+  string,
+  ControlError.RunNotFound | ControlError.ClaimLost | ControlError.PersistenceError,
+  ControlRuntime
+> =>
+  Effect.flatMap(ControlRuntime, (runtime) =>
+    runtime.claimFence(runId).pipe(
+      Effect.catchTag(
+        "/control/ClaimLost",
+        () => Effect.flatMap(runtime.resume(runId), () => runtime.claimFence(runId))
+      )
+    ))
 
 /**
  * Writes one event into the durable journal, the way a run's activity reaches

@@ -25,7 +25,7 @@ import type * as GatewayProjection from "../src/GatewayProjection.ts"
 import { GatewayRpcs, SubmitApprovalOutput } from "../src/GatewayRpcs.ts"
 import * as GatewayServer from "../src/GatewayServer.ts"
 import { Projections } from "../src/Projections.ts"
-import { emit, stack } from "./GatewayStack.ts"
+import { driverFence, emit, stack } from "./GatewayStack.ts"
 
 const principal = { id: "gateway-test", kind: "test", stampedAt: 1 }
 
@@ -75,7 +75,7 @@ describe("Approval.Submit", () => {
       // `AgentSession.authorize` and `AgentSession.settle` do: the ask is
       // registered, then the run's status is moved under its own fence.
       yield* runtime.registerApproval(target)
-      const fence = yield* runtime.claimFence(runId)
+      const fence = yield* driverFence(runId)
       yield* runtime.writeStatus(runId, fence, "waiting-approval")
       expect((yield* runtime.getRun(runId)).status).toBe("waiting-approval")
 
@@ -120,7 +120,7 @@ describe("Approval.Submit", () => {
         envelope: { capabilities: ["model:call"], flows: ["ask"], budget: {} }
       }
       yield* runtime.registerApproval(target)
-      const fence = yield* runtime.claimFence(runId)
+      const fence = yield* driverFence(runId)
       yield* runtime.writeStatus(runId, fence, "waiting-approval")
 
       const submitted = yield* rpc["Approval.Submit"]({

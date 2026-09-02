@@ -45,7 +45,13 @@ const approvalRequested = event(1, "control.approval.requested", {
   requestId: "gate",
   question: "Ship?",
   payload: {
-    target: { _tag: "Node", runId: "run-1", requestId: "gate", digest: "d", envelope: {} },
+    target: {
+      _tag: "Node",
+      runId: "run-1",
+      requestId: "gate",
+      digest: "d",
+      envelope: { capabilities: [], flows: [], budget: {} }
+    },
     scope: "run",
     idempotencyKey: "k"
   }
@@ -67,13 +73,30 @@ const control = (overrides: Partial<ControlService>): ControlService => ({
   ...overrides
 } as ControlService)
 
+const make = (
+  service: ControlService,
+  options: { readonly heartbeatMillis?: number | undefined } = {}
+): Projections.Service => Effect.runSync(Projections.make(service, options))
+
+const issuedCursor = (
+  selector: GatewaySchema.ProjectionSelector,
+  value: number,
+  offset = 0
+): GatewaySchema.ProjectionCursor => ({
+  selector,
+  projection: selector._tag,
+  runId: "runId" in selector ? selector.runId ?? null : null,
+  value,
+  offset
+})
+
 describe("Projections run-list pagination", () => {
   it.effect("folds workspace rows from every control-list page", () =>
     Effect.gen(function*() {
       const first = Array.from({ length: 100 }, (_, index) => numberedRun(index + 1))
       const second = [numberedRun(101)]
       let listCalls = 0
-      const projections = Projections.make(control({
+      const projections = make(control({
         list: () => {
           listCalls += 1
           return Effect.succeed(
@@ -94,7 +117,7 @@ describe("Projections run-list pagination", () => {
   it.effect("stops a perpetually paginated listing at the workspace ceiling", () =>
     Effect.gen(function*() {
       let listCalls = 0
-      const projections = Projections.make(control({
+      const projections = make(control({
         list: () => {
           const page = listCalls
           listCalls += 1
@@ -117,7 +140,7 @@ describe("Projections run-list pagination", () => {
   it.effect("passes an explicit numeric limit on every run-list request", () =>
     Effect.gen(function*() {
       const limits: Array<number | undefined> = []
-      const projections = Projections.make(control({
+      const projections = make(control({
         list: (request) => {
           limits.push(request.limit)
           return Effect.succeed(
@@ -136,7 +159,7 @@ describe("Projections run-list pagination", () => {
     Effect.gen(function*() {
       let listCalls = 0
       const limits: Array<number | undefined> = []
-      const projections = Projections.make(control({
+      const projections = make(control({
         list: (request) => {
           listCalls += 1
           limits.push(request.limit)
@@ -158,7 +181,7 @@ describe("Projections run-list pagination", () => {
         message: "SQL failed on the second page",
         cause: { statement: "select secret from runs" }
       })
-      const projections = Projections.make(control({
+      const projections = make(control({
         list: () => {
           listCalls += 1
           return listCalls === 1
@@ -181,7 +204,7 @@ describe("Projections run-list pagination", () => {
 describe("Projections read-path failures", () => {
   it.effect("reports a failed run listing as a gateway refusal", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({ list: () => Effect.fail(new Unavailable({ code: "unavailable", feature: "list", ticket: "T-1" })) })
       )
       const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
@@ -199,7 +222,7 @@ describe("Projections read-path failures", () => {
         message: "SQL failed while reading /private/tmp/control.db",
         cause: { nested, statement: "select secret from runs", offset: 1n }
       })
-      const projections = Projections.make(control({ list: () => Effect.fail(persistence) }))
+      const projections = make(control({ list: () => Effect.fail(persistence) }))
 
       const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
       expect(failure.cause).toEqual({ _tag: "/control/PersistenceError", code: "persistence_failed" })
@@ -223,7 +246,7 @@ describe("Projections read-path failures", () => {
           null
         ]
       ) {
-        const projections = Projections.make(
+        const projections = make(
           control({ list: () => Effect.fail(opaque as unknown as Unavailable) })
         )
         const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
@@ -235,7 +258,7 @@ describe("Projections read-path failures", () => {
 
   it.effect("names a tagged failure that carries no code", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({ list: () => Effect.fail({ _tag: "/control/Mystery" } as unknown as Unavailable) })
       )
       const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
@@ -244,7 +267,7 @@ describe("Projections read-path failures", () => {
 
   it.effect("reports a failed event read as a gateway refusal naming the run", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: () => Stream.fail(new Unavailable({ code: "unavailable", feature: "watch", ticket: "T-2" }))
@@ -256,7 +279,7 @@ describe("Projections read-path failures", () => {
 
   it.effect("treats a listing that answered about flows as no runs at all", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({ list: () => Effect.succeed({ _tag: "flows", items: [] } satisfies ListResponse) })
       )
       const snapshot = yield* projections.snapshot({ _tag: "workspace-runs" })
@@ -264,10 +287,84 @@ describe("Projections read-path failures", () => {
     }))
 })
 
+describe("Projections resource bounds", () => {
+  it.effect("stops reading at the first event past the per-run ceiling", () =>
+    Effect.gen(function*() {
+      let produced = 0
+      const projections = make(control({
+        list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+        watch: () =>
+          Stream.iterate(1, (sequence) => sequence + 1).pipe(
+            Stream.take(Projections.maxEventsPerRun + 50),
+            Stream.map((sequence) => {
+              produced += 1
+              return event(sequence, "control.test", null)
+            })
+          )
+      }))
+
+      const failure = yield* Effect.flip(projections.snapshot({ _tag: "run-events", runId: run.runId }))
+      expect(failure.code).toBe("resource_limit")
+      expect(produced).toBe(Projections.maxEventsPerRun + 1)
+    }))
+
+  it.effect("bounds encoded event histories and projected row sets", () =>
+    Effect.gen(function*() {
+      const oversizedEvents = make(control({
+        list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+        watch: () => Stream.succeed(event(1, "control.test", "x".repeat(Projections.maxProjectionBytes)))
+      }))
+      const oversizedRows = make(control({
+        list: () =>
+          Effect.succeed({
+            _tag: "runs",
+            items: [{ ...run, flowId: "x".repeat(Projections.maxProjectionBytes) }]
+          })
+      }))
+
+      expect(
+        (yield* Effect.flip(oversizedEvents.snapshot({ _tag: "run-events", runId: run.runId }))).code
+      ).toBe("resource_limit")
+      expect((yield* Effect.flip(oversizedRows.snapshot({ _tag: "workspace-runs" }))).code)
+        .toBe("resource_limit")
+    }))
+
+  it.effect("refuses malformed and backward event histories as unavailable", () =>
+    Effect.gen(function*() {
+      const malformedEvents = [
+        [{}],
+        [{ ...event(1, "control.test", null), sequence: -1 }],
+        [event(2, "control.test", null), event(1, "control.test", null)]
+      ]
+      for (const history of malformedEvents) {
+        const projections = make(control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: () => Stream.fromIterable(history as ReadonlyArray<ControlEvent>)
+        }))
+        const failure = yield* Effect.flip(projections.snapshot({ _tag: "run-events", runId: run.runId }))
+        expect(failure.code).toBe("run_unavailable")
+      }
+    }))
+
+  it.effect("refuses a projection row that violates its selector schema", () =>
+    Effect.gen(function*() {
+      const projections = make(control({
+        list: () =>
+          Effect.succeed({
+            _tag: "runs",
+            items: [{ ...run, flowId: undefined }] as unknown as ReadonlyArray<RunSummary>
+          })
+      }))
+      const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
+      expect(failure.code).toBe("run_unavailable")
+      expect(failure.message).toBe("Projection produced invalid rows")
+    }))
+})
+
 describe("Projections approvals inbox", () => {
   it.effect("collects the pending gates of every waiting run", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: () => Stream.fromIterable([approvalRequested])
@@ -276,7 +373,13 @@ describe("Projections approvals inbox", () => {
       const snapshot = yield* projections.snapshot({ _tag: "approvals" })
       expect(snapshot.rows).toMatchObject([{ runId: "run-1", requestId: "gate", status: "pending" }])
       // The workspace inbox is not scoped to a run, so its cursor names none.
-      expect(snapshot.cursor).toEqual({ projection: "approvals", runId: null, value: 0 })
+      expect(snapshot.cursor).toEqual({
+        selector: { _tag: "approvals" },
+        projection: "approvals",
+        runId: null,
+        value: 0,
+        offset: 0
+      })
     }))
 })
 
@@ -289,7 +392,7 @@ describe("Projections node output", () => {
         event(3, "control.agent.cell-call-started", { flowName: "read" }),
         event(4, "control.agent.cell-call-settled", { flowName: "read", outcome: "success", value: "read it" })
       ]
-      const projections = Projections.make(control({
+      const projections = make(control({
         list: () => Effect.succeed({ _tag: "runs", items: [run] }),
         watch: () => Stream.fromIterable(calls)
       }))
@@ -327,7 +430,7 @@ describe("Projections subscriptions", () => {
     it.effect(`uses one moving-log read for a ${tag} subscription`, () =>
       Effect.gen(function*() {
         const moving = movingLog()
-        const projections = Projections.make(moving.service, { heartbeatMillis: 60_000 })
+        const projections = make(moving.service, { heartbeatMillis: 60_000 })
         const frames = yield* Stream.runCollect(projections.subscribe({ _tag: tag, runId: "run-1" }))
         const snapshotEnd = frames.find((frame) => frame._tag === "snapshot-end")
         const deltas = frames.filter((frame) => frame._tag === "delta")
@@ -353,7 +456,7 @@ describe("Projections subscriptions", () => {
   it.effect("uses one moving-log read for a unary snapshot cursor and rows", () =>
     Effect.gen(function*() {
       const moving = movingLog()
-      const snapshot = yield* Projections.make(moving.service).snapshot({ _tag: "run-events", runId: "run-1" })
+      const snapshot = yield* make(moving.service).snapshot({ _tag: "run-events", runId: "run-1" })
       const rows = snapshot.rows as ReadonlyArray<ControlEvent>
       expect(moving.reads()).toBe(1)
       expect(snapshot.cursor.value).toBe(rows.at(-1)?.sequence)
@@ -363,7 +466,7 @@ describe("Projections subscriptions", () => {
     Effect.gen(function*() {
       const second = { ...run, runId: "run-2" }
       const reads: Array<string> = []
-      const projections = Projections.make(control({
+      const projections = make(control({
         list: (request) => {
           const named = request._tag === "runs" ? request.filters?.runId : undefined
           return Effect.succeed(
@@ -393,7 +496,7 @@ describe("Projections subscriptions", () => {
       let history: ReadonlyArray<ControlEvent> = []
       let nonFollowingReads = 0
       let listCalls = 0
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => {
             listCalls += 1
@@ -434,7 +537,7 @@ describe("Projections subscriptions", () => {
         payload: { planId: "plan-1" }
       }
       const changed = event(1, "control.run.completed", { runId: run.runId })
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: (request) =>
             Effect.succeed({
@@ -452,7 +555,13 @@ describe("Projections subscriptions", () => {
       // waiting status after the control row has completed under a fence.
       expect(delta?._tag).toBe("delta")
       if (delta?._tag !== "delta") return
-      expect(delta.cursor).toEqual({ projection: "workspace-runs", runId: null, value: 0 })
+      expect(delta.cursor).toEqual({
+        selector: { _tag: "workspace-runs" },
+        projection: "workspace-runs",
+        runId: null,
+        value: 0,
+        offset: 0
+      })
       expect(delta.delta).toMatchObject([{ runId: "run-1", status: "completed", verdict: "completed" }])
     }))
 
@@ -464,7 +573,7 @@ describe("Projections subscriptions", () => {
         runId: second.runId
       }
       let nonFollowingReads = 0
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: (request) =>
             Effect.succeed({
@@ -494,9 +603,10 @@ describe("Projections subscriptions", () => {
     Effect.gen(function*() {
       const history = [
         event(1, "control.run.accepted", { runId: run.runId }),
+        event(1, "control.lineage.disclosed", { runId: run.runId }),
         event(2, "control.run.running", { runId: run.runId })
       ]
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: () => Stream.fromIterable(history)
@@ -521,7 +631,7 @@ describe("Projections subscriptions", () => {
         ...event(1, "control.run.accepted", { runId: second.runId }),
         runId: second.runId
       }
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: (request) =>
             Effect.succeed({
@@ -554,7 +664,7 @@ describe("Projections subscriptions", () => {
         ...event(1, "control.run.accepted", { runId: extra.runId }),
         runId: extra.runId
       }
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: (request) => {
             const named = request._tag === "runs" ? request.filters?.runId : undefined
@@ -582,7 +692,7 @@ describe("Projections subscriptions", () => {
 
   it.effect("delivers new gates to an unscoped approvals inbox", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) => filter.follow === true ? Stream.fromIterable([approvalRequested]) : Stream.empty
@@ -596,8 +706,150 @@ describe("Projections subscriptions", () => {
       // after the approvals inbox snapshot was read.
       expect(delta?._tag).toBe("delta")
       if (delta?._tag !== "delta") return
-      expect(delta.cursor).toEqual({ projection: "approvals", runId: null, value: 0 })
+      expect(delta.cursor).toEqual({
+        selector: { _tag: "approvals" },
+        projection: "approvals",
+        runId: null,
+        value: 0,
+        offset: 0
+      })
       expect(delta.delta).toMatchObject([{ runId: "run-1", requestId: "gate", status: "pending" }])
+    }))
+
+  it.effect("removes a resolved run from the live approvals inbox", () =>
+    Effect.gen(function*() {
+      const approved = event(2, "control.approval.approved", { tokenId: "gate" })
+      const projections = make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fromIterable([approvalRequested, approved])
+              : Stream.fromIterable([approvalRequested])
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "approvals" }))
+      const deltas = frames.filter((frame) => frame._tag === "delta")
+      expect(deltas).toHaveLength(1)
+      expect(deltas[0]?.delta).toEqual([])
+    }))
+
+  it.effect("does not let irrelevant followed runs exhaust the approvals inbox", () =>
+    Effect.gen(function*() {
+      const irrelevant = Array.from({ length: Projections.maxWorkspaceRuns }, (_, index) => {
+        const runId = `completed-${index + 1}`
+        return {
+          run: { ...numberedRun(index + 1), runId, status: "completed" as const },
+          event: { ...event(1, "control.run.completed", { runId }), runId }
+        }
+      })
+      const waiting = { ...run, runId: "waiting-last" }
+      const requested = {
+        sequence: 1,
+        kind: "control.approval.requested",
+        runId: waiting.runId,
+        occurredAt: 1,
+        payload: {
+          runId: waiting.runId,
+          requestId: "gate",
+          question: "Ship?",
+          payload: {
+            target: {
+              _tag: "Node",
+              runId: waiting.runId,
+              requestId: "gate",
+              digest: "d",
+              envelope: { capabilities: [], flows: [], budget: {} }
+            },
+            scope: "run",
+            idempotencyKey: "k"
+          }
+        }
+      } satisfies ControlEvent
+      const histories = new Map<string, ReadonlyArray<ControlEvent>>([
+        ...irrelevant.map(({ event }) => [event.runId!, [event]] as const),
+        [waiting.runId, [requested]]
+      ])
+      const summaries = new Map([
+        ...irrelevant.map(({ run }) => [run.runId, run] as const),
+        [waiting.runId, waiting]
+      ])
+      const projections = make(
+        control({
+          list: (request) => {
+            const runId = request._tag === "runs" ? request.filters?.runId : undefined
+            return Effect.succeed({
+              _tag: "runs",
+              items: runId === undefined ? [] : [summaries.get(runId)!]
+            })
+          },
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fromIterable([...irrelevant.map(({ event }) => event), requested])
+              : Stream.fromIterable(histories.get(filter.runId ?? "") ?? [])
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "approvals" }))
+      const deltas = frames.filter((frame) => frame._tag === "delta")
+      expect(deltas).toHaveLength(1)
+      expect(deltas[0]?.delta).toMatchObject([{ runId: waiting.runId, requestId: "gate", status: "pending" }])
+    }))
+
+  it.effect("keeps the approvals inbox at its ceiling when every admitted run is relevant", () =>
+    Effect.gen(function*() {
+      const requestFor = (runId: string): ControlEvent => ({
+        sequence: 1,
+        kind: "control.approval.requested",
+        runId,
+        occurredAt: 1,
+        payload: {
+          runId,
+          requestId: `gate-${runId}`,
+          question: "Ship?",
+          payload: {
+            target: {
+              _tag: "Node",
+              runId,
+              requestId: `gate-${runId}`,
+              digest: "d",
+              envelope: { capabilities: [], flows: [], budget: {} }
+            },
+            scope: "run",
+            idempotencyKey: `approve:${runId}`
+          }
+        }
+      })
+      const initial = Array.from({ length: Projections.maxWorkspaceRuns }, (_, index) => ({
+        ...numberedRun(index + 1),
+        status: "waiting-approval" as const
+      }))
+      const extra = { ...numberedRun(Projections.maxWorkspaceRuns + 1), status: "waiting-approval" as const }
+      const histories = new Map(initial.map((item) => [item.runId, [requestFor(item.runId)]] as const))
+      histories.set(extra.runId, [requestFor(extra.runId)])
+      const projections = make(
+        control({
+          list: (request) => {
+            const named = request._tag === "runs" ? request.filters?.runId : undefined
+            return Effect.succeed({
+              _tag: "runs",
+              items: named === extra.runId ? [extra] : named === undefined ? initial : []
+            })
+          },
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fromIterable(histories.get(extra.runId)!)
+              : Stream.fromIterable(histories.get(filter.runId ?? "") ?? [])
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "approvals" }))
+      expect(frames.filter((frame) => frame._tag === "row")).toHaveLength(Projections.maxWorkspaceRuns)
+      expect(frames.filter((frame) => frame._tag === "delta")).toEqual([])
     }))
 
   it.effect("resumes after a run cursor without emitting snapshot frames", () =>
@@ -607,7 +859,7 @@ describe("Projections subscriptions", () => {
         event(2, "control.run.running", { runId: "run-1" }),
         event(3, "control.run.completed", { runId: "run-1" })
       ]
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) =>
@@ -620,7 +872,7 @@ describe("Projections subscriptions", () => {
 
       const frames = yield* Stream.runCollect(projections.subscribe(
         { _tag: "run-events", runId: "run-1" },
-        { projection: "run-events", runId: "run-1", value: 1 }
+        issuedCursor({ _tag: "run-events", runId: "run-1" }, 1)
       ))
       expect(frames.map((frame) => frame._tag)).toEqual(["delta", "delta"])
       expect(frames.flatMap((frame) => frame._tag === "delta" ? [frame.cursor.value] : [])).toEqual([2, 3])
@@ -632,11 +884,66 @@ describe("Projections subscriptions", () => {
       ])
     }))
 
+  it.effect("resumes within one journal sequence without dropping derived events", () =>
+    Effect.gen(function*() {
+      const history = [
+        event(1, "control.run.accepted", { runId: "run-1" }),
+        event(1, "control.lineage.disclosed", { runId: "run-1" }),
+        event(2, "control.run.running", { runId: "run-1" })
+      ]
+      const selector = { _tag: "run-events" as const, runId: "run-1" }
+      const projections = make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+              : Stream.fromIterable(history)
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe(selector, issuedCursor(selector, 1, 0)))
+      expect(frames.flatMap((frame) => frame._tag === "delta" ? [[frame.cursor.value, frame.cursor.offset]] : []))
+        .toEqual([[1, 1], [2, 0]])
+      expect(frames.flatMap((frame) => frame._tag === "delta" ? frame.delta as ReadonlyArray<ControlEvent> : []))
+        .toEqual([
+          history[1],
+          history[2]
+        ])
+    }))
+
+  it.effect("refuses a node-output cursor for a different node in the same run", () =>
+    Effect.gen(function*() {
+      const history = [
+        event(1, "control.agent.cell-call-started", { flowName: "one" }),
+        event(2, "control.agent.cell-call-settled", { flowName: "one", outcome: "success", value: "one" }),
+        event(3, "control.agent.cell-call-started", { flowName: "two" }),
+        event(4, "control.agent.cell-call-settled", { flowName: "two", outcome: "success", value: "two" })
+      ]
+      let follows = 0
+      const projections = make(control({
+        list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+        watch: (filter) => {
+          if (filter.follow === true) follows += 1
+          return filter.follow === true ? Stream.empty : Stream.fromIterable(history)
+        }
+      }))
+      const first = { _tag: "node-output" as const, runId: "run-1", nodeId: "call-1" }
+      const second = { ...first, nodeId: "call-2" }
+      const cursor = (yield* projections.snapshot(first)).cursor
+      const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(second, cursor)))
+
+      expect(failure.code).toBe("malformed_request")
+      expect(failure.message).toContain("exact selector")
+      expect(follows).toBe(0)
+    }))
+
   it.effect("refuses negative and fractional resume cursor values before following", () =>
     Effect.gen(function*() {
       const history = [event(1, "control.run.accepted", { runId: "run-1" })]
       let follows = 0
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) => {
@@ -651,12 +958,63 @@ describe("Projections subscriptions", () => {
       for (const value of [-1, 0.5]) {
         const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(
           { _tag: "run-events", runId: "run-1" },
-          { projection: "run-events", runId: "run-1", value }
+          issuedCursor({ _tag: "run-events", runId: "run-1" }, value)
         )))
         expect(failure.code).toBe("malformed_request")
         expect(failure.message).toContain(String(value))
       }
       expect(follows).toBe(0)
+    }))
+
+  it.effect("refuses invalid offsets and structurally incomplete cursors before following", () =>
+    Effect.gen(function*() {
+      let follows = 0
+      const projections = make(control({
+        list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+        watch: (filter) => {
+          if (filter.follow === true) follows += 1
+          return Stream.empty
+        }
+      }))
+      const selector = { _tag: "run-events" as const, runId: "run-1" }
+      const invalid = [
+        { ...issuedCursor(selector, 0), offset: -1 },
+        { projection: "run-events", runId: "run-1", value: 0, offset: 0 }
+      ]
+      const messages: Array<string> = []
+      for (const cursor of invalid) {
+        const failure = yield* Effect.flip(
+          Stream.runCollect(projections.subscribe(selector, cursor as GatewaySchema.ProjectionCursor))
+        )
+        messages.push(failure.message)
+      }
+      expect(messages[0]).toContain("offset -1")
+      expect(messages[1]).toContain("not a valid gateway cursor")
+      expect(follows).toBe(0)
+    }))
+
+  it.effect("accepts the zero origin and refuses a position the run never issued", () =>
+    Effect.gen(function*() {
+      const history = [event(1, "control.run.accepted", { runId: "run-1" })]
+      const selector = { _tag: "run-events" as const, runId: "run-1" }
+      const projections = make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+              : Stream.fromIterable(history)
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const resumed = yield* Stream.runCollect(projections.subscribe(selector, issuedCursor(selector, 0)))
+      expect(resumed.flatMap((frame) => frame._tag === "delta" ? [frame.cursor.value] : [])).toEqual([1])
+      const failure = yield* Effect.flip(
+        Stream.runCollect(projections.subscribe(selector, issuedCursor(selector, 0, 1)))
+      )
+      expect(failure.code).toBe("malformed_request")
+      expect(failure.message).toContain("was not issued")
     }))
 
   it.effect("refuses a resume cursor ahead of the run's last sequence", () =>
@@ -666,7 +1024,7 @@ describe("Projections subscriptions", () => {
         event(2, "control.run.running", { runId: "run-1" })
       ]
       let follows = 0
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) => {
@@ -680,7 +1038,7 @@ describe("Projections subscriptions", () => {
 
       const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(
         { _tag: "run-events", runId: "run-1" },
-        { projection: "run-events", runId: "run-1", value: 3 }
+        issuedCursor({ _tag: "run-events", runId: "run-1" }, 3)
       )))
       expect(failure.code).toBe("malformed_request")
       expect(failure.message).toContain("3")
@@ -691,7 +1049,7 @@ describe("Projections subscriptions", () => {
   it.effect("refuses a positive resume cursor for a run with no events", () =>
     Effect.gen(function*() {
       let follows = 0
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) => {
@@ -704,7 +1062,7 @@ describe("Projections subscriptions", () => {
 
       const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(
         { _tag: "run-events", runId: "run-1" },
-        { projection: "run-events", runId: "run-1", value: 1 }
+        issuedCursor({ _tag: "run-events", runId: "run-1" }, 1)
       )))
       expect(failure.code).toBe("malformed_request")
       expect(failure.message).toContain("1")
@@ -717,25 +1075,37 @@ describe("Projections subscriptions", () => {
       [
         "a different projection",
         { _tag: "run-events", runId: "run-1" },
-        { projection: "transcript", runId: "run-1", value: 1 },
+        issuedCursor({ _tag: "transcript", runId: "run-1" }, 1),
         "projection"
       ],
       [
         "a different run",
         { _tag: "run-events", runId: "run-1" },
-        { projection: "run-events", runId: "run-2", value: 1 },
+        { ...issuedCursor({ _tag: "run-events", runId: "run-1" }, 1), runId: "run-2" },
         "run"
+      ],
+      [
+        "a different selector tag with the same projection field",
+        { _tag: "run-events", runId: "run-1" },
+        { ...issuedCursor({ _tag: "transcript", runId: "run-1" }, 1), projection: "run-events" },
+        "exact selector"
+      ],
+      [
+        "a different approval selector with the same run field",
+        { _tag: "approvals", runId: "run-1" },
+        { ...issuedCursor({ _tag: "approvals", runId: "run-2" }, 1), runId: "run-1" },
+        "exact selector"
       ],
       [
         "a workspace projection",
         { _tag: "workspace-runs" },
-        { projection: "workspace-runs", runId: null, value: 0 },
+        issuedCursor({ _tag: "workspace-runs" }, 0),
         "workspace"
       ],
       [
         "a cursor that names no run",
         { _tag: "run-events", runId: "run-1" },
-        { projection: "run-events", runId: null, value: 1 },
+        { ...issuedCursor({ _tag: "run-events", runId: "run-1" }, 1), runId: null },
         "for run none"
       ]
     ] as const satisfies ReadonlyArray<
@@ -749,7 +1119,7 @@ describe("Projections subscriptions", () => {
   ) {
     it.effect(`refuses a resume cursor for ${name}`, () =>
       Effect.gen(function*() {
-        const projections = Projections.make(
+        const projections = make(
           control({
             list: () => Effect.succeed({ _tag: "runs", items: [run] })
           }),
@@ -763,7 +1133,7 @@ describe("Projections subscriptions", () => {
 
   it.live("keeps a workspace subscription open on keepalives alone", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [] }),
           watch: (filter) => filter.follow === true ? Stream.never : Stream.empty
@@ -783,7 +1153,7 @@ describe("Projections subscriptions", () => {
   it.live("emits every declared gateway frame tag through subscriptions", () =>
     Effect.gen(function*() {
       const runFrames = yield* Stream.runCollect(
-        Projections.make(
+        make(
           control({
             list: () => Effect.succeed({ _tag: "runs", items: [run] }),
             watch: (filter) =>
@@ -795,7 +1165,7 @@ describe("Projections subscriptions", () => {
         ).subscribe({ _tag: "run-summary", runId: "run-1" })
       )
       const workspaceFrames = yield* Stream.runCollect(Stream.take(
-        Projections.make(
+        make(
           control({
             list: () => Effect.succeed({ _tag: "runs", items: [] }),
             watch: (filter) => filter.follow === true ? Stream.never : Stream.empty
@@ -813,9 +1183,31 @@ describe("Projections subscriptions", () => {
 })
 
 describe("Projections delta failures", () => {
+  it.effect("refuses backward sequences on run and workspace follows", () =>
+    Effect.gen(function*() {
+      const backward = [event(2, "control.test", null), event(1, "control.test", null)]
+      for (
+        const selector of [
+          { _tag: "run-events" as const, runId: "run-1" },
+          { _tag: "workspace-runs" as const }
+        ]
+      ) {
+        const projections = make(
+          control({
+            list: () => Effect.succeed({ _tag: "runs", items: selector._tag === "workspace-runs" ? [] : [run] }),
+            watch: (filter) => filter.follow === true ? Stream.fromIterable(backward) : Stream.empty
+          }),
+          { heartbeatMillis: 60_000 }
+        )
+        const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(selector)))
+        expect(failure.code).toBe("run_unavailable")
+        expect(failure.message).toContain("moved backward")
+      }
+    }))
+
   it.effect("reports a follow that broke mid-stream as a gateway refusal", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [run] }),
           watch: (filter) =>
@@ -833,7 +1225,7 @@ describe("Projections delta failures", () => {
 
   it.effect("reports a workspace follow that broke mid-stream as a gateway refusal", () =>
     Effect.gen(function*() {
-      const projections = Projections.make(
+      const projections = make(
         control({
           list: () => Effect.succeed({ _tag: "runs", items: [] }),
           watch: (filter) =>

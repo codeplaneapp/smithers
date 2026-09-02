@@ -21,6 +21,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { ControlRpcs } from "@smthrs/control"
 import { Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
+import type { ServeError } from "effect/unstable/http/HttpServerError"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
@@ -71,7 +72,7 @@ export const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" ||
  * Every start-time rule this module enforces answers here as a `bind_failed`
  * `GatewayError`, so a host that wants to report a refusal rather than crash on
  * one asks this before it composes a layer. {@link listenOptions} and
- * {@link layer} raise exactly what this returns.
+ * {@link layer} fail with exactly what this returns.
  *
  * @param options the requested bind
  * @since 1.0.0
@@ -99,31 +100,28 @@ export const bindRefusal = (options: ServerOptions): GatewayError | undefined =>
 }
 
 /**
- * Applies the bind policy, or raises the `bind_failed` `GatewayError` naming
- * exactly which rule refused.
- *
- * The raise is what a composition sees, because a layer is built rather than
- * run: `Layer.mergeAll` calls this while the host is still assembling itself.
- * {@link bindRefusal} is the same policy as a value.
+ * Applies the bind policy, returning the admitted Node options or a typed
+ * `bind_failed` refusal.
  *
  * @param options the requested bind
  * @since 1.0.0
  * @category constructors
  */
-export const listenOptions = (options: ServerOptions): ListenOptions => {
-  const refusal = bindRefusal(options)
-  if (refusal !== undefined) throw refusal
-  // `credential`, `listen`, and the keepalive cadence are this module's, not
-  // `node:net`'s: they are named here so the rest is exactly a bind.
-  const {
-    credential: _credential,
-    heartbeatMillis: _cadence,
-    listen: _listen,
-    maxRequestBodyBytes: _maxBody,
-    ...node
-  } = options
-  return { ...node, host: node.host ?? "127.0.0.1" }
-}
+export const listenOptions = (options: ServerOptions): Effect.Effect<ListenOptions, GatewayError> =>
+  Effect.suspend(() => {
+    const refusal = bindRefusal(options)
+    if (refusal !== undefined) return Effect.fail(refusal)
+    // `credential`, `listen`, and the keepalive cadence are this module's, not
+    // `node:net`'s: they are named here so the rest is exactly a bind.
+    const {
+      credential: _credential,
+      heartbeatMillis: _cadence,
+      listen: _listen,
+      maxRequestBodyBytes: _maxBody,
+      ...node
+    } = options
+    return Effect.succeed({ ...node, host: node.host ?? "127.0.0.1" })
+  })
 
 /**
  * The authentication both RPC mounts run under.
@@ -169,6 +167,18 @@ const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions =>
   }
 }
 
+const bindFailure = (failure: ServeError): GatewayError =>
+  new GatewayError({
+    code: "bind_failed",
+    message: "The gateway socket could not be bound",
+    cause: { _tag: failure._tag }
+  })
+
+const mapServeError = <A, R>(server: Layer.Layer<A, ServeError, R>): Layer.Layer<A, GatewayError, R> =>
+  server.pipe(
+    Layer.catch((failure) => Layer.effectContext<A, GatewayError, never>(Effect.fail(bindFailure(failure))))
+  )
+
 /**
  * Hosts the assembled gateway on a Node HTTP server.
  *
@@ -180,11 +190,8 @@ const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions =>
  * The returned layer retains the concrete `HttpServer` service, so a caller
  * that bound port 0 can read the ephemeral address it got.
  *
- * A bind this module's policy refuses raises the `bind_failed` `GatewayError`
- * {@link bindRefusal} names, while the layer is being built. A host that wants
- * to answer a refusal rather than raise one calls {@link bindRefusal} first.
- * A listen failure the operating system reports, such as an address already in
- * use, is not mapped here: it stays the `NodeHttpServer` failure it is.
+ * Policy refusals and operating-system listen failures both fail the layer as
+ * sanitized `bind_failed` `GatewayError` values.
  *
  * @param health the identity `GET /health` answers with
  * @param options the requested bind
@@ -195,15 +202,18 @@ export const layer = (
   health: GatewayServer.Health,
   options: ServerOptions = defaultServerOptions
 ) =>
-  HttpRouter.serve(
-    GatewayServer.layer(health, {
-      ...(options.heartbeatMillis === undefined ? {} : { heartbeatMillis: options.heartbeatMillis }),
-      ingress: ingressOptions(options)
-    }).pipe(
-      Layer.provide(layerAuth(options)),
-      Layer.provide(RpcSerialization.layerNdjson)
-    ),
-    { disableListenLog: true, disableLogger: true }
-  ).pipe(
-    Layer.provideMerge(NodeHttpServer.layer(createServer, listenOptions(options)))
+  Layer.unwrap(
+    Effect.map(listenOptions(options), (nodeOptions) =>
+      HttpRouter.serve(
+        GatewayServer.layer(health, {
+          ...(options.heartbeatMillis === undefined ? {} : { heartbeatMillis: options.heartbeatMillis }),
+          ingress: ingressOptions(options)
+        }).pipe(
+          Layer.provide(layerAuth(options)),
+          Layer.provide(RpcSerialization.layerNdjson)
+        ),
+        { disableListenLog: true, disableLogger: true }
+      ).pipe(
+        Layer.provideMerge(mapServeError(NodeHttpServer.layer(createServer, nodeOptions)))
+      ))
   )

@@ -298,9 +298,17 @@ export const rowSchemaFor = (selector: ProjectionSelector) => {
  * @category models
  */
 export const ProjectionCursor = Schema.Struct({
+  selector: ProjectionSelector,
   projection: ProjectionName,
   runId: Schema.NullOr(Schema.String),
-  value: Schema.Number
+  value: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
+  ),
+  offset: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
+  )
 })
 
 /**
@@ -319,10 +327,43 @@ export type ProjectionCursor = typeof ProjectionCursor.Type
  * @since 1.0.0
  * @category models
  */
-export const ProjectionSnapshot = Schema.Struct({
-  cursor: ProjectionCursor,
-  rows: Schema.Array(Schema.Unknown)
-})
+export const ProjectionSnapshot = Schema.Union([
+  Schema.Struct({
+    selector: WorkspaceRunsSelector,
+    cursor: ProjectionCursor,
+    rows: Schema.Array(GatewayProjection.RunSummaryRow)
+  }),
+  Schema.Struct({
+    selector: RunSummarySelector,
+    cursor: ProjectionCursor,
+    rows: Schema.Array(GatewayProjection.RunSummaryRow)
+  }),
+  Schema.Struct({
+    selector: RunEventsSelector,
+    cursor: ProjectionCursor,
+    rows: Schema.Array(ControlSchema.ControlEvent)
+  }),
+  Schema.Struct({
+    selector: TranscriptSelector,
+    cursor: ProjectionCursor,
+    rows: Schema.Array(GatewayProjection.TranscriptRow)
+  }),
+  Schema.Struct({
+    selector: RunTreeSelector,
+    cursor: ProjectionCursor,
+    rows: Schema.Array(GatewayProjection.RunTreeRow)
+  }),
+  Schema.Struct({
+    selector: ApprovalsSelector,
+    cursor: ProjectionCursor,
+    rows: Schema.Array(GatewayProjection.ApprovalRow)
+  }),
+  Schema.Struct({
+    selector: NodeOutputSelector,
+    cursor: ProjectionCursor,
+    rows: Schema.Array(GatewayProjection.NodeOutputRow)
+  })
+])
 
 /**
  * A projection snapshot and the cursor it was read at.
@@ -357,11 +398,43 @@ export type SnapshotStartFrame = typeof SnapshotStartFrame.Type
  * @since 0.1.0
  * @category models
  */
-export const RowFrame = Schema.TaggedStruct("row", {
-  selector: ProjectionSelector,
-  cursor: ProjectionCursor,
-  row: Schema.Unknown
-})
+export const RowFrame = Schema.Union([
+  Schema.TaggedStruct("row", {
+    selector: WorkspaceRunsSelector,
+    cursor: ProjectionCursor,
+    row: GatewayProjection.RunSummaryRow
+  }),
+  Schema.TaggedStruct("row", {
+    selector: RunSummarySelector,
+    cursor: ProjectionCursor,
+    row: GatewayProjection.RunSummaryRow
+  }),
+  Schema.TaggedStruct("row", {
+    selector: RunEventsSelector,
+    cursor: ProjectionCursor,
+    row: ControlSchema.ControlEvent
+  }),
+  Schema.TaggedStruct("row", {
+    selector: TranscriptSelector,
+    cursor: ProjectionCursor,
+    row: GatewayProjection.TranscriptRow
+  }),
+  Schema.TaggedStruct("row", {
+    selector: RunTreeSelector,
+    cursor: ProjectionCursor,
+    row: GatewayProjection.RunTreeRow
+  }),
+  Schema.TaggedStruct("row", {
+    selector: ApprovalsSelector,
+    cursor: ProjectionCursor,
+    row: GatewayProjection.ApprovalRow
+  }),
+  Schema.TaggedStruct("row", {
+    selector: NodeOutputSelector,
+    cursor: ProjectionCursor,
+    row: GatewayProjection.NodeOutputRow
+  })
+])
 
 /**
  * A row emitted during a selector snapshot.
@@ -396,11 +469,43 @@ export type SnapshotEndFrame = typeof SnapshotEndFrame.Type
  * @since 0.1.0
  * @category models
  */
-export const DeltaFrame = Schema.TaggedStruct("delta", {
-  selector: ProjectionSelector,
-  cursor: ProjectionCursor,
-  delta: Schema.Unknown
-})
+export const DeltaFrame = Schema.Union([
+  Schema.TaggedStruct("delta", {
+    selector: WorkspaceRunsSelector,
+    cursor: ProjectionCursor,
+    delta: Schema.Array(GatewayProjection.RunSummaryRow)
+  }),
+  Schema.TaggedStruct("delta", {
+    selector: RunSummarySelector,
+    cursor: ProjectionCursor,
+    delta: Schema.Array(GatewayProjection.RunSummaryRow)
+  }),
+  Schema.TaggedStruct("delta", {
+    selector: RunEventsSelector,
+    cursor: ProjectionCursor,
+    delta: Schema.Array(ControlSchema.ControlEvent)
+  }),
+  Schema.TaggedStruct("delta", {
+    selector: TranscriptSelector,
+    cursor: ProjectionCursor,
+    delta: Schema.Array(GatewayProjection.TranscriptRow)
+  }),
+  Schema.TaggedStruct("delta", {
+    selector: RunTreeSelector,
+    cursor: ProjectionCursor,
+    delta: Schema.Array(GatewayProjection.RunTreeRow)
+  }),
+  Schema.TaggedStruct("delta", {
+    selector: ApprovalsSelector,
+    cursor: ProjectionCursor,
+    delta: Schema.Array(GatewayProjection.ApprovalRow)
+  }),
+  Schema.TaggedStruct("delta", {
+    selector: NodeOutputSelector,
+    cursor: ProjectionCursor,
+    delta: Schema.Array(GatewayProjection.NodeOutputRow)
+  })
+])
 
 /**
  * A projection mutation after snapshot completion.
@@ -434,9 +539,9 @@ export type HeartbeatFrame = typeof HeartbeatFrame.Type
  */
 export const GatewayFrame = Schema.Union([
   SnapshotStartFrame,
-  RowFrame,
+  ...RowFrame.members,
   SnapshotEndFrame,
-  DeltaFrame,
+  ...DeltaFrame.members,
   HeartbeatFrame
 ])
 

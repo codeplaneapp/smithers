@@ -46,6 +46,17 @@
   length.
 - `GatewayError.cause` now carries a redacted `{_tag, code}` summary rather than
   the whole internal `ControlError`, and the full cause is logged server-side.
+- Projection histories and encoded row sets are bounded. A limit breach now
+  fails as `resource_limit` rather than retaining an unbounded journal or wire
+  payload.
+- Projection cursors now bind the full selector and a sequence-local offset,
+  preserving every derived event when several share one journal sequence.
+- Startup policy and operating-system bind failures now travel through typed
+  effect and layer channels as sanitized `bind_failed` values; constructors no
+  longer throw synchronously.
+- The workspace approvals follower counts only runs with pending gates toward
+  its run ceiling, so irrelevant completed histories cannot starve a later
+  request.
 - An unknown run now fails `run_not_found` identically for every run-scoped
   selector, rather than failing for two of them and answering an empty snapshot
   for the other four.

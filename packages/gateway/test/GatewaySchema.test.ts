@@ -66,3 +66,26 @@ describe("GatewaySchema.rowSchemaFor", () => {
     })
   }
 })
+
+describe("selector-correlated wire payloads", () => {
+  it("rejects rows and deltas that do not belong to their selector", () => {
+    const selector = { _tag: "run-summary" as const, runId: "run-1" }
+    const cursor = {
+      selector,
+      projection: selector._tag,
+      runId: selector.runId,
+      value: 4,
+      offset: 0
+    }
+    for (
+      const candidate of [
+        { _tag: "row", selector, cursor, row: accepted },
+        { _tag: "delta", selector, cursor, delta: [accepted] }
+      ]
+    ) {
+      expect(() => Schema.decodeUnknownSync(GatewaySchema.GatewayFrame)(candidate)).toThrow()
+    }
+    expect(() => Schema.decodeUnknownSync(GatewaySchema.ProjectionSnapshot)({ selector, cursor, rows: [accepted] }))
+      .toThrow()
+  })
+})

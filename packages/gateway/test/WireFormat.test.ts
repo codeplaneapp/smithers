@@ -138,29 +138,54 @@ describe("the encoded projection rows", () => {
 
 describe("the encoded subscription frames", () => {
   const selector = { _tag: "run-summary" as const, runId: "run-1" }
-  const cursor = { projection: "run-summary" as const, runId: "run-1", value: 6 }
+  const cursor = { selector, projection: "run-summary" as const, runId: "run-1", value: 6, offset: 0 }
+  const row = GatewayProjection.runSummary(run, [])
 
   it("freezes the snapshot, row, delta, and heartbeat frames", () => {
     expect(encode(GatewaySchema.GatewayFrame, { _tag: "snapshot-start", selector, cursor })).toEqual({
       _tag: "snapshot-start",
       selector: { _tag: "run-summary", runId: "run-1" },
-      cursor: { projection: "run-summary", runId: "run-1", value: 6 }
+      cursor: {
+        selector: { _tag: "run-summary", runId: "run-1" },
+        projection: "run-summary",
+        runId: "run-1",
+        value: 6,
+        offset: 0
+      }
     })
-    expect(encode(GatewaySchema.GatewayFrame, { _tag: "row", selector, cursor, row: { runId: "run-1" } })).toEqual({
+    expect(encode(GatewaySchema.GatewayFrame, { _tag: "row", selector, cursor, row })).toEqual({
       _tag: "row",
       selector: { _tag: "run-summary", runId: "run-1" },
-      cursor: { projection: "run-summary", runId: "run-1", value: 6 },
-      row: { runId: "run-1" }
+      cursor: {
+        selector: { _tag: "run-summary", runId: "run-1" },
+        projection: "run-summary",
+        runId: "run-1",
+        value: 6,
+        offset: 0
+      },
+      row
     })
     expect(encode(GatewaySchema.GatewayFrame, { _tag: "snapshot-end", selector, cursor })).toEqual({
       _tag: "snapshot-end",
       selector: { _tag: "run-summary", runId: "run-1" },
-      cursor: { projection: "run-summary", runId: "run-1", value: 6 }
+      cursor: {
+        selector: { _tag: "run-summary", runId: "run-1" },
+        projection: "run-summary",
+        runId: "run-1",
+        value: 6,
+        offset: 0
+      }
     })
     expect(encode(GatewaySchema.GatewayFrame, { _tag: "delta", selector, cursor, delta: [] })).toEqual({
       _tag: "delta",
       selector: { _tag: "run-summary", runId: "run-1" },
-      cursor: { projection: "run-summary", runId: "run-1", value: 6 },
+      cursor: {
+        selector: { _tag: "run-summary", runId: "run-1" },
+        projection: "run-summary",
+        runId: "run-1",
+        value: 6,
+        offset: 0
+      },
       delta: []
     })
     expect(encode(GatewaySchema.GatewayFrame, { _tag: "heartbeat", atMs: 1_700_000_000_000 })).toEqual({
@@ -172,9 +197,26 @@ describe("the encoded subscription frames", () => {
   it("freezes a workspace cursor as a null run at zero", () => {
     expect(
       encode(GatewaySchema.ProjectionSnapshot, {
-        cursor: { projection: "workspace-runs", runId: null, value: 0 },
+        selector: { _tag: "workspace-runs" },
+        cursor: {
+          selector: { _tag: "workspace-runs" },
+          projection: "workspace-runs",
+          runId: null,
+          value: 0,
+          offset: 0
+        },
         rows: []
       })
-    ).toEqual({ cursor: { projection: "workspace-runs", runId: null, value: 0 }, rows: [] })
+    ).toEqual({
+      selector: { _tag: "workspace-runs" },
+      cursor: {
+        selector: { _tag: "workspace-runs" },
+        projection: "workspace-runs",
+        runId: null,
+        value: 0,
+        offset: 0
+      },
+      rows: []
+    })
   })
 })

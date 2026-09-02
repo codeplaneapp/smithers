@@ -20,7 +20,7 @@ import { Effect, Fiber, Schema, type Scope, Stream } from "effect"
 import type * as GatewayProjection from "../src/GatewayProjection.ts"
 import * as GatewaySchema from "../src/GatewaySchema.ts"
 import { Projections } from "../src/Projections.ts"
-import { defaultCadenceStack, emit, stack } from "./GatewayStack.ts"
+import { defaultCadenceStack, driverFence, emit, stack } from "./GatewayStack.ts"
 
 const approvalOf = (card: PlanCard): ApprovalPayload => ({
   target: { _tag: "Plan", planId: card.planId, digest: card.digest, envelope: card.envelope },
@@ -72,7 +72,7 @@ const parkOnApproval = (runId: string, requestId: string, question: string) =>
     const payload = askPayload(runId, requestId)
     yield* runtime.registerApproval(askTarget(runId, requestId))
     yield* emit(runId, "control.approval.requested", { runId, requestId, question, payload })
-    const fence = yield* runtime.claimFence(runId)
+    const fence = yield* driverFence(runId)
     yield* runtime.writeStatus(runId, fence, "waiting-approval")
     yield* emit(runId, "control.run.waiting-approval", { runId, status: "waiting-approval" })
     return payload
@@ -89,6 +89,32 @@ const runScopedSelectors = (runId: string): ReadonlyArray<GatewaySchema.Projecti
   { _tag: "approvals", runId },
   { _tag: "node-output", runId, nodeId: "call-1" }
 ]
+
+describe("the fixture stack these projections read through", () => {
+  // Every suite here launches through the noop executor, and `ControlLive`
+  // releases a launch its executor declines: the run keeps its public
+  // `accepted` status and loses its owner. A fixture that writes a run's
+  // status is the executor that took the launch up, so it claims the run
+  // before it fences. Pinning that here means a later change to the control
+  // plane's release-on-decline semantics fails with the reason rather than
+  // with an opaque `ClaimLost` from every fixture that writes a status.
+  test("refuses a bare fence on a declined launch and fences it after a claim", () =>
+    Effect.gen(function*() {
+      const runtime = yield* ControlRuntime
+      const runId = yield* launch
+      expect((yield* runtime.getRun(runId)).status).toBe("accepted")
+
+      const lost = yield* Effect.flip(runtime.claimFence(runId))
+      expect(lost._tag).toBe("/control/ClaimLost")
+
+      const fence = yield* driverFence(runId)
+      yield* runtime.writeStatus(runId, fence, "running")
+      expect((yield* runtime.getRun(runId)).status).toBe("running")
+
+      // A run this process now owns is fenced without a second claim.
+      expect(yield* driverFence(runId)).toBe(fence)
+    }).pipe(Effect.provide(stack())))
+})
 
 describe("gateway projections over a real SQLite control plane", () => {
   test("projects an approval request into a pending row carrying its decision payload", () =>
@@ -227,7 +253,7 @@ describe("gateway projections over a real SQLite control plane", () => {
       // writes them in. The summary's status is the row's, so a fold that read
       // it off the journal alone would report the run's previous state.
       const runtime = yield* ControlRuntime
-      const fence = yield* runtime.claimFence(runId)
+      const fence = yield* driverFence(runId)
       yield* runtime.writeStatus(runId, fence, "completed")
       yield* emit(runId, "control.run.completed", { runId, status: "completed" })
 
@@ -258,7 +284,7 @@ describe("gateway projections over a real SQLite control plane", () => {
       expect(transcript.every((row) => row.runId === runId)).toBe(true)
     }).pipe(Effect.provide(stack())))
 
-  test("reports no model usage, because the journal redacts the counters", () =>
+  test("reports model usage from the durable redacted journal", () =>
     Effect.gen(function*() {
       const projections = yield* Projections
       const runId = yield* launch
@@ -270,27 +296,18 @@ describe("gateway projections over a real SQLite control plane", () => {
         durationMillis: 42
       })
 
-      const settled = ((yield* projections.snapshot({ _tag: "run-events", runId })).rows as ReadonlyArray<
+      const settled = ((yield* projections.snapshot({ _tag: "run-events", runId })).rows as unknown as ReadonlyArray<
         { readonly kind: string; readonly payload: { readonly usage: Record<string, unknown> } }
       >).find((event) => event.kind === "control.agent.model-settled")
-      // `@smthrs/journal` `Redaction.isSensitiveKey` strips one trailing plural
-      // before testing its suffixes, so `inputTokens` canonicalizes to
-      // `inputtoken`, reads as a credential, and is stored as the placeholder.
-      // The counters therefore never reach a reader of a real journal.
-      expect(settled?.payload.usage).toEqual({ inputTokens: "[REDACTED]", outputTokens: "[REDACTED]" })
+      // Numeric accounting survives structural redaction; a string under the
+      // same credential-shaped key is still refused by the journal.
+      expect(settled?.payload.usage).toEqual({ inputTokens: 120, outputTokens: 34 })
 
       const summary = ((yield* projections.snapshot({ _tag: "run-summary", runId })).rows as ReadonlyArray<
         GatewayProjection.RunSummaryRow
       >)[0]
-      // This is a cross-package defect, not a property this projection wants: a
-      // served run card reports 0 in / 0 out for every real run. The fold reads
-      // a number or nothing, and `test/Diagnosis.test.ts` pins it over events
-      // that were never redacted. Fixing it belongs to the emitter and the
-      // redactor: `@smthrs/agent` names the field, `@smthrs/journal` decides
-      // the field reads as a credential. When either moves, both assertions
-      // here change together.
-      expect(summary?.inputTokens).toBe(0)
-      expect(summary?.outputTokens).toBe(0)
+      expect(summary?.inputTokens).toBe(120)
+      expect(summary?.outputTokens).toBe(34)
     }).pipe(Effect.provide(stack())))
 
   for (const selector of runScopedSelectors("missing-run")) {

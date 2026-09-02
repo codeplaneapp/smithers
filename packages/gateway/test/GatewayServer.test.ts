@@ -33,11 +33,12 @@ import * as SyncServer from "@smthrs/sync/SyncServer"
 import { Effect, Layer, type Scope, Stream } from "effect"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
+import { createServer } from "node:http"
 import { connect } from "node:net"
 import { GatewayError, GatewayErrorCode, type GatewayErrorCode as GatewayErrorCodeValue } from "../src/GatewayError.ts"
 import * as GatewayServer from "../src/GatewayServer.ts"
 import * as NodeGateway from "../src/node/NodeGateway.ts"
-import { make as makeProjections, Projections } from "../src/Projections.ts"
+import { make as makeProjections, maxProjectionBytes, Projections } from "../src/Projections.ts"
 import { emit, stack } from "./GatewayStack.ts"
 
 const health: GatewayServer.Health = {
@@ -1026,52 +1027,58 @@ describe("the Watch keepalive", () => {
 })
 
 describe("gateway bind policy", () => {
-  /** Whatever a start-time refusal raised, as the typed error it should be. */
-  const raised = (build: () => unknown): GatewayError => {
-    try {
-      build()
-    } catch (error) {
-      expect(error).toBeInstanceOf(GatewayError)
-      return error as GatewayError
-    }
-    throw new Error("expected a refusal")
-  }
+  it.effect.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    "refuses the invalid body limit %s through the layer error channel",
+    (maxRequestBodyBytes) =>
+      Effect.gen(function*() {
+        const refusal = yield* Effect.flip(
+          Layer.build(
+            GatewayServer.layerIngress({ maxRequestBodyBytes }) as Layer.Layer<never, GatewayError>
+          ).pipe(Effect.scoped)
+        )
+        expect(refusal.code).toBe("bind_failed")
+        expect(refusal.message).toContain("request body limit")
+        expect(NodeGateway.bindRefusal({ port: 0, maxRequestBodyBytes })?.code).toBe("bind_failed")
+      })
+  )
 
-  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("refuses the invalid body limit %s", (maxRequestBodyBytes) => {
-    // A start-time refusal is this package's own typed failure, so a host that
-    // reports one reports a `bind_failed` code rather than a bare exception.
-    const refusal = raised(() => GatewayServer.layerIngress({ maxRequestBodyBytes }))
-    expect(refusal.code).toBe("bind_failed")
-    expect(refusal.message).toContain("request body limit")
-    expect(NodeGateway.bindRefusal({ port: 0, maxRequestBodyBytes })?.code).toBe("bind_failed")
-  })
-
-  it.each([0, -1, 1.5])("refuses the invalid keepalive cadence %s", (heartbeatMillis) => {
-    // A cadence of zero makes `Stream.tick` a tight loop that floods every
-    // subscriber, which is why the cadence is checked the same way the body
-    // limit is rather than not at all.
-    const assembled = raised(() => GatewayServer.layer(health, { heartbeatMillis }))
-    expect(assembled.code).toBe("bind_failed")
-    expect(assembled.message).toContain("keepalive cadence")
-    expect(raised(() => makeProjections({} as unknown as ControlService, { heartbeatMillis })).code).toBe("bind_failed")
-    expect(NodeGateway.bindRefusal({ port: 0, heartbeatMillis })?.code).toBe("bind_failed")
-  })
+  it.effect.each([0, -1, 1.5])(
+    "refuses the invalid keepalive cadence %s through typed effects",
+    (heartbeatMillis) =>
+      Effect.gen(function*() {
+        // A cadence of zero makes `Stream.tick` a tight loop that floods every
+        // subscriber, so every construction boundary refuses it before bind.
+        const assembled = yield* Effect.flip(
+          Layer.build(
+            GatewayServer.layer(health, { heartbeatMillis }) as Layer.Layer<never, GatewayError>
+          ).pipe(Effect.scoped)
+        )
+        expect(assembled.code).toBe("bind_failed")
+        expect(assembled.message).toContain("keepalive cadence")
+        expect(
+          (yield* Effect.flip(makeProjections({} as unknown as ControlService, { heartbeatMillis }))).code
+        ).toBe("bind_failed")
+        expect(NodeGateway.bindRefusal({ port: 0, heartbeatMillis })?.code).toBe("bind_failed")
+      })
+  )
 
   it("accepts a positive cadence and body limit", () => {
     expect(NodeGateway.bindRefusal({ port: 0, heartbeatMillis: 25, maxRequestBodyBytes: 64 })).toBeUndefined()
   })
 
-  it("defaults a bind with no host to loopback", () => {
-    expect(NodeGateway.listenOptions({ port: 0 })).toEqual({ port: 0, host: "127.0.0.1" })
-    expect(NodeGateway.bindRefusal({ port: 0 })).toBeUndefined()
-  })
+  it.effect("defaults a bind with no host to loopback", () =>
+    Effect.gen(function*() {
+      expect(yield* NodeGateway.listenOptions({ port: 0 })).toEqual({ port: 0, host: "127.0.0.1" })
+      expect(NodeGateway.bindRefusal({ port: 0 })).toBeUndefined()
+    }))
 
-  it("accepts every loopback spelling with no opt-in and no credential", () => {
-    for (const host of ["127.0.0.1", "::1", "localhost"]) {
-      expect(NodeGateway.isLoopbackHost(host)).toBe(true)
-      expect(NodeGateway.listenOptions({ host, port: 0 })).toEqual({ host, port: 0 })
-    }
-  })
+  it.effect("accepts every loopback spelling with no opt-in and no credential", () =>
+    Effect.gen(function*() {
+      for (const host of ["127.0.0.1", "::1", "localhost"]) {
+        expect(NodeGateway.isLoopbackHost(host)).toBe(true)
+        expect(yield* NodeGateway.listenOptions({ host, port: 0 })).toEqual({ host, port: 0 })
+      }
+    }))
 
   it("classifies every other host as reachable from elsewhere", () => {
     // `127.0.0.2` is loopback to the kernel and is not one of the three names
@@ -1083,34 +1090,82 @@ describe("gateway bind policy", () => {
     }
   })
 
-  it("refuses a non-loopback bind without an explicit --listen", () => {
-    expect(raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0 })).message).toMatch(/--listen/)
-    expect(raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: false })).message).toMatch(
-      /--listen/
-    )
-  })
+  it.effect("refuses a non-loopback bind without an explicit --listen", () =>
+    Effect.gen(function*() {
+      expect((yield* Effect.flip(NodeGateway.listenOptions({ host: "0.0.0.0", port: 0 }))).message).toMatch(
+        /--listen/
+      )
+      expect(
+        (yield* Effect.flip(NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: false }))).message
+      ).toMatch(/--listen/)
+    }))
 
-  it("refuses a non-loopback bind without a bearer credential", () => {
-    expect(raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true })).message).toMatch(
-      /bearer credential/
-    )
-    expect(
-      raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true, credential: "" })).message
-    ).toMatch(/bearer credential/)
-  })
+  it.effect("refuses a non-loopback bind without a bearer credential", () =>
+    Effect.gen(function*() {
+      expect(
+        (yield* Effect.flip(NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true }))).message
+      ).toMatch(/bearer credential/)
+      expect(
+        (yield* Effect.flip(
+          NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true, credential: "" })
+        )).message
+      ).toMatch(/bearer credential/)
+    }))
 
-  it("accepts a credentialed non-loopback bind that opted in", () => {
-    expect(NodeGateway.listenOptions({
-      host: "0.0.0.0",
-      port: 0,
-      listen: true,
-      credential: "secret",
-      maxRequestBodyBytes: 128
-    })).toEqual({
-      host: "0.0.0.0",
-      port: 0
-    })
-  })
+  it.effect("accepts a credentialed non-loopback bind that opted in", () =>
+    Effect.gen(function*() {
+      expect(
+        yield* NodeGateway.listenOptions({
+          host: "0.0.0.0",
+          port: 0,
+          listen: true,
+          credential: "secret",
+          maxRequestBodyBytes: 128
+        })
+      ).toEqual({
+        host: "0.0.0.0",
+        port: 0
+      })
+    }))
+
+  it.effect("maps an operating-system listen failure to a sanitized gateway refusal", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const occupied = yield* Effect.acquireRelease(
+        Effect.tryPromise({
+          try: () =>
+            new Promise<{ readonly port: number; readonly server: ReturnType<typeof createServer> }>(
+              (resolve, reject) => {
+                const server = createServer()
+                server.once("error", reject)
+                server.listen(0, "127.0.0.1", () => {
+                  const address = server.address()
+                  if (address === null || typeof address === "string") {
+                    reject(new Error("expected a TCP address"))
+                  } else {
+                    resolve({ port: address.port, server })
+                  }
+                })
+              }
+            ),
+          catch: (cause) => cause
+        }),
+        ({ server }) =>
+          Effect.promise(() =>
+            new Promise<void>((resolve) => {
+              server.close(() => resolve())
+            })
+          )
+      )
+      const failure = yield* Effect.flip(
+        Layer.build(served({ host: "127.0.0.1", port: occupied.port }))
+      )
+
+      expect(failure).toBeInstanceOf(GatewayError)
+      if (!(failure instanceof GatewayError)) throw failure
+      expect(failure.code).toBe("bind_failed")
+      expect(failure.cause).toEqual({ _tag: "ServeError" })
+      expect(JSON.stringify(failure)).not.toContain("127.0.0.1")
+    })))
 
   it("defaults to a loopback bind on the gateway port", () => {
     expect(NodeGateway.defaultServerOptions).toEqual({ host: "127.0.0.1", port: 7331 })
@@ -1189,10 +1244,31 @@ describe("gateway error vocabulary", () => {
           })
           return (await response.json() as { readonly code: string }).code
         })
-      const unavailable = makeProjections({
+      const unavailable = Effect.runSync(makeProjections({
         list: () => Effect.fail(new Unavailable({ code: "unavailable", feature: "list", ticket: "T-errors" })),
         watch: () => Stream.empty
-      } as unknown as ControlService)
+      } as unknown as ControlService))
+      const oversized = Effect.runSync(makeProjections({
+        list: () =>
+          Effect.succeed({
+            _tag: "runs",
+            items: [{
+              runId: "oversized-run",
+              flowId: "system/test",
+              status: "running",
+              createdAt: 0,
+              updatedAt: 0
+            }]
+          }),
+        watch: () =>
+          Stream.succeed({
+            sequence: 1,
+            kind: "control.run.accepted",
+            runId: "oversized-run",
+            occurredAt: 0,
+            payload: "x".repeat(maxProjectionBytes)
+          })
+      } as unknown as ControlService))
       const table = [
         [
           "bind_failed",
@@ -1201,6 +1277,13 @@ describe("gateway error vocabulary", () => {
         ["unauthorized", postCode("{}")],
         ["malformed_request", postCode("{}", "edge-secret")],
         ["request_too_large", postCode("x".repeat(256), "edge-secret")],
+        [
+          "resource_limit",
+          Effect.map(
+            Effect.flip(oversized.snapshot({ _tag: "run-events", runId: "oversized-run" })),
+            (failure) => failure.code
+          )
+        ],
         [
           "run_unavailable",
           Effect.map(Effect.flip(unavailable.snapshot({ _tag: "workspace-runs" })), (failure) => failure.code)

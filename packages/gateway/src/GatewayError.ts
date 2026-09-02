@@ -16,6 +16,7 @@ export const GatewayErrorCode = Schema.Literals([
   "unauthorized",
   "malformed_request",
   "request_too_large",
+  "resource_limit",
   "run_unavailable",
   "run_not_found"
 ])

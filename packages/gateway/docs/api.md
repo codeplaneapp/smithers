@@ -58,10 +58,10 @@ accepts `127.0.0.1`, `::1`, and `localhost` and nothing else.
 
 `NodeGateway.bindRefusal` answers the policy as a value: a `bind_failed`
 `GatewayError` naming the rule that refused, or `undefined`.
-`NodeGateway.listenOptions` and `NodeGateway.layer` raise exactly what it
-returns, because a layer is built rather than run. A listen failure the
-operating system reports, such as an address already in use, is not mapped: it
-stays the `NodeHttpServer` failure it is.
+`NodeGateway.listenOptions` returns that refusal in its typed effect channel,
+and `NodeGateway.layer` fails through its layer channel. Operating-system
+listen failures, such as an address already in use, are mapped to the same
+sanitized `bind_failed` contract.
 
 One shared bearer authenticates every mount and binds one principal. There are
 no users, no roles, no per-run ownership, and no scopes.
@@ -118,11 +118,13 @@ single read, so a client that follows the same selector from the advertised
 cursor sees each later change exactly once.
 
 `Projection.Subscribe` accepts an `after` cursor. With one it skips the snapshot
-and answers the deltas after that cursor. A cursor that names a different
-projection or a different run is refused with `malformed_request`, and so is a
-negative, fractional, or ahead-of-run cursor. A cursor on a workspace selector
-is refused too: control journal sequences belong to per-run partitions, so a
-workspace cursor is always `0` with a null run and no workspace projection is
+and answers the deltas after that cursor. The cursor embeds the exact selector
+and a `(sequence, offset)` position, so two node-output selectors in one run do
+not share a cursor and multiple derived events at one journal sequence resume
+without loss. A cursor that names another selector, was never issued, or is
+negative, fractional, or ahead of the run is refused with
+`malformed_request`. A workspace cursor is refused too: control journal
+sequences belong to per-run partitions, so no workspace projection is
 resumable from one.
 
 A workspace subscription follows every run partition and answers a full
@@ -132,6 +134,8 @@ same allowance as the snapshot. The unscoped follow replays each partition's
 history, so the gateway discards the prefix each snapshot already folded. The
 subscription is still not resumable because control journal sequences belong
 to per-run partitions, and its cursor is always `0` with a null run.
+An approvals inbox counts only runs that still have a pending gate toward that
+allowance; completed and otherwise irrelevant histories cannot exhaust it.
 
 ## Failures
 
@@ -144,6 +148,7 @@ constructed by a real path.
 | `unauthorized`      | 401    | the ingress guard, on any protected path without the configured credential                                                                               |
 | `malformed_request` | 400    | the ingress guard, for a `POST` body carrying no RPC request message or a body it could not read, and the read path, for an invalid resume cursor        |
 | `request_too_large` | 413    | the ingress guard, for a body over the configured limit                                                                                                  |
+| `resource_limit`    | none   | the read path, when one run or projected row set exceeds its event or encoded-byte allowance                                                             |
 | `run_unavailable`   | none   | the read path, when listing runs, reading a run's events, or following a run or the workspace failed                                                     |
 | `run_not_found`     | none   | the read path, for a run the control plane does not have, identically for every run-scoped selector                                                      |
 
@@ -173,9 +178,10 @@ A workspace delta re-reads the run row of the run whose event arrived, which is
 one indexed listing per event, and reads a run it has not seen before once.
 Neither cost grows with a run's length.
 
-What is not bounded at 1.0.0-rc.0: a projection read collects each selected
-run's whole journal. There is no event ceiling, no encoded-byte ceiling, and no
-overflow frame.
+One run admits at most `Projections.maxEventsPerRun` events, and both its event
+history and every encoded projected row set are capped at
+`Projections.maxProjectionBytes`. The fold fails at the first value past either
+bound instead of retaining the rest of a hostile or corrupt stream.
 
 ## Supervision
 

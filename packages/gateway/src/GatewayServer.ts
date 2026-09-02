@@ -471,7 +471,7 @@ export const carriesRpcRequest = (
  */
 export const layerIngress = (options: IngressOptions = {}) => {
   const refusal = settingRefusal("The gateway request body limit", options.maxRequestBodyBytes)
-  if (refusal !== undefined) throw refusal
+  if (refusal !== undefined) return Layer.effectDiscard(Effect.fail(refusal))
   const maxBytes = options.maxRequestBodyBytes ?? defaultMaxRequestBodyBytes
   return HttpRouter.middleware(
     Effect.gen(function*() {
@@ -539,10 +539,8 @@ export interface LayerOptions {
  * is the Node host that binds this to a socket.
  *
  * A keepalive cadence or a body limit that is not a positive safe integer is
- * refused here, before anything binds, by throwing the `bind_failed`
- * `GatewayError` {@link GatewayError.settingRefusal} builds. A host that wants
- * the refusal as a value rather than an exception asks
- * `NodeGateway.bindRefusal` first.
+ * refused here, before anything binds, through the layer's typed
+ * `GatewayError` channel.
  *
  * @param health the identity `GET /health` answers with
  * @param options the keepalive cadence and the ingress policy
@@ -551,7 +549,7 @@ export interface LayerOptions {
  */
 export const layer = (health: Health, options: LayerOptions = {}) => {
   const refusal = settingRefusal("The gateway keepalive cadence", options.heartbeatMillis)
-  if (refusal !== undefined) throw refusal
+  if (refusal !== undefined) return Layer.effectDiscard(Effect.fail(refusal))
   return Layer.mergeAll(
     layerControlHttp(options.heartbeatMillis),
     layerProjectionsHttp,
