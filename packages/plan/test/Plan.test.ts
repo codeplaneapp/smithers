@@ -16,42 +16,9 @@ import * as Planned from "../src/Planned.ts"
 import * as StepKey from "../src/StepKey.ts"
 import { withCrypto, withCryptoFailure } from "./Crypto.ts"
 
-export const effects = (
-  reads: ReadonlyArray<string>,
-  writes: ReadonlyArray<string>
-): Plan.NodeEffects => ({ reads, writes, boundaryMode: "hard" })
+import { compile, draft, effects } from "./PlanFixtures.ts"
 
-export const draft = (
-  id: string,
-  options: {
-    readonly body?: unknown
-    readonly inputs?: ReadonlyArray<KeyMaterial.InputRef>
-    readonly reads?: ReadonlyArray<string>
-    readonly writes?: ReadonlyArray<string>
-    readonly removes?: ReadonlyArray<string>
-  } & Omit<Plan.NodeDraft, "id" | "material" | "effects"> = {}
-): Plan.NodeDraft => ({
-  id,
-  material: {
-    version: KeyMaterial.version,
-    kind: "sealed",
-    body: options.body ?? { action: id },
-    inputs: options.inputs ?? [],
-    layers: [],
-    capabilities: []
-  },
-  effects: {
-    ...effects(options.reads ?? [], options.writes ?? []),
-    ...(options.removes === undefined ? {} : { removes: options.removes })
-  },
-  ...(options.kind === undefined ? {} : { kind: options.kind }),
-  ...(options.priority === undefined ? {} : { priority: options.priority }),
-  ...(options.conflictStrategy === undefined ? {} : { conflictStrategy: options.conflictStrategy }),
-  ...(options.runtimeStrategy === undefined ? {} : { runtimeStrategy: options.runtimeStrategy })
-})
-
-export const compile = (nodes: ReadonlyArray<Plan.NodeDraft>, planId = "plan-1") =>
-  Plan.compile({ planId, flow: "example/Build", nodes })
+export { compile, draft, effects }
 
 const keyOf = (plan: Plan.Plan, id: string) => plan.nodes.find((node) => node.id === id)!.key
 

@@ -8,7 +8,7 @@ import * as Migrations from "../src/Migrations.ts"
 import * as Plan from "../src/Plan.ts"
 import * as PlanStore from "../src/PlanStore.ts"
 import { withCrypto } from "./Crypto.ts"
-import { compile, draft } from "./Plan.test.ts"
+import { compile, draft } from "./PlanFixtures.ts"
 
 const stores = Layer.provideMerge(PlanStore.layer, Layer.provideMerge(Migrations.layer, TestDatabase.layer))
 
