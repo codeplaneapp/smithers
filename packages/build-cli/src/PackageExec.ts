@@ -3000,6 +3000,14 @@ const sandboxRequest = (
     for (const path of dependency.outDirs) reads.add(path)
     for (const path of dependency.outFiles) reads.add(path)
     if (dependency.lane?.kind === "cargo") { for (const path of dependency.lane.outFiles) reads.add(path) }
+    // A Filegroup has no outputs: its files are what a consumer reads through
+    // it, so they join the read set as if the consumer had declared them.
+    if (dependency.rule === "Filegroup") {
+      for (const input of dependency.declaredInputs) {
+        if (input.declaration._tag === "GitDiff") continue
+        for (const file of input.files) reads.add(file.path)
+      }
+    }
     stack.push(...dependency.dependencies)
   }
   const above = (directory: string): void => {
