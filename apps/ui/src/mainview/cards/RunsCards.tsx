@@ -39,7 +39,7 @@ export const RunListCardBody = ({
     .map(([status, count]) => `${count} ${status}`)
     .join(" · ")
   /* The filter chips: every status the unfiltered workspace could carry, each re-invoking runs.list with its argument. */
-  const chips = [...new Set(runs.map((run) => run.status))].sort()
+  const chips = [...new Set([...(card.payload.statuses ?? []), ...runs.map((run) => run.status)])].sort()
   const listArgs = (status?: string): string =>
     [status, card.payload.flow, card.payload.lineage === undefined ? undefined : `lineage=${card.payload.lineage}`, repo]
       .filter((part) => part !== undefined)
@@ -153,7 +153,7 @@ export const ApprovalsInboxCardBody = ({
                 <li>run {approval.runId} · {clockLabel(approval.requestedAt)}</li>
               </ul>
             </ConfirmationRequest>
-            {approval.decision === undefined ?
+            {approval.decision === undefined && approval.pending !== true ?
               (
                 <ConfirmationActions>
                   <ConfirmationAction

@@ -475,28 +475,40 @@ export const createWorkflowController = (
     const card = store.collections.cards.get(cardId)
     if (card === undefined || card.kind !== "approvals-inbox") return
     const row = card.payload.approvals.find((entry) => entry.requestId === requestId)
-    if (row === undefined) return
+    if (row === undefined || row.decision !== undefined || row.pending === true) return
+    store.dispatch({
+      type: "card.updated",
+      actor: "user",
+      id: cardId,
+      patch: {
+        payload: {
+          ...card.payload,
+          approvals: card.payload.approvals.map((entry) => entry.requestId === requestId ? { ...entry, pending: true } : entry)
+        }
+      }
+    })
     const submitted = await gateway.submitApproval(
       card.payload.repo,
       row.approval as Parameters<typeof gateway.submitApproval>[1],
       decision === "approved" ? "approve" : "deny"
+    )
+    const latest = store.collections.cards.get(cardId)
+    if (latest === undefined || latest.kind !== "approvals-inbox") return
+    const approvals = latest.payload.approvals.map((entry) =>
+      entry.requestId === requestId
+        ? submitted.status === "ok"
+          ? { ...entry, decision, decisionError: undefined, pending: undefined }
+          : { ...entry, decisionError: submitted.message, pending: undefined }
+        : entry
     )
     store.dispatch({
       type: "card.updated",
       actor: submitted.status === "ok" ? "user" : "system",
       id: cardId,
       patch: {
-        payload: {
-          ...card.payload,
-          approvals: card.payload.approvals.map((entry) =>
-            entry.requestId === requestId
-              ? submitted.status === "ok"
-                ? { ...entry, decision, decisionError: undefined }
-                : { ...entry, decisionError: submitted.message }
-              : entry
-          )
-        },
-        ...(submitted.status === "ok" ? { status: "acted" as const } : {})
+        payload: { ...latest.payload, approvals },
+        // The inbox is acted only when no row is still undecided.
+        ...(approvals.every((entry) => entry.decision !== undefined) ? { status: "acted" as const } : {})
       }
     })
   }

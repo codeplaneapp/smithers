@@ -146,6 +146,8 @@ export const createRunsController = (
         ...(args.status === undefined ? {} : { status: args.status }),
         ...(args.flow === undefined ? {} : { flow: args.flow }),
         ...(args.lineage === undefined ? {} : { lineage: args.lineage }),
+        // Every status the UNFILTERED workspace carries, so the filter chips (and "All") survive a single-status filter.
+        statuses: [...new Set(listed.value.map((row) => row.status))].sort(),
         runs: rows.map((row) => ({
           runId: row.runId,
           flowId: row.flowId,
@@ -214,6 +216,9 @@ export const createRunsController = (
     const card = runCardFor(runId)
     if (card === undefined) {
       return `Open the run first (runs.open ${runId}) — rerunning needs the card that knows the flow and its launch input.`
+    }
+    if (!["completed", "failed", "cancelled", "no-capacity"].includes(card.payload.phase)) {
+      return `Run ${runId} is not settled (${card.payload.phase}); stop it first or wait for it to finish.`
     }
     if (card.payload.input === undefined) {
       return `This run's launch input isn't recorded on this client, so there's nothing faithful to rerun — start the flow fresh with flow.run ${card.payload.workflow}.`
@@ -351,23 +356,41 @@ export const createRunsController = (
   }
 
   /** Stop every live run card's run — one workspace's, when named. Each cancel is durable; the cards settle from the pump. */
+  /** The wire statuses the run inbox counts as live (mirrors RunsCards LIVE_STATUSES). */
+  const RUN_LIST_LIVE_STATUSES: ReadonlySet<string> = new Set(["accepted", "running", "parked", "waiting-approval"])
   const stopAllRuns = async (repoArg?: string): Promise<CommandResult> => {
     const guard = workflows.workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const live = ([...store.collections.cards.values()].filter(
-      (card) =>
-        card.kind === "flow-run" &&
-        (card.payload.phase === "launching" ||
-          card.payload.phase === "running" ||
-          card.payload.phase === "waiting-approval" ||
-          card.payload.phase === "reconnecting")
-    ) as Array<Extract<Card, { kind: "flow-run" }>>)
-      .filter((card) => repoArg === undefined || card.payload.repo === repoArg)
+    /*
+     * The button reads "Stop all N" off the run inbox's rows, so the act
+     * cancels THOSE rows — the wire's live runs under the inbox's active
+     * filter — never just the runs this client happens to hold cards for.
+     * With no inbox open, the client's live cards are the only known set.
+     */
+    const inboxes = ([...store.collections.cards.values()].filter(
+      (card) => card.kind === "run-list" && (repoArg === undefined || card.payload.repo === repoArg)
+    ) as Array<Extract<Card, { kind: "run-list" }>>)
+    const live: Array<{ readonly repo: string; readonly runId: string }> = inboxes.length > 0
+      ? inboxes.flatMap((card) =>
+        card.payload.runs
+          .filter((run) => RUN_LIST_LIVE_STATUSES.has(run.status))
+          .map((run) => ({ repo: card.payload.repo, runId: run.runId }))
+      )
+      : ([...store.collections.cards.values()].filter(
+        (card) =>
+          card.kind === "flow-run" &&
+          (card.payload.phase === "launching" ||
+            card.payload.phase === "running" ||
+            card.payload.phase === "waiting-approval" ||
+            card.payload.phase === "reconnecting")
+      ) as Array<Extract<Card, { kind: "flow-run" }>>)
+        .filter((card) => repoArg === undefined || card.payload.repo === repoArg)
+        .map((card) => ({ repo: card.payload.repo, runId: card.payload.runId }))
     if (live.length === 0) return repoArg === undefined ? "No runs are live." : `No runs are live on ${repoArg}.`
     let stopped = 0
     let firstRefusal: string | undefined
     for (const card of live) {
-      const cancelled = await gateway.cancel(card.payload.repo, card.payload.runId, "the human stopped every run")
+      const cancelled = await gateway.cancel(card.repo, card.runId, "the human stopped every run")
       if (cancelled.status === "ok") {
         stopped += 1
       } else if (firstRefusal === undefined) {
