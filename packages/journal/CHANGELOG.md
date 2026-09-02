@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The migration modules `0001_initial` and `0002_checkpoints` export their
+  Effect as a named binding (`initial`, `checkpoints`) instead of a default
+  export, and `Migrations` imports them by name. The CommonJS build converts
+  each source file with esbuild in Node interop mode, where a default import
+  of a sibling module resolves to that module's whole exports object rather
+  than the Effect, so `Migrations.set.migrations["0001_initial"].pipe` was
+  undefined under `require` while the ESM build kept working.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Breaking Changes

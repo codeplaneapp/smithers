@@ -14,7 +14,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category migrations
  * @since 0.1.0
  */
-const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`CREATE TABLE flows_journal_events (
@@ -33,5 +33,3 @@ const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(fu
 
   yield* sql`CREATE INDEX flows_journal_events_event_type_idx ON flows_journal_events (event_type)`
 })
-
-export default initial

@@ -24,7 +24,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category migrations
  * @since 0.1.0
  */
-const checkpoints: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const checkpoints: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`CREATE TABLE flows_journal_checkpoints (
@@ -36,5 +36,3 @@ const checkpoints: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.ge
     PRIMARY KEY (run_id, seq)
   )`
 })
-
-export default checkpoints
