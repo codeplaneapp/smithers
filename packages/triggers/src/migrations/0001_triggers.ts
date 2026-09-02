@@ -2,8 +2,17 @@
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 
-/** @category migrations @since 0.1.0 */
-const triggers: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+/**
+ * Creates the `flows_triggers` and `flows_trigger_fires` tables.
+ *
+ * A named export rather than `export default`: the CommonJS build reads a
+ * default import of a sibling module as the whole exports object, so the
+ * migrator received `{ default }` instead of this Effect.
+ *
+ * @category migrations
+ * @since 0.1.0
+ */
+export const triggers: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
   yield* sql`CREATE TABLE IF NOT EXISTS flows_triggers (
     trigger_id TEXT PRIMARY KEY,
@@ -30,5 +39,3 @@ const triggers: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(f
     FOREIGN KEY (trigger_id) REFERENCES flows_triggers (trigger_id)
   )`
 })
-
-export default triggers

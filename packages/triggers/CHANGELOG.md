@@ -99,6 +99,14 @@
   pointer.
 - Coverage thresholds are 100 on all four metrics. The ratchet that stood at
   68/67/81/80 is what let every defect above ship untested.
+- The CommonJS build no longer hands the migrator `{ default }` objects instead
+  of migration Effects. esbuild compiles a default import of a sibling ESM
+  module to `__toESM(require(...), 1).default`, which under Node interop is the
+  whole exports object, so `require("@smthrs/triggers/SqlTriggerStore")` failed
+  at the first migration. The migration modules export `triggers` and
+  `reservationLease` by name, `migrations/index.ts` imports them by name, and
+  the record is exported as `migrations` so a test can assert each entry has
+  `pipe`.
 
 ### Removed
 
