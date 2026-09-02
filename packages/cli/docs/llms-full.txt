@@ -3266,7 +3266,7 @@ resumable transport sessions remain unplanned.
 
 ### Authentication
 
-`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability, the branch share scheme extended with a signed `kid` for key rotation, presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. The verified expiry travels with the principal, so an open subscription ends with `unauthorized` when the credential that opened it runs out. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`SMITHERS_SYNC_SECRET`, `SMITHERS_SYNC_KEY_ID`, with the `FLOWS_`-prefixed spellings read as rc.0 aliases and removed at 1.0.0); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
+`SyncAuth` is an Effect RPC middleware service, and the package ships its production implementation: `SyncAuth.layer` verifies a `WorkspaceShare` capability, the branch share scheme extended with a signed `kid` for key rotation, presented in the `flows-sync-workspace` request header, and installs the resulting `SyncPrincipal` for the request. The principal defaults to anonymous, and the server refuses anonymous access to every non-branch run and to workspace listings, so an unauthenticated connection can read only branch runs it holds a branch share capability for. The verified expiry travels with the principal, so an open subscription ends with `unauthorized` when the credential that opened it runs out. Signing secrets are provisioned as `Redacted` values through `WorkspaceShare.layerHmac` (explicit keyring) or `WorkspaceShare.layerConfig` (`FLOWS_SYNC_SECRET`, `FLOWS_SYNC_KEY_ID`); there is no default secret. A deployment may substitute its own `SyncAuth` implementation at the transport boundary.
 
 See Journal and the `@smthrs/sync` reference.
 
@@ -11583,19 +11583,22 @@ from.
 | `Alerts.defaultDetectors` | const | constants | The four conditions a control plane journals out of the box. |
 | `Alerts.Open` | interface | models | A condition that is open on a run, and when it opened. |
 | `Alerts.Alert` | interface | models | One alert a policy decided to raise. |
+| `Alerts.coalescingKey` | const | getters | The key an alert coalesces on: one open condition on one run. |
 | `Alerts.alertId` | const | getters | The identity a delivery is recorded under. |
 | `Alerts.conditions` | const | projections | Every condition a run's journal leaves open, with the time each opened. |
 | `Alerts.decide` | const | projections | The alerts a policy raises for the conditions open at `now`. |
+| `Alerts.FailureCode` | const + type | models | Why a sink did not take an alert. |
 | `Alerts.AlertError` | class | errors | A sink refused or could not take an alert. |
 | `Alerts.SinkService` | interface | services | Where a raised alert is sent. |
 | `Alerts.Sink` | class | services | The `SinkService` tag. |
 | `Alerts.layerNoop` | const | layers | A sink that accepts every alert and sends it nowhere. |
+| `Alerts.defaultWebhookTimeout` | const | constants | How long the webhook sink waits for an answer before it calls the page refused. |
 | `Alerts.layerWebhook` | const | layers | A sink that POSTs each alert to one webhook. |
 | `Alerts.Tick` | interface | models | What one tick decided. |
 | `Alerts.RuntimeService` | interface | services | The alert runtime: one tick per run. |
 | `Alerts.AlertRuntime` | class | services | The `RuntimeService` tag. |
 | `Alerts.layer` | const | layers | The alert runtime over one policy. |
-| `Notification.Provenance` | const + type | models | Durable origin of a notification. |
+| `Notification.Provenance` | const + type | models | Durable origin of a notification: who said it, from where, and at which turn. |
 | `Notification.HumanSteer` | const | models | A human message that must reach the model before the current turn closes. |
 | `Notification.HumanFollowup` | const | models | A human message that waits for the run to become idle. |
 | `Notification.SystemEvent` | const | models | A machine-originated event. |
@@ -11604,15 +11607,19 @@ from.
 | `Notification.coalesceKey` | const | getters | The key a pending notification coalesces on, or `null` when it must never be coalesced. |
 | `NotificationEvent.AdmittedEventType` | const | constants | The journal `eventType` recorded for one admission decision. |
 | `NotificationEvent.PromotedEventType` | const | constants | The journal `eventType` recorded when pending notifications are promoted. |
-| `NotificationEvent.Admitted` | const + type | models | A durable admission record. |
-| `NotificationEvent.Promoted` | const + type | models | A durable promotion record. |
+| `NotificationEvent.AdmissionDecision` | const + type | models | What a durable admission record says was decided. |
+| `NotificationEvent.Admitted` | const + type | models | A durable admission record: the notification a run was told about, and what the queue decided to do with it. |
+| `NotificationEvent.Promoted` | const + type | models | A durable promotion record: which notifications one boundary of one lineage delivered. |
 | `NotificationEvent.Event` | type | models | Any journal event owned by this package. |
+| `NotificationEvent.isAdmitted` | const | refinements | Whether an owned event is an admission record. |
+| `NotificationEvent.isPromoted` | const | refinements | Whether an owned event is a promotion record. |
 | `NotificationEvent.fromEntry` | const | constructors | Decodes an owned notification event from a journal entry. |
+| `NotificationState.defaultCapacity` | const | constants | The default maximum number of pending notifications retained per run. |
 | `NotificationState.Pending` | interface | models | A notification retained until it is promoted at a harness safe point. |
 | `NotificationState.AdmissionDecision` | type | models | The result recorded for one durable notification admission. |
 | `NotificationState.State` | interface | models | Immutable bounded queue state derived from the notification journal. |
 | `NotificationState.Admission` | interface | models | One pure admission transition and its visible decision. |
-| `NotificationState.Promotion` | interface | models | A pure promotion transition. |
+| `NotificationState.Promotion` | interface | models | A pure promotion transition: what a boundary takes, and what is left. |
 | `NotificationState.empty` | const | constructors | Creates an empty bounded notification queue. |
 | `NotificationState.admit` | const | operations | Admits a notification, coalescing only pending system events with the same key. |
 | `NotificationState.applyAdmission` | const | operations | Applies the decision already committed in an admission journal event. |
@@ -11620,17 +11627,17 @@ from.
 | `NotificationState.promoteSteers` | const | operations | Promotes every steer notification admitted at or before the turn-close cutoff. |
 | `NotificationState.promoteQueued` | const | operations | Promotes exactly the oldest pending queue notification. |
 | `NotificationState.applyPromoted` | const | operations | Applies a durable promotion record while replaying journal history. |
-| `NotificationQueue.NotificationError` | class | errors | The queue could not be reached or served the request. |
-| `NotificationQueue.AdmissionReceipt` | interface | models | What admitting one notification decided: its durable sequence number and whether the id had already been admitted. |
+| `NotificationQueue.NotificationError` | class | errors | The queue could not be reached, or it refused what a caller handed it. |
+| `NotificationQueue.AdmissionReceipt` | interface | models | What admitting one notification decided. |
 | `NotificationQueue.DrainInput` | interface | models | The boundary a drain is attempted at, and whether the run would go idle if nothing were delivered. |
 | `NotificationQueue.DrainReceipt` | interface | models | The notifications this boundary delivers, and whether the boundary had already drained. |
 | `NotificationQueue.Service` | interface | services | The durable pending queue: admit a notification exactly once, and drain what a boundary is allowed to deliver. |
 | `NotificationQueue.NotificationQueue` | class | services | The `Service` tag. |
 | `NotificationQueue.make` | const | constructors | Builds a `Service` from an implementation of its methods. |
-| `NotificationQueue.makeNoop` | const | constructors | A `Service` that fails both methods as unavailable. |
+| `NotificationQueue.makeNoop` | const | constructors | A `Service` that fails every method as unavailable. |
 | `NotificationQueue.layerNoop` | const | layers | Provides `makeNoop`. |
-| `NotificationQueue.layer` | const | layers | Journal-backed production layer. |
-| `Projection.defaultCapacity` | const | constants | The default maximum number of pending notifications retained per run. |
+| `NotificationQueue.layerWith` | const | layers | Journal-backed production layer, with the pending capacity a composition chooses. |
+| `NotificationQueue.layer` | const | layers | Journal-backed production layer at the default capacity. |
 | `Projection.derive` | const | projections | Re-derives pending notifications from admitted and promoted journal events. |
 | `SteerPayload.Thinking` | const + type | models | How hard the model should think. |
 | `SteerPayload.MessagePayload` | const | models | A message inserted into the transcript at the next turn boundary. |
@@ -20705,13 +20712,8 @@ same report bytes, so a reviewer sees only what actually changed.
 One failure type for the whole package, so the CLI maps a code onto an exit
 status without walking a cause chain. The codes are `run-state-blocked`,
 `unsafe-blocked`, `no-vcs`, `checkpoint-failed`, `verify-failed`,
-`agent-failed`, `io`, `unsupported-project`, `invalid-layout`, and
-`stale-plan`. The first two are the operator gates and exit 3; the rest exit
-1. `invalid-layout` refuses a root, report directory, or flows directory that
-could leave or overlap the project, before anything is read. `stale-plan`
-refuses an apply whose project changed after it was planned, before anything
-is written. `Command.isMigrateError` is the guard the entry points use: the
-class and its code, never a `_tag` string an arbitrary object can carry.
+`agent-failed`, `io`, and `unsupported-project`. The first two are the operator
+gates and exit 3; the rest exit 1.
 
 `MigrateError.make(code, message, details?)` builds one. `MigrateError.io(message)`
 is the filesystem seam: it turns an unknown cause into an `io` failure so a
@@ -20766,11 +20768,7 @@ bounded recursion needs a bound and the migration has to choose one.
 `Mapping.snippet(hit)` is the rewrite text for a hit whose construct is
 automatic: a compilable fragment carrying the hit's own identifiers, not a
 whole file. It returns `undefined` for everything else, and the agent works
-from the rule instead. Compilable is kept literally: a step id that would
-start with a digit is prefixed (`1st` becomes `Step1st`), every key, tag, and
-seat is quoted, a step group whose ids would fold to one identifier (`a-b`
-and `a_b`) is refused, and a `Timer` duration is emitted as a number of
-milliseconds or a duration string and refused when it is an expression.
+from the rule instead.
 
 `Mapping.byConstruct(name)` resolves a row for every catalog name. A test keeps
 the table below in sync with `Mapping.rows`.
@@ -21219,10 +21217,7 @@ the table below in sync with `Mapping.rows`.
 
 `Detect.scan(root, options?)` walks a project, skipping `node_modules`, `.git`,
 `.jj`, `dist`, `.flows`, and the 0.x run-state directories, and returns a
-`Detection`. What the walk could not read is reported rather than dropped: a
-directory it could not list, one deeper than twelve levels, and a file over
-8 MB each raise an `incomplete-scan` warning naming the path, and `Gate`
-refuses to `apply` a plan built over one (`scan` and `plan` still report it).
+`Detection`.
 
 - **Packages**: the root `package.json`, every workspace member,
   `.smithers/package.json`, and any manifest next to a workflow file.
@@ -21232,14 +21227,8 @@ refuses to `apply` a plan built over one (`scan` and `plan` still report it).
   exists in both trees (`@smthrs/cli`, `engine`, `memory`, `testing`) is decided
   by version alone, against `<1.0.0-0`. `1.0.0-rc.0` is not before that range, so
   a project already on the release candidate is not reported as old. Companion
-  packages (`react`, `ai`, `@ai-sdk/*`, `zod`, `effect`, `xstate`) are recorded.
-  Every `effect` declaration in every manifest is kept in `effectDeclarations`
-  with its file and field, and each one that is not exactly `4.0.0-rc.108`
-  raises `effect-pin-conflict` naming it: a range, a later prerelease, and two
-  manifests that disagree are each a version this release was not built
-  against. `Detect.resolvedEffectVersions(lock)` reads what a pnpm, bun, npm,
-  or yarn lockfile resolved `effect` to, and a resolution other than the pin
-  raises the same warning against the lockfile.
+  packages (`react`, `ai`, `@ai-sdk/*`, `zod`, `effect`, `xstate`) are recorded,
+  and an `effect` pin that is not `4.0.0-rc.*` raises `effect-pin-conflict`.
 - **Imports and pragmas**: every import specifier, read with the TypeScript
   compiler API one file at a time, classified `old`, `foreign`, `mdx`, or
   `relative`. `Detect.isOldSpecifier(specifier, context)` makes that call, and
@@ -21392,16 +21381,6 @@ Printed text needs `Schema` in scope, and `Effect` too when a field has a
 default. A test evaluates every printed form and decodes a sample through it,
 so the subset is proved, not asserted.
 
-The printer refuses, rather than approximates, whatever it cannot say with the
-same meaning: a `z.record` key that is neither a string nor a literal set, a
-nested `.optional()` or `.default()` inside an array, a union, or a record
-(a nested `.describe()` survives as an annotation), and a `.min()`/`.max()`
-on a kind that has no such check. A string or an array gets a length check
-and a number gets a bound, decided by what the chain is rather than by its
-text. `printField(chain)` is `print` for a struct field: a top-level default,
-optional, or description is applied the way the field carries it, which is
-what `Mapping.snippet` uses for a step's payload keys.
-
 Everything else is `guided` with a reason: `.passthrough()`, `.refine()`,
 `.transform()`, `z.discriminatedUnion`, `z.lazy`, `z.tuple`, and custom error
 maps carry behavior a text rewrite cannot preserve.
@@ -21449,22 +21428,11 @@ lands at `flows/pipelines/ci-fast/flow.ts`.
 
 `Units.verifyCommands(detection, overrides?, flowsDir?)` derives the commands
 that verify a unit: install from the lockfile or `packageManager` (`bun`,
-`pnpm`, `yarn`, and `npm`), format from the formatter the project already
-configures, in check mode (`dprint check`, `prettier --check .`), one
-`tsc --noEmit -p` per `tsconfig.json`, and test from `smithers.config.ts`
-`repoCommands.test` or the root test script. Every one is overridable, because
-the tool must never invent a command that runs the operator's code.
-
-A derived command is an `ArgvCommand`: `{ _tag: "argv", executable, args }`,
-spawned with no shell, so a file name the scanner read off the disk is one
-argument whatever characters it carries. A bare string is reserved for an
-operator override and keeps shell semantics. `Units.simpleCommand(line)` turns
-a repository-authored line into an argv when it is plain words and refuses
-anything a shell would interpret; a `repoCommands.test` it refuses is reported
-in the plan's notes with the command that ran instead. `Contract.commandLine`
-renders either form as the one line the prompt, the report, and the
-`proc:spawn` grant share, which for an argv is the kernel's own rendering of
-the command it spawns.
+`pnpm`, `yarn`, and `npm`), format from
+the formatter the project already configures, one `tsc --noEmit -p` per
+`tsconfig.json`, and test from `smithers.config.ts` `repoCommands.test` or the
+root test script. Every one is overridable, because the tool must never invent
+a command that runs the operator's code.
 
 ### Checks
 
@@ -21629,22 +21597,11 @@ Every snippet in a prompt is captured source or a scanner-derived rewrite. The p
 
 | Export | Type | Default |
 | --- | --- | --- |
-| `MigrateOptions` | `Schema` | `mode` is required; everything else is optional. Decoding refuses any layout `layoutIssue` refuses. |
+| `MigrateOptions` | `Schema` | `mode` is required; everything else is optional. |
 | `Mode` | `"scan" \| "plan" \| "apply"` | The CLI defaults to `plan`. |
 | `reportDir` | `(options) => string` | `.smithers-migrate` |
 | `flowsDir` | `(options) => string` | `flows` |
 | `maxRepairRounds` | `(options) => number` | `3` |
-| `layoutIssue` | `(options) => string \| undefined` | The root is absolute and normalized; each layout path is a plain relative path (no `.`, `..`, empty segment, NUL, backslash, or trailing slash, and not under `.flows`, `.git`, `.jj`, or `node_modules`); the two do not overlap. |
-| `validateLayout` | `(options) => Effect` | What the text cannot show: the root is a directory, the deepest existing ancestor of each layout path resolves (symlinks followed) inside the resolved root, and an existing report directory holds only `reportDirEntries`. |
-| `reservedDirectories` | `[".flows", ".git", ".jj", "node_modules"]` | Names no layout path may be or live under. |
-| `reportDirEntries` | `["archive", "backup", "pending-unit.json", "report.json", "report.md", "units"]` | Everything the tool writes at the top of the report directory. |
-| `State`, `stateOf`, `scanEnvironment` | `Schema`, `(environment) => State \| undefined`, `(state) => environment` | The three state paths a host derives from `SMITHERS_HOME`, `HOME`, and `TMPDIR`. `Command.optionsOf` puts them on the payload as `state`; the flow's scan and `Layers.layerNodeScanned` rebuild the scanners' environment from them, so global and gateway run state is found by the run itself. No other environment reaches the payload. |
-
-`MigrateFlow.scan` runs `validateLayout` before the scan, skips the report
-directory during it, and refuses a report or flows directory that sits under
-a 0.x run-state root or holds one (`MigrateFlow.layoutConflict`) after it.
-`Command.survey` uses the same scan, so the survey and the flow's own scan
-step refuse the same layouts.
 
 ### The migration flow
 
@@ -21657,27 +21614,22 @@ Every step takes a value from the step before it, and that is the ordering. A pl
 | Node | Tier | What it does |
 | --- | --- | --- |
 | `Scan` | sealed | Walks the project and renders the plan report. |
-| `Gate` | sealed | Refuses `apply` over run state or unsafe constructs, and a payload whose unit ids no longer match the project; answers with the options it approved. |
-| `Seal` | irreversible | Reads the project once more, immediately before the first checkpoint, recomputes `MigrateFlow.planSeal` and refuses with `stale-plan` when it differs from the payload's, naming each path whose bytes changed. Clears the unit artifacts of any earlier run. Irreversible so a durable host runs it in every execution rather than replaying a recorded answer. |
-| `Checkpoint` | irreversible | Opens a jj change, writes a git ref, or copies the unit's declared sources and targets aside with a per-path manifest (absent, or present with its digest), digests every run-state path, and digests the whole tree. |
+| `Gate` | sealed | Refuses `apply` over run state or unsafe constructs; answers with the options it approved. |
+| `Checkpoint` | irreversible | Opens a jj change, writes a git ref, or copies the unit's files aside, digests every run-state path, and digests the whole tree. |
 | `Capture` | sealed | Reads the unit's sources: the checkpoint's copy on the first round, the disk on a repair round. |
 | `Transform` | model | Rewrites the unit through the `write`, `edit`, and `apply_patch` flows. |
 | `Verify` | irreversible | Install, format, typecheck, tests, and registry discovery. |
 | `Repair` | model | One failing round, handed back with the failing output and the contract. |
-| `Finish` | irreversible | Deterministic checks, the archive and the deterministic rewrites on pass, the kind's postconditions, then the whole verification again over the final tree followed by the confinement and run-state checks again, checkpoint restore on any failure, unit report. The report records the final verification. |
+| `Finish` | irreversible | Deterministic checks, the archive and the deterministic rewrites on pass, the kind's postconditions, checkpoint restore on any failure, unit report. |
 | `WriteReport` | irreversible | Folds the unit reports into the scan's report and writes `report.json` and `report.md`. |
 
-The agent's half runs on kernel-guarded services pinned to the project root, with a grant store that denies every filesystem action, `fs:*`, on each 0.x run-state path and everything under it: a read is a copy into a model call, so the contract's "do not read" is enforced by the kernel and not by the sentence. The capability envelope reads wider than that confinement on purpose: an envelope has to subsume what a bound flow declares, and `@smthrs/std` declares `fs:write:/**`. The bound is enforced by the workspace root and the grant rules, which can express "everything but these"; a pattern string cannot.
+The agent's half runs on kernel-guarded services pinned to the project root, with a grant store that denies every write under a 0.x run-state path. The capability envelope reads wider than that confinement on purpose: an envelope has to subsume what a bound flow declares, and `@smthrs/std` declares `fs:write:/**`. The bound is enforced by the workspace root and the grant rules, which can express "everything but these"; a pattern string cannot.
 
-The prompt treats everything it quotes from the project as data. `Contract.fenced` fences a source, a hint, a snippet, or a command's output with one more backtick than the longest run inside it, so the content cannot end the block; `Contract.inline` does the same for a path or a command; and the contract's last rule says that an instruction inside any of them is part of the project and changes nothing.
-
-The same rules grant `proc:spawn` one command line at a time, for this project's own install, format, typecheck, and test commands and nothing else. Those commands are what the manifests and the lockfile imply, as argv values the tool spawns with no shell, with the operator's `--verify-install`, `--verify-format`, `--verify-typecheck`, and `--verify-test` on top as the shell lines the operator typed; one derivation, `Layers.commandsFor`, serves the host and the units, because an agent shown one set of commands and granted another would be refused the very lines its brief lists, and the line a grant names is the kernel's own rendering of the argv it spawns. A spawned process writes at the OS level, where no `fs:write` rule can see it, so confining the spawn is the only place a shell can be stopped from reaching a database. What those commands then do is outside any rule, and the run-state digests are what catch it: the unit fails its checks and is restored.
+The same rules grant `proc:spawn` one command line at a time, for this project's own install, format, typecheck, and test commands and nothing else. Those commands are what the manifests and the lockfile imply, with the operator's `--verify-install`, `--verify-format`, `--verify-typecheck`, and `--verify-test` on top; one derivation, `Layers.commandsFor`, serves the host and the units, because an agent shown one set of commands and granted another would be refused the very lines its brief lists. A spawned process writes at the OS level, where no `fs:write` rule can see it, so confining the spawn is the only place a shell can be stopped from reaching a database. What those commands then do is outside any rule, and the run-state digests are what catch it: the unit fails its checks and is restored.
 
 #### What a unit is allowed to write
 
 The checkpoint records two things a unit is judged against and they are not the same. `Checkpoint.digest` covers the 0.x run-state paths, which must not change at all. `Checkpoint.tree` covers everything else in the project, minus `.git`, `.jj`, `node_modules`, the report directory, `.flows/`, and those run-state roots, and is written beside the unit's backup rather than carried in the journal, because a project has thousands of files and each one would otherwise cross it once per unit.
-
-The checkpoint copies every declared source and target aside and records, per path, whether it existed and what its bytes digested to; `Checkpoint.restore` and `Checkpoint.rollback` decide from that manifest alone. A target the operator already had at the path a unit writes comes back byte for byte, a path recorded absent is the only kind a rollback removes, a path the manifest never named is refused rather than guessed at, and a backup or a restored file whose digest no longer matches fails the restore instead of overwriting the tree. Absence is the platform's typed `NotFound` and nothing else: a permission error, a disk error, or a directory where a file was declared fails the checkpoint.
 
 `Checkpoint.treeDiff` afterwards is what the unit report's `changedFiles` is built from. The agent answers with a `changedFiles` list of its own; it is advisory, is journaled so a reader can compare the two, and decides nothing. A path in the diff that is in neither the unit's sources nor its targets fails the unit: an added file is removed, and a modified or deleted one is named in the report with the checkpoint's own restore command, because the checkpoint copied the unit's declared files aside and nothing else. A lockfile at the project root is the exception, and the only one: an install rewrites it, and a migration that adds packages makes it do exactly that. The exception is an exact root path, not a name at any depth, `src/pnpm-lock.yaml` is a file no install writes, so it fails the unit like any other undeclared write, and it exempts the lockfile from the refusal, not from the record: the unit report's changed files still name it.
 
@@ -21687,11 +21639,7 @@ What the scope puts back is read from the tree at the moment it fires, never fro
 
 `Archive.run` tells two kinds of source apart. A source the migration replaced moves to `.smithers-migrate/archive/<original path>`, in two phases: every copy is written before any source is removed. A source a 1.0 project keeps, `package.json`, `tsconfig*.json`, `.gitignore`, is rewritten where it is and never moved: old packages out, `effect` pinned to the version this release ships, `smithers up <file>` scripts rewritten to `smithers run <flow>` and a verb with no 1.0 counterpart reported rather than deleted, the JSX compiler options and old path mappings removed, `.flows/` ignored. A `dependencies` or `integration` unit archives nothing, because its files are the ones the migration edits. Tool code gets the agent's rule too: an archive whose source set reaches a run-state path fails with `run-state-blocked` rather than moving it.
 
-`MigrateFlow.postconditions` asks, after the archive, whether the project is in the state this kind of unit exists to produce. The content checks read the files a unit changed, so a unit that changed nothing passes all of them and used to be recorded as migrated on that basis. There is one set per kind, and a file a check needs has to be there: a workflow unit wrote the flow it was planned for; a dependencies or project unit's manifests still exist, declare no 0.x package in any of the six dependency fields, and pin `effect`; a project unit's tsconfigs still exist and configure no JSX runtime, and its root `.gitignore` exists and covers `.flows/` (the project unit owns it, as a source when the project has one and as a target it creates when it does not); an integration unit's sources still exist and no longer import the 0.x facade.
-
-The final tree is then verified as the final tree. `Verify.run` runs again over it, install, format, every typecheck, the tests, and registry discovery, and its result is the verification the unit report records; the whole-tree confinement check and the run-state check run again after it, because the archive and the verification both ran commands, and a file the unit owns under a run-state root (`.smithers/smithers.config.ts` beside `.smithers/smithers.db`) is the unit's to archive and is left out of the run-state comparison. Only then is the unit `migrated`; any failure restores it.
-
-Each unit writes its outcome to `<reportDir>/units/<readable id>-<16 hex of sha256(id)>.json`, so two ids that read alike (`workflow:a/b`, `workflow:a-b`) never share a file, and the artifact carries the id inside. `WriteReport` reads one artifact per planned unit, refuses one that cannot be decoded or was written for a different unit, and records a unit with no artifact as `failed` with a `no recorded outcome` entry, so an apply that lost a unit exits 1 rather than 0.
+`MigrateFlow.postconditions` is the last word before a unit is called `migrated`. The content checks read the files a unit changed, so a unit that changed nothing passes all of them and used to be recorded as migrated on that basis. The postconditions ask the opposite question, is the project now in the state this kind of unit exists to produce, and there is one set per kind: a workflow unit wrote the flow it was planned for; a dependencies or project unit's manifests declare no 0.x package and pin `effect`; a project unit's tsconfigs configure no JSX runtime and its ignore file covers `.flows/`; an integration unit's sources no longer import the 0.x facade.
 
 `Command.run` is the entry point the CLI verb, the `smithers-migrate` bin, and the durable control-plane launch share. `Command.registration` is the layer a durable host passes to `NodeRuntime`'s `registerFlows`, so `smithers plan migrate` / `approve` / `run` execute the same flow under the same journal.
 

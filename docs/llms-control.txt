@@ -26,7 +26,7 @@ store or the journal tables.
 | `Deny` | `target`, `scope`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | `List` | `flows \| runs` | `flows \| runs` |
 | `Plan` | `flowId`, `input`, `idempotencyKey` | `{ planId, flowId, digest, inputSummary, envelope, deployClass, plan, nodes, approval }` |
-| `Resume` | `runId`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
+| `Resume` | `runId`, `idempotencyKey`, `reason` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | `Run` | `Plan \| Resume` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | `Signal` | `runId`, `signal`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
 | `Steer` | `runId`, `message`, `idempotencyKey` | `Accepted \| AlreadyApplied \| Parked \| Conflict \| Terminal` |
@@ -45,7 +45,6 @@ writes.
 | `run-events` | `/projections/ws` |
 | `transcript` | `/projections/ws` |
 | `run-tree` | `/projections/ws` |
-| `plan-cards` | `/projections/ws` |
 | `approvals` | `/projections/ws` |
 | `node-output` | `/projections/ws` |
 
@@ -95,7 +94,9 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
 | `AlreadyResolved` | `already_resolved` |
+| `PlanNotFound` | `plan_not_found` |
 | `RunNotFound` | `run_not_found` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -134,6 +135,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -173,7 +175,9 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
 | `AlreadyResolved` | `already_resolved` |
+| `PlanNotFound` | `plan_not_found` |
 | `RunNotFound` | `run_not_found` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -199,7 +203,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 
 | Receipt | Fields |
 | --- | --- |
-| `flows` | `items`, `nextCursor` |
+| `flows` | `items`, `warnings`, `nextCursor` |
 | `runs` | `items`, `nextCursor` |
 
 ### Errors
@@ -207,6 +211,8 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | Error | Code |
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
+| `PlanNotFound` | `plan_not_found` |
+| `PlanDenied` | `plan_denied` |
 | `FlowNotFound` | `flow_not_found` |
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
@@ -219,6 +225,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `PersistenceError` | `persistence_failed` |
 | `LaunchFailed` | `launch_failed` |
 | `NoMatchingWait` | `no_matching_wait` |
+| `CredentialConflict` | `credential_conflict` |
 
 ---
 
@@ -279,6 +286,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- | --- |
 | `runId` | `string` | yes |
 | `idempotencyKey` | `string` | yes |
+| `reason` | `string` | no |
 
 ### Success
 
@@ -296,6 +304,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -332,9 +341,12 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | Error | Code |
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
+| `PlanNotFound` | `plan_not_found` |
+| `PlanDenied` | `plan_denied` |
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `LaunchFailed` | `launch_failed` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
@@ -374,6 +386,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `NoMatchingWait` | `no_matching_wait` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -411,6 +424,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | Error | Code |
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
