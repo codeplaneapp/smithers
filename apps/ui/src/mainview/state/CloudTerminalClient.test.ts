@@ -1,6 +1,9 @@
 /* The cloud-workspace terminal transport against a real WebSocket server. */
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test"
 import { createCloudTerminalClient, pageCloudSocketUrl } from "./CloudTerminalClient"
+
+// Real sockets on a loaded CI runner: the per-test ceiling follows the wait helper's.
+setDefaultTimeout(60_000)
 
 interface Harness {
   readonly url: string
@@ -54,7 +57,14 @@ const serve = (options: ServeOptions = {}): Harness => {
   return harness
 }
 
-const until = async (predicate: () => boolean, timeoutMs = 4000): Promise<void> => {
+/*
+ * Every wait here is on a real loopback WebSocket server, so the ceiling is
+ * generous: a two-core CI runner under load takes 7-10x longer to spawn and
+ * upgrade than this Mac (the "apps e2e" job timed three of these tests out at
+ * exactly 4 s in run 33651343176). A passing test never waits longer than it
+ * needs; only a failing one pays the ceiling.
+ */
+const until = async (predicate: () => boolean, timeoutMs = 30_000): Promise<void> => {
   const deadline = Date.now() + timeoutMs
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("condition did not pass")
