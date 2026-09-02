@@ -17,12 +17,19 @@ Continuation is whatever the link returns: `done` ends the chain, `to`
 authors the next link, `park` suspends the lineage with a typed reason.
 
 A **call** is the one door. Every effect a script performs is
-`ctx.call(name, payload)`, and every call settles as a journaled
+`ctx.call(name, payload)`. A call the gates ADMIT settles as a journaled
 `CallSettled` event keyed by `CallKey`: the link, the digest of the script
 that issued it, the ordinal within that link, and the digest of the entry's
-declaration. Editing one character of a script re-keys exactly the calls
-inside it and nothing else, which is why a script's digest is always the
-digest of its text. `Outcome.to` re-derives it and discards whatever the
+declaration. A call a gate REJECTS journals a `GateRejected` observation at
+that ordinal instead, and one that parks pending approval journals nothing at
+all, so resuming re-executes it. The author seat's shape gate is the one
+place both events share an ordinal: the rejection is journaled first and the
+raw reply is then settled as a marker, so a crash between the two resumes
+through the rejection rather than replaying the marker as a script.
+
+Editing one character of a script re-keys exactly the calls inside it and
+nothing else, which is why a script's digest is always the digest of its
+text. `Outcome.to` re-derives it and discards whatever the
 caller passed: scripts are model-authored, so a script chooses the text it
 hands on, never the replay identity that text is keyed by.
 
@@ -42,31 +49,44 @@ than serving a stale result.
 | 4. Authorization | `Authorize.authorize` | A call whose declared capabilities the host's policy denies, or parks pending approval. |
 
 A rejected call becomes a journaled `GateRejected` observation the next
-author reads, not a crash. The two exceptions are deliberate: a denied model
-seat propagates typed (routing around a denial by authoring again would burn
-tokens on a chain that cannot author), and a required approval parks the run
-in place WITHOUT a `LinkEnded`, so resuming re-executes the link from its
-settled prefix and re-asks the seam under whatever grant now exists.
+author reads, not a crash. Three exceptions are deliberate. A denied model
+seat propagates typed, because routing around a denial by authoring again
+would burn tokens on a chain that cannot author. A required approval parks
+the run in place WITHOUT a `LinkEnded`, so resuming re-executes the link from
+its settled prefix and re-asks the seam under whatever grant now exists. And
+a call rejected by gate 2's per-link budget parks the chain with a `quota`
+reason instead of authoring again: the observation is journaled, but the link
+is out of fuel, so there is no next author to read it.
 
 ## Failures
 
-Every failure is a tagged error with a stable `code`. Codes are part of the
-contract: a host branches on them, never on prose.
+Every failure the run's error channel carries is a tagged error with a stable
+`code`. Codes are part of the contract: a host branches on them, never on
+prose. `Catalog.CallError` is the one entry below that carries no `code` of
+its own — it is a host's failure, described by `name` and `message`, with an
+optional `cause` for the subsystem's own stable code.
 
-| Error                        | Codes                                                         | Reaches the caller when                                                                                                       |
-| ---------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `Chain.ChainError`           | `replay_divergence`, `invalid_journal`                        | The journal and the current program disagree. Never recoverable by re-authoring.                                              |
-| `Journal.JournalError`       | `journal_conflict`, `journal_unavailable`                     | The journal is unreachable, or another writer advanced this chain's scope.                                                    |
-| `Author.AuthorError`         | `exhausted`, `author_unavailable`                             | The model seat is out of budget or unreachable.                                                                               |
-| `Authorize.AuthorizeError`   | `denied`, `approval_required`, `authorize_unavailable`        | Gate 4's verdict. `denied` and `approval_required` are absorbed for catalog calls; `authorize_unavailable` always propagates. |
-| `Steering.SteeringError`     | `steering_unavailable`                                        | The steering channel is mounted but broken.                                                                                   |
-| `ScriptRunner.ScriptFailure` | `compile`, `runtime`, `invalid_outcome`, `runner_unavailable` | Absorbed into a `script_failed` observation, never propagated.                                                                |
-| `Catalog.CallError`          | host-supplied `cause`                                         | Absorbed into a `call_failed` observation, unless `cause` is `approval_required`, which parks.                                |
+| Error                        | Codes                                                         | Reaches the caller when                                                                                                                                                                                |
+| ---------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Chain.ChainError`           | `replay_divergence`, `invalid_journal`                        | The journal and the current program disagree. Never recoverable by re-authoring.                                                                                                                       |
+| `Journal.JournalError`       | `journal_conflict`, `journal_unavailable`                     | The journal is unreachable, or another writer advanced this chain's scope.                                                                                                                             |
+| `Author.AuthorError`         | `exhausted`, `author_unavailable`                             | The model seat is out of budget or unreachable.                                                                                                                                                        |
+| `Authorize.AuthorizeError`   | `denied`, `approval_required`, `authorize_unavailable`        | Gate 4's verdict. `denied` and `approval_required` are absorbed for catalog calls; `authorize_unavailable` always propagates.                                                                          |
+| `Steering.SteeringError`     | `steering_unavailable`                                        | The steering channel is mounted but broken.                                                                                                                                                            |
+| `ScriptRunner.ScriptFailure` | `compile`, `runtime`, `invalid_outcome`, `runner_unavailable` | Absorbed into a `script_failed` observation. It never reaches `Chain.run`'s error channel, but `QuickJsRunner.layer()` carries it: loading the WebAssembly module can fail while the layers are built. |
+| `Catalog.CallError`          | host-supplied `cause`                                         | Absorbed into a `call_failed` observation, unless `cause` is `approval_required`, which parks.                                                                                                         |
 
-A run therefore fails with a `ChainError`, a `JournalError`, an
-`AuthorError`, a `SteeringError`, or an `AuthorizeError`, and with nothing
-else. A script that fails, a handler that fails, and a value that will not
-serialize are all observations the model can route around.
+`Chain.run`'s error channel therefore carries a `ChainError`, a
+`JournalError`, an `AuthorError`, a `SteeringError`, or an `AuthorizeError`,
+and nothing else. A script that fails, a handler that fails, and a value
+that will not serialize are all observations the model can route around. A
+script's own `compile` failure is one of those observations, raised while the
+link runs.
+
+Building the layers is separate: `QuickJsRunner.layer()` carries a
+`ScriptFailure`, so a host that cannot load the QuickJS WebAssembly module —
+a browser CSP blocking it, say — fails with `runner_unavailable` while the
+runtime is constructed, before any run starts.
 
 ## Concurrency
 
@@ -86,9 +106,9 @@ Every default a caller silently inherits:
 
 | Limit                                   | Default                               | Where                                                    |
 | --------------------------------------- | ------------------------------------- | -------------------------------------------------------- |
-| Links per chain                         | 32                                    | `Chain.Options.maxLinks`                                 |
-| Calls per link                          | 64                                    | `Chain.Options.maxCallsPerLink`                          |
-| Sub-chain nesting depth                 | 4                                     | `SubChains.Options.maxDepth`                             |
+| Links per chain                         | 32                                    | `Chain.defaultMaxLinks`                                  |
+| Calls per link                          | 64                                    | `Chain.defaultMaxCallsPerLink`                           |
+| Sub-chain nesting depth                 | 4                                     | `SubChains.defaultMaxDepth`                              |
 | QuickJS realm memory                    | 64 MiB, floored at 256 KiB            | `QuickJsRunner.defaultLimits.memoryBytes`, `memoryFloor` |
 | QuickJS in-realm stack                  | 256 KiB, capped at 256 KiB            | `QuickJsRunner.defaultLimits.stackBytes`, `stackCeiling` |
 | QuickJS interrupt polls                 | 10000                                 | `QuickJsRunner.defaultLimits.steps`                      |
@@ -115,18 +135,24 @@ reading every property exactly once, so an accessor that answers differently
 on a second read cannot smuggle an unvalidated subtree across; and it turns
 every throw — a throwing accessor, a throwing proxy trap, a cycle, a depth
 or size overrun — into a refusal. A host handler returning something
-unserializable is a rejected call the script can observe, never a defect.
+unserializable is never a defect: at the runner boundary it rejects the
+script's own `ctx.call` promise, and inside `Chain.run` it is a `call_failed`
+observation that ends the attempt and hands the next author the reason.
 
 Copy semantics a caller must expect:
 
 - `undefined` is refused everywhere except as the whole value, where it
   becomes `null`. Array holes read as `undefined` and are refused too,
-  because `JSON.stringify` would rewrite them to `null` and this boundary
-  never changes a value it accepts.
+  because `JSON.stringify` would rewrite them to `null`.
 - Non-finite numbers (`NaN`, `Infinity`) are refused rather than rewritten.
-- A `toJSON` method is never called. A function is not a JSON value, so an
-  object carrying one is refused outright rather than serialized through
-  the hook.
+- `-0` crosses as `0`. It is the one accepted value the boundary normalizes,
+  because JSON cannot represent a negative zero and the QuickJS binding,
+  which encodes in-realm, already hands the host `0`. Every other accepted
+  value crosses unchanged.
+- A `toJSON` method is never called, however it is reached — own or
+  inherited. An ENUMERABLE function-valued property refuses the object
+  outright, because a function is not a JSON value; a non-enumerable or
+  inherited one is simply not part of the copy.
 - Non-plain prototypes are refused: a `Date`, a `Map`, a class instance.
 - Identity is not preserved. Two references to one object become two copies.
 
@@ -134,6 +160,25 @@ Both runner bindings apply this boundary to the outcome, the QuickJS one
 in-realm before its own `JSON.stringify` can rewrite the value. That is what
 keeps `done(NaN)` a typed `invalid_outcome` in production and not a silent
 `Done(null)`.
+
+The in-realm twin captures the `Object`, `Array`, `Number`, and `JSON`
+operations it uses, plus the error and promise constructors, into its closure
+before the script body runs. Reassigning a realm global therefore cannot
+change what the boundary accepts.
+
+Capture alone is not enough, because the realm's PROTOTYPES stay writable.
+`JSON.stringify` reads an inherited `toJSON`, so a copy that kept its
+prototype would be validated by the walk and then replaced by a hook the
+script installed on `Object.prototype` or `Array.prototype` — the host
+handler would receive a payload the boundary never saw, and `done([1, 2, 3])`
+would journal whatever the hook returned. Every container the in-realm copy
+is built from therefore carries no prototype at all, which is what makes "a
+`toJSON` method is never called" true however that method is reached.
+
+The host walk still runs over the decoded result afterwards: the realm check
+prevents realm-side rewriting, while the host check treats bridge output as
+untrusted and enforces the shared bounds, so the two checks are not
+redundant.
 
 ## Determinism
 

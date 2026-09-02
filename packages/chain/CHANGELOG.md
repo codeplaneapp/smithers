@@ -27,9 +27,16 @@ The version the manifest has carried since the package moved into
   `undefined` property, and a `toJSON` hook were silently rewritten by the
   QuickJS binding's own `JSON.stringify` and are now a typed
   `invalid_outcome` in both runners.
-- `Prompt.catalogBlock` truncates entry names at `Prompt.maxEntryName` (64)
-  and descriptions at `Prompt.maxEntryDescription` (200), strips backticks,
-  and drops a leading list or heading marker.
+- `Prompt.catalogBlock` advertises entry NAMES byte-identically or not at
+  all. A name that is not already one bounded line — longer than
+  `Prompt.maxEntryName` (64), carrying whitespace or a backtick, or failing
+  to survive the round trip a reader makes through a rendered line — is
+  omitted from the block rather than rewritten, because the model must read
+  the exact string `Catalog.lookup` accepts. Descriptions are still collapsed
+  to one line, stripped of backticks, and truncated at
+  `Prompt.maxEntryDescription` (200): collapsing a description to one line is
+  what makes a `#` or a fence inert. An entry named `-flag` still renders as
+  `-flag`.
 
 ### Added
 
@@ -50,6 +57,21 @@ The version the manifest has carried since the package moved into
 - `QuickJsRunner.Limits.stackBytes`, defaulting to `stackCeiling`
   (256 KiB).
 - `ScriptRunner.maxJsonDepth` (128) and `ScriptRunner.maxJsonSize` (8 MiB).
+- `Chain.defaultMaxLinks` (32), `Chain.defaultMaxCallsPerLink` (64), and
+  `SubChains.defaultMaxDepth` (4). The budgets a caller silently inherits
+  were literals buried in the implementation.
+- `Prompt.renderableName`, the predicate deciding which entry names the
+  catalog block can advertise verbatim.
+- `QuickJsRunner.decodeCallInput` and `QuickJsRunner.dispatchBridgeCall`, the
+  two host-side bridge gates, named so the suite can drive their fail-closed
+  paths directly rather than only through a hardened realm.
+- Package-owned documentation generation: `BUILD.ts` declares the seven
+  standard targets plus a `docsPages` Generate target, `Package.ts` declares
+  which surfaces the package owns, and `scripts/docs.mjs` writes
+  `docs/exports.md` from the JSDoc. `--check` drift-checks it, which is what
+  `//packages/chain:docsPages` runs under the `lint` verb, what
+  `scripts/check-docs.mjs` discovers and runs, and what `test/Docs.test.ts`
+  asserts. Member-level API drift had no gate before this.
 
 ### Fixed
 
@@ -87,6 +109,75 @@ The version the manifest has carried since the package moved into
   cannot move the advertised catalog away from the dispatched one.
 - The QuickJS bridge's host-side `JSON.stringify` could throw inside a
   synchronous realm callback. It settles a refusal instead.
+- The QuickJS realm's own encoder validated a value in place and then
+  stringified the ORIGINAL, so the second read decided what actually
+  crossed: a changing accessor, a non-enumerable `toJSON` hook, and an array
+  hole all behaved differently from the in-process binding, and neither the
+  depth nor the size bound applied to a production outcome. It now builds
+  the same validated copy the host walk builds, and the parsed outcome
+  crosses `jsonBoundary` host-side as well.
+- `ScriptRunner.jsonBoundary` built its copy with plain assignment, so an own
+  `__proto__` key — which any value made with `Object.create(null)` can
+  carry, and which the prototype check admits by design — reached
+  `Object.prototype`'s setter: the key vanished and the copy's PROTOTYPE
+  became an object the walk had validated as data. Properties are defined
+  now, not assigned, in both the host walk and the realm's.
+- `Authorize.layerRules` applied an `ask` rule only when it could be proven
+  to cover the whole of a wildcard claim, so a broad `allow` skipped a
+  narrower later `ask` and the operator was never prompted. `ask` restricts
+  exactly as `deny` does and now fires unless it is provably disjoint.
+- `QuickJsRunner`'s defect boundary absorbed defects raised by the CALLER'S
+  handler as well as the realm's own. `SubChains` deliberately turns a
+  failing child run into a defect so the parent dies un-settled; under
+  QuickJS that became a journaled script failure the parent authored around,
+  unlike `layerInProcess`. Handler defects are re-raised unchanged.
+- `jsonBoundary` returned `-0` unchanged where the QuickJS binding, which
+  encodes in-realm, hands the host `0`. JSON has no negative zero, so it now
+  crosses as `0` in both bindings.
+- The QuickJS prelude resolved the boundary's intrinsics from mutable realm
+  globals at call time, so a script could reassign one and rewrite what the
+  boundary accepts: `Number.isFinite = () => true; return done(NaN)`
+  journaled `Done(null)` in production while every in-process test reported
+  `invalid_outcome`. The prelude now captures the `Object`, `Array`,
+  `Number`, and `JSON` operations it uses, plus the error and promise
+  constructors, into its closure before the script body runs, and walks its
+  own arrays by index rather than through `Array.prototype`.
+- `Authorize.layerRules` let a later, narrower `ask` erase a `deny` that
+  still covered the rest of a wildcard claim: `[deny fs:read:secret/**,
+  ask fs:read:secret/public]` answered `approval_required` for the claim
+  `fs:read:secret/**`, although `Permission.evaluate` denies the member
+  `secret/private`. A rule that provably covers the whole claim is still
+  last-match-wins; a `deny` or `ask` that may cover only part of it can now
+  only RAISE the verdict.
+- `QuickJsRunner` invoked the caller's handler outside the effect its
+  handler-defect guard wraps, so a handler that threw BEFORE returning its
+  `Effect` became a typed `runtime` script failure under QuickJS and a defect
+  under `layerInProcess`. The invocation is suspended into the guarded effect
+  now, and both bindings let the caller's defect kill the run.
+- `Catalog.make` froze the entries array but retained the caller's entry
+  OBJECTS, so renaming one after construction still split the advertised
+  catalog from the dispatched one: the block advertised the new name,
+  `lookup` still answered to the old one, and neither matched. The
+  declaration fields are copied and frozen now — including `capabilities` —
+  while the handler stays by reference.
+- Capturing the QuickJS boundary's intrinsics was not enough on its own,
+  because the realm's PROTOTYPES stayed writable and `JSON.stringify` reads
+  an inherited `toJSON`. The realm validated a value and then serialized
+  whatever a script-installed hook returned instead:
+  `Object.prototype.toJSON = () => ({ forged: true })` made a handler
+  receive `{ forged: true }` in place of the payload the boundary had
+  approved, and `Array.prototype.toJSON = () => "FORGED"` journaled
+  `done([1, 2, 3])` as `Done("FORGED")` — laundering the in-process binding
+  refuses, since it never stringifies. Every container the in-realm copy is
+  built from now carries no prototype, so there is no `toJSON` to find.
+- `Prompt.catalogBlock` advertised an entry named `—` as `- — — description`,
+  whose first separator falls before the name rather than after it, because
+  the bullet contributes a space of its own. A reader splitting that line
+  recovers the empty string and calls something the catalog does not carry.
+  `Prompt.renderableName` now checks that round trip against the renderer
+  itself rather than against a hand-derived character rule, so the one name
+  the separator swallows is omitted while a name that merely contains an em
+  dash, like `flows—build`, still renders.
 
 ### Changed
 

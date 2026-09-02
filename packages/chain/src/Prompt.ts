@@ -11,10 +11,11 @@
  * The catalog block renders what the chain actually dispatches: names
  * dedupe last-wins exactly like `Catalog.make`'s lookup, an entry named
  * `author` is filtered (the trampoline intercepts that name before the
- * catalog), and names/descriptions are collapsed to single lines so no
- * entry can inject structure into the prefix. `forCatalog` assembles from
- * a mounted catalog service, keeping the advertised block and the
- * dispatched entries the same by construction.
+ * catalog), names are advertised byte-identically or omitted, and
+ * descriptions are collapsed to single lines so no entry can inject
+ * structure into the prefix. `forCatalog` assembles from a mounted catalog
+ * service, keeping the advertised block and the dispatched entries the same
+ * by construction.
  *
  * @since 0.1.0
  */
@@ -69,13 +70,55 @@ export const rules = sections.rules
 export const contract = sections.contract
 
 /**
- * The longest entry name the catalog block renders.
+ * The longest entry name the catalog block will advertise. An entry above
+ * this bound is omitted rather than shortened, because advertised names must
+ * stay byte-identical to what `Catalog.lookup` dispatches.
  *
  * @category constants
  * @since 0.1.0
  * @slop
  */
 export const maxEntryName = 64
+
+/** What every catalog line opens with, before the entry's name. */
+const bullet = "- "
+
+/**
+ * What divides an entry's name from its description. It is the only
+ * structure a catalog line has, so it is also what a reader splits on.
+ */
+const separator = " — "
+
+/** One catalog line, and the only place its shape is written down. */
+const line = (name: string, description: string): string => `${bullet}${name}${separator}${description}`
+
+/**
+ * Whether a name can be advertised verbatim on one bounded line.
+ *
+ * A name is rendered byte-identically or not at all, so the only names the
+ * block can carry are the ones that already are one bounded line: no
+ * whitespace to forge a section break, no backtick to open a span, and
+ * within {@link maxEntryName}. Everything else is a name the model could
+ * read but `Catalog.lookup` would refuse.
+ *
+ * The last clause is the round trip itself rather than a rule derived from
+ * it: a reader recovers a call name by splitting a line at its FIRST
+ * separator, so the name is renderable only when that first separator is the
+ * real one. Deriving it from {@link line} keeps the predicate and the
+ * renderer from drifting. The bullet contributes a space of its own, which
+ * is what makes an entry named `—` — and only that one — render as
+ * `- — — description`, whose first ` — ` sits before the name: a reader
+ * splitting there recovers the empty string and calls something the catalog
+ * does not carry. A name that merely CONTAINS an em dash, like `flows—build`,
+ * still round-trips and is still advertised.
+ *
+ * @category assembly
+ * @since 0.1.0
+ * @slop
+ */
+export const renderableName = (name: string): boolean =>
+  name.length > 0 && name.length <= maxEntryName && !/[\s`]/.test(name) &&
+  line(name, "").indexOf(separator) === bullet.length + name.length
 
 /**
  * The longest entry description the catalog block renders.
@@ -91,17 +134,24 @@ export const maxEntryName = 64
 export const maxEntryDescription = 200
 
 /**
- * Collapses one declaration field to a single bounded line.
+ * Collapses one entry description to a single bounded line.
  *
- * Entry text is the least-trusted string in the prefix. Whitespace
- * collapsing defeats newline-based section forgery; stripping backticks and
- * a leading list or heading marker stops an entry from opening a code fence
- * or a rival section inside its own bullet; and the length cap bounds how
- * much of the prefix one entry can occupy. Truncation is marked so a
- * shortened line never reads as the whole declaration.
+ * Descriptions are the least-trusted strings in the prefix:
+ * registry-discovered entries carry them from repository files. Three
+ * defences, and deliberately no more. Whitespace collapsing defeats
+ * newline-based section forgery, and it is what makes a `#` or a fence
+ * harmless — both land mid-line, where they open nothing. Backticks come out
+ * because a one-line description has no use for them. The length cap bounds
+ * how much of the context window one entry can claim, and truncation is
+ * marked so a shortened line never reads as the whole declaration.
+ *
+ * Names are treated differently: advertise-what-you-dispatch requires the
+ * model to read the exact string `Catalog.lookup` accepts. An unrenderable
+ * name is dropped because not advertising a dispatchable call is safe, while
+ * advertising a rewritten call that gate 3 then refuses is not.
  */
-const inline = (text: string, limit: number): string => {
-  const flat = text.replaceAll(/\s+/g, " ").replaceAll("`", "").replace(/^[\s#>*+-]+/, "").trim()
+const inlineDescription = (description: string, limit: number): string => {
+  const flat = description.replaceAll(/\s+/g, " ").replaceAll("`", "").trim()
   return flat.length <= limit ? flat : `${flat.slice(0, limit - 3)}...`
 }
 
@@ -109,7 +159,8 @@ const inline = (text: string, limit: number): string => {
  * Renders the catalog as a byte-stable block: the author entry pinned
  * first, then every dispatchable entry sorted by name — deduped
  * last-wins to mirror `Catalog.make`, the reserved author name filtered,
- * and every line collapsed to one bounded line.
+ * with names advertised verbatim or omitted and descriptions collapsed to
+ * one bounded line.
  *
  * @category assembly
  * @since 0.1.0
@@ -118,19 +169,20 @@ const inline = (text: string, limit: number): string => {
 export const catalogBlock = (entries: ReadonlyArray<Catalog.Entry>): string => {
   const dispatchable = new Map<string, Catalog.Entry>()
   for (const entry of entries) {
+    if (!renderableName(entry.name)) continue
     if (entry.name === AuthorDeclaration.authorName) continue
     dispatchable.set(entry.name, entry)
   }
   // Names are unique after the dedupe, so the comparator never sees equals.
   const lines = [...dispatchable.values()]
     .sort((left, right) => left.name < right.name ? -1 : 1)
-    .map((entry) => `- ${inline(entry.name, maxEntryName)} — ${inline(entry.description, maxEntryDescription)}`)
+    .map((entry) => line(entry.name, inlineDescription(entry.description, maxEntryDescription)))
   return [
     "# Catalog",
     "",
     "The calls available to `ctx.call`:",
     "",
-    `- ${AuthorDeclaration.authorName} — ${AuthorDeclaration.authorDescription}`,
+    line(AuthorDeclaration.authorName, AuthorDeclaration.authorDescription),
     ...lines
   ].join("\n")
 }

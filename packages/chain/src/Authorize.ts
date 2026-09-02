@@ -185,10 +185,22 @@ const mayOverlap = (rule: Capability.CapabilityPattern, claim: Capability.Capabi
   actionsMayOverlap(rule.action, claim.action) && resourcesMayOverlap(rule.resource, claim.resource)
 
 /**
+ * How restrictive an effect is. A rule that covers only PART of a claimed
+ * set can raise the verdict for that part, and nothing narrower than the
+ * whole set can lower it again: a later `ask` over `secret/public` must not
+ * erase a `deny` that still covers `secret/private`.
+ */
+const restriction: Record<Permission.RuleEffect, number> = { allow: 0, ask: 1, deny: 2 }
+
+/**
  * Evaluates one wildcard claim, which names a set of capabilities rather
- * than a single one. An `allow` must PROVE it covers the whole set; a
- * `deny` fires unless it is provably disjoint from it. Matching rules are
- * last-match-wins, exactly as `Permission.evaluate` orders them.
+ * than a single one.
+ *
+ * A rule that PROVABLY covers the whole claim is the last word for every
+ * member, so whole-set matches are last-match-wins exactly as
+ * `Permission.evaluate` orders rules for one capability. A `deny` or `ask`
+ * that only may overlap part of the claim can only raise the verdict; it
+ * cannot lower a restriction that still governs another member.
  */
 const evaluatePattern = (
   rules: ReadonlyArray<Permission.Rule>,
@@ -196,10 +208,18 @@ const evaluatePattern = (
 ): Permission.RuleEffect => {
   let verdict: Permission.RuleEffect = "ask"
   for (const rule of rules) {
-    const applies = rule.effect === "deny"
-      ? mayOverlap(rule.pattern, claim)
-      : Capability.subsumes(rule.pattern, claim)
-    if (applies) {
+    if (Capability.subsumes(rule.pattern, claim)) {
+      // The rule covers every member of the claim, so it is the last word for
+      // all of them: last-match-wins, exactly as `Permission.evaluate` orders
+      // rules for one concrete capability.
+      verdict = rule.effect
+      continue
+    }
+    // An `allow` that cannot prove it covers the whole set grants nothing.
+    if (
+      rule.effect !== "allow" && mayOverlap(rule.pattern, claim) &&
+      restriction[rule.effect] > restriction[verdict]
+    ) {
       verdict = rule.effect
     }
   }
@@ -211,15 +231,17 @@ const evaluatePattern = (
  * by `@smthrs/capability`'s own `Permission.evaluate`, so a host reusing its
  * kernel ruleset gets the same verdict from both engines. A claim that names
  * a SET — a family action or a resource glob — is decided pattern-to-pattern
- * instead, since `evaluate` takes one concrete capability: an `allow` must
- * subsume the whole set, and a `deny` fires unless it is provably disjoint
- * from it, so an undecidable deny never falls through to a later allow.
+ * instead, since `evaluate` takes one concrete capability. A rule that
+ * subsumes the whole set is last-match-wins; a `deny` or `ask` that may cover
+ * only part of the set can only raise the verdict, so an undecidable
+ * restriction never erases or falls through another member's restriction.
  *
  * Two orderings, deliberately distinct. Across a REQUEST'S CLAIMS `deny`
  * beats `ask` beats `allow`: any denied claim refuses the call and any
- * asking claim outranks an allowed one. Across RULES the last match wins,
- * which is what `Permission.evaluate` documents and implements, so a later
- * allow does override an earlier deny.
+ * asking claim outranks an allowed one. Across RULES a whole-set match wins
+ * outright, while a partial restricting match only raises the verdict. Thus
+ * a later whole-set allow can override an earlier partial deny, but a later
+ * narrow ask cannot erase a deny that still covers the rest of the claim.
  *
  * An unmatched or unparseable claim asks — the kernel's conservative
  * posture.

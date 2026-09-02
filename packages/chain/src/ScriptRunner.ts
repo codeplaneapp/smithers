@@ -214,8 +214,11 @@ export const jsonBoundary = (
     if (seen.has(candidate)) throw refused
     seen.add(candidate)
     if (Array.isArray(candidate)) {
+      // Read once: the doc promise is that no property is read twice, and a
+      // proxy over an array can answer `length` differently each time.
+      const length = candidate.length
       const copied: Array<unknown> = []
-      for (let index = 0; index < candidate.length; index = index + 1) {
+      for (let index = 0; index < length; index = index + 1) {
         copied.push(copy(candidate[index], depth + 1))
       }
       seen.delete(candidate)
@@ -226,7 +229,18 @@ export const jsonBoundary = (
     const copied: Record<string, unknown> = {}
     for (const key of Object.keys(candidate)) {
       spend(key.length)
-      copied[key] = copy((candidate as Record<string, unknown>)[key], depth + 1)
+      // Defined, never assigned. `copied.__proto__ = x` invokes the setter
+      // Object.prototype inherits: the key would silently vanish from the
+      // copy and the copy's PROTOTYPE would become an object this walk
+      // validated as data. An own `__proto__` reaches here from any value
+      // built with `Object.create(null)`, which the prototype check above
+      // admits by design.
+      Object.defineProperty(copied, key, {
+        configurable: true,
+        enumerable: true,
+        value: copy((candidate as Record<string, unknown>)[key], depth + 1),
+        writable: true
+      })
     }
     seen.delete(candidate)
     return copied

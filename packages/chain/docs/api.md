@@ -54,13 +54,23 @@ mounted.
 import { Catalog, Chain, Journal, ModelAuthor, QuickJsRunner } from "@smthrs/chain"
 import { Effect, Layer } from "effect"
 
+// `ModelAuthor.layer` needs `Model.Model`, and `Layer.mergeAll` does not
+// satisfy one sibling from another: the model layer goes UNDER the author
+// layer, not beside it.
+const author = ModelAuthor.layer(authorConfig).pipe(Layer.provide(modelLayer))
+
 const layers = Layer.mergeAll(
   Journal.layerMemory(),
-  ModelAuthor.layer(authorConfig),
+  author,
   QuickJsRunner.layer(),
   Catalog.layer(Catalog.withSystem(hostEntries))
 )
 
+// `QuickJsRunner.layer()` carries a `ScriptFailure` error, so the composed
+// program can also fail with `runner_unavailable` while the layers are being
+// built — before any run starts. Compiling the WebAssembly module is the
+// thing that can fail (a browser CSP blocking WebAssembly, say), and that is
+// a typed, retryable unavailability rather than a defect.
 const terminal = await Effect.runPromise(
   Chain.run({ goal: "fix the failing test" }).pipe(Effect.provide(layers))
 )

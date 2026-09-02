@@ -29,6 +29,8 @@ const denyWrite = new Rule({ effect: "deny", pattern: pattern("fs:write", "**") 
 const allowSrc = new Rule({ effect: "allow", pattern: pattern("fs:read", "src/**") })
 const denyVendor = new Rule({ effect: "deny", pattern: pattern("fs:read", "vendor/*") })
 const denySecret = new Rule({ effect: "deny", pattern: pattern("fs:write", "secret") })
+const askSecret = new Rule({ effect: "ask", pattern: pattern("fs:read", "secret/*") })
+const askExactSecret = new Rule({ effect: "ask", pattern: pattern("fs:read", "secret") })
 
 /** The seam's verdict for one claim, in `Permission.evaluate`'s vocabulary. */
 const verdictOf = (
@@ -45,6 +47,23 @@ const verdictOf = (
         "/chain/AuthorizeError",
         (error) => Effect.succeed(error.code === "denied" ? "deny" as const : "ask" as const)
       ),
+      Effect.provide(Authorize.layerRules(rules)),
+      Effect.orDie
+    )
+  )
+
+/** The seam's direct success or stable error code for one claim. */
+const seamOutcomeOf = (
+  rules: ReadonlyArray<Rule>,
+  claim: string
+): Promise<"allowed" | "approval_required" | "authorize_unavailable" | "denied"> =>
+  Effect.runPromise(
+    Effect.flatMap(
+      Authorize.Authorize,
+      (seam) => seam.authorize({ capabilities: [claim], name: "probe", slot: { chain: "", link: 0, ordinal: 0 } })
+    ).pipe(
+      Effect.as("allowed" as const),
+      Effect.catchTag("/chain/AuthorizeError", (error) => Effect.succeed(error.code)),
       Effect.provide(Authorize.layerRules(rules)),
       Effect.orDie
     )
@@ -337,6 +356,46 @@ describe("Authorize", () => {
     expect(await verdictOf([allowRead, denyMiddleStar], "fs:read:a/b/**")).toBe("deny")
   })
 
+  it("keeps a whole-set deny when a later ask covers only part of the claim", async () => {
+    const denySecretTree = new Rule({ effect: "deny", pattern: pattern("fs:read", "secret/**") })
+    const askPublic = new Rule({ effect: "ask", pattern: pattern("fs:read", "secret/public") })
+    // `secret/private` is still denied by Permission.evaluate, even though
+    // the later rule asks for the distinct `secret/public` member.
+    expect(await seamOutcomeOf([denySecretTree, askPublic], "fs:read:secret/**")).toBe("denied")
+  })
+
+  it("lets the later ask decide its exact public capability", async () => {
+    const denySecretTree = new Rule({ effect: "deny", pattern: pattern("fs:read", "secret/**") })
+    const askPublic = new Rule({ effect: "ask", pattern: pattern("fs:read", "secret/public") })
+    expect(await seamOutcomeOf([denySecretTree, askPublic], "fs:read:secret/public"))
+      .toBe("approval_required")
+  })
+
+  it("lets a later whole-set allow override a partial deny", async () => {
+    const partialDeny = new Rule({ effect: "deny", pattern: pattern("fs:read", "a/*/x") })
+    expect(await seamOutcomeOf([partialDeny, allowRead], "fs:read:a/b/**")).toBe("allowed")
+  })
+
+  it("lets a later partial deny raise a whole-set allow", async () => {
+    expect(await seamOutcomeOf([allowRead, denyMiddleStar], "fs:read:a/b/**")).toBe("denied")
+  })
+
+  it("lets a later partial ask raise a whole-set allow", async () => {
+    const partialAsk = new Rule({ effect: "ask", pattern: pattern("fs:read", "a/*/x") })
+    expect(await seamOutcomeOf([allowRead, partialAsk], "fs:read:a/b/**")).toBe("approval_required")
+  })
+
+  it("does not let a partial ask lower an existing deny", async () => {
+    const denyTree = new Rule({ effect: "deny", pattern: pattern("fs:read", "a/**") })
+    const partialAsk = new Rule({ effect: "ask", pattern: pattern("fs:read", "a/*/x") })
+    expect(await seamOutcomeOf([denyTree, partialAsk], "fs:read:a/b/**")).toBe("denied")
+  })
+
+  it("ignores a provably disjoint deny after a whole-set allow", async () => {
+    const disjoint = new Rule({ effect: "deny", pattern: pattern("fs:write", "/etc/*") })
+    expect(await seamOutcomeOf([allowRead, disjoint], "fs:read:repo/**")).toBe("allowed")
+  })
+
   it("compares literal resources exactly when a family claim carries one", async () => {
     // `fs:*:secret` names a set of actions but one exact resource, so the
     // pattern path decides it: two literals overlap only when they are equal.
@@ -355,6 +414,17 @@ describe("Authorize", () => {
     // in the other direction: the seam must not read "the rule does not
     // subsume this claim" as "the rule does not apply".
     expect(await verdictOf([allowAll, denySecret], "*")).toBe("deny")
+  })
+
+  it("does not let a broad allow skip a later ask rule it cannot be proven to cover", async () => {
+    // `ask` restricts, exactly as `deny` does: an operator who gated
+    // `secret/*` must not be bypassed because `subsumes` cannot prove that
+    // rule covers a claim of `secret/x/**`.
+    expect(await verdictOf([allowRead, askSecret], "fs:read:secret/x/**")).toBe("ask")
+    // The broadest claim there is, gated by the narrowest rule there is.
+    expect(await verdictOf([allowRead, askExactSecret], "fs:read:**")).toBe("ask")
+    // Provable disjointness still lets the allow stand.
+    expect(await verdictOf([allowRead, askSecret], "fs:read:public/**")).toBe("allow")
   })
 
   it("still allows a wildcard claim when the deny rule is provably disjoint", async () => {

@@ -8,7 +8,7 @@
  * catalog entries, journaled like any call — and the only bridge out is
  * `ctx.call`. The same single-file variant runs unmodified on Node and in
  * a browser. Adapted from the cell loop's QuickJS binding
- * (`docs/specs/Concepts/Chain Harness Build.md`, PR 3).
+ * (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */
@@ -92,31 +92,93 @@ export const defaultLimits: Required<Limits> = {
  * from the global object.
  */
 const prelude = `(function () {
+  // Capture every boundary intrinsic before the script can replace a realm
+  // global. Otherwise a script that reassigns Number.isFinite can make
+  // done(NaN) become a journaled Done(null) in production while every
+  // in-process test reports invalid_outcome. Capturing is only half of it:
+  // the copies these intrinsics build carry no prototype either, because
+  // JSON.stringify reads an inherited "toJSON" and a realm prototype is
+  // writable from the script (see copyJson).
+  var intrinsicGetPrototypeOf = Object.getPrototypeOf
+  var intrinsicObjectKeys = Object.keys
+  var intrinsicDefineProperty = Object.defineProperty
+  var intrinsicObjectPrototype = Object.prototype
+  var intrinsicCreate = Object.create
+  var intrinsicSetPrototypeOf = Object.setPrototypeOf
+  var intrinsicIsArray = Array.isArray
+  var intrinsicIsFinite = Number.isFinite
+  var intrinsicStringify = JSON.stringify
+  var intrinsicParse = JSON.parse
+  var IntrinsicTypeError = TypeError
+  var IntrinsicError = Error
+  var IntrinsicPromise = Promise
+  var intrinsicPromiseReject = IntrinsicPromise.reject.bind(IntrinsicPromise)
   var bridge = globalThis.__call
-  var check = function (value) {
-    var seen = []
-    var visit = function (value) {
-      if (value === null || typeof value === "string" || typeof value === "boolean") return
-      if (typeof value === "number" && Number.isFinite(value)) return
-      if (typeof value !== "object") throw new TypeError("not JSON-serializable")
-      if (seen.indexOf(value) >= 0) throw new TypeError("not JSON-serializable")
-      var prototype = Object.getPrototypeOf(value)
-      if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-        throw new TypeError("not JSON-serializable")
-      }
-      seen.push(value)
-      Object.keys(value).forEach(function (key) { visit(value[key]) })
-      seen.pop()
+  var maxDepth = ${ScriptRunner.maxJsonDepth}
+  // The in-realm twin of ScriptRunner.jsonBoundary, and it must stay a
+  // twin: whatever the two bindings disagree about is a value that behaves
+  // one way in production and another in every in-process test. It BUILDS a
+  // copy rather than validating in place, for the reason the host does —
+  // stringifying the original would read every accessor a second time, so a
+  // getter that changed its answer, or a toJSON hook, would decide what
+  // actually crossed. Array holes are read by index and refused; JSON has
+  // no hole and rewriting one to null would change an accepted value.
+  var copyJson = function (value, depth, seen) {
+    if (depth > maxDepth) throw new IntrinsicTypeError("not JSON-serializable")
+    if (value === null || typeof value === "string" || typeof value === "boolean") return value
+    if (typeof value === "number") {
+      if (!intrinsicIsFinite(value)) throw new IntrinsicTypeError("not JSON-serializable")
+      return value === 0 ? 0 : value
     }
-    visit(value)
+    if (typeof value !== "object") throw new IntrinsicTypeError("not JSON-serializable")
+    for (var seenIndex = 0; seenIndex < seen.length; seenIndex++) {
+      if (seen[seenIndex] === value) throw new IntrinsicTypeError("not JSON-serializable")
+    }
+    var prototype = intrinsicGetPrototypeOf(value)
+    var isArray = intrinsicIsArray(value)
+    if (!isArray && prototype !== intrinsicObjectPrototype && prototype !== null) {
+      throw new IntrinsicTypeError("not JSON-serializable")
+    }
+    seen[seen.length] = value
+    var copied
+    // Every container the copy is built from is detached from its prototype.
+    // Capturing JSON.stringify is not enough on its own: stringify consults
+    // an INHERITED "toJSON", so a script that assigns one to Object.prototype
+    // or Array.prototype would otherwise replace the validated copy with
+    // whatever that hook returns — the host handler would receive a payload
+    // the boundary never saw, and done([1,2,3]) would journal Done("what the
+    // hook said"). A prototype-less copy has no toJSON to find.
+    if (isArray) {
+      copied = []
+      intrinsicSetPrototypeOf(copied, null)
+      var length = value.length
+      for (var index = 0; index < length; index++) {
+        copied[copied.length] = copyJson(value[index], depth + 1, seen)
+      }
+    } else {
+      copied = intrinsicCreate(null)
+      var keys = intrinsicObjectKeys(value)
+      for (var k = 0; k < keys.length; k++) {
+        // Defined, not assigned. The prototype-less copy above already
+        // denies "__proto__" its inherited setter, and defining rather than
+        // assigning keeps that true of any container this walk ever builds.
+        intrinsicDefineProperty(copied, keys[k], {
+          configurable: true,
+          enumerable: true,
+          value: copyJson(value[keys[k]], depth + 1, seen),
+          writable: true
+        })
+      }
+    }
+    seen.length = seen.length - 1
+    return copied
   }
   var encodeInput = function (input) {
     try {
-      check(input)
+      return intrinsicStringify(copyJson(input, 0, []))
     } catch (error) {
-      throw new TypeError("ctx.call input must be JSON-serializable")
+      throw new IntrinsicTypeError("ctx.call input must be JSON-serializable")
     }
-    return JSON.stringify(input)
   }
   // The outcome crosses the same gate as a call payload, in the realm that
   // produced it. Without this the wrapper's own JSON.stringify would
@@ -127,11 +189,10 @@ const prelude = `(function () {
   // between "not JSON" and "not an outcome".
   globalThis.__encodeOutcome = function (value) {
     try {
-      check(value)
+      return intrinsicStringify(copyJson(value, 0, []))
     } catch (error) {
       return null
     }
-    return JSON.stringify(value)
   }
   delete globalThis.__call
   delete globalThis.Date
@@ -139,18 +200,18 @@ const prelude = `(function () {
   globalThis.ctx = Object.freeze({
     call: function (name, input) {
       if (typeof name !== "string") {
-        return Promise.reject(new TypeError("ctx.call expects a call name as its first argument"))
+        return intrinsicPromiseReject(new IntrinsicTypeError("ctx.call expects a call name as its first argument"))
       }
       var encoded
       try {
         encoded = encodeInput(input === undefined ? null : input)
       } catch (error) {
-        return Promise.reject(error)
+        return intrinsicPromiseReject(error)
       }
       return bridge(name, encoded).then(function (encoded) {
-        var settled = JSON.parse(encoded)
+        var settled = intrinsicParse(encoded)
         if (settled.ok) return settled.value
-        var error = new Error(settled.message)
+        var error = new IntrinsicError(settled.message)
         error.name = "CallError"
         throw error
       })
@@ -184,6 +245,99 @@ interface Pending {
   readonly payload: unknown
   readonly settle: (payload: unknown) => void
   readonly refusal?: string | undefined
+}
+
+/**
+ * Carries a defect raised by the CALLER'S handler past the realm's own
+ * defect boundary.
+ *
+ * That boundary exists for the WebAssembly module's aborts. A defect from
+ * the handler is the host's, not the realm's, and the two must not be
+ * confused: `SubChains` deliberately turns a failing child run into a
+ * defect so the parent dies un-settled and can resume at the child's
+ * settled prefix. Absorbing it into a journaled script failure would break
+ * that contract and make the two runner bindings disagree about what kills
+ * a run.
+ */
+class HandlerDefect {
+  readonly defect: unknown
+  constructor(defect: unknown) {
+    this.defect = defect
+  }
+}
+
+/**
+ * Applies the host JSON boundary to one call input encoded by the realm.
+ *
+ * Captured in-realm intrinsics are the first defence, but the host still
+ * treats their output as untrusted. Keeping this small gate named also lets
+ * the suite exercise malformed text that a hardened realm cannot emit.
+ *
+ * @category gates
+ * @since 0.1.0
+ * @slop
+ */
+export const decodeCallInput = (
+  encoded: string
+): { readonly payload: unknown; readonly refusal?: string | undefined } => {
+  try {
+    const payload = ScriptRunner.jsonBoundary(JSON.parse(encoded))
+    return payload._tag === "Refused"
+      ? { payload: null, refusal: "ctx.call input must be JSON-serializable" }
+      : { payload: payload.value }
+  } catch {
+    return { payload: null, refusal: "ctx.call input must be JSON-serializable" }
+  }
+}
+
+/**
+ * Dispatches one queued realm call or settles its host-side input refusal.
+ *
+ * The refusal path is defence in depth: captured intrinsics prevent authored
+ * code from producing it, while the host boundary must still fail closed if
+ * the realm bridge ever hands it malformed text.
+ *
+ * @category gates
+ * @since 0.1.0
+ * @slop
+ */
+export const dispatchBridgeCall = <E>(
+  next: Pending,
+  pending: Array<Pending>,
+  handler: (request: ScriptRunner.Request) => Effect.Effect<unknown, E>
+): Effect.Effect<void, E> => {
+  if (next.refusal !== undefined) {
+    return Effect.sync(() => next.settle({ message: next.refusal, ok: false }))
+  }
+  // `Effect.suspend` makes the invocation itself part of the guarded effect.
+  // A handler that throws before returning its Effect is still the caller's
+  // defect, and both runner bindings must let it kill the run identically.
+  return Effect.suspend(() => handler({ name: next.name, payload: next.payload })).pipe(
+    Effect.tapError(() =>
+      Effect.sync(() => {
+        // A failed handler aborts the run; queued calls settle as aborted so
+        // the realm holds no dangling promises when the scope disposes it.
+        next.settle({ message: "the link was aborted", ok: false })
+        for (const stale of pending.splice(0)) {
+          stale.settle({ message: "the link was aborted", ok: false })
+        }
+      })
+    ),
+    Effect.catchDefect((defect) => Effect.die(new HandlerDefect(defect))),
+    Effect.flatMap((result) =>
+      Effect.sync(() => {
+        // A handler result crosses the same JSON boundary as the in-process
+        // binding; refusing here also keeps the host-side stringify in
+        // settle() total.
+        const resultBoundary = ScriptRunner.jsonBoundary(result)
+        if (resultBoundary._tag === "Refused") {
+          next.settle({ message: `the "${next.name}" call result is not JSON-serializable`, ok: false })
+        } else {
+          next.settle({ ok: true, value: resultBoundary.value })
+        }
+      })
+    )
+  )
 }
 
 /**
@@ -301,22 +455,8 @@ const evaluate = <E>(
           deferreds.delete(deferred)
         }
       }
-      let payload: ReturnType<typeof ScriptRunner.jsonBoundary>
-      try {
-        payload = ScriptRunner.jsonBoundary(JSON.parse(encoded))
-      } catch {
-        payload = { _tag: "Refused" }
-      }
-      if (payload._tag === "Refused") {
-        pending.push({
-          name,
-          payload: null,
-          refusal: "ctx.call input must be JSON-serializable",
-          settle
-        })
-      } else {
-        pending.push({ name, payload: payload.value, settle })
-      }
+      const input = decodeCallInput(encoded)
+      pending.push({ name, payload: input.payload, refusal: input.refusal, settle })
       return deferred.handle
     })
     context.setProp(context.global, "__call", bridge)
@@ -366,53 +506,36 @@ const evaluate = <E>(
       // awaits it (a race loser), and its bridge handle is disposed.
       const next = pending.shift()
       if (next !== undefined) {
-        if (next.refusal !== undefined) {
-          next.settle({ message: next.refusal, ok: false })
-          continue
-        }
-        const result = yield* handler({ name: next.name, payload: next.payload }).pipe(
-          Effect.tapError(() =>
-            Effect.sync(() => {
-              // A failed handler aborts the run; queued calls settle as
-              // aborted so the realm holds no dangling promises when the
-              // scope disposes it.
-              next.settle({ message: "the link was aborted", ok: false })
-              for (const stale of pending.splice(0)) {
-                stale.settle({ message: "the link was aborted", ok: false })
-              }
-            })
-          )
-        )
-        // A handler result crosses the same JSON boundary as the
-        // in-process binding; refusing here also keeps the host-side
-        // stringify in settle() total.
-        const resultBoundary = ScriptRunner.jsonBoundary(result)
-        if (resultBoundary._tag === "Refused") {
-          next.settle({ message: `the "${next.name}" call result is not JSON-serializable`, ok: false })
-        } else {
-          next.settle({ ok: true, value: resultBoundary.value })
-        }
+        yield* dispatchBridgeCall(next, pending, handler)
         continue
       }
       const state = context.getPromiseState(scriptHandle)
       if (state.type === "fulfilled") {
         const value = context.dump(state.value)
         state.value.dispose()
-        // The in-realm encoder answers null for a value the realm's own
-        // JSON.stringify would rewrite, and a script that replaced
-        // JSON.stringify can hand back text that is not JSON at all. Both
-        // are the same refusal the in-process binding makes.
-        let decoded: unknown
+        // The in-realm encoder answers null for a value JSON.stringify would
+        // rewrite. A non-string or malformed result is the same refusal the
+        // in-process binding makes.
+        //
+        // The parsed text then crosses the HOST boundary as well, exactly
+        // as the in-process binding's returned value does. The two checks
+        // are not redundant: the in-realm copy is what stops the realm's own
+        // stringify from rewriting the value, and the host walk is the one
+        // that bounds size — the shared gate both bindings answer to.
+        let decoded: ReturnType<typeof ScriptRunner.jsonBoundary>
         try {
           if (typeof value !== "string") throw new TypeError(ScriptRunner.unserializableOutcome)
-          decoded = JSON.parse(value)
+          decoded = ScriptRunner.jsonBoundary(JSON.parse(value))
         } catch {
+          decoded = { _tag: "Refused" }
+        }
+        if (decoded._tag === "Refused") {
           return yield* new ScriptRunner.ScriptFailure({
             code: "invalid_outcome",
             message: ScriptRunner.unserializableOutcome
           })
         }
-        const outcome = ScriptRunner.decodeOutcome(decoded)
+        const outcome = ScriptRunner.decodeOutcome(decoded.value)
         if (outcome._tag === "None") {
           return yield* new ScriptRunner.ScriptFailure({
             code: "invalid_outcome",
@@ -438,15 +561,19 @@ const evaluate = <E>(
     }
   }).pipe(
     Effect.scoped,
-    // Last line of defence for the sealed realm's own machinery. A native
-    // WebAssembly abort — the shape a host-stack exhaustion takes — is a
-    // defect, and a defect escapes `Chain.run` entirely: nothing is
-    // journaled, so the resumed link replays the same script and dies the
-    // same way forever. Degrading it to a `runtime` ScriptFailure makes it
-    // a journaled observation the model can route around, which is the
-    // contract this module states.
+    // Last line of defence for the sealed realm's own machinery, and ONLY
+    // for it. A native WebAssembly abort — the shape a host-stack
+    // exhaustion takes — is a defect, and a defect escapes `Chain.run`
+    // entirely: nothing is journaled, so the resumed link replays the same
+    // script and dies the same way forever. Degrading it to a `runtime`
+    // ScriptFailure makes it a journaled observation the model can route
+    // around, which is the contract this module states. A defect the
+    // CALLER'S handler raised is re-raised unchanged: it is the host's
+    // failure, not the script's.
     Effect.catchDefect((defect) =>
-      new ScriptRunner.ScriptFailure({ code: "runtime", message: ScriptRunner.failureMessage(defect) })
+      defect instanceof HandlerDefect
+        ? Effect.die(defect.defect)
+        : new ScriptRunner.ScriptFailure({ code: "runtime", message: ScriptRunner.failureMessage(defect) })
     )
   )
 

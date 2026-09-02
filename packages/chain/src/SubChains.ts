@@ -59,6 +59,17 @@ export const agentDescription = "Run a sub-agent chain to completion and return 
  */
 export const agentCapability = "proc:spawn:agent"
 
+/**
+ * The nesting bound a catalog inherits when {@link Options.maxDepth} is
+ * unset, counted in derived child segments. It is part of the agent entry's
+ * contract digest, so changing it re-keys every settled spawn.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const defaultMaxDepth = 4
+
 const AgentInput = Schema.Struct({
   goal: Schema.String,
   context: Schema.optional(Schema.Array(Schema.String))
@@ -105,7 +116,7 @@ export const contractDigest = (options: Options): string =>
   Digest.digest(Digest.canonical({
     description: agentDescription,
     maxCallsPerLink: options.maxCallsPerLink ?? null,
-    maxDepth: options.maxDepth ?? 4,
+    maxDepth: options.maxDepth ?? defaultMaxDepth,
     maxLinks: options.maxLinks ?? null,
     name: agentName,
     prefix: options.prefix ?? null
@@ -141,7 +152,7 @@ export const make = (
     const journal = yield* Journal.Journal
     const author = yield* Author.Author
     const runner = yield* ScriptRunner.ScriptRunner
-    const maxDepth = options.maxDepth ?? 4
+    const maxDepth = options.maxDepth ?? defaultMaxDepth
     const self: { current: Catalog.Service | undefined } = { current: undefined }
 
     const agent: Catalog.Entry = {

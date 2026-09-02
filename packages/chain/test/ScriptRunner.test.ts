@@ -86,6 +86,23 @@ describe("ScriptRunner", () => {
     expect(ScriptRunner.jsonBoundary([1, , 3])._tag).toBe("Refused")
   })
 
+  it("copies an own __proto__ key as an own key, never as the copy's prototype", () => {
+    // `Object.create(null)` passes the prototype check by design, and such a
+    // value can carry an own `__proto__`. Plain assignment into the copy
+    // would invoke Object.prototype's setter: the key would vanish and the
+    // copy's prototype would become an object the walk validated as data.
+    const source = Object.create(null) as Record<string, unknown>
+    source["__proto__"] = { polluted: true }
+    const crossed = ScriptRunner.jsonBoundary(source)
+    expect(crossed._tag).toBe("Ok")
+    if (crossed._tag === "Ok") {
+      const copied = crossed.value as Record<string, unknown>
+      expect(Object.keys(copied)).toEqual(["__proto__"])
+      expect(Object.getPrototypeOf(copied)).toBe(Object.prototype)
+      expect(Object.getOwnPropertyDescriptor(copied, "__proto__")?.value).toEqual({ polluted: true })
+    }
+  })
+
   it("refuses rather than throws on depth and size", () => {
     // Both bounds exist so a pathological value is a REFUSAL the script can
     // observe. Overflowing the walk's own stack, or handing a value on to a

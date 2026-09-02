@@ -1,11 +1,18 @@
+import { spawnSync } from "node:child_process"
 import { readdirSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import * as Author from "../src/Author.ts"
+import * as Authorize from "../src/Authorize.ts"
+import * as Chain from "../src/Chain.ts"
 import * as chain from "../src/index.ts"
+import * as Journal from "../src/Journal.ts"
 import * as Prompt from "../src/Prompt.ts"
 import * as QuickJsRunner from "../src/QuickJsRunner.ts"
 import * as ScriptRunner from "../src/ScriptRunner.ts"
+import * as Steering from "../src/Steering.ts"
+import * as SubChains from "../src/SubChains.ts"
 
 // The package owns its own prose (see docs/README.md). Nothing generates
 // these files, so this is the gate that keeps them honest: a namespace added
@@ -43,8 +50,9 @@ describe("package documentation", () => {
     expect(defaultOf("QuickJS realm memory")).toBe(
       `${memoryBytes / 1024 / 1024} MiB, floored at ${QuickJsRunner.memoryFloor / 1024} KiB`
     )
+    const stackBytes = QuickJsRunner.defaultLimits.stackBytes ?? 0
     expect(defaultOf("QuickJS in-realm stack")).toBe(
-      `${QuickJsRunner.stackCeiling / 1024} KiB, capped at ${QuickJsRunner.stackCeiling / 1024} KiB`
+      `${stackBytes / 1024} KiB, capped at ${QuickJsRunner.stackCeiling / 1024} KiB`
     )
     expect(defaultOf("QuickJS interrupt polls")).toBe(String(QuickJsRunner.defaultLimits.steps))
     expect(defaultOf("JSON boundary depth")).toBe(String(ScriptRunner.maxJsonDepth))
@@ -55,42 +63,72 @@ describe("package documentation", () => {
     expect(defaultOf("Catalog entry description in the prompt")).toBe(
       `${Prompt.maxEntryDescription} characters`
     )
-    // The chain's own budgets are literals inside Chain.run and SubChains.make;
-    // pin them here so a silent widening cannot land without touching the table.
-    expect(defaultOf("Links per chain")).toBe("32")
-    expect(defaultOf("Calls per link")).toBe("64")
-    expect(defaultOf("Sub-chain nesting depth")).toBe("4")
+    expect(defaultOf("Links per chain")).toBe(String(Chain.defaultMaxLinks))
+    expect(defaultOf("Calls per link")).toBe(String(Chain.defaultMaxCallsPerLink))
+    expect(defaultOf("Sub-chain nesting depth")).toBe(String(SubChains.defaultMaxDepth))
     // The README repeats the headline numbers; keep it from drifting too.
-    expect(readme).toContain("32 links per chain, 64 calls per link")
-    expect(readme).toContain(`${QuickJsRunner.stackCeiling / 1024} KiB stack`)
+    expect(readme).toContain(
+      `${Chain.defaultMaxLinks} links per chain, ${Chain.defaultMaxCallsPerLink} calls per link`
+    )
+    expect(readme).toContain(`${stackBytes / 1024} KiB stack`)
   })
+
+  // Read out of the schemas, not transcribed: a code added to or removed
+  // from any of these unions changes what the contract has to name.
+  // `Schema.Literals` carries `literals`, `Schema.Literal` carries `literal`,
+  // and either wrapped in `withConstructorDefault` carries the wrapped schema
+  // under `schema`. An unreadable field throws rather than silently
+  // contributing nothing, which would turn this gate into a no-op.
+  const codesOf = (name: string, error: unknown): ReadonlyArray<string> => {
+    type Union = {
+      readonly literal?: string
+      readonly literals?: ReadonlyArray<string>
+      readonly schema?: Union
+    }
+    const code = (error as { readonly fields: { readonly code: Union } }).fields.code
+    const read = (union: Union | undefined): ReadonlyArray<string> | undefined =>
+      union === undefined
+        ? undefined
+        : union.literals ?? (union.literal === undefined ? read(union.schema) : [union.literal])
+    const literals = read(code)
+    if (literals === undefined || literals.length === 0) {
+      throw new Error(`${name} no longer exposes its code literals; the docs gate cannot read them`)
+    }
+    return literals
+  }
 
   it("names every stable error code the contract promises", () => {
     const codes = [
-      "replay_divergence",
-      "invalid_journal",
-      "journal_conflict",
-      "journal_unavailable",
-      "exhausted",
-      "author_unavailable",
-      "denied",
-      "approval_required",
-      "authorize_unavailable",
-      "steering_unavailable",
-      "compile",
-      "runtime",
-      "invalid_outcome",
-      "runner_unavailable"
+      ...codesOf("ChainError", Chain.ChainError),
+      ...codesOf("JournalError", Journal.JournalError),
+      ...codesOf("AuthorError", Author.AuthorError),
+      ...codesOf("AuthorizeError", Authorize.AuthorizeError),
+      ...codesOf("SteeringError", Steering.SteeringError),
+      ...codesOf("ScriptFailure", ScriptRunner.ScriptFailure)
     ]
-    for (const code of codes) {
-      expect(contract).toContain(`\`${code}\``)
-    }
+    const unnamed = codes.filter((code) => !contract.includes(`\`${code}\``))
+    expect(unnamed).toEqual([])
   })
 
   it("keeps the README pointing at the package-owned prose", () => {
     expect(readme).toContain("./docs/api.md")
     expect(readme).toContain("./docs/contract.md")
+    expect(readme).toContain("./docs/exports.md")
     expect(readme).toContain("./docs/README.md")
+  })
+
+  it("keeps docs/exports.md current with the JSDoc it is generated from", () => {
+    // The namespace check above is coarse: a namespace row in `api.md` says
+    // nothing about the members inside it, so a renamed export, a member
+    // moved to another `@category`, or a rewritten first sentence drifted
+    // silently. `scripts/docs.mjs --check` is the member-level half, and it
+    // is the same program `//packages/chain:docsPages` runs under the `lint`
+    // verb, so a green local suite and a green CI mean the same thing.
+    const checked = spawnSync(process.execPath, [join(packageRoot, "scripts", "docs.mjs"), "--check"], {
+      encoding: "utf8"
+    })
+    expect(`${checked.stdout}${checked.stderr}`.trim()).toContain("current")
+    expect(checked.status).toBe(0)
   })
 
   it("leaves no source file citing a document this repository does not carry", () => {

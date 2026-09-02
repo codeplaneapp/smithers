@@ -35,6 +35,15 @@ describe("Steering", () => {
     expect(drained).toEqual(["seeded"])
   })
 
+  it("snapshots a caller-owned seed array when the layer is constructed", async () => {
+    const seed = ["a"]
+    const layer = Steering.layerMemory(seed)
+    seed.push("b")
+
+    const drained = await withQueue(layer, (steering) => steering.drain("0/0"))
+    expect(drained).toEqual(["a"])
+  })
+
   it("fails as noop and accepts overrides", async () => {
     const noop = Steering.makeNoop()
     const admitError = await Effect.runPromise(Effect.flip(noop.admit("x")))

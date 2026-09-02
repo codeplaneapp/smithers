@@ -29,6 +29,16 @@ describe("Journal", () => {
     expect(events).toEqual([started])
   })
 
+  it("snapshots a caller-owned seed array when the layer is constructed", async () => {
+    const other: Event.Event = { _tag: "LinkEnded", link: 0, outcome: { _tag: "Done", value: null } }
+    const seed: Array<Event.Event> = [started]
+    const layer = Journal.layerMemory(seed)
+    seed.push(other)
+
+    const events = await withJournal(layer, (journal) => journal.read)
+    expect(events).toEqual([started])
+  })
+
   it("defaults to an empty journal", async () => {
     const events = await withJournal(Journal.layerMemory(), (journal) => journal.read)
     expect(events).toEqual([])

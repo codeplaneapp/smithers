@@ -120,6 +120,29 @@ describe.each(runners)("runner conformance: %s", (_name, layer) => {
     expect(seen).toEqual(["boom"])
   })
 
+  it("propagates a synchronous handler throw as a caller defect", async () => {
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.flatMap(
+          ScriptRunner.ScriptRunner,
+          (runner) =>
+            runner.run(
+              Script.make(`await ctx.call("x", null)\nreturn done(null)`),
+              () => {
+                throw new Error("sync handler boom")
+              }
+            )
+        ).pipe(Effect.provide(layer))
+      ) as Effect.Effect<Exit.Exit<unknown, unknown>, never, never>
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    const cause = (exit as Exit.Failure<unknown, unknown>).cause
+    expect(Cause.hasFails(cause)).toBe(false)
+    expect(Cause.hasDies(cause)).toBe(true)
+    expect(Cause.prettyErrors(cause)[0]?.message).toBe("sync handler boom")
+  })
+
   it("round-trips a missing payload as null and an undefined result as null", async () => {
     const outcome = await runWith(
       layer,
@@ -205,6 +228,60 @@ describe.each(runners)("runner conformance: %s", (_name, layer) => {
     expect(error.message).toBe(ScriptRunner.unserializableOutcome)
   })
 
+  // Values whose realm-side and host-side treatments used to differ. The
+  // QuickJS binding validated in place and then stringified the ORIGINAL, so
+  // an accessor decided what actually crossed, a hole became null, and depth
+  // was unbounded. Both bindings now build a validated copy and answer the
+  // same host boundary.
+  it.each([
+    ["an array hole", `var a = [1]; a[2] = 3; return done(a)`],
+    [
+      "a value past the depth bound",
+      [
+        `var deep = {}`,
+        `var head = deep`,
+        `for (var i = 0; i < 400; i++) { head.n = {}; head = head.n }`,
+        `return done(deep)`
+      ].join("\n")
+    ]
+  ])("refuses an outcome carrying %s", async (_case, text) => {
+    const error = await failWith(layer, text, echo) as ScriptRunner.ScriptFailure
+    expect(error.code).toBe("invalid_outcome")
+    expect(error.message).toBe(ScriptRunner.unserializableOutcome)
+  })
+
+  it("never invokes a toJSON hook, however it is defined", async () => {
+    // Non-enumerable, so `Object.keys` skips it and the copy drops it. The
+    // realm's own `JSON.stringify` would have CALLED it and replaced the
+    // whole object with its return value.
+    const outcome = await runWith(
+      layer,
+      [
+        `var value = { v: 1 }`,
+        `Object.defineProperty(value, "toJSON", { value: function () { return 7 } })`,
+        `return done(value)`
+      ].join("\n"),
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: { v: 1 } })
+  })
+
+  it("reads an outcome's accessors exactly once, so the validated value is the one that crosses", async () => {
+    // The old QuickJS path validated in place and then stringified the
+    // ORIGINAL, so the SECOND read decided what crossed. Both bindings now
+    // hand on the copy the first read produced.
+    const outcome = await runWith(
+      layer,
+      [
+        `var reads = 0`,
+        `var shifty = { get a() { reads++; return reads === 1 ? 1 : { snuck: true } } }`,
+        `return done(shifty)`
+      ].join("\n"),
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: { a: 1 } })
+  })
+
   it("separates a JSON value that is not an outcome from one that is not JSON", async () => {
     const notOutcome = await failWith(layer, `return { nope: true }`, echo) as ScriptRunner.ScriptFailure
     expect(notOutcome.message).toBe(ScriptRunner.notAnOutcome)
@@ -287,25 +364,50 @@ describe("QuickJs sealed realm", () => {
     expect(error.code).toBe("runtime")
   })
 
-  it.each(["1e999", "not-json"])("host-validates call input encoded as %s by replaced realm JSON", async (encoded) => {
-    let calls = 0
+  it.each(["1e999", "not-json"])("ignores replaced realm JSON when encoding call input as %s", async (encoded) => {
+    const seen: Array<unknown> = []
     const outcome = await runWith(
       layer,
       [
-        `const stringify = globalThis.JSON.stringify`,
         `globalThis.JSON.stringify = function () { return ${JSON.stringify(encoded)} }`,
-        `const message = await ctx.call("x", {}).catch(function (error) { return error.message })`,
-        `globalThis.JSON.stringify = stringify`,
-        `return done(message)`
+        `const value = await ctx.call("x", {})`,
+        `return done(value)`
       ].join("\n"),
-      () =>
+      (request) =>
         Effect.sync(() => {
-          calls++
+          seen.push(request.payload)
           return null
         })
     )
-    expect(outcome).toEqual({ _tag: "Done", value: "ctx.call input must be JSON-serializable" })
-    expect(calls).toBe(0)
+    expect(outcome).toEqual({ _tag: "Done", value: null })
+    expect(seen).toEqual([{}])
+  })
+
+  it.each([
+    ["Number.isFinite", `Number.isFinite = function () { return true }\nreturn done(NaN)`],
+    [
+      "JSON.stringify",
+      `JSON.stringify = function () { return '{"_tag":"Done","value":"pwned"}' }\nreturn { nope: true }`
+    ],
+    [
+      "Array.isArray",
+      [
+        `var originalIsArray = Array.isArray`,
+        `Array.isArray = function (value) { return value instanceof Error ? true : originalIsArray(value) }`,
+        `return done(new Error("not plain"))`
+      ].join("\n")
+    ],
+    [
+      "Object.keys",
+      [
+        `var originalKeys = Object.keys`,
+        `Object.keys = function (value) { return value && "bad" in value ? [] : originalKeys(value) }`,
+        `return done({ bad: function () {} })`
+      ].join("\n")
+    ]
+  ])("captures %s before the script can forge boundary behavior", async (_intrinsic, text) => {
+    const error = await failWith(layer, text, echo) as ScriptRunner.ScriptFailure
+    expect(error.code).toBe("invalid_outcome")
   })
 
   it("reports a job-queue interrupt that is outside the script promise", async () => {
@@ -431,19 +533,68 @@ describe("QuickJs sealed realm", () => {
     expect(error.message).toBe(ScriptRunner.unserializableOutcome)
   })
 
-  it("refuses an outcome the script re-encoded as non-JSON text", async () => {
-    const error = await failWith(
+  it("ignores a replaced realm JSON.stringify when encoding an outcome", async () => {
+    const outcome = await runWith(
       layer,
       `globalThis.JSON.stringify = function () { return "not-json" }\nreturn done("ignored")`,
       echo
-    ) as ScriptRunner.ScriptFailure
-    expect(error.code).toBe("invalid_outcome")
-    expect(error.message).toBe(ScriptRunner.unserializableOutcome)
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: "ignored" })
   })
 
   it("keeps the outcome encoder off the global object", async () => {
     const outcome = await runWith(layer, `return done(typeof globalThis.__encodeOutcome)`, echo)
     expect(outcome).toEqual({ _tag: "Done", value: "undefined" })
+  })
+
+  // Capturing the intrinsics is only half the defence, and these three pin
+  // the other half. `JSON.stringify` reads an INHERITED `toJSON`, and a realm
+  // prototype is writable from the script, so a copy that kept its prototype
+  // would be validated by the boundary and then replaced by the hook on the
+  // way out. Both the payload the HOST HANDLER receives and the outcome the
+  // chain JOURNALS came from the hook rather than from the script.
+  //
+  // These live here rather than in the shared conformance block on purpose:
+  // the in-process binding runs in the host realm, so the same script would
+  // pollute this test process. That binding never stringifies at all — the
+  // shared "never invokes a toJSON hook" case above is its half of the pair.
+  it("ignores a toJSON inherited from Object.prototype when encoding an outcome", async () => {
+    const outcome = await runWith(
+      layer,
+      [
+        `Object.prototype.toJSON = function () { return { _tag: "Done", value: "FORGED" } }`,
+        `return done("honest")`
+      ].join("\n"),
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: "honest" })
+  })
+
+  it("ignores a toJSON inherited from Array.prototype when encoding an outcome", async () => {
+    const outcome = await runWith(
+      layer,
+      `Array.prototype.toJSON = function () { return "FORGED" }\nreturn done([1, 2, 3])`,
+      echo
+    )
+    expect(outcome).toEqual({ _tag: "Done", value: [1, 2, 3] })
+  })
+
+  it("hands the handler the validated call input, not an inherited toJSON's answer", async () => {
+    const seen: Array<unknown> = []
+    const outcome = await runWith(
+      layer,
+      [
+        `Object.prototype.toJSON = function () { return { forged: true } }`,
+        `return done(await ctx.call("echo", { honest: true }))`
+      ].join("\n"),
+      (request) =>
+        Effect.sync(() => {
+          seen.push(request.payload)
+          return request.payload
+        })
+    )
+    expect(seen).toEqual([{ honest: true }])
+    expect(outcome).toEqual({ _tag: "Done", value: { honest: true } })
   })
 
   // Opting out of the stack limit is what production must never do, and the
@@ -500,6 +651,38 @@ describe("QuickJs sealed realm", () => {
       message: `the "weird" call result cannot be encoded`,
       ok: false
     })
+  })
+
+  it.each(["1e999", "not-json"])("refuses host-decoded bridge input %s", async (encoded) => {
+    expect(QuickJsRunner.decodeCallInput(encoded)).toEqual({
+      payload: null,
+      refusal: "ctx.call input must be JSON-serializable"
+    })
+    const settlements: Array<unknown> = []
+    let calls = 0
+    await Effect.runPromise(
+      QuickJsRunner.dispatchBridgeCall(
+        {
+          name: "x",
+          payload: null,
+          refusal: "ctx.call input must be JSON-serializable",
+          settle: (settlement) => {
+            settlements.push(settlement)
+          }
+        },
+        [],
+        () =>
+          Effect.sync(() => {
+            calls++
+            return null
+          })
+      )
+    )
+    expect(calls).toBe(0)
+    expect(settlements).toEqual([{
+      message: "ctx.call input must be JSON-serializable",
+      ok: false
+    }])
   })
 
   it("journals time and randomness through the one door, replaying identically", async () => {

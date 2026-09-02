@@ -113,6 +113,25 @@ export const entryDigest = (entry: Entry): string =>
     }))
 
 /**
+ * One entry copied out of the caller's object.
+ *
+ * The outer array is not enough. `Prompt.catalogBlock` reads `entries` and
+ * gate 3 reads `lookup`, and both must keep answering about the SAME
+ * declaration: renaming a caller-owned entry after construction would leave
+ * the block advertising one name while the index still answers to another.
+ * Only the declaration is copied — the handler is the entry's behavior and is
+ * held by reference.
+ */
+const snapshotEntry = (entry: Entry): Entry =>
+  Object.freeze({
+    capabilities: entry.capabilities === undefined ? undefined : Object.freeze([...entry.capabilities]),
+    description: entry.description,
+    digest: entry.digest,
+    handler: entry.handler,
+    name: entry.name
+  })
+
+/**
  * Builds a catalog over the given entries, indexed by name.
  *
  * @category constructors
@@ -125,7 +144,7 @@ export const make = (entries: ReadonlyArray<Entry>): Service => {
   // `Prompt.catalogBlock` (which reads `entries`) away from `lookup` (which
   // gate 3 decides membership with), so the model would be shown a call the
   // chain refuses, or refused a call the model was never shown.
-  const snapshot: ReadonlyArray<Entry> = Object.freeze([...entries])
+  const snapshot: ReadonlyArray<Entry> = Object.freeze(entries.map(snapshotEntry))
   const byName = new Map(snapshot.map((entry) => [entry.name, entry]))
   return Catalog.of({
     entries: snapshot,

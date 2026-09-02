@@ -118,6 +118,27 @@ export const authorDigest: string = AuthorDeclaration.authorDigest
  */
 export const authorCapability: string = AuthorDeclaration.authorCapability
 
+/**
+ * The link budget a run inherits when {@link Options.maxLinks} is unset.
+ * Exceeding it parks the chain with a `quota` reason.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const defaultMaxLinks = 32
+
+/**
+ * The per-link call budget a run inherits when
+ * {@link Options.maxCallsPerLink} is unset. Exceeding it rejects the call as
+ * a `fuel` observation, which parks the chain on the next attempt.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const defaultMaxCallsPerLink = 64
+
 const decodeScript = Schema.decodeUnknownOption(Script.Script)
 
 const sameJson = (left: typeof Schema.Json.Type, right: typeof Schema.Json.Type): boolean =>
@@ -158,8 +179,8 @@ export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError,
       ? yield* Effect.serviceOption(Steering.Steering)
       : Option.none<Steering.Service>()
     const authorize = yield* Effect.serviceOption(Authorize.Authorize)
-    const maxLinks = options.maxLinks ?? 32
-    const maxCalls = options.maxCallsPerLink ?? 64
+    const maxLinks = options.maxLinks ?? defaultMaxLinks
+    const maxCalls = options.maxCallsPerLink ?? defaultMaxCallsPerLink
     const prefix = options.prefix ?? ""
 
     const initial = yield* journal.read

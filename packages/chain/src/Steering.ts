@@ -97,14 +97,17 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Steerin
  * @since 0.1.0
  * @slop
  */
-export const layerMemory = (initial: ReadonlyArray<string> = []): Layer.Layer<Steering> =>
-  Layer.effect(Steering)(
+export const layerMemory = (initial: ReadonlyArray<string> = []): Layer.Layer<Steering> => {
+  // Snapshot now, not when the lazy layer is later built: a caller may
+  // mutate its seed after constructing the layer but before providing it.
+  const snapshot = [...initial]
+  return Layer.effect(Steering)(
     Effect.gen(function*() {
-      // Copied, never retained: see `Journal.layerMemory`.
-      const ref = yield* Ref.make<ReadonlyArray<string>>([...initial])
+      const ref = yield* Ref.make<ReadonlyArray<string>>(snapshot)
       return make({
         admit: Effect.fn("Steering.admit")((message) => Ref.update(ref, (queue) => [...queue, message])),
         drain: Effect.fn("Steering.drain")(() => Ref.getAndSet(ref, []))
       })
     })
   )
+}

@@ -93,12 +93,13 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Journal
  * @since 0.1.0
  * @slop
  */
-export const layerMemory = (initial: ReadonlyArray<Event.Event> = []): Layer.Layer<Journal> =>
-  Layer.effect(Journal)(
+export const layerMemory = (initial: ReadonlyArray<Event.Event> = []): Layer.Layer<Journal> => {
+  // Snapshot now, not when the lazy layer is later built: a caller may
+  // mutate its seed after constructing the layer but before providing it.
+  const snapshot = [...initial]
+  return Layer.effect(Journal)(
     Effect.gen(function*() {
-      // Copied, never retained: a caller that keeps mutating its seed array
-      // would otherwise keep rewriting the journal's history behind it.
-      const ref = yield* Ref.make<ReadonlyArray<Event.Event>>([...initial])
+      const ref = yield* Ref.make<ReadonlyArray<Event.Event>>(snapshot)
       return make({
         append: Effect.fn("Journal.append")((event, expectedPosition) =>
           Ref.modify(ref, (events) =>
@@ -118,3 +119,4 @@ export const layerMemory = (initial: ReadonlyArray<Event.Event> = []): Layer.Lay
       })
     })
   )
+}
