@@ -282,6 +282,8 @@ Pure graph introspection for flow declarations.
 | `isFatalDiagnostic` (const) | predicates | Reports whether a diagnostic blocks `keyMaterial`. |
 | `keyMaterial` (const) | getters | Returns node-associated, digest-free key material in topological dependency order. |
 | `LayerRequest` (interface) | models | Information supplied to the planner's pure per-node layer resolver. |
+| `maximumEffectGlobs` (const) | limits | Maximum number of patterns, entries ending in `*`, one read list or one write list of an effect declaration may carry before `build` refuses the plan with `plan_too_large`. |
+| `maximumEffectPathLength` (const) | limits | Maximum length, in UTF-16 code units, of one effect path `build` admits before it refuses the plan with `plan_too_large`. |
 | `maximumEffectPaths` (const) | limits | Maximum number of read and write paths, summed, one effect declaration may list before `build` refuses the plan with `plan_too_large`. |
 | `maximumGraphConflicts` (const) | limits | Maximum number of write conflicts `build` records before it refuses the plan. |
 | `maximumGraphDepth` (const) | limits | Maximum structural nesting accepted by `build`. |
