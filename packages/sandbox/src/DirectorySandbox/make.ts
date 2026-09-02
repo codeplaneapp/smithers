@@ -8,6 +8,7 @@ import type * as FileSystem from "effect/FileSystem"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessHandle, ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { hostKillScript } from "../internal/killScript.ts"
 import { gather, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -108,6 +109,7 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
         remoteId: workdir,
         workdir,
         spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+          yield* checkEnvironmentNames(spawnOptions.env)
           const settings: ChildProcess.CommandOptions = {
             shell: true,
             cwd: resolve(spawnOptions.cwd ?? ""),
