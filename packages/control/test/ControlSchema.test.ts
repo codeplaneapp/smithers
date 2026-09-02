@@ -256,6 +256,25 @@ describe("ControlSchema", () => {
     ).toMatchObject({ filters: { principalId: "tenant-a" } })
   })
 
+  it("strips the control envelope from every steer kind the vocabulary carries", () => {
+    // What crosses into the notification queue is the item alone. A kind the
+    // conversion forgot would reach the harness as an envelope it cannot read,
+    // so all four are named here rather than only the one an end-to-end test
+    // happens to send.
+    const envelopeFields = { messageId: "steer-1", runId: "run-1", principal, createdAt: 12 }
+
+    expect(ControlSchema.steerItem({ ...envelopeFields, body: "keep going" }))
+      .toEqual({ kind: "Message", body: "keep going" })
+    expect(ControlSchema.steerItem({ ...envelopeFields, kind: "Message", body: "keep going" }))
+      .toEqual({ kind: "Message", body: "keep going" })
+    expect(ControlSchema.steerItem({ ...envelopeFields, kind: "Seat", seat: "opus" }))
+      .toEqual({ kind: "Seat", seat: "opus" })
+    expect(ControlSchema.steerItem({ ...envelopeFields, kind: "Thinking", thinking: "high" }))
+      .toEqual({ kind: "Thinking", thinking: "high" })
+    expect(ControlSchema.steerItem({ ...envelopeFields, kind: "Tools", toolNames: ["read", "write"] }))
+      .toEqual({ kind: "Tools", toolNames: ["read", "write"] })
+  })
+
   it("accepts only finite positive integer page sizes up to 500", () => {
     for (const tag of ["flows", "runs"] as const) {
       for (const limit of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 501]) {

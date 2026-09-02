@@ -182,6 +182,7 @@ export const derive = (event: ControlEvent): ControlEvent | undefined => {
       parentRunId: edge.parentRunId,
       ...(lineageId === undefined ? {} : { lineageId }),
       ...(roundOrdinal === undefined ? {} : { roundOrdinal }),
+      /* v8 ignore next -- `originOf` answers nothing only without a parent, and the guard above already refused an edge with no parent */
       ...(origin === undefined ? {} : { origin })
     }
   }

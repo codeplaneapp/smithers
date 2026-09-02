@@ -71,6 +71,12 @@
   scoped to the authenticated actor's stable id and kind; accessors and
   `toJSON` never participate, server timestamps do not split retries, and a
   nested `principal` remains caller intent.
+- `ControlClient` classifies a transport failure by what actually happened. A
+  request it could not encode, a response it could not decode, an unusable URL
+  and an HTTP 4xx are final; a connection it could not open and an HTTP 5xx are
+  retryable. Every failure used to be reported as retryable, carrying the
+  transport's own message, so a keyless call was retried after a refusal that
+  repeating could not fix. An interrupted call stays interrupted.
 - `Monitor` records `control.monitor.healed` only for an `Accepted` or
   `AlreadyApplied` receipt, stops on a `Terminal` one, and no longer resets its
   stall evidence for a remedy that was refused.

@@ -14,6 +14,7 @@ import * as ControlRuntime from "../ControlRuntime.ts"
 const browserCrypto = Layer.succeed(
   Crypto.Crypto,
   Crypto.make({
+    /* v8 ignore next -- `Crypto.make` requires a random-byte primitive, and the deterministic runtime this bundle composes derives every identifier from a counter, so only `digest` is ever called here */
     randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
     digest: (algorithm, data) =>
       Effect.promise(() => globalThis.crypto.subtle.digest(algorithm, data.slice().buffer)).pipe(

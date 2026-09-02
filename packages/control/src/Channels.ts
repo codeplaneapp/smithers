@@ -192,6 +192,7 @@ const ownData = (input: Record<PropertyKey, unknown>, key: PropertyKey, path: st
 }
 
 const copyBody = (input: unknown): Uint8Array => {
+  /* v8 ignore next 4 -- every host that has `Uint8Array` has its prototype accessors; the refusal exists so a host without them fails closed rather than reading a caller-owned buffer */
   if (
     typedArrayBuffer === undefined || typedArrayByteOffset === undefined ||
     typedArrayByteLength === undefined

@@ -4,6 +4,7 @@
  */
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { Cause, Effect, Exit, Option, Redacted } from "effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import * as Credential from "../src/Credential.ts"
 import type * as CredentialStore from "../src/CredentialStore.ts"
@@ -125,6 +126,40 @@ describe("SqlCredentialStore", () => {
     // What is on disk is ciphertext, not the rotated secret.
     expect(JSON.stringify(observed.persisted)).not.toContain("sk-live-rotated")
     expect(observed.revoked).toBe(true)
+  })
+
+  it("reports every operation as unavailable storage when the table is gone", async () => {
+    // A dropped table is what a half-migrated database, a restored backup, or
+    // a wrong `SMITHERS_HOME` looks like from here. Each operation names
+    // itself, so an operator reads which call could not reach storage rather
+    // than a driver sentence about SQL.
+    const failures = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        const store = yield* SqlCredentialStore.make
+        yield* sql`DROP TABLE control_credentials`.pipe(Effect.orDie)
+        return yield* Effect.forEach(
+          [
+            store.read("exa"),
+            store.write(record()),
+            store.list(),
+            store.remove("exa")
+          ],
+          (operation) => Effect.map(Effect.exit(operation), squash)
+        )
+      }).pipe(Effect.provide(TestDatabase.layer), Effect.scoped, Effect.orDie)
+    )
+
+    expect(failures.map((failure) => failure.feature)).toEqual([
+      "credential storage (read)",
+      "credential storage (write)",
+      "credential storage (list)",
+      "credential storage (remove)"
+    ])
+    for (const failure of failures) {
+      expect(failure._tag).toBe("/control/Unavailable")
+      expect(failure.ticket).toBe("control-credential-storage")
+    }
   })
 
   it("provides the durable store as a layer", async () => {

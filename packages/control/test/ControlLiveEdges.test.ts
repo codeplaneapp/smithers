@@ -16,10 +16,10 @@ import { NotificationQueue } from "@smthrs/notifications"
 import { Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
-import { InvalidInput, PersistenceError } from "../src/ControlError.ts"
+import { ClaimLost, InvalidInput, PersistenceError, RunNotFound } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
-import { ControlRuntime, type MemoryFlow } from "../src/ControlRuntime.ts"
-import type { Envelope, Receipt } from "../src/ControlSchema.ts"
+import { ControlRuntime, type MemoryFlow, type Service as ControlRuntimeService } from "../src/ControlRuntime.ts"
+import type { Envelope, Receipt, RunSummary } from "../src/ControlSchema.ts"
 import { live, memoryRuntime, type Stack } from "./TestStack.ts"
 
 const envelope: Envelope = { capabilities: [], flows: [], budget: {} }
@@ -51,6 +51,22 @@ const start = (suffix: string) =>
     yield* runtime.resume(receipt.runId)
     return receipt.runId
   })
+
+/**
+ * The deterministic runtime with individual methods replaced.
+ *
+ * `ControlLive` reads the same row more than once inside one verb, and the
+ * states between those reads belong to a second process: an engine that
+ * settled the run, a peer holding its fence, a row that will not take a write.
+ * Replacing one method is how a single-process suite reaches them.
+ */
+const wrapping = (
+  override: (runtime: ControlRuntimeService) => Partial<ControlRuntimeService>
+): Layer.Layer<ControlRuntime> =>
+  Layer.effect(
+    ControlRuntime,
+    Effect.map(ControlRuntime, (runtime) => ({ ...runtime, ...override(runtime) }))
+  ).pipe(Layer.provide(memoryRuntime({ flows })))
 
 /** What a receipt says, flattened for a single equality. */
 const said = (receipt: Receipt): ReadonlyArray<unknown> => [
@@ -194,6 +210,32 @@ describe("ControlLive listings", () => {
     // a claim the queue never made, and an operator would read it as "no
     // steering is waiting".
     expect(listed.items[0]?.steering).toBeUndefined()
+  })
+
+  it("fails the listing when the journal under the queue fails", async () => {
+    // A queue that refuses is a missing count. A JOURNAL that fails is a
+    // storage failure, and answering a listing over it would report every run
+    // as steer-free on evidence nobody read.
+    const journal = Layer.orDie(TestJournal.layer())
+    const broken = Layer.effect(
+      NotificationQueue.NotificationQueue,
+      Effect.map(NotificationQueue.NotificationQueue, (queue) => ({
+        ...queue,
+        pending: () => Effect.fail(new Journal.JournalError({ code: "read_failed", message: "the journal is gone" }))
+      }))
+    ).pipe(Layer.provide(NotificationQueue.layer), Layer.provide(journal))
+
+    const error = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        yield* start("journal-offline")
+        return yield* control.list({ _tag: "runs" }).pipe(Effect.flip)
+      }),
+      live({ journal, notifications: broken, runtime: memoryRuntime({ flows }) })
+    )
+
+    expect(error).toBeInstanceOf(PersistenceError)
+    expect((error as PersistenceError).operation).toBe("control.list.steering")
   })
 })
 
@@ -373,5 +415,146 @@ describe("ControlLive executor uptake", () => {
     // record it was handed is cleared rather than left for a second host to
     // take up a second time.
     expect(observed.pendingResume).toBeUndefined()
+  })
+})
+
+describe("ControlLive when the row moves under it", () => {
+  it("answers Terminal when the run settles between the two reads a resume takes", async () => {
+    // The outer read decides whether to replay a receipt; the inner one, inside
+    // the write transaction, decides what to do. Between them the run can
+    // settle — in the shipped CLI the engine owns a second `flows_runs` table
+    // in a second file — and the mutation has to notice rather than claim a
+    // fence on a finished run.
+    let settledReads = 0
+    const receipt = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runId = yield* start("mid-flight")
+        // Armed after the run exists: from here the FIRST read still sees a
+        // live run and every later one sees the settled row.
+        settledReads = 1
+        return yield* control.resume({ runId, idempotencyKey: "resume:mid-flight" })
+      }),
+      live({
+        runtime: wrapping((runtime) => ({
+          getRun: (runId) =>
+            Effect.map(
+              runtime.getRun(runId),
+              (summary) =>
+                settledReads > 0 && settledReads++ > 1 ? { ...summary, status: "completed" as const } : summary
+            )
+        }))
+      })
+    )
+
+    expect(said(receipt)).toEqual(["Terminal", "completed"])
+  })
+
+  it("leaves a control row that already agrees with the engine alone, and survives one it cannot write", async () => {
+    // A cancel that learns the engine settled first reconciles the control row
+    // onto the engine's status. Two things must not happen: a second write when
+    // the row already agrees, and a failed reconciliation taking the operator's
+    // receipt down with it.
+    const terminalEngine = ControlExecutor.makeNoop({
+      requestCancel: () => Effect.succeed({ _tag: "Terminal" as const, status: "completed" as const })
+    })
+    let agreed = 0
+    const alreadyAgreed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runId = yield* start("engine-agreed")
+        agreed = 1
+        return yield* control.cancel({ runId, idempotencyKey: "cancel:engine-agreed" })
+      }),
+      live({
+        executor: terminalEngine,
+        runtime: wrapping((runtime) => ({
+          getRun: (runId) =>
+            Effect.map(
+              runtime.getRun(runId),
+              (summary) => agreed > 0 && agreed++ > 1 ? { ...summary, status: "completed" as const } : summary
+            )
+        }))
+      })
+    )
+
+    let unwritableRow = false
+    const unwritable = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runId = yield* start("engine-unwritable")
+        // Armed after the run exists: starting one needs the fence this then
+        // refuses.
+        unwritableRow = true
+        const receipt = yield* control.cancel({ runId, idempotencyKey: "cancel:engine-unwritable" })
+        return { after: yield* (yield* ControlRuntime).getRun(runId), receipt }
+      }),
+      live({
+        executor: terminalEngine,
+        runtime: wrapping((runtime) => ({
+          claimFence: (runId) =>
+            unwritableRow
+              ? Effect.fail(
+                new PersistenceError({ operation: "claim a fence", message: `the row for ${runId} is unwritable` })
+              )
+              : runtime.claimFence(runId)
+        }))
+      })
+    )
+
+    expect(said(alreadyAgreed)).toEqual(["Terminal", "completed"])
+    // The engine's own status is still the receipt, and the unreconciled row
+    // is left as it was rather than the caller losing the answer.
+    expect(said(unwritable.receipt)).toEqual(["Terminal", "completed"])
+    expect(unwritable.after.status).not.toBe("completed")
+  })
+
+  it("records a steer for a parked run whose wake nobody can take", async () => {
+    // The wake is a courtesy: the message is already durable, so a run whose
+    // fence a peer holds — or whose row this plane cannot find — must not turn
+    // an admitted steer into a failed one.
+    const parked = (summary: RunSummary): RunSummary => ({
+      ...summary,
+      status: "parked",
+      waitingReason: "event"
+    })
+    const steer = (runId: string) => ({
+      runId,
+      message: {
+        messageId: `steer:${runId}`,
+        runId,
+        principal: { id: "operator", kind: "test", stampedAt: 0 },
+        createdAt: 0,
+        body: "wake up"
+      },
+      idempotencyKey: `steer:${runId}`
+    })
+    const receipts = await Promise.all(
+      [
+        (runId: string) => new ClaimLost({ runId }),
+        (runId: string) => new RunNotFound({ runId })
+      ].map((refusal) => {
+        // Armed after the run exists: starting one needs the very reads and
+        // claims this then takes away.
+        let armed = false
+        const stack = live({
+          runtime: wrapping((runtime) => ({
+            getRun: (runId) => armed ? Effect.map(runtime.getRun(runId), parked) : runtime.getRun(runId),
+            resume: (runId, options) => armed ? Effect.fail(refusal(runId)) : runtime.resume(runId, options)
+          }))
+        })
+        return run(
+          Effect.gen(function*() {
+            const control = yield* Control
+            const runId = yield* start("parked-wake")
+            armed = true
+            return yield* control.steer(steer(runId))
+          }),
+          stack
+        )
+      })
+    )
+
+    for (const receipt of receipts) expect(receipt._tag).toBe("Accepted")
   })
 })

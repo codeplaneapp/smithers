@@ -90,8 +90,10 @@ const cancelled = (evidence: Evidence, requests: Input["requests"]): boolean =>
   evidence.cancelRequestedAt !== undefined || evidence.cancelledAt !== undefined ||
   requests.has(evidence.runId)
 
-const requestedAtOf = (evidence: Evidence, request: Request | undefined): number =>
-  request?.requestedAt ?? evidence.cancelRequestedAt ?? evidence.cancelledAt ?? 0
+const requestedAtOf = (evidence: Evidence, request: Request | undefined): number => {
+  /* v8 ignore next -- the trailing zero is unreachable: a run is attributed only once one of the three sources above exists, which is exactly what `cancelled` reads */
+  return request?.requestedAt ?? evidence.cancelRequestedAt ?? evidence.cancelledAt ?? 0
+}
 
 const attributed = (
   source: Cancellation["source"],

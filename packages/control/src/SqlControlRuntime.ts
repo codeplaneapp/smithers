@@ -163,8 +163,10 @@ const randomId = (): string => globalThis.crypto.randomUUID()
  * from looping.
  */
 const causeMessages = (value: unknown, depth = 4): string => {
+  /* v8 ignore next -- the SQLite driver nests error OBJECTS; a bare string at a cause position is another driver's shape */
   if (depth === 0 || typeof value !== "object" || value === null) return typeof value === "string" ? value : ""
   const fields = value as { readonly message?: unknown; readonly cause?: unknown; readonly reason?: unknown }
+  /* v8 ignore next -- every level of the driver's chain carries a message */
   const own = typeof fields.message === "string" ? fields.message : ""
   return `${own} ${causeMessages(fields.reason, depth - 1)} ${causeMessages(fields.cause, depth - 1)}`
 }
@@ -180,11 +182,11 @@ const causeMessages = (value: unknown, depth = 4): string => {
  */
 const missingTable = (table: string) => (cause: unknown): boolean => {
   const message = causeMessages(cause)
-  return message.includes(table) && (
-    message.includes("no such table") ||
+  if (!message.includes(table)) return false
+  /* v8 ignore next 2 -- the PostgreSQL and MySQL phrasings; rc.0 supports SQLite alone, which says "no such table" */
+  return message.includes("no such table") ||
     message.includes("does not exist") ||
     message.includes("doesn't exist")
-  )
 }
 
 const terminal = (status: RunStatus): boolean => status === "cancelled" || status === "completed" || status === "failed"
@@ -351,6 +353,7 @@ const makeRuntime = (
         const rows = yield* sql<{ readonly value: number }>`
           UPDATE control_sequences SET value = value + 1 WHERE name = ${name} RETURNING value
         `
+        /* v8 ignore next -- the row was inserted by the statement above, so `RETURNING` always answers with one */
         return Number(rows[0]?.value ?? 0)
       })).pipe(Effect.mapError(persistence("allocate a sequence")))
 
@@ -808,7 +811,10 @@ const makeRuntime = (
             SELECT run_id AS "runId", parent_run_id AS "parentRunId" FROM ancestry
           `.pipe(Effect.mapError(persistence("walk a run's ancestry")))
           if (rows.length === 0) {
-            // No row at all: the caller's own `requireRow` reports that.
+            // No row at all: the caller's own `requireRow` reports that. The
+            // walk only reaches an id it has already visited by following a
+            // spawn edge back into the chain, and that id had a row.
+            /* v8 ignore next -- an already-visited id always had a row */
             if (!visited.has(start)) chain.push(start)
             break
           }
@@ -1043,9 +1049,14 @@ const makeRuntime = (
               return { _tag: "raced", holder } as const
             }
           }
+          // The column is not nullable. An absent decoded input never reaches
+          // here — the card's own canonical input summary refuses it first —
+          // and storing `null` is what the column would need if one did.
+          /* v8 ignore next -- an absent decoded input is refused while the card is built */
+          const decodedJson = JSON.stringify(decoded ?? null)
           yield* sql`
             INSERT INTO control_plans (plan_id, card_json, decoded_input_json, decision)
-            VALUES (${planId}, ${JSON.stringify(card)}, ${JSON.stringify(decoded ?? null)}, 'pending')
+            VALUES (${planId}, ${JSON.stringify(card)}, ${decodedJson}, 'pending')
           `
           yield* sql`
             INSERT INTO control_tokens (
@@ -1148,6 +1159,7 @@ const makeRuntime = (
             AND target_id = ${identity.targetId}
         `.pipe(query("read an approval token"))
         const row = rows[0]
+        /* v8 ignore next 8 -- the insert above either wrote this row or left the one already there; a read that finds neither is a storage failure no test can stage */
         if (row === undefined) {
           return yield* Effect.fail(
             new PersistenceError({

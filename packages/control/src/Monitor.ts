@@ -443,7 +443,10 @@ export const run = (
       if (beat > 0 && intervalMs > 0) yield* Effect.sleep(Duration.millis(intervalMs))
       const summary = yield* summaryOf(options.runId)
       const events = yield* progressOf(options.runId)
-      const sequence = events.length === 0 ? -1 : (events[events.length - 1]?.sequence ?? -1)
+      // An index read answers `undefined` for an empty list, which is the same
+      // "no progress yet" a length check would have derived, so one fallback
+      // covers both instead of a length test guarding an unreachable one.
+      const sequence = events[events.length - 1]?.sequence ?? -1
       beatsWithoutProgress = sequence === lastSequence ? beatsWithoutProgress + 1 : 0
       lastSequence = sequence
       const health = classify({

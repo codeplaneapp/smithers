@@ -430,6 +430,27 @@ describe("Credential", () => {
     expect(secret).toBe("layered")
   })
 
+  it("carries the host's authorization policy through the layer", async () => {
+    // A composition that supplied a policy and got the permissive default
+    // would hand every caller every secret, and nothing in the happy path
+    // would say so.
+    expectUnauthorized(
+      await failureOf(
+        Effect.gen(function*() {
+          const credentials = yield* Credential.Credential
+          return yield* created(credentials, "policed")
+        }).pipe(
+          Effect.provide(
+            Credential.layer({
+              authorize: () => Effect.fail(new Unauthorized({ message: "the host refuses every credential" }))
+            }).pipe(Layer.provide([CredentialStore.layerMemory, WebCryptoCipher.layer({ key: hostKey })]))
+          )
+        )
+      ),
+      "the host refuses every credential"
+    )
+  })
+
   it("reports unavailable storage when the store cannot be reached", async () => {
     expectUnavailable(
       await failureOf(Effect.gen(function*() {

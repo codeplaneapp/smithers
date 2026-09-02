@@ -179,13 +179,13 @@ describe("vitest coverage isolation conformance", () => {
   // measured coverage of a translator whose remaining branches are the 0.x
   // shapes only a live model run reaches, and those three cases are pinned in
   // `docs/alpha-notes.md` rather than run by the default gate.
+  // `control` and `testing` left the set on 2026-09-01: both now pin 100 in
+  // every category (`6b3e0142e4`, `d1012596b6`).
   const coverageFloorDeferred = new Set([
     "cli",
-    "control",
     "memory",
     "registry",
     "std",
-    "testing",
     "build",
     "build-cli",
     "targets",
@@ -704,6 +704,28 @@ describe("vitest coverage isolation conformance", () => {
       "cli/src/Docs.ts": 5,
       "cli/src/Doctor.ts": 1,
       "cli/src/Gc.ts": 2,
+      // Control's three arms sit behind the mutation boundary: every caller
+      // hands `principalOf` a mutation the boundary already decoded into a
+      // struct, and an unpaired high or lone low surrogate is refused there
+      // before the redaction helper can meet it. TestControl's deterministic
+      // runtime derives every identifier from a counter, so the random-byte
+      // primitive `Crypto.make` requires is never asked for bytes.
+      "control/src/ControlLive.ts": 3,
+      "control/src/test/TestControl.ts": 1,
+      // The rest of control's arms defend invariants its own code establishes:
+      // a run is attributed only once one of its three cancellation sources
+      // exists, so the trailing zero in `Cancellation` is unreachable; a
+      // `Uint8Array` host always has the prototype accessors `Channels`
+      // refuses to run without; the runtime's approval and target maps are
+      // keyed by the identity they are compared against, and one process
+      // writes `fence` and `localFence` together; `planning` is called only by
+      // `launch`, which has the run it just started; and `Lineage` has already
+      // refused an edge with no parent before `originOf` could answer nothing.
+      "control/src/Cancellation.ts": 1,
+      "control/src/Channels.ts": 1,
+      "control/src/ControlRuntime.ts": 3,
+      "control/src/Lineage.ts": 1,
+      "control/src/internal/planning.ts": 1,
       // The agent package's former hints (FlowEngineLike's canonicalization
       // mappers and AgentSession's process-loss fallbacks) were removed with
       // the code that needed them in 81b218ce7; the entries leave with them.
@@ -760,11 +782,6 @@ describe("vitest coverage isolation conformance", () => {
       // names none outside `DigestAlgorithm`, so the rejection translation is
       // unreachable from the engine.
       "flows/src/internal/SandboxedFlowGuest.ts": 1,
-      // The public Incur wrappers hydrate the selected route and replace its
-      // metadata-only definition before execution. The placeholder method is
-      // retained because Incur's command definition type requires one, but no
-      // public serve or fetch path can dispatch it.
-      "fs/src/Incur.ts": 1,
       // ECMAScript arrays expose a uint32 own `length`; Proxy invariants do
       // not permit the descriptor-backed boundary walk to observe any other
       // shape. These guards keep future reflection changes fail-closed.
@@ -872,7 +889,13 @@ describe("vitest coverage isolation conformance", () => {
       // One defensive normalization for a future `Duration` input that throws,
       // and one path guard that `KeyDigest` already satisfies by excluding
       // every path separator and dot segment.
-      "step-cache/src/RemoteCacheStore.ts": 2
+      "step-cache/src/RemoteCacheStore.ts": 2,
+      // The fixture engine's three unreachable arms (`d1012596b6`): registered
+      // execution bodies settle only after run or resume arms their
+      // settlement, the registered execute function runs every subject flow so
+      // the declarative body is never interpreted, and every path to
+      // awaitResult arms a settlement after recording execution metadata.
+      "testing/src/FlowEngineLike.ts": 3
     }
     const sourceFiles = (directory: string): Array<string> => {
       let entries

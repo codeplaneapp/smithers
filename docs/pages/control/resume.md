@@ -31,6 +31,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 

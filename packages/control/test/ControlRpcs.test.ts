@@ -60,6 +60,22 @@ describe("ControlRpcs", () => {
     expect(refused.every((error) => error instanceof Unauthorized)).toBe(true)
   })
 
+  it("stamps the host clock when the composition names none", async () => {
+    // `now` is a seam for deterministic suites. A host that omits it still owes
+    // every authenticated principal a real stamp, because the stamp is what
+    // says WHEN a decision was authorized.
+    const authenticator = bearerAuthenticator({
+      token: "alpha-secret",
+      principal: { id: "alpha", kind: "bearer" }
+    })
+
+    const before = Date.now()
+    const authenticated = await Effect.runPromise(authenticator.authenticate({ authorization: "Bearer alpha-secret" }))
+
+    expect(authenticated.stampedAt).toBeGreaterThanOrEqual(before)
+    expect(authenticated.stampedAt).toBeLessThanOrEqual(Date.now())
+  })
+
   it("fails closed when the configured bearer token is empty", async () => {
     const authenticator = bearerAuthenticator({
       token: "",

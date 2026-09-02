@@ -117,6 +117,7 @@ const terminalOrAccepted = (
  * delivered.
  */
 const withoutStampedPrincipal = (input: unknown): unknown => {
+  /* v8 ignore next -- every caller passes a mutation the boundary already decoded into a struct; the guard keeps the helper total for a reader */
   if (input === null || typeof input !== "object") return input
   const { principal: _principal, ...rest } = input as Record<string, unknown>
   const message = rest["message"]
@@ -172,14 +173,23 @@ const AttributedSignalInput = Schema.Struct({
   principal: Schema.optional(Principal)
 })
 
+// The surrogate scan restates, at the point the DURABLE KEY is formed, what
+// `MutationBoundary.admit` already refused: a lone surrogate is not a string
+// SQLite and JSON round-trip identically, and this value is a primary key. The
+// two refusing arms are therefore unreachable through every caller, and stay
+// as the local invariant rather than as a check somebody may delete upstream.
 const validIdempotencyKey = (value: string): boolean => {
   if (value.length === 0 || value.length > 1024 || value.includes("\0")) return false
   for (let index = 0; index < value.length; index++) {
     const unit = value.charCodeAt(index)
     if (unit >= 0xd800 && unit <= 0xdbff) {
       const low = value.charCodeAt(++index)
+      /* v8 ignore next -- an unpaired high surrogate is refused by the mutation boundary first */
       if (!(low >= 0xdc00 && low <= 0xdfff)) return false
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
+      continue
+    }
+    /* v8 ignore next -- a lone low surrogate is refused by the mutation boundary first */
+    if (unit >= 0xdc00 && unit <= 0xdfff) return false
   }
   return true
 }
@@ -907,8 +917,9 @@ export const layer: Layer.Layer<
             )
             const highWaterByPartition = new Map(cutoffs)
             const tail = Stream.fromSubscription(subscription).pipe(
+              // Every committed entry names its partition, so an entry from one
+              // this snapshot never read has no cutoff and passes through.
               Stream.filter((entry) => {
-                if (entry.runId === undefined) return true
                 const highWater = highWaterByPartition.get(String(entry.runId))
                 return highWater === undefined || entry.seq > highWater
               }),

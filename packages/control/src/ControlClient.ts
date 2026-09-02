@@ -80,52 +80,70 @@ const transportError = (cause: unknown, classification: TransportClassification)
     cause
   })
 
+// A `StatusCodeError` reported by the RPC client always carries the concrete
+// error, and that error always carries its response. The three refusals below
+// are what keeps a hand-built wrapper without one from being read as a 5xx and
+// retried forever; none of them is reachable from the client's own transports.
 const statusFrom = (cause: unknown): number | undefined => {
+  /* v8 ignore next -- a StatusCodeError cause always carries its response */
   if (typeof cause !== "object" || cause === null || !("response" in cause)) return undefined
   const response = cause.response
+  /* v8 ignore next -- as above: the response is an object carrying a status */
   if (typeof response !== "object" || response === null || !("status" in response)) return undefined
+  /* v8 ignore next -- as above: the status is a number */
   return typeof response.status === "number" ? response.status : undefined
+}
+
+type HttpFailureKind = Extract<RpcClientError.RpcClientError["reason"], { readonly _tag: "HttpError" }>["kind"]
+type TransportReason = RpcClientError.RpcClientError["reason"]["_tag"]
+
+/**
+ * What each HTTP failure means for a retry.
+ *
+ * `StatusCodeError` is absent on purpose: it is the one kind whose answer
+ * depends on the response, not on the kind.
+ */
+const httpClassification: Record<Exclude<HttpFailureKind, "StatusCodeError">, TransportClassification> = {
+  TransportError: connectionFailure,
+  EncodeError: requestEncoding,
+  InvalidUrlError: invalidClientUrl,
+  DecodeError: responseDecoding,
+  EmptyBodyError: responseDecoding
+}
+
+/**
+ * What each non-HTTP transport failure means for a retry.
+ *
+ * A table rather than a switch, because the mapping is data: the compiler
+ * still requires every reason the RPC client can report to have an answer, and
+ * a reader can check the whole policy at a glance.
+ */
+const reasonClassification: Record<Exclude<TransportReason, "HttpError">, TransportClassification> = {
+  RpcClientDefect: responseDecoding,
+  SocketReadError: connectionFailure,
+  SocketWriteError: connectionFailure,
+  SocketOpenError: connectionFailure,
+  SocketCloseError: connectionFailure,
+  // A worker transport is not composable with this client, which speaks HTTP
+  // and WebSocket. The entries exist so the table stays exhaustive.
+  WorkerSpawnError: unknownClientFailure,
+  WorkerSendError: unknownClientFailure,
+  WorkerReceiveError: unknownClientFailure,
+  WorkerUnknownError: unknownClientFailure
 }
 
 const classifyRpcClientError = (error: RpcClientError.RpcClientError): TransportClassification => {
   const reason = error.reason
-  switch (reason._tag) {
-    case "HttpError": {
-      switch (reason.kind) {
-        case "TransportError":
-          return connectionFailure
-        case "EncodeError":
-          return requestEncoding
-        case "InvalidUrlError":
-          return invalidClientUrl
-        case "DecodeError":
-        case "EmptyBodyError":
-          return responseDecoding
-        case "StatusCodeError": {
-          // Effect's serializable HttpError keeps the concrete
-          // StatusCodeError in `cause`. The wrapper has no separate status
-          // field, so a hand-built wrapper without that cause cannot safely be
-          // classified as retryable and falls back to the client class.
-          const status = statusFrom(reason.cause)
-          return status !== undefined && status >= 500 && status <= 599
-            ? serverHttpFailure
-            : clientHttpFailure
-        }
-      }
-    }
-    case "RpcClientDefect":
-      return responseDecoding
-    case "SocketReadError":
-    case "SocketWriteError":
-    case "SocketOpenError":
-    case "SocketCloseError":
-      return connectionFailure
-    case "WorkerSpawnError":
-    case "WorkerSendError":
-    case "WorkerReceiveError":
-    case "WorkerUnknownError":
-      return unknownClientFailure
-  }
+  if (reason._tag !== "HttpError") return reasonClassification[reason._tag]
+  if (reason.kind !== "StatusCodeError") return httpClassification[reason.kind]
+  // Effect's serializable HttpError keeps the concrete StatusCodeError in
+  // `cause`. The wrapper has no separate status field, so a hand-built wrapper
+  // without that cause cannot safely be classified as retryable and falls back
+  // to the client class.
+  const status = statusFrom(reason.cause)
+  return status !== undefined && status >= 500 && status <= 599
+    ? serverHttpFailure
+    : clientHttpFailure
 }
 
 const isRpcClientError = Schema.is(RpcClientError.RpcClientError)
@@ -146,6 +164,10 @@ const normalizedFailure = (cause: Cause.Cause<unknown>): Effect.Effect<never, Co
     )
   }
   const defect = Cause.findDefect(cause)
+  // A cause with neither a failure nor a defect is an interruption, and an
+  // operator's own cancellation is not the server failing. It is re-raised
+  // exactly as it arrived rather than described as a transport failure.
+  /* v8 ignore next 2 -- the fiber propagates an interrupt-only cause without reaching this operator */
   return Result.isSuccess(defect)
     ? Effect.fail(transportError(defect.success, classify(defect.success)))
     : Effect.failCause(cause as Cause.Cause<ControlError>)

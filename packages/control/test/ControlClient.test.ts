@@ -1,8 +1,8 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
-import { Cause, Effect, Layer, Stream } from "effect"
-import { HttpRouter, HttpServer } from "effect/unstable/http"
+import { Cause, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { createServer } from "node:http"
 import { describe, expect, it } from "vitest"
@@ -274,6 +274,140 @@ describe("ControlClient", () => {
     } finally {
       await malformed.close()
     }
+  })
+
+  it("reports a URL no request can be built from as final", async () => {
+    // A misconfigured `--control-url` fails before a byte leaves the process.
+    // Retrying it forever would hide the one thing an operator has to fix.
+    const failure = transport(
+      await Effect.runPromise(
+        withClient("not-a-url", token, (control) => control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(
+          Effect.scoped
+        )
+      )
+    )
+
+    expect(failure.retryable).toBe(false)
+    expect(failure.message).toBe("The control server URL is invalid.")
+  })
+
+  it("classifies an empty 200 body as a non-retryable decode failure", async () => {
+    // A proxy that answers 200 with nothing is not a server that failed: the
+    // request was delivered and the answer is unreadable, so repeating it
+    // reaches the same proxy.
+    const empty = await rawServer(200, "")
+    try {
+      const failure = transport(
+        await Effect.runPromise(
+          withClient(empty.url, token, (control) => control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(
+            Effect.scoped
+          )
+        )
+      )
+
+      expect(failure.retryable).toBe(false)
+      expect(failure.message).toBe("The control response could not be decoded.")
+    } finally {
+      await empty.close()
+    }
+  })
+
+  it("refuses a watch filter it cannot encode, before opening a socket", async () => {
+    // `watch` is a stream, and its request is encoded on the way in exactly as
+    // a unary call's is. A filter the schema refuses has to fail as a final
+    // client error rather than as a stream that opens and then dies.
+    const exit = await run(Effect.gen(function*() {
+      const url = yield* baseUrl
+      return yield* withClient(
+        url,
+        token,
+        (control) =>
+          Effect.exit(
+            Stream.runCollect(control.watch({ runId: 7 as unknown as string, follow: false }))
+          )
+      )
+    }))
+
+    if (exit._tag === "Success") throw new Error("expected the filter to be refused")
+    const failure = transport(Cause.squash(exit.cause))
+    expect(failure.retryable).toBe(false)
+    expect(failure.message).toBe("The control request could not be encoded.")
+  })
+
+  it("marks a watch whose socket never opens retryable", async () => {
+    // The stream's failures are classified by the same rules the unary calls
+    // use, so an operator's retry policy does not have to know which transport
+    // a verb travels on.
+    const port = await closedPort()
+    const failure = transport(
+      await Effect.runPromise(
+        withClient(
+          `http://127.0.0.1:${port}`,
+          token,
+          (control) => Stream.runCollect(control.watch({ follow: true })).pipe(Effect.flip)
+        ).pipe(Effect.scoped)
+      )
+    )
+
+    expect(failure.retryable).toBe(true)
+    expect(failure.message).toBe("The control server could not be reached.")
+  })
+
+  it("classifies a transport failure it cannot name, and never retries one", async () => {
+    // Everything above is a failure the RPC client itself reported. This is the
+    // other kind: whatever the host transport threw. It reaches the caller as a
+    // control error rather than a defect, and it is final, because nothing here
+    // says the request was safe to send twice.
+    const dying = (failure: unknown) =>
+      ControlClient.layer({ url: "http://127.0.0.1:1/rpc" }).pipe(
+        Layer.provide([
+          Layer.succeed(HttpClient.HttpClient, HttpClient.make(() => Effect.die(failure))),
+          NodeSocket.layerWebSocket("ws://127.0.0.1:1/rpc/ws"),
+          RpcSerialization.layerNdjson
+        ])
+      )
+    const listedThrough = (failure: unknown) =>
+      Effect.runPromise(
+        Effect.gen(function*() {
+          const control = yield* Control
+          return yield* Effect.exit(control.list({ _tag: "flows" }))
+        }).pipe(Effect.provide(dying(failure) as Layer.Layer<Control>), Effect.scoped)
+      )
+    const schemaFailure = await Effect.runPromise(
+      Effect.flip(Schema.decodeUnknownEffect(Schema.String)(7))
+    )
+
+    const unnamed = await listedThrough(new Error("the host transport gave up"))
+    const undecodable = await listedThrough(schemaFailure)
+
+    if (unnamed._tag === "Success" || undecodable._tag === "Success") throw new Error("expected both to fail")
+    const unnamedFailure = transport(Cause.squash(unnamed.cause))
+    const undecodableFailure = transport(Cause.squash(undecodable.cause))
+    expect(unnamedFailure.retryable).toBe(false)
+    expect(unnamedFailure.message).toBe("The control RPC client failed.")
+    // A schema failure is a decode failure wherever it surfaced, and the raw
+    // message is kept only in the cause slot.
+    expect(undecodableFailure.retryable).toBe(false)
+    expect(undecodableFailure.message).toBe("The control response could not be decoded.")
+    expect(undecodableFailure.message).not.toContain("7")
+  })
+
+  it("leaves an interrupted call interrupted rather than reporting a transport failure", async () => {
+    // An operator's Ctrl-C is not the server failing. A cause with no error and
+    // no defect is passed through as it is, so the caller's own cancellation
+    // stays cancellation all the way out.
+    const exit = await run(Effect.gen(function*() {
+      const url = yield* baseUrl
+      const fiber = yield* withClient(
+        url,
+        token,
+        (control) => control.list({ _tag: "flows" }).pipe(Effect.andThen(Effect.never))
+      ).pipe(Effect.forkChild({ startImmediately: true }))
+      return yield* Effect.exit(Fiber.interrupt(fiber).pipe(Effect.andThen(Fiber.await(fiber)), Effect.flatten))
+    }))
+
+    if (exit._tag === "Success") throw new Error("expected the interrupted call to fail")
+    expect(Cause.hasInterrupts(exit.cause)).toBe(true)
   })
 
   it("streams watch snapshots over the real WebSocket mount", async () => {

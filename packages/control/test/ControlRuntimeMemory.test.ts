@@ -11,6 +11,7 @@ import {
   EnvelopeMismatch,
   FlowNotFound,
   InvalidInput,
+  PersistenceError,
   PlanDenied,
   PlanDigestMismatch,
   PlanNotFound,
@@ -347,6 +348,105 @@ describe("ControlRuntime.layerMemory", () => {
       message: "idempotency key mutation:key was used for another mutation"
     })
     expect(observed.absent).toBeUndefined()
+  })
+
+  it("refuses to overwrite a settled key with a different receipt", async () => {
+    // The record is the proof one mutation happened once. Letting a second
+    // mutation write over it under the same key would replay the wrong receipt
+    // to whoever asks next, which is the one thing the key exists to prevent.
+    const observed = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        yield* runtime.recordMutation("mutation:settled", "cancel:run-1", { _tag: "Accepted", receiptId: "r" })
+        const reused = yield* Effect.flip(
+          runtime.recordMutation("mutation:settled", "cancel:run-2", { _tag: "Accepted", receiptId: "r" })
+        )
+        const rewritten = yield* Effect.flip(
+          runtime.recordMutation("mutation:settled", "cancel:run-1", { _tag: "Accepted", receiptId: "other" })
+        )
+        const idempotent = yield* runtime.recordMutation("mutation:settled", "cancel:run-1", {
+          _tag: "Accepted",
+          receiptId: "r"
+        })
+        return {
+          idempotent,
+          replay: yield* runtime.lookupMutation("mutation:settled", "cancel:run-1"),
+          reused,
+          rewritten
+        }
+      })
+    )
+
+    expect(observed.reused).toBeInstanceOf(PersistenceError)
+    expect((observed.reused as PersistenceError).operation).toBe("record a mutation")
+    expect(observed.rewritten).toBeInstanceOf(PersistenceError)
+    // Re-recording the identical mutation is the retry the key is for, and it
+    // leaves the stored receipt exactly where it was.
+    expect(observed.idempotent).toBeUndefined()
+    expect(observed.replay).toEqual({ _tag: "AlreadyApplied", receiptId: "r" })
+  })
+
+  it("refuses a plan input no snapshot can detach, after canonicalizing it", async () => {
+    // Canonicalization mirrors `JSON.stringify`, which DROPS a function-valued
+    // property, so this input has a canonical form and only `structuredClone`
+    // refuses it. The refusal has to be the same typed `InvalidInput` a
+    // canonical failure raises rather than a defect escaping the runtime, and
+    // it must not carry the host's clone message.
+    const error = await withRuntime((runtime) =>
+      Effect.flip(runtime.plan({ flowId: "system/test", input: { visit: () => "unclonable" } }))
+    )
+
+    expect(error).toBeInstanceOf(InvalidInput)
+    expect((error as InvalidInput).issue).toBe("$: canonicalization failed")
+  })
+
+  it("answers a settled run's own summary from interrupt rather than ClaimLost", async () => {
+    // Terminality is read first. A settled run released its fence on the way
+    // out, so the fence check would answer `ClaimLost` about a run that has
+    // nothing left to interrupt, which names the wrong problem.
+    const observed = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        const settled = yield* start(runtime)
+        const fence = yield* runtime.claimFence(settled.run.runId)
+        yield* runtime.writeStatus(settled.run.runId, fence, "completed")
+        return {
+          interrupted: yield* runtime.interrupt(settled.run.runId),
+          resumed: yield* runtime.resume(settled.run.runId)
+        }
+      })
+    )
+
+    expect(observed.interrupted.status).toBe("completed")
+    // The same read on the same reason: restarting a settled run restarts
+    // nothing, and it answers with the run rather than a claim failure.
+    expect(observed.resumed.status).toBe("completed")
+  })
+
+  it("stops offering a resume the run can no longer take up, and keeps one whose cursor moved on", async () => {
+    // `pendingResumes` is what a host polls. A settled run is nobody's to
+    // restart, and a clear that names an older cursor belongs to a delegation
+    // this one already replaced.
+    const observed = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        const settled = yield* start(runtime)
+        const standing = yield* start(runtime)
+        yield* runtime.requestResume(settled.run.runId)
+        const first = yield* runtime.requestResume(standing.run.runId)
+        const second = yield* runtime.requestResume(standing.run.runId)
+        const fence = yield* runtime.claimFence(settled.run.runId)
+        yield* runtime.writeStatus(settled.run.runId, fence, "cancelled")
+        yield* runtime.clearResume(standing.run.runId, first)
+        yield* runtime.clearResume("run-that-never-existed", second)
+        const stale = yield* runtime.pendingResumes
+        yield* runtime.clearResume(standing.run.runId, second)
+        return { second, settled: settled.run.runId, stale, taken: yield* runtime.pendingResumes }
+      })
+    )
+
+    // The cancelled run is gone from the listing; the standing one survived
+    // both a stale cursor and an unknown run id.
+    expect(observed.stale.map((pending) => pending.runId)).not.toContain(observed.settled)
+    expect(observed.stale.map((pending) => pending.sequence)).toEqual([observed.second])
+    expect(observed.taken).toEqual([])
   })
 
   it("stamps a submitted principal over the composition's own, on its own clock", async () => {

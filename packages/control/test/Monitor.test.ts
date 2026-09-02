@@ -9,7 +9,7 @@
  * journal, which only a real journal has.
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Effect, Fiber, type Layer, Stream } from "effect"
+import { Effect, Fiber, Layer, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
@@ -519,6 +519,35 @@ describe("Monitor.run over the durable control plane", () => {
 
     expect(observed.beats).toHaveLength(1)
     expect(observed.health).toBe("healthy")
+  })
+
+  it("calls a run unknown when the control plane answers a listing of another kind", async () => {
+    // `Monitor` asks for runs and reads the answer's tag rather than trusting
+    // it. A control plane that answered a flow listing — an older server, a
+    // proxy that rewrote the request — would otherwise have its items read as
+    // run summaries, and the monitor would heal a run from another table's row.
+    const blindListing = Layer.provideMerge(
+      Layer.effect(
+        Control,
+        Effect.map(Control, (control) => ({
+          ...control,
+          list: () => Effect.succeed({ _tag: "flows" as const, items: [] })
+        }))
+      ),
+      durable()
+    ) as Layer.Layer<DurableStack>
+
+    const observed = await run(
+      Effect.gen(function*() {
+        const runId = yield* start("blind-listing")
+        return yield* Monitor.run({ runId, intervalMs: 0, maxChecks: 2, stallBeats: 1, autoHeal: ["stalled"] })
+      }),
+      blindListing
+    )
+
+    expect(observed.beats.map((beat) => beat.health)).toEqual(["unknown", "unknown"])
+    // Nothing is known, so nothing is remedied.
+    expect(observed.beats.every((beat) => beat.healed === undefined)).toBe(true)
   })
 
   it("waits the interval between beats", async () => {

@@ -64,10 +64,12 @@ export const sameEnvelope = (left: Envelope, right: Envelope): boolean => canoni
  * @private
  * @slop
  */
-export const accepted = (receiptId: string, runId?: RunId): Receipt =>
-  runId === undefined
+export const accepted = (receiptId: string, runId?: RunId): Receipt => {
+  /* v8 ignore next 3 -- both runtimes call this from `launch`, which has the run it just started; the parameter stays optional for the receipt's shape rather than for a caller */
+  return runId === undefined
     ? { _tag: "Accepted", receiptId }
     : { _tag: "Accepted", receiptId, runId }
+}
 
 /**
  * The receipt a replayed mutation returns, derived from the recorded one.
