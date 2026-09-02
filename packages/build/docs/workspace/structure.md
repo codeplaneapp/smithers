@@ -87,6 +87,13 @@ uses to match a dependency to its label. Across commands in one process, a
 `BUILD.ts` that was edited is re-evaluated, and two workspaces that happen to
 share a path spelling never share a module.
 
+Besides targets, a `BUILD.ts` may export a `PackageDefaults` declaration, a
+`Workspace` configuration, and one `Smithers.Nix.Environment`. The environment
+applies to the exporting package and every package below it; the root's is the
+workspace's, and a package that exports its own overrides it for that package
+alone. Two environment exports in one `BUILD.ts` fail the load. See
+[Environments](../concepts/environments.md).
+
 Three guards apply. A `BUILD.ts` must resolve, inside the canonical workspace
 root, to a regular file; a link out of the workspace is refused rather than
 imported, because evaluating a `BUILD.ts` runs it. Loading a `BUILD.ts` that

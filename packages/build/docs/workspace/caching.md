@@ -54,6 +54,13 @@ Two substitutions happen inside `inputs.attrs` before hashing:
 | `Dev`, `ToolBuild` | `[]`                       | `proc:spawn`                        |
 | Everything else    | `[]`                       | `fs:read`, `proc:spawn`             |
 
+Under a declared [Nix environment](../concepts/environments.md) every target
+whose capabilities include `proc:spawn` also carries `nix:<store hash>`: the
+32-character hash of the closure its tools resolve from. The hash comes from
+the resolved store path, not from the flake's text, so two flakes that
+evaluate to one closure share keys and one flake evaluated by two nixpkgs
+pins does not.
+
 `API-REVIEW.md` records that executable targets should eventually derive both
 lists from the real flow graph and its resolved layers.
 
@@ -89,6 +96,8 @@ any byte of the implementation changes; there is no salt to remember to bump.
 - For `LlmLint`, changing the `model` attribute, which also changes `layers`.
 - Any change to the bytes of the shipped `cli/src`, `targets/src`, or `src`
   sources, through the ambient implementation fingerprint.
+- Under a declared Nix environment, any change to the closure: an edit to the
+  flake, its lock, or the expression file that changes the store path.
 
 Two things deliberately do not re-key a target: the workspace's absolute path,
 and the resolved cache directory name. See
@@ -109,9 +118,17 @@ not yet key material.
 | Every other catalog target                    | Never                                                            |
 
 Mutation, long-lived processes, model calls, and external publication are never
-cached. External compiler, test, and lint targets also remain non-cacheable until
+cached. External compiler, test, and lint targets remain non-cacheable until
 their executable and runtime toolchain are represented in the content key; a
 lockfile path or command name alone is not toolchain identity.
+
+A declared [Nix environment](../concepts/environments.md) is that identity.
+When a target's package declares one, the planner marks these targets
+cacheable, because the `nix:<hash>` layer names the exact compiler, runner, or
+linter that produced the result: `TsBuild`, `DtsBuild`, `Typecheck`, `Vitest`,
+`VitestCoverage`, `NodeTest`, `EsLint`, `BiomeCheck`, `DepsLint`,
+`PackageLint`, `CargoTest`, and `CargoLint`. Without an environment they stay
+as the table says.
 
 ## Keys vary by verb
 
@@ -303,6 +320,9 @@ is seconds or minutes wide in a real run.
 - A hit reports `hit`, skips the run, and does not re-execute the tool.
 - A green run of a cacheable target stores its result. A failure to store prints
   one warning line and does not fail the run.
+- A result produced outside an enforced confinement is stored in the local tier
+  only. Publishing to the remote tier needs a confined run; see
+  [Hermeticity](../concepts/actions-and-boundaries.md#hermeticity).
 - `--no-cache` bypasses reads and still writes.
 
 Only a result that round trips through JSON without type loss is stored: null,

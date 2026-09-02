@@ -99,6 +99,21 @@ describe("packages/build prose", () => {
     for (const name of names) expect(page, `remote-caching.md never names ${name}`).toContain(name)
   })
 
+  it("installs and deploys infra with the workspace's package manager", () => {
+    // `infra/` is a workspace package with no lockfile of its own, so the
+    // recipe's old `npm ci` step failed on every fresh checkout, and `npx`
+    // would fetch alchemy from the registry instead of the pinned install.
+    expect(Fs.existsSync(NodePath.join(packageRoot, "infra/package-lock.json"))).toBe(false)
+    expect(JSON.parse(read("infra/package.json")).scripts).toHaveProperty("deploy")
+    const page = read("docs/workspace/remote-caching.md")
+    expect(page).toContain("pnpm install --frozen-lockfile --offline")
+    expect(page).toContain("CI=1 pnpm exec alchemy plan alchemy.run.ts --stage prod")
+    expect(page).toContain("CI=1 pnpm run deploy -- --yes")
+    for (const file of proseFiles()) {
+      expect(read(file), `${file} runs infra through npm`).not.toMatch(/\bnpm ci\b|\bnpx\b/)
+    }
+  })
+
   it("states the credential split both deployments enforce", () => {
     // Both implementations refuse two equal digests, so no page may still
     // describe the self-hosted tier as single-credential or offer one secret

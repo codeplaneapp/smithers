@@ -50,41 +50,35 @@ Two mechanisms enforce it, and only the first is a control:
 A `pull_request`-triggered job receives the read credential and no write
 credential. It pulls at full speed and publishes nothing.
 
-## The change GithubCiGen needs
+## What GithubCiGen carries, and the adoption that remains
 
-Today `packages/targets/src/GithubCiGen.ts` renders cache host state in
-`cacheEnvironment` (around line 795), from one optional `cacheTokenSecret`
-attr (declared around line 245). `render` computes that map once and spreads
-the same `env` block onto every generated step of every job, so the one token
-reaches `pull_request` runs and `push` runs alike. The root `BUILD.ts` declares
+`packages/targets/src/GithubCiGen.ts` carries the split. Beside
+`cacheTokenSecret`, the read credential, the attrs declare an optional
+`cacheWriteTokenSecret`, and the `Job` struct declares an optional
+`publishesToCache` boolean. `render` still computes the shared entries
+(endpoint and read token) once and spreads them onto every generated step; the
+write entry is rendered only into a job that declares `publishesToCache`, and
+that job is emitted with
+`if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/<branch>' }}`
+over the declared push branches, so a `pull_request` run of it never starts,
+let alone holds the credential.
+
+The generator refuses the half-declared shapes rather than rendering them: a
+`publishesToCache` job with no declared write credential, a declared write
+credential no job publishes with, read and write secrets naming one variable,
+a publishing job in a workflow with no push branches, and a gate that only a
+publishing job would satisfy (its guard means GitHub skips it on every pull
+request, so it proves nothing).
+
+What remains is the adoption in the root `BUILD.ts`, which today declares
 `cacheToken = Smithers.Secret("SMITHERS_CACHE_TOKEN")` and passes it as
-`cacheTokenSecret`.
+`cacheTokenSecret`, the shared-credential posture. The change: declare
+`cacheWriteToken = Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")`, rename
+`cacheToken` to name `SMITHERS_CACHE_READ_TOKEN`, pass both, and mark the
+publishing job. It must wait for steps 1 and 2 of the deployment ordering
+below.
 
-The change, in order:
-
-1. Add an optional `cacheWriteTokenSecret: Schema.optional(Secret.Declaration)`
-   attr beside `cacheTokenSecret`, and document `cacheTokenSecret` as the read
-   credential.
-2. Split `cacheEnvironment(attrs)` into two renderings: the shared entries
-   (endpoint and read token) and the write entry. Keep the shared function as
-   it is and add `writeCacheEnvironment(attrs)` returning at most one entry.
-3. In `render`, decide per job rather than once for the workflow. A job earns
-   the write entry only when the workflow cannot be triggered by a pull
-   request, which is `attrs.pullRequest === false`, or when the job itself is
-   guarded by a condition that excludes pull-request events. The smallest
-   correct form is a per-job `publishesToCache: Schema.optional(Schema.Boolean)`
-   on the `Job` struct (around line 171), defaulting to false. When it is true,
-   `render` adds the write entry to that job's step `env` and emits
-   `if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}`
-   in the same block that emits `runs-on`; `Job` declares no `if` today, so
-   that line is new. Never emit the write entry on a job without that guard: a
-   `pull_request` run of the same job would receive it.
-4. In the root `BUILD.ts`, declare
-   `cacheWriteToken = Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")`, rename
-   `cacheToken` to name `SMITHERS_CACHE_READ_TOKEN`, pass both, and mark the
-   publishing job.
-
-Landing that change regenerates `.github/workflows/ci.yml`. The workflow is a
+Landing that adoption regenerates `.github/workflows/ci.yml`. The workflow is a
 generated root file whose drift is gated, so the regenerated file belongs in
 the same commit as the `GithubCiGen` and `BUILD.ts` edits:
 
@@ -125,8 +119,8 @@ this order:
 2. **Add the repository secrets.** Add `SMITHERS_CACHE_READ_TOKEN` holding the
    newly minted read token and `SMITHERS_CACHE_WRITE_TOKEN` holding the current
    value to the GitHub repository.
-3. **Land the CI generation change** above, so pull-request jobs stop receiving
-   the write credential.
+3. **Land the root `BUILD.ts` adoption** above, so pull-request jobs stop
+   receiving the write credential.
 4. **Rotate.** Only now generate a new write credential, redeploy the Worker
    with the new `SMITHERS_CACHE_WRITE_TOKEN` and the unchanged read token, and
    update the repository secret. Rotating before step 3 breaks every job that

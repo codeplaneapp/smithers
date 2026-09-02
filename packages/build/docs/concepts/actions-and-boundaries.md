@@ -137,14 +137,60 @@ the constant token `{smthrs:cache-directory}` in its argv at plan time.
 immediately before spawn. The real path therefore never enters an action payload
 or a step key.
 
-## Hermeticity today
+## Hermeticity
 
-There is no sandbox. `ExecLive` spawns the tool in the workspace with
-`process.env` merged under the payload `env`, minus `SMITHERS_CACHE_URL` and the
-declared remote-cache token variable. Nothing prevents a tool from reading or
-writing outside its declared set.
+Every tool run goes through one sandbox module, `ExecSandbox`, and every
+declared confinement is enforced or the target fails closed. Nothing logs
+"unenforced" and carries on.
 
-A `BUILD.ts` file is not sandboxed either, and it is not meant to be. It is
+A target declares a policy: the default confinement, `{ network: "loopback" }`,
+`{ network: true }`, or the `"none"` opt-out. On the `PACKAGE.ts` surface
+that is the `sandbox` attr and the default is the confinement. On the
+`BUILD.ts` surface the root `Workspace({ sandbox })` declaration sets one
+policy for every tool-running target, and the default is `"none"` until a
+workspace declares otherwise, because the catalog's declared inputs are what
+the sandbox exposes and a workspace has to declare them completely first.
+
+Under confinement a tool may read its declared read set and nothing else under
+the workspace: the target's expanded declared inputs, the outputs of every
+transitive dependency, the `node_modules` trees above its working directory,
+and the cache directory's scratch and fetch store. It may write its declared
+outputs, its declared `changes`, and the cache directory with the result cache
+itself re-closed, plus a private temporary directory and home. A declared
+output file opens the directory it lives in, because a file cannot be bound
+before it exists and a tool that writes by rename needs the directory. The
+network is closed unless the policy opens it.
+
+| Host    | Mechanism                                                                                                                                                                                                                                                                       |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux   | bubblewrap. The host root is bound read-only, a tmpfs covers the workspace, the declared set is bound on top, the tmpfs is remounted read-only, and the network namespace is unshared. `loopback` shares the host network, because a namespace cannot admit the host's loopback alone. |
+| macOS   | seatbelt. Reads under the workspace are denied except the declared set, writes are denied except the declared set and the private tmp, and the network is denied except what the policy opens. The operating system and toolchain outside the workspace stay readable.               |
+| Docker  | `docker run` with a read-only root, the declared set mounted at its host paths, and `--network none`. Declared with `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`; the image supplies the toolchain. The only mechanism on Windows.                                  |
+| Windows | Nothing native. A confined target without a Docker declaration fails closed.                                                                                                                                                                                                    |
+
+The mechanism is selected per host: bubblewrap on Linux, seatbelt on macOS,
+Docker where declared. A Linux host without `bwrap`, a Windows host without
+a Docker declaration, or a declared mechanism missing from `PATH` fails the
+target with `sandbox_unenforceable` and a message naming what is missing.
+`--plan` reports the answer as `sandboxEnforced`.
+
+An undeclared read is missing or refused, an undeclared write fails at the
+kernel, and the run fails. The sandbox denies at the kernel, so the witness is
+the tool's own error text; the failure carries the paths that text names and
+which side of the boundary each fell on:
+
+```text
+/bin/sh: note.txt: Operation not permitted
+sandbox: note.txt is outside the declared write set
+sandbox: seatbelt, network none, 3 read path(s), 2 write path(s)
+```
+
+Reads outside the workspace are not scoped on any mechanism. The workspace
+tree is what the content key covers; the loader, the interpreters, and the
+package manager live outside it, and the toolchain identity that names them is
+the `nix:<hash>` layer of a declared [Nix environment](environments.md).
+
+A `BUILD.ts` file is not sandboxed, and it is not meant to be. It is
 executable TypeScript evaluated in the CLI process: it can import any host
 module, read any file you can read, and spawn any process. Evaluating a
 workspace is exactly as trusted as running that repository's own code. The CLI
@@ -154,13 +200,8 @@ corrupt any concurrent caller. What the CLI does guarantee is narrower and
 real: token values never enter a declaration, a target key, or a stored cache
 entry, and the child-process environment is where the credential is withheld.
 
-The shipped filesystem boundary can measure a declared read set and capture and
-replay a declared `TreeArtifact`. It cannot prove that a process wrote nowhere
-else, so it omits the whole-tree and hermetic-read proofs and its evidence stays
-run-local. The concrete consequence is that no fetch result is admitted to the
-shared tier today, even though the action is designed to be admissible.
-
-The sandbox execution lane supplies those proofs. It is not wired. See
+A result produced outside an enforced confinement stays in the local cache
+tier. Only a confined run publishes to the shared tier; see
 [Remote caching](../workspace/remote-caching.md#the-current-engine-boundary).
 
 ## Next

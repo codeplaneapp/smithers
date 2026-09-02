@@ -1,14 +1,22 @@
 # Configuration
 
-A workspace has one configurable setting: where the CLI keeps its cache and target
-scratch files. The root `BUILD.ts` file declares it.
+A workspace declares where the CLI keeps its cache and target scratch files,
+and the confinement its tool-running targets execute under. The root
+`BUILD.ts` file declares both.
 
 ```ts
 // BUILD.ts
-import { Smithers } from "@smthrs/targets"
+import { Workspace } from "@smthrs/targets/Config"
 
-export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
+export const config = Workspace({ cacheDirectory: ".flows", gitignored: true, sandbox: {} })
 ```
+
+`sandbox` is the policy every tool-running target executes under: `"none"`
+(the default), `{}` for the default confinement, `{ network: "loopback" }`, or
+`{ network: true }`. `sandboxes` names the mechanism when the platform's own is
+not wanted, for example `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`
+on a host without bubblewrap or seatbelt. See
+[Hermeticity](../concepts/actions-and-boundaries.md#hermeticity).
 
 `Workspace` validates its options and performs no I/O, so `BUILD.ts` evaluation
 stays pure. The export name does not matter; when several exports are `Workspace`
@@ -42,6 +50,7 @@ per-run choice, so there is no flag for it.
 | ------------------------------------------ | -------------------------------------------------------------------- |
 | `<cacheDirectory>/cache/<xx>/<key>.json`   | The result cache, one JSON file per stored target result             |
 | `<cacheDirectory>/knip-<fingerprint>.json` | `DepsLint`, when its ignore lists are non-empty and the tool is knip |
+| `<cacheDirectory>/sandbox/<run>`            | A confined run's private temporary directory and home; removed when the run ends |
 
 Package-manager stores are not controlled by this setting. They stay at
 `.flows/store/<manager>` because fetch declares those fixed paths as

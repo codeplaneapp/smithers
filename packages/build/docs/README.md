@@ -45,6 +45,7 @@ wired is marked as such on the page that covers it.
 | [Dependencies](concepts/dependencies.md)                     | Import edges, `deps` attributes, and transitive planning.                          |
 | [Actions and boundaries](concepts/actions-and-boundaries.md) | Sealed actions, `TreeArtifact` writes, host state, and hermeticity.                |
 | [Install](concepts/install.md)                               | The measure round, fetch key material, the fetch/link split, and manager-as-layer. |
+| [Environments](concepts/environments.md)                     | The declared Nix closure tools resolve from, its key layer, and what it makes cacheable. |
 
 ## Extending
 

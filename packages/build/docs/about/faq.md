@@ -56,11 +56,15 @@ with an `unresolved_action` refusal. The per-target status is on each page under
 
 ## Are actions sandboxed?
 
-No. `ExecLive` spawns the tool with `node:child_process` in the workspace, with
-`process.env` merged under the payload `env`. Declared effects exist in the
-action declarations, and the Smithers filesystem boundary can capture and replay a
-declared `TreeArtifact`, but nothing proves that a process wrote nowhere else.
-See [Actions and boundaries](../concepts/actions-and-boundaries.md).
+Yes, where a policy asks for it. On the `PACKAGE.ts` surface every target is
+confined unless it declares `sandbox: "none"`; on the `BUILD.ts` surface the
+root `Workspace({ sandbox: {} })` declaration confines every tool-running
+target. The mechanism is bubblewrap on Linux, seatbelt on macOS, and Docker
+where the workspace declares an image. A confined tool reads only its declared
+inputs and its dependencies' outputs under the workspace, writes only its
+declared outputs, and has no network unless the policy opens it. A host that
+cannot enforce a declared confinement fails the target closed. See
+[Actions and boundaries](../concepts/actions-and-boundaries.md#hermeticity).
 
 ## Is `node_modules` cached?
 

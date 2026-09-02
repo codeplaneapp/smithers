@@ -68,7 +68,7 @@ summary.
 |           |                                                              |
 | --------- | ------------------------------------------------------------ |
 | Kinds     | `build`                                                      |
-| Cacheable | Never; the executable toolchain is not complete key material |
+| Cacheable | Under a declared Nix environment; never otherwise, the executable toolchain is not key material |
 | Executes  | Yes, through `ExecLive`                                      |
 
 ## Notes

@@ -18,6 +18,12 @@ deliberately does not supply the irreversible-exec implementation, so a target
 that publishes externally or applies release versioning fails at interpretation
 with an `unresolved_action` refusal.
 
+**Cacheable** is the target's own declaration. Under a declared
+[Nix environment](../../concepts/environments.md) the planner overrides `Never`
+for the external-tool targets whose only missing key material was the
+toolchain: TsBuild, DtsBuild, Typecheck, Vitest, VitestCoverage, NodeTest,
+EsLint, BiomeCheck, DepsLint, PackageLint, CargoTest, and CargoLint.
+
 **Executes** means the target's plan runs through its declared CLI verb, either
 as a root or as a dependency. **Plans only** means the target is
 planned, queried, and graphed normally, but executing it fails on a missing

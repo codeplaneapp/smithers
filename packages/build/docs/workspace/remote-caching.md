@@ -275,14 +275,17 @@ removes the containers and the named cache volume.
 
 `infra/` deploys the same protocol to Cloudflare with Alchemy: a Worker storing
 action-cache JSON in D1 and blobs in R2, served at `https://build.smithers.sh`.
+It is the `@smthrs/build-infra` workspace package, so the ordinary workspace
+install covers it and it has no lockfile of its own. Cloudflare authentication
+and the credential rollout order are in `infra/README.md`.
 
 ```sh
+pnpm install --frozen-lockfile --offline
 cd infra
-npm ci --ignore-scripts
 export SMITHERS_CACHE_READ_TOKEN="$(openssl rand -hex 32)"
 export SMITHERS_CACHE_WRITE_TOKEN="$(openssl rand -hex 32)"
-CI=1 npx alchemy plan alchemy.run.ts --stage prod
-CI=1 npm run deploy -- --yes
+CI=1 pnpm exec alchemy plan alchemy.run.ts --stage prod
+CI=1 pnpm run deploy -- --yes
 ```
 
 `alchemy.run.ts` reads those two names, not `SMITHERS_CACHE_TOKEN`: the Worker
@@ -298,19 +301,21 @@ rows before the Worker serves them.
 
 ## The current engine boundary
 
+The CLI result cache publishes to the shared tier only what an enforced
+confinement produced. `CacheStore.put` takes `shared: false` and both
+surfaces pass it whenever the run was not confined: the target opted out with
+`sandbox: "none"`, the workspace declared `S.Sandbox.None()`, or the
+`BUILD.ts` workspace never declared a policy. Such a result is evidence for
+the machine that produced it and stays in `<cacheDirectory>/cache`. A
+confined run (see [Hermeticity](../concepts/actions-and-boundaries.md#hermeticity))
+publishes as before.
+
 Fetch declares `.flows/store/<manager>` as a `TreeArtifact`. The shipped
 filesystem boundary can execute that action, capture the declared tree, and
-replay it locally. It cannot attest that the process wrote nowhere else, so it
-omits the whole-tree and hermetic-read proofs and its evidence stays run-local.
-
-The consequence is concrete: no fetch result is admitted to the shared tier
-today. The action is designed to be admissible, and becomes admissible when the
-sandbox execution lane supplies those proofs. This is an engine wiring
-limitation, not a second cache protocol.
-
-The same caveat does not apply to the CLI result cache. It stores a JSON success
-value under a planner content key, publishes no artifacts, and makes no
-hermeticity claim.
+replay it locally. The install actions still run outside the tool sandbox, so
+that evidence stays run-local and no fetch result is admitted to the engine's
+shared tier. The action is designed to be admissible, and becomes admissible
+when the install flow runs under the same confinement the exec action does.
 
 ## Next
 

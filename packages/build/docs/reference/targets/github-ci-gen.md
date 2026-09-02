@@ -249,7 +249,10 @@ different claim.
 `CiToolchain.Needs({ … })` declares what a job requires. The generator turns each
 requirement into steps, in the order a runner needs them: checkout, workflow
 lint, package-manager setup, interpreters, install, language toolchains, runner
-assertions, then the job's target steps, then artifact collection.
+assertions, then the job's target steps, then artifact collection. A job with
+a Nix environment installs Nix in place of the package manager and the
+interpreters, and runs the install and every target step inside
+`nix develop` of the declared environment.
 
 | Name           | Type                  | Default  | Renders                                                                                    |
 | -------------- | --------------------- | -------- | ------------------------------------------------------------------------------------------ |
@@ -258,6 +261,7 @@ assertions, then the job's target steps, then artifact collection.
 | `runtimes`     | `Array<RuntimeSetup>` | `[]`     | `CiToolchain.Node({ runtime, release })` / `CiToolchain.Bun({ runtime, release })`.        |
 | `rust`         | `RustSetup`           | optional | `CiToolchain.Rust({ toolchain })` — `rustup toolchain install`, plus the cache by default. |
 | `jj`           | `JjSetup`             | optional | `CiToolchain.Jj({ release })` — the pinned jj-cli, and a colocated repository.             |
+| `nix`          | `NixSetup`            | optional | `CiToolchain.Nix({ environment, installer?, substituter?, publicKey? })` — installs Nix and wraps every command in `nix develop`; refused beside `runtimes`, `rust`, `jj`, `ripgrep`, `go`, or `foundry`. |
 | `browser`      | `SystemBrowser`       | optional | `CiToolchain.Browser({ executable, reason })` — asserts the runner image ships it.         |
 | `workflowLint` | `WorkflowLint`        | optional | `CiToolchain.Actionlint({ release, workflows })`.                                          |
 | `artifacts`    | `ArtifactUpload`      | optional | `CiToolchain.Artifacts({ artifact, sources })` — collect and upload.                       |

@@ -23,6 +23,14 @@ export const nodeModules = Smithers.Install({ packageManager })
 export const rootJSDocConfig = Smithers.file("//eslint.jsdoc.js")
 ```
 
+A workspace whose tools come from a Nix closure adds one more export beside
+these. It applies to every package below the root, and a package that exports
+its own overrides it. See [Environments](../concepts/environments.md).
+
+```ts
+export const environment = Smithers.Nix.Environment({ flake: Smithers.file("//flake.nix") })
+```
+
 `config` and `rootJSDocConfig` are not targets. `nodeModules` is: it becomes
 `//:nodeModules`, and `//` resolves to it because the default-target search tries
 `lib`, then `nodeModules`, then the package basename, then `default`. The
