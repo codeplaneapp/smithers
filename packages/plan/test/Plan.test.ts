@@ -278,7 +278,13 @@ describe("Plan.compile", () => {
         code: "graph_too_large",
         message: `A plan may contain at most ${Plan.maximumPlanNodes} nodes, received ${Plan.maximumPlanNodes + 1}`
       })
-    }))
+    }),
+    // Measured 5.7s on the developer machine and roughly seven times that on a
+    // two-core runner, against vitest's 30s default: five times the headroom
+    // here and none there, so it timed out on CI while passing locally. The
+    // budget is explicit rather than inherited, and generous enough that only
+    // a real complexity regression in `Plan.compile` can reach it.
+    120_000)
 
   it.effect("refuses a graph above the documented node bound before quadratic analysis", () =>
     Effect.gen(function*() {
