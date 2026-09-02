@@ -20,11 +20,12 @@ import { tokens as t } from "../tokens";
  * smithers theme tokens and a CVD-validated categorical palette, over Recharts.
  *
  * It lives in the `adapters/` layer because it pulls the heavy `recharts`
- * widget; reach it through the `smthrs/ui/adapters/chart`
- * subpath (never the base barrel, which the UI-architecture guard keeps free
- * of heavy dependencies).
+ * widget; reach it through the `@smthrs/ui/adapters/chart`
+ * subpath, never the base barrel, which `tests/barrel-weight.test.ts` keeps
+ * free of heavy dependencies.
  *
- * House chart rules the defaults encode (see docs/reference/ui/chart.mdx):
+ * House chart rules the defaults encode (see the {@link CHART_SERIES} and
+ * {@link chartSeriesColor} doc blocks below):
  * series colors come from {@link chartSeriesColor} in fixed slot order (never
  * cycled or generated), one axis per chart, hairline grid, and identity is
  * never color-alone — the tooltip and legend ship by default, which is also

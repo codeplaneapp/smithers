@@ -12,6 +12,10 @@ source lives inside the package:
 - **Failure codes and resource limits** — [`contracts.md`](./contracts.md).
 - **Release history** — `../CHANGELOG.md`.
 
+`tests/docs-links.test.ts` is the gate over these files: every relative link
+here has to resolve, and nothing in the package may name the unscoped
+`smthrs` specifier.
+
 There is no page for this package under `docs/pages`, and there is no docs
 generator target in `BUILD.ts`. `@smthrs/ui` is `private: true` at
 `1.0.0-rc.0` (`docs/migration/disposition-ledger.md`, row `packages/ui`,

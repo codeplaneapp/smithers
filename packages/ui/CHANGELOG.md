@@ -134,6 +134,13 @@ Everything below landed on top of the imported 0.x kit.
 - `tests/provenance.test.ts` checks every lane manifest against the module it
   names, replacing the single hand-written check that covered one lane of
   fifteen.
+- `tests/docs-links.test.ts` resolves every relative link in the package's own
+  Markdown and fails on any subpath written against the unscoped `smthrs`
+  package, which at rc.0 publishes only a notice whose module throws on import.
+  The scoped `@smthrs/ui` is the only importable name. The colocated docs had
+  shipped three links to a `docs/contracts.md` that was never written, and no
+  gate noticed, because `scripts/check-ui-architecture.mjs` had been the only
+  checker of this package's documentation claims.
 - This package still runs `bun test` rather than the 1.0 vitest baseline, and
   declares no eslint or dprint target. `BUILD.ts` records why; the Phase 4 UI
   port is what moves it.
