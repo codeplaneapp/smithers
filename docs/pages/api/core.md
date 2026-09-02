@@ -149,7 +149,9 @@ an agent controls. Each distinct path is scanned once for a dot segment and
 sorted once, so the character work of a build is at most
 `maximumPlanEffectPaths` paths of `maximumEffectPathLength` code units plus
 the comparisons that sort them; 64 writers of 1024 such paths sharing a
-4000-character prefix build in about one second. A pattern's prefix is located
+4000-character prefix build in about one second on an idle developer machine
+(a loaded one takes two to three times longer; the bound, not the figure, is
+the contract). A pattern's prefix is located
 once by binary search, patterns nested under another collapse into the
 outermost before the paths they cover are enumerated, and every match after
 that is an integer comparison, so `Effects.overlaps` costs the two
