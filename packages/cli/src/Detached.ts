@@ -142,48 +142,30 @@ const signalGroup = (pid: number, signal: NodeJS.Signals): void => {
   }
 }
 
-/**
- * Terminates and reaps a child that never reached admission.
- *
- * On POSIX the group, not just its leader, must disappear before this resolves.
- * A cooperative group gets SIGTERM; a group still present after the grace
- * window gets SIGKILL and another bounded reap window. The boolean is false
- * when the host could not confirm containment, so a caller never reports an
- * orphan-prone launch as successfully terminated.
- *
- * @category destructors
- * @since 1.0.0
- */
-export const terminate = async (
-  child: ChildProcess,
-  graceMs: number = defaultTerminationGraceMs
-): Promise<boolean> => {
-  const grace = Number.isFinite(graceMs) ? Math.max(1, Math.trunc(graceMs)) : defaultTerminationGraceMs
-  const pid = child.pid
-  // A spawn that never became a process. Node reports the failure
-  // asynchronously and leaves the handle with no pid, and it sets `exitCode`
-  // to -2, so the liveness check below reads the handle as already ended and
-  // the function used to answer `true`. That is a containment claim for a
-  // child the host never reached: the caller renders "was terminated" for
-  // something it never had. There is no group to signal and no exit to
-  // observe, so the honest answer is that containment was not confirmed.
-  if (pid === undefined) return false
-  if (pid !== undefined && process.platform !== "win32") {
-    if (!processGroupAlive(pid)) return true
-    try {
-      signalGroup(pid, "SIGTERM")
-    } catch {
-      return false
-    }
-    if (await waitUntil(() => processGroupAlive(pid), grace)) return true
-    try {
-      signalGroup(pid, "SIGKILL")
-    } catch {
-      return false
-    }
-    return waitUntil(() => processGroupAlive(pid), grace)
+/** SIGTERM, then SIGKILL, aimed at the child's process group. */
+const terminateGroup = async (pid: number, grace: number): Promise<boolean> => {
+  if (!processGroupAlive(pid)) return true
+  try {
+    signalGroup(pid, "SIGTERM")
+  } catch {
+    return false
   }
+  if (await waitUntil(() => processGroupAlive(pid), grace)) return true
+  try {
+    signalGroup(pid, "SIGKILL")
+  } catch {
+    return false
+  }
+  return waitUntil(() => processGroupAlive(pid), grace)
+}
 
+/**
+ * SIGTERM, then SIGKILL, aimed at the child handle alone.
+ *
+ * The whole containment claim is then about the leader rather than the group,
+ * which is exactly what a host without process groups can promise.
+ */
+const terminateHandle = async (child: ChildProcess, grace: number): Promise<boolean> => {
   if (!childAlive(child)) return true
   try {
     child.kill("SIGTERM")
@@ -197,6 +179,42 @@ export const terminate = async (
     return !childAlive(child)
   }
   return waitUntil(() => childAlive(child), grace)
+}
+
+/**
+ * Terminates and reaps a child that never reached admission.
+ *
+ * On POSIX the group, not just its leader, must disappear before this resolves.
+ * A cooperative group gets SIGTERM; a group still present after the grace
+ * window gets SIGKILL and another bounded reap window. The boolean is false
+ * when the host could not confirm containment, so a caller never reports an
+ * orphan-prone launch as successfully terminated.
+ *
+ * `platform` is the host whose process model the containment is judged against,
+ * and it is a parameter for the same reason `@smthrs/flows`'s containment
+ * options take one: Windows has no process groups, so the handle is the only
+ * thing that can be signalled there, and a host that runs its coverage on POSIX
+ * has no other way to exercise what it ships to Windows.
+ *
+ * @category destructors
+ * @since 1.0.0
+ */
+export const terminate = async (
+  child: ChildProcess,
+  graceMs: number = defaultTerminationGraceMs,
+  platform: NodeJS.Platform = process.platform
+): Promise<boolean> => {
+  const grace = Number.isFinite(graceMs) ? Math.max(1, Math.trunc(graceMs)) : defaultTerminationGraceMs
+  const pid = child.pid
+  // A spawn that never became a process. Node reports the failure
+  // asynchronously and leaves the handle with no pid, and it sets `exitCode`
+  // to -2, so `terminateHandle`'s liveness check reads the handle as already
+  // ended and this function used to answer `true`. That is a containment claim
+  // for a child the host never reached: the caller renders "was terminated" for
+  // something it never had. There is no group to signal and no exit to
+  // observe, so the honest answer is that containment was not confirmed.
+  if (pid === undefined) return false
+  return platform === "win32" ? terminateHandle(child, grace) : terminateGroup(pid, grace)
 }
 
 /**

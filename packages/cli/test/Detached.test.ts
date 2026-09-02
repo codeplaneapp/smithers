@@ -270,3 +270,32 @@ describe("terminating a child the host gave no process group", () => {
     expect(await Detached.terminate(spawned, 20)).toBe(false)
   }, 30_000)
 })
+
+describe("terminating on a host that has no process groups", () => {
+  /**
+   * What `smithers up -d` ships to Windows. `process.kill(-pid, …)` is not a
+   * thing there, so the handle is the only reachable target, and the whole
+   * containment claim is about the leader. The rest of this suite runs on POSIX
+   * and can never enter that arm, so `platform` is passed rather than read: a
+   * branch that only a different operating system reaches is a branch nobody
+   * has ever run, and the point of shipping it is that it works.
+   */
+  it("signals the child handle itself and confirms the leader is gone", async () => {
+    const alive = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" })
+    const pid = alive.pid
+    if (pid === undefined) throw new Error("the fixture child did not start")
+
+    expect(await Detached.terminate(alive, 2_000, "win32")).toBe(true)
+    expect(await until(() => processGone(pid), 2_000)).toBe(true)
+  }, 30_000)
+
+  it("answers true without signalling anything when the child has already exited", async () => {
+    const finished = spawn(process.execPath, ["-e", ""], { stdio: "ignore" })
+    await new Promise<void>((resolve) => finished.once("exit", () => resolve()))
+
+    // Nothing to contain, so nothing is claimed beyond what the handle already
+    // shows. The POSIX arm answers the same way through the group probe, which
+    // is why the two arms can share one caller.
+    expect(await Detached.terminate(finished, 20, "win32")).toBe(true)
+  }, 30_000)
+})

@@ -17,14 +17,31 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-cli-coverage-${process.pid}`),
       include: ["src/**"],
-      // Re-measured after exercising the named CLI seams. Integer floors leave
-      // less than one point for branches that depend on the host (`jj` on PATH
-      // and provider keys exported), while deleted coverage still fails.
+      // Measured (96.42 / 91.61 / 96.46 / 96.84 over 933 cases), then floored
+      // to integers, which leaves under a point for the branches that depend on
+      // the host: `jj` on PATH and provider keys exported. Deleted coverage
+      // still fails the run.
+      //
+      // rc-contract section 9 asks every package for 100, and this package is
+      // the one that cannot reach it from inside the process being measured.
+      // What a command line promises is what a PROCESS does — its exit status,
+      // its stderr, the `.flows/` it leaves behind, the second `smithers` it
+      // refuses — so `Bin.test.ts`, `BinTeardown.test.ts`,
+      // `TwoProcessClaim.test.ts`, `CrossProcessCancel.test.ts`,
+      // `EndToEnd.test.ts` and the MCP stdio round trip spawn the real
+      // executable and assert against it. v8 attributes that execution to the
+      // child, so the residue below is asserted code that this process did not
+      // run, not unasserted code. The rest is genuinely out of reach here:
+      // `update` reads the npm registry, and `Detached.terminate`'s handle arm
+      // is Windows-only, reachable through its `platform` argument and no
+      // further. Re-attributing the process cases by re-asserting them in
+      // process would buy the number and lose the promise, so the number is
+      // what moves.
       thresholds: {
-        branches: 85,
-        functions: 87,
-        lines: 90,
-        statements: 89
+        branches: 91,
+        functions: 96,
+        lines: 96,
+        statements: 96
       }
     }
   }

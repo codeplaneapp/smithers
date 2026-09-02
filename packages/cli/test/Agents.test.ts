@@ -16,6 +16,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -172,6 +173,24 @@ describe("registering the MCP server", () => {
 
     expect(wired.status).toBe("failed")
     expect(wired.reason).toBeDefined()
+  })
+
+  it("reports a configuration it cannot even open, and names why", () => {
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    // A path that exists and refuses to open. A self-referential symlink is the
+    // deterministic way to say that: `open` answers ELOOP whoever is running,
+    // where a mode-stripped file answers nothing at all to root. The point is
+    // the arm that is NOT "the file is absent": absence is an empty document
+    // this command may write, and every other refusal has to be reported with
+    // its reason rather than treated as a fresh configuration and overwritten.
+    symlinkSync(path, path)
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(wired).toMatchObject({ agent: "claude", path, status: "failed" })
+    expect(wired.reason).toContain(`${path} could not be read`)
+    expect(readdirSync(directory)).toEqual([".claude.json"])
   })
 
   it("prints instructions with the separator an agent CLI needs", () => {
