@@ -17,8 +17,8 @@
  *
  * @since 0.1.0
  */
-import * as NodeUtil from "node:util/types"
 import * as Schema from "effect/Schema"
+import * as NodeUtil from "node:util/types"
 import * as Target from "./Target.ts"
 
 /**
@@ -268,7 +268,9 @@ const patternList = (value: unknown, where: string): ReadonlyArray<string> => {
 
 const normalizeAgents = (value: unknown): Agents => {
   if (typeof value === "string") {
-    if (!policies.has(value)) throw new Error(`Owners agents policy is not auto-land, human-approve, or deny: ${JSON.stringify(value)}`)
+    if (!policies.has(value)) {
+      throw new Error(`Owners agents policy is not auto-land, human-approve, or deny: ${JSON.stringify(value)}`)
+    }
     return Agents.make({ default: value as AgentPolicy, overrides: [] })
   }
   if (!isPlainObject(value)) throw new TypeError("Owners agents must be a policy name or an object of policy overrides")
@@ -299,7 +301,9 @@ const normalizeUpstream = (value: unknown): Upstream | undefined => {
     throw new TypeError("Owners upstream must be none, review, approve, or { mode, packages }")
   }
   for (const key of Object.getOwnPropertyNames(value)) {
-    if (key !== "mode" && key !== "packages") throw new TypeError(`Owners upstream received unknown key ${JSON.stringify(key)}`)
+    if (key !== "mode" && key !== "packages") {
+      throw new TypeError(`Owners upstream received unknown key ${JSON.stringify(key)}`)
+    }
   }
   const mode = value["mode"]
   if (mode !== "review" && mode !== "approve") {
@@ -308,12 +312,16 @@ const normalizeUpstream = (value: unknown): Upstream | undefined => {
   const packages = value["packages"]
   if (packages === undefined) return Upstream.make({ mode })
   if (!Array.isArray(packages) || packages.length === 0) {
-    throw new TypeError("Owners upstream packages must be a non-empty array of //package labels or //package/... patterns")
+    throw new TypeError(
+      "Owners upstream packages must be a non-empty array of //package labels or //package/... patterns"
+    )
   }
   if (packages.length > maximumPatterns) throw new Error(`Owners upstream lists more than ${maximumPatterns} packages`)
   for (const entry of packages) {
     if (typeof entry !== "string" || !labelPattern.test(entry)) {
-      throw new Error(`Owners upstream package must be a //package label or //package/... pattern: ${JSON.stringify(entry)}`)
+      throw new Error(
+        `Owners upstream package must be a //package label or //package/... pattern: ${JSON.stringify(entry)}`
+      )
     }
   }
   return Upstream.make({ mode, packages: [...packages].sort(byCodeUnit) })
@@ -431,7 +439,9 @@ export const Teams = (roster: Readonly<Record<string, ReadonlyArray<string>>> | 
     if (!loginShape.test(name)) throw new Error(`Teams name is not a portable identifier: ${JSON.stringify(name)}`)
     const members = roster[name]
     if (!Array.isArray(members)) throw new TypeError(`Teams ${JSON.stringify(name)} must be an array of member logins`)
-    if (members.length > maximumOwners) throw new Error(`Teams ${JSON.stringify(name)} lists more than ${maximumOwners} members`)
+    if (members.length > maximumOwners) {
+      throw new Error(`Teams ${JSON.stringify(name)} lists more than ${maximumOwners} members`)
+    }
     const seen = new Set<string>()
     for (const member of members) {
       if (typeof member !== "string" || !loginShape.test(member)) {

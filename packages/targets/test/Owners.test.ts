@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
+import { Smithers } from "../src/index.ts"
 import * as Input from "../src/Input.ts"
 import * as Owners from "../src/Owners.ts"
 import { metadata, Package } from "../src/Package.ts"
 import * as PackageManager from "../src/PackageManager.ts"
 import * as Runtime from "../src/Runtime.ts"
 import * as Shell from "../src/Shell.ts"
-import { Smithers } from "../src/index.ts"
 import * as Target from "../src/Target.ts"
 import * as WorkspaceDeclaration from "../src/WorkspaceDeclaration.ts"
 
@@ -14,7 +14,9 @@ const lint = Shell.Test({
   data: [Input.glob(["**"])]
 })
 
-const workspaceOptions = (extra: Partial<WorkspaceDeclaration.WorkspaceOptions> = {}): WorkspaceDeclaration.WorkspaceOptions => {
+const workspaceOptions = (
+  extra: Partial<WorkspaceDeclaration.WorkspaceOptions> = {}
+): WorkspaceDeclaration.WorkspaceOptions => {
   const packageJson = Input.file("//package.json")
   return {
     repository: "git+https://example.invalid/fixture.git",
@@ -76,11 +78,17 @@ describe("Owners.declare", () => {
     expect(() => Owners.declare({ perFile: { "../*.ts": ["will"] } })).toThrow(/relative to the package/)
     expect(() => Owners.declare({ perFile: { "*.ts": [] } })).toThrow(/names no owner/)
     expect(() => Owners.declare({ noparent: true })).toThrow(/noparent requires at least one owner/)
-    expect(() => Owners.declare({ owners: ["will"], agents: "maybe" as never })).toThrow(/auto-land, human-approve, or deny/)
+    expect(() => Owners.declare({ owners: ["will"], agents: "maybe" as never })).toThrow(
+      /auto-land, human-approve, or deny/
+    )
     expect(() => Owners.declare({ owners: ["will"], agents: { approve: ["x"] } as never })).toThrow(/unknown key/)
     expect(() => Owners.declare({ owners: ["will"], upstream: "all" as never })).toThrow(/none, review, approve/)
-    expect(() => Owners.declare({ owners: ["will"], upstream: { mode: "review", packages: [] } })).toThrow(/non-empty array/)
-    expect(() => Owners.declare({ owners: ["will"], upstream: { mode: "review", packages: ["lib"] } })).toThrow(/\/\/package label/)
+    expect(() => Owners.declare({ owners: ["will"], upstream: { mode: "review", packages: [] } })).toThrow(
+      /non-empty array/
+    )
+    expect(() => Owners.declare({ owners: ["will"], upstream: { mode: "review", packages: ["lib"] } })).toThrow(
+      /\/\/package label/
+    )
     expect(() => Owners.declare({ owners: ["will"], extra: 1 } as never)).toThrow(/unknown option/)
   })
 })
