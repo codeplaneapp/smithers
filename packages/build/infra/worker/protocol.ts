@@ -624,7 +624,20 @@ export const canonicalJson = (value: unknown): string => {
   return chunks.join("")
 }
 
-const invalidKeyDigest = (keyDigest: string): string | null => {
+/**
+ * Names the single rule an action-cache key breaks, or `null` when it holds.
+ *
+ * Exported because one clause is unreachable through the HTTP surface and can
+ * only be pinned directly: URL parsing substitutes `U+FFFD` for a lone
+ * surrogate before the handler ever sees the path, and a percent-escape that
+ * would decode to one (`%ED%A0%80`) makes `decodeURIComponent` throw first. The
+ * well-formedness clause therefore guards a non-HTTP caller, and a test that
+ * only drove requests would report it as dead code.
+ *
+ * @category utilities
+ * @since 0.1.0
+ */
+export const invalidKeyDigest = (keyDigest: string): string | null => {
   if (keyDigest.length === 0) return "empty keyDigest"
   if (!isWellFormedText(keyDigest)) return "keyDigest must be well-formed Unicode text"
   if (utf8Bytes(keyDigest) > maxKeyDigestLength) {
@@ -1304,13 +1317,21 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
           if (request.method !== "GET" || response.status !== 200 || response.body === null) {
             return response
           }
-          streaming = true
           let released = false
-          return heldWhileStreaming(response, () => {
+          // The flag is set only once the wrapper exists. Setting it first
+          // would leak the counter for the isolate's lifetime if wrapping
+          // threw: the wrapper that owes the decrement would never have been
+          // built, and this request's `finally` would already be disarmed.
+          // This body is built here from validated stored text, so no store
+          // can hand the wrapper something that refuses a reader; the order
+          // matches the artifact path, where a store can.
+          const held = heldWhileStreaming(response, () => {
             if (released) return
             released = true
             activeCacheRequests -= 1
           })
+          streaming = true
+          return held
         }
         if (segments.length === 3 && segments[0] === "" && segments[1] === "cas") {
           let digest: string
@@ -1341,15 +1362,20 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
               if (request.method !== "GET" || response.status !== 200 || response.body === null) {
                 return response
               }
-              transferred = true
-              streaming = true
               let released = false
-              return heldWhileStreaming(response, () => {
+              // Both flags are set only once the wrapper exists, so a throw
+              // inside the wrapping leaves this request's own `finally` and
+              // the outer one still responsible for the two counters. Setting
+              // them first would strand both for the isolate's lifetime.
+              const held = heldWhileStreaming(response, () => {
                 if (released) return
                 released = true
                 activeArtifactTransfers -= 1
                 activeCacheRequests -= 1
               })
+              transferred = true
+              streaming = true
+              return held
             } finally {
               if (!transferred) activeArtifactTransfers -= 1
             }

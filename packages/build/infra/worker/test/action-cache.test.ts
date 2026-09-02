@@ -186,6 +186,29 @@ describe("action-cache retention", () => {
     expect(survivors()).toEqual([])
   })
 
+  it("stops after twenty batches and resumes on the next invocation", async () => {
+    const insert = d1.sqlite.prepare(
+      `INSERT INTO smithers_build_cache_entry (key_digest, entry_json, result_json, last_accessed_at)
+      VALUES (?, '{}', '{}', ?)`
+    )
+    d1.sqlite.exec("BEGIN")
+    try {
+      for (let index = 0; index < 10_001; index += 1) {
+        insert.run(`cold-${index}`, "2026-01-01T00:00:00.000Z")
+      }
+      d1.sqlite.exec("COMMIT")
+    } catch (error) {
+      d1.sqlite.exec("ROLLBACK")
+      throw error
+    }
+
+    await expect(pruneStaleEntries(d1.database, "2026-06-01T00:00:00.000Z")).resolves.toBe(10_000)
+    expect(survivors()).toHaveLength(1)
+
+    await expect(pruneStaleEntries(d1.database, "2026-06-01T00:00:00.000Z")).resolves.toBe(1)
+    expect(survivors()).toEqual([])
+  })
+
   it("removes nothing when every entry is inside the window", async () => {
     seed("warm", "2026-08-30T00:00:00.000Z")
 

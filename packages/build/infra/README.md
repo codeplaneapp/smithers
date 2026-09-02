@@ -87,9 +87,10 @@ The `CI=1` prefix is for the environment-token path. Omit it when you use an
 interactive Alchemy OAuth profile.
 
 Alchemy creates a stage-specific D1 database and R2 bucket, applies every SQL
-file in `worker/migrations/` in order, deploys the Worker with the four
-bindings and its retention cron trigger, and attaches `build.smithers.sh` as
-its custom domain. Migration `0001_initial.sql` creates the table;
+file in `worker/migrations/` in order, applies the bucket's artifact lifecycle
+rules, deploys the Worker with the four bindings and its retention cron
+trigger, and attaches `build.smithers.sh` as its custom domain. Migration
+`0001_initial.sql` creates the table;
 `0002_bound_cache_rows.sql` bounds every insert and every update of the
 guarded columns. It does not revalidate rows written before it, and the read
 path's access-metadata update deliberately does not fire it. The production
@@ -131,6 +132,13 @@ pnpm exec smithers-build ci '//packages/build/infra/...'
 That plans the typecheck (`:check`), the suite (`:suite`), ESLint (`:lint`),
 and the README parity check (`:docs`). The fast local loop is
 `pnpm exec vitest run` from `packages/build/infra`.
+
+The suite computes coverage and fails below the thresholds in
+`vitest.config.ts`. They are a ratchet set at the measured floor, raised as
+tests accrete and never lowered. `alchemy.run.ts` is excluded because it
+declares Cloudflare resources and cannot execute without an account; the rules
+it would otherwise encode live in `deployment.ts`, which the suite covers, and
+a test reads `alchemy.run.ts` to gate the wiring that remains.
 
 ## Protocol
 
@@ -203,10 +211,18 @@ it deletes entries whose `last_accessed_at` is more than 30 days old, in
 bounded batches, using the LRU index the read path already maintains. Deleting
 a cold entry only costs the next build a cache miss.
 
-R2 has no such ceiling and no expiry: artifacts accumulate until an operator
-configures a bucket lifecycle rule. `DELETE /ac/{keyDigest}` is the manual
-escape hatch for one entry; it removes the D1 row and never the R2 objects the
-entry named.
+R2 has no such ceiling and no scheduled reader, so artifact retention is the
+bucket's own lifecycle: an artifact expires 90 days after it was uploaded, and
+an abandoned multipart upload is aborted after one day. R2 measures an object's
+age from its upload rather than from its last read, which is why the artifact
+window is three times the entry window. A hot entry can still outlive the
+upload age of an artifact it names. When it does, `GET /cas/{digest}` answers
+`404`, `@smthrs/artifacts` raises `ArtifactMissing`, and the engine's step
+boundary falls back to a real execution: a dangling reference costs a cache
+miss, never a corrupt restore.
+
+`DELETE /ac/{keyDigest}` is the manual escape hatch for one entry; it removes
+the D1 row and never the R2 objects the entry named.
 
 ## Deploy wrapper
 

@@ -2,13 +2,24 @@ import * as Alchemy from "alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
 import { Stack } from "alchemy/Stack"
 import * as Effect from "effect/Effect"
-import { cacheTokenVerifier, retentionCron, stackName, workerStageOptions } from "./deployment.ts"
+import {
+  artifactLifecycleRules,
+  cacheTokenVerifier,
+  retentionCron,
+  stackName,
+  workerStageOptions
+} from "./deployment.ts"
 
 const cacheDatabase = Cloudflare.D1.Database("CacheDatabase", {
   migrationsDir: "./worker/migrations"
 })
 
-const cacheBucket = Cloudflare.R2.Bucket("CacheBucket")
+// The Worker's scheduled sweep prunes D1 entries; R2 has no scheduled reader,
+// so artifact retention is the bucket's own lifecycle. Without it the store
+// keeps every artifact ever published, forever.
+const cacheBucket = Cloudflare.R2.Bucket("CacheBucket", {
+  lifecycleRules: [...artifactLifecycleRules]
+})
 
 const cacheWorker = Cloudflare.Worker(
   "CacheWorker",

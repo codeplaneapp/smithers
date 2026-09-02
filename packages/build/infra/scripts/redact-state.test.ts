@@ -1,7 +1,9 @@
+import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it, vi } from "vitest"
 import { stackName } from "../deployment.ts"
 import { maximumStateFileBytes, redactAlchemyState } from "./redact-state.ts"
@@ -221,13 +223,35 @@ describe("redactAlchemyState", () => {
     })
   })
 
+  it("refuses sibling fields beside a recognized environment verifier", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(
+        NodePath.join(root, "CacheWorker.json"),
+        JSON.stringify({
+          props: {
+            env: {
+              CACHE_READ_TOKEN: {
+                __redacted__: sentinel,
+                raw: "bearer-hidden-beside-the-sentinel"
+              }
+            }
+          }
+        })
+      )
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /unrecognized shape for credential binding CACHE_READ_TOKEN/
+      )
+    })
+  })
+
   it("refuses a bearer token that is the redaction sentinel", async () => {
     await expect(redactAlchemyState({ directory: Os.tmpdir(), bearerToken: sentinel })).rejects.toThrow(
       /must not be the redaction sentinel/
     )
   })
 
-  it("leaves a native binding that is not a secret", async () => {
+  it("redacts a credential-named native binding regardless of its declared type", async () => {
     await withFixture(async (root) => {
       const file = NodePath.join(root, "CacheWorker.json")
       await Fs.writeFile(
@@ -240,8 +264,159 @@ describe("redactAlchemyState", () => {
         })
       )
 
+      expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(1)
+      expect(JSON.parse(await Fs.readFile(file, "utf8")).bindings[0].data.bindings[0].text).toBe(sentinel)
+    })
+  })
+
+  it("redacts a credential-named native binding beneath an unrelated outer binding", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      await Fs.writeFile(
+        file,
+        JSON.stringify({
+          bindings: [{
+            sid: "OTHER_BINDING",
+            data: { bindings: [{ type: "plain_text", name: "CACHE_TOKEN", text: "raw-token" }] }
+          }]
+        })
+      )
+
+      expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(1)
+      expect(JSON.parse(await Fs.readFile(file, "utf8")).bindings[0].data.bindings[0].text).toBe(sentinel)
+    })
+  })
+
+  it.each([
+    [
+      "an outer credential binding without a credential-named native entry",
+      {
+        bindings: [{
+          sid: "CACHE_TOKEN",
+          data: { bindings: [{ type: "plain_text", name: "OTHER_TOKEN", text: "raw-token" }] }
+        }]
+      },
+      "CACHE_TOKEN"
+    ],
+    [
+      "a credential-named native entry nested below the supported shape",
+      {
+        bindings: [{
+          sid: "OTHER_BINDING",
+          data: {
+            bindings: [{
+              type: "wrapper",
+              name: "OTHER_TOKEN",
+              value: { type: "secret_text", name: "CACHE_READ_TOKEN", text: "raw-token" }
+            }]
+          }
+        }]
+      },
+      "CACHE_READ_TOKEN"
+    ],
+    [
+      "a credential moved outside props.env",
+      { props: { legacy: { CACHE_WRITE_TOKEN: "raw-token" } } },
+      "CACHE_WRITE_TOKEN"
+    ]
+  ])("refuses %s", async (_case, state, name) => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(NodePath.join(root, "CacheWorker.json"), JSON.stringify(state))
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        new RegExp(`unrecognized shape for credential binding ${name}`)
+      )
+    })
+  })
+
+  /**
+   * The document-wide audit refuses a credential name it cannot prove clean.
+   * It must not refuse one it can: an Alchemy state file that echoes the
+   * worker's inputs into a second field carries the same already-scrubbed
+   * value there, and refusing that would fail every deployment after the
+   * first with no credential at risk.
+   */
+  it.each([
+    ["a record echo of the current verifier", { __redacted__: verifierOf("token") }],
+    ["a record echo of the sentinel", { __redacted__: sentinel }],
+    ["a bare sentinel string", sentinel]
+  ])("accepts %s under a credential name outside the handled shapes", async (_case, echo) => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      await Fs.writeFile(
+        file,
+        JSON.stringify({
+          props: { env: { CACHE_READ_TOKEN: { __redacted__: verifierOf("token") } } },
+          output: { env: { CACHE_READ_TOKEN: echo } }
+        })
+      )
+
       expect(await redactAlchemyState({ directory: root, bearerToken: "token" })).toBe(0)
-      expect(await Fs.readFile(file, "utf8")).toContain("public")
+      expect(JSON.parse(await Fs.readFile(file, "utf8")).output.env.CACHE_READ_TOKEN).toEqual(echo)
+    })
+  })
+
+  it("refuses an unhandled credential name whose echo is not provably clean", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(
+        NodePath.join(root, "CacheWorker.json"),
+        JSON.stringify({
+          props: { env: { CACHE_READ_TOKEN: { __redacted__: verifierOf("token") } } },
+          output: { env: { CACHE_READ_TOKEN: { __redacted__: "raw-token" } } }
+        })
+      )
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /unrecognized shape for credential binding CACHE_READ_TOKEN/
+      )
+    })
+  })
+
+  it("refuses unknown fields on a credential-named native binding", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(
+        NodePath.join(root, "CacheWorker.json"),
+        JSON.stringify({
+          bindings: [{
+            sid: "OTHER_BINDING",
+            data: {
+              bindings: [{
+                type: "secret_text",
+                name: "CACHE_WRITE_TOKEN",
+                text: sentinel,
+                raw: "bearer-hidden-beside-the-sentinel"
+              }]
+            }
+          }]
+        })
+      )
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /unrecognized shape for credential binding CACHE_WRITE_TOKEN/
+      )
+    })
+  })
+
+  it.each([
+    ["non-record data", null],
+    ["a non-array native binding list", { bindings: {} }],
+    ["a non-record native binding", { bindings: [null] }],
+    ["a credential-named native binding without text", {
+      bindings: [{ type: "secret_text", name: "CACHE_WRITE_TOKEN" }]
+    }],
+    ["a credential-named native binding with a non-string type", {
+      bindings: [{ type: { raw: "bearer" }, name: "CACHE_WRITE_TOKEN", text: sentinel }]
+    }]
+  ])("refuses %s under a credential binding", async (_case, data) => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(
+        NodePath.join(root, "CacheWorker.json"),
+        JSON.stringify({ bindings: [{ sid: "CACHE_WRITE_TOKEN", data }] })
+      )
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /unrecognized shape for credential binding CACHE_WRITE_TOKEN/
+      )
     })
   })
 
@@ -280,6 +455,50 @@ describe("redactAlchemyState", () => {
       await Fs.writeFile(file, Buffer.alloc(maximumStateFileBytes + 1, 0x20))
       await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
         /exceeds .* bytes/
+      )
+    })
+  })
+
+  it("bounds aggregate JSON members", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(NodePath.join(root, "CacheWorker.json"), `[${"0,".repeat(100_000)}0]`)
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /too many JSON members/
+      )
+    })
+  })
+
+  it("bounds the rendered replacement before publication", async () => {
+    await withFixture(async (root) => {
+      const leafCount = 99_860
+      const filler = `${"[".repeat(127)}"${"x".repeat(9 * 1024 * 1024)}",${"0,".repeat(leafCount - 2)}0${
+        "]".repeat(127)
+      }`
+      const input = `{"props":{"env":{"CACHE_TOKEN":{"__redacted__":"raw"}}},"filler":${filler}}`
+      expect(Buffer.byteLength(input, "utf8")).toBeLessThanOrEqual(maximumStateFileBytes)
+      await Fs.writeFile(NodePath.join(root, "CacheWorker.json"), input)
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /redacted Alchemy state exceeds 33554432 bytes/
+      )
+    })
+  })
+
+  it("bounds the number of Worker state files", async () => {
+    await withFixture(async (root) => {
+      for (let offset = 0; offset < 1_025; offset += 128) {
+        await Promise.all(
+          Array.from({ length: Math.min(128, 1_025 - offset) }, async (_, index) => {
+            const directory = NodePath.join(root, `state-${offset + index}`)
+            await Fs.mkdir(directory)
+            await Fs.writeFile(NodePath.join(directory, "CacheWorker.json"), "{}")
+          })
+        )
+      }
+
+      await expect(redactAlchemyState({ directory: root, bearerToken: "token" })).rejects.toThrow(
+        /exceeds 1024 Worker state files/
       )
     })
   })
@@ -347,6 +566,27 @@ describe("redactAlchemyState", () => {
   it("treats an absent state directory as an empty deployment", async () => {
     await withFixture(async (root) => {
       expect(await redactAlchemyState({ directory: NodePath.join(root, "missing"), bearerToken: "token" })).toBe(0)
+    })
+  })
+
+  it("reports CLI success and failure through the process contract", async () => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      const script = fileURLToPath(new URL("./redact-state.ts", import.meta.url).href)
+      await Fs.writeFile(file, workerState("CACHE_TOKEN", "raw-token"))
+
+      const success = spawnSync(process.execPath, ["--experimental-strip-types", script, root], {
+        encoding: "utf8"
+      })
+      expect(success.status).toBe(0)
+      expect(success.stdout).toContain("Redacted 1 Alchemy Worker state file(s).")
+
+      await Fs.writeFile(file, "{")
+      const failure = spawnSync(process.execPath, ["--experimental-strip-types", script, root], {
+        encoding: "utf8"
+      })
+      expect(failure.status).toBe(1)
+      expect(failure.stderr).toContain("Alchemy state redaction failed:")
     })
   })
 })

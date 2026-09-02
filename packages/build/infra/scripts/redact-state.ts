@@ -26,7 +26,12 @@ const infraDirectory = NodePath.dirname(NodePath.dirname(fileURLToPath(import.me
 // silently turning redaction into a no-op that reports success.
 const defaultStateDirectory = NodePath.join(infraDirectory, ".alchemy", "state", stackName)
 
-/** Maximum bytes accepted from one Alchemy state file. */
+/**
+ * Maximum bytes accepted from one Alchemy state file.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
 export const maximumStateFileBytes = 16 * 1024 * 1024
 
 const maximumRenderedStateBytes = 32 * 1024 * 1024
@@ -35,7 +40,12 @@ const maximumWorkerStateFiles = 1_024
 const maximumJsonDepth = 128
 const maximumJsonMembers = 100_000
 
-/** Optional state location and token override, primarily for isolated tooling and tests. */
+/**
+ * Optional state location and token override, primarily for isolated tooling and tests.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface RedactAlchemyStateOptions {
   readonly directory?: string | undefined
   readonly bearerToken?: string | undefined
@@ -257,11 +267,69 @@ const readStateFile = async (file: string): Promise<{ readonly identity: FileIde
   return { identity, state }
 }
 
-const isCredentialBinding = (name: unknown): boolean => typeof name === "string" && credentialBindingNames.has(name)
+const isCredentialBinding = (name: unknown): name is string =>
+  typeof name === "string" && credentialBindingNames.has(name)
+
+const unrecognizedCredentialBinding = (name: string): TypeError =>
+  new TypeError(`Alchemy state holds an unrecognized shape for credential binding ${name}`)
+
+const assertNoUnhandledCredentialBindings = (
+  root: unknown,
+  permitted: ReadonlySet<string>,
+  handledKeyContainers: WeakSet<object>,
+  handledNameRecords: WeakSet<object>,
+  handledSidRecords: WeakSet<object>
+): void => {
+  /**
+   * Reports a value under an unhandled credential name as provably clean.
+   *
+   * Only the two renderings this scrubber writes qualify: the sentinel or a
+   * verifier derived from a currently configured bearer, bare or wrapped in
+   * Alchemy's `__redacted__` envelope. Everything else, including a shorter
+   * or longer object, could be carrying the bearer.
+   */
+  const provablyClean = (candidate: unknown): boolean => {
+    if (typeof candidate === "string") return permitted.has(candidate)
+    if (!isRecord(candidate)) return false
+    const keys = Object.keys(candidate)
+    if (keys.length !== 1 || keys[0] !== "__redacted__") return false
+    const inner = candidate["__redacted__"]
+    return typeof inner === "string" && permitted.has(inner)
+  }
+  const pending: Array<unknown> = [root]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (Array.isArray(current)) {
+      for (const member of current) pending.push(member)
+      continue
+    }
+    if (!isRecord(current)) continue
+    for (const [key, member] of Object.entries(current)) {
+      // An Alchemy state file may echo the worker's inputs into a field this
+      // scrubber does not write, and after a successful run that echo already
+      // holds the scrubbed value. Refusing it would fail every deployment
+      // after the first with no credential at risk, so refuse only what
+      // cannot be proven clean.
+      if (isCredentialBinding(key) && !handledKeyContainers.has(current) && !provablyClean(member)) {
+        throw unrecognizedCredentialBinding(key)
+      }
+      if (key === "name" && isCredentialBinding(member) && !handledNameRecords.has(current)) {
+        throw unrecognizedCredentialBinding(member)
+      }
+      if (key === "sid" && isCredentialBinding(member) && !handledSidRecords.has(current)) {
+        throw unrecognizedCredentialBinding(member)
+      }
+      pending.push(member)
+    }
+  }
+}
 
 const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): boolean => {
   if (!isRecord(value)) return false
   let changed = false
+  const handledKeyContainers = new WeakSet<object>()
+  const handledNameRecords = new WeakSet<object>()
+  const handledSidRecords = new WeakSet<object>()
   // Fail closed on the value's type as well as its content: a credential
   // binding holding a number, an array, or an object with the bearer nested
   // inside it is exactly the shape a string-only test walks past while the
@@ -271,13 +339,20 @@ const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): bool
   const props = isRecord(value["props"]) ? value["props"] : null
   const env = props !== null && isRecord(props["env"]) ? props["env"] : null
   if (env !== null) {
+    handledKeyContainers.add(env)
     for (const [name, entry] of Object.entries(env)) {
       if (!isCredentialBinding(name)) continue
       if (isRecord(entry)) {
         if (!Object.hasOwn(entry, "__redacted__")) {
           // Refusing beats reporting success over a shape this script cannot
           // prove is credential free.
-          throw new TypeError(`Alchemy state holds an unrecognized shape for credential binding ${name}`)
+          throw unrecognizedCredentialBinding(name)
+        }
+        if (Object.keys(entry).some((key) => key !== "__redacted__")) {
+          // A recognized verifier beside an unrecognized field is not clean:
+          // the sibling may be the raw bearer from a newer Alchemy state
+          // representation. Accept only the one shape this scrubber proves.
+          throw unrecognizedCredentialBinding(name)
         }
         if (!mustRedact(entry["__redacted__"])) continue
         changed = true
@@ -291,24 +366,58 @@ const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): bool
   }
 
   const bindings = value["bindings"]
-  if (!Array.isArray(bindings)) return changed
-  for (const binding of bindings) {
-    if (!isRecord(binding) || !isCredentialBinding(binding["sid"])) continue
-    const data = isRecord(binding["data"]) ? binding["data"] : null
-    const nativeBindings = data?.["bindings"]
-    if (!Array.isArray(nativeBindings)) continue
-    for (const nativeBinding of nativeBindings) {
-      if (
-        !isRecord(nativeBinding) ||
-        nativeBinding["type"] !== "secret_text" ||
-        !isCredentialBinding(nativeBinding["name"])
-      ) continue
-      if (mustRedact(nativeBinding["text"])) {
-        changed = true
-        nativeBinding["text"] = redacted
+  if (Array.isArray(bindings)) {
+    for (const binding of bindings) {
+      if (!isRecord(binding)) continue
+      const sid = binding["sid"]
+      const data = binding["data"]
+      if (!isRecord(data) || !Array.isArray(data["bindings"])) {
+        if (isCredentialBinding(sid)) throw unrecognizedCredentialBinding(sid)
+        continue
+      }
+      const nativeBindings = data["bindings"]
+      let containsCredentialBinding = false
+      for (const nativeBinding of nativeBindings) {
+        if (!isRecord(nativeBinding)) {
+          if (isCredentialBinding(sid)) throw unrecognizedCredentialBinding(sid)
+          continue
+        }
+        const name = nativeBinding["name"]
+        if (!isCredentialBinding(name)) continue
+        containsCredentialBinding = true
+        if (
+          !Object.hasOwn(nativeBinding, "text") ||
+          Object.keys(nativeBinding).some((key) => !["name", "text", "type"].includes(key)) ||
+          (Object.hasOwn(nativeBinding, "type") && typeof nativeBinding["type"] !== "string")
+        ) {
+          throw unrecognizedCredentialBinding(name)
+        }
+        handledNameRecords.add(nativeBinding)
+        // The binding name is the trust boundary in both Alchemy representations.
+        // Trusting the native type would let a credential survive under a label
+        // such as `plain_text` while the environment half rejects the same shape.
+        if (mustRedact(nativeBinding["text"])) {
+          changed = true
+          nativeBinding["text"] = redacted
+        }
+      }
+      if (isCredentialBinding(sid)) {
+        if (!containsCredentialBinding) throw unrecognizedCredentialBinding(sid)
+        handledSidRecords.add(binding)
       }
     }
   }
+  // Walk the whole decoded document after handling the two known Alchemy
+  // representations. A credential name moved one level deeper, into another
+  // props field, or behind a new wrapper is an unknown state format, not a
+  // clean state file.
+  assertNoUnhandledCredentialBindings(
+    value,
+    permitted,
+    handledKeyContainers,
+    handledNameRecords,
+    handledSidRecords
+  )
   return changed
 }
 
@@ -480,7 +589,13 @@ const discoverWorkerStates = async (
  *
  * State discovery and reads are bounded, links are refused, and each changed
  * file is published with the same write-sync-rename-directory-sync sequence
- * used for other durable repository state.
+ * used for other durable repository state. Credential-named entries in both
+ * the environment and native binding representations are treated as secrets
+ * regardless of their declared type, and an unreadable credential shape is
+ * refused rather than reported clean.
+ *
+ * @category security
+ * @since 0.1.0
  */
 export const redactAlchemyState = async (options: RedactAlchemyStateOptions = {}): Promise<number> => {
   const { directory, permitted } = normalizeOptions(options)
@@ -496,7 +611,12 @@ export const redactAlchemyState = async (options: RedactAlchemyStateOptions = {}
 const invokedPath = process.argv[1]
 if (invokedPath !== undefined && import.meta.url === pathToFileURL(invokedPath).href) {
   try {
-    const count = await redactAlchemyState()
+    // The one optional argument is an absolute Alchemy state directory. The
+    // deploy wrapper never passes it — it calls `redactAlchemyState()` in
+    // process — so the default stack directory stays the operator's path and
+    // this argument exists so the CLI contract itself is executable.
+    const directory = process.argv[2]
+    const count = await redactAlchemyState(directory === undefined ? {} : { directory })
     process.stdout.write(`Redacted ${count} Alchemy Worker state file(s).\n`)
   } catch (error) {
     process.stderr.write(`Alchemy state redaction failed: ${failureMessage(error)}\n`)

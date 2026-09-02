@@ -19,11 +19,39 @@ const standard = Smithers.StandardPackage({ packageManager, cwd: "packages/build
 
 export const lib = standard.lib
 export const check = standard.check
-export const test = standard.test
 export const lint = standard.lint
 export const fmt = standard.fmt
 export const docs = standard.docs
 export const circular = standard.circular
+
+/**
+ * The package suite, with every prose surface its documentation contract
+ * reads declared as key material.
+ *
+ * `StandardPackage.test` knows only `src/` and `test/`. `Docs.test.ts` also
+ * reads the package's Markdown, deployment declaration, and self-hosted
+ * credential configuration. Leaving those paths undeclared let a cached test
+ * result survive a contradictory documentation edit, so this target is the
+ * standard Vitest declaration with that complete read set.
+ */
+export const test = Smithers.Vitest({
+  packageManager,
+  tests: [Smithers.glob("test/**/*.test.ts")],
+  sources: [
+    Smithers.glob("src/**/*.ts"),
+    Smithers.file("README.md"),
+    Smithers.file("DESIGN.md"),
+    Smithers.glob("docs/**/*.md"),
+    Smithers.glob("infra/**/*.md"),
+    Smithers.file("infra/alchemy.run.ts"),
+    Smithers.file("terraform/modules/cache/service/config.js")
+  ],
+  deps: [lib],
+  config: Smithers.file("vitest.config.ts"),
+  environment: "node",
+  passWithNoTests: false,
+  cwd: "packages/build"
+})
 
 /**
  * Runs the self-hosted cache service's suite.

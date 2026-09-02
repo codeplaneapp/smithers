@@ -43,6 +43,70 @@ export const maxCacheTokenBytes = 4096
  */
 export const retentionCron = "17 3 * * *"
 
+/**
+ * How long a published artifact survives in R2.
+ *
+ * R2 lifecycle rules measure an object's age from its upload, not from its
+ * last read, so this cannot be the same window the D1 sweep applies to entries
+ * (that one is last-access based). It is deliberately three times longer, so
+ * an entry that is still being read normally outlives its artifacts' upload
+ * age only in the tail. When it does not, the reference dangles and `GET
+ * /cas/{digest}` answers 404, which `@smthrs/artifacts` raises as
+ * `ArtifactMissing` and the engine's step boundary turns into a real
+ * execution: a cache miss, never a corrupt restore.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const artifactRetentionDays = 90
+
+/**
+ * How long an incomplete multipart upload survives in R2.
+ *
+ * An abandoned upload is billed storage that no request can ever read, so it
+ * is discarded well inside the artifact window.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const abandonedUploadRetentionDays = 1
+
+const secondsPerDay = 24 * 60 * 60
+
+/**
+ * The bucket lifecycle the deployment applies to published artifacts.
+ *
+ * Declared here rather than inline in the resource graph so the retention
+ * policy is exercised by the same suite that covers the rest of deployment
+ * policy.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const artifactLifecycleRules = [
+  {
+    id: "expire-cache-artifacts",
+    enabled: true,
+    deleteObjectsTransition: {
+      condition: { type: "Age", maxAge: artifactRetentionDays * secondsPerDay }
+    }
+  },
+  {
+    id: "abort-abandoned-uploads",
+    enabled: true,
+    abortMultipartUploadsTransition: {
+      condition: { type: "Age", maxAge: abandonedUploadRetentionDays * secondsPerDay }
+    }
+  }
+] as const satisfies ReadonlyArray<{
+  readonly id: string
+  readonly enabled: boolean
+  readonly deleteObjectsTransition?: { readonly condition: { readonly type: "Age"; readonly maxAge: number } }
+  readonly abortMultipartUploadsTransition?: {
+    readonly condition: { readonly type: "Age"; readonly maxAge: number }
+  }
+}>
+
 const printableAscii = /^[!-~]+$/
 
 /**

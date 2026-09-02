@@ -8,6 +8,7 @@ import {
   createHandler,
   type DeleteFence,
   describeFailure,
+  invalidKeyDigest,
   maxBodyChunks,
   maxCanonicalJsonBytes,
   maxConcurrentActionCachePublications,
@@ -262,6 +263,34 @@ describe("remote-cache hardening", () => {
     expect((await handler(request("/ac/%00"))).status).toBe(400)
     expect((await handler(request(`/ac/${oversized}`))).status).toBe(400)
     expect((await handler(request("/ac/normal:key/extra"))).status).toBe(404)
+  })
+
+  it("names every action-key fault directly", () => {
+    const tooLong = `key-${"a".repeat(maxKeyDigestLength)}`
+    const multiByteTooLong = "é".repeat(Math.floor(maxKeyDigestLength / 2) + 1)
+    expect(multiByteTooLong.length).toBeLessThanOrEqual(maxKeyDigestLength)
+    expect(textEncoder.encode(multiByteTooLong).byteLength).toBeGreaterThan(maxKeyDigestLength)
+
+    expect(invalidKeyDigest("")).toBe("empty keyDigest")
+    expect(invalidKeyDigest("\uD800")).toBe("keyDigest must be well-formed Unicode text")
+    expect(invalidKeyDigest("valid\uD800")).toBe("keyDigest must be well-formed Unicode text")
+    expect(invalidKeyDigest(tooLong)).toBe(`keyDigest must be at most ${maxKeyDigestLength} UTF-8 bytes`)
+    expect(invalidKeyDigest(multiByteTooLong)).toBe(
+      `keyDigest must be at most ${maxKeyDigestLength} UTF-8 bytes`
+    )
+    expect(invalidKeyDigest("key\u0000digest")).toBe("keyDigest must not contain control characters")
+    expect(invalidKeyDigest("normal:key")).toBeNull()
+  })
+
+  it("exposes the URL boundary around lone surrogates", async () => {
+    const handler = makeHandler()
+    const encoded = await handler(request("/ac/%ED%A0%80"))
+    expect(encoded.status).toBe(400)
+    await expect(encoded.json()).resolves.toEqual({ error: "keyDigest must be valid URL encoding" })
+
+    const normalized = request("/ac/\uD800")
+    expect(new URL(normalized.url).pathname).toBe("/ac/%EF%BF%BD")
+    expect((await handler(normalized)).status).toBe(404)
   })
 
   it("requires strict, paired publication provenance", async () => {
@@ -804,6 +833,7 @@ describe("remote-cache hardening", () => {
     expect(artifact.status).toBe(415)
     await expect(artifact.json()).resolves.toEqual({ error: "content-type must be application/octet-stream" })
     expect(findMissing.status).toBe(415)
+    await expect(findMissing.json()).resolves.toEqual({ error: "content-type must be application/json" })
   })
 
   it("refuses a declared length over the bound before reading the body", async () => {
@@ -1247,9 +1277,10 @@ describe("remote-cache hardening", () => {
           recordedEventSeq: null
         })
         const handler = makeHandler({ actionCache })
-        const held = await Promise.all(
-          Array.from({ length: maxConcurrentCacheRequests }, () => handler(request(`/ac/${keyDigest}`)))
-        )
+        const held: Array<Response> = []
+        for (let index = 0; index < maxConcurrentCacheRequests; index += 1) {
+          held.push(await handler(request(`/ac/${keyDigest}`)))
+        }
         expect(held.every((response) => response.status === 200)).toBe(true)
         expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(429)
 
