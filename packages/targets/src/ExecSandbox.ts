@@ -516,7 +516,12 @@ export const bubblewrap = (
       out.push("--ro-bind-try", closed, closed)
     }
   }
-  out.push("--remount-ro", confinement.workspaceRoot)
+  // `--remount-ro` acts on the mount at that exact path. When the root itself
+  // is a declared write (a declared output file at the top level opens its
+  // parent), that mount is the writable bind, and remounting it would deny
+  // every write the declaration admitted; the tmpfs it replaced needs no
+  // re-closing.
+  if (!confinement.writes.includes(confinement.workspaceRoot)) out.push("--remount-ro", confinement.workspaceRoot)
   out.push("--chdir", confinement.cwd, "--unshare-all", "--new-session", "--die-with-parent")
   // A fresh network namespace carries a private loopback interface that
   // reaches nothing on the host, which is what `none` means. `loopback` has

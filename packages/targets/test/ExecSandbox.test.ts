@@ -167,6 +167,23 @@ describe("bubblewrap argv", () => {
     expect(text.indexOf("--ro-bind-try")).toBeGreaterThan(text.indexOf("--bind /work/ws/.flows "))
   })
 
+  it("does not remount the root read-only when the root itself is the declared write directory", () => {
+    // A declared output file at the top level opens its parent, the root.
+    const rootWrite = planned(host("linux", { bwrap: "/usr/bin/bwrap" }, [], ["/work/ws"]), {
+      reads: [],
+      writes: ["out.txt"],
+      readOnly: []
+    })
+    expect(rootWrite.writes).toEqual(["/work/ws"])
+    const argv = ExecSandbox.bubblewrap(rootWrite, ["true"])
+    const text = argv.join(" ")
+    expect(text).toContain("--bind /work/ws /work/ws")
+    expect(text).not.toContain("--remount-ro")
+    // A write below the root keeps the tmpfs at the root re-closed.
+    const nested = ExecSandbox.bubblewrap(planned(linux), ["true"]).join(" ")
+    expect(nested).toContain("--remount-ro /work/ws")
+  })
+
   it("unshares the network for the default policy and shares the host's for loopback and open", () => {
     const open = ExecSandbox.bubblewrap(planned(linux, { policy: { network: true } }), ["true"]).join(" ")
     expect(open).toContain("--share-net")
