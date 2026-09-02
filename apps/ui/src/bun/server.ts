@@ -508,7 +508,8 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
 
   // The runtime error ingest the SPA posts to (state/ClientErrors.ts holds
   // the client half of this contract): logged, never persisted.
-  router.add("POST", CLIENT_ERRORS_PATH, async ({ request }) => {    const body = new Uint8Array(await request.arrayBuffer())
+  router.add("POST", CLIENT_ERRORS_PATH, async ({ request }) => {
+    const body = new Uint8Array(await request.arrayBuffer())
     if (body.byteLength > CLIENT_ERROR_MAX_BODY) {
       return jsonError(413, "body_too_large", `Client error reports are capped at ${CLIENT_ERROR_MAX_BODY} bytes.`)
     }
