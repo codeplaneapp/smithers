@@ -120,6 +120,13 @@ const STATUS_CLASS_BY_STATUS = {
   recovering: "warn",
   queued: "muted",
   pending: "muted",
+  /*
+   * Lane citc's workspace statuses (ADR 0002): `starting` is provisioning in
+   * flight, `suspended` is the parked analog — the machine is asleep, not
+   * broken. (`pending`, `stopped`, `running`, `failed` already map above.)
+   */
+  starting: "run",
+  suspended: "warn",
   open: "muted",
   todo: "muted",
   skipped: "muted",
