@@ -672,7 +672,10 @@ describe("wave 11 — the /api/workflow/* routes", () => {
       "List",
       "Plan",
       "Projection.Snapshot",
-      "Run"
+      "Resume",
+      "Run",
+      "Signal",
+      "Steer"
     ])
   })
 

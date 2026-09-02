@@ -19,15 +19,16 @@
 /**
  * Where each relayed procedure is mounted on the gateway.
  *
- * `Plan`, `Run`, `Cancel`, and `List` are `@smthrs/control` `ControlRpcs` at
- * `/rpc`. `Projection.Snapshot` and `Approval.Submit` are `@smthrs/gateway`
- * `GatewayRpcs` at `/projections`.
+ * `Plan`, `Run`, `Cancel`, `Resume`, `Steer`, `Signal`, and `List` are
+ * `@smthrs/control` `ControlRpcs` at `/rpc`. `Projection.Snapshot` and
+ * `Approval.Submit` are `@smthrs/gateway` `GatewayRpcs` at `/projections`.
  *
- * This is the product floor and no more. `Signal` and `Steer` are relayable
- * control procedures with no caller in `apps/ui`, and the relay carries the
- * server-held gateway credential, so mounting a procedure before a product
- * call needs it widens what a compromised browser session can reach for
- * nothing. Add each back beside the call that makes it.
+ * This is the product floor and no more: every procedure here has a caller in
+ * `apps/ui`, and the relay carries the server-held gateway credential, so
+ * mounting a procedure before a product call needs it widens what a
+ * compromised browser session can reach for nothing. `Approve` and `Deny`
+ * stay out — a decision crosses as the gateway's `Approval.Submit`, which
+ * carries the payload the projection published back unchanged.
  *
  * The two streaming procedures (`Watch`, `Projection.Subscribe`) are
  * deliberately absent for a different reason: a stream belongs on the
@@ -39,6 +40,9 @@ export const GATEWAY_PROCEDURE_MOUNTS: Readonly<Record<string, "/rpc" | "/projec
   Plan: "/rpc",
   Run: "/rpc",
   Cancel: "/rpc",
+  Resume: "/rpc",
+  Steer: "/rpc",
+  Signal: "/rpc",
   List: "/rpc",
   "Projection.Snapshot": "/projections",
   "Approval.Submit": "/projections"
