@@ -86,7 +86,14 @@ const oracle = (input: Cancellation.Input): Map<string, CancellationSummary> => 
   return answers
 }
 
-const principal = (index: number): Principal => ({ id: `operator-${index}`, kind: "user" })
+// `stampedAt` is part of every stamped principal, so the generated evidence
+// carries one. It is derived from the index rather than the clock: a property
+// case has to be reproducible from its printed rendering.
+const principal = (index: number): Principal => ({
+  id: `operator-${index}`,
+  kind: "user",
+  stampedAt: 1_700_000_000_000 + index
+})
 
 /** A forest of at most `size` runs, each with at most one parent already generated. */
 const generate = (random: () => number): Cancellation.Input => {
@@ -125,8 +132,7 @@ describe("Cancellation.attribute matches an independent oracle", () => {
       const input = generate(random)
       const actual = Cancellation.attribute(input)
       const expected = oracle(input)
-      const rendered = () =>
-        JSON.stringify({ runs: input.runs, requests: [...input.requests] }, undefined, 1)
+      const rendered = () => JSON.stringify({ runs: input.runs, requests: [...input.requests] }, undefined, 1)
       // Compare as sorted entries so a failure prints the case, not a Map.
       const normalize = (value: ReadonlyMap<string, CancellationSummary>) =>
         [...value.entries()].sort(([left], [right]) => left.localeCompare(right))

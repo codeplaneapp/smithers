@@ -11,6 +11,12 @@
  * THE LITERALS BELOW ARE A WIRE CONTRACT. Changing one is a breaking change
  * for every persisted approval, not a test update. If a change makes them move,
  * that is the finding.
+ *
+ * The one exception already taken: the enveloped vector's budget named a `usd`
+ * key `Envelope` has never carried, so it described a plan no caller could
+ * submit and the type checker refused it. The literal beside it was regenerated
+ * for `{ tokens: 5 }`. No envelope a caller can build hashes differently
+ * because of it.
  */
 import * as Sha256 from "@smthrs/crypto/Sha256"
 import { Effect, Layer } from "effect"
@@ -39,7 +45,7 @@ const enveloped: PlanSource = {
   planId: "plan-2",
   flowId: "system/up",
   decodedInput: { repo: "smithers", branch: "main" },
-  envelope: { capabilities: ["fs.read", "net.fetch"], flows: ["system/ls"], budget: { usd: 5 } },
+  envelope: { capabilities: ["fs.read", "net.fetch"], flows: ["system/ls"], budget: { tokens: 5 } },
   deployClass: true,
   handoff: {
     plan: { digest: "0".repeat(64), nodes: [{ id: "a", key: "k", status: "run" }] } as never
@@ -54,7 +60,7 @@ describe("PlanCard.digest golden vectors", () => {
 
   it("digests an enveloped deploy-class plan to its frozen value", async () => {
     const card = await cardFor(enveloped)
-    expect(card.digest).toBe("37a2a4968ea89ebc2c64a8f2e8d08630f3726bcd0b487987f74ec0d9e7b76a2d")
+    expect(card.digest).toBe("889851c21fd54488e87cf5fb5526264539119bbb13ce15c22584940b748fa810")
   })
 
   it("binds the approval target to the same digest", async () => {

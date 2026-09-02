@@ -126,7 +126,14 @@ describe("the channel ingress boundary", () => {
   })
 
   it("refuses a channel name behind an accessor", async () => {
-    expect(await refusal({ get channel() { return "hook" }, raw: wellFormed.raw })).toBe(
+    expect(
+      await refusal({
+        get channel() {
+          return "hook"
+        },
+        raw: wellFormed.raw
+      })
+    ).toBe(
       "request.channel: must be an own data property"
     )
   })
@@ -155,7 +162,11 @@ describe("the channel ingress boundary", () => {
   })
 
   it("refuses a header behind an accessor", async () => {
-    const headers = { get signature() { return "sha256=..." } }
+    const headers = {
+      get signature() {
+        return "sha256=..."
+      }
+    }
     expect(await refusal({ ...wellFormed, raw: { ...wellFormed.raw, headers } })).toBe(
       "raw.headers.signature: must be an enumerable data property"
     )
@@ -186,9 +197,7 @@ describe("the channel ingress boundary", () => {
   })
 
   it("reports an unregistered channel as unavailable", async () => {
-    const failure = await withChannels((channels) =>
-      Effect.flip(channels.ingest({ ...wellFormed, channel: "absent" }))
-    )
+    const failure = await withChannels((channels) => Effect.flip(channels.ingest({ ...wellFormed, channel: "absent" })))
     expect(failure).toBeInstanceOf(Unavailable)
     expect((failure as Unavailable).feature).toBe("channel \"absent\" is not registered")
   })

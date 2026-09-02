@@ -28,6 +28,20 @@ import { park } from "./Park.ts"
 const run = <A, E>(body: Effect.Effect<A, E, DurableStack>): Promise<A> =>
   Effect.runPromise(body.pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie))
 
+/**
+ * The same stack over a clock the case moves by hand.
+ *
+ * A case that asserts the default interval has to let nine of them pass, and
+ * nine real seconds is not a unit test. `TestClock.adjust` opens the latch of
+ * every sleep scheduled at or before the new time, so the loop takes its beats
+ * on demand and the case still fails if the default interval ever becomes
+ * zero — a zero interval finishes before the first adjustment.
+ */
+const runOnTestClock = <A, E>(body: Effect.Effect<A, E, DurableStack>): Promise<A> =>
+  Effect.runPromise(
+    body.pipe(Effect.provide(durable()), Effect.scoped, Effect.provide(TestClock.layer()), Effect.orDie)
+  )
+
 /** Parks a run on a reason the way the engine parks one. */
 const parkOn = (runId: string, reason: string) =>
   Effect.flatMap(
@@ -56,7 +70,7 @@ const start = (suffix: string) =>
 
 describe("Monitor.run defaults", () => {
   it("beats ten times a second apart when it is given nothing but a run id", async () => {
-    const report = await run(Effect.gen(function*() {
+    const report = await runOnTestClock(Effect.gen(function*() {
       const runId = yield* start("defaults")
       const fiber = yield* Monitor.run({ runId }).pipe(Effect.forkChild({ startImmediately: true }))
       // Nine sleeps separate ten beats. Advancing less than that would leave

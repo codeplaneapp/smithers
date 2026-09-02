@@ -14,8 +14,8 @@
  */
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import * as ControlError from "../src/ControlError.ts"
 import { isControlError } from "../src/ControlClient.ts"
+import * as ControlError from "../src/ControlError.ts"
 
 /** One constructed instance per member of `ControlErrorSchema`, with its frozen strings. */
 const table: ReadonlyArray<{

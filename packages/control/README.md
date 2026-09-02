@@ -331,16 +331,16 @@ above are empty there.
 
 ## Limits
 
-| Bound                       | Value                                                                                       | Refusal                                                                  |
-| --------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `list` page size            | `ControlSchema.defaultPageSize` (100) by default, `ControlSchema.maxPageSize` (500) maximum | `InvalidInput` with code `invalid_input`, naming `limit`                 |
-| `list` cursor               | only a cursor a previous page returned                                                      | `InvalidInput`, naming `cursor`                                          |
-| `list` run filters          | `runId`, `flowId`, `status`, `parentRunId`, `lineageId`                                     | `InvalidInput` for `principalId`, which rc.0 records nothing to evaluate |
-| `watch` cursor              | `afterSequence` requires `runId`                                                            | `InvalidInput`, naming `afterSequence`                                   |
-| `watch` follow-mode handoff | one high-water mark per partition present when the watch starts                             | snapshot rows at or below the mark; buffered tail rows above it          |
-| `watch` partition reads     | 8 partition snapshots at a time, plus one reserved slot for the live tail                   | queued, never refused                                                   |
+| Bound                       | Value                                                                                       | Refusal                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `list` page size            | `ControlSchema.defaultPageSize` (100) by default, `ControlSchema.maxPageSize` (500) maximum | `InvalidInput` with code `invalid_input`, naming `limit`                                  |
+| `list` cursor               | only a cursor a previous page returned                                                      | `InvalidInput`, naming `cursor`                                                           |
+| `list` run filters          | `runId`, `flowId`, `status`, `parentRunId`, `lineageId`                                     | `InvalidInput` for `principalId`, which rc.0 records nothing to evaluate                  |
+| `watch` cursor              | `afterSequence` requires `runId`                                                            | `InvalidInput`, naming `afterSequence`                                                    |
+| `watch` follow-mode handoff | one high-water mark per partition present when the watch starts                             | snapshot rows at or below the mark; buffered tail rows above it                           |
+| `watch` partition reads     | 8 partition snapshots at a time, plus one reserved slot for the live tail                   | queued, never refused                                                                     |
 | webhook request body        | `WebhookChannel.maximumBodyBytes` (1 MiB), lowered per mount by `handler`'s third argument  | `InvalidInput` naming both byte counts, before the read when `content-length` declares it |
-| mutation identity           | 4 MiB, 128 levels, 100,000 values and members; idempotency keys are 1 to 1,024 characters   | `InvalidInput` before the first wait                                     |
+| mutation identity           | 4 MiB, 128 levels, 100,000 values and members; idempotency keys are 1 to 1,024 characters   | `InvalidInput` before the first wait                                                      |
 
 A `steer` whose `message.runId` disagrees with the run the call names is
 refused with `InvalidInput` before anything is admitted to the queue.

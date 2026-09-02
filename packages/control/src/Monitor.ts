@@ -381,24 +381,35 @@ export const run = (
       eventType: string,
       payload: Record<string, unknown>,
       operation: string
-    ): Effect.Effect<void, ControlError> =>
-      journal.emitDurableUnfenced(
-        new JournalEvent.Input({
-          runId: JournalEvent.RunId.make(options.runId),
-          sourceId: JournalEvent.SourceId.make(`/control/monitor/${monitorId}`),
-          eventType,
-          payload: { runId: options.runId, monitorId, ...payload }
+    ): Effect.Effect<void, ControlError> => {
+      const unrecorded = (cause: unknown) =>
+        new PersistenceError({
+          operation: eventType,
+          message: `Failed to record ${operation} for ${options.runId}`,
+          cause
         })
-      ).pipe(
-        Effect.mapError((cause) =>
-          new PersistenceError({
-            operation: eventType,
-            message: `Failed to record ${operation} for ${options.runId}`,
-            cause
-          })
-        ),
+      // The record is BUILT inside the failure channel, not before it.
+      // `JournalEvent.RunId`/`SourceId` refuse an identifier the store cannot
+      // tell apart from another one — a lone UTF-16 surrogate, an embedded NUL
+      // — by THROWING, and `monitorId` reaches here from an operator's flag. A
+      // thrown constructor is a defect, which the RPC boundary reports as an
+      // opaque `TransportError` and a caller cannot handle; a beat whose record
+      // cannot be built is the same event as a beat whose record cannot be
+      // appended, so both fail as `PersistenceError` naming the record.
+      return Effect.try({
+        try: () =>
+          new JournalEvent.Input({
+            runId: JournalEvent.RunId.make(options.runId),
+            sourceId: JournalEvent.SourceId.make(`/control/monitor/${monitorId}`),
+            eventType,
+            payload: { runId: options.runId, monitorId, ...payload }
+          }),
+        catch: unrecorded
+      }).pipe(
+        Effect.flatMap((input) => Effect.mapError(journal.emitDurableUnfenced(input), unrecorded)),
         Effect.asVoid
       )
+    }
 
     /** What the beat saw, and what it is about to do about it. */
     const record = (beat: Beat, remedy: Remedy): Effect.Effect<void, ControlError> =>

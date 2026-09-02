@@ -518,7 +518,14 @@ describe("SqlControlRuntime", () => {
 
     const succeeded = observed.filter((exit) => exit._tag === "Success")
     expect(succeeded).toHaveLength(2)
-    const answers = succeeded.map((exit) => (exit as { readonly value: { readonly card: { readonly planId: string; readonly digest: string }; readonly created: boolean } }).value)
+    const answers = succeeded.map((exit) =>
+      (exit as {
+        readonly value: {
+          readonly card: { readonly planId: string; readonly digest: string }
+          readonly created: boolean
+        }
+      }).value
+    )
     expect(new Set(answers.map((answer) => answer.card.planId)).size).toBe(1)
     expect(new Set(answers.map((answer) => answer.card.digest)).size).toBe(1)
     expect(answers.filter((answer) => answer.created)).toHaveLength(1)
