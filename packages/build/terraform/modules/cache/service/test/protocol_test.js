@@ -917,6 +917,54 @@ describe("content-addressed storage", () => {
     expect(missing.status).toBe(404)
   })
 
+  test("refuses a ranged artifact upload so the client sends the blob whole", async () => {
+    // `RemoteArtifacts.Options.chunkBytes` probes with an empty body under
+    // `Content-Range: bytes */{total}` and reads a `400` as this service's
+    // statement that it does not support partial PUT (RFC 9110 section 14.5),
+    // falling back to one whole-blob `PUT`. The refusal is on the header, not
+    // the digest: even a full matching body under `Content-Range` is refused.
+    const contentStore = memoryContentStore()
+    const handler = makeHandler({ contentStore })
+    const bytes = new TextEncoder().encode("chunked artifact")
+    const digest = digestOf("chunked artifact")
+
+    const probe = await handler(
+      request(`/cas/${digest}`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-range": `bytes */${bytes.byteLength}`
+        }
+      })
+    )
+    const rangedWhole = await handler(
+      request(`/cas/${digest}`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-range": `bytes 0-${bytes.byteLength - 1}/${bytes.byteLength}`
+        },
+        body: bytes
+      })
+    )
+    expect(probe.status).toBe(400)
+    expect(await probe.json()).toEqual({
+      error: "content-range is not supported; send the whole blob in one request"
+    })
+    expect(rangedWhole.status).toBe(400)
+    expect(contentStore.objects.has(digest)).toBe(false)
+
+    const fallback = await handler(
+      request(`/cas/${digest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      })
+    )
+    expect(fallback.status).toBe(201)
+    expect(contentStore.objects.has(digest)).toBe(true)
+  })
+
   test("answers a successful corrupt-row repair with 200 and serves the repaired bytes", async () => {
     const repairedBytes = new TextEncoder().encode("repaired artifact bytes")
     const digest = digestOf("repaired artifact bytes")

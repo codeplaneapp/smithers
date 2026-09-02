@@ -77,6 +77,19 @@ describe("hosted and self-hosted cache protocols", () => {
     }
   })
 
+  it("refuses a ranged artifact upload with one shared answer", () => {
+    // `RemoteArtifacts.Options.chunkBytes` falls back to one whole-blob `PUT`
+    // when a ranged `PUT /cas` is answered `400`, RFC 9110 section 14.5's
+    // status for a resource that does not support partial PUT. The client's
+    // degradation depends on that refusal, so it may not drift from either
+    // tier.
+    for (const [label, source] of implementations) {
+      expect(source, `${label} accepts a ranged artifact upload`).toContain(
+        "content-range is not supported; send the whole blob in one request"
+      )
+    }
+  })
+
   it("holds an admission permit through every response body a client paces", () => {
     for (const [label, source] of implementations) {
       expect(source, `${label} has no streaming permit holder`).toContain("heldWhileStreaming")

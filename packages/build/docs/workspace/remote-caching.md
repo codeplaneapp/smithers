@@ -102,15 +102,15 @@ The Smithers engine has its own two-store split: `RemoteCacheStore` for keyed st
 entries and `RemoteArtifacts` for content-addressed blobs. Both speak one HTTP
 protocol.
 
-| Request                  | Behavior                                                                                              |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `GET /ac/{keyDigest}`    | Returns the stored entry JSON, or `404`.                                                              |
-| `PUT /ac/{keyDigest}`    | First writer wins: `201` new, `200` identical, `409` different.                                       |
-| `DELETE /ac/{keyDigest}` | Deletes an entry. Supplying `recordedRunId` and `recordedEventSeq` together makes it a fenced delete. |
-| `GET /cas/{digest}`      | Streams the blob as `application/octet-stream`, or `404`.                                             |
-| `PUT /cas/{digest}`      | Hashes the complete upload before publication; a digest mismatch returns `400`.                       |
-| `HEAD /cas/{digest}`     | Existence probe.                                                                                      |
-| `POST /cas/findMissing`  | Takes `{"digests":[...]}` and returns the missing ones in request order.                              |
+| Request                  | Behavior                                                                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /ac/{keyDigest}`    | Returns the stored entry JSON, or `404`.                                                                                         |
+| `PUT /ac/{keyDigest}`    | First writer wins: `201` new, `200` identical, `409` different.                                                                  |
+| `DELETE /ac/{keyDigest}` | Deletes an entry. Supplying `recordedRunId` and `recordedEventSeq` together makes it a fenced delete.                            |
+| `GET /cas/{digest}`      | Streams the blob as `application/octet-stream`, or `404`.                                                                        |
+| `PUT /cas/{digest}`      | Hashes the complete upload before publication; a digest mismatch returns `400`. A `Content-Range` request is refused with `400`. |
+| `HEAD /cas/{digest}`     | Existence probe.                                                                                                                 |
+| `POST /cas/findMissing`  | Takes `{"digests":[...]}` and returns the missing ones in request order.                                                         |
 
 Publication order is blobs before metadata: probe with `findMissing`, upload what
 is missing, write the local row, then publish the entry. A shared entry must
@@ -135,6 +135,14 @@ requires `application/octet-stream`. The bound is enforced against the stream, s
 a chunked upload that declares no length is refused at the same point as one that
 declares a false length. A storage failure is always `503`, never a `404`: the
 client retries a refusal and must never read one as a miss.
+
+Neither backend implements the resumable `Content-Range`/`308` upload sequence
+`RemoteArtifacts.Options.chunkBytes` can speak. Both answer a ranged
+`PUT /cas` with `400` before reading the body, the answer RFC 9110 gives a
+resource that does not support partial `PUT`, and the client reads that as its
+cue to send the blob in one request. One artifact body is therefore bounded by
+the configured artifact cap, at most 16 MiB on either tier, so a larger
+artifact cannot be published to these services in either mode.
 
 An action-cache document is stored and returned verbatim. Two shapes are
 accepted: the `CacheEntry` envelope `RemoteCacheStore` publishes, and the CLI's

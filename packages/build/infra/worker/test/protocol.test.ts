@@ -257,6 +257,54 @@ describe("remote-cache protocol", () => {
     expect(await fetched.text()).toBe("verified artifact")
   })
 
+  it("refuses a ranged artifact upload so the client sends the blob whole", async () => {
+    // `RemoteArtifacts.Options.chunkBytes` probes with an empty body under
+    // `Content-Range: bytes */{total}` and reads a `400` as this service's
+    // statement that it does not support partial PUT (RFC 9110 section 14.5),
+    // falling back to one whole-blob `PUT`. The refusal is on the header, not
+    // the digest: even a full matching body under `Content-Range` is refused.
+    const contentStore = new MemoryContentStore()
+    const handler = makeHandler(contentStore)
+    const bytes = new TextEncoder().encode("chunked artifact")
+    const digest = await digestOf("chunked artifact")
+
+    const probe = await handler(
+      authorizedRequest(`/cas/${digest}`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-range": `bytes */${bytes.byteLength}`
+        }
+      })
+    )
+    const rangedWhole = await handler(
+      authorizedRequest(`/cas/${digest}`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-range": `bytes 0-${bytes.byteLength - 1}/${bytes.byteLength}`
+        },
+        body: bytes
+      })
+    )
+    expect(probe.status).toBe(400)
+    expect(await probe.json()).toEqual({
+      error: "content-range is not supported; send the whole blob in one request"
+    })
+    expect(rangedWhole.status).toBe(400)
+    expect(await contentStore.has(digest)).toBe(false)
+
+    const fallback = await handler(
+      authorizedRequest(`/cas/${digest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      })
+    )
+    expect(fallback.status).toBe(201)
+    expect(await contentStore.has(digest)).toBe(true)
+  })
+
   it("returns unique missing digests in request order", async () => {
     const contentStore = new MemoryContentStore()
     const handler = makeHandler(contentStore)

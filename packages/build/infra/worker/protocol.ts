@@ -907,6 +907,17 @@ const handleArtifact = async (
       })
   }
   if (request.method === "PUT") {
+    // This service does not implement the resumable Content-Range/308
+    // sequence `RemoteArtifacts.Options.chunkBytes` speaks. RFC 9110 section
+    // 14.5 names the answer of a resource that does not support partial PUT:
+    // 400, which that client reads as its cue to send the blob whole.
+    // Refusing before the body is read makes the refusal deliberate; before,
+    // the empty probe fell through to the digest check below and got the same
+    // status with a misleading answer.
+    if (request.headers.get("content-range") !== null) {
+      await discardBody(request.body)
+      return json(400, { error: "content-range is not supported; send the whole blob in one request" })
+    }
     if (mediaType(request) !== "application/octet-stream") {
       await discardBody(request.body)
       return json(415, { error: "content-type must be application/octet-stream" })
