@@ -39,6 +39,16 @@ export const versionedSources = [
     path: "packages/observability/src/Otlp.ts",
     declaration: "defaultServiceVersion",
     pattern: /(export const defaultServiceVersion = ")([^"]*)(")/
+  },
+  {
+    path: "packages/migrate/src/flow/Cli.ts",
+    declaration: "version",
+    pattern: /(export const version = ")([^"]*)(")/
+  },
+  {
+    path: "packages/migrate/src/Report.ts",
+    declaration: "tool.version",
+    pattern: /(export const tool = \{ name: "@smthrs\/migrate", version: ")([^"]*)(" \} as const)/
   }
 ]
 

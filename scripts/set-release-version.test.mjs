@@ -110,7 +110,9 @@ test("retargetSource refuses a file that no longer carries the declaration", () 
 
 test("sourceMismatches names a literal the manifests left behind", () => {
   assert.deepEqual(sourceMismatches("9.9.9"), [
-    "packages/observability/src/Otlp.ts: defaultServiceVersion is 1.0.0-rc.0, expected 9.9.9"
+    "packages/observability/src/Otlp.ts: defaultServiceVersion is 1.0.0-rc.0, expected 9.9.9",
+    "packages/migrate/src/flow/Cli.ts: version is 1.0.0-rc.0, expected 9.9.9",
+    "packages/migrate/src/Report.ts: tool.version is 1.0.0-rc.0, expected 9.9.9"
   ])
 })
 
