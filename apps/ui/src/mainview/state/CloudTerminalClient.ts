@@ -49,6 +49,8 @@ interface Connection {
   readonly listeners: Set<CloudTerminalAttachment>
   readonly pending: Array<string>
   reconnect: ReturnType<typeof setTimeout> | undefined
+  /** A 1011 attach failure is retried once; the second is surfaced. */
+  retriedAttach?: boolean
 }
 
 export const createCloudTerminalClient = (options: CloudTerminalClientOptions): CloudTerminalClient => {
@@ -96,9 +98,22 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
         for (const listener of conn.listeners) listener.onOutput(text)
       })
     }
-    opened.onclose = () => {
+    opened.onclose = (event: CloseEvent) => {
       if (conn.socket === opened) conn.socket = undefined
-      scheduleReconnect(sessionId, entry)
+      /*
+       * plue's close codes (internal/routes/workspace_terminal.go): 1001 "terminal
+       * client too slow" and an abnormal 1006 drop reconnect; 1011 "failed to
+       * attach terminal" retries once; 1008 "access revoked: …" and a normal
+       * 1000 are final — the listeners hear the reason once and the 1 Hz retry
+       * never starts.
+       */
+      if (event.code === 1006 || event.code === 1001 || (event.code === 1011 && !conn.retriedAttach)) {
+        if (event.code === 1011) conn.retriedAttach = true
+        scheduleReconnect(sessionId, entry)
+        return
+      }
+      const note = event.code === 1008 ? `access revoked${event.reason ? `: ${event.reason.replace(/^access revoked:\s*/, "")}` : ""}` : `session closed${event.reason ? `: ${event.reason}` : ""}`
+      for (const listener of conn.listeners) listener.onOutput(`\r\n[${note}]\r\n`)
     }
     opened.onerror = () => {
       // onclose follows; the reconnect is its job.
