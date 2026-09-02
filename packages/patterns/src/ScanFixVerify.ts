@@ -11,7 +11,8 @@
  * worst case. {@link run} performs the real fan-out over the issues the
  * scanner actually returned.
  *
- * @see docs/pages/api/patterns-loops.md
+ * @see https://smithers.sh/api/patterns-loops
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -148,27 +149,29 @@ const validate = (options: {
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const invalid = validate(options)
   if (invalid !== undefined) throw invalid
-  const captures = {
-    maxRetries: options.maxRetries,
-    maxIssues: options.maxIssues,
-    concurrency: options.concurrency
-  }
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const stages = { scan: options.scan, fix: options.fix, verify: options.verify }
+  const maxRetries = options.maxRetries
+  const maxIssues = options.maxIssues
+  const concurrency = options.concurrency
+  const captures = { maxRetries, maxIssues, concurrency }
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.scan, options.fix, options.verify],
+    flows: [stages.scan, stages.fix, stages.verify],
     body: Node.capture(captures, (input) => {
       const visit = (iteration: number): Node.Node<unknown, unknown> =>
         Node.andThen(
-          call(options.scan, { input, iteration }),
+          call(stages.scan, { input, iteration }),
           Node.capture({ ...captures, iteration }, (issues) => {
             const found = issues as ReadonlyArray<unknown>
             let fixes: Node.Node<ReadonlyArray<unknown>, unknown> = Node.succeed([])
-            for (let offset = 0; offset < options.maxIssues; offset += options.concurrency) {
+            for (let offset = 0; offset < maxIssues; offset += concurrency) {
               const members: Record<string, Node.Node<unknown, unknown>> = {}
-              const last = Math.min(offset + options.concurrency, options.maxIssues)
+              const last = Math.min(offset + concurrency, maxIssues)
               for (let index = offset; index < last; index++) {
-                members[`fix-${index}`] = call(options.fix, { issue: found[index], index, iteration })
+                members[`fix-${index}`] = call(stages.fix, { issue: found[index], index, iteration })
               }
               fixes = Node.andThen(
                 fixes,
@@ -188,9 +191,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
               fixes,
               Node.capture({ ...captures, iteration }, (fixed) =>
                 Node.andThen(
-                  call(options.verify, { input, issues, fixes: fixed, iteration }),
+                  call(stages.verify, { input, issues, fixes: fixed, iteration }),
                   Node.capture({ ...captures, iteration }, (verification) =>
-                    iteration >= options.maxRetries
+                    iteration >= maxRetries
                       ? Node.succeed({
                         iterations: iteration,
                         remaining: issues,
@@ -228,6 +231,11 @@ export const run = <I, Issue, Fix, Verification, E, R, E2, R2, E3, R3>(
 ): Effect.Effect<Report<Issue, Verification>, E | E2 | E3 | PatternError, R | R2 | R3> => {
   const invalid = validate(options)
   if (invalid !== undefined) return Effect.fail(invalid)
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const stages = { scan: options.scan, fix: options.fix, verify: options.verify }
+  const maxRetries = options.maxRetries
+  const concurrency = options.concurrency
   return Effect.gen(function*() {
     const verifications: Array<Verification> = []
     const loop = yield* Loop.run<
@@ -238,21 +246,21 @@ export const run = <I, Issue, Fix, Verification, E, R, E2, R2, E3, R3>(
       never,
       never
     >(input, {
-      maxIterations: options.maxRetries,
+      maxIterations: maxRetries,
       onMaxReached: "return-last",
       body: ({ input, iteration }) =>
         Effect.gen(function*() {
-          const issues = yield* options.scan({ input, iteration })
+          const issues = yield* stages.scan({ input, iteration })
           if (issues.length === 0) {
             return { issues, fixes: [], verification: undefined, resolved: true }
           }
           const fixes = yield* MapReduce.run({ shards: issues, input }, {
-            concurrency: options.concurrency,
+            concurrency,
             onEmpty: "reduce",
-            map: ({ index, shard }) => options.fix({ issue: shard, index, iteration }),
+            map: ({ index, shard }) => stages.fix({ issue: shard, index, iteration }),
             reduce: ({ mapped }) => Effect.succeed(mapped)
           })
-          const verification = yield* options.verify({ input, issues, fixes, iteration })
+          const verification = yield* stages.verify({ input, issues, fixes, iteration })
           verifications.push(verification)
           // A verification is evidence about the round it ends, not the
           // terminal. The next scan confirms it, and only an empty scan stops

@@ -14,6 +14,8 @@
  * `ReviewLoop` owns: it reviews with the produced plan and revises with
  * `{ output, review, round }`, while `run` names the goal and the round in both.
  *
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
+ *
  * @since 0.1.0
  */
 import { Flow, Node } from "@smthrs/core"
@@ -207,6 +209,19 @@ export interface RuntimeOptions<Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5,
 
 const positive = (value: number): boolean => Number.isSafeInteger(value) && value >= 1
 
+// The bounds and the budget as own fields: the declared ladders and the
+// running chain read them again long after the call, and a caller's edit in
+// between must not reach them.
+const copiedBounds = (bounds: Bounds): Bounds => ({
+  tierOrder: [...bounds.tierOrder],
+  maxDepth: bounds.maxDepth,
+  maxDeriskRounds: bounds.maxDeriskRounds,
+  maxAttempts: bounds.maxAttempts
+})
+
+const copiedBudget = (budget: Budget | undefined): Budget | undefined =>
+  budget === undefined ? undefined : { ...budget }
+
 const refuse = (code: DelegationErrorCode, message: string): DelegationError =>
   new DelegationError({ code, path: "root", message })
 
@@ -355,7 +370,20 @@ const ladder = (
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+export const make = (caller: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+  // The body runs when the graph builds, later than this call, and the
+  // ladders it declares read the options again then, so every stage below
+  // reads this snapshot and never the caller's options.
+  const options: MakeOptions = {
+    ...copiedBounds(caller),
+    refine: caller.refine,
+    plan: caller.plan,
+    derisk: caller.derisk,
+    execute: { ...caller.execute },
+    review: caller.review,
+    settle: caller.settle,
+    budget: copiedBudget(caller.budget)
+  }
   const refusal = checkBounds(options, Object.keys(options.execute))
   if (refusal !== undefined) throw refusal
   const derisk = ReviewLoop.make({
@@ -452,13 +480,26 @@ const attemptCause = (attempts: ReadonlyArray<Attempt>): ReadonlyArray<Readonly<
  */
 export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
   prompt: string,
-  options: RuntimeOptions<Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>
+  caller: RuntimeOptions<Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>
 ): Effect.Effect<
   Settled,
   E1 | E2 | E3 | E5 | E6 | DelegationError | Trellis.TrellisError,
   R1 | R2 | R3 | R4 | R5 | R6
-> =>
-  Effect.gen(function*() {
+> => {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const options: typeof caller = {
+    ...copiedBounds(caller),
+    refine: caller.refine,
+    plan: caller.plan,
+    derisk: caller.derisk,
+    execute: { ...caller.execute },
+    review: caller.review,
+    settle: caller.settle,
+    budget: copiedBudget(caller.budget),
+    concurrency: caller.concurrency
+  }
+  return Effect.gen(function*() {
     const refusal = checkBounds(options, Object.keys(options.execute))
     if (refusal !== undefined) return yield* Effect.fail(refusal)
     const envelope: Trellis.Envelope = {
@@ -560,3 +601,4 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
       deriskExhausted: exhausted
     })
   })
+}

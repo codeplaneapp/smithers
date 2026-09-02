@@ -6,8 +6,9 @@
  * and a per-rung `escalateIf` that overrides it. A `fallback` runs only after
  * every rung escalated, which is where a human approval flow belongs.
  *
- * @see docs/specs/Concepts/Higher Order Flows.md
- * @see docs/pages/concepts/failure-and-retry.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/concepts/failure-and-retry
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -69,8 +70,10 @@ export interface RuntimeRung<I, A, E, R, E2, R2> {
  * A rung is either a plain effectful function or a {@link RuntimeRung} that
  * carries its own `escalateIf`. With no `accept` and no `escalateIf`,
  * {@link defaultEscalate} decides.
- * `run` snapshots `rungs` at entry; later array mutations do not alter that
- * run.
+ *
+ * `run` snapshots `rungs`, each rung's `run` and `escalateIf`, `accept`, and
+ * `fallback` at the call, so a later edit to the array, a rung record, or the
+ * option object does not alter that run.
  *
  * @category models
  * @since 0.1.0
@@ -140,11 +143,15 @@ export const defaultEscalate = (result: unknown): boolean => {
   return row.ok === false
 }
 
-const declared = (rung: Flow.Any | Rung): Rung => "flow" in rung ? rung : { flow: rung }
+// Copies, never the caller's records: the declaration reads a rung again
+// when the graph builds, and `run` reads one again when the effect runs.
+const declared = (rung: Flow.Any | Rung): Rung =>
+  "flow" in rung ? { flow: rung.flow, escalateIf: rung.escalateIf } : { flow: rung }
 
 const operational = <I, A, E, R, E2, R2>(
   rung: ((input: I) => Effect.Effect<A, E, R>) | RuntimeRung<I, A, E, R, E2, R2>
-): RuntimeRung<I, A, E, R, E2, R2> => typeof rung === "function" ? { run: rung } : rung
+): RuntimeRung<I, A, E, R, E2, R2> =>
+  typeof rung === "function" ? { run: rung } : { run: rung.run, escalateIf: rung.escalateIf }
 
 /**
  * Builds the conservative bounded ladder topology, including every rung, every
@@ -158,22 +165,26 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   if (options.rungs.length === 0) {
     throw new PatternError({ code: "invalid_decorator", message: "Escalation requires at least one rung" })
   }
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
   const rungs = options.rungs.map(declared)
+  const accept = options.accept
+  const fallback = options.fallback
   const flows = [
     ...rungs.flatMap((rung) => rung.escalateIf === undefined ? [rung.flow] : [rung.flow, rung.escalateIf]),
-    ...(options.accept === undefined ? [] : [options.accept]),
-    ...(options.fallback === undefined ? [] : [options.fallback])
+    ...(accept === undefined ? [] : [accept]),
+    ...(fallback === undefined ? [] : [fallback])
   ]
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
     flows,
-    body: Node.capture({ rungs: rungs.length, fallback: options.fallback !== undefined }, (input) => {
+    body: Node.capture({ rungs: rungs.length, fallback: fallback !== undefined }, (input) => {
       const exhausted = (last: unknown, level: number): Node.Node<unknown, unknown> =>
-        options.fallback === undefined
+        fallback === undefined
           ? Node.succeed({ level, result: last, accepted: false, exhausted: true })
           : Node.andThen(
-            call(options.fallback, input),
+            call(fallback, input),
             Node.capture({ level: rungs.length }, (result) => Node.succeed({ level: rungs.length, result }))
           )
       const visit = (index: number, last: unknown): Node.Node<unknown, unknown> => {
@@ -192,9 +203,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
                 )
               )
             }
-            if (options.accept === undefined) return visit(index + 1, result)
+            if (accept === undefined) return visit(index + 1, result)
             return Node.andThen(
-              call(options.accept, result),
+              call(accept, result),
               Node.capture({ rung: index }, (decision) => accepted(decision) ? settle : visit(index + 1, result))
             )
           })
@@ -205,14 +216,14 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   })
 }
 
-const escalates = <I, A, E, R, E2, R2, F, E3, R3>(
+const escalates = <I, A, E, R, E2, R2>(
   rung: RuntimeRung<I, A, E, R, E2, R2>,
-  options: RuntimeOptions<I, A, E, R, E2, R2, F, E3, R3>,
+  accept: ((result: A) => Effect.Effect<unknown, E2, R2>) | undefined,
   result: A,
   level: number
 ): Effect.Effect<boolean, E2, R2> => {
   if (rung.escalateIf !== undefined) return rung.escalateIf(result, level)
-  if (options.accept !== undefined) return Effect.map(options.accept(result), (decision) => !accepted(decision))
+  if (accept !== undefined) return Effect.map(accept(result), (decision) => !accepted(decision))
   return Effect.succeed(defaultEscalate(result))
 }
 
@@ -232,7 +243,12 @@ export const run = <I, A, E, R, E2 = never, R2 = never, F = A, E3 = never, R3 = 
   input: I,
   options: RuntimeOptions<I, A, E, R, E2, R2, F, E3, R3>
 ): Effect.Effect<Reached<A> | Reached<F> | Exhausted<A>, E | E2 | E3 | PatternError, R | R2 | R3> => {
-  const rungs = [...options.rungs]
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the array, a rung record, or the option object in between must
+  // not reach it.
+  const rungs = options.rungs.map(operational)
+  const accept = options.accept
+  const fallback = options.fallback
   if (rungs.length === 0) {
     return Effect.fail(
       new PatternError({ code: "invalid_decorator", message: "Escalation requires at least one rung" })
@@ -241,15 +257,14 @@ export const run = <I, A, E, R, E2 = never, R2 = never, F = A, E3 = never, R3 = 
   return Effect.gen(function*() {
     let last: A | undefined
     let level = 0
-    for (const declaration of rungs) {
-      const rung = operational(declaration)
+    for (const rung of rungs) {
       const result = yield* rung.run(input)
       last = result
-      if (!(yield* escalates(rung, options, result, level))) return { level, result }
+      if (!(yield* escalates(rung, accept, result, level))) return { level, result }
       level = level + 1
     }
-    if (options.fallback !== undefined) {
-      return { level: rungs.length, result: yield* options.fallback(input) }
+    if (fallback !== undefined) {
+      return { level: rungs.length, result: yield* fallback(input) }
     }
     return { level: rungs.length - 1, result: last as A, accepted: false, exhausted: true }
   })

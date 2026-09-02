@@ -8,9 +8,10 @@
  * The pattern detects once. Polling belongs to the caller, because how often
  * to look is a deployment decision rather than a property of the check: wrap
  * {@link run} in `Loop.run` for bounded rounds inside one execution. The recipe
- * is in `docs/pages/api/patterns-loops.md`.
+ * is in the loops reference at https://smithers.sh/api/patterns-loops.
  *
- * @see docs/pages/api/patterns-loops.md
+ * @see https://smithers.sh/api/patterns-loops
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -51,8 +52,10 @@ export interface MakeOptions {
  */
 export interface RuntimeOptions<I, Baseline, Snapshot, Comparison, Alert, E, R, E2, R2, E3 = never, R3 = never> {
   /**
-   * The same reference is handed to every callback; a callback that mutates it
-   * changes what later callbacks see.
+   * Read once when `run` is called and then handed, as the same reference, to
+   * every callback: a callback that mutates it changes what later callbacks
+   * see, while replacing it on the option object after the call changes
+   * nothing.
    */
   readonly baseline: Baseline
   readonly capture: (input: {
@@ -119,23 +122,30 @@ export const drifted = (value: unknown): boolean =>
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again. The baseline is
+  // the caller's value: it enters key material as a literal, so an edit
+  // inside it after the call is an edit to the declaration's identity.
   const alert = options.alert
+  const capture = options.capture
+  const compare = options.compare
+  const baseline = options.baseline
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: alert === undefined ? [options.capture, options.compare] : [options.capture, options.compare, alert],
-    body: Node.capture({ baseline: options.baseline, alerts: alert !== undefined }, (input) =>
+    flows: alert === undefined ? [capture, compare] : [capture, compare, alert],
+    body: Node.capture({ baseline, alerts: alert !== undefined }, (input) =>
       Node.andThen(
-        call(options.capture, { input, baseline: options.baseline }),
-        Node.capture({ baseline: options.baseline }, (snapshot) =>
+        call(capture, { input, baseline }),
+        Node.capture({ baseline }, (snapshot) =>
           Node.andThen(
-            call(options.compare, { snapshot, baseline: options.baseline }),
-            Node.capture({ baseline: options.baseline }, (comparison) =>
+            call(compare, { snapshot, baseline }),
+            Node.capture({ baseline }, (comparison) =>
               alert === undefined
                 ? Node.succeed({ snapshot, comparison })
                 : Node.map(
-                  call(alert, { comparison, snapshot, baseline: options.baseline }),
-                  Node.capture({ baseline: options.baseline }, (raised) => ({ snapshot, comparison, alert: raised }))
+                  call(alert, { comparison, snapshot, baseline }),
+                  Node.capture({ baseline }, (raised) => ({ snapshot, comparison, alert: raised }))
                 ))
           ))
       ))
@@ -154,15 +164,18 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 export const run = <I, Baseline, Snapshot, Comparison, Alert, E, R, E2, R2, E3 = never, R3 = never>(
   input: I,
   options: RuntimeOptions<I, Baseline, Snapshot, Comparison, Alert, E, R, E2, R2, E3, R3>
-): Effect.Effect<Result<Snapshot, Comparison, Alert>, E | E2 | E3, R | R2 | R3> =>
-  Effect.gen(function*() {
-    const baseline = options.baseline
-    const snapshot = yield* options.capture({ input, baseline })
-    const comparison = yield* options.compare({ snapshot, baseline })
-    const moved = options.alertIf === undefined ? drifted(comparison) : options.alertIf(comparison)
-    if (!moved || options.alert === undefined) {
+): Effect.Effect<Result<Snapshot, Comparison, Alert>, E | E2 | E3, R | R2 | R3> => {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const { alert, alertIf, baseline, capture, compare } = options
+  return Effect.gen(function*() {
+    const snapshot = yield* capture({ input, baseline })
+    const comparison = yield* compare({ snapshot, baseline })
+    const moved = alertIf === undefined ? drifted(comparison) : alertIf(comparison)
+    if (!moved || alert === undefined) {
       return { snapshot, comparison, drifted: moved }
     }
-    const raised = yield* options.alert({ comparison, snapshot, baseline })
+    const raised = yield* alert({ comparison, snapshot, baseline })
     return { snapshot, comparison, drifted: moved, alert: raised }
   })
+}

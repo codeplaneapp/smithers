@@ -491,4 +491,69 @@ describe("Kanban", () => {
     expect(one.map((node) => node.kind)).toEqual(two.map((node) => node.kind))
     expect(one.map((node) => node.keyMaterial.body)).not.toEqual(two.map((node) => node.keyMaterial.body))
   })
+
+  it("declares from the snapshot make took of its options", () => {
+    const other = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed("other") })
+    const mutableColumns = [{ name: "triage", flow: step }, { name: "build", flow: step }]
+    const mutableItems = [{ id: "a" }, { id: "b" }]
+    const options = { columns: mutableColumns, items: mutableItems, concurrency: 2, onComplete: step }
+    const board = Kanban.make(options)
+    const before = Graph.nodes(Graph.build(board, "sprint")).map((node) => node.keyMaterial.body)
+
+    // Every edit a caller can make after the call: a swapped column flow, an
+    // appended column, a renamed item, an appended item, a widened bound, and
+    // a swapped completion flow.
+    mutableColumns[0]!.flow = other
+    mutableColumns.push({ name: "release", flow: other })
+    mutableItems[0]!.id = "z"
+    mutableItems.push({ id: "c" })
+    options.concurrency = 1
+    options.onComplete = other
+
+    const after = Graph.nodes(Graph.build(board, "sprint"))
+    expect(after.map((node) => node.keyMaterial.body)).toEqual(before)
+    expect(after.filter((node) => node.kind === "FlowCall")).toHaveLength(5)
+  })
+
+  it.effect("runs the snapshot run took of its items and columns", () =>
+    Effect.gen(function*() {
+      const seen: Array<string> = []
+      const column: Kanban.RuntimeColumn<Kanban.Item, string, never, never> = {
+        name: "triage",
+        run: ({ item }) => Effect.sync(() => (seen.push(item.id), "ok"))
+      }
+      const mutableItems = [{ id: "a" }]
+      const mutableColumns = [column]
+      const options = { columns: mutableColumns, concurrency: 1 }
+      const board = Kanban.run(mutableItems, options)
+
+      // Every edit a caller can make between the call and the execution: a
+      // duplicate id the validation already refused, a swapped column, an
+      // appended column, and a widened bound.
+      mutableItems.push({ id: "a" })
+      mutableColumns[0] = { name: "triage", run: () => Effect.sync(() => (seen.push("swapped"), "swapped")) }
+      mutableColumns.push({ name: "late", run: () => Effect.sync(() => (seen.push("late"), "late")) })
+      options.concurrency = 5
+
+      const result = yield* board
+      expect(seen).toEqual(["a"])
+      expect(result).toEqual({ board: { a: { triage: "ok" } }, completed: ["a"], failed: [], iterations: 1 })
+    }))
+
+  it.effect("keys the board by the id an item carried when run was called", () =>
+    Effect.gen(function*() {
+      const item = { id: "a" }
+      const board = Kanban.run([item], {
+        concurrency: 1,
+        columns: [{ name: "triage", run: ({ item: card }) => Effect.succeed(card === item) }]
+      })
+
+      // The record itself stays the caller's: the column receives the same
+      // object. Its id was read once, so the row keeps the original name.
+      item.id = "renamed"
+
+      const result = yield* board
+      expect(result.board).toEqual({ a: { triage: true } })
+      expect(result.completed).toEqual(["a"])
+    }))
 })

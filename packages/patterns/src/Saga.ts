@@ -5,7 +5,8 @@
  * changed the world". Each step registers the call that undoes it, and a
  * failure walks those calls backwards, most recent first.
  *
- * @see docs/pages/concepts/failure-and-retry.md
+ * @see https://smithers.sh/concepts/failure-and-retry
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -79,8 +80,10 @@ export interface RuntimeStep<I, A, E, R, E2, R2> {
 /**
  * Configuration for {@link run}.
  *
- * `run` snapshots `steps` at entry; later array mutations do not alter that
- * run.
+ * `run` snapshots `steps`, each step's `id`, `action`, and `compensation`,
+ * and `onFailure` at the call, so a later edit to the array, a step record,
+ * or the option object does not alter that run. See
+ * https://smithers.sh/api/patterns#identity-and-ownership.
  *
  * @category models
  * @since 0.1.0
@@ -154,23 +157,34 @@ const declarationRefusal = (steps: ReadonlyArray<Step>): PatternError | undefine
  * A step whose action or compensation is not a flow is refused here, because
  * the declaration cannot be built out of anything else.
  *
+ * `make` snapshots `steps` and each step's `id`, `action`, and
+ * `compensation` at the call, so a later edit to the caller's array or
+ * records does not change the declaration.
+ *
  * @category constructors
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  const refusal = stepsRefusal(options.steps) ?? declarationRefusal(options.steps)
+  // The body runs when the graph builds, later than this call, so it reads
+  // this snapshot and never the caller's steps again.
+  const steps: ReadonlyArray<Step> = options.steps.map((step) => ({
+    id: step.id,
+    action: step.action,
+    compensation: step.compensation
+  }))
+  const refusal = stepsRefusal(steps) ?? declarationRefusal(steps)
   if (refusal !== undefined) throw refusal
   const policy = options.onFailure ?? "compensate"
   const flows = policy === "fail"
-    ? options.steps.map((step) => step.action)
-    : options.steps.flatMap((step) => [step.action, step.compensation])
+    ? steps.map((step) => step.action)
+    : steps.flatMap((step) => [step.action, step.compensation])
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
     flows,
-    body: Node.capture({ steps: options.steps.map((step) => step.id), onFailure: policy }, (input) => {
+    body: Node.capture({ steps: steps.map((step) => step.id), onFailure: policy }, (input) => {
       const visit = (index: number, completed: Readonly<Record<string, unknown>>): Node.Node<unknown, unknown> => {
-        const step = options.steps[index]
+        const step = steps[index]
         if (step === undefined) return Node.succeed(completed)
         return Node.andThen(
           call(step.action, { input, completed }),
@@ -225,12 +239,19 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 export const run = <I, A, E, R, E2, R2>(
   input: I,
   options: RuntimeOptions<I, A, E, R, E2, R2>
-): Effect.Effect<Readonly<Record<string, A>> | Compensated<E>, E | PatternError, R | R2> =>
-  Effect.suspend(() => {
-    const steps = [...options.steps]
+): Effect.Effect<Readonly<Record<string, A>> | Compensated<E>, E | PatternError, R | R2> => {
+  // Snapshots taken at the call, ahead of the suspend: the effect may run
+  // later, and a caller's edit to the array, a step record, or the option
+  // object in between must not reach it.
+  const steps: ReadonlyArray<RuntimeStep<I, A, E, R, E2, R2>> = options.steps.map((step) => ({
+    id: step.id,
+    action: step.action,
+    compensation: step.compensation
+  }))
+  const policy = options.onFailure ?? "compensate"
+  return Effect.suspend(() => {
     const refusal = stepsRefusal(steps)
     if (refusal !== undefined) return Effect.fail(refusal)
-    const policy = options.onFailure ?? "compensate"
     const residue: Array<{ readonly id: string; readonly error: unknown }> = []
     const forward = Effect.gen(function*() {
       const completed = new Map<string, A>()
@@ -278,3 +299,4 @@ export const run = <I, A, E, R, E2, R2>(
     }
     return Effect.flatMap(Effect.exit(Effect.scoped(forward)), settle)
   })
+}

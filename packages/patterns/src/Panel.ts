@@ -5,7 +5,8 @@
  * and hands one moderator every answer. {@link make} declares that topology,
  * {@link run} performs it.
  *
- * @see docs/pages/concepts/concurrency.md
+ * @see https://smithers.sh/concepts/concurrency
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -76,8 +77,14 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       message: "Panel requires at least one panelist"
     })
   }
-  const roles = options.roles
-  for (const name of Object.keys(roles ?? {})) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again. Roles are copied
+  // as own entries, so a prototype-shaped panelist name never reads a role
+  // off `Object.prototype`.
+  const roles = options.roles === undefined ? undefined : new Map(Object.entries(options.roles))
+  const moderator = options.moderator
+  const concurrency = options.concurrency
+  for (const name of roles?.keys() ?? []) {
     if (!Object.hasOwn(options.panelists, name)) {
       throw new PatternError({
         code: "invalid_decorator",
@@ -88,22 +95,22 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   const names = panelists.map(([name]) => name)
   const material = {
     panelists: names,
-    ...(roles === undefined ? {} : { roles: names.map((name) => roles[name] ?? null) }),
-    ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency })
+    ...(roles === undefined ? {} : { roles: names.map((name) => roles.get(name) ?? null) }),
+    ...(concurrency === undefined ? {} : { concurrency })
   }
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [...panelists.map(([, flow]) => flow), options.moderator],
+    flows: [...panelists.map(([, flow]) => flow), moderator],
     body: Node.capture(material, (input) => {
       const nodes = Object.fromEntries(
-        panelists.map(([name, panelist]) => [name, call(panelist, payload(input, roles?.[name]))])
+        panelists.map(([name, panelist]) => [name, call(panelist, payload(input, roles?.get(name)))])
       ) as Record<string, Node.Any>
       return Node.andThen(
-        options.concurrency === undefined ? Node.all(nodes) : Bounded.all(nodes, { concurrency: options.concurrency }),
+        concurrency === undefined ? Node.all(nodes) : Bounded.all(nodes, { concurrency }),
         Node.capture(
           { panelists: names },
-          (opinions) => call(options.moderator, { input, opinions })
+          (opinions) => call(moderator, { input, opinions })
         )
       )
     })
@@ -124,22 +131,24 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 export const run = <I, A, E, R, B, E2, R2>(
   input: I,
   options: RuntimeOptions<I, A, E, R, B, E2, R2>
-): Effect.Effect<B, E | E2 | PatternError, R | R2> =>
-  Effect.suspend((): Effect.Effect<B, E | E2 | PatternError, R | R2> => {
-    const panelists = Object.entries(options.panelists)
+): Effect.Effect<B, E | E2 | PatternError, R | R2> => {
+  // Snapshots taken at the call, ahead of the suspend: the effect may run
+  // later, and a caller's edit to the record or the option object in between
+  // must not reach it.
+  const panelists = Object.entries(options.panelists)
+  const moderator = options.moderator
+  const concurrency = options.concurrency
+  return Effect.suspend((): Effect.Effect<B, E | E2 | PatternError, R | R2> => {
     if (panelists.length === 0) {
       return Effect.fail(
         new PatternError({ code: "invalid_decorator", message: "Panel requires at least one panelist" })
       )
     }
-    if (
-      options.concurrency !== undefined &&
-      (!Number.isSafeInteger(options.concurrency) || options.concurrency < 1)
-    ) {
+    if (concurrency !== undefined && (!Number.isSafeInteger(concurrency) || concurrency < 1)) {
       return Effect.fail(
         new PatternError({
           code: "invalid_decorator",
-          message: `Panel concurrency must be a positive safe integer, received ${options.concurrency}`
+          message: `Panel concurrency must be a positive safe integer, received ${concurrency}`
         })
       )
     }
@@ -147,8 +156,9 @@ export const run = <I, A, E, R, B, E2, R2>(
       Effect.forEach(
         panelists,
         ([name, panelist]) => Effect.map(panelist(input), (opinion) => [name, opinion] as const),
-        { concurrency: options.concurrency ?? "unbounded" }
+        { concurrency: concurrency ?? "unbounded" }
       ),
-      (opinions) => options.moderator({ input, opinions: Object.fromEntries(opinions) })
+      (opinions) => moderator({ input, opinions: Object.fromEntries(opinions) })
     )
   })
+}

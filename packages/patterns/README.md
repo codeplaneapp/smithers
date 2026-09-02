@@ -70,6 +70,15 @@ calls. A very large bound builds a very large graph before anything runs. For
 an unbounded loop, use the `run` half under an external scheduler instead of
 unrolling it in `make`.
 
+## Identity and ownership
+
+Ids and names are compared by exact, case-sensitive string equality with no
+Unicode normalization. Every `make`, `run`, and decorator factory snapshots
+its options at the call, so a later edit to the caller's objects does not
+change a declaration or a run. Flows, callbacks, inputs, and the values
+callbacks return stay the caller's references. The full contract is in
+[Identity and ownership](https://smithers.sh/api/patterns#identity-and-ownership).
+
 ## What `WithCache` declares today
 
 `WithCache` writes its policy under the annotation identifier

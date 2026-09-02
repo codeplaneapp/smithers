@@ -14,6 +14,8 @@
  * `@smthrs/flow` defines, so each round is its own journal segment and a crash
  * resumes at the round boundary.
  *
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
+ *
  * @since 0.1.0
  */
 import { Flow, Node } from "@smthrs/core"
@@ -177,6 +179,26 @@ export const leaves = (plan: Plan): ReadonlyArray<Leaf> => {
 }
 
 const bounded = (value: number): boolean => Number.isSafeInteger(value) && value >= 1
+
+// The three bounds as own fields, so an effect or a declaration built now
+// never reads a caller's envelope object again.
+const copiedEnvelope = (envelope: Envelope): Envelope => ({
+  fuel: envelope.fuel,
+  depth: envelope.depth,
+  fanout: envelope.fanout
+})
+
+// A structural copy of a plan, so an effect that runs later visits the leaves
+// the plan named when the effect was built.
+const copiedPlan = (plan: Plan): Plan => {
+  const members = container(plan)
+  if (members === undefined) {
+    const agent = (plan as { readonly agent: { readonly goal: string; readonly seat?: string | undefined } }).agent
+    return { agent: { goal: agent.goal, seat: agent.seat } }
+  }
+  const copies: readonly [Plan, ...ReadonlyArray<Plan>] = [copiedPlan(members[0]!), ...members.slice(1).map(copiedPlan)]
+  return "sequence" in plan ? { sequence: copies } : { parallel: copies }
+}
 
 const admissionRefusal = (options: {
   readonly envelope?: Envelope | undefined
@@ -411,7 +433,11 @@ export interface MakeOptions {
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  const { envelope } = options
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const envelope = copiedEnvelope(options.envelope)
+  const author = options.author
+  const leaf = options.leaf
   const invalid = admissionRefusal({ envelope })
   if (invalid !== undefined) throw invalid
   const captured = { fuel: envelope.fuel, depth: envelope.depth, fanout: envelope.fanout }
@@ -420,7 +446,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     output: Schema.Unknown,
     body: Node.capture(captured, (input) =>
       Node.andThen(
-        Compose.call(options.author, input),
+        Compose.call(author, input),
         Node.capture(captured, (plan) => {
           // A declaration cannot know the goals a plan will name, so the
           // authored plan stands in for the goal and the slot names the path.
@@ -429,11 +455,11 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
             goal: plan,
             path: `slot-${slot}`
           })
-          let slots: Node.Node<unknown, unknown> = Compose.call(options.leaf, slotLeaf(0))
+          let slots: Node.Node<unknown, unknown> = Compose.call(leaf, slotLeaf(0))
           for (let slot = 1; slot < envelope.fuel; slot++) {
             slots = Node.andThen(
               slots,
-              Node.capture({ slot }, () => Compose.call(options.leaf, slotLeaf(slot)))
+              Node.capture({ slot }, () => Compose.call(leaf, slotLeaf(slot)))
             )
           }
           return slots
@@ -518,6 +544,9 @@ export interface RuntimeOptions<E, R, E2, R2, E3, R3> {
  * and admitted by a shared semaphore, so the bound holds across the whole
  * plan rather than per container.
  *
+ * `execute` copies the plan and snapshots the options at the call, so a later
+ * edit to either does not alter that execution.
+ *
  * @category combinators
  * @since 0.1.0
  */
@@ -528,9 +557,14 @@ export const execute = <E, R>(
     readonly concurrency: number
   }
 ): Effect.Effect<unknown, E | TrellisError, R> => {
-  const invalid = admissionRefusal({ concurrency: options.concurrency })
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the plan or the option object in between must not reach it.
+  const admitted = copiedPlan(plan)
+  const runLeaf = options.leaf
+  const concurrency = options.concurrency
+  const invalid = admissionRefusal({ concurrency })
   if (invalid !== undefined) return Effect.fail(invalid)
-  return Effect.flatMap(Semaphore.make(options.concurrency), (semaphore) => {
+  return Effect.flatMap(Semaphore.make(concurrency), (semaphore) => {
     const visit = (node: Plan, path: string): Effect.Effect<unknown, E, R> => {
       const members = container(node)
       if (members === undefined) {
@@ -538,7 +572,7 @@ export const execute = <E, R>(
         const leaf: Leaf = agent.seat === undefined
           ? { goal: agent.goal, path }
           : { goal: agent.goal, seat: agent.seat, path }
-        return semaphore.withPermits(1)(options.leaf(leaf))
+        return semaphore.withPermits(1)(runLeaf(leaf))
       }
       return Effect.forEach(
         members,
@@ -546,7 +580,7 @@ export const execute = <E, R>(
         { concurrency: "parallel" in node ? "unbounded" : 1 }
       )
     }
-    return visit(plan, "root")
+    return visit(admitted, "root")
   })
 }
 
@@ -558,22 +592,32 @@ export const execute = <E, R>(
  * left over from earlier rounds, so a plan that overspends fails
  * `fuel_exhausted` before any of its leaves runs.
  *
+ * `run` snapshots every callback, the envelope's three bounds, and
+ * `concurrency` at the call, so a later edit to the option object does not
+ * alter that run.
+ *
  * @category combinators
  * @since 0.1.0
  */
 export const run = <E, R, E2, R2, E3 = never, R3 = never>(
   prompt: string,
   options: RuntimeOptions<E, R, E2, R2, E3, R3>
-): Effect.Effect<RunResult, E | E2 | E3 | TrellisError, R | R2 | R3> =>
-  Effect.suspend(() => {
-    const envelope = options.envelope
-    const concurrency = options.concurrency ?? envelope.fanout
+): Effect.Effect<RunResult, E | E2 | E3 | TrellisError, R | R2 | R3> => {
+  // Snapshots taken at the call, ahead of the suspend: the effect may run
+  // later, and a caller's edit to the option object in between must not
+  // reach it.
+  const envelope = copiedEnvelope(options.envelope)
+  const concurrency = options.concurrency ?? envelope.fanout
+  const author = options.author
+  const leaf = options.leaf
+  const continuation = options.continue
+  return Effect.suspend(() => {
     const invalid = admissionRefusal({ envelope, concurrency })
     if (invalid !== undefined) return Effect.fail(invalid)
     return Effect.gen(function*() {
       const rounds: Array<Round> = []
       let remaining = envelope.fuel
-      let authored: unknown = yield* options.author({ prompt, round: 1, previous: undefined, remaining })
+      let authored: unknown = yield* author({ prompt, round: 1, previous: undefined, remaining })
       for (let round = 1;; round++) {
         const refusals = validate(authored, envelope)
         if (refusals.length > 0) {
@@ -599,11 +643,11 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
             })
           )
         }
-        const result = yield* execute(plan, { leaf: options.leaf, concurrency })
+        const result = yield* execute(plan, { leaf, concurrency })
         remaining -= cost
         rounds.push({ plan, result })
-        if (options.continue === undefined) return { rounds, remaining }
-        const next = yield* options.continue({ plan, result, round, remaining })
+        if (continuation === undefined) return { rounds, remaining }
+        const next = yield* continuation({ plan, result, round, remaining })
         // A continuation is a request for another round. Nothing, or a plan
         // that names no work, is the same answer: the trampoline is done. Every
         // other round costs at least one leaf, so `run` always terminates.
@@ -612,3 +656,4 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
       }
     })
   })
+}

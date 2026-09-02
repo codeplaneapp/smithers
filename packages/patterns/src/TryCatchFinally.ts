@@ -7,7 +7,8 @@
  * handler claimed. The declaration shows the finalizer on both arms, so a
  * reader sees that nothing leaves the boundary without it.
  *
- * @see docs/pages/concepts/failure-and-retry.md
+ * @see https://smithers.sh/concepts/failure-and-retry
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -72,7 +73,10 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  if (options.catchErrors !== undefined && options.catch === undefined) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const arms = { try: options.try, catch: options.catch, catchErrors: options.catchErrors, finally: options.finally }
+  if (arms.catchErrors !== undefined && arms.catch === undefined) {
     throw new PatternError({
       code: "invalid_decorator",
       message: "TryCatchFinally catchErrors requires catch"
@@ -82,26 +86,26 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     input: Schema.Unknown,
     output: Schema.Unknown,
     flows: [
-      options.try,
-      ...(options.catch === undefined ? [] : [options.catch]),
-      ...(options.finally === undefined ? [] : [options.finally])
+      arms.try,
+      ...(arms.catch === undefined ? [] : [arms.catch]),
+      ...(arms.finally === undefined ? [] : [arms.finally])
     ],
     body: Node.capture(
-      { catch: options.catch !== undefined, finally: options.finally !== undefined },
+      { catch: arms.catch !== undefined, finally: arms.finally !== undefined },
       (input) => {
-        const finalize = options.finally
+        const finalize = arms.finally
         const settle = (value: unknown): Node.Node<unknown, unknown> =>
           finalize === undefined
             ? Node.succeed(value)
             : Node.map(call(finalize, { input }), Node.capture({ settled: true }, () => value))
-        const attempt = call(options.try, input)
-        const handler = options.catch
+        const attempt = call(arms.try, input)
+        const handler = arms.catch
         const recover = (handled: Flow.Any) => {
           const onFailure = Node.capture(
             { handled: true },
             (error: unknown): Node.Node<unknown, unknown> => call(handled, { error, input })
           )
-          const filter = options.catchErrors as Schema.Schema<unknown> | undefined
+          const filter = arms.catchErrors as Schema.Schema<unknown> | undefined
           return filter === undefined
             ? Node.catch(attempt, { onFailure })
             : Node.catch(attempt, { error: filter, onFailure })
@@ -142,7 +146,10 @@ export const run = <I, A, E, R, B = A, E2 = never, R2 = never, E3 = never, R3 = 
   input: I,
   options: RuntimeOptions<I, A, E, R, B, E2, R2, E3, R3>
 ): Effect.Effect<A | B, E | E2 | PatternError, R | R2 | R3> => {
-  if (options.catchErrors !== undefined && options.catch === undefined) {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const arms = { try: options.try, catch: options.catch, catchErrors: options.catchErrors, finally: options.finally }
+  if (arms.catchErrors !== undefined && arms.catch === undefined) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
@@ -150,16 +157,16 @@ export const run = <I, A, E, R, B = A, E2 = never, R2 = never, E3 = never, R3 = 
       })
     )
   }
-  const handler = options.catch
-  const attempt = Effect.suspend(() => options.try(input))
+  const handler = arms.catch
+  const attempt = Effect.suspend(() => arms.try(input))
   const guarded: Effect.Effect<A | B, E | E2, R | R2> = handler === undefined
     ? attempt
     : Effect.catchIf(
       attempt,
-      (error): error is E => options.catchErrors === undefined || options.catchErrors(error),
+      (error): error is E => arms.catchErrors === undefined || arms.catchErrors(error),
       (error) => handler(error, input)
     )
-  const finalize = options.finally
+  const finalize = arms.finally
   if (finalize === undefined) return guarded
   return Effect.onExit(guarded, (exit) =>
     Effect.matchEffect(finalize(input), {

@@ -2,7 +2,8 @@
  * Intervene pattern: read a target, propose a change, apply it behind an
  * optional approval, and report what happened.
  *
- * @see docs/pages/api/patterns-teams.md
+ * @see https://smithers.sh/api/patterns-teams
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -87,24 +88,28 @@ const decide = Schema.decodeUnknownEffect(WithApproval.Approved)
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const stages = { read: options.read, propose: options.propose, report: options.report }
+  const dryRun = options.dryRun
   const reason = options.reason ?? DEFAULT_REASON
   const apply = options.approval === undefined
     ? options.apply
     : WithApproval.withApproval(options.apply, { reason, approval: options.approval })
-  const captures = { dryRun: options.dryRun, gated: options.approval !== undefined, reason }
+  const captures = { dryRun, gated: options.approval !== undefined, reason }
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.read, options.propose, apply, options.report],
+    flows: [stages.read, stages.propose, apply, stages.report],
     body: Node.capture(captures, (input) =>
       Node.andThen(
-        call(options.read, { phase: "read", input }),
+        call(stages.read, { phase: "read", input }),
         Node.capture(captures, (context) =>
           Node.andThen(
-            call(options.propose, { phase: "propose", input, context }),
+            call(stages.propose, { phase: "propose", input, context }),
             Node.capture(captures, (proposal) =>
-              options.dryRun
-                ? call(options.report, {
+              dryRun
+                ? call(stages.report, {
                   phase: "report",
                   input,
                   proposal,
@@ -114,7 +119,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
                 : Node.andThen(
                   call(apply, { phase: "apply", input, proposal }),
                   Node.capture(captures, (applied) =>
-                    call(options.report, {
+                    call(stages.report, {
                       phase: "report",
                       input,
                       proposal,
@@ -141,16 +146,20 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 export const run = <I, Context, Proposal, Applied, Report, E, R, E2, R2, E3, R3, E4, R4, E5 = never, R5 = never>(
   input: I,
   options: RuntimeOptions<I, Context, Proposal, Applied, Report, E, R, E2, R2, E3, R3, E4, R4, E5, R5>
-): Effect.Effect<Report, E | E2 | E3 | E4 | E5 | Schema.SchemaError, R | R2 | R3 | R4 | R5> =>
-  Effect.gen(function*() {
-    const context = yield* options.read(input)
-    const proposal = yield* options.propose({ input, context })
-    if (options.dryRun) {
-      return yield* options.report({ input, proposal, applied: undefined, dryRun: true })
+): Effect.Effect<Report, E | E2 | E3 | E4 | E5 | Schema.SchemaError, R | R2 | R3 | R4 | R5> => {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const { apply, approval, dryRun, propose, read, report } = options
+  return Effect.gen(function*() {
+    const context = yield* read(input)
+    const proposal = yield* propose({ input, context })
+    if (dryRun) {
+      return yield* report({ input, proposal, applied: undefined, dryRun: true })
     }
-    if (options.approval !== undefined) {
-      yield* decide(yield* options.approval({ input, proposal }))
+    if (approval !== undefined) {
+      yield* decide(yield* approval({ input, proposal }))
     }
-    const applied = yield* options.apply({ input, proposal })
-    return yield* options.report({ input, proposal, applied, dryRun: false })
+    const applied = yield* apply({ input, proposal })
+    return yield* report({ input, proposal, applied, dryRun: false })
   })
+}

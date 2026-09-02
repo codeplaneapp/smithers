@@ -8,7 +8,8 @@
  * failed primary is a failed run. {@link Escalation} is the pattern for
  * alternatives.
  *
- * @see docs/pages/api/patterns-loops.md
+ * @see https://smithers.sh/api/patterns-loops
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -189,17 +190,20 @@ export const delta = (primary: number, shadow: number): Delta => {
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const declared = { primary: options.primary, shadow: options.shadow }
   const score = options.score
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
     flows: score === undefined
-      ? [options.primary, options.shadow]
-      : [options.primary, options.shadow, score],
+      ? [declared.primary, declared.shadow]
+      : [declared.primary, declared.shadow, score],
     body: Node.capture({ scores: score !== undefined }, (input) => {
       const shadow: Node.Node<unknown, unknown> = Node.catch(
         Node.map(
-          call(options.shadow, input),
+          call(declared.shadow, input),
           Node.capture({ shadow: "settled" }, (value: unknown) => ({ quarantined: false, value }))
         ),
         {
@@ -221,7 +225,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
           }))
         )
       return Node.andThen(
-        Node.all({ primary: call(options.primary, input), shadow }),
+        Node.all({ primary: call(declared.primary, input), shadow }),
         Node.capture({ scores: score !== undefined }, scored)
       )
     })
@@ -241,10 +245,13 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
 export const run = <I, P, S, E, R, E2, R2, E3 = never, R3 = never>(
   input: I,
   options: RuntimeOptions<I, P, S, E, R, E2, R2, E3, R3>
-): Effect.Effect<Result<P, S>, E | E3 | PatternError, R | R2 | R3> =>
-  Effect.gen(function*() {
+): Effect.Effect<Result<P, S>, E | E3 | PatternError, R | R2 | R3> => {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const declared = { primary: options.primary, shadow: options.shadow, score: options.score }
+  return Effect.gen(function*() {
     const quarantine: Effect.Effect<Shadow<S>, never, R2> = Effect.flatMap(
-      Effect.exit(options.shadow(input)),
+      Effect.exit(declared.shadow(input)),
       (exit) =>
         Exit.isSuccess(exit)
           ? Effect.succeed<Shadow<S>>({ quarantined: false, value: exit.value })
@@ -255,14 +262,15 @@ export const run = <I, P, S, E, R, E2, R2, E3 = never, R3 = never>(
           ? Effect.interrupt
           : Effect.succeed<Shadow<S>>({ quarantined: true, cause: exit.cause })
     )
-    const [primary, shadow] = yield* Effect.all([options.primary(input), quarantine] as const, { concurrency: 2 })
-    if (options.score === undefined || shadow.quarantined) {
+    const [primary, shadow] = yield* Effect.all([declared.primary(input), quarantine] as const, { concurrency: 2 })
+    if (declared.score === undefined || shadow.quarantined) {
       const reported: Result<P, S> = { primary, shadow }
       return reported
     }
-    const scores = yield* options.score({ primary, shadow: shadow.value })
+    const scores = yield* declared.score({ primary, shadow: shadow.value })
     const refusal = scoreRefusal(scores.primary, scores.shadow)
     if (refusal !== undefined) return yield* Effect.fail(refusal)
     const reported: Result<P, S> = { primary, shadow, delta: measuredDelta(scores.primary, scores.shadow) }
     return reported
   })
+}

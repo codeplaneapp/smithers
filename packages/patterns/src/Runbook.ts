@@ -3,7 +3,8 @@
  * whether it is gated by an approval, and a denial either stops the runbook or
  * skips the step.
  *
- * @see docs/pages/api/patterns-teams.md
+ * @see https://smithers.sh/api/patterns-teams
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -97,8 +98,10 @@ export interface RuntimeStep<I, Out, E, R> {
  *
  * `approve` must produce the literal `"approved"`; anything else is a denial
  * and fails the typed schema decode.
- * `run` snapshots `steps` at entry; later array mutations do not alter that
- * run.
+ *
+ * `run` snapshots `steps`, each step's `id`, `risk`, and `run`, `approve`, and
+ * `onDeny` at the call, so a later edit to the array, a step record, or the
+ * option object does not alter that run.
  *
  * @category models
  * @since 0.1.0
@@ -174,10 +177,13 @@ const identities = (ids: ReadonlyArray<string>): boolean => new Set(ids).size ==
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  if (options.steps.length === 0) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these copies and never the caller's step records again.
+  const steps: ReadonlyArray<Step> = options.steps.map((step) => ({ id: step.id, flow: step.flow, risk: step.risk }))
+  if (steps.length === 0) {
     throw new PatternError({ code: "invalid_decorator", message: "Runbook requires at least one step" })
   }
-  const ids = options.steps.map((step) => step.id)
+  const ids = steps.map((step) => step.id)
   if (!identities(ids)) {
     throw new PatternError({ code: "invalid_decorator", message: "Runbook step ids must be unique" })
   }
@@ -191,8 +197,8 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     })
   }
   const reason = options.reason ?? DEFAULT_REASON
-  const captures = { steps: ids, risks: options.steps.map((step) => step.risk), onDeny: options.onDeny, reason }
-  const declared = options.steps.map((step) =>
+  const captures = { steps: ids, risks: steps.map((step) => step.risk), onDeny: options.onDeny, reason }
+  const declared = steps.map((step) =>
     gated(step.risk)
       ? {
         step,
@@ -245,7 +251,12 @@ export const run = <I, Out, E = never, R = never, E2 = never, R2 = never>(
   input: I,
   options: RuntimeOptions<I, Out, E, R, E2, R2>
 ): Effect.Effect<Result<Out>, E | E2 | PatternError | Schema.SchemaError, R | R2> => {
-  const steps = [...options.steps]
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the array, a step record, or the option object in between must
+  // not reach it.
+  const steps = options.steps.map((step) => ({ id: step.id, risk: step.risk, run: step.run }))
+  const approve = options.approve
+  const onDeny = options.onDeny
   if (steps.length === 0) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Runbook requires at least one step" }))
   }
@@ -266,8 +277,8 @@ export const run = <I, Out, E = never, R = never, E2 = never, R2 = never>(
         previous
       }
       if (gated(step.risk)) {
-        const answer = decide(yield* options.approve(request))
-        const decision: Approved | "denied" = options.onDeny === "skip"
+        const answer = decide(yield* approve(request))
+        const decision: Approved | "denied" = onDeny === "skip"
           ? yield* Effect.catch(answer, () => Effect.succeed("denied" as const))
           : yield* answer
         if (decision === "denied") {

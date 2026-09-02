@@ -12,7 +12,8 @@
  * candidates against a fixed suite belongs above the pattern layer, in the
  * caller that owns the suite.
  *
- * @see docs/pages/api/patterns-loops.md
+ * @see https://smithers.sh/api/patterns-loops
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -166,22 +167,26 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const invalid = validate(options)
   if (invalid !== undefined) throw invalid
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const stages = { generate: options.generate, evaluate: options.evaluate }
+  const maxIterations = options.maxIterations
   const captures = {
     ...options.targetScore === undefined ? {} : { targetScore: options.targetScore },
-    maxIterations: options.maxIterations,
+    maxIterations,
     onMaxReached: options.onMaxReached
   }
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.generate, options.evaluate],
+    flows: [stages.generate, stages.evaluate],
     body: Node.capture(captures, (input) => {
       const visit = (previous: unknown, iteration: number): Node.Node<unknown, unknown> =>
         Node.andThen(
-          call(options.generate, { input, previous, iteration }),
+          call(stages.generate, { input, previous, iteration }),
           Node.capture({ ...captures, iteration }, (candidate) =>
             Node.andThen(
-              call(options.evaluate, { value: candidate, iteration }),
+              call(stages.evaluate, { value: candidate, iteration }),
               Node.capture({ ...captures, iteration }, (evaluation) => {
                 const scored = evaluation as { readonly score: number; readonly feedback: unknown }
                 const attempt = {
@@ -193,7 +198,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
                 // A declaration cannot compare a score it does not have, so the
                 // declared terminal is the exhausted one; `run` reports the
                 // convergent case.
-                return iteration >= options.maxIterations
+                return iteration >= maxIterations
                   ? Node.succeed({ best: attempt, iterations: iteration, converged: false })
                   : visit(attempt, iteration + 1)
               })
@@ -223,16 +228,21 @@ export const run = <I, C, E, R, E2, R2>(
 ): Effect.Effect<Result<C>, E | E2 | PatternError, R | R2> => {
   const invalid = validate(options)
   if (invalid !== undefined) return Effect.fail(invalid)
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const stages = { generate: options.generate, evaluate: options.evaluate }
   const targetScore = options.targetScore
+  const maxIterations = options.maxIterations
+  const onMaxReached = options.onMaxReached
   return Effect.gen(function*() {
     const attempts: Array<Attempt<C>> = []
     const loop = yield* Loop.run<I, Attempt<C>, E | E2 | PatternError, R | R2, never, never>(input, {
-      maxIterations: options.maxIterations,
+      maxIterations,
       onMaxReached: "return-last",
       body: ({ input, iteration, previous }) =>
         Effect.gen(function*() {
-          const candidate = yield* options.generate({ input, previous, iteration })
-          const evaluation = yield* options.evaluate({ value: candidate, iteration })
+          const candidate = yield* stages.generate({ input, previous, iteration })
+          const evaluation = yield* stages.evaluate({ value: candidate, iteration })
           if (!Number.isFinite(evaluation.score)) {
             return yield* Effect.fail(
               new PatternError({
@@ -263,11 +273,11 @@ export const run = <I, C, E, R, E2, R2>(
       attempts[0] ?? loop.value
     )
     const converged = targetScore !== undefined && best.score >= targetScore
-    if (!converged && options.onMaxReached === "fail") {
+    if (!converged && onMaxReached === "fail") {
       return yield* Effect.fail(
         new PatternError({
           code: "exhausted",
-          message: `Optimizer reached its bound of ${options.maxIterations} iterations below ${targetScore}`
+          message: `Optimizer reached its bound of ${maxIterations} iterations below ${targetScore}`
         })
       )
     }

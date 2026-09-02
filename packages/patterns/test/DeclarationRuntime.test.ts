@@ -93,7 +93,7 @@ describe("pattern declaration execution", () => {
         { id: "a", flow: land },
         { id: "b", flow: land },
         { id: "c", flow: land }
-      ], { concurrency: 2, failurePolicy: "halt" }),
+      ], { concurrency: 2, failurePolicy: "quarantine" }),
       "main"
     )).toEqual({ a: "a", b: "b", c: "c" })
 

@@ -2,7 +2,8 @@
  * Supervisor pattern: one boss plans, workers execute in parallel, the boss
  * reviews, and only the tasks the review calls retriable are re-delegated.
  *
- * @see docs/pages/api/patterns-teams.md
+ * @see https://smithers.sh/api/patterns-teams
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -209,6 +210,10 @@ const retriableOf = (review: unknown): unknown =>
  * `workerType`, when two tasks share an id, or when a `workerType` names no
  * declared worker.
  *
+ * `make` snapshots the boss flows, the worker record, and both bounds at the
+ * call, so a later edit to the caller's options does not change the
+ * declaration.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -229,23 +234,31 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       message: "Supervisor concurrency must be a positive safe integer"
     })
   }
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again. The worker record
+  // is copied as own data properties, so a prototype-shaped worker type still
+  // routes.
+  const boss = { plan: options.plan, review: options.review, finalize: options.finalize }
+  const routes: Readonly<Record<string, Flow.Any>> = Object.fromEntries(workers)
+  const maxRounds = options.maxRounds
+  const concurrency = options.concurrency
   const names = workers.map(([name]) => name)
-  const captures = { maxRounds: options.maxRounds, concurrency: options.concurrency, workers: names }
+  const captures = { maxRounds, concurrency, workers: names }
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.plan, ...workers.map(([, flow]) => flow), options.review, options.finalize],
+    flows: [boss.plan, ...workers.map(([, flow]) => flow), boss.review, boss.finalize],
     body: Node.capture(captures, (input) => {
       const tasks = planned(input)
       const ids = tasks.map((task) => task.id)
       if (new Set(ids).size !== ids.length) throw invalid("Supervisor task ids must be unique")
       for (const task of tasks) {
-        if (!Object.hasOwn(options.workers, task.workerType)) {
+        if (!Object.hasOwn(routes, task.workerType)) {
           throw invalid(`Supervisor has no worker named "${task.workerType}"`)
         }
       }
       return Node.andThen(
-        call(options.plan, { phase: "plan", input }),
+        call(boss.plan, { phase: "plan", input }),
         Node.capture({ ...captures, tasks: ids }, (plan) => {
           const work = (task: Task, round: number, review: unknown): Record<string, unknown> =>
             round === 1
@@ -253,14 +266,14 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
               : { phase: "work", task, round, plan, input, review, retriable: retriableOf(review) }
           const batchAt = (offset: number, round: number, review: unknown): Node.Node<unknown, unknown> => {
             const members: Record<string, Node.Any> = {}
-            for (const task of tasks.slice(offset, offset + options.concurrency)) {
-              members[task.id] = call(options.workers[task.workerType]!, work(task, round, review))
+            for (const task of tasks.slice(offset, offset + concurrency)) {
+              members[task.id] = call(routes[task.workerType]!, work(task, round, review))
             }
             return Node.all(members)
           }
           const delegate = (round: number, review: unknown): Node.Node<unknown, unknown> => {
             let batched = batchAt(0, round, review)
-            for (let offset = options.concurrency; offset < tasks.length; offset += options.concurrency) {
+            for (let offset = concurrency; offset < tasks.length; offset += concurrency) {
               const batch = batchAt(offset, round, review)
               batched = Node.andThen(
                 batched,
@@ -277,10 +290,10 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
               delegate(round, previous),
               Node.capture({ ...captures, round }, (results) =>
                 Node.andThen(
-                  call(options.review, { phase: "review", round, plan, results, input }),
+                  call(boss.review, { phase: "review", round, plan, results, input }),
                   Node.capture({ ...captures, round }, (review) =>
-                    done(review) || round >= options.maxRounds
-                      ? call(options.finalize, {
+                    done(review) || round >= maxRounds
+                      ? call(boss.finalize, {
                         phase: "finalize",
                         rounds: round,
                         plan,
@@ -313,6 +326,10 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  * repeats a task id. Outcomes are keyed by task id, so a repeated id would
  * delegate twice and hand the review the same outcome twice.
  *
+ * `run` snapshots every callback and both bounds at the call, so a later
+ * edit to the option object does not alter that run. The plan a `plan`
+ * callback returns is copied task by task when it is validated.
+ *
  * @category combinators
  * @since 0.1.0
  */
@@ -320,7 +337,13 @@ export const run = <I, P extends Plan, Out, Review, Final, E, R, E2, R2, E3, R3,
   input: I,
   options: RuntimeOptions<I, P, Out, Review, Final, E, R, E2, R2, E3, R3, E4, R4>
 ): Effect.Effect<Completed<Final> | Exhausted<Review>, E | E3 | E4 | PatternError, R | R2 | R3 | R4> => {
-  if (!bound(options.maxRounds) || !bound(options.concurrency)) {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const boss = { plan: options.plan, review: options.review, finalize: options.finalize }
+  const worker = options.worker
+  const maxRounds = options.maxRounds
+  const concurrency = options.concurrency
+  if (!bound(maxRounds) || !bound(concurrency)) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
@@ -329,7 +352,7 @@ export const run = <I, P extends Plan, Out, Review, Final, E, R, E2, R2, E3, R3,
     )
   }
   return Effect.gen(function*() {
-    const plan = yield* options.plan(input)
+    const plan = yield* boss.plan(input)
     const tasks = validateTasks(plan)
     if (tasks instanceof PatternError) return yield* Effect.fail(tasks)
     const ids = tasks.map((task) => task.id)
@@ -347,7 +370,7 @@ export const run = <I, P extends Plan, Out, Review, Final, E, R, E2, R2, E3, R3,
         const outcomes = yield* Effect.forEach(
           pending,
           (task) =>
-            options.worker({ task, plan, round, input }).pipe(
+            worker({ task, plan, round, input }).pipe(
               Effect.map((output): Outcome<Out> => ({
                 _tag: "Done",
                 id: task.id,
@@ -365,20 +388,20 @@ export const run = <I, P extends Plan, Out, Review, Final, E, R, E2, R2, E3, R3,
                 })
               )
             ),
-          { concurrency: options.concurrency }
+          { concurrency }
         )
         for (const outcome of outcomes) latest.set(outcome.id, outcome)
         // Round one visits every task and later rounds only replace entries,
         // so `latest` contains one outcome for every validated task here.
         const results = tasks.map((task) => latest.get(task.id)!)
-        const review = yield* options.review({ plan, results, round, input })
+        const review = yield* boss.review({ plan, results, round, input })
         if (done(review)) {
-          const final = yield* options.finalize({ plan, results, review, rounds: round, input })
+          const final = yield* boss.finalize({ plan, results, review, rounds: round, input })
           return { exhausted: false, rounds: round, final } satisfies Completed<Final>
         }
         const ids = retriable(review)
         const next = tasks.filter((task) => ids.includes(task.id))
-        if (next.length === 0 || round === options.maxRounds) {
+        if (next.length === 0 || round === maxRounds) {
           return { exhausted: true, rounds: round, review } satisfies Exhausted<Review>
         }
         return yield* supervise(next, round + 1)

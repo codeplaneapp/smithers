@@ -2,7 +2,8 @@
  * Merge-queue pattern: land a set of members in one prioritized order, at a
  * concurrency the queue owns rather than the members.
  *
- * @see docs/pages/api/patterns-teams.md
+ * @see https://smithers.sh/api/patterns-teams
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -47,8 +48,11 @@ export interface Member {
  * Configuration for {@link make}.
  *
  * `concurrency` defaults to 1: a merge queue serializes landings unless a
- * caller widens it deliberately. `priority` sets the default a member without
- * its own priority receives.
+ * caller widens it deliberately. Only a `quarantine` queue may widen it: a
+ * `halt` queue promises that no member behind a failure lands, and a batch
+ * starts its members before any of them has failed, so `halt` above
+ * concurrency 1 is refused. `priority` sets the default a member without its
+ * own priority receives.
  *
  * @category models
  * @since 0.1.0
@@ -192,7 +196,8 @@ const priorityRefusal = (
 const validate = (
   members: ReadonlyArray<{ readonly id: string; readonly priority?: number | undefined }>,
   concurrency: number,
-  priority: number
+  priority: number,
+  failurePolicy: FailurePolicy
 ): PatternError | undefined => {
   if (members.length === 0) {
     return new PatternError({ code: "invalid_decorator", message: "MergeQueue requires at least one member" })
@@ -206,6 +211,12 @@ const validate = (
       code: "invalid_decorator",
       message: "MergeQueue concurrency must be a positive safe integer"
     })
+  }
+  // A batch starts every member in it before any of them has failed, so a
+  // halting queue wider than one member could land a member behind a
+  // failure. The contract promises it never does, so halt stays serial.
+  if (failurePolicy === "halt" && concurrency > 1) {
+    return new PatternError({ code: "invalid_decorator", message: "MergeQueue halt requires concurrency 1" })
   }
   return priorityRefusal(members, priority)
 }
@@ -229,8 +240,9 @@ const validate = (
  * recovery arm settling it as MergeQueue's `Quarantined` result, so a failing
  * member neither fails the chain nor interrupts the batch beside it: the
  * queue {@link run} lands. Under `halt` the chain has no continuation past a
- * failed member, and a batch join fails on the first failing member and
- * interrupts the rest.
+ * failed member, and it is always the serial chain: a halting queue is refused
+ * above concurrency 1, because a batch would start a member behind a failure
+ * before the failure is known.
  *
  * The wire marker is `{ _tag: "Quarantined", id, error }`, the same shape as
  * the runtime {@link Quarantined} result, and MergeQueue keeps landed and
@@ -238,8 +250,13 @@ const validate = (
  * arbitrary successful value.
  *
  * `make` throws a `PatternError` when there are no members, when two members
- * share an id, when `concurrency` is not a positive safe integer, or when
- * `priority` is not a safe integer.
+ * share an id, when `concurrency` is not a positive safe integer, when
+ * `failurePolicy` is `halt` and `concurrency` is above 1, or when `priority`
+ * is not a safe integer.
+ *
+ * `make` snapshots `members`, each member's `id`, `flow`, and `priority`, and
+ * every option at the call, so a later edit to the caller's array, records,
+ * or option object does not change the declaration.
  *
  * @category constructors
  * @since 0.1.0
@@ -248,18 +265,26 @@ export const make = (
   members: ReadonlyArray<Member>,
   options: MakeOptions
 ): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's members or options again.
+  const snapshot: ReadonlyArray<Member> = members.map((member) => ({
+    id: member.id,
+    flow: member.flow,
+    priority: member.priority
+  }))
   const concurrency = options.concurrency ?? 1
   const priority = options.priority ?? DefaultPriority
-  const invalid = validate(members, concurrency, priority)
+  const failurePolicy = options.failurePolicy
+  const invalid = validate(snapshot, concurrency, priority, failurePolicy)
   if (invalid !== undefined) throw invalid
-  const queue = ordered(members, priority)
+  const queue = ordered(snapshot, priority)
   // Priority is deliberately absent: it reaches the plan as an annotation, and
   // an annotation never enters key material. What it changes, the order and
   // therefore each member's position, is captured through `members`.
   const captures = {
     members: queue.map((entry) => entry.id),
     concurrency,
-    failurePolicy: options.failurePolicy
+    failurePolicy
   }
   return Flow.make({
     input: Schema.Unknown,
@@ -275,7 +300,7 @@ export const make = (
           }),
           entry.priority
         )
-        if (options.failurePolicy === "halt") return declared
+        if (failurePolicy === "halt") return declared
         // The arm goes on the member rather than on the join because a serial
         // queue has no join to put it on. Runtime results keep successful and
         // quarantined members in separate arrays, so this marker never
@@ -302,8 +327,9 @@ export const make = (
         const group = Object.fromEntries(
           queue.slice(offset, offset + concurrency).map((entry) => [entry.id, landing(entry)])
         ) as Record<string, Node.Any>
-        // A plain join: under quarantine every member already carries its own
-        // recovery arm, so no member can fail this join on the batch's behalf.
+        // A plain join: only a quarantining queue reaches a batch, and every
+        // member of one already carries its own recovery arm, so no member
+        // can fail this join on the batch's behalf.
         return Node.all(group)
       }
       let batches = batchAt(0)
@@ -329,8 +355,15 @@ export const make = (
  * descending priority and then declaration order.
  *
  * Under `failurePolicy: "halt"` a failing member fails the queue and no member
- * behind it lands. Under `"quarantine"` the failure is recorded, the member
+ * behind it lands, which is why `halt` runs only at concurrency 1: a wider
+ * queue would have started the next member before the failure was known.
+ * `run` fails with a `PatternError` for `halt` above concurrency 1, before
+ * any member starts. Under `"quarantine"` the failure is recorded, the member
  * does not land, and the members behind it still do.
+ *
+ * `run` snapshots `members`, each member's `id`, `priority`, and `run`, and
+ * every option at the call, so a later edit to the caller's array, records,
+ * or option object does not alter that run.
  *
  * @category combinators
  * @since 0.1.0
@@ -339,11 +372,20 @@ export const run = <I, Out, E = never, R = never>(
   input: I,
   options: RuntimeOptions<I, Out, E, R>
 ): Effect.Effect<Result<Out, E>, E | PatternError, R> => {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the array, a member record, or the option object in between must
+  // not reach it.
+  const members: ReadonlyArray<RuntimeMember<I, Out, E, R>> = options.members.map((member) => ({
+    id: member.id,
+    priority: member.priority,
+    run: member.run
+  }))
   const concurrency = options.concurrency ?? 1
   const priority = options.priority ?? DefaultPriority
-  const invalid = validate(options.members, concurrency, priority)
+  const failurePolicy = options.failurePolicy
+  const invalid = validate(members, concurrency, priority, failurePolicy)
   if (invalid !== undefined) return Effect.fail(invalid)
-  const queue = ordered(options.members, priority)
+  const queue = ordered(members, priority)
   return Effect.map(
     Effect.forEach(
       queue,
@@ -355,7 +397,7 @@ export const run = <I, Out, E = never, R = never>(
           input
         })
         const landed = Effect.map(attempt, (output) => ({ landed: true, id: entry.id, output }) as const)
-        return options.failurePolicy === "quarantine"
+        return failurePolicy === "quarantine"
           ? Effect.catch(landed, (error: E) => Effect.succeed({ landed: false, id: entry.id, error } as const))
           : landed
       },

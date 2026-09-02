@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Every `make`, every `run`, `Trellis.execute`, `WithRetry.retryEffect`, and
+  the decorator factories `WithRetry.make`, `WithCache.make`, and
+  `WithApproval.make` snapshot their options at the call. The arrays, member
+  records, nested bounds, flows, and callbacks the package interprets are
+  copied before a `Flow`, `Effect`, or decorator is returned, so a later edit
+  to the caller's objects no longer changes a declaration or a run.
+  `Pattern.slot` returns a frozen copy of its declaration.
+- `MergeQueue.make` and `MergeQueue.run` refuse `failurePolicy: "halt"` above
+  concurrency 1 with `PatternError` `invalid_decorator`. A batch starts its
+  members before any of them has failed, and `halt` promises that no member
+  behind a failure lands.
+
+### Changed
+
+- Every `@see` in the package JSDoc is an absolute `https://smithers.sh` URL.
+  The repository paths the source used to name are not part of the npm
+  package, so an installed copy could not follow them.
+- Documented the identity and ownership contract on the API page: exact,
+  case-sensitive, non-normalizing string identity for ids and names, when
+  `make`, `run`, and the decorator factories snapshot their options, and which
+  values stay the caller's references.
+- Documented `TrellisError` and `DelegationError` beside `PatternError` on the
+  API page, with their codes, paths, causes, and producing APIs.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Added

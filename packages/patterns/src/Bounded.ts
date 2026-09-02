@@ -8,7 +8,8 @@
  * `Node.all` per batch, batches sequenced. {@link run} is the Effect form of
  * the same contract.
  *
- * @see docs/pages/concepts/concurrency.md
+ * @see https://smithers.sh/concepts/concurrency
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -155,12 +156,22 @@ export const all = (
 export const run = <A, E, R>(
   members: Readonly<Record<string, Effect.Effect<A, E, R>>>,
   options: RuntimeOptions
-): Effect.Effect<Readonly<Record<string, A>>, E | PatternError, R> =>
-  Effect.suspend((): Effect.Effect<Readonly<Record<string, A>>, E | PatternError, R> => {
-    const refusal = widthRefusal(options.concurrency) ?? nonEmptyRefusal(Object.keys(members))
+): Effect.Effect<Readonly<Record<string, A>>, E | PatternError, R> => {
+  // Snapshots taken at the call, ahead of the suspend: the effect may run
+  // later, and a caller's edit to the record or the option object in between
+  // must not reach it. Own entries only, so a prototype-shaped member name
+  // stays a data property.
+  const declared: Readonly<Record<string, Effect.Effect<A, E, R>>> = Object.fromEntries(Object.entries(members))
+  const concurrency = options.concurrency
+  const priority = options.priority
+  const priorities = options.priorities === undefined
+    ? undefined
+    : Object.fromEntries(Object.entries(options.priorities))
+  return Effect.suspend((): Effect.Effect<Readonly<Record<string, A>>, E | PatternError, R> => {
+    const refusal = widthRefusal(concurrency) ?? nonEmptyRefusal(Object.keys(declared))
     if (refusal !== undefined) return Effect.fail(refusal)
-    for (const name of Object.keys(options.priorities ?? {})) {
-      if (!Object.hasOwn(members, name)) {
+    for (const name of Object.keys(priorities ?? {})) {
+      if (!Object.hasOwn(declared, name)) {
         return Effect.fail(
           new PatternError({
             code: "invalid_decorator",
@@ -169,22 +180,23 @@ export const run = <A, E, R>(
         )
       }
     }
-    const priorities = new Map<string, number>()
-    for (const name of Object.keys(members)) {
-      const value: unknown = options.priorities !== undefined && Object.hasOwn(options.priorities, name)
-        ? options.priorities[name]
-        : options.priority ?? 0
+    const ranks = new Map<string, number>()
+    for (const name of Object.keys(declared)) {
+      const value: unknown = priorities !== undefined && Object.hasOwn(priorities, name)
+        ? priorities[name]
+        : priority ?? 0
       const invalid = Compose.safeIntegerPriorityRefusal("Bounded", name, value)
       if (invalid !== undefined) return Effect.fail(invalid)
-      priorities.set(name, value as number)
+      ranks.set(name, value as number)
     }
-    const order = ranked(members, (name) => priorities.get(name)!)
+    const order = ranked(declared, (name) => ranks.get(name)!)
     return Effect.map(
       Effect.forEach(
         order,
         (entry) => Effect.map(entry.member, (value) => [entry.name, value] as const),
-        { concurrency: options.concurrency }
+        { concurrency }
       ),
       (pairs) => Object.fromEntries(pairs) as Readonly<Record<string, A>>
     )
   })
+}

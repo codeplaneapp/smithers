@@ -417,4 +417,37 @@ describe("Saga", () => {
       expect((error as PatternError).code).toBe("compensation_failed")
       expect((error as PatternError).message).toBe("Saga compensation failed for: two")
     }))
+
+  it("declares from the snapshot make took of its steps", () => {
+    const steps = declared.map((step) => ({ ...step }))
+    const saga = Saga.make({ steps, onFailure: "compensate-and-fail" })
+    const before = Graph.nodes(Graph.build(saga, "order")).map((node) => node.keyMaterial.body)
+
+    // A swapped action, a swapped compensation, and an appended step, all
+    // after the call.
+    steps[0]!.action = named("do-elsewhere")
+    steps[1]!.compensation = named("undo-elsewhere")
+    steps.push({ id: "four", action: named("do-four"), compensation: named("undo-four") })
+
+    const graph = Graph.build(saga, "order")
+    expect(Graph.nodes(graph).map((node) => node.keyMaterial.body)).toEqual(before)
+    expect(calledFlows(graph)).toEqual(["do-one", "do-two", "do-three", "undo-three", "undo-two", "undo-one"])
+  })
+
+  it.effect("runs the snapshot run took of its steps", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const steps = [scripted(trace, "one")]
+      const options = { steps, onFailure: "fail" as const }
+      const saga = Saga.run("order", options)
+
+      // A swapped action and an appended step, between the call and the
+      // execution.
+      steps[0]!.action = () => Effect.sync(() => (trace.push("do-swapped"), "swapped"))
+      steps.push(scripted(trace, "late"))
+
+      const result = yield* saga
+      expect(trace).toEqual(["do-one"])
+      expect(result).toEqual({ one: "one-done" })
+    }))
 })

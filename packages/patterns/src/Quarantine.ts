@@ -7,7 +7,8 @@
  * member instead: its siblings run to completion and the join returns a record
  * of explicit {@link Succeeded} and {@link Quarantined} outcomes.
  *
- * @see docs/pages/concepts/concurrency.md
+ * @see https://smithers.sh/concepts/concurrency
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -231,18 +232,24 @@ export function run<A, E, R>(
   members: Readonly<Record<string, Effect.Effect<A, E, R>>>,
   options: RuntimeOptions
 ): Effect.Effect<Readonly<Record<string, A | Settled<A, E>>>, E | PatternError, R> {
+  // Snapshots taken at the call, ahead of the suspend: the effect may run
+  // later, and a caller's edit to the record or the option object in between
+  // must not reach it. Own entries only, so a prototype-shaped member name
+  // stays a data property.
+  const declared: Readonly<Record<string, Effect.Effect<A, E, R>>> = Object.fromEntries(Object.entries(members))
+  const policy = options.policy
+  const concurrency = options.concurrency ?? "unbounded"
   return Effect.suspend((): Effect.Effect<Readonly<Record<string, A | Settled<A, E>>>, E | PatternError, R> => {
-    const names = Object.keys(members)
-    const concurrency = options.concurrency ?? "unbounded"
+    const names = Object.keys(declared)
     const refusal = nonEmptyRefusal(names) ?? widthRefusal(concurrency)
     if (refusal !== undefined) return Effect.fail(refusal)
     return Effect.map(
       Effect.forEach(
         names,
         (member): Effect.Effect<readonly [string, A | Settled<A, E>], E, R> =>
-          options.policy === "halt"
-            ? Effect.map(members[member]!, (value) => [member, value] as const)
-            : Effect.match(members[member]!, {
+          policy === "halt"
+            ? Effect.map(declared[member]!, (value) => [member, value] as const)
+            : Effect.match(declared[member]!, {
               onFailure: (error): readonly [string, Settled<A, E>] => [member, quarantined(member, error)],
               onSuccess: (value): readonly [string, Settled<A, E>] => [member, succeeded(member, value)]
             }),

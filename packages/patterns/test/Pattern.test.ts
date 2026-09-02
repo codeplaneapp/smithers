@@ -84,6 +84,28 @@ describe("Pattern", () => {
     )
   })
 
+  it("returns a frozen snapshot of the slot declaration", () => {
+    const fallback = Flow.make({
+      name: "fallback",
+      input: Schema.String,
+      output: Schema.String,
+      body: (input) => Node.succeed(input)
+    })
+    const options: { input: typeof Schema.String; output: typeof Schema.String; default: Flow.Any | undefined } = {
+      input: Schema.String,
+      output: Schema.String,
+      default: fallback
+    }
+    const declaration = Pattern.slot(options)
+
+    // Dropping the default after the call must not turn the slot required.
+    options.default = undefined
+
+    expect(declaration).not.toBe(options)
+    expect(Object.isFrozen(declaration)).toBe(true)
+    expect(Pattern.bind(declaration)).toBe(fallback)
+  })
+
   it("refuses a slot default that violates its own schemas", () => {
     const incompatible = Flow.make({
       input: Schema.Number,

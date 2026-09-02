@@ -1,7 +1,8 @@
 /**
  * Run-local approval decoration.
  *
- * @see docs/specs/Concepts/Injection And Decoration.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -52,7 +53,10 @@ const ApprovalInput = Schema.Struct({
 })
 
 const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
-  if (options.reason.trim().length === 0) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // this snapshot and never the caller's options again.
+  const reason = options.reason
+  if (reason.trim().length === 0) {
     throw new PatternError({
       code: "invalid_decorator",
       message: "Approval reason must not be empty"
@@ -71,14 +75,14 @@ const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
     capabilities: details.capabilities,
     effects: details.effects,
     flows: [approval, inner],
-    body: Node.capture({ reason: options.reason }, (input) =>
+    body: Node.capture({ reason }, (input) =>
       Node.andThen(
         Compose.call(approval, {
           input,
-          reason: options.reason,
+          reason,
           scope: "run"
         }),
-        Node.capture({ reason: options.reason }, () => Compose.call(inner, input))
+        Node.capture({ reason }, () => Compose.call(inner, input))
       ))
   })
 }
@@ -86,10 +90,16 @@ const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
 /**
  * Builds a run-scoped approval decorator.
  *
+ * `make` snapshots the options at the call, so a later edit to the caller's
+ * object does not change the decorator it returned.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options): Pattern.Decorator => (inner) => declaration(inner, options)
+export const make = (options: Options): Pattern.Decorator => {
+  const snapshot: Options = { reason: options.reason, approval: options.approval }
+  return (inner) => declaration(inner, snapshot)
+}
 
 /**
  * Runs a caller-supplied, typed approval flow before the wrapped flow.

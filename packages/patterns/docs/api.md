@@ -25,11 +25,77 @@ Declaration-time misuse raises `PatternError` from `make`: an empty ladder, a
 fractional concurrency, a compensation that is not a flow. The same condition
 inside `run` becomes a typed failure rather than a throw.
 
-## `PatternError`
+## Identity and ownership
 
-`PatternError` is the package's single tagged error, carrying a `code` from
-`PatternErrorCode`, a message, and an optional `cause` with the reported error
-or errors.
+Every pattern that names things by string compares those strings the way
+JavaScript does, and every pattern copies what it interprets out of the
+options it is handed. This section is the contract for both.
+
+### String identity
+
+Item ids, member names, column names, check ids, task ids, step ids, tier
+names, panelist names, and worker types are compared by exact string
+equality, through `Set`, `Map`, and record keys. The comparison is
+case-sensitive, trims nothing, and applies no Unicode normalization: `"é"`
+as one code point and as `e` followed by a combining acute accent are two
+different ids, and so are `"a"` and `"a "`. Normalize before you declare. A
+record of members is read by its own enumerable string keys in the order
+JavaScript reports them, which places an integer-like key such as `"10"`
+ahead of the rest.
+
+### Snapshot timing
+
+`make` snapshots its options when it is called, before the `Flow` is
+returned. The deferred body that core runs when the graph builds reads that
+snapshot and never the caller's option object again. `run` snapshots its
+options when it is called, before the `Effect` is returned, so an edit
+between the call and the execution does not reach the effect. The decorator
+factories `WithRetry.make`, `WithCache.make`, and `WithApproval.make`
+snapshot when `make` is called, not when the decorator is applied, and
+`WithRetry.retryEffect` snapshots when it is called. `Pattern.slot` returns a
+frozen copy of its declaration, which is what `Pattern.bind` reads.
+
+### What is copied
+
+Copies are shallow and field by field. A pattern copies every array it
+interprets and the interpreted fields of every record in it: an id, a name, a
+priority, a risk, a flow, a callback. Nested bounds are copied the same way:
+`WithRetry` `backoff`, `Trellis` `envelope`, `DelegationChain` `budget`. A
+record of flows or callbacks (`Panel` `panelists`, `CheckSuite` `checks`,
+`Supervisor` `workers`, `DelegationChain` `execute`, and the members handed
+to `Bounded` and `Quarantine`) is copied as its own entries, so a
+prototype-shaped name such as `"constructor"` stays a data property.
+`Trellis.execute` copies the plan it is handed, and `Supervisor.run` copies
+the tasks of the plan its `plan` callback returns when it validates them.
+
+The package never freezes a caller's object and never copies below the fields
+it interprets. Flows, callbacks, and schemas are references. A value the
+package carries without reading stays the caller's: the flow input, the
+`baseline` of `DriftDetector`, the values inside `Loop` `captures`, the
+`Item` record `Kanban` hands a column, and every value a callback returns.
+`Kanban` reads an item's `id` once at the call, keys the board by it, and
+hands the column the caller's own record. `DriftDetector.run` reads
+`baseline` once at the call and hands every callback that same reference.
+
+Three results are frozen because they are protocol values rather than caller
+data: the slot `Pattern.slot` returns, the `Succeeded` and `Quarantined`
+envelopes `Quarantine` produces, and the turns in a `Debate.run` transcript.
+Every other result is a fresh plain object the caller may keep or edit.
+
+## Errors
+
+The package raises three tagged errors. `PatternError` is the shared one:
+every module except `Trellis` and `DelegationChain` reports its refusals and
+exhaustions through it. Those two own their own errors because every
+rejection they report carries a plan path, and a path is what an author has
+to read to repair a plan. All three carry a `code` from a stable literal
+schema, a `message`, and an optional `cause`, and none of them carries the
+input that produced the failure.
+
+### `PatternError`
+
+`PatternError` carries a `code` from `PatternErrorCode`, a message, and an
+optional `cause` with the reported error or errors.
 
 | Code                  | Raised when                                                                                                         |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -41,6 +107,41 @@ or errors.
 | `finalizer_failed`    | A `TryCatchFinally` finalizer failed after the protected body settled                                               |
 | `compensation_failed` | One or more `Saga` compensations failed while unwinding                                                             |
 | `quarantined`         | `Quarantine.settle` was called on a result holding quarantined members                                              |
+
+### `TrellisError`
+
+`TrellisError` carries a `code` from `TrellisErrorCode`, the plan `path` the
+fault was found at (`root`, or a path such as `root.parallel[1].sequence[0]`),
+a message, and an optional `cause`. `Trellis.validate` returns every refusal
+it finds as an array and attaches no cause. `Trellis.make` throws one, and
+`Trellis.execute` and `Trellis.run` fail with one; a refusal `run` reports
+carries `{ rounds, remaining }` as its cause, the rounds already executed and
+the fuel left. `DelegationChain.run` fails with the same error when the
+derisked plan does not fit its envelope.
+
+| Code               | Path          | Raised when                                                                                                                                                                      |
+| ------------------ | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_envelope` | `root`        | A `fuel`, `depth`, or `fanout` bound, or a `concurrency`, is not a positive safe integer                                                                                         |
+| `invalid_plan`     | the node      | A node is not exactly one of `agent`, `sequence`, or `parallel`, an agent has no non-empty string `goal` or carries a non-string `seat`, or a container is not a non-empty array |
+| `depth_exceeded`   | the node      | A node nests deeper than the envelope `depth`                                                                                                                                    |
+| `fanout_exceeded`  | the container | A container holds more members than the envelope `fanout`                                                                                                                        |
+| `fuel_exhausted`   | `root`        | A plan needs more leaf calls than the envelope `fuel`, or than the fuel left after earlier rounds                                                                                |
+
+### `DelegationError`
+
+`DelegationError` carries a `code` from `DelegationErrorCode`, a `path`
+(`root` for the chain itself, or the leaf's plan path), a message, and an
+optional `cause`. `DelegationChain.make` throws one and `DelegationChain.run`
+fails with one. See
+[Delegation patterns](/api/patterns-delegation#delegationchain) for how the
+chain climbs its tier ladder and what a repair looks like.
+
+| Code             | Path     | Cause                                                                                                     | Raised when                                                                                                                                  |
+| ---------------- | -------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_bounds` | `root`   | none                                                                                                      | `maxDepth`, `maxDeriskRounds`, or `maxAttempts` is not a positive safe integer, `concurrency` is set and is not one, or `tierOrder` is empty |
+| `missing_tier`   | `root`   | none                                                                                                      | `tierOrder` names a tier that `execute` has no flow or callback for                                                                          |
+| `derisk_failed`  | `root`   | none                                                                                                      | A `PatternError` was raised inside the derisk loop; the message is that error's                                                              |
+| `leaf_failed`    | the leaf | The per-tier attempts, `{ tier, error }` or `{ tier, rejected }`, or the `PatternError` the ladder raised | No tier settled the leaf within `maxAttempts` attempts each                                                                                  |
 
 <!-- generated:modules -->
 

@@ -1,7 +1,8 @@
 /**
  * Deterministic map-reduce declaration pattern.
  *
- * @see docs/specs/Concepts/Higher Order Flows.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -73,7 +74,12 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  if (!Number.isSafeInteger(options.concurrency) || options.concurrency < 1) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const stages = { map: options.map, reduce: options.reduce }
+  const concurrency = options.concurrency
+  const onEmpty = options.onEmpty
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
     throw new PatternError({
       code: "invalid_decorator",
       message: "MapReduce concurrency must be a positive safe integer"
@@ -82,8 +88,8 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.map, options.reduce],
-    body: Node.capture({ concurrency: options.concurrency, onEmpty: options.onEmpty }, (input) => {
+    flows: [stages.map, stages.reduce],
+    body: Node.capture({ concurrency, onEmpty }, (input) => {
       if (
         typeof input !== "object" ||
         input === null ||
@@ -97,20 +103,20 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       }
       const shards = input.shards as ReadonlyArray<unknown>
       if (shards.length === 0) {
-        if (options.onEmpty === "fail") {
+        if (onEmpty === "fail") {
           throw new PatternError({ code: "exhausted", message: "MapReduce received no shards" })
         }
-        return options.onEmpty === "succeed"
+        return onEmpty === "succeed"
           ? Node.succeed([])
-          : call(options.reduce, { input, mapped: [] })
+          : call(stages.reduce, { input, mapped: [] })
       }
       let mapped: Node.Node<ReadonlyArray<unknown>, unknown> = Node.succeed([])
-      for (let offset = 0; offset < shards.length; offset += options.concurrency) {
+      for (let offset = 0; offset < shards.length; offset += concurrency) {
         const members: Record<string, Node.Node<unknown, unknown>> = {}
-        const batch = shards.slice(offset, offset + options.concurrency)
+        const batch = shards.slice(offset, offset + concurrency)
         batch.forEach((shard, batchIndex) => {
           const index = offset + batchIndex
-          members[`shard-${index}`] = call(options.map, { shard, index, input })
+          members[`shard-${index}`] = call(stages.map, { shard, index, input })
         })
         mapped = Node.andThen(
           mapped,
@@ -129,8 +135,8 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       return Node.andThen(
         mapped,
         Node.capture(
-          { concurrency: options.concurrency, onEmpty: options.onEmpty },
-          (values) => call(options.reduce, { input, mapped: values })
+          { concurrency, onEmpty },
+          (values) => call(stages.reduce, { input, mapped: values })
         )
       )
     })
@@ -156,7 +162,14 @@ export const run = <
   input: I,
   options: RuntimeOptions<I, I["shards"][number], Mapped, Reduced, E, R, E2, R2>
 ): Effect.Effect<Reduced | ReadonlyArray<Mapped>, E | E2 | PatternError, R | R2> => {
-  if (!Number.isSafeInteger(options.concurrency) || options.concurrency < 1) {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the shard array or the option object in between must not reach
+  // it. The input itself is handed to the callbacks as the caller's object.
+  const stages = { map: options.map, reduce: options.reduce }
+  const concurrency = options.concurrency
+  const onEmpty = options.onEmpty
+  const shards: ReadonlyArray<I["shards"][number]> = [...input.shards]
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
@@ -164,20 +177,20 @@ export const run = <
       })
     )
   }
-  if (input.shards.length === 0) {
-    if (options.onEmpty === "fail") {
+  if (shards.length === 0) {
+    if (onEmpty === "fail") {
       return Effect.fail(new PatternError({ code: "exhausted", message: "MapReduce received no shards" }))
     }
-    return options.onEmpty === "succeed"
+    return onEmpty === "succeed"
       ? Effect.succeed([])
-      : Effect.suspend(() => options.reduce({ input, mapped: [] }))
+      : Effect.suspend(() => stages.reduce({ input, mapped: [] }))
   }
   return Effect.flatMap(
     Effect.forEach(
-      input.shards,
-      (shard, index) => options.map({ shard, index, input }),
-      { concurrency: options.concurrency }
+      shards,
+      (shard, index) => stages.map({ shard, index, input }),
+      { concurrency }
     ),
-    (mapped) => options.reduce({ input, mapped })
+    (mapped) => stages.reduce({ input, mapped })
   )
 }

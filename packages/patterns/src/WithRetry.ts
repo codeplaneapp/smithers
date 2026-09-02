@@ -7,8 +7,9 @@
  * `@smthrs/flow` `RetryPolicy`, so a pattern policy and an engine policy
  * translate one to one.
  *
- * @see docs/pages/concepts/failure-and-retry.md
- * @see docs/specs/Concepts/Injection And Decoration.md
+ * @see https://smithers.sh/concepts/failure-and-retry
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -85,6 +86,19 @@ const validate = (options: Options): void => {
 // be code no caller can reach.
 const tags = (nonRetryable: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(nonRetryable)].sort()
 
+// Own fields only: a decorator is applied later than `make`, and a retried
+// effect reads its ladder later than `retryEffect`, so neither may read the
+// caller's option object or its backoff record again.
+const copied = <const Attempts extends number>(options: Options<Attempts>): Options<Attempts> => ({
+  attempts: options.attempts,
+  backoff: options.backoff === undefined ? undefined : {
+    initialMs: options.backoff.initialMs,
+    factor: options.backoff.factor,
+    maxMs: options.backoff.maxMs
+  },
+  nonRetryable: options.nonRetryable === undefined ? undefined : [...options.nonRetryable]
+})
+
 const captures = (options: Options): Readonly<Record<string, unknown>> => ({
   attempts: options.attempts,
   ...(options.backoff === undefined ? {} : {
@@ -131,11 +145,16 @@ const declaration = <const Attempts extends number>(
  * {@link retryEffect} at the Effect execution boundary; retry cannot be
  * truthfully encoded as a success-only `Node.andThen` chain.
  *
+ * `make` snapshots the options at the call, so a later edit to the caller's
+ * object does not change the decorator it returned.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const make = <const Attempts extends number>(options: Options<Attempts>): Pattern.Decorator => (inner) =>
-  declaration(inner, options)
+export const make = <const Attempts extends number>(options: Options<Attempts>): Pattern.Decorator => {
+  const snapshot = copied(options)
+  return (inner) => declaration(inner, snapshot)
+}
 
 /**
  * Wraps a flow in a declaration-identifiable retry decorator.
@@ -172,8 +191,9 @@ const tagOf = (error: unknown): string | undefined =>
  */
 export const retryEffect = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
-  options: Options
+  caller: Options
 ): Effect.Effect<A, E, R> => {
+  const options = copied(caller)
   validate(options)
   const retryable = options.nonRetryable === undefined
     ? undefined

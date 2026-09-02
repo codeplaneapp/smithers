@@ -10,10 +10,11 @@
  * satisfied.
  *
  * For a loop whose rounds must survive a crash, hand each iteration to the
- * durable trampoline instead: `Flow.to` with `maxRounds`, described in
- * `docs/pages/api/patterns-loops.md`.
+ * durable trampoline instead: `Flow.to` with `maxRounds`, described in the
+ * loops reference at https://smithers.sh/api/patterns-loops.
  *
- * @see docs/specs/Concepts/Higher Order Flows.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -152,32 +153,36 @@ const bound = (maxIterations: number): PatternError | undefined =>
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  const invalid = bound(options.maxIterations)
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const declared = { body: options.body, until: options.until }
+  const maxIterations = options.maxIterations
+  const invalid = bound(maxIterations)
   if (invalid !== undefined) throw invalid
   const onMaxReached = options.onMaxReached ?? defaultOnMaxReached
   const captures = {
     ...options.captures,
-    maxIterations: options.maxIterations,
+    maxIterations,
     onMaxReached,
-    predicate: options.until === undefined ? "body" : "flow"
+    predicate: declared.until === undefined ? "body" : "flow"
   }
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: options.until === undefined ? [options.body] : [options.body, options.until],
+    flows: declared.until === undefined ? [declared.body] : [declared.body, declared.until],
     body: Node.capture(captures, (input) => {
       const visit = (previous: unknown, iteration: number): Node.Node<unknown, unknown> =>
         Node.andThen(
-          call(options.body, { input, previous, iteration }),
+          call(declared.body, { input, previous, iteration }),
           Node.capture({ ...captures, iteration }, (produced) => {
             const settle = (verdict: unknown): Node.Node<unknown, unknown> =>
               done(verdict)
                 ? Node.succeed({ value: produced, iterations: iteration, exhausted: false })
-                : iteration >= options.maxIterations
+                : iteration >= maxIterations
                 ? Node.succeed({ value: produced, iterations: iteration, exhausted: true })
                 : visit(produced, iteration + 1)
-            return options.until === undefined ? settle(produced) : Node.andThen(
-              call(options.until, { value: produced, iteration }),
+            return declared.until === undefined ? settle(produced) : Node.andThen(
+              call(declared.until, { value: produced, iteration }),
               Node.capture({ ...captures, iteration }, settle)
             )
           })
@@ -217,7 +222,11 @@ export const run = <I, A, E, R, E2, R2>(
   input: I,
   options: RuntimeOptions<I, A, E, R, E2, R2>
 ): Effect.Effect<Result<A>, E | E2 | PatternError, R | R2> => {
-  const invalid = bound(options.maxIterations)
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const declared = { body: options.body, until: options.until }
+  const maxIterations = options.maxIterations
+  const invalid = bound(maxIterations)
   if (invalid !== undefined) return Effect.fail(invalid)
   const onMaxReached = options.onMaxReached ?? defaultOnMaxReached
   return Effect.gen(function*() {
@@ -225,16 +234,16 @@ export const run = <I, A, E, R, E2, R2>(
     // `bound` rejected a maxIterations below one, so iteration 1 always runs
     // and the bound arm below always returns. The loop needs no exit test.
     for (let iteration = 1;; iteration++) {
-      const value: A = yield* options.body({ input, previous, iteration })
+      const value: A = yield* declared.body({ input, previous, iteration })
       previous = value
-      const verdict = options.until === undefined ? value : yield* options.until({ value, iteration })
+      const verdict = declared.until === undefined ? value : yield* declared.until({ value, iteration })
       if (done(verdict)) return { value, iterations: iteration, exhausted: false }
-      if (iteration >= options.maxIterations) {
+      if (iteration >= maxIterations) {
         if (onMaxReached === "fail") {
           return yield* Effect.fail(
             new PatternError({
               code: "exhausted",
-              message: `Loop reached its bound of ${options.maxIterations} iterations unsatisfied`
+              message: `Loop reached its bound of ${maxIterations} iterations unsatisfied`
             })
           )
         }

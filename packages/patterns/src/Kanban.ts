@@ -2,7 +2,8 @@
  * Kanban pattern: move every item through an ordered list of columns, with a
  * concurrency bound applied inside each column.
  *
- * @see docs/pages/api/patterns-teams.md
+ * @see https://smithers.sh/api/patterns-teams
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -104,8 +105,11 @@ export interface Board<Out, E> {
  * `until` stops it early, after the pass whose result satisfies the predicate,
  * and requires `maxIterations`, because a predicate that never holds would
  * otherwise run forever.
- * `run` snapshots `columns` at entry; later array mutations do not alter that
- * run.
+ * `run` snapshots `items`, `columns`, and every option at the call and reads
+ * each item's `id` once there, so a later edit to the arrays or the option
+ * object does not alter that run. The item record itself is handed to the
+ * column as the caller's own object. See
+ * https://smithers.sh/api/patterns#identity-and-ownership.
  *
  * @category models
  * @since 0.1.0
@@ -152,6 +156,10 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * duplicate item id, duplicate column name, or a concurrency that is not a
  * positive safe integer.
  *
+ * `make` snapshots `columns`, `items`, and every option at the call, copying
+ * each item record, so a later edit to the caller's arrays or records does
+ * not change the declaration.
+ *
  * A column joins its batch with {@link Quarantine.all} under the `quarantine`
  * policy, because one rejected card is not a reason to interrupt the cards
  * beside it, which is the same call {@link run} makes. A rejected card
@@ -171,32 +179,39 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  if (options.columns.length === 0) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again. An item record is
+  // copied because it enters key material as a literal.
+  const columns: ReadonlyArray<Column> = options.columns.map((column) => ({ name: column.name, flow: column.flow }))
+  const items: ReadonlyArray<Item> = options.items.map((item) => ({ ...item }))
+  const concurrency = options.concurrency
+  const onComplete = options.onComplete
+  if (columns.length === 0) {
     throw new PatternError({ code: "invalid_decorator", message: "Kanban requires at least one column" })
   }
-  if (options.items.length === 0) {
+  if (items.length === 0) {
     throw new PatternError({ code: "invalid_decorator", message: "Kanban requires at least one item" })
   }
-  if (!bound(options.concurrency)) {
+  if (!bound(concurrency)) {
     throw new PatternError({
       code: "invalid_decorator",
       message: "Kanban concurrency must be a positive safe integer"
     })
   }
-  const ids = options.items.map((item) => item.id)
+  const ids = items.map((item) => item.id)
   if (new Set(ids).size !== ids.length) {
     throw new PatternError({ code: "invalid_decorator", message: "Kanban item ids must be unique" })
   }
-  const names = options.columns.map((column) => column.name)
+  const names = columns.map((column) => column.name)
   if (new Set(names).size !== names.length) {
     throw new PatternError({ code: "invalid_decorator", message: "Kanban column names must be unique" })
   }
-  const captures = { columns: names, items: ids, concurrency: options.concurrency }
+  const captures = { columns: names, items: ids, concurrency }
   const column = (index: number, previous: unknown): Node.Node<unknown, unknown> => {
-    const declared = options.columns[index]!
+    const declared = columns[index]!
     const batchAt = (offset: number): Node.Node<unknown, unknown> => {
       const members = Object.fromEntries(
-        options.items.slice(offset, offset + options.concurrency).map((item) => [
+        items.slice(offset, offset + concurrency).map((item) => [
           item.id,
           call(declared.flow, {
             column: declared.name,
@@ -208,7 +223,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       return Quarantine.all(members, { policy: "quarantine" })
     }
     let batches = batchAt(0)
-    for (let offset = options.concurrency; offset < options.items.length; offset += options.concurrency) {
+    for (let offset = concurrency; offset < items.length; offset += concurrency) {
       const batch = batchAt(offset)
       batches = Node.andThen(
         batches,
@@ -224,23 +239,22 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: options.onComplete === undefined
-      ? options.columns.map((declared) => declared.flow)
-      : [...options.columns.map((declared) => declared.flow), options.onComplete],
+    flows: onComplete === undefined
+      ? columns.map((declared) => declared.flow)
+      : [...columns.map((declared) => declared.flow), onComplete],
     body: Node.capture(captures, () => {
       const walk = (index: number, previous: unknown): Node.Node<unknown, unknown> => {
         const current = column(index, previous)
-        if (index + 1 < options.columns.length) {
+        if (index + 1 < columns.length) {
           return Node.andThen(
             current,
             Node.capture({ ...captures, column: names[index + 1] }, (values) => walk(index + 1, values))
           )
         }
-        const complete = options.onComplete
-        if (complete === undefined) return current
+        if (onComplete === undefined) return current
         return Node.andThen(
           current,
-          Node.capture(captures, (values) => call(complete, { phase: "complete", items: options.items, board: values }))
+          Node.capture(captures, (values) => call(onComplete, { phase: "complete", items, board: values }))
         )
       }
       return walk(0, undefined)
@@ -248,35 +262,44 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   })
 }
 
-const pass = <It extends Item, Out, E, R, E2, R2>(
-  items: ReadonlyArray<It>,
-  options: RuntimeOptions<It, Out, E, R, E2, R2>
+// A card pairs the id `run` read at the call with the caller's own item
+// record, so the board is keyed by a name that cannot move under it while the
+// column still receives the object the caller handed over.
+interface Card<It> {
+  readonly id: string
+  readonly item: It
+}
+
+const pass = <It extends Item, Out, E, R>(
+  cards: ReadonlyArray<Card<It>>,
+  columns: ReadonlyArray<RuntimeColumn<It, Out, E, R>>,
+  concurrency: number
 ): Effect.Effect<Omit<Board<Out, E>, "iterations">, never, R> =>
   Effect.gen(function*() {
     const board = new Map<string, Map<string, Out>>()
     const failed: Array<Failure<E>> = []
     const latest = new Map<string, Out>()
-    let active: ReadonlyArray<It> = items
-    for (const column of options.columns) {
+    let active: ReadonlyArray<Card<It>> = cards
+    for (const column of columns) {
       const outcomes = yield* Effect.forEach(
         active,
-        (item) =>
-          column.run({ item, column: column.name, previous: latest.get(item.id) }).pipe(
-            Effect.map((output) => ({ ok: true, item, output } as const)),
-            Effect.catch((error: E) => Effect.succeed({ ok: false, item, error } as const))
+        (card) =>
+          column.run({ item: card.item, column: column.name, previous: latest.get(card.id) }).pipe(
+            Effect.map((output) => ({ ok: true, card, output } as const)),
+            Effect.catch((error: E) => Effect.succeed({ ok: false, card, error } as const))
           ),
-        { concurrency: options.concurrency }
+        { concurrency }
       )
-      const next: Array<It> = []
+      const next: Array<Card<It>> = []
       for (const outcome of outcomes) {
         if (outcome.ok) {
-          const row = board.get(outcome.item.id) ?? new Map<string, Out>()
+          const row = board.get(outcome.card.id) ?? new Map<string, Out>()
           row.set(column.name, outcome.output)
-          board.set(outcome.item.id, row)
-          latest.set(outcome.item.id, outcome.output)
-          next.push(outcome.item)
+          board.set(outcome.card.id, row)
+          latest.set(outcome.card.id, outcome.output)
+          next.push(outcome.card)
         } else {
-          failed.push({ id: outcome.item.id, column: column.name, error: outcome.error })
+          failed.push({ id: outcome.card.id, column: column.name, error: outcome.error })
         }
       }
       active = next
@@ -285,7 +308,7 @@ const pass = <It extends Item, Out, E, R, E2, R2>(
       board: Object.fromEntries(
         Array.from(board, ([id, columns]) => [id, Object.fromEntries(columns)])
       ),
-      completed: active.map((item) => item.id),
+      completed: active.map((card) => card.id),
       failed
     }
   })
@@ -316,14 +339,23 @@ export const run = <It extends Item, Out, E = never, R = never, E2 = never, R2 =
   items: ReadonlyArray<It>,
   options: RuntimeOptions<It, Out, E, R, E2, R2>
 ): Effect.Effect<Board<Out, E>, PatternError | E2, R | R2> => {
-  const columns = [...options.columns]
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the arrays or the option object in between must not reach it.
+  // Each item's id is read once here; the record itself stays the caller's.
+  const columns = options.columns.map((column) => ({ name: column.name, run: column.run }))
+  const cards = items.map((item): Card<It> => ({ id: item.id, item }))
+  const snapshot: ReadonlyArray<It> = cards.map((card) => card.item)
+  const concurrency = options.concurrency
+  const until = options.until
+  const onComplete = options.onComplete
+  const maxIterations = options.maxIterations
   if (columns.length === 0) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban requires at least one column" }))
   }
-  if (items.length === 0) {
+  if (cards.length === 0) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban requires at least one item" }))
   }
-  if (!bound(options.concurrency)) {
+  if (!bound(concurrency)) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
@@ -331,7 +363,7 @@ export const run = <It extends Item, Out, E = never, R = never, E2 = never, R2 =
       })
     )
   }
-  const ids = items.map((item) => item.id)
+  const ids = cards.map((card) => card.id)
   if (new Set(ids).size !== ids.length) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban item ids must be unique" }))
   }
@@ -339,8 +371,7 @@ export const run = <It extends Item, Out, E = never, R = never, E2 = never, R2 =
   if (new Set(names).size !== names.length) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban column names must be unique" }))
   }
-  const maxIterations = options.maxIterations
-  if (options.until !== undefined && maxIterations === undefined) {
+  if (until !== undefined && maxIterations === undefined) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
@@ -357,16 +388,15 @@ export const run = <It extends Item, Out, E = never, R = never, E2 = never, R2 =
     )
   }
   const limit = maxIterations ?? 1
-  const runtimeOptions = { ...options, columns }
   return Effect.gen(function*() {
     let iterations = 0
     for (;;) {
-      const settled = yield* pass(items, runtimeOptions)
+      const settled = yield* pass(cards, columns, concurrency)
       iterations += 1
       const result: Board<Out, E> = { ...settled, iterations }
-      const done = options.until !== undefined && options.until(result)
+      const done = until !== undefined && until(result)
       if (done || iterations >= limit) {
-        if (options.onComplete !== undefined) yield* options.onComplete({ items, board: result })
+        if (onComplete !== undefined) yield* onComplete({ items: snapshot, board: result })
         return result
       }
     }

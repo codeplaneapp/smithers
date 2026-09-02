@@ -2,7 +2,8 @@
  * Check-suite pattern: run independent checks with bounded concurrency and
  * reduce their rows to one verdict.
  *
- * @see docs/pages/api/patterns-teams.md
+ * @see https://smithers.sh/api/patterns-teams
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -181,11 +182,16 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
   const declared = Object.entries(options.checks)
+  const strategy = options.strategy
+  const concurrency = options.concurrency
+  const continueOnFail = options.continueOnFail
   if (declared.length === 0) {
     throw new PatternError({ code: "invalid_decorator", message: "CheckSuite requires at least one check" })
   }
-  if (!bound(options.concurrency)) {
+  if (!bound(concurrency)) {
     throw new PatternError({
       code: "invalid_decorator",
       message: "CheckSuite concurrency must be a positive safe integer"
@@ -197,9 +203,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   }
   const captures = {
     checks: ids,
-    strategy: options.strategy,
-    concurrency: options.concurrency,
-    continueOnFail: options.continueOnFail
+    strategy,
+    concurrency,
+    continueOnFail
   }
   return Flow.make({
     input: Schema.Unknown,
@@ -208,17 +214,17 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     body: Node.capture(captures, (input) => {
       const batchAt = (offset: number): Node.Node<unknown, unknown> => {
         const members = Object.fromEntries(
-          declared.slice(offset, offset + options.concurrency).map(([id, flow]) => [
+          declared.slice(offset, offset + concurrency).map(([id, flow]) => [
             id,
             call(flow, { check: id, input })
           ])
         ) as Record<string, Node.Any>
-        return options.continueOnFail
+        return continueOnFail
           ? Quarantine.all(members, { policy: "quarantine" })
           : Quarantine.all(members, { policy: "halt" })
       }
       let batches = batchAt(0)
-      for (let offset = options.concurrency; offset < declared.length; offset += options.concurrency) {
+      for (let offset = concurrency; offset < declared.length; offset += concurrency) {
         const batch = batchAt(offset)
         batches = Node.andThen(
           batches,
@@ -230,7 +236,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       }
       return Node.map(
         batches,
-        Node.capture(captures, (values) => verdict(rows(values, ids, options.continueOnFail), options.strategy))
+        Node.capture(captures, (values) => verdict(rows(values, ids, continueOnFail), strategy))
       )
     })
   })
@@ -259,13 +265,18 @@ export const run = <I, Out, E, R>(
   input: I,
   options: RuntimeOptions<I, Out, E, R>
 ): Effect.Effect<Verdict, E | PatternError, R> => {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the record or the option object in between must not reach it.
   const declared = Object.entries(options.checks)
+  const strategy = options.strategy
+  const concurrency = options.concurrency
+  const continueOnFail = options.continueOnFail
   if (declared.length === 0) {
     return Effect.fail(
       new PatternError({ code: "invalid_decorator", message: "CheckSuite requires at least one check" })
     )
   }
-  if (!bound(options.concurrency)) {
+  if (!bound(concurrency)) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
@@ -283,12 +294,12 @@ export const run = <I, Out, E, R>(
       declared,
       ([id, check]): Effect.Effect<CheckResult, E, R> => {
         const attempt = Effect.map(check(input), (row) => ({ id, passed: passed(row) }))
-        return options.continueOnFail
+        return continueOnFail
           ? Effect.catch(attempt, () => Effect.succeed({ id, passed: false }))
           : attempt
       },
-      { concurrency: options.concurrency }
+      { concurrency }
     ),
-    (results) => verdict(results, options.strategy)
+    (results) => verdict(results, strategy)
   )
 }

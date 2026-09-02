@@ -1,7 +1,8 @@
 /**
  * Engine step-key cache decoration.
  *
- * @see docs/specs/Concepts/Injection And Decoration.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -217,10 +218,18 @@ const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
  * seam redeclares the wrapper and does not carry an annotation bag across, so
  * `withCache` reapplies the policy after it.
  *
+ * `make` snapshots the options at the call, so a later edit to the caller's
+ * object does not change the decorator it returned.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options = {}): Pattern.Decorator => (inner) => declaration(inner, options)
+export const make = (options: Options = {}): Pattern.Decorator => {
+  // The decorator is applied later than this call, so it reads this snapshot
+  // and never the caller's options again.
+  const snapshot: Options = { ttlMs: options.ttlMs, scope: options.scope, version: options.version }
+  return (inner) => declaration(inner, snapshot)
+}
 
 /**
  * Marks a sealable wrapper for engine step-key caching, optionally declaring

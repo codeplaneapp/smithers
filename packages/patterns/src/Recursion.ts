@@ -1,7 +1,8 @@
 /**
  * Trellis-style bounded recursive expansion declarations.
  *
- * @see docs/specs/Concepts/Higher Order Flows.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -65,7 +66,11 @@ const boundError = (message: string): never => {
  * @since 0.1.0
  */
 export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  if (!valid(options.fuel) || !valid(options.depth) || !valid(options.fanout)) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const envelope = { fuel: options.fuel, depth: options.depth, fanout: options.fanout }
+  const child = options.child
+  if (!valid(envelope.fuel) || !valid(envelope.depth) || !valid(envelope.fanout)) {
     return boundError("Recursion bounds must be positive safe integers")
   }
   const parent = options.parent
@@ -78,9 +83,9 @@ export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknow
       }
     }
     if (
-      options.fuel > parent.fuel ||
-      options.depth > parent.depth ||
-      options.fanout > parent.fanout
+      envelope.fuel > parent.fuel ||
+      envelope.depth > parent.depth ||
+      envelope.fanout > parent.fanout
     ) {
       return boundError("Nested recursion may attenuate but cannot widen its parent envelope")
     }
@@ -88,12 +93,12 @@ export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknow
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.child],
-    body: Node.capture({ depth: options.depth, fanout: options.fanout, fuel: options.fuel }, (input) => {
+    flows: [child],
+    body: Node.capture({ depth: envelope.depth, fanout: envelope.fanout, fuel: envelope.fuel }, (input) => {
       if (typeof input === "function") {
         return boundError("Recursion input must be a literal tree available while planning")
       }
-      const ledger = { remaining: options.fuel }
+      const ledger = { remaining: envelope.fuel }
       const visit = (
         value: unknown,
         depth: number
@@ -112,21 +117,21 @@ export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknow
           }
           children = declaredChildren as ReadonlyArray<Branch>
         }
-        if (children.length > options.fanout) {
+        if (children.length > envelope.fanout) {
           return boundError("Recursive child fan-out exceeds the envelope")
         }
         if (children.length > 0 && depth <= 1) {
           return boundError("Recursive child depth exceeds the envelope")
         }
         ledger.remaining--
-        const current = (options.child as unknown as (
+        const current = (child as unknown as (
           input: unknown
         ) => FlowNode<unknown, unknown>)({
           input: branch.input,
           envelope: {
             fuel: ledger.remaining,
             depth: depth - 1,
-            fanout: options.fanout
+            fanout: envelope.fanout
           }
         })
         if (children.length === 0) return current
@@ -141,7 +146,7 @@ export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknow
           })
         )
       }
-      return visit(input, options.depth)
+      return visit(input, envelope.depth)
     })
   })
 }

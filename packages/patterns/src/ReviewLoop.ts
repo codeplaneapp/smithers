@@ -1,7 +1,8 @@
 /**
  * Bounded produce-review-revise pattern.
  *
- * @see docs/specs/Concepts/Higher Order Flows.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -79,7 +80,11 @@ export const accepted = Compose.accepted
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  if (!Number.isSafeInteger(options.maxRounds) || options.maxRounds < 1) {
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const stages = { produce: options.produce, review: options.review, revise: options.revise }
+  const maxRounds = options.maxRounds
+  if (!Number.isSafeInteger(maxRounds) || maxRounds < 1) {
     throw new PatternError({
       code: "invalid_decorator",
       message: "ReviewLoop maxRounds must be a positive safe integer"
@@ -88,24 +93,24 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.produce, options.review, options.revise],
+    flows: [stages.produce, stages.review, stages.revise],
     body: Node.capture(
-      { maxRounds: options.maxRounds },
+      { maxRounds },
       (input) =>
         Node.andThen(
-          call(options.produce, input),
-          Node.capture({ maxRounds: options.maxRounds }, (initial) => {
+          call(stages.produce, input),
+          Node.capture({ maxRounds }, (initial) => {
             const visit = (output: unknown, round: number): Node.Node<unknown, unknown> =>
               Node.andThen(
-                call(options.review, output),
-                Node.capture({ maxRounds: options.maxRounds, round }, (review) => {
+                call(stages.review, output),
+                Node.capture({ maxRounds, round }, (review) => {
                   if (accepted(review)) return Node.succeed(output)
-                  if (round >= options.maxRounds) {
+                  if (round >= maxRounds) {
                     return Node.succeed({ output, review, approved: false, exhausted: true })
                   }
                   return Node.andThen(
-                    call(options.revise, { output, review, round }),
-                    Node.capture({ maxRounds: options.maxRounds, round }, (revised) => visit(revised, round + 1))
+                    call(stages.revise, { output, review, round }),
+                    Node.capture({ maxRounds, round }, (revised) => visit(revised, round + 1))
                   )
                 })
               )
@@ -130,7 +135,11 @@ export const run = <I, A, Review, E, R, E2, R2, E3, R3>(
   input: I,
   options: RuntimeOptions<I, A, Review, E, R, E2, R2, E3, R3>
 ): Effect.Effect<A | Exhausted<A, Review>, E | E2 | E3 | PatternError, R | R2 | R3> => {
-  if (!Number.isSafeInteger(options.maxRounds) || options.maxRounds < 1) {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const stages = { produce: options.produce, review: options.review, revise: options.revise }
+  const maxRounds = options.maxRounds
+  if (!Number.isSafeInteger(maxRounds) || maxRounds < 1) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
@@ -139,15 +148,15 @@ export const run = <I, A, Review, E, R, E2, R2, E3, R3>(
     )
   }
   return Effect.gen(function*() {
-    let output = yield* options.produce(input)
+    let output = yield* stages.produce(input)
     let round = 1
     while (true) {
-      const review = yield* options.review(output, round)
+      const review = yield* stages.review(output, round)
       if (accepted(review)) return output
-      if (round === options.maxRounds) {
+      if (round === maxRounds) {
         return { output, review, approved: false, exhausted: true }
       }
-      output = yield* options.revise({ output, review, round })
+      output = yield* stages.revise({ output, review, round })
       round += 1
     }
   })

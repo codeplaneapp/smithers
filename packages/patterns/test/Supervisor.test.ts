@@ -447,4 +447,51 @@ describe("Supervisor", () => {
     expect(one.map((node) => node.kind)).toEqual(two.map((node) => node.kind))
     expect(one.map((node) => node.keyMaterial.body)).not.toEqual(two.map((node) => node.keyMaterial.body))
   })
+
+  it("declares from the snapshot make took of its options", () => {
+    const other = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed("other") })
+    const workers: Record<string, Flow.Any> = { coder: step, tester: step }
+    const options = { plan: step, workers, review: step, finalize: step, maxRounds: 2, concurrency: 2 }
+    const supervisor = Supervisor.make(options)
+    const before = Graph.nodes(Graph.build(supervisor, goal)).map((node) => node.keyMaterial.body)
+
+    // Every edit a caller can make after the call: a swapped worker, a removed
+    // worker the plan still routes to, swapped boss flows, and tighter bounds.
+    workers.coder = other
+    delete workers.tester
+    options.plan = other
+    options.review = other
+    options.finalize = other
+    options.maxRounds = 1
+    options.concurrency = 1
+
+    const after = Graph.nodes(Graph.build(supervisor, goal))
+    expect(after.map((node) => node.keyMaterial.body)).toEqual(before)
+    expect(inPhase(Graph.build(supervisor, goal), "work")).toHaveLength(6)
+  })
+
+  it.effect("runs the snapshot run took of its callbacks", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const options = {
+        maxRounds: 1,
+        concurrency: 1,
+        plan: () => Effect.succeed({ tasks: [{ id: "a", workerType: "coder" }] }),
+        worker: ({ task }: { readonly task: Supervisor.Task }) =>
+          Effect.sync(() => (trace.push(`work ${task.id}`), "done")),
+        review: () => Effect.succeed({ allDone: true, retriable: [] }),
+        finalize: () => Effect.succeed("final")
+      }
+      const supervision = Supervisor.run("goal", options)
+
+      // A swapped worker, a swapped finalizer, and a widened round bound,
+      // between the call and the execution.
+      options.worker = () => Effect.sync(() => (trace.push("swapped"), "swapped"))
+      options.finalize = () => Effect.succeed("swapped")
+      options.maxRounds = 5
+
+      const result = yield* supervision
+      expect(trace).toEqual(["work a"])
+      expect(result).toEqual({ exhausted: false, rounds: 1, final: "final" })
+    }))
 })

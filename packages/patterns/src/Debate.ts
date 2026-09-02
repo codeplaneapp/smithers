@@ -1,6 +1,8 @@
 /**
  * A bounded, alternating deliberation pattern.
  *
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
+ *
  * @since 0.1.0
  */
 import { Flow, Node } from "@smthrs/core"
@@ -93,23 +95,27 @@ const invalidRounds = (rounds: number): never => {
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
-  if (!Number.isSafeInteger(options.rounds) || options.rounds < 1) invalidRounds(options.rounds)
+  // The body runs when the graph builds, later than this call, so it reads
+  // these snapshots and never the caller's options again.
+  const participants = { proponent: options.proponent, opponent: options.opponent, judge: options.judge }
+  const rounds = options.rounds
+  if (!Number.isSafeInteger(rounds) || rounds < 1) invalidRounds(rounds)
   return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
-    flows: [options.proponent, options.opponent, options.judge],
-    body: Node.capture({ rounds: options.rounds }, (input) => {
+    flows: [participants.proponent, participants.opponent, participants.judge],
+    body: Node.capture({ rounds }, (input) => {
       let current: Node.Node<{ readonly input: unknown; readonly transcript: ReadonlyArray<Turn> }, unknown> = Node
         .succeed({ input, transcript: [] })
-      for (let round = 0; round < options.rounds; round++) {
+      for (let round = 0; round < rounds; round++) {
         current = Node.andThen(
           current,
           Node.capture({ round }, (state) =>
             Node.andThen(
-              call(options.proponent, state),
+              call(participants.proponent, state),
               Node.capture({ round }, (proponent) =>
                 Node.map(
-                  call(options.opponent, { ...state, proponent }),
+                  call(participants.opponent, { ...state, proponent }),
                   Node.capture({ round }, (opponent) => ({
                     input: state.input,
                     transcript: [...state.transcript, { proponent, opponent }]
@@ -118,7 +124,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
             ))
         )
       }
-      return Node.andThen(current, Node.capture({ rounds: options.rounds }, (state) => call(options.judge, state)))
+      return Node.andThen(current, Node.capture({ rounds }, (state) => call(participants.judge, state)))
     })
   })
 }
@@ -134,22 +140,26 @@ export const run = <I, Proponent, Opponent, Judge, E, R, E2, R2, E3, R3>(
   input: I,
   options: RuntimeOptions<I, Proponent, Opponent, Judge, E, R, E2, R2, E3, R3>
 ): Effect.Effect<Judge, E | E2 | E3 | PatternError, R | R2 | R3> => {
-  if (!Number.isSafeInteger(options.rounds) || options.rounds < 1) {
+  // Snapshots taken at the call: the effect may run later, and a caller's
+  // edit to the option object in between must not reach it.
+  const participants = { proponent: options.proponent, opponent: options.opponent, judge: options.judge }
+  const rounds = options.rounds
+  if (!Number.isSafeInteger(rounds) || rounds < 1) {
     return Effect.fail(
       new PatternError({
         code: "invalid_decorator",
-        message: `Debate rounds must be a positive safe integer, received ${options.rounds}`
+        message: `Debate rounds must be a positive safe integer, received ${rounds}`
       })
     )
   }
   return Effect.gen(function*() {
     const transcript: Array<RuntimeTurn<Proponent, Opponent>> = []
     const snapshot = (): ReadonlyArray<RuntimeTurn<Proponent, Opponent>> => Object.freeze([...transcript])
-    for (let round = 1; round <= options.rounds; round++) {
-      const proponent = yield* options.proponent({ input, transcript: snapshot(), round })
-      const opponent = yield* options.opponent({ input, transcript: snapshot(), proponent, round })
+    for (let round = 1; round <= rounds; round++) {
+      const proponent = yield* participants.proponent({ input, transcript: snapshot(), round })
+      const opponent = yield* participants.opponent({ input, transcript: snapshot(), proponent, round })
       transcript.push(Object.freeze({ proponent, opponent }))
     }
-    return yield* options.judge({ input, transcript: snapshot() })
+    return yield* participants.judge({ input, transcript: snapshot() })
   })
 }

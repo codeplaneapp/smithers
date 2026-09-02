@@ -4,8 +4,8 @@
  * These combinators are a forward-compatible bridge for the future
  * `Schema.Flow` and `Flow.decorate` core surfaces.
  *
- * @see docs/specs/Concepts/Higher Order Flows.md
- * @see docs/specs/Concepts/Injection And Decoration.md
+ * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -44,7 +44,9 @@ const schemaRefusalMessage = (subject: string, issue: SchemaCompatibilityIssue):
  * Declares a flow-valued slot.
  *
  * Defaults are checked immediately so an invalid declaration cannot enter a
- * plan. Replace this bridge with `Schema.Flow` when core provides it.
+ * plan. The returned slot is a frozen copy of the options, so a later edit to
+ * the caller's object does not reach {@link bind}. Replace this bridge with
+ * `Schema.Flow` when core provides it.
  *
  * @category constructors
  * @since 0.1.0
@@ -61,7 +63,10 @@ export const slot = <I extends Schema.Top, O extends Schema.Top>(
       message: schemaRefusalMessage("The slot default", issue)
     })
   }
-  return options
+  // A frozen copy: `bind` reads the slot again later, and a caller's edit to
+  // the options object in between must not turn a defaulted slot required or
+  // swap in a default the check above never saw.
+  return Object.freeze({ input: options.input, output: options.output, default: options.default })
 }
 
 /**

@@ -117,7 +117,7 @@ describe("MergeQueue", () => {
   })
 
   it("batches by two at concurrency 2", () => {
-    const graph = Graph.build(MergeQueue.make(members, { concurrency: 2, failurePolicy: "halt" }), "land")
+    const graph = Graph.build(MergeQueue.make(members, { concurrency: 2, failurePolicy: "quarantine" }), "land")
 
     expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(2)
     expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall")).toHaveLength(3)
@@ -143,6 +143,37 @@ describe("MergeQueue", () => {
         message: "MergeQueue priority for member \"docs\" must be a safe integer, received 1.5"
       })
     )
+  })
+
+  it("refuses halt above concurrency 1, because a member behind a failure must never have started", () => {
+    expect(() => MergeQueue.make(members, { concurrency: 2, failurePolicy: "halt" })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "MergeQueue halt requires concurrency 1"
+      })
+    )
+    expect(Flow.isFlow(MergeQueue.make(members, { concurrency: 1, failurePolicy: "halt" }))).toBe(true)
+    expect(Flow.isFlow(MergeQueue.make(members, { concurrency: 2, failurePolicy: "quarantine" }))).toBe(true)
+  })
+
+  it("declares from the snapshot make took of its members and options", () => {
+    const other = Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.succeed("other") })
+    const mutableMembers = members.map((member) => ({ ...member }))
+    const options: MergeQueue.MakeOptions = { failurePolicy: "quarantine" }
+    const queue = MergeQueue.make(mutableMembers, options)
+    const before = Graph.nodes(Graph.build(queue, "land")).map((node) => node.keyMaterial.body)
+
+    // A swapped flow, a re-prioritized member, an appended member, and a
+    // changed policy, all after the call.
+    mutableMembers[0]!.flow = other
+    mutableMembers[0]!.priority = 9000
+    mutableMembers.push({ id: "late", flow: other })
+    ;(options as { failurePolicy: MergeQueue.FailurePolicy }).failurePolicy = "halt"
+
+    const after = Graph.nodes(Graph.build(queue, "land"))
+    expect(after.map((node) => node.keyMaterial.body)).toEqual(before)
+    expect(after.filter((node) => node.kind === "Catch")).toHaveLength(3)
+    expect(literals(Graph.build(queue, "land")).map((value) => value.id)).toEqual(["hotfix", "docs", "feature"])
   })
 
   it("refuses every unsafe member priority at declaration time", () => {
@@ -225,6 +256,60 @@ describe("MergeQueue", () => {
       expect(ran).toEqual(["first", "second"])
     }))
 
+  it.effect("never starts a member behind one that fails under halt", () =>
+    Effect.gen(function*() {
+      const ran: Array<string> = []
+      const queued = ["first", "second"].map((id) => ({
+        id,
+        run: () =>
+          Effect.gen(function*() {
+            ran.push(id)
+            // Yielding hands the scheduler a chance to start the next member
+            // before this one has failed, which a concurrent queue would take.
+            yield* Effect.yieldNow
+            return yield* Effect.fail(`${id} conflicts`)
+          })
+      }))
+
+      const failure = yield* MergeQueue.run("main", { members: queued, failurePolicy: "halt" }).pipe(Effect.flip)
+
+      expect(failure).toBe("first conflicts")
+      expect(ran).toEqual(["first"])
+    }))
+
+  it.effect("refuses halt above concurrency 1 before any member starts", () =>
+    Effect.gen(function*() {
+      let ran = 0
+      const failure = yield* MergeQueue.run("main", {
+        members: [{ id: "a", run: () => Effect.sync(() => (ran += 1, "landed")) }],
+        concurrency: 2,
+        failurePolicy: "halt"
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(PatternError)
+      expect((failure as PatternError).code).toBe("invalid_decorator")
+      expect((failure as PatternError).message).toBe("MergeQueue halt requires concurrency 1")
+      expect(ran).toBe(0)
+    }))
+
+  it.effect("runs the snapshot run took of its members and options", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const mutableMembers = [{ id: "a", run: () => Effect.sync(() => (trace.push("a"), "a")) }]
+      const options = { members: mutableMembers, failurePolicy: "quarantine" as MergeQueue.FailurePolicy }
+      const queue = MergeQueue.run("main", options)
+
+      // A swapped member, an appended member, and a changed policy, between
+      // the call and the execution.
+      mutableMembers[0] = { id: "a", run: () => Effect.sync(() => (trace.push("swapped"), "swapped")) }
+      mutableMembers.push({ id: "late", run: () => Effect.sync(() => (trace.push("late"), "late")) })
+      options.failurePolicy = "halt"
+
+      const result = yield* queue
+      expect(trace).toEqual(["a"])
+      expect(result).toEqual({ landed: [{ id: "a", output: "a" }], quarantined: [], order: ["a"] })
+    }))
+
   it.effect("lands the rest and reports the failure under quarantine", () =>
     Effect.gen(function*() {
       const ran: Array<string> = []
@@ -268,7 +353,7 @@ describe("MergeQueue", () => {
           })
       }))
 
-      const running = yield* MergeQueue.run("main", { members: queued, concurrency: 2, failurePolicy: "halt" })
+      const running = yield* MergeQueue.run("main", { members: queued, concurrency: 2, failurePolicy: "quarantine" })
         .pipe(Effect.forkChild({ startImmediately: true }))
 
       yield* Latch.await(saturated)
