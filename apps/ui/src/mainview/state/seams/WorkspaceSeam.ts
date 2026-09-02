@@ -194,6 +194,9 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
 
   const timers = new Set<ReturnType<typeof setTimeout>>()
   const watching = new Set<string>()
+  const watchPolls = new Map<string, number>()
+  /** 5s cadence × 120 = ten minutes, the provisioning ceiling the workspaces spec names. */
+  const MAX_WATCH_POLLS = 120
 
   const after = (ms: number, work: () => void): void => {
     const timer = setTimeout(() => {
@@ -209,6 +212,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     for (const timer of timers) clearTimeout(timer)
     timers.clear()
     watching.clear()
+    watchPolls.clear()
   }
 
   /*
@@ -409,6 +413,14 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       watching.delete(workspaceId)
       return
     }
+    // A workspace wedged in pending/starting is not polled for the life of the app: the watch gives up after MAX_WATCH_POLLS and the card keeps the last fact.
+    const polled = (watchPolls.get(workspaceId) ?? 0) + 1
+    watchPolls.set(workspaceId, polled)
+    if (polled > MAX_WATCH_POLLS) {
+      watching.delete(workspaceId)
+      watchPolls.delete(workspaceId)
+      return
+    }
     let response: Response
     try {
       response = await ctx.http(cloud(repoPath(row.repoId, `/workspaces/${encodeURIComponent(workspaceId)}`)))
@@ -418,6 +430,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     }
     if (response.status === 404) {
       watching.delete(workspaceId)
+      watchPolls.delete(workspaceId)
       await loadList(row.repoId)
       return
     }
@@ -428,6 +441,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
         renderWorkspace(parsed)
         if (!UNSETTLED.has(parsed.status)) {
           watching.delete(workspaceId)
+          watchPolls.delete(workspaceId)
           return
         }
       }
