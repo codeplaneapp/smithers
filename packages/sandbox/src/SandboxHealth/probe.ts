@@ -3,9 +3,9 @@
  *
  * @since 0.1.0
  */
-import * as Cause from "effect/Cause"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import { boundedMessage } from "../internal/boundedMessage.ts"
 import type { HealthState } from "./HealthState.ts"
 import { Healthy } from "./Healthy.ts"
 import type { PingProvider } from "./PingProvider.ts"
@@ -25,9 +25,16 @@ const defaultDeadline: Duration.Input = "5 seconds"
  *
  * A failed ping becomes `Unhealthy(reason: "ping_failed")`; a ping that
  * outlives the deadline becomes `Unhealthy(reason: "unresponsive")`. The
- * probe opens a `SandboxHealth.probe` span annotated with the outcome, and a
- * failed ping's full cause is logged at debug level — the flattened `message`
- * on the reported state is a summary, not the only record of the failure.
+ * probe opens a `SandboxHealth.probe` span annotated with the outcome.
+ *
+ * A failed ping is logged at debug level as its provider `code` and its
+ * `message`, bounded at 512 characters with control characters collapsed, and
+ * the verdict carries that same bounded message. The `ProviderError` itself,
+ * and above all its `cause`, never reaches a logger from here: adapters attach
+ * raw vendor errors there, which can quote credentials, request headers,
+ * proxies, or response bodies, and rendering an arbitrary object can throw or
+ * run without bound. A host that wants the raw failure taps the ping it hands
+ * in, `Effect.tapError` on `PingProvider.ping`, and applies its own redaction.
  *
  * @category constructors
  * @since 0.1.0
@@ -39,16 +46,18 @@ export const probe = (
   Effect.timeoutOrElse(
     Effect.matchEffect(provider.ping, {
       onSuccess: (): Effect.Effect<HealthState> => Effect.succeed(new Healthy()),
-      onFailure: (error): Effect.Effect<HealthState> =>
-        Effect.logDebug("sandbox ping failed", Cause.fail(error)).pipe(
+      onFailure: (error): Effect.Effect<HealthState> => {
+        const message = boundedMessage(error.message)
+        return Effect.logDebug("sandbox ping failed", { code: error.code, message }).pipe(
           Effect.as(
             new Unhealthy({
               component: "sandbox",
               reason: "ping_failed",
-              message: error.message
+              message
             })
           )
         )
+      }
     }),
     {
       duration: options?.deadline ?? defaultDeadline,

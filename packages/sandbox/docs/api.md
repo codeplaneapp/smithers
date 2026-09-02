@@ -75,6 +75,8 @@ The journal's run-ownership heartbeat detects a dead engine owner; nothing detec
 
 `probe` never fails: a failed ping becomes `Unhealthy(reason: "ping_failed")`, and a ping that outlives the deadline (5 seconds by default) becomes `Unhealthy(reason: "unresponsive")`. That is what distinguishes "sandbox dead" from "slow command": the probe answers within the deadline either way. `Unhealthy.component` is `"sandbox"`, so an "engine alive, sandbox dead" diagnosis is explicit rather than inferred from a generic provider error.
 
+A failed ping is logged at debug level as the provider's `code` and its `message`, and the verdict carries that same message, bounded at 512 characters with control characters collapsed to spaces. The `ProviderError` and its `cause` never reach a logger from the probe: adapters attach raw vendor errors to `cause`, which can quote credentials, request headers, proxies, or response bodies, and rendering an arbitrary object can throw or run without bound, so raising the minimum log level to `Debug` discloses nothing. A host that wants the raw failure taps the ping it hands in (`Effect.tapError` on `PingProvider.ping`) and applies its own redaction.
+
 Reasons, like the host error codes, are a stable public contract: never repurpose one, add one.
 
 ## SandboxSupervision

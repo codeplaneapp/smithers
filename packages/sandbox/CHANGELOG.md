@@ -91,6 +91,16 @@
   the in-flight commands and closes the provider scope uninterruptibly before
   reporting, so a reporter that defects or never returns cannot strand a
   waiter, leak the machine, or hold the permit every later command needs.
+- `SandboxHealth.probe` no longer logs a failed ping's `ProviderError` as the
+  log record's cause. Adapters attach raw vendor errors to `cause`, which can
+  quote credentials, request headers, proxies, or response bodies, and the
+  standard formatters render that object whole, so any host that raised its
+  minimum log level to `Debug` disclosed it; an attached object whose
+  properties throw also defected the probe inside the formatter. The record now
+  carries only the provider `code` and the `message`, and both the record and
+  the `Unhealthy` verdict bound that message at 512 characters with control
+  characters collapsed. A host that wants the raw failure taps
+  `PingProvider.ping` with `Effect.tapError` and redacts it itself.
 
 ### Changed
 

@@ -103,11 +103,32 @@ describe("SandboxHealth.probe", () => {
       spans.filter((span) => span.name === "SandboxHealth.probe").map((span) => span.attributes.get("outcome"))
     ).toEqual(["healthy", "ping_failed"])
   })
+})
 
-  it("logs the full ping failure cause instead of flattening it to the message", async () => {
-    const causes: Array<Cause.Cause<unknown>> = []
+/**
+ * Runs one probe with the debug level enabled and both standard formatters
+ * installed, and returns the verdict beside the rendered log lines. The
+ * formatters are the real ones a host installs, so what they print is what a
+ * host would see.
+ */
+const renderProbeLogs = (provider: SandboxHealth.PingProvider) =>
+  Effect.gen(function*() {
+    const lines: Array<string> = []
+    const keep = (line: string) => {
+      lines.push(line)
+    }
+    const state = yield* SandboxHealth.probe(provider).pipe(
+      Effect.provide(Logger.layer([Logger.map(Logger.formatJson, keep), Logger.map(Logger.formatLogFmt, keep)])),
+      Effect.provideService(References.MinimumLogLevel, "Debug")
+    )
+    return { state, lines }
+  })
+
+describe("SandboxHealth.probe logging", () => {
+  it("logs the provider code and message and never the failure cause", async () => {
+    const records: Array<{ cause: Cause.Cause<unknown>; message: unknown }> = []
     const capture = Logger.make((options) => {
-      if (String(options.message).includes("sandbox ping failed")) causes.push(options.cause)
+      records.push({ cause: options.cause, message: options.message })
     })
 
     await Effect.runPromise(
@@ -117,10 +138,125 @@ describe("SandboxHealth.probe", () => {
       )
     )
 
-    const errors = causes.flatMap((cause) => cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error))
-    expect(errors).toHaveLength(1)
-    expect(errors[0]).toBeInstanceOf(ProviderError)
-    expect((errors[0] as ProviderError).code).toBe("unavailable")
+    expect(records.map((record) => record.cause.reasons)).toEqual([[]])
+    expect(records.map((record) => record.message)).toEqual([
+      ["sandbox ping failed", { code: "unavailable", message: "session is gone" }]
+    ])
+  })
+
+  it("does not disclose a raw provider cause through the standard formatters", async () => {
+    const error = new ProviderError({
+      code: "unavailable",
+      message: "session is gone",
+      cause: {
+        headers: { authorization: "Bearer sk-live-SECRET" },
+        proxy: "http://user:hunter2@proxy.internal"
+      }
+    })
+    // The control: the formatters print a cause through Cause.pretty, which
+    // does render the attached vendor error, so the assertions below are not
+    // satisfied by a formatter that never looked.
+    expect(Cause.pretty(Cause.fail(error))).toContain("sk-live-SECRET")
+
+    const { lines, state } = await Effect.runPromise(renderProbeLogs({ ping: Effect.fail(error) }))
+
+    expect(state._tag).toBe("Unhealthy")
+    expect(lines).toHaveLength(2)
+    for (const line of lines) {
+      expect(line).toContain("sandbox ping failed")
+      expect(line).toContain("unavailable")
+      expect(line).not.toContain("sk-live-SECRET")
+      expect(line).not.toContain("hunter2")
+    }
+  })
+
+  it("bounds the message it logs and reports at 512 characters, whatever the provider attached", async () => {
+    const error = new ProviderError({
+      code: "unknown",
+      message: "x".repeat(100_000),
+      cause: "y".repeat(8 * 1024 * 1024)
+    })
+
+    const { lines, state } = await Effect.runPromise(renderProbeLogs({ ping: Effect.fail(error) }))
+
+    expect(state._tag).toBe("Unhealthy")
+    if (state._tag === "Unhealthy") {
+      expect(state.message).toHaveLength(512 + 3)
+      expect(state.message?.endsWith("...")).toBe(true)
+    }
+    expect(lines).toHaveLength(2)
+    for (const line of lines) expect(line.length).toBeLessThan(2048)
+  })
+
+  it("collapses control characters so a provider message cannot forge a log line", async () => {
+    const error = new ProviderError({
+      code: "unknown",
+      message: "\u0000gone\r\nlevel=ERROR message=forged\u007f\u001b[31m\n"
+    })
+
+    const { lines, state } = await Effect.runPromise(renderProbeLogs({ ping: Effect.fail(error) }))
+
+    expect(state._tag).toBe("Unhealthy")
+    if (state._tag === "Unhealthy") expect(state.message).toBe("gone level=ERROR message=forged [31m")
+    expect(lines).toHaveLength(2)
+    for (const line of lines) expect(line).toContain("gone level=ERROR message=forged [31m")
+  })
+
+  it("answers Unhealthy without a defect when the attached cause throws on inspection", async () => {
+    const getter = {
+      get token(): string {
+        throw new Error("boom-getter")
+      }
+    }
+    const proxy = new Proxy({}, {
+      get() {
+        throw new Error("boom-proxy")
+      },
+      has() {
+        throw new Error("boom-proxy")
+      },
+      ownKeys() {
+        throw new Error("boom-proxy")
+      },
+      getOwnPropertyDescriptor() {
+        throw new Error("boom-proxy")
+      }
+    })
+
+    for (const cause of [getter, proxy]) {
+      const error = new ProviderError({ code: "unknown", message: "adversarial", cause })
+      // The control: rendering this cause is exactly what defected before.
+      expect(() => Cause.pretty(Cause.fail(error))).toThrow(/boom/)
+
+      const { lines, state } = await Effect.runPromise(renderProbeLogs({ ping: Effect.fail(error) }))
+
+      expect(state._tag).toBe("Unhealthy")
+      if (state._tag === "Unhealthy") expect(state.message).toBe("adversarial")
+      expect(lines).toHaveLength(2)
+      for (const line of lines) expect(line).not.toContain("boom")
+    }
+  })
+
+  it("hands the raw cause to a host that taps the ping, without it reaching the log", async () => {
+    const raw = { token: "sk-live-SECRET" }
+    const error = new ProviderError({ code: "unavailable", message: "session is gone", cause: raw })
+    const seen: Array<ProviderError> = []
+    const tapped: SandboxHealth.PingProvider = {
+      ping: Effect.fail(error).pipe(
+        Effect.tapError((failure) =>
+          Effect.sync(() => {
+            seen.push(failure)
+          })
+        )
+      )
+    }
+
+    const { lines, state } = await Effect.runPromise(renderProbeLogs(tapped))
+
+    expect(seen.map((failure) => failure.cause)).toEqual([raw])
+    expect(state._tag).toBe("Unhealthy")
+    expect(lines).toHaveLength(2)
+    for (const line of lines) expect(line).not.toContain("sk-live-SECRET")
   })
 })
 
