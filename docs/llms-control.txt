@@ -96,6 +96,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `AlreadyResolved` | `already_resolved` |
 | `PlanNotFound` | `plan_not_found` |
 | `RunNotFound` | `run_not_found` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -134,6 +135,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -175,6 +177,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `AlreadyResolved` | `already_resolved` |
 | `PlanNotFound` | `plan_not_found` |
 | `RunNotFound` | `run_not_found` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -301,6 +304,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -342,6 +346,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `LaunchFailed` | `launch_failed` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
@@ -381,6 +386,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `NoMatchingWait` | `no_matching_wait` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 

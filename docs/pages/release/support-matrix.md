@@ -122,7 +122,7 @@ execution claim.
 | `@smthrs/std` | Standard tool library: filesystem, search, shell, checkpoints. | subpath (`Grep`, `Glob`, `Search`, `PortableSearch`) |
 | [`@smthrs/step-cache`](/api/step-cache) | Sealed step results by step-key digest. | gated yes |
 | [`@smthrs/sync`](/api/sync) | Read-only journal replication RPC, `RunCatalog`, branch collaboration. | gated yes |
-| `@smthrs/testing` | Engine and model doubles, conformance suites, restart/parity harnesses, vitest adapters. | no claim |
+| [`@smthrs/testing`](/api/testing) | Engine and model doubles, conformance suites, restart/parity harnesses, vitest adapters. | no claim |
 | [`@smthrs/time-travel`](/api/time-travel) | Replay, fork, rewind, compensation, `SqlTimeTravelStore` (library API only in rc.0; see section 5). | gated yes |
 | `smthrs` | Deprecation/migration notice only (section 3.3). | not applicable |
 

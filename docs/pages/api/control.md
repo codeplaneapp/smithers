@@ -35,16 +35,25 @@ Every mutation answers a `Receipt`; `plan` returns a `PlanCard` instead. The
 typed error identifies the failed resource, so a plan that never became a run
 does not report a run failure.
 
-| Verb                       | Receipts                                             | Typed failures                                                                                                                         |
-| -------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                      |
-| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
-| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
-| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable`          |
-| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                       |
-| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable`                                                                     |
-| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
-| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                         |
+Before its first wait, each mutation copies only bounded JSON own data fields
+and schema-decodes that detached value. Its durable fingerprint is a canonical
+SHA-256 digest, and an authenticated request namespaces its idempotency key by
+the principal's stable `kind` and `id`, not the changing server timestamp.
+Accessors, `toJSON`, sparse arrays, cycles, and non-JSON objects are refused
+with `InvalidInput` before any collaborator sees them. The identity boundary
+accepts at most 4 MiB, 128 levels, 100,000 values and members, and a 1 to 1,024
+character idempotency key.
+
+| Verb                       | Receipts                                             | Typed failures                                                                                                                                         |
+| -------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                      |
+| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `InvalidInput`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
+| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
+| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`          |
+| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                       |
+| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                     |
+| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
+| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                                         |
 
 `PlanNotFound` carries `code: "plan_not_found"`; `PlanDenied` carries
 `code: "plan_denied"`. Their `planId` identifies the plan the operator must
@@ -546,6 +555,8 @@ namespace from the package root.
 | `Channels`           | `layerMemory` (const)                 | layers       | Process-local channel layer for adapter unit tests only.                                                                                                |
 | `WebhookChannel`     | `SignatureVerifier` (type)            | models       | Signature verifier injected by a webhook transport.                                                                                                     |
 | `WebhookChannel`     | `Config` (interface)                  | models       | Configuration for a schema-declared webhook channel.                                                                                                    |
+| `WebhookChannel`     | `maximumBodyBytes` (const)            | constants    | Largest webhook request body one mount reads by default, in bytes.                                                                                      |
+| `WebhookChannel`     | `HandlerOptions` (interface)          | models       | Per-mount overrides for the webhook request handler.                                                                                                    |
 | `WebhookChannel`     | `make` (const)                        | constructors | Builds a webhook channel.                                                                                                                               |
 | `WebhookChannel`     | `handler` (const)                     | handlers     | Reads an abstract Effect HTTP request and dispatches it through Channels.                                                                               |
 | `Credential`         | `CredentialRef` (interface)           | models       | A journal-safe name for a stored connection credential.                                                                                                 |

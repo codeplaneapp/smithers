@@ -3905,7 +3905,7 @@ Three things it is used for, in rising order of commitment.
 
 **Assert what a run journaled.** `JournalAssertions.expectJournal` reads entries in `entry.index` order and answers about steps and journaled effects separately, so an at-most-once claim about an external effect cannot be satisfied by an ordinary step that happens to share its key.
 
-**Replay a model instead of calling one.** `CachedModel` records what a fixture is missing and replays what it has, matching a request by its canonical shape with `modelId` erased. `RecordedModel` is the strict double that claims each recorded call once and refuses a request the fixture does not describe. Neither reads the environment, so how a suite decides to record stays the suite's business.
+**Replay a model instead of calling one.** `CachedModel` records what a fixture is missing and replays what it has, keyed by the full canonical request with `modelId` included, so switching models is an ordinary miss that records a second entry. `RecordedModel` is the strict double: it matches by request shape with `modelId` erased, claims each recorded call once, refuses a request the fixture does not describe, and refuses a fixture recorded against another model. Neither reads the environment, so how a suite decides to record stays the suite's business.
 
 **Certify an engine.** `Conformance.coreSuite()` is the mandatory black-box suite every `EngineSubject` must pass: identity, interruption, replay, and race. `MemoryEngine` and `FlowEngineLike` are the two reference subjects it is developed against, and `RestartableEngine` adds the restart and hard-kill boundaries that a lease-based reclaim has to recover from. The race and interrupt cases advance a `TestClock`, so register them through `Vitest.testEffect(...).effect`, which supplies one, and not through `.live`, which does not.
 
@@ -6282,6 +6282,13 @@ The stable process statuses are 0 for success, 1 for a failed operation or run,
 2 for usage, 3 for a run waiting on approval, 130 for cancellation, and 143 for
 termination.
 
+A failure is one line on stderr and nothing on stdout, so a `--json` reader
+never finds a diagnostic inside its document. The line names the failure's
+class rather than its namespace (`ClaimLost`, not `/control/ClaimLost`),
+followed by its sentence. A control failure that carries no sentence is
+reported by the fields it does carry, contract code first:
+`ClaimLost: claim_lost runId=run-42`.
+
 ### Command documentation
 
 The `smithers` command pages are generated from the real Effect CLI
@@ -6578,16 +6585,25 @@ Every mutation answers a `Receipt`; `plan` returns a `PlanCard` instead. The
 typed error identifies the failed resource, so a plan that never became a run
 does not report a run failure.
 
-| Verb                       | Receipts                                             | Typed failures                                                                                                                         |
-| -------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                      |
-| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
-| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
-| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable`          |
-| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                       |
-| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable`                                                                     |
-| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
-| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                         |
+Before its first wait, each mutation copies only bounded JSON own data fields
+and schema-decodes that detached value. Its durable fingerprint is a canonical
+SHA-256 digest, and an authenticated request namespaces its idempotency key by
+the principal's stable `kind` and `id`, not the changing server timestamp.
+Accessors, `toJSON`, sparse arrays, cycles, and non-JSON objects are refused
+with `InvalidInput` before any collaborator sees them. The identity boundary
+accepts at most 4 MiB, 128 levels, 100,000 values and members, and a 1 to 1,024
+character idempotency key.
+
+| Verb                       | Receipts                                             | Typed failures                                                                                                                                         |
+| -------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                      |
+| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `InvalidInput`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
+| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
+| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`          |
+| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                       |
+| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                     |
+| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
+| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                                         |
 
 `PlanNotFound` carries `code: "plan_not_found"`; `PlanDenied` carries
 `code: "plan_denied"`. Their `planId` identifies the plan the operator must
@@ -7089,6 +7105,8 @@ namespace from the package root.
 | `Channels`           | `layerMemory` (const)                 | layers       | Process-local channel layer for adapter unit tests only.                                                                                                |
 | `WebhookChannel`     | `SignatureVerifier` (type)            | models       | Signature verifier injected by a webhook transport.                                                                                                     |
 | `WebhookChannel`     | `Config` (interface)                  | models       | Configuration for a schema-declared webhook channel.                                                                                                    |
+| `WebhookChannel`     | `maximumBodyBytes` (const)            | constants    | Largest webhook request body one mount reads by default, in bytes.                                                                                      |
+| `WebhookChannel`     | `HandlerOptions` (interface)          | models       | Per-mount overrides for the webhook request handler.                                                                                                    |
 | `WebhookChannel`     | `make` (const)                        | constructors | Builds a webhook channel.                                                                                                                               |
 | `WebhookChannel`     | `handler` (const)                     | handlers     | Reads an abstract Effect HTTP request and dispatches it through Channels.                                                                               |
 | `Credential`         | `CredentialRef` (interface)           | models       | A journal-safe name for a stored connection credential.                                                                                                 |
@@ -10812,29 +10830,34 @@ Route: /api/memory
 
 ## Memory
 
+`@smthrs/memory` stores durable cross-run facts, message threads, and notes, ranks them for recall, and exposes the two callable flows a model drives: `remember` and `recall`.
+
+Storage is SQLite through `@smthrs/database`. Recall is a replaceable slot with three bindings in the box: keyword, SQLite full text, and in-process semantic. A memory policy attached to a flow decides which namespace its tree reads and writes, and whether recall runs at all.
+
 This page covers the parts a flow author touches: the two callable flows, the
 memory policy that decides which namespace a flow tree reads and writes, and the
 store behaviours that are easy to get wrong.
 
 ### Modules
 
-| Module             | Import specifier                  | Summary                                                                                            | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Bank`             | `@smthrs/memory/Bank`             | Validating public bank-name constructors.                                                          | `parse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `Embedding`        | `@smthrs/memory/Embedding`        | Provider-neutral embeddings used by semantic memory recall.                                        | `EmbedResponse`, `EmbedManyResponse`, `EmbedMany`, `Service`, `Embedding`, `make`, `layer`, `makeNoop`, `layerNoop`, `layerFake`, `inProcessModel`, `inProcessVector`, `makeInProcess`, `layerInProcess`                                                                                                                                                                                                                                                                                                    |
-| `Flows`            | `@smthrs/memory/Flows`            | Unsealed memory flow declarations and runtime bindings.                                            | `rememberName`, `recallName`, `rememberDescription`, `recallDescription`, `RememberInput`, `RememberOutput`, `RecallInput`, `RecallOutput`, `rememberEffects`, `recallEffects`, `remember`, `recall`, `recallSlot`, `bindRecall`, `runRemember`, `runRecall`, `runRecallFor`, `runRememberFor`, `Handlers`, `handlersFor`, `handlers`, `RememberInputType`, `RecallInputType`, `RecallOutputType`                                                                                                           |
-| `Maintenance`      | `@smthrs/memory/Maintenance`      | Finite memory maintenance Effects intended for explicit schedules.                                 | `TtlGcResult`, `ttlGc`, `TokenLimiterOptions`, `TokenLimiterResult`, `limitHistory`, `SummarizerInput`, `Summarizer`, `CompactionOptions`, `CompactionResult`, `compact`                                                                                                                                                                                                                                                                                                                                    |
-| `MemoryError`      | `@smthrs/memory/MemoryError`      | Stable memory failures.                                                                            | `MemoryErrorCode`, `MemoryError`                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `MemoryStore`      | `@smthrs/memory/MemoryStore`      | Authoritative SQL memory contract store.                                                           | `Provenance`, `Fact`, `PutFactInput`, `GetFactInput`, `ListFactsInput`, `Thread`, `CreateThreadInput`, `ListThreadsInput`, `Message`, `AppendMessageInput`, `ListMessagesInput`, `GetNoteInput`, `NoteStatus`, `Note`, `PutNoteInput`, `SetNoteStatusInput`, `SupersedeInput`, `NamespaceInput`, `StatusFilter`, `ListNotesInput`, `SearchRow`, `SearchRowsInput`, `EnableFtsInput`, `SearchFtsInput`, `FtsRow`, `CompactMessagesInput`, `Service`, `MemoryStore`, `make`, `makeNoop`, `layerNoop`, `layer` |
-| `MemoryTrellis`    | `@smthrs/memory/MemoryTrellis`    | A Trellis whose generated work inherits one memory policy.                                         | `MakeOptions`, `Parts`, `parts`, `make`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `Namespace`        | `@smthrs/memory/Namespace`        | Structured memory namespaces and tag-group matching.                                               | `Kind`, `Namespace`, `MAX_TAGS`, `MAX_TAG_GROUP_DEPTH`, `MAX_TAG_GROUP_NODES`, `TagPrefix`, `Tag`, `Tags`, `MatchMode`, `TagGroup`, `matches`                                                                                                                                                                                                                                                                                                                                                               |
-| `Recall`           | `@smthrs/memory/Recall`           | The replaceable memory-recall seam.                                                                | `TagGroup`, `Input`, `Result`, `Output`, `slot`, `Service`, `Recall`, `capRecallResults`, `make`, `layer`, `makeNoop`, `layerNoop`, `NamespaceValue`, `bankForNamespace`, `namespaceForBank`                                                                                                                                                                                                                                                                                                                |
-| `RecallFts`        | `@smthrs/memory/RecallFts`        | SQLite FTS5 recall binding.                                                                        | `recall`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `RecallKeyword`    | `@smthrs/memory/RecallKeyword`    | Browser-safe keyword recall.                                                                       | `Row`, `recall`, `layer`, `normalizeQueryTerms`, `scoreRow`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `RecallSemantic`   | `@smthrs/memory/RecallSemantic`   | In-process semantic recall and best-effort vector projection.                                      | `Vector`, `VectorStore`, `Options`, `budgetLimits`, `defaultModel`, `makeSqlVectorStore`, `recall`, `Projector`, `makeProjector`, `projectAfterCommit`, `decorateStore`, `layer`, `cosineSimilarity`, `recencyDecay`                                                                                                                                                                                                                                                                                        |
-| `Source`           | `@smthrs/memory/Source`           | Advisory memory context source for an agent's opening context.                                     | `Input`, `Source`, `DeclaredText`, `make`, `source`, `declaredText`, `byteLength`, `truncate`                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `SnapshotRecorder` | `@smthrs/memory/SnapshotRecorder` | Optional host boundary for freezing an opening memory snapshot beyond the process that fetched it. | `Identity`, `Service`, `SnapshotRecorder`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `WithMemory`       | `@smthrs/memory/WithMemory`       | One memory policy applied to a whole flow tree.                                                    | `Policy`, `MemoryPolicy`, `references`, `children`, `policyOf`, `withMemory`                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Module             | Import specifier                  | Summary                                                                                            | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Bank`             | `@smthrs/memory/Bank`             | Validating public bank-name constructors.                                                          | `parse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `Database`         | `@smthrs/memory/Database`         | Public database port used by SQL-backed memory adapters.                                           | `DatabaseService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `Embedding`        | `@smthrs/memory/Embedding`        | Provider-neutral embeddings used by semantic memory recall.                                        | `EmbedResponse`, `EmbedManyResponse`, `EmbedMany`, `Service`, `Embedding`, `make`, `layer`, `makeNoop`, `layerNoop`, `layerFake`, `inProcessModel`, `inProcessVector`, `makeInProcess`, `layerInProcess`                                                                                                                                                                                                                                                                                                                                                            |
+| `Flows`            | `@smthrs/memory/Flows`            | Memory flow declarations and runtime bindings.                                                     | `rememberName`, `recallName`, `rememberDescription`, `recallDescription`, `RememberInput`, `RememberOutput`, `RecallInput`, `RecallOutput`, `rememberEffects`, `recallEffects`, `remember`, `recall`, `recallSlot`, `bindRecall`, `runRememberWith`, `runRemember`, `runRecall`, `runRecallFor`, `runRememberFor`, `Handlers`, `handlersFor`, `handlers`, `RememberInputType`, `RecallInputType`, `RecallOutputType`                                                                                                                                                |
+| `Maintenance`      | `@smthrs/memory/Maintenance`      | Finite memory maintenance Effects intended for explicit schedules.                                 | `TtlGcResult`, `ttlGc`, `TokenLimiterOptions`, `TokenLimiterResult`, `limitHistory`, `SummarizerInput`, `Summarizer`, `CompactionOptions`, `CompactionResult`, `compact`                                                                                                                                                                                                                                                                                                                                                                                            |
+| `MemoryError`      | `@smthrs/memory/MemoryError`      | Stable memory failures.                                                                            | `MemoryErrorCode`, `MemoryError`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `MemoryStore`      | `@smthrs/memory/MemoryStore`      | Authoritative SQL memory contract store.                                                           | `Provenance`, `Fact`, `PutFactInput`, `GetFactInput`, `ListFactsInput`, `Thread`, `CreateThreadInput`, `ListThreadsInput`, `GetThreadInput`, `DeleteThreadInput`, `Message`, `AppendMessageInput`, `ListMessagesInput`, `MessageCursor`, `GetNoteInput`, `NoteStatus`, `Note`, `PutNoteInput`, `SetNoteStatusInput`, `SupersedeInput`, `NamespaceInput`, `StatusFilter`, `ListNotesInput`, `SearchRow`, `SearchRowsInput`, `EnableFtsInput`, `SearchFtsInput`, `FtsRow`, `CompactMessagesInput`, `Service`, `MemoryStore`, `make`, `makeNoop`, `layerNoop`, `layer` |
+| `MemoryTrellis`    | `@smthrs/memory/MemoryTrellis`    | A Trellis whose generated work inherits one memory policy.                                         | `MakeOptions`, `Parts`, `parts`, `make`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `Namespace`        | `@smthrs/memory/Namespace`        | Structured memory namespaces and tag-group matching.                                               | `Kind`, `Namespace`, `MAX_TAGS`, `MAX_TAG_GROUP_DEPTH`, `MAX_TAG_GROUP_NODES`, `TagPrefix`, `Tag`, `Tags`, `MatchMode`, `TagGroup`, `matches`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `Recall`           | `@smthrs/memory/Recall`           | The replaceable memory-recall seam.                                                                | `MAX_RECALL_BANKS`, `MAX_RECALL_BANK_NAME_LENGTH`, `MAX_RECALL_QUERY_BYTES`, `MAX_RECALL_TOKENS`, `MAX_RECALL_TAG_GROUPS`, `TagGroup`, `Input`, `Result`, `Output`, `slot`, `Service`, `Recall`, `capRecallResults`, `make`, `layer`, `makeNoop`, `layerNoop`, `NamespaceValue`, `bankForNamespace`, `namespaceForBank`                                                                                                                                                                                                                                             |
+| `RecallFts`        | `@smthrs/memory/RecallFts`        | SQLite FTS5 recall binding.                                                                        | `literalFtsQuery`, `recall`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `RecallKeyword`    | `@smthrs/memory/RecallKeyword`    | Keyword recall with no host dependencies.                                                          | `Row`, `recall`, `layer`, `normalizeQueryTerms`, `scoreRow`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `RecallSemantic`   | `@smthrs/memory/RecallSemantic`   | In-process semantic recall and best-effort vector projection.                                      | `Vector`, `VectorStore`, `Options`, `budgetLimits`, `defaultModel`, `makeSqlVectorStore`, `recall`, `ProjectionInput`, `Projector`, `makeProjector`, `decorateStore`, `layer`, `cosineSimilarity`, `recencyDecay`                                                                                                                                                                                                                                                                                                                                                   |
+| `Source`           | `@smthrs/memory/Source`           | Advisory memory context source for an agent's opening context.                                     | `Input`, `Source`, `DeclaredText`, `make`, `source`, `declaredText`, `byteLength`, `truncate`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `SnapshotRecorder` | `@smthrs/memory/SnapshotRecorder` | Optional host boundary for freezing an opening memory snapshot beyond the process that fetched it. | `Identity`, `Service`, `SnapshotRecorder`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `WithMemory`       | `@smthrs/memory/WithMemory`       | One memory policy applied to a whole flow tree.                                                    | `Policy`, `MemoryPolicy`, `references`, `children`, `policyOf`, `withMemory`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ### The two flows
 
@@ -10893,9 +10916,9 @@ Applying one never changes the graph a flow plans, node for node.
 
 #### Reading a policy back
 
-`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` are
-the policy-aware handlers, and `Flows.handlersFor(flow)` is the pair a host
-binds. The policy supplies defaults and never overrides:
+`Flows.runRecallFor(flow, input)` and `Flows.runRememberFor(flow, input)` read
+the policy, and `Flows.handlersFor(flow)` is the pair a host binds. The policy
+supplies defaults and never overrides:
 
 - `runRecallFor` fills in the policy bank when the caller names no banks, and
   the policy budget when the caller states no `maxTokens`. A caller that names
@@ -10940,6 +10963,14 @@ that call compile: `FlowBinding.make` reads `flow.input` to type the handler. A
 flow held as `Flow.Any`, the existential a pattern passes around, stays
 `Flow.Any`.
 
+Every handler takes exactly one argument, the decoded flow input, because
+`FlowBinding.make` types its handler as `(input, call)` and passes the `Call` in
+the second position. Run coordinates are bound instead, once, when the handler is
+built: `Flows.handlersFor(flow, { runId, nodeId, iteration })` records them on
+every fact its `remember` writes, and `Flows.runRememberWith(provenance)` is the
+same thing without a policy. A provenance parameter on the handler itself would
+receive the `Call` and persist it as the fact's provenance.
+
 Binding `Flows.recall` with `Flows.runRecall` reaches the store with no
 namespace, no budget cap, and no way to honour `recall: "none"`.
 
@@ -10973,6 +11004,89 @@ plan with `Trellis.run` rather than calling the declared flow: calling the
 originals instead loses the policy.
 
 See delegation patterns for the trellis itself.
+
+### Store behaviours worth knowing
+
+These are the answers that surprise callers most often. Each one is enforced by
+a test in the package.
+
+- `listNotes` defaults `status` to `"accepted"`. Pending and rejected notes are
+  hidden unless you ask for them by name or pass `"any"`.
+- A message id is unique **within its thread**, not globally. The same id in two
+  threads is two messages. A same-thread retry whose `role`, `text`, or `at`
+  differs fails with `idempotency_conflict` and a path to the first field that
+  differs.
+- `appendMessage` creates a missing thread for you, in the `global` namespace
+  under the id `history`. Call `createThread` first when the thread belongs
+  somewhere else.
+- `maxTokens` is a UTF-8 **byte** ceiling over the serialized result array, not
+  a token count. Bytes conservatively bound tokens without committing the
+  package to one model's tokenizer. `Source.Input.maxBytes` is a separate
+  ceiling on the rendered snapshot text.
+- `capRecallResults` drops rows with empty text before it fills the budget.
+- Fact values are stored as JSON, so the value `getFact` returns is the value
+  `JSON.stringify` produced: `NaN` and `Infinity` become `null`, `undefined`,
+  function, and symbol members disappear, and sparse arrays collapse. The value
+  is serialized once at API entry, and the stored JSON, the search text, the
+  retained tags, and any vector projection all come from that one snapshot.
+- `RecallKeyword` normalizes both query and row text to NFKC before matching.
+  SQLite full text search does not, so the two bindings can disagree on
+  compatibility-equivalent characters.
+- The authoritative store writes **no** embedding vectors. Semantic projection
+  is opt-in through `RecallSemantic.decorateStore`, and `RecallSemantic.recall`
+  only lists vectors written under the model it was asked for.
+- TTL garbage collection is complete: `Maintenance.ttlGc` removes the expired
+  fact, its full-text projection, and its vector rows in one transaction.
+
+#### Published ceilings
+
+| Ceiling                              | Value | Enforced at                   |
+| ------------------------------------ | ----- | ----------------------------- |
+| `Namespace.MAX_TAGS`                 | 16    | tag decode                    |
+| `Namespace.MAX_TAG_GROUP_DEPTH`      | 8     | tag-group decode and matching |
+| `Namespace.MAX_TAG_GROUP_NODES`      | 64    | tag-group decode and matching |
+| `Recall.MAX_RECALL_BANKS`            | 16    | `Recall.Input` decode         |
+| `Recall.MAX_RECALL_BANK_NAME_LENGTH` | 128   | `Recall.Input` decode         |
+| `Recall.MAX_RECALL_QUERY_BYTES`      | 16384 | `Recall.Input` decode         |
+| `Recall.MAX_RECALL_TOKENS`           | 65536 | `Recall.Input` and `Policy`   |
+| `Recall.MAX_RECALL_TAG_GROUPS`       | 16    | `Recall.Input` decode         |
+
+Each tag group is bounded on its own, and the group list is bounded too: every
+group is evaluated against every candidate row by every binding, so an unbounded
+list would multiply the per-group budget without limit.
+
+#### What a read limit counts
+
+`limit` on `listFacts`, `listNotes`, `listMessages`, `searchRows` and `searchFts`
+bounds the rows the caller RECEIVES, after every status, supersession and
+tag-group filter on the same input. It is not a bound on the rows the query
+examines, and a bounded read never under-fills while matching rows remain.
+
+Statuses and supersession are answered in SQL. Tag groups are answered by
+`Namespace.matches`, the single source of truth for the five match modes, so a
+tag-filtered read walks the namespace in bounded pages until it has `limit`
+matches. Working-set memory stays proportional to one page, never to the
+namespace.
+
+### Failure codes
+
+`MemoryError.code` is the stable machine-readable answer, and `MemoryError.path`
+points at the offending field when one exists. `invalid_argument` means the
+caller passed something wrong; `store` means the backend failed. They are never
+the same code.
+
+| Code                    | Meaning                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| `not_found`             | the addressed record does not exist                               |
+| `fts_not_enabled`       | the namespace kind has not opted into full text search            |
+| `invalid_namespace`     | a namespace or bank name is empty or malformed                    |
+| `invalid_tag`           | a tag or tag group violates the vocabulary or a published ceiling |
+| `invalid_argument`      | any other rejected argument, with a `path` to the field           |
+| `supersede_conflict`    | a supersession request contradicts what is already stored         |
+| `idempotency_conflict`  | a retry reused an id with different immutable creation data       |
+| `embedding_unavailable` | the embedding provider failed or answered an invalid batch        |
+| `vector_model_mismatch` | a stored vector under the requested model has the wrong dimension |
+| `store`                 | the backend failed                                                |
 
 See [`@smthrs/memory` on GitHub](https://github.com/smithersai/smithers/blob/main/packages/memory/README.md)
 for installation and the full export table.
@@ -11469,19 +11583,22 @@ from.
 | `Alerts.defaultDetectors` | const | constants | The four conditions a control plane journals out of the box. |
 | `Alerts.Open` | interface | models | A condition that is open on a run, and when it opened. |
 | `Alerts.Alert` | interface | models | One alert a policy decided to raise. |
+| `Alerts.coalescingKey` | const | getters | The key an alert coalesces on: one open condition on one run. |
 | `Alerts.alertId` | const | getters | The identity a delivery is recorded under. |
 | `Alerts.conditions` | const | projections | Every condition a run's journal leaves open, with the time each opened. |
 | `Alerts.decide` | const | projections | The alerts a policy raises for the conditions open at `now`. |
+| `Alerts.FailureCode` | const + type | models | Why a sink did not take an alert. |
 | `Alerts.AlertError` | class | errors | A sink refused or could not take an alert. |
 | `Alerts.SinkService` | interface | services | Where a raised alert is sent. |
 | `Alerts.Sink` | class | services | The `SinkService` tag. |
 | `Alerts.layerNoop` | const | layers | A sink that accepts every alert and sends it nowhere. |
+| `Alerts.defaultWebhookTimeout` | const | constants | How long the webhook sink waits for an answer before it calls the page refused. |
 | `Alerts.layerWebhook` | const | layers | A sink that POSTs each alert to one webhook. |
 | `Alerts.Tick` | interface | models | What one tick decided. |
 | `Alerts.RuntimeService` | interface | services | The alert runtime: one tick per run. |
 | `Alerts.AlertRuntime` | class | services | The `RuntimeService` tag. |
 | `Alerts.layer` | const | layers | The alert runtime over one policy. |
-| `Notification.Provenance` | const + type | models | Durable origin of a notification. |
+| `Notification.Provenance` | const + type | models | Durable origin of a notification: who said it, from where, and at which turn. |
 | `Notification.HumanSteer` | const | models | A human message that must reach the model before the current turn closes. |
 | `Notification.HumanFollowup` | const | models | A human message that waits for the run to become idle. |
 | `Notification.SystemEvent` | const | models | A machine-originated event. |
@@ -11490,15 +11607,19 @@ from.
 | `Notification.coalesceKey` | const | getters | The key a pending notification coalesces on, or `null` when it must never be coalesced. |
 | `NotificationEvent.AdmittedEventType` | const | constants | The journal `eventType` recorded for one admission decision. |
 | `NotificationEvent.PromotedEventType` | const | constants | The journal `eventType` recorded when pending notifications are promoted. |
-| `NotificationEvent.Admitted` | const + type | models | A durable admission record. |
-| `NotificationEvent.Promoted` | const + type | models | A durable promotion record. |
+| `NotificationEvent.AdmissionDecision` | const + type | models | What a durable admission record says was decided. |
+| `NotificationEvent.Admitted` | const + type | models | A durable admission record: the notification a run was told about, and what the queue decided to do with it. |
+| `NotificationEvent.Promoted` | const + type | models | A durable promotion record: which notifications one boundary of one lineage delivered. |
 | `NotificationEvent.Event` | type | models | Any journal event owned by this package. |
+| `NotificationEvent.isAdmitted` | const | refinements | Whether an owned event is an admission record. |
+| `NotificationEvent.isPromoted` | const | refinements | Whether an owned event is a promotion record. |
 | `NotificationEvent.fromEntry` | const | constructors | Decodes an owned notification event from a journal entry. |
+| `NotificationState.defaultCapacity` | const | constants | The default maximum number of pending notifications retained per run. |
 | `NotificationState.Pending` | interface | models | A notification retained until it is promoted at a harness safe point. |
 | `NotificationState.AdmissionDecision` | type | models | The result recorded for one durable notification admission. |
 | `NotificationState.State` | interface | models | Immutable bounded queue state derived from the notification journal. |
 | `NotificationState.Admission` | interface | models | One pure admission transition and its visible decision. |
-| `NotificationState.Promotion` | interface | models | A pure promotion transition. |
+| `NotificationState.Promotion` | interface | models | A pure promotion transition: what a boundary takes, and what is left. |
 | `NotificationState.empty` | const | constructors | Creates an empty bounded notification queue. |
 | `NotificationState.admit` | const | operations | Admits a notification, coalescing only pending system events with the same key. |
 | `NotificationState.applyAdmission` | const | operations | Applies the decision already committed in an admission journal event. |
@@ -11506,17 +11627,17 @@ from.
 | `NotificationState.promoteSteers` | const | operations | Promotes every steer notification admitted at or before the turn-close cutoff. |
 | `NotificationState.promoteQueued` | const | operations | Promotes exactly the oldest pending queue notification. |
 | `NotificationState.applyPromoted` | const | operations | Applies a durable promotion record while replaying journal history. |
-| `NotificationQueue.NotificationError` | class | errors | The queue could not be reached or served the request. |
-| `NotificationQueue.AdmissionReceipt` | interface | models | What admitting one notification decided: its durable sequence number and whether the id had already been admitted. |
+| `NotificationQueue.NotificationError` | class | errors | The queue could not be reached, or it refused what a caller handed it. |
+| `NotificationQueue.AdmissionReceipt` | interface | models | What admitting one notification decided. |
 | `NotificationQueue.DrainInput` | interface | models | The boundary a drain is attempted at, and whether the run would go idle if nothing were delivered. |
 | `NotificationQueue.DrainReceipt` | interface | models | The notifications this boundary delivers, and whether the boundary had already drained. |
 | `NotificationQueue.Service` | interface | services | The durable pending queue: admit a notification exactly once, and drain what a boundary is allowed to deliver. |
 | `NotificationQueue.NotificationQueue` | class | services | The `Service` tag. |
 | `NotificationQueue.make` | const | constructors | Builds a `Service` from an implementation of its methods. |
-| `NotificationQueue.makeNoop` | const | constructors | A `Service` that fails both methods as unavailable. |
+| `NotificationQueue.makeNoop` | const | constructors | A `Service` that fails every method as unavailable. |
 | `NotificationQueue.layerNoop` | const | layers | Provides `makeNoop`. |
-| `NotificationQueue.layer` | const | layers | Journal-backed production layer. |
-| `Projection.defaultCapacity` | const | constants | The default maximum number of pending notifications retained per run. |
+| `NotificationQueue.layerWith` | const | layers | Journal-backed production layer, with the pending capacity a composition chooses. |
+| `NotificationQueue.layer` | const | layers | Journal-backed production layer at the default capacity. |
 | `Projection.derive` | const | projections | Re-derives pending notifications from admitted and promoted journal events. |
 | `SteerPayload.Thinking` | const + type | models | How hard the model should think. |
 | `SteerPayload.MessagePayload` | const | models | A message inserted into the transcript at the next turn boundary. |
@@ -14227,32 +14348,79 @@ has the matching named subpath.
 
 ---
 
-## `@smthrs/registry`
+## @smthrs/registry
 
 Route: /api/registry
 
-> @smthrs/registry: flow discovery over flows/**, the descriptors it produces, and the catalog a host registers.
+> Portable flow descriptor discovery and progressive-disclosure registry services.
 
-This page is the public API reference for **flow discovery and the catalog a
-model is shown**: portable descriptors scanned off a filesystem, disclosed to
-an agent in a compact form, and resolved back to a runnable body on demand.
+{/* Generated by `node packages/registry/scripts/docs.mjs` from packages/registry. Edit package sources, never this file. */}
 
-Discovery is metadata-only. Scanning a source parses Markdown frontmatter and
-module metadata without evaluating a module or reading a prompt body, so a
-catalog of a thousand flows costs a thousand frontmatter parses and no imports.
-A body is loaded when a flow is actually invoked.
+## @smthrs/registry
+
+Flow discovery and the catalog a model is shown: portable descriptors scanned off a filesystem, disclosed to an agent in a compact form, and resolved back to a runnable body on demand.
+
+Discovery is metadata-only. Scanning a source parses markdown frontmatter and module metadata without evaluating a module or reading a prompt body, so a catalog of a thousand flows costs a thousand frontmatter parses and no imports. A body is loaded when a flow is actually invoked, and its bytes are checked against the content address discovery recorded.
+
+Governing contract: `packages/registry/docs/api.md`, published as https://smithers.sh/api/registry.
+
+### The eight modules
+
+| Module          | What it owns                                                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Descriptor`    | The serializable `FlowDescriptor` and every value it is built from: schema references, body references, effects, provenance, budgets, and discovery warnings. |
+| `Discovery`     | The `Discovery` service that walks one source root and produces a `SourceScan`.                                                                               |
+| `MarkdownFlow`  | Markdown and Agent Skills compatibility: frontmatter to descriptor, body loading, and prompt rendering.                                                       |
+| `Registry`      | The refreshable, first-found-wins catalog a harness consumes, plus its layers.                                                                                |
+| `Disclosure`    | The compact projections a model and a slash-autocomplete list are shown.                                                                                      |
+| `Executable`    | Turning one descriptor into a runnable `@smthrs/flow` value, and the `Invocation` envelope a delegate receives.                                               |
+| `Pack`          | Manifests, content addresses, compatibility ranges, and the precedence rules a shareable pack brings.                                                         |
+| `RegistryError` | `DiscoveryError` and `RegistryError`, their stable codes, and their constructors.                                                                             |
 
 ### Descriptor
 
 `FlowDescriptor` is the serializable unit: a name, its schema references, its
-declared effects and placement, a `BodyRef` naming where the body lives, and a
-`Provenance` recording the source and root it came from. `SourceScan` pairs the
-descriptors a source yielded with the `DiscoveryWarning`s it produced, such as
-a duplicate name, an unparseable frontmatter block, or an unreadable file. A
-scan that dropped an entry must say so rather than return a shorter list.
+declared effects and placement, a `BodyRef` naming where the body lives and the
+SHA-256 of the bytes discovery read, and a `Provenance` recording the source and
+root it came from. `SourceScan` pairs the descriptors a source yielded with the
+`DiscoveryWarning`s it produced, such as a duplicate name, an unparseable
+frontmatter block, or an unreadable file. A scan that dropped an entry must say
+so rather than return a shorter list.
 
 `Provenance.pack` names the pack a descriptor came from, when it came from one.
 It is absent for every descriptor a plain source produced.
+
+`BodyRef.contentDigest` is the content address of the whole entry file. It is
+what makes a lazily loaded body honest: `Registry.loadBody` and
+`Executable.fromDescriptor` rehash the bytes they read and fail
+`body_unavailable` when the file changed after discovery, rather than running a
+body whose declaration the catalog no longer describes. Refreshing the registry
+is what adopts the new bytes.
+
+### Snapshot ownership
+
+A registry owns everything it hands out. `Registry.layer`, `layerFromPacks`, and
+`layerFromDescriptors` copy each descriptor and every array, record, and option
+inside it, then freeze the copy, and they snapshot the configuration they were
+given. Two consequences a caller can rely on:
+
+| Action                                                                         | Effect on later reads                                                     |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Mutating a descriptor a caller passed to `layerFromDescriptors`                | None. The registry answers from its own copy.                             |
+| Mutating a descriptor returned by `list`, `visible`, or `get`                  | Rejected: returned descriptors are frozen.                                |
+| Mutating the `sources` or `packs.installed` array after construction           | None. The configuration was snapshotted.                                  |
+| Mutating an `Invocation` a delegate received, or the input object passed to it | Rejected: the envelope, its arrays, and its JSON input are frozen copies. |
+
+The envelope matters twice over, because the same values are captured as the
+delegating node's durable identity. Freezing them is what keeps the envelope a
+delegate reads and the key material the engine recorded from diverging.
+
+The guarantee has a cost, and it is bounded: one traversal per descriptor per
+`refresh`, through a single identity map, over metadata the scan already parsed.
+There is no extra file-system work and no body is read, so a refresh still costs
+one frontmatter parse per flow plus one copy of what that parse produced. The
+single map is also what keeps a value two fields reference from coming back as
+two objects.
 
 ### Declaring a budget
 
@@ -14276,9 +14444,16 @@ this: `NodeControl.durableFlow` reads the budget with `Descriptor.budgetOf` and
 the executor binds `Budget.layerFromEnvelope`, so a declared ceiling reaches the
 run that spends against it.
 
+Both ceilings are positive safe integers. The schema refuses zero, a negative
+number, a fraction, `NaN`, and a value past `Number.MAX_SAFE_INTEGER`, so an
+invalid ceiling cannot be decoded into a descriptor and projected across a
+package boundary.
+
 `budget` is absent for a flow that declares none. `Descriptor.budgetOf` answers
 that absence with `Descriptor.budgetUnbounded`, so giving up a ceiling is a
-named value a reader can see rather than an empty object nobody wrote.
+named value a reader can see rather than an empty object nobody wrote. Both the
+shared unbounded value and every budget `budgetOf` returns are frozen: one host
+cannot rewrite the ceiling every other undeclared descriptor reports.
 
 A malformed budget is dropped rather than tightened, and dropping it produces a
 `DiscoveryWarning { code: "invalid_budget" }`. Every other malformed field has a
@@ -14293,10 +14468,32 @@ Module flows declare no budget. Discovery reads a `flow.ts` without evaluating
 it, and `budget` is absent for every descriptor it produces, so a module flow
 runs unbounded unless its host supplies a budget of its own.
 
+### Delegated authority
+
+A descriptor that names a delegate flow inherits authority discovery cannot
+read. Both the markdown and the module path route that case through one
+conservative projection: wildcard capabilities `["*"]`, wildcard `reads` and
+`writes` `["**"]`, `mode: "expected"`, and `tier: "irreversible"`, reported as a
+`DiscoveryWarning { code: "unprojectable_authority" }`. A declared `sealed` tier
+on such a flow is reported as under-classifying rather than accepted.
+
+This is the admission contract, not a cosmetic label.
+`Executable.dispatchedAction` puts `effects.tier` on the dispatched action, and
+`@smthrs/engine-store`'s `ActionPersistence` reuses a `sealed` dispatch and
+refuses anything else. Projecting an indirectly writing flow as sealed would
+both cache it as reusable and disclose it to a model as read-only.
+
+`Discovery` infers a tier from projected capabilities when a flow declares none.
+Only a relative `fs:write:<resource>` path with no home marker, no variable
+reference, and no URI scheme is compensable; `~/…`, `$HOME/…`, `${HOME}/…`,
+`%USERPROFILE%\…`, `file:///…`, an absolute path, and a path that escapes the
+workspace with `..` are all irreversible.
+
 ### Discovery and Registry
 
 `Discovery.scan(source)` reads one source. `Registry` is the service the harness
-consumes: `list`, `visible`, `getOption`, `body`, `refresh`, and `warnings`.
+consumes, and it has eight members: `list`, `visible`, `get`, `getOption`,
+`loadBody`, `runPrompt`, `refresh`, and `warnings`.
 
 Three constructors build one:
 
@@ -14304,6 +14501,104 @@ Three constructors build one:
 - `Registry.layerFromDescriptors(entries, warnings?)` takes an in-memory
   snapshot and still loads bodies lazily.
 - `Registry.layerFromPacks(packs, { runtimeVersion })` merges a set of packs.
+
+`refresh` rescans every configured source and replaces the snapshot only after
+all of them succeed, so a failed rescan leaves the previous complete snapshot
+serving reads rather than emptying the catalog.
+
+Discovery follows symbolic links wherever the host `FileSystem.stat` does, which
+is what the ordinary Node file system does. Two guards bound the walk: a
+visited-directory identity set, keyed on device and inode, refuses to descend
+into a directory already visited and reports `symlink_cycle`; and a 32-segment
+depth ceiling reports `max_depth_exceeded` and stops. Without them a single
+`flows/a/b/loop -> flows` link yields one flow many times over and terminates
+only when the operating system raises `ELOOP`.
+
+#### Resource ceilings
+
+| Ceiling                           | Value       | What it bounds                                                                                                                                                                                                            |
+| --------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Discovery.entrySizeLimit`        | 4 MiB       | The size of an entry file discovery will admit. A larger file is skipped with `entry_too_large` and contributes no descriptor, so a stray build artifact under `flows/` cannot exhaust the process at layer construction. |
+| `Discovery.maximumTraversalDepth` | 32 segments | How deep a source walk descends. The entry-name path is the flow name, so a deeper tree is a loop or a mistake.                                                                                                           |
+| Metadata parse ceiling            | 64 KiB      | How much of an admitted file is parsed looking for frontmatter or module metadata. It bounds parsing only; the size ceiling above is what bounds input.                                                                   |
+
+The size ceiling is checked twice, because the first check trusts the host. A
+`stat` size past the limit skips the file unread, which is the fast path an
+ordinary file system takes. The bytes actually read are then measured against
+the same limit, so a host whose `stat` under-reports or omits a size still gets
+`entry_too_large` with the true byte count, and the entry is refused before it
+is hashed, decoded, or parsed. An in-memory or remote `FileSystem` and a special
+file are the hosts that need it.
+
+#### Failure and warning codes
+
+`Discovery` and `Registry` fail with typed errors that carry a stable `code`, a
+`module` and `method`, and, where one is in hand, the offending `path` as a
+field rather than only inside the prose message.
+
+| Error             | Codes                                                                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DiscoveryError`  | `root_missing`, `read_failed`, `invalid_root`, `unknown`                                                                                        |
+| `RegistryError`   | `not_found`, `system_collision`, `body_unavailable`, `not_prompt_flow`, `invalid_pack`, `incompatible_pack`, `unreadable_pack_range`, `unknown` |
+| `ExecutableError` | `missing_delegate`, `ambiguous_delegate`, `body_unavailable`, `invalid_module`                                                                  |
+
+Anything a scan can survive is a `DiscoveryWarning` instead, read back through
+`registry.warnings()`. The codes are grouped by what they say:
+
+| Group                  | Codes                                                                                                                                                                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Naming and description | `missing_description`, `invalid_description`, `missing_name`, `invalid_name`, `directory_name_mismatch`, `name_field_ignored`, `duplicate_name`, `root_level_entry`                                                                                 |
+| Declaration fields     | `unknown_frontmatter_key`, `invalid_allowed_tools`, `invalid_capabilities`, `invalid_budget`, `invalid_model_invocation`, `invalid_compatibility`, `invalid_license`, `invalid_metadata`, `unsupported_input_schema`, `unsupported_module_metadata` |
+| Authority              | `unprojectable_authority`, `invalid_effect_declaration`, `invalid_effect_tier`                                                                                                                                                                      |
+| Source shape           | `multiple_entry_files`, `frontmatter_parse_error`, `non_serializable_frontmatter`, `symlink_cycle`, `max_depth_exceeded`, `entry_too_large`, `unreadable`                                                                                           |
+| Packs                  | `unknown_pack_key`, `shadowed`                                                                                                                                                                                                                      |
+
+#### Text, frontmatter, and XML
+
+| Surface                    | Behaviour                                                                                                                                                                                                                                                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontmatter parsing        | YAML on the failsafe schema. Every mapping is built with a null prototype and frozen, so a `__proto__`, `constructor`, or `prototype` key is retained as an ordinary own key and can never install inherited metadata that the descriptor's digest cannot see.                                                   |
+| Malformed frontmatter      | Reported as `frontmatter_parse_error` with a bounded line-and-column summary. The offending source line is never quoted and the raw parser error is not attached, because unknown frontmatter is retained verbatim and may hold a secret.                                                                        |
+| Non-serializable values    | Replaced with `null` and reported once as `non_serializable_frontmatter`.                                                                                                                                                                                                                                        |
+| `Disclosure.toXml`         | Replaces every code point XML 1.0 forbids, plus lone surrogates and Unicode noncharacters, with U+FFFD before escaping `&`, `<`, `>`, `"`, and `'`. Tab, line feed, carriage return, combining marks, and astral characters survive unchanged, so one malformed description cannot invalidate the whole catalog. |
+| `Executable.fileSpecifier` | Percent-encodes exactly what `pathToFileURL` does, so a POSIX path containing a backslash, a control character, a space, or non-ASCII text addresses the file it names. A backslash becomes a separator only in a Windows drive path.                                                                            |
+
+### Running a discovered flow
+
+`Executable.fromDescriptor(descriptor, options)` resolves the delegate, loads
+the body, and returns a runnable flow. The delegate is resolved first: a flow
+whose delegate nobody registered is not runnable on this host whatever its body
+says.
+
+`Invocation` is the fixed envelope every delegate receives, because one delegate
+runs many descriptors. It carries the flow name, the caller's JSON input, the
+rendered prompt, the model seat, the capabilities and collaborator flows the
+descriptor declared, and the placement. Placement travels as two fields:
+`placement` names the host kind (`client`, `local`, `sandbox`, or `remote`) and
+`placementOptions` carries the `image`, `profile`, and `target` that select it,
+or `null` when none were named. Both are read from the lowered placement, so a
+`Flow.within(...)` annotation on the loaded body wins over the descriptor's
+frontmatter directive in the envelope exactly as it does in the flow annotation
+and the durable identity.
+
+`MarkdownFlow.renderPrompt(body, { args })` renders a markdown body for a model.
+It appends a fixed block naming where the skill's own files live:
+
+```text
+<the body text>
+
+Supporting skill resources are available relative to this skill directory but are not loaded into context unless needed:
+<skill_resources>
+- Base directory: /absolute/path/to/the/skill
+- Resolve relative resource paths from this directory and read only the files you need.
+</skill_resources>
+
+<args, when the caller supplied any>
+```
+
+The base directory is the absolute host path the descriptor was discovered
+under, so a host that must not disclose its filesystem layout to a model should
+render the body itself rather than through this helper.
 
 ### Packs
 
@@ -14325,15 +14620,31 @@ exactly the way an ordinary source is. They are paths rather than flow names on
 purpose: a manifest listing names would need re-editing whenever a flow was
 added, and the pack digest would then not change when one was.
 
+#### Path confinement
+
+A pack is third-party content, so this module holds exactly one piece of
+filesystem policy: a pack contributes sources only from inside its own root.
+
+| Rule                                                                                                                                    | Where it is enforced                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| A manifest entry is a relative path with no empty, `.`, or `..` segment, no NUL byte, no backslash, no leading `/`, and no drive prefix | `Pack.read`, as a decode refusal that fails `invalid_pack` naming the offending entry                             |
+| A resolved entry stays under the resolved pack root                                                                                     | `Pack.sources`, so a directly constructed `Installed` value is checked too                                        |
+| A resolved entry's real path stays under the pack root's real path                                                                      | `Pack.sources`, wherever the host can answer `realPath`, so a symlinked escape is refused alongside a lexical one |
+
 `Pack.read(fs, path, dir)` decodes the manifest and fails
 `RegistryError { code: "invalid_pack" }` when it is missing, unparseable, or
 incomplete. Nothing half-loads: the manifest is what names the pack in every
-descriptor's provenance.
+descriptor's provenance. It returns the manifest, the directory, and any
+`unknown_pack_key` warnings, because a misspelled `requires` would otherwise
+disable the compatibility gate in silence.
 
 `Pack.digest(manifest, files)` is the content address a lock file records. It
-covers the manifest and every measured file by its own hash under its
+covers the manifest and every measured file by its own hash under its validated
 pack-relative path, so reading the same bytes in a different order produces the
-same digest and editing one flow body changes it.
+same digest and editing one flow body changes it. Duplicate paths are ordered by
+their content digest rather than by input order. File contents are UTF-8 text;
+measuring the files is the caller's job, and the CLI pack verbs are the intended
+caller.
 
 `Registry.layerFromPacks` applies three rules:
 
@@ -14345,35 +14656,157 @@ same digest and editing one flow body changes it.
 - **A shadowed flow is reported.** The loser becomes a
   `DiscoveryWarning { code: "shadowed" }` naming both packs and versions, read
   back through `registry.warnings()`.
-- **Compatibility is checked before anything is scanned.** A pack whose
-  `requires.smithers` range this runtime does not satisfy fails
+- **Compatibility is checked for every pack before any pack is scanned.** A pack
+  whose `requires.smithers` range this runtime does not satisfy fails
   `RegistryError { code: "incompatible_pack" }` at load, not at the first call
-  into one of its flows. The grammar is `*`, an exact version, and the `>=`,
-  `>`, `<=`, `<`, `^`, `~` comparators joined by spaces as a conjunction.
-  `^` and `~` read the way npm reads them. `^` allows everything up to the next
-  bump of the left-most non-zero field, so `^1.2.0` accepts `1.9.0`, `^0.2.3`
-  accepts `0.2.9` and refuses `0.9.0`, and `^0.0.3` accepts only `0.0.3`; `~`
-  pins the minor, so `~1.2.0` accepts `1.2.9` and refuses `1.3.0`.
-  A range the parser cannot read is refused rather than assumed compatible,
-  because guessing loads a pack against a runtime it was never written for.
-  Prerelease and build suffixes are ignored on both sides, so a `1.0.0-rc.4`
-  runtime satisfies a range written against `1.0.0`.
+  into one of its flows, and not after the directories of an earlier pack have
+  already been walked. The grammar is `*`, an inclusive hyphen range, and
+  whitespace-separated conjunctions of bare, `=`, `>=`, `>`, `<=`, `<`, `^`, and
+  `~` comparators. Whitespace may separate an operator from its version, and a
+  version with one or two components is zero-filled, so `>= 1.0.0`, `>=1.0`, and
+  `^1` all read. `^` and `~` read the way npm reads them: `^` allows everything
+  up to the next bump of the left-most non-zero field, so `^1.2.0` accepts
+  `1.9.0`, `^0.2.3` accepts `0.2.9` and refuses `0.9.0`, and `^0.0.3` accepts
+  only `0.0.3`; `~` pins the minor, so `~1.2.0` accepts `1.2.9` and refuses
+  `1.3.0`. `x` components and `||` unions are not read. A range the parser
+  cannot read is refused rather than assumed compatible, and it is refused as
+  its own `RegistryError { code: "unreadable_pack_range" }` so an operator can
+  tell a dialect this runtime cannot parse from a pack that genuinely needs a
+  newer one. Prerelease and build suffixes are ignored on both sides, so a
+  `1.0.0-rc.4` runtime satisfies a range written against `1.0.0`.
 
 The rest of the pack surface:
 
-| Export | What it is |
-| --- | --- |
-| `Pack.compatible(range, version)` | The range check above, as a predicate. |
-| `Pack.checkCompatible(manifest, runtimeVersion)` | The same check as an effect that fails `RegistryError { code: "incompatible_pack" }` naming the pack, its range, and the runtime. |
-| `Pack.attribute(descriptor, pack)` | Stamps one descriptor's `Provenance.pack` with the pack that supplied it. |
-| `Pack.sources(packs)` | The discovery sources a pack list contributes, flows and skills directories alike. |
-| `Pack.merge(scans)` | Applies the precedence and shadowing rules above to already-scanned packs. |
-| `Descriptor.PackRef` | The `{ name, version, origin }` a stamped descriptor carries, so a catalog entry says which pack it came from. |
+| Export                                       | What it is                                                                                                                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Pack.compatible(range, runtimeVersion)`     | The range check above, as a predicate. An unreadable range is `false`.                                                                                                   |
+| `Pack.checkCompatible(pack, runtimeVersion)` | The same check over one `Installed` pack, as an effect that fails `incompatible_pack` or `unreadable_pack_range` naming the pack, its range, and the runtime.            |
+| `Pack.attribute(descriptor, pack)`           | Stamps one descriptor's `Provenance.pack` with the pack that supplied it.                                                                                                |
+| `Pack.sources(pack, path)`                   | The confined discovery sources one pack contributes, flows and skills directories alike, as an effect that fails `invalid_pack` for an entry that escapes the pack root. |
+| `Pack.merge(scans)`                          | Applies the precedence and shadowing rules above to already-scanned packs.                                                                                               |
+| `Descriptor.PackRef`                         | The `{ name, version, origin }` a stamped descriptor carries, so a catalog entry says which pack it came from.                                                           |
 
 The `pack add | remove | list | update | eject` verbs are CLI surface and are not
-part of this package. This is the runtime contract underneath them: it reads
-manifests from directories a caller names and holds no filesystem policy of its
-own.
+part of this package. This is the runtime contract underneath them.
+
+### Exports
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `RegistryError.DiscoveryErrorCode` (const) | models | Stable reasons a source scan can fail. |
+| `RegistryError.DiscoveryErrorCode` (type) | models | Stable reasons a source scan can fail. |
+| `RegistryError.DiscoveryError` (class) | errors | A failure while discovering entries in one registry source. |
+| `RegistryError.RegistryErrorCode` (const) | models | Stable reasons registry construction, lookup, or prompt rendering can fail. |
+| `RegistryError.RegistryErrorCode` (type) | models | Stable reasons registry construction, lookup, or prompt rendering can fail. |
+| `RegistryError.RegistryError` (class) | errors | A failure while constructing, looking up, loading, or rendering a registry entry. |
+| `RegistryError.RegistryFailure` (type) | models | Every failure the Registry layer is allowed to surface. |
+| `RegistryError.discoveryError` (const) | constructors | Creates a `DiscoveryError` from a failed source-discovery operation. |
+| `RegistryError.registryError` (const) | constructors | Creates a `RegistryError` from a failed registry operation. |
+| `Descriptor.EffectTier` (const) | models | The reversibility tier declared by a flow. |
+| `Descriptor.EffectTier` (type) | models | The reversibility tier declared by a flow. |
+| `Descriptor.Placement` (const) | models | The execution environment selected by a leading placement directive. |
+| `Descriptor.Placement` (type) | models | The execution environment selected by a leading placement directive. |
+| `Descriptor.EffectDeclaration` (const) | models | The canonical effect declaration shared with `/core`. |
+| `Descriptor.EffectDeclaration` (type) | models | The canonical effect declaration shared with `/core`. |
+| `Descriptor.SchemaRefMarkdownArgs` (class) | models | The fixed `{ args: string }` input marker used by markdown flows. |
+| `Descriptor.SchemaRefMarkdownOutput` (class) | models | The fixed string output marker used by markdown flows. |
+| `Descriptor.SchemaRefModule` (class) | models | A schema field on a module's default `Flow.make` value. |
+| `Descriptor.SchemaRefNone` (class) | models | A flow with no declared input or output schema. |
+| `Descriptor.SchemaRefInline` (class) | models | A schema carried by value, as a JSON Schema document. |
+| `Descriptor.SchemaRef` (const) | models | A serializable locator for a flow input or output schema. |
+| `Descriptor.SchemaRef` (type) | models | A serializable locator for a flow input or output schema. |
+| `Descriptor.BodyRefMarkdown` (class) | models | A markdown body stored at a source path. |
+| `Descriptor.BodyRefModule` (class) | models | A module body stored at a source path. |
+| `Descriptor.BodyRef` (const) | models | A serializable locator and content address for a flow body, which is loaded only on demand. |
+| `Descriptor.BodyRef` (type) | models | A serializable locator and content address for a flow body, which is loaded only on demand. |
+| `Descriptor.FlowBodyPrompt` (class) | models | A loaded markdown prompt body. |
+| `Descriptor.FlowBodyModule` (class) | models | A loaded module flow body. |
+| `Descriptor.FlowBody` (const) | models | The body returned after an entry is loaded on demand. |
+| `Descriptor.FlowBody` (type) | models | The body returned after an entry is loaded on demand. |
+| `Descriptor.PackRef` (const) | models | The pack a descriptor was discovered in, when it came from one. |
+| `Descriptor.PackRef` (type) | models | The pack a descriptor was discovered in. |
+| `Descriptor.Provenance` (class) | models | Opaque source information retained with each discovered entry. |
+| `Descriptor.Source` (interface) | models | Registry source configuration. |
+| `Descriptor.DiscoveryWarningCode` (const) | models | Stable codes for non-fatal source-discovery diagnostics. |
+| `Descriptor.DiscoveryWarningCode` (type) | models | Stable codes for non-fatal source-discovery diagnostics. |
+| `Descriptor.DiscoveryWarning` (class) | models | A non-fatal source-discovery diagnostic. |
+| `Descriptor.BudgetCeiling` (const) | schemas | A positive safe-integer control-plane budget ceiling. |
+| `Descriptor.BudgetCeiling` (type) | models | A positive safe-integer control-plane budget ceiling. |
+| `Descriptor.FlowBudget` (const) | models | The tokens and milliseconds a flow declares that a control plane should approve for one of its runs. |
+| `Descriptor.FlowBudget` (type) | models | The tokens and milliseconds a flow declares. |
+| `Descriptor.budgetUnbounded` (const) | constructors | The budget of a flow that declares none: no token ceiling and no latency ceiling. |
+| `Descriptor.FlowDescriptor` (class) | models | The discovered metadata for one flow, excluding its unloaded body content. |
+| `Descriptor.budgetOf` (const) | accessors | The budget one descriptor declared, or `budgetUnbounded`. |
+| `Descriptor.SourceScan` (class) | models | The result of scanning one source. |
+| `Discovery.Discovery` (interface) | services | Discovers flow descriptors from a configured source without loading their bodies into the returned scan. |
+| `Discovery.Discovery` (const) | services | Service tag for portable flow discovery. |
+| `Discovery.entrySizeLimit` (const) | constants | Maximum complete entry size admitted to discovery and content hashing. |
+| `Discovery.maximumTraversalDepth` (const) | constants | Maximum number of entry-name segments traversed below a source root. |
+| `Discovery.make` (const) | constructors | Creates a discovery service from portable file-system and path services. |
+| `Discovery.layer` (const) | layers | Provides portable flow discovery from the current file-system and path services. |
+| `Discovery.makeNoop` (const) | constructors | Creates an empty discovery stub with optional method overrides. |
+| `Discovery.layerNoop` (const) | layers | Provides an empty discovery stub with optional method overrides. |
+| `MarkdownFlow.Input` (const) | schemas | The fixed decoded input schema for markdown flows. |
+| `MarkdownFlow.Input` (type) | models | The decoded input accepted by every markdown flow. |
+| `MarkdownFlow.Output` (const) | schemas | The fixed output schema for markdown flows. |
+| `MarkdownFlow.Output` (type) | models | The prompt text returned by a markdown flow. |
+| `MarkdownFlow.FromMarkdownOptions` (interface) | models | Parameters used to derive a descriptor from already-read markdown text. |
+| `MarkdownFlow.FromMarkdownResult` (interface) | models | The metadata result of markdown flow discovery. |
+| `MarkdownFlow.fromMarkdown` (const) | constructors | Derives a markdown flow descriptor without retaining the prompt body. |
+| `MarkdownFlow.loadBody` (const) | constructors | Loads a markdown prompt body after discovery, removing only leading frontmatter. |
+| `MarkdownFlow.renderPrompt` (const) | rendering | Renders decoded markdown-flow arguments using the compatible skill convention. |
+| `MarkdownFlow.toCoreFrontmatter` (const) | conversions | Projects a registry descriptor into the one authoring value accepted by `/core/Markdown`. |
+| `Disclosure.toEntries` (const) | conversions | Projects descriptors into slash-autocomplete entries. |
+| `Disclosure.toXml` (const) | conversions | Renders model-invocable descriptors as an agentskills-style XML block. |
+| `Executable.defaultAgent` (const) | constructors | The delegate a descriptor runs on when it names no single flow of its own. |
+| `Executable.Payload` (const) | schemas | The payload a bridged flow is executed with. |
+| `Executable.Payload` (type) | models | The payload a bridged flow is executed with. |
+| `Executable.Invocation` (const) | schemas | Everything a delegate is told about the descriptor it is running. |
+| `Executable.Invocation` (type) | models | Everything a delegate is told about the descriptor it is running. |
+| `Executable.Delegate` (interface) | models | A registered `@smthrs/flow` flow a descriptor may delegate to. |
+| `Executable.ExecutableErrorCode` (const) | models | Stable reasons a descriptor cannot be made runnable. |
+| `Executable.ExecutableErrorCode` (type) | models | Stable reasons a descriptor cannot be made runnable. |
+| `Executable.ExecutableError` (class) | errors | A descriptor the bridge will not turn into a runnable flow. |
+| `Executable.Lowered` (interface) | models | The runtime decisions lowered off a descriptor and its loaded body. |
+| `Executable.Registration` (type) | models | What a registration layer still needs from its host: the flow runtime it registers with, the action implementation table a driver resolves the bridged dispatch through, and the `Crypto` the bridge derives its delegate's child execution id with. |
+| `Executable.Executable` (interface) | models | One discovered flow, made runnable. |
+| `Executable.Options` (interface) | models | How a descriptor is loaded and what it may delegate to. |
+| `Executable.fileSpecifier` (const) | conversions | A `file:` specifier for an absolute filesystem path. |
+| `Executable.delegateOf` (const) | constructors | The registry name of the flow a descriptor delegates to. |
+| `Executable.lower` (const) | conversions | Reads the runtime decisions a loaded body and its descriptor declare. |
+| `Executable.fromDescriptor` (const) | constructors | Makes one discovered descriptor runnable. |
+| `Executable.fromRegistry` (const) | constructors | Makes one discovered flow runnable by registry name. |
+| `Executable.Catalog` (interface) | models | Every discovered flow this host can run, and the ones it declined. |
+| `Executable.Catalog` (const) | services | Service tag for the catalog a host was built from. |
+| `Executable.catalog` (const) | constructors | Makes every discovered flow runnable, reporting the ones it could not. |
+| `Executable.layer` (const) | layers | Registers every runnable discovered flow with the runtime. |
+| `Executable.ProjectOptions` (interface) | models | How a project's flow registry is assembled. |
+| `Executable.layerProject` (const) | layers | Provides the registry a Node host discovers a project's flows in. |
+| `Pack.Origin` (const) | models | Where a pack was installed from, and therefore which one wins a name. |
+| `Pack.Origin` (type) | models | Where a pack was installed from. |
+| `Pack.Requires` (const) | models | The runtime range a pack declares it needs. |
+| `Pack.Requires` (type) | models | The runtime range a pack declares it needs. |
+| `Pack.Manifest` (class) | models | A pack manifest, as it is written in `pack.json`. |
+| `Pack.Installed` (interface) | models | One pack the host has decided to load, and where it came from. |
+| `Pack.File` (interface) | models | One file's contribution to a pack's content address. |
+| `Pack.read` (const) | constructors | Reads and decodes one pack's manifest. |
+| `Pack.digest` (const) | identity | The content address of one pack, as a lock file records it. |
+| `Pack.compatible` (const) | refinements | Whether a runtime version satisfies a pack's declared range. |
+| `Pack.sources` (const) | conversions | The registry sources one pack contributes, in manifest order. |
+| `Pack.attribute` (const) | conversions | Stamps a descriptor with the pack it was discovered in. |
+| `Pack.Scan` (interface) | models | One pack's scan, ready to merge. |
+| `Pack.merge` (const) | combinators | Merges scanned packs into one descriptor set, local packs first. |
+| `Pack.checkCompatible` (const) | refinements | Refuses a pack whose declared runtime range this runtime does not satisfy. |
+| `Registry.Config` (interface) | models | Configuration for constructing a registry from ordered discovery sources. |
+| `Registry.PackConfig` (interface) | models | The pack half of a `Config`. |
+| `Registry.Registry` (interface) | services | A refreshable snapshot of discovered flow descriptors. |
+| `Registry.Registry` (const) | services | Service tag for the refreshable flow registry. |
+| `Registry.make` (const) | constructors | Scans ordered sources and constructs a refreshable first-found-wins registry. |
+| `Registry.layer` (const) | layers | Provides a registry constructed from ordered discovery sources. |
+| `Registry.layerFromDescriptors` (const) | layers | Provides an in-memory descriptor snapshot while retaining lazy body loading. |
+| `Registry.layerFromPacks` (const) | layers | Scans a set of installed packs and constructs a registry over their merged descriptors. |
+| `Registry.makeNoop` (const) | constructors | Creates an empty registry stub with optional method overrides. |
+| `Registry.layerNoop` (const) | layers | Provides an empty registry stub with optional method overrides. |
 
 ---
 
@@ -14862,11 +15295,11 @@ const useMachine = Effect.scoped(
 
 Every bundled provider derives its machine's name from the session key the same way: the key's leading name-safe characters, for the operator reading a container or process list, plus a 64-bit digest of the whole key. The digest is what keeps `a/b` and `a-b` on separate machines, and what keeps two keys that merely start alike apart. It is a checksum and not a cryptographic one, so 64 bits over the whole key is the claim rather than "collision proof", and because the slug IS durable machine identity, changing it orphans whatever is running under the old names.
 
-Standard input for a transport with no input channel is staged under a session private directory in the workspace, `.smthrs-stdin`, under an unguessable name, and its removal is a finalizer of the spawn's scope rather than a `rm` appended to the command. A killed or interrupted command therefore does not leave the caller's script, patch, or credential blob on the machine, and a reattached session cannot read a previous incarnation's staging file by guessing its name.
+Standard input for a transport with no input channel is staged under a session private directory in the workspace, `.smthrs-stdin`, under an unguessable name, and its removal is a finalizer of the spawn's scope rather than a `rm` appended to the command. The finalizer is registered before the first byte is written, so a write that fails partway still has its partial file taken away: no provider writes a file atomically, and `AwsSandbox` sends one remote round trip per `ExecTransport.chunkBytes` bytes. A killed or interrupted command therefore does not leave the caller's script, patch, or credential blob on the machine, and a reattached session cannot read a previous incarnation's staging file by guessing its name. What is guaranteed is the unguessable name and the scope-bound removal: the staging file is created through the session's own `writeFile`, so its mode is the machine's umask like any other file the session writes.
 
 `commandProvider(provider, options)` projects the lifecycle back onto the spawn-only provider. Existing `RemoteChildProcessSpawner` adapters, `SandboxHealth.fromProvider`, `SandboxSupervision`, and `ProviderConformance` then compose unchanged. `options.provides` declares `kill` and `ping` before acquisition, because the projected provider must expose those capabilities statically; `stdin` is not among them, because delivering it is an obligation of every session rather than a capability a session may lack. A supervision retire-and-reopen cycle acquires a new generation; an older generation's late finalizer cannot clear the newer held session.
 
-`fileSystem(session)` uses `Session.readFile` and `Session.writeFile` for byte transfer. It derives `exists`, `stat`, `makeDirectory`, `readDirectory`, `remove`, `rename`, `realPath`, and `readLink` with POSIX `sh` probes. Entries in `session.files` override the derived operations one by one, and an override is installed through the workdir resolver rather than beside it, so a native operation receives the rooted path without re-implementing the rule. Other `FileSystem` operations retain `makeNoop`'s explicit refusal rather than simulating watches, open handles, or temporary directories.
+`fileSystem(session)` uses `Session.readFile` and `Session.writeFile` for byte transfer. It derives `exists`, `stat`, `makeDirectory`, `readDirectory`, `remove`, `rename`, `realPath`, and `readLink` with POSIX `sh` probes. Entries in `session.files` override the derived operations one by one, and an override is installed through the workdir resolver rather than beside it, so a native operation receives the rooted path without re-implementing the rule. Both arguments are rooted where both are paths the machine must reach (`rename`, `copyFile`, `link`); `symlink` is the exception, because its first argument is the text stored inside the link and POSIX resolves a relative one against the link's own directory, so rooting it would move where the link pointed. Other `FileSystem` operations retain `makeNoop`'s explicit refusal rather than simulating watches, open handles, or temporary directories.
 
 The probe surface is intentionally honest. `stat` reports exact file size, but mode is `0` and times and ownership are absent. Directory output is line framed, so a newline in a filename is misread; the listing probe is `ls -1A` and never a bare `ls -A`, because POSIX `ls` columnizes when its output is a terminal and one provider's transport is a pseudo-terminal. Probes require the named POSIX utilities on the machine.
 
@@ -14943,9 +15376,9 @@ const provider = ContainerSandbox.make({
 
 The default CLI is `docker`; set `program: "podman"` for Podman or name a compatible wrapper. `acquire` deterministically names the container, runs `create` then `start`, and reattaches when that name already exists: a refused create is followed by `container inspect`, so the reattach turns on whether the engine has the container rather than on the English wording of its conflict message. Commands, reads, and writes all travel through `exec` to the same guest workdir. The scope finalizer runs `rm --force`, ending the container and everything still inside it.
 
-The exec's own shell is named absolutely and a caller's environment travels as an `env(1)` prefix on the inner shell, never as `--env` on the exec and never through `export`. Both rules exist for the same reason: the engine resolves an exec's argv through the exec environment's `PATH`, so a caller's `PATH` override would otherwise break the wrapper before the command ran, and `export` refuses a name the session contract accepts (`a-b=1`) and would abort the whole line.
+The exec's own shell is named absolutely and a caller's environment travels as an `env(1)` prefix on the inner shell, never as `--env` on the exec and never through `export`. Both rules exist for the same reason: the engine resolves an exec's argv through the exec environment's `PATH`, so a caller's `PATH` override would otherwise break the wrapper before the command ran, and `export` refuses a name the session contract accepts (`a-b=1`) and would abort the whole line. Every shell the provider starts for itself is absolute for that same reason, workspace preparation, file reads and writes, and signal delivery included, since `options.env` is applied to the whole container. A spawn value of `undefined` deletes the variable with `env -u` rather than merely omitting it, so a name the container was created with is genuinely gone from the command's environment; every `-u` precedes every assignment, because `env` stops reading options at its first operand.
 
-Killing the local `docker exec` client does not reliably signal the guest process. Each spawned command therefore writes its guest pid to a session-private pidfile. `kill` starts a second guest command that walks descendants through `/proc`, signals children first, and then signals the recorded process. A kill that arrives before the wrapper has recorded its pid leaves a cancellation marker instead, which the wrapper reads before becoming the command, so a cancellation cannot outrun the guest it meant to stop. Acquisition wipes the pidfile directory before reuse, so reattachment cannot target stale pids.
+Killing the local `docker exec` client does not reliably signal the guest process. Each spawned command therefore writes its guest pid to a session-private pidfile. `kill` starts a second guest command that plants a cancellation marker first and only then waits for, reads, and signals the recorded pid, walking descendants through `/proc` and signalling children before the root. The marker comes first because the wrapper writes its pid before it reads the marker: a wrapper with no pid on disk has not reached the marker check yet and must see it, and a wrapper that has passed the check has left a pid to signal. Reading the pid first left a window in which the wrapper started the command between the empty read and the marker being written, and the kill reported success anyway. Acquisition wipes the pidfile directory before reuse, so reattachment cannot target stale pids.
 
 #### KubernetesSandbox
 
@@ -14967,7 +15400,7 @@ const provider = KubernetesSandbox.make({
 
 `acquire` derives the Pod name from the session key (prefix `smthrs-sbx-`, lowercased, bounded to 63 characters with the key's digest kept), runs `kubectl run` with `--restart Never` and `sleep infinity`, treats an `AlreadyExists` answer as a reattach, waits for the `Ready` condition with a 300 second timeout, and prepares the workdir and a session-private pidfile directory. Options `kubectl run` has no flag for (`serviceAccount`, `nodeSelector`, `resources`) travel as a strategic-merge `--overrides` document; `context`, `namespace`, and `kubeconfig` prefix every invocation. The scope finalizer runs `kubectl delete pod --force --grace-period=0`, and a Pod that was created but never became Ready or could not prepare its workspace is deleted the same way.
 
-Commands run through `kubectl exec` under the guest `sh`, in the requested `cwd`, with the caller's environment applied by `env(1)` in front of an absolute `/bin/sh`. Files travel through the same channel as base64: a read runs guest `base64`, a write pipes base64 into `base64 -d` on the exec's stdin after `mkdir -p` of the parent, so file contents cross the text boundary and remain byte exact. `kill` is the `ContainerSandbox` design, a pidfile per command, the same cancellation marker, and a second exec that signals descendants before the recorded pid. `ping` is `kubectl exec <pod> -- true`.
+Commands run through `kubectl exec` under an absolute `/bin/sh`, in the requested `cwd`, with the caller's environment applied by `env(1)` in front of a second absolute `/bin/sh`; a spawn value of `undefined` deletes a Pod-wide variable with `env -u` rather than leaving it in place, and every `-u` precedes every assignment because `env` stops reading options at its first operand. The provider's own preparation, read, write, and signal shells are absolute too, since `options.env` reaches the whole Pod and a `PATH` override would otherwise disable them. Files travel through the same channel as base64: a read runs guest `base64`, a write pipes base64 into `base64 -d` on the exec's stdin after `mkdir -p` of the parent, so file contents cross the text boundary and remain byte exact. `kill` is the `ContainerSandbox` design, a pidfile per command, the same cancellation marker, and a second exec that signals descendants before the recorded pid. `ping` is `kubectl exec <pod> -- true`.
 
 Isolation is the cluster's, not the provider's: the image, the service account, and the namespace's policies decide what a Pod can reach, and the provider only forwards the shaping options above. The image must carry `sh`, `env`, and `base64`. The Ready timeout is fixed. The real-backend suite runs against the `orbstack` context and skips wherever `kubectl cluster-info` does not answer there.
 
@@ -15064,11 +15497,11 @@ const provider = AwsSandbox.make({
 })
 ```
 
-`acquire` first looks for the machine a previous acquire of the same key left running: `ListTasks` filtered by the `startedBy` tag derived from the key, for both the RUNNING and the PENDING desired status. PENDING counts because a host that died between `RunTask` and its finalizer left a task that had not reached readiness yet, and skipping it would strand an ownerless machine that nothing stops. The lowest ARN is adopted and waited for if it is not ready; anything else under that key is stopped before provisioning, so a key never accumulates machines. Otherwise it calls `RunTask` with `enableExecuteCommand: true`, `launchType: "FARGATE"`, and that `startedBy`, polls `DescribeTasks` with exponential backoff (capped at 10 seconds, `maxPollAttempts` default 60) until the task is `RUNNING` and its agent is, and registers `StopTask` on the scope; an adopted task is released the same way, so closing the scope always leaves nothing behind. A task that reaches `STOPPED` first fails with `unavailable`; an exhausted poll budget fails with `timeout`. Supplying an image registers a minimal Fargate task definition and deregisters it after the task finalizer runs: family `smthrs-<startedBy>`, `sleep infinity`, `initProcessEnabled`, `cpu` 256 and `memory` 512 by default, container `sandbox`. `env` reaches the task as container overrides, which needs a `container` name or an image-generated definition, and a spawn's own environment is applied by `env(1)` in front of an absolute `/bin/sh` rather than by `export`, which refuses a name the session contract accepts. `ping` describes the task again and requires the same readiness.
+`acquire` first looks for the machine a previous acquire of the same key left running: one `ListTasks` call with the `startedBy` tag derived from the key and no desired-status filter. AWS requires `startedBy` to be the only filter and documents that a PENDING desired-status filter returns nothing. Omitting `desiredStatus` uses the RUNNING default, which still returns a provisioning task whose desired status is RUNNING while its `lastStatus` is PENDING. This is how a host that died between `RunTask` and its finalizer recovers the not-yet-ready task instead of stranding it. The lowest ARN is adopted and waited for if it is not ready; anything else under that key is stopped before provisioning, so a key never accumulates machines. Otherwise it calls `RunTask` with `enableExecuteCommand: true`, `launchType: "FARGATE"`, and that `startedBy`, polls `DescribeTasks` with exponential backoff (capped at 10 seconds, `maxPollAttempts` default 60) until the task is `RUNNING` and its agent is, and registers `StopTask` on the scope; an adopted task is released the same way, so closing the scope always leaves nothing behind. A task that reaches `STOPPED` first fails with `unavailable`; an exhausted poll budget fails with `timeout`. Supplying an image registers a minimal Fargate task definition and deregisters it after the task finalizer runs: family `smthrs-<startedBy>`, `sleep infinity`, `initProcessEnabled`, `cpu` 256 and `memory` 512 by default, container `sandbox`. `env` reaches the task as container overrides, which needs a `container` name or an image-generated definition, and a spawn's own environment is applied by `env(1)` in front of an absolute `/bin/sh` rather than by `export`, which refuses a name the session contract accepts. An undefined spawn value uses portable `env -u` to delete the inherited task variable. `ping` describes the task again and requires the same readiness.
 
-Commands, reads, and writes travel through `ExecTransport`: `aws ecs execute-command --interactive`, driven through the injected spawner, because ECS Exec is two halves and the ECS API implements only one. `ExecuteCommand` opens an SSM session and returns its metadata; the data channel that carries output and status is the Session Manager protocol, which the AWS CLI speaks by delegating to `session-manager-plugin`. The session is a pseudo-terminal, so standard error arrives interleaved on standard output and line endings are normalized; the plugin exits zero whatever the remote command did, so every command is wrapped to print its own status line under a per-command nonce, and a session that ends without one is `aborted`, never a success. Reads come back as guest `base64` and writes go in as base64 slices bounded by `chunkBytes` (default 3072 bytes before encoding), so file contents are byte-exact despite the terminal. `chunkBytes` is validated when the session is acquired: it is the increment of the loop that slices a file, so `0`, a negative value, or `NaN` would spin forever or silently truncate the write, and each is refused with `spawn_error` naming the accepted range. Standard input is staged as a workspace file and redirected. `kill` records each command's guest pid in a session-private pidfile and signals it and its descendants through a second session; closing a spawn's scope does the same for a command not yet seen to end.
+Commands, reads, and writes travel through `ExecTransport`: `aws ecs execute-command --interactive`, driven through the injected spawner, because ECS Exec is two halves and the ECS API implements only one. `ExecuteCommand` opens an SSM session and returns its metadata; the data channel that carries output and status is the Session Manager protocol, which the AWS CLI speaks by delegating to `session-manager-plugin`. The session is a pseudo-terminal, so standard error arrives interleaved on standard output and line endings are normalized; the plugin exits zero whatever the remote command did, so every command is wrapped to print its own status line under a per-command nonce, and a session that ends without one is `aborted`, never a success. Reads come back as guest `base64` and writes go in as base64 slices bounded by `chunkBytes` (default 3072 bytes before encoding), so file contents are byte-exact despite the terminal. `chunkBytes` is validated when the session is acquired and must be a whole number from 1 through 65536 bytes; an invalid value is refused with `spawn_error` naming that range. Each slice is base64 inside one `--command` argv entry. Base64 expands by four thirds, and Linux caps one argv entry at 128 KiB (`MAX_ARG_STRLEN`, 32 pages), so 64 KiB of payload plus framing stays below the smallest known limit on the path. AWS publishes no separate SSM document limit. Standard input is staged as a workspace file and redirected. `kill` records each command's guest pid in a session-private pidfile and signals it and its descendants through a second session; closing a spawn's scope does the same for a command not yet seen to end.
 
-Without an `exec` transport the session still provisions and tears down tasks but refuses `spawn`, `readFile`, and `writeFile` with `unavailable`, naming the missing transport, and the conformance suite records every obligation it cannot meet; with the transport it passes the suite in full. Honest limits: the host running the provider needs the `aws` CLI and `session-manager-plugin` installed; a command's standard error cannot be separated from its output; and no live cluster is driven from this repository, so the transport is proven against a fake that reproduces the plugin's banner, footer, carriage returns, and zero exit over a real local shell, while the exact command length the SSM document accepts is the service's to enforce, which is what `chunkBytes` is for.
+Without an `exec` transport the session still provisions and tears down tasks but refuses `spawn`, `readFile`, and `writeFile` with `unavailable`, naming the missing transport, and the conformance suite records every obligation it cannot meet; with the transport it passes the suite in full. Honest limits: the host running the provider needs the `aws` CLI and `session-manager-plugin` installed; a command's standard error cannot be separated from its output; and no live cluster is driven from this repository, so the transport is proven against a fake that reproduces the plugin's banner, footer, carriage returns, and zero exit over a real local shell. AWS does not publish an exact SSM command limit, so `chunkBytes` enforces the portable 65536-byte payload bound derived from Linux's per-argument cap instead of claiming a service-specific limit.
 
 #### CloudflareSandbox
 
@@ -15101,15 +15534,15 @@ This provider does not create infrastructure. The Durable Object namespace, its 
 Two things here are bounded and the rest is sized by the host's heap. A caller
 placing an agent's file tools on a machine should know which is which.
 
-| Path                                    | Bound                                                                                                                                                                                                                                                                                                    |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a command's standard input              | 16 MiB, refused above it. The count runs as the bytes arrive, so an oversized or endless producer is stopped at the bound rather than after it finishes                                                                                                                                                  |
-| the signal a closing scope sends        | 5 seconds. A finalizer cannot be interrupted, so a provider whose `kill` never answers would hold the closing fiber open forever; the provider's own teardown sends it again                                                                                                                             |
-| `Session.readFile`, `Session.writeFile` | none. A file crosses whole, in memory, on every provider                                                                                                                                                                                                                                                 |
-| a command's `stdout` and `stderr`       | none. `RemoteChildProcessSpawner` and the probe helpers collect a command's output whole                                                                                                                                                                                                                 |
-| `Sandbox.fileSystem.readDirectory`      | none, and a listing is materialized twice: once as probe output and once as the parsed entries                                                                                                                                                                                                           |
-| `AwsSandbox` command output             | none, and buffered whole by construction: the Session Manager channel carries one session's output as a single stream that is parsed after it ends                                                                                                                                                       |
-| `AwsSandbox` file writes                | one remote `aws ecs execute-command` round trip per `ExecTransport.chunkBytes` bytes (default 3072 before base64). A 64 MiB write at the default is roughly 22,000 sequential invocations. The option must be a whole number of at least 1; the upper end is the SSM document's own command-length limit |
+| Path                                    | Bound                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a command's standard input              | 16 MiB, refused above it. The count runs as the bytes arrive, so an oversized or endless producer is stopped at the bound rather than after it finishes                                                                                                                                                                                                                                                                                                                                                     |
+| the signal a closing scope sends        | 5 seconds, or however long it takes the command's exit to be observed, whichever comes first. A finalizer cannot be interrupted, so a provider whose `kill` never answers would hold the closing fiber open forever; the provider's own teardown sends it again. `string` and `lines` close the scope when the output ends rather than when the exit lands, so the exit observation is what keeps a command that already finished from costing its caller the whole bound                                   |
+| `Session.readFile`, `Session.writeFile` | none. A file crosses whole, in memory, on every provider                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| a command's `stdout` and `stderr`       | none. `RemoteChildProcessSpawner` and the probe helpers collect a command's output whole                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `Sandbox.fileSystem.readDirectory`      | none, and a listing is materialized twice: once as probe output and once as the parsed entries                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `AwsSandbox` command output             | none, and buffered whole by construction: the Session Manager channel carries one session's output as a single stream that is parsed after it ends                                                                                                                                                                                                                                                                                                                                                          |
+| `AwsSandbox` file writes                | one remote `aws ecs execute-command` round trip per `ExecTransport.chunkBytes` bytes (default 3072 before base64). A 64 MiB write at the default is roughly 22,000 sequential invocations. The enforced range is 1 through 65536 bytes. Each slice is base64 inside one `--command` argv entry; base64 expands by four thirds, and Linux caps one entry at 128 KiB (`MAX_ARG_STRLEN`, 32 pages), so 64 KiB plus framing stays inside the smallest known limit. AWS publishes no separate SSM document limit |
 
 Command output is byte-exact through `DirectorySandbox`, `ContainerSandbox`,
 `KubernetesSandbox`, `MicrosandboxSandbox`, and `JustBashSandbox`. It is not
@@ -15793,6 +16226,7 @@ follower has fallen.
 | `SyncClient.make` `bootstrapLimit`               | `SyncClient.defaultBootstrapLimit` (256)      | Entries one catch-up page asks for.                                                                                                                                             |
 | `BranchCommands.Options.maxCommandBytes`         | `SyncProtocol.defaultMaxFrameBytes` (1 MiB)   | Encoded size of one command submission, refused before anything is appended.                                                                                                    |
 | `BranchCommands.Options.ledgerCapacity`          | `BranchCommands.defaultLedgerCapacity` (4096) | Receipts one branch keeps in memory. The journal's producer identity is the durable dedupe, so an evicted receipt costs a round trip and never correctness.                     |
+| `BranchCommands.Options.hydrationLimit`          | `BranchCommands.defaultHydrationLimit` (4096) | Entries one branch's first-touch hydration reads before it stops, so a long history is not charged to the next writer's latency. What the walk misses, the journal answers.     |
 | `BranchPresence.PresenceOptions.maxParticipants` | `BranchPresence.defaultMaxParticipants` (256) | Participants one branch may hold at once; a further announce is refused with `backpressure`.                                                                                    |
 | `RunCatalog.MemoryOptions.changesCapacity`       | `RunCatalog.defaultChangesCapacity` (1024)    | Announcements a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                          |
 | `RunCatalog.PollingOptions.intervalMs`           | `RunCatalog.defaultPollIntervalMs` (1000)     | Milliseconds between reads of the durable run set: one bounded query per interval per composition, not per subscriber.                                                          |
@@ -16056,7 +16490,7 @@ assertion in the other suites, so these are the tests that see it.
 | `WorkspaceShare.Keyring` | interface | models | A keyring: the key that signs new capabilities plus every key still accepted for verification. |
 | `WorkspaceShare.makeHmac` | const | constructors | Constructs the HMAC-SHA-256 workspace share authority over a keyring. |
 | `WorkspaceShare.layerHmac` | const | layers | Provides the HMAC-SHA-256 workspace share authority over a keyring. |
-| `WorkspaceShare.layerConfig` | const | layers | Provides the workspace share authority from configuration: the secret from `FLOWS_SYNC_SECRET` (read as `Redacted`, never logged) and the key name from `FLOWS_SYNC_KEY_ID`, defaulting to `primary`. |
+| `WorkspaceShare.layerConfig` | const | layers | Provides the workspace share authority from configuration: the secret from `SMITHERS_SYNC_SECRET` (read as `Redacted`, never logged) and the key name from `SMITHERS_SYNC_KEY_ID`, defaulting to `primary`. |
 | `SyncPrincipal.Anonymous` | interface | models | A request that presented no credential. |
 | `SyncPrincipal.Workspace` | interface | models | A request authenticated for the workspace's non-branch runs. |
 | `SyncPrincipal.Principal` | type | models | Any authenticated identity a sync request can carry. |
@@ -16091,6 +16525,7 @@ assertion in the other suites, so these are the tests that see it.
 | `BranchCommands.makeNoop` | const | constructors | Constructs a command ledger that admits nothing. |
 | `BranchCommands.layerNoop` | const | layers | Provides a command ledger that admits nothing. |
 | `BranchCommands.defaultLedgerCapacity` | const | constants | Receipts one branch keeps in memory before the oldest are evicted. |
+| `BranchCommands.defaultHydrationLimit` | const | constants | Entries one branch's first-touch hydration reads before it stops. |
 | `BranchCommands.Options` | interface | models | Admission policy. |
 | `BranchCommands.makeLiveWith` | const | constructors | Constructs the journal-backed branch command ledger under an explicit policy. |
 | `BranchCommands.makeLive` | const | constructors | Constructs the journal-backed branch command ledger with default policy. |
@@ -16104,6 +16539,502 @@ assertion in the other suites, so these are the tests that see it.
 | `BranchIds.makeWebCrypto` | const | constructors | Constructs the default source: Web Crypto UUIDs. |
 | `BranchIds.layer` | const | layers | Provides `makeWebCrypto`. |
 | `BranchIds.layerSequential` | const | layers | Provides a deterministic counter, `<prefix>-1`, `<prefix>-2`, and so on. |
+
+---
+
+## @smthrs/testing
+
+Route: /api/testing
+
+> @smthrs/testing: Testing and conformance library for flows.
+
+{/* Generated by `node packages/testing/scripts/docs.mjs` from packages/testing. Edit package sources, never this file. */}
+
+## @smthrs/testing
+
+Testing and conformance library for flows.
+
+### What this package is
+
+`@smthrs/testing` is the assertion and conformance vocabulary for flows. It
+holds no runner: `Vitest` is a thin adapter, every assertion is an ordinary
+`Effect`, and every conformance case is a value a runner registers. A consumer
+that uses another runner loses only that one module.
+
+Four things live here.
+
+- **Assertions** over the artifacts a flow produces: `PlanAssertions` for a
+  built plan, `JournalAssertions` for a journal, `Divergence` for the first
+  attributable difference between two journals, `ScoreGate` for graded eval
+  suites.
+- **Layer bundles** that make a tier explicit: `TestLayers.unit` for the unit
+  tier, `TestLayers.poisoned` for plan-time purity.
+- **Conformance suites** an implementation must pass: `Conformance.coreSuite`
+  for any engine, `HostSuite.hostSuite` for any Host bundle.
+- **Doubles**: `MemoryEngine` and `RestartableEngine` as reference engines,
+  `FlowEngineLike` as the adapter that runs the same pins against the real
+  engine, and `RecordedModel`, `RecordingModel`, and `CachedModel` as the
+  record-and-replay model loop.
+
+### Typed failures
+
+Every failure carries a stable `code` from one closed union, exported as
+`TestingError.Code`. Match on the code, never on the prose of a message.
+
+A conformance seam never carries an `unknown` error channel, no operation lets
+a host error escape its declared channel, and an error a runner prints in full
+carries a bounded identity rather than the input that produced it: a fixture
+miss reports the model id, the message count, and the tool names, not the
+conversation.
+
+Four codes are shouted rather than `snake_case`: `REPLAY_HARNESS_MISMATCH`,
+`EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, `RALPH_MAX_REACHED`. They are
+inherited verbatim from the 0.x codes consumers already match on. Every new
+code is `snake_case`.
+
+### What is copied and what is aliased
+
+A recorder writes what the provider saw. `RecordingModel` projects the request
+when the stream is acquired, not after it ends, and snapshots each event as it
+is emitted; `Fixture.recordedRequest` deep-copies every collection it stores,
+including tool `parameters`, `stopSequences`, `itemIds`, and
+`addedToolNames`. A caller may mutate its own request or its own event objects
+during an exchange without changing what was recorded.
+
+A fixture loaded through `Fixture.decode` is a plain value. Nothing in this
+package mutates it, and `Fixture.index` memoizes a digest-keyed lookup on it, so
+holding one fixture across many replays is the intended use.
+
+### Identity and encoding
+
+`Fixture.canonicalRequestDigest` sorts object keys recursively, retains array
+order, and rejects anything that is not JSON with a typed
+`FixtureEncodingError` naming the path of the offending value. It returns the
+canonical encoding rather than a fixed-length hash: a cache selects the call to
+replay by this value, and a hash collision would replay another conversation's
+response as this one's. Strings are compared by code unit throughout, never by
+locale, so a rendered plan is byte-identical on every machine.
+
+### Limits
+
+- `Fixture.canonicalRequestDigest` rejects a value nested more than 128 levels
+  deep rather than overflowing the stack.
+- `FlowEngineLike` gives a runtime 1000 scheduler passes to publish a result
+  whose body has already exited, then fails typed rather than spinning.
+- Conformance pins wait on a bounded live-clock schedule, roughly one second,
+  then fail rather than hang.
+- `ScoreGate` has no sample-count limit: its minimum is an iterative reduction,
+  not an argument spread.
+
+### Runner requirements
+
+`Conformance.coreSuite`'s race and interrupt cases advance virtual time, so
+register them under a deterministic clock. `Vitest.testEffect(...).effect` (and
+its `scoped` alias) supplies one; `.live` does not.
+
+`@smthrs/testing/Vitest` is ESM-only, and it is deliberately absent from the
+root barrel: `vitest` refuses to load through `require()`, so a barrel that
+re-exported it would break `require("@smthrs/testing")` for every CommonJS
+consumer of the assertion helpers.
+
+### Reference
+
+21 public modules, 140 documented exports.
+
+| Module | Public exports | Description |
+| --- | --- | --- |
+| `TestingError` | `PlanAssertionCode`, `JournalAssertionCode`, `ScoreGateCode`, `Code`, `PlanAssertionError`, `JournalAssertionError`, `ConformanceViolation`, `UnscriptedModelError`, `FixtureEncodingError`, `ReplayHarnessMismatchError`, `FixtureDivergenceError`, `ExactlyOnceUnsupportedError`, `CapabilityContractError`, `ConformanceSkipped`, `InvalidScoreSample`, `ScoreGateError`, `EngineUnavailableError`, `ExecutionConflictError`, `TransactionBoundary`, `RewindBoundary`, `CapabilityOperationError`, `TransactionCommitError`, `RewindFailureError`, `FlowHashMismatchError`, `TaskTimeoutError`, `RalphMaxReachedError`, `EngineSubjectError` | Typed failures raised by testing and conformance operations. |
+| `PlanLike` | `PlanPlacementLike`, `PlanNodeLike`, `PlanLike` | Read-only plan introspection types. |
+| `EngineSubject` | `StepSpec`, `FlowSpec`, `JournalEntryLike`, `ExecutionResult`, `EngineSubject`, `make`, `layer`, `makeNoop`, `layerNoop` | The black-box engine *subject* seam used by conformance pins. |
+| `ModelLike` | `ModelRequestLike`, `ModelEventLike`, `modelErrorTag`, `ModelErrorLike`, `ModelLikeError`, `ModelLike`, `make` | Structural model seam coordinated read-only with `packages/model`. |
+| `TestLayers` | `unit`, `poisonedClockAndRandom`, `poisoned` | Deterministic test layer bundles. |
+| `Plan` | `Node`, `Plan`, `KeysOptions`, `FromGraphOptions`, `PlanOfOptions`, `keys`, `fromGraph`, `planOf`, `make`, `render`, `node`, `edge` | Pure projection and presentation helpers for built plans. |
+| `PlanAssertions` | `PlacementExpectation`, `Edge`, `EdgeOptions`, `CoverageOptions`, `NodeAssertions`, `PlanAssertions`, `PlansAssertions`, `expectPlan`, `expectKeyGoldens`, `expectPure`, `expectPlans` | Pure assertions for already-built plan graphs. |
+| `JournalAssertions` | `TerminalStatus`, `JournalExpectations`, `EffectExpectations`, `expectJournal` | Effect-valued assertions over a flow journal. |
+| `Divergence` | `Divergence`, `firstDivergence`, `assertNoDivergence` | Deterministic journal divergence attribution. |
+| `Conformance` | `ConformanceCase`, `coreSuite` | Runner-independent conformance cases for flow engine implementations. |
+| `RecordedModel` | `Options`, `RecordedModel`, `Replay`, `make`, `layer`, `scripted` | A recorded, non-networking `ModelLike` implementation. |
+| `RecordingModel` | `Sink`, `make`, `layer` | A live model wrapped so every call it makes is recorded. |
+| `CachedModel` | `Options`, `make`, `layer` | A model that answers from a fixture and records what the fixture is missing. |
+| `Fixture` | `RecordedCall`, `Fixture`, `decode`, `canonicalRequestDigest`, `index`, `recordedRequest` | Recorded-model fixture values and their portable decoder. |
+| `FixtureStore` | `FixtureStore`, `make`, `makeMemory`, `layerMemory`, `makeFile`, `layerFile` | Where a cached model reads and records its fixture. |
+| `MemoryEngine` | `EngineStore`, `makeStore`, `make`, `layer` | Reference in-memory flow engine with an externally owned replay store. |
+| `FlowEngineLike` | `make`, `layer`, `layerOver`, `layerMemory` | `EngineSubject` adapter over the real `/engine`. |
+| `RestartableEngine` | `Restartable`, `make` | Scoped restart harness for the reference in-memory engine. |
+| `HostSuite` | `CapabilityExpectation`, `HttpTransportExpectation`, `HostProfile`, `HostSuiteError`, `HostSuiteCase`, `HostBundle`, `hostSuite` | Runner-agnostic conformance cases for complete Host bundles. |
+| `ScoreGate` | `ScoreSample`, `Verdict`, `validateSamples`, `combine`, `grade`, `ScoreExpectation`, `expectScores`, `SuiteCase`, `SuiteGates`, `CaseReport`, `CaseVerdict`, `SuiteReport`, `SuiteOptions`, `suite`, `ciGrade` | Fixed-suite score gates and the graded suite runner. |
+| `Vitest` *(subpath)* | `it`, `TestEffect`, `testEffect` | Vitest adapter for scoped Effect test bodies. |
+
+#### TestingError
+
+`import * as TestingError from "@smthrs/testing/TestingError"`
+
+Typed failures raised by testing and conformance operations.
+
+Every error carries a stable `code` drawn from a closed literal union, so consumers can match on codes without parsing messages. The per-error code schemas and the combined `Code` union are exported.
+
+Governing design: `packages/testing/docs/concepts.md`, "Errors are typed values, not string conventions".
+
+Two casing conventions live in `Code`. Most literals are `snake_case`; `REPLAY_HARNESS_MISMATCH`, `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, and `RALPH_MAX_REACHED` are inherited verbatim from the 0.x codes consumers already match on, and are kept shouted so a migrated matcher keeps working. A new code is `snake_case`.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `PlanAssertionCode` | const | codes | Codes raised by plan assertions. |
+| `JournalAssertionCode` | const | codes | Codes raised by journal assertions. |
+| `ScoreGateCode` | const | codes | Codes raised by fixed-suite score gates. |
+| `Code` | const | codes | Every stable code any testing error can carry, as one closed union. |
+| `PlanAssertionError` | class | errors | An assertion failure while inspecting a flow plan. |
+| `JournalAssertionError` | class | errors | An assertion failure while inspecting a flow journal. |
+| `ConformanceViolation` | class | errors | A failed executable conformance pin. |
+| `UnscriptedModelError` | class | errors | A recorded model received a request with no matching fixture. |
+| `FixtureEncodingError` | class | errors | A value a fixture must store is not representable as canonical JSON. |
+| `ReplayHarnessMismatchError` | class | errors | A replay harness produced output different from its recorded expectation. |
+| `FixtureDivergenceError` | class | errors | The first divergent field in a fixture sequence. |
+| `ExactlyOnceUnsupportedError` | class | errors | Exactly-once assertions are unsupported because the assertion vocabulary must not be able to lie: |
+| `CapabilityContractError` | class | errors | An operation violated its declared capability contract. |
+| `ConformanceSkipped` | class | errors | A conformance pin could not run because its subject does not implement the capability named by the pin. |
+| `InvalidScoreSample` | const | codes | One score observation a gate rejected, identified the way `ScoreSample` identifies it, so a suite of five hundred samples names the scorer that produced the bad value rather than reporting a bare number. |
+| `ScoreGateError` | class | errors | A score sample did not satisfy a configured gate, or a gate was misused. |
+| `EngineUnavailableError` | class | errors | The requested engine subject is unavailable for a test or conformance pin. |
+| `ExecutionConflictError` | class | errors | A `run` named an execution id that already exists, with a different flow or a different payload. |
+| `TransactionBoundary` | const | codes | Transaction commit-failure injection boundaries. |
+| `RewindBoundary` | const | codes | Rewind boundaries at which a conformance subject can inject a failure. |
+| `CapabilityOperationError` | class | errors | A requested capability operation has no valid subject. |
+| `TransactionCommitError` | class | errors | A failure raised at an injected transactional commit boundary. |
+| `RewindFailureError` | class | errors | A failure raised at an injected frame-rewind boundary. |
+| `FlowHashMismatchError` | class | errors | Resume was rejected because the current flow or import graph differs from the stamp recorded for the execution. |
+| `TaskTimeoutError` | class | errors | An approval failed because its durable deadline elapsed under the fail policy. |
+| `RalphMaxReachedError` | class | errors | A bounded flow loop exhausted its iteration budget. |
+| `EngineSubjectError` | type | errors | Every typed failure an engine subject (or one of its optional capabilities) may raise. |
+
+#### PlanLike
+
+`import * as PlanLike from "@smthrs/testing/PlanLike"`
+
+Read-only plan introspection types.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `PlanPlacementLike` | interface | models | A serializable projection of a node's placement directive: |
+| `PlanNodeLike` | interface | models | One plan node, in the shape the plan assertions read. |
+| `PlanLike` | interface | models | A compiled plan, in the shape the plan assertions read. |
+
+#### EngineSubject
+
+`import * as EngineSubject from "@smthrs/testing/EngineSubject"`
+
+The black-box engine *subject* seam used by conformance pins.
+
+This is the test-owned port: a pin drives an arbitrary engine implementation through `run`/`result`/`interrupt`/`resume`/`journal` and asserts on the journal it produced. It is deliberately distinct from the production harness port `/harness/EngineLike` (`sealStep`/`splice`/`suspend`), which is the seam the built-in harness *consumes*. The two are never interchangeable and no longer share a name.
+
+Governing design: `packages/testing/docs/concepts.md`, "The engine subject seam".
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `StepSpec` | type | models | One step of a conformance flow: |
+| `FlowSpec` | interface | models | A conformance flow, described only by its ordered steps. |
+| `JournalEntryLike` | interface | models | One journal entry, in the shape the conformance assertions read. |
+| `ExecutionResult` | interface | models | How one execution ended. |
+| `EngineSubject` | interface | services | The engine under test, reduced to what conformance needs: |
+| `make` | const | constructors | Builds an `EngineSubject` from an implementation of its methods. |
+| `layer` | const | layers | Provides `EngineSubject` from an implementation. |
+| `makeNoop` | const | constructors | An `EngineSubject` that fails every operation as unavailable. |
+| `layerNoop` | const | layers | Provides `makeNoop`. |
+
+#### ModelLike
+
+`import * as ModelLike from "@smthrs/testing/ModelLike"`
+
+Structural model seam coordinated read-only with `packages/model`.
+
+These shapes are a structural copy of `@smthrs/model`'s request, event, and error contracts, and the copy is deliberate: a third-party engine subject or scorer implements `ModelLike` without adopting the model package's classes, and a recorded fixture stores plain data rather than a `Schema.Class` instance whose shape would change with the class.
+
+It is NOT a way to avoid depending on `@smthrs/model`. This package depends on it, and `CachedModel` and `RecordingModel` import it directly to wrap the real provider seam. That is what the earlier wording here claimed, and it was never true. The two shapes can therefore drift, and `test/ModelLikeParity.test.ts` is what stops them: it asserts, at compile time, that a production request, event, and error are assignable to the structural copies a fixture stores.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `ModelRequestLike` | interface | models | The public request shape of `/model/ModelRequest`, copied structurally so a fixture stores plain data and a third-party subject need not adopt the model package's classes. |
+| `ModelEventLike` | type | models | The public event shape of `/model/ModelEvent`, copied structurally from its streaming protocol. |
+| `modelErrorTag` | const | errors | The tag every `/model/ModelError` carries. |
+| `ModelErrorLike` | interface | errors | The public error shape of `/model/ModelError`, copied structurally so a fixture stores it as plain data. |
+| `ModelLikeError` | type | errors | Errors surfaced by the local model port. |
+| `ModelLike` | interface | services | The model seam a test drives, structurally identical to `@smthrs/model`'s `Model` but not depending on it. |
+| `make` | const | constructors | Builds a `ModelLike` from an implementation of its one method. |
+
+#### TestLayers
+
+`import * as TestLayers from "@smthrs/testing/TestLayers"`
+
+Deterministic test layer bundles.
+
+Governing design: `packages/testing/docs/concepts.md`, "A test harness is a layer set".
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `unit` | const | layers | The unit-tier bundle: |
+| `poisonedClockAndRandom` | const | layers | Poisoned `Clock` and `Random` references. |
+| `poisoned` | const | layers | A plan-time bundle: |
+
+#### Plan
+
+`import * as Plan from "@smthrs/testing/Plan"`
+
+Pure projection and presentation helpers for built plans.
+
+Keys are derived from the graph's digest-free key material through `/keys`: sealed nodes get cross-run content keys, non-sealed nodes get run-local ordinal keys. Plan projection is pure: it never touches Host, Model, or Clock, and is expected to succeed under `TestLayers.poisoned`.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `Node` | interface | models | A plan node with presentation-only collections in canonical order. |
+| `Plan` | interface | models | A built plan with presentation-only collections in canonical order. |
+| `KeysOptions` | interface | models | Options for graph-local key derivation. |
+| `FromGraphOptions` | interface | models | Inputs needed to project a core graph into the testing assertion port. |
+| `PlanOfOptions` | interface | models | Options accepted by `planOf`. |
+| `keys` | const | constructors | Derives every node's step key from the graph's digest-free key material. |
+| `fromGraph` | const | constructors | Projects the public `/core` graph introspection API into a PlanLike. |
+| `planOf` | const | constructors | Decodes flow input through the flow's declared input schema, then builds and projects the plan. |
+| `make` | const | constructors | Copies a built plan into a stable presentation order. |
+| `render` | const | formatting | Renders a plan as a stable, line-oriented canonical string. |
+| `node` | const | getters | Returns the built node with the supplied id, if present. |
+| `edge` | const | formatting | Renders an edge as a stable, readable pair. |
+
+#### PlanAssertions
+
+`import * as PlanAssertions from "@smthrs/testing/PlanAssertions"`
+
+Pure assertions for already-built plan graphs.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `PlacementExpectation` | type | models | An expected placement: |
+| `Edge` | type | models | A plan edge accepted by `edges`. |
+| `EdgeOptions` | interface | models | Options for edge assertions. |
+| `CoverageOptions` | interface | models | Options for static plan coverage assertions. |
+| `NodeAssertions` | interface | models | Fluent assertions scoped to a single built node. |
+| `PlanAssertions` | interface | models | Fluent assertions scoped to one built plan. |
+| `PlansAssertions` | interface | models | Fluent assertions across a static suite of built plans. |
+| `expectPlan` | const | constructors | Creates fluent pure assertions for a built plan. |
+| `expectKeyGoldens` | const | assertions | Asserts key digests against checked-in goldens: |
+| `expectPure` | const | assertions | Runs a plan computation that must be pure. |
+| `expectPlans` | const | constructors | Creates static coverage assertions across built plans for a suite's inputs. |
+
+#### JournalAssertions
+
+`import * as JournalAssertions from "@smthrs/testing/JournalAssertions"`
+
+Effect-valued assertions over a flow journal.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `TerminalStatus` | type | models | A terminal outcome recorded by an engine journal. |
+| `JournalExpectations` | interface | models | Fluent effect assertions for one journal. |
+| `EffectExpectations` | interface | models | Fluent effect assertions for one effect key in a journal. |
+| `expectJournal` | const | assertions | Builds fluent, Effect-valued assertions over journal entries. |
+
+#### Divergence
+
+`import * as Divergence from "@smthrs/testing/Divergence"`
+
+Deterministic journal divergence attribution.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `Divergence` | interface | models | The first attributable difference between two journal entries. |
+| `firstDivergence` | const | assertions | Finds the first differing journal entry, reporting the entry index and the first differing field. |
+| `assertNoDivergence` | const | assertions | Fails with the first journal divergence. |
+
+#### Conformance
+
+`import * as Conformance from "@smthrs/testing/Conformance"`
+
+Runner-independent conformance cases for flow engine implementations.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `ConformanceCase` | interface | models | A black-box assertion over an `EngineSubject` implementation. |
+| `coreSuite` | const | constructors | Builds the mandatory black-box suite every `EngineSubject` must pass: |
+
+#### RecordedModel
+
+`import * as RecordedModel from "@smthrs/testing/RecordedModel"`
+
+A recorded, non-networking `ModelLike` implementation.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `Options` | interface | models | Options for recorded-model replay. |
+| `RecordedModel` | interface | services | Controller for inspecting a recorded-model replay. |
+| `Replay` | interface | models | The model and controller constructed from a fixture. |
+| `make` | const | constructors | Builds a replay model and its controller. |
+| `layer` | const | layers | Provides both `ModelLike` and the recorded-model controller. |
+| `scripted` | const | constructors | Creates a fixture-backed model from handwritten calls. |
+
+#### RecordingModel
+
+`import * as RecordingModel from "@smthrs/testing/RecordingModel"`
+
+A live model wrapped so every call it makes is recorded.
+
+This is the other half of `RecordedModel`: it produces the fixtures that module replays. The recorder is a `/model/Model`, not a `ModelLike`, because it wraps the real provider seam the code under test already talks to.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `Sink` | type | models | Where a recorder sends each completed call. |
+| `make` | const | constructors | Wraps a live model so each call is written to `sink` when its stream ends. |
+| `layer` | const | layers | Provides a recording model over a live one. |
+
+#### CachedModel
+
+`import * as CachedModel from "@smthrs/testing/CachedModel"`
+
+A model that answers from a fixture and records what the fixture is missing.
+
+This is the record-and-replay loop as one layer: a call whose canonical request digest is already in the fixture replays from it, and a call that is not runs against the live model and is appended. The first run records, every run after it replays, and neither the test nor the flow changes shape.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `Options` | interface | models | What a cached model is built from. |
+| `make` | const | constructors | Builds a model that replays a fixture hit and records a miss. |
+| `layer` | const | layers | Provides `make` as the `/model/Model` seam. |
+
+#### Fixture
+
+`import * as Fixture from "@smthrs/testing/Fixture"`
+
+Recorded-model fixture values and their portable decoder.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `RecordedCall` | interface | models | One recorded model invocation. |
+| `Fixture` | interface | models | A portable recording of model calls. |
+| `decode` | const | decoders | Decodes a checked-in recorded-model fixture. |
+| `canonicalRequestDigest` | const | encoding | The canonical JSON encoding of a request, and its replay identity. |
+| `index` | const | encoding | A digest-keyed index over a fixture's recorded calls, computed once. |
+| `recordedRequest` | const | encoding | Projects a request onto the plain JSON data a fixture stores. |
+
+#### FixtureStore
+
+`import * as FixtureStore from "@smthrs/testing/FixtureStore"`
+
+Where a cached model reads and records its fixture.
+
+The store is the only part of the record-and-replay loop that touches a host: `layerFile` is Node-only, `layerMemory` runs anywhere.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `FixtureStore` | interface | services | Loads and records a recorded-model fixture. |
+| `make` | const | constructors | Builds a `FixtureStore` from an implementation of its two methods. |
+| `makeMemory` | const | constructors | Builds a store that keeps the fixture in memory. |
+| `layerMemory` | const | layers | Provides `makeMemory`. |
+| `makeFile` | const | constructors | Builds a store over a JSON file. |
+| `layerFile` | const | layers | Provides `makeFile`. |
+
+#### MemoryEngine
+
+`import * as MemoryEngine from "@smthrs/testing/MemoryEngine"`
+
+Reference in-memory flow engine with an externally owned replay store.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `EngineStore` | interface | models | Persistent state shared by one or more in-memory engine instances. |
+| `makeStore` | const | constructors | Creates an empty persistent store for memory-engine executions. |
+| `make` | const | constructors | Constructs an in-memory engine whose durable state is held by `store`. |
+| `layer` | const | layers | Provides a scoped in-memory engine backed by `store`. |
+
+#### FlowEngineLike
+
+`import * as FlowEngineLike from "@smthrs/testing/FlowEngineLike"`
+
+`EngineSubject` adapter over the real `/engine`.
+
+This is the authoritative subject for the core conformance operations: identity, replay, race, and interruption run against the production engine, not a test-only model. Governing design: `packages/testing/docs/concepts.md`, "The engine subject seam". Smithers capabilities absent from the production contract are recorded as parity gaps rather than simulated. The adapter registers each `FlowSpec` as a real `Flow` whose execute function runs every step as an `Action`:
+
+- Sealed steps declare their spec key as the activity idempotency key, so the engine derives content identity from it and aliased sealed steps replay one recorded result. - Unsealed steps declare no idempotency key, so the engine derives occurrence (ordinal) identity and duplicate declared keys run separately. - Race steps run through `Action.raceAll`, the engine's durable race.
+
+Step outcomes are journaled by the adapter as they settle; replayed steps never invoke their closures, so the journal is written exactly once per behavior-bearing outcome.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `make` | const | constructors | Constructs an `EngineSubject` over the real flow engine in the ambient `FlowEngine` service. |
+| `layer` | const | layers | Provides an `EngineSubject` over the ambient `FlowEngine` service. |
+| `layerOver` | const | layers | Provides an `EngineSubject` over any `FlowRuntime` implementation. |
+| `layerMemory` | const | layers | Provides an `EngineSubject` over the engine's in-memory implementation. |
+
+#### RestartableEngine
+
+`import * as RestartableEngine from "@smthrs/testing/RestartableEngine"`
+
+Scoped restart harness for the reference in-memory engine.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `Restartable` | interface | models | A stable engine facade and controls for replacing its live in-memory instance while retaining the persistent execution store. |
+| `make` | const | constructors | Constructs a restartable engine over one persistent `MemoryEngine` store. |
+
+#### HostSuite
+
+`import * as HostSuite from "@smthrs/testing/HostSuite"`
+
+Runner-agnostic conformance cases for complete Host bundles.
+
+One shared suite parameterized by layer set. Governing designs: `packages/testing/docs/concepts.md`, "Host-layer conformance" and "Tickets, not exceptions".
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `CapabilityExpectation` | type | models | A declared Host capability expectation. |
+| `HttpTransportExpectation` | type | models | HTTP requires an explicit probe target so the shared suite never invents a live network call. |
+| `HostProfile` | interface | models | Every closed-list Host capability must be declared; omission is not an admission mechanism. |
+| `HostSuiteError` | type | models | Every failure a host suite case may raise: |
+| `HostSuiteCase` | interface | models | A declarative conformance case consumable by any Effect test runner. |
+| `HostBundle` | type | models | The output shape of the public Host bundle contract. |
+| `hostSuite` | const | constructors | Produces the shared Host conformance suite. |
+
+#### ScoreGate
+
+`import * as ScoreGate from "@smthrs/testing/ScoreGate"`
+
+Fixed-suite score gates and the graded suite runner.
+
+Live production observations intentionally do not enter this module: a gate is evaluated only over its caller-owned, fixed sample array. The case-runner is caller-supplied, following the per-case runner and reporter split of the vitest-evals harnesses this is modelled on; scorer samples flow through it unchanged.
+
+Governing design: `packages/testing/docs/concepts.md`, "Scored suites and inconclusive grading".
+
+INCONCLUSIVE grades an environment fault, never a measurement. A gate the scores actually missed is a finding and grades `Failed`, so a suite cannot report an undecidable harness on evidence it did decide.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `ScoreSample` | type | models | A score observation collected for one fixed test case and step key. |
+| `Verdict` | type | models | The non-error result of grading a fixed suite. |
+| `validateSamples` | const | gates | Rejects every score observation outside `[0, 1]`, naming each one. |
+| `combine` | const | grading | Reduces the verdicts of several gates, plus the environment faults observed outside them, to one verdict. |
+| `grade` | const | grading | Maps a verdict to the shared CI convention: |
+| `ScoreExpectation` | interface | constructors | A fixed-suite score-gate builder. |
+| `expectScores` | const | constructors | Builds gates over a fixed sample set. |
+| `SuiteCase` | interface | models | One fixed suite case: |
+| `SuiteGates` | interface | models | Gates applied across the whole fixed suite. |
+| `CaseReport` | interface | models | The graded outcome of one case. |
+| `CaseVerdict` | type | models | A per-case verdict. |
+| `SuiteReport` | interface | models | The full graded report of a fixed suite run. |
+| `SuiteOptions` | interface | models | Options for `suite`. |
+| `suite` | const | constructors | Runs a fixed suite through its case-runner, collects every score sample, applies the declared gates over the samples that exist, and grades the whole run. |
+| `ciGrade` | const | grading | The CI grading of a suite report, through `grade`: |
+
+#### Vitest
+
+`import * as Vitest from "@smthrs/testing/Vitest"` (not re-exported from the root)
+
+Vitest adapter for scoped Effect test bodies.
+
+This is the sole module in `/testing` that imports a test runner, and the runner boundary is the **only** sanctioned `AbortSignal` touch in the package: Vitest cancellation is converted to fiber interruption at the edge (`Fiber.interrupt`), never threaded through Effect code.
+
+Governing design: `packages/testing/docs/concepts.md`, "The vitest boundary".
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `it` | const | testing | The Effect-aware `it`, with `scoped` aliased onto `it.effect`. |
+| `TestEffect` | interface | testing | The Effect-aware test registrars, each carrying the requirements `R` a body may use: |
+| `testEffect` | const | testing | Builds a **fresh** environment from the supplied layer for every test case and runs each body in its own Scope, so no state, including the deterministic variant's `TestClock`, is shared between tests and no test can depend on registration order. |
 
 ---
 
@@ -16694,6 +17625,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `AlreadyResolved` | `already_resolved` |
 | `PlanNotFound` | `plan_not_found` |
 | `RunNotFound` | `run_not_found` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -16732,6 +17664,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -16773,6 +17706,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `AlreadyResolved` | `already_resolved` |
 | `PlanNotFound` | `plan_not_found` |
 | `RunNotFound` | `run_not_found` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -16899,6 +17833,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
@@ -16940,6 +17875,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
 | `ClaimLost` | `claim_lost` |
+| `InvalidInput` | `invalid_input` |
 | `LaunchFailed` | `launch_failed` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
@@ -16979,6 +17915,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
 | `NoMatchingWait` | `no_matching_wait` |
+| `InvalidInput` | `invalid_input` |
 | `PersistenceError` | `persistence_failed` |
 | `Unavailable` | `unavailable` |
 
