@@ -8,12 +8,12 @@ cacheable target and stores the result after a green run.
 The planner builds four fields of key material for each target, encodes them
 deterministically, and takes the sha256 of the encoding.
 
-| Field          | Contents                                                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `body`         | The target's flow tag, its target id, its target implementation digest, its declared output roots, and `EXECUTION_FORMAT` |
-| `inputs`       | The ambient identity, the canonicalized attrs, the expanded declared inputs, and the dependency labels with their keys    |
-| `layers`       | A catalog-declared layer identity list                                                                                    |
-| `capabilities` | A catalog-declared capability list                                                                                        |
+| Field          | Contents                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `body`         | The target's flow tag, target id, schema identity, declared output roots, and `EXECUTION_FORMAT`                       |
+| `inputs`       | The ambient identity, the canonicalized attrs, the expanded declared inputs, and the dependency labels with their keys |
+| `layers`       | A catalog-declared layer identity list                                                                                 |
+| `capabilities` | A catalog-declared capability list                                                                                     |
 
 ### The encoding is injective
 
@@ -66,22 +66,23 @@ lists from the real flow graph and its resolved layers.
 
 ### Implementation identity
 
-Two things identify the implementation:
+The ambient `implementation` field is a digest of the loaded, shipped source
+trees: the CLI, target catalog, build runtime, execution libraries, and pinned
+runtime dependencies. Logical root names, relative file names, and file bytes
+enter the digest; absolute paths never do. Two checkouts of the same sources at
+different locations therefore agree on the key and can share a cache.
 
-- `Target.Metadata.implementationDigest` covers the text of the functions a target
-  declaration passes to `Target.make`: the implementation, and the optional
-  functions deriving attrs, inputs, outputs, and cacheability.
-- The ambient `implementation` field is a digest of the shipped source trees —
-  `cli/src`, `targets/src`, and `src` — as logical relative names plus file bytes.
-  Absolute paths never enter it, so two checkouts of the same sources at
-  different locations agree on the key and can share a cache.
+`Target.Metadata.implementationDigest` is not persistent key material. It
+includes process-local entropy for any callback not declared with
+`Node.capture`, because JavaScript cannot inspect an ordinary closure's captured
+values. It distinguishes target implementations within one process, but would
+force every target to miss in the next process.
 
-The second exists because the first is blind to everything the declared
-functions call: helpers, action layer implementations, and the executor's own
-admission logic. Editing `measureOutput` used to leave every stored entry
-addressable under an unchanged key. The fingerprint changes automatically when
-any byte of the implementation changes; there is no salt to remember to bump.
-`EXECUTION_FORMAT` remains for deliberate semantic breaks.
+The ambient fingerprint covers the complete shipped implementation rather than
+only the declared callback: helpers, action layer implementations, and the
+executor's own admission logic all re-key every target when any source byte
+changes. There is no salt to remember to bump. `EXECUTION_FORMAT` remains for
+deliberate semantic breaks.
 
 ## What re-keys a target
 
