@@ -35,6 +35,7 @@ import type {
 } from "../src/api.ts"
 import type { Env } from "./env.ts"
 import { INDEX_SESSION, byRecency, indexSession, titleFrom } from "./registry.ts"
+import { track } from "./stream.ts"
 import { runTurn } from "./turn.ts"
 
 // ---------------------------------------------------------------------------
@@ -251,16 +252,18 @@ export class AppSession extends DurableObject<Env> {
     })
 
     // The flag and the controller belong to this stream, so they are cleared
-    // where the stream ends rather than where the request returns.
-    const tracked = body.pipeThrough(
-      new TransformStream<Uint8Array, Uint8Array>({
-        transform: (chunk, out) => out.enqueue(chunk),
-        flush: () => {
-          this.busy = false
-          this.cancels.delete(controller)
-        }
-      })
-    )
+    // where the stream ends rather than where the request returns. `track` runs
+    // that cleanup on all three endings; a `TransformStream`'s `flush` ran on
+    // only one of them, so a cancelled readable side or a failed source left
+    // `busy` true and every later turn answered 409. A hangup also aborts the
+    // controller, which is the signal the turn itself watches.
+    const tracked = track(body, {
+      onSettle: () => {
+        this.busy = false
+        this.cancels.delete(controller)
+      },
+      onCancel: (reason) => controller.abort(reason)
+    })
 
     return new Response(tracked, {
       headers: {

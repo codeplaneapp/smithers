@@ -21,6 +21,14 @@ export interface Env {
   readonly OPENAI_API_KEY?: string
   /** Upstream JSON-RPC the Tevm fork reads state from. Optional in mock mode. */
   readonly TEVM_FORK_RPC_URL?: string
+  /**
+   * The shared credential every `/api/*` route but `GET /api/health` requires.
+   *
+   * Unset means the API is open, which is what a `pnpm dev` run wants and what
+   * a deploy does not. `GET /api/health` reports which of the two an instance
+   * is in. `wrangler secret put APP_API_TOKEN`. See `worker/guard.ts`.
+   */
+  readonly APP_API_TOKEN?: string
   /** The app name from `PACKAGE.ts`, echoed by `GET /api/health`. */
   readonly APP_NAME: string
   /**

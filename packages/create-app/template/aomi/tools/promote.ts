@@ -12,6 +12,7 @@
  * Object one here. This module is the app-local stand-in with the same shapes, so
  * deleting it later is a change of import path.
  */
+import { isRouteSegment } from "@smthrs/create-app/app"
 import * as Flow from "@smthrs/core/Flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import * as Context from "effect/Context"
@@ -225,9 +226,6 @@ const writeFlowFlow = Flow.make({
 // Handlers
 // ---------------------------------------------------------------------------
 
-/** The router's own rule for a routable flow directory (@smthrs/create-app/router). */
-const FLOW_ID = /^[a-z][a-z0-9-]*$/
-
 const filesFor = (input: WriteFlowInput): Record<string, string> => ({
   [`flows/${input.id}/flow.ts`]: input.flowSource,
   [`flows/${input.id}/flow.e2e.ts`]: input.testSource,
@@ -263,7 +261,11 @@ export const promoteSource = (services: Context.Context<CellHistory | FlowStore>
         flow: writeFlowFlow,
         handler: (input) =>
           Effect.gen(function*() {
-            if (!FLOW_ID.test(input.id)) {
+            // The router's own rule, imported rather than restated: a saved
+            // flow whose id this accepts is a flow `pnpm routes` will route.
+            // One segment, so `filesFor` writes `flows/<id>/flow.ts` and not a
+            // nested tree.
+            if (!isRouteSegment(input.id)) {
               return yield* Effect.fail(
                 new PromoteError({
                   message:

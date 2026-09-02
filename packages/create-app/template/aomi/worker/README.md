@@ -12,6 +12,8 @@ second deployable and no origin server.
 | `index.ts` | The entry point. Exports the Durable Object class, so it is the only module here that imports `cloudflare:workers` |
 | `router.ts` | The router. One switch over `Routes` from `src/api.ts`; everything else falls through to `ASSETS`. Free of `cloudflare:workers`, so `test/worker.test.ts` drives it on plain Node |
 | `registry.ts` | Which Durable Object holds a session, and the one well-known object that holds the session list |
+| `guard.ts` | The three bounds every `/api/*` request passes: credential, body size, session-id shape |
+| `stream.ts` | Streamed-response bookkeeping that runs once on close, source error, and cancel |
 | `env.ts` | The bindings, as an interface. Nothing else reads configuration |
 | `AppSession.ts` | One Durable Object per session: transcript, cards, saved flows |
 | `turn.ts` | One agent turn as an NDJSON stream of `TurnFrame` lines, with the runtime imported lazily |
@@ -30,8 +32,13 @@ second deployable and no origin server.
 | `GET /api/session` | `{ sessions: [] }` — the shell keeps its own list |
 | `GET /api/flows?sessionId=` | File flows from `routes.gen.ts` plus the session's saved flows |
 | `POST /api/flows/run` | `{ executionId }` |
-| `GET /api/health` | `{ ok, build, app }` |
+| `GET /api/health` | `{ ok, build, app, auth }`, reachable without a credential |
 | anything else | `env.ASSETS.fetch(request)` |
+
+Every `/api/*` route but health answers `401` when `APP_API_TOKEN` is set and
+the request carries no matching `Authorization: Bearer` header, `413` for a JSON
+body over 64 KiB, and `400` for a session id that is not a flat identifier of at
+most 128 characters.
 
 `assets.run_worker_first` is scoped to `/api/*`, so an asset request never wakes
 this code. An unrouted `/api/*` path answers this Worker's own JSON 404 rather
@@ -81,6 +88,7 @@ Secrets, set once per environment and never committed:
 
 ```sh
 wrangler secret put OPENAI_API_KEY --config worker/wrangler.jsonc
+wrangler secret put APP_API_TOKEN --config worker/wrangler.jsonc
 ```
 
 `seats.ts` reads the credential for the provider the seat names, so the secret
@@ -92,6 +100,30 @@ a deploy secret: only `test/tevm.test.ts` reads it, from `.dev.vars`.
 custom domain. Wrangler creates the DNS record and the certificate on the
 `smithers.sh` zone during the first deploy; nothing has to be added in the
 dashboard.
+
+## Security
+
+`CreateApp` ships `deploy` as a first-class target with a custom domain, so what
+a deployed instance is bounded by is worth stating plainly. `guard.ts` owns all
+three bounds and `test/worker.test.ts` drives each of them.
+
+| Bound | What it does | Default |
+| --- | --- | --- |
+| `APP_API_TOKEN` | Every `/api/*` route but `GET /api/health` requires `Authorization: Bearer <it>`, refused with 401 before any Durable Object is woken | **Unset, so the API is open** |
+| 64 KiB body cap | Every JSON body is read through the cap and refused with 413 past it, with or without a declared `content-length` | Always on |
+| Session-id shape | A flat identifier of at most 128 characters, never the registry object's name, so `INDEX_SESSION` cannot be addressed as a session | Always on |
+
+Leaving `APP_API_TOKEN` unset is deliberate: a local `pnpm dev` run wants an
+open API, and failing closed there would only teach the reader to hardcode a
+token. `GET /api/health` reports `auth: "none"` or `auth: "token"` so an
+operator can tell which mode a deploy is in from outside. The browser shell
+takes the token from `?token=<value>` once and remembers it
+(`src/shell/token.ts`).
+
+What is still NOT bounded, and what a production app would add: per-session
+Durable Object storage growth, model spend, and request rate. One shared token
+is one tenant, not tenancy: a holder of the token reaches every session id it
+can guess.
 
 ### Two config files, one directory
 

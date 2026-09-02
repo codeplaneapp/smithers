@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import type { AppManifest, Brand } from "../src/app.ts"
+import { RouterError } from "../src/router.ts"
 import { brandCss, brandModuleId, createApp, loadManifest, manifestModuleId } from "../src/vite.ts"
 
 const roots: Array<string> = []
@@ -171,6 +172,88 @@ describe("createApp", () => {
 
     listeners[0]!(join(root, "app/panes/balances.tsx"))
     expect(readFileSync(join(root, "routes.ui.gen.ts"), "utf8")).toContain("balances")
+  })
+
+  // The listener runs inside chokidar's emit, so a throw out of it is an
+  // uncaught exception that takes the dev server down rather than an error
+  // overlay. A capitalised pane file, a second flow.ts for an existing id, or
+  // a deleted root AGENT.ts each raise one while the server is running.
+  it("reports a refused tree instead of taking the dev server down", async () => {
+    const root = tree({ ...layers, "app/page.tsx": "export default () => null\n" })
+    const refused: Array<RouterError> = []
+    const plugin = createApp({
+      root,
+      manifest: async () => manifestOf(minimal),
+      onRouterError: (error) => refused.push(error)
+    })
+    await plugin.configResolved({ root })
+    const before = readFileSync(join(root, "routes.ui.gen.ts"), "utf8")
+
+    const listeners: Array<(file: string) => void> = []
+    plugin.configureServer({ watcher: { on: (_event, listener) => listeners.push(listener) } })
+
+    mkdirSync(join(root, "app/panes"), { recursive: true })
+    const pane = join(root, "app/panes/Balances.tsx")
+    writeFileSync(pane, "export const Pane = {}\n")
+
+    expect(() => listeners[0]!(pane)).not.toThrow()
+    expect(refused).toHaveLength(1)
+    expect(refused[0]!.code).toBe("invalid_name")
+    expect(refused[0]!.message).toContain("app/panes/Balances.tsx")
+    // The previous tables survive: a refusal leaves the app serving what it
+    // was serving.
+    expect(readFileSync(join(root, "routes.ui.gen.ts"), "utf8")).toBe(before)
+  })
+
+  it("names the refusal on stderr when the host installed no reporter", async () => {
+    const root = tree({ ...layers, "app/page.tsx": "export default () => null\n" })
+    const plugin = createApp({ root, manifest: async () => manifestOf(minimal) })
+    await plugin.configResolved({ root })
+
+    const listeners: Array<(file: string) => void> = []
+    plugin.configureServer({ watcher: { on: (_event, listener) => listeners.push(listener) } })
+
+    mkdirSync(join(root, "app/panes"), { recursive: true })
+    const pane = join(root, "app/panes/Balances.tsx")
+    writeFileSync(pane, "export const Pane = {}\n")
+
+    const written: Array<string> = []
+    const original = process.stderr.write.bind(process.stderr)
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      written.push(String(chunk))
+      return true
+    }) as typeof process.stderr.write
+    try {
+      expect(() => listeners[0]!(pane)).not.toThrow()
+    } finally {
+      process.stderr.write = original
+    }
+    expect(written.join("")).toContain("smthrs-create-app: invalid_name:")
+    expect(written.join("")).toContain("app/panes/Balances.tsx")
+  })
+
+  it("still propagates a failure that is not a refused tree", async () => {
+    // Only a RouterError means "the tree is wrong". Anything else is a defect
+    // in the plugin or the filesystem, and swallowing it would leave the dev
+    // server silently serving a table it can no longer regenerate.
+    const root = tree({ ...layers, "app/page.tsx": "export default () => null\n" })
+    const plugin = createApp({ root, manifest: async () => manifestOf(minimal) })
+    await plugin.configResolved({ root })
+
+    const listeners: Array<(file: string) => void> = []
+    plugin.configureServer({ watcher: { on: (_event, listener) => listeners.push(listener) } })
+
+    const page = join(root, "app/page.tsx")
+    rmSync(root, { recursive: true, force: true })
+    let thrown: unknown
+    try {
+      listeners[0]!(page)
+    } catch (cause) {
+      thrown = cause
+    }
+    expect(thrown).toBeDefined()
+    expect(thrown).not.toBeInstanceOf(RouterError)
+    expect((thrown as NodeJS.ErrnoException).code).toBe("ENOENT")
   })
 
   it("resolves only its own virtual modules", () => {

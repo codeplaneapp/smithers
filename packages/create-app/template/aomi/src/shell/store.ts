@@ -65,8 +65,18 @@ export interface AppState {
   readonly previewEnabled: boolean
 }
 
-const newId = (prefix: string): string =>
-  `${prefix}_${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`
+// The Worker only accepts a flat identifier of at most 128 characters, and
+// never the registry object's name (`worker/guard.ts`). A single
+// `Math.random().toString(36)` can be as short as one character, so the
+// fallback concatenates until it is 16 wide: a session id is also the only
+// thing standing between two browsers and each other's transcript.
+const newId = (prefix: string): string => {
+  const uuid = globalThis.crypto?.randomUUID?.()
+  if (uuid !== undefined) return `${prefix}_${uuid}`
+  let random = ""
+  while (random.length < 16) random += Math.random().toString(36).slice(2)
+  return `${prefix}_${random.slice(0, 16)}`
+}
 
 let state: AppState = {
   route: "/build",

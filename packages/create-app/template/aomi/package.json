@@ -36,7 +36,6 @@
     "@smthrs/targets": "0.1.0",
     "@smthrs/testing": "1.0.0-rc.0",
     "@smthrs/ui": "1.0.0-rc.0",
-    "@smthrs/ui-styleguide": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

@@ -43,5 +43,9 @@
 	//   OPENAI_API_KEY     — credential for an `openai:<model>` seat
 	//   ANTHROPIC_API_KEY  — credential for an `anthropic:<model>` seat
 	//   TEVM_FORK_RPC_URL  — JSON-RPC the Tevm fork reads chain state from
+	//   APP_API_TOKEN      — shared credential every /api/* route but health
+	//                        requires. UNSET MEANS THE API IS OPEN; set it
+	//                        before pointing the custom domain above at this
+	//                        Worker. See worker/README.md's Security section.
 	"observability": { "enabled": true }
 }

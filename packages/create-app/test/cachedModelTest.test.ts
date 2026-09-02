@@ -14,6 +14,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "@effect/vitest"
 import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
+import { CapabilityContractError } from "@smthrs/testing/TestingError"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -22,7 +23,14 @@ import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { inspect } from "node:util"
 import { defineAgent, defineFlow, defineSandbox, defineTools } from "../src/index.ts"
-import { cachedModelTest, preparedRequest, recording, type RoutedFlow, runCachedModelTest } from "../src/testing.ts"
+import {
+  cachedModelTest,
+  preparedRequest,
+  recording,
+  replayModelError,
+  type RoutedFlow,
+  runCachedModelTest
+} from "../src/testing.ts"
 
 const Output = Schema.Struct({ answer: Schema.String })
 type Output = typeof Output.Type
@@ -194,6 +202,34 @@ describe("the default routes loader", () => {
     ).rejects.toThrow("AGENT.ts must export `Agent`")
   })
 
+  // The name alone was the whole check, so a layer file could export anything
+  // at all under it and the mistake only surfaced deep inside the agent host,
+  // in a message that named neither the file nor the field.
+  it("refuses a layer export that is not a spec at all", async () => {
+    const root = tree({
+      "AGENT.ts": "export const Agent = 42\n",
+      "SANDBOX.ts": `export const Sandbox = ${JSON.stringify(Sandbox)}\n`,
+      "TOOLS.ts": `export const Tools = ${JSON.stringify(Tools)}\n`,
+      "flows/echo/flow.ts": `export const Flow = { _tag: "FlowSpec" }\n`
+    })
+    await expect(
+      runCachedModelTest("not a spec", { fixture, flow: "echo", payload: {}, root, expect: () => {} })
+    ).rejects.toThrow("AGENT.ts must export `Agent` built by defineAgent")
+  })
+
+  it("refuses a layer export carrying another spec's tag", async () => {
+    const root = tree({
+      "AGENT.ts": `export const Agent = ${JSON.stringify(Agent)}\n`,
+      "SANDBOX.ts": `export const Sandbox = ${JSON.stringify(Sandbox)}\n`,
+      // The shape of a `TOOLS.ts` export, built by the wrong constructor.
+      "TOOLS.ts": `export const Tools = ${JSON.stringify({ ...Tools, _tag: "SandboxSpec" })}\n`,
+      "flows/echo/flow.ts": `export const Flow = { _tag: "FlowSpec" }\n`
+    })
+    await expect(
+      runCachedModelTest("wrong tag", { fixture, flow: "echo", payload: {}, root, expect: () => {} })
+    ).rejects.toThrow("TOOLS.ts must export `Tools` built by defineTools")
+  })
+
   it("loads the flow, agent, sandbox, and tools a routed tree declares", async () => {
     const root = tree(app({
       "flows/echo/flow.ts":
@@ -299,6 +335,41 @@ describe("refusals", () => {
     expect(rendered).not.toContain("recorded model replay failed")
   })
 
+  // Both refusals name the file first. `JSON.parse` used to run eagerly
+  // outside the returned effect, so a fixture with a trailing comma rejected
+  // with a bare `SyntaxError` and a schema-drifted one surfaced its
+  // `SchemaError` unwrapped; neither said which of an app's fixtures was
+  // wrong.
+  it("names the fixture path when its bytes are not JSON", async () => {
+    const path = join(dir, "malformed.json")
+    writeFileSync(path, "{\"calls\": [},\n")
+    const failure = await runCachedModelTest("malformed fixture", {
+      fixture: pathToFileURL(path),
+      flow: "echo",
+      payload: { topic: "durable workflows" },
+      routes: async () => routed,
+      expect: () => {}
+    }).then(() => undefined, (error: unknown) => error)
+    const rendered = inspect(failure, { depth: 20 })
+    expect(rendered).toContain(path)
+    expect(rendered).toContain("is not valid JSON")
+  })
+
+  it("names the fixture path when the JSON is not a fixture", async () => {
+    const path = join(dir, "not-a-fixture.json")
+    writeFileSync(path, JSON.stringify({ calls: "nope" }))
+    const failure = await runCachedModelTest("drifted fixture", {
+      fixture: pathToFileURL(path),
+      flow: "echo",
+      payload: { topic: "durable workflows" },
+      routes: async () => routed,
+      expect: () => {}
+    }).then(() => undefined, (error: unknown) => error)
+    const rendered = inspect(failure, { depth: 20 })
+    expect(rendered).toContain(path)
+    expect(rendered).toContain("is not a @smthrs/testing fixture")
+  })
+
   it("surfaces a replay of a request the fixture never recorded", async () => {
     await expect(
       runCachedModelTest("unscripted request", {
@@ -311,6 +382,129 @@ describe("refusals", () => {
         expect: () => {}
       })
     ).rejects.toThrow()
+  })
+})
+
+/**
+ * What a recording run that fails does to the fixture already on disk.
+ *
+ * The write used to sit in a `finally`, so a provider 429, a payload the flow
+ * could not decode, or an assertion that no longer held replaced a good
+ * committed fixture with a partial one, and a run that reached the model zero
+ * times truncated it to `{"calls": []}`. Both cases below start from a fixture
+ * with known bytes and assert those exact bytes afterwards: nothing here reads
+ * what the run produced, because the contract is that it produced nothing.
+ */
+describe("a failed recording", () => {
+  const sentinel = "{\n  \"calls\": [\n    \"the bytes already committed\"\n  ]\n}\n"
+
+  /** A fresh fixture path carrying {@link sentinel}, plus the staging name a write would use. */
+  const committed = (name: string): { readonly path: string; readonly staging: string } => {
+    const path = join(dir, name)
+    writeFileSync(path, sentinel)
+    return { path, staging: `${path}.recording` }
+  }
+
+  const record = async (run: () => Promise<void>): Promise<unknown> => {
+    process.env["SMTHRS_RECORD"] = "1"
+    try {
+      return await run().then(() => undefined, (error: unknown) => error)
+    } finally {
+      delete process.env["SMTHRS_RECORD"]
+    }
+  }
+
+  it("leaves the committed bytes alone when the assertion no longer holds", async () => {
+    const { path, staging } = committed("assertion-failed.json")
+    const failure = await record(() =>
+      runCachedModelTest<{ topic: string }, Output>("assertion failed", {
+        fixture: pathToFileURL(path),
+        flow: "echo",
+        payload: { topic: "durable workflows" },
+        live: scripted,
+        routes: async () => routed,
+        expect: () => {
+          throw new Error("the answer changed")
+        }
+      })
+    )
+    expect(inspect(failure)).toContain("the answer changed")
+    expect(readFileSync(path, "utf8")).toBe(sentinel)
+    expect(existsSync(staging)).toBe(false)
+  })
+
+  it("leaves the committed bytes alone when the run itself fails", async () => {
+    // `echo` declares `{ topic: string }`, so an empty payload fails to decode
+    // and the run ends before the model is reached at all.
+    const { path, staging } = committed("run-failed.json")
+    const failure = await record(() =>
+      runCachedModelTest("run failed", {
+        fixture: pathToFileURL(path),
+        flow: "echo",
+        payload: {},
+        live: scripted,
+        routes: async () => routed,
+        expect: () => {}
+      })
+    )
+    expect(failure).toBeDefined()
+    expect(readFileSync(path, "utf8")).toBe(sentinel)
+    expect(existsSync(staging)).toBe(false)
+  })
+})
+
+/**
+ * The bridge from the replay error channel to the production `Model` seam.
+ *
+ * `ModelLikeError` has two members and a fixture can only express one of them:
+ * `ModelErrorLike.code` is a closed union with no `capability_contract_violation`
+ * member, so only a poisoned `ModelLike` reaches the second branch. It is
+ * driven here directly rather than left unproven.
+ */
+describe("replayModelError", () => {
+  it("rebuilds a recorded provider failure field for field", () => {
+    const error = replayModelError({
+      code: "rate_limited",
+      message: "slow down",
+      retryAfterMillis: 1_500,
+      resetAtEpochMillis: 42,
+      resetSource: "header",
+      providerCode: "429",
+      requestId: "req-1",
+      httpStatus: 429
+    })
+    expect(error.code).toBe("rate_limited")
+    expect(error.message).toBe("slow down")
+    expect(error.retryAfterMillis).toBe(1_500)
+    expect(error.resetAtEpochMillis).toBe(42)
+    expect(error.resetSource).toBe("header")
+    expect(error.providerCode).toBe("429")
+    expect(error.requestId).toBe("req-1")
+    expect(error.httpStatus).toBe(429)
+  })
+
+  it("omits the retry metadata a recording did not carry", () => {
+    const error = replayModelError({ code: "content_policy", message: "refused" })
+    expect(error.code).toBe("content_policy")
+    expect(error.retryAfterMillis).toBeUndefined()
+    expect(error.httpStatus).toBeUndefined()
+  })
+
+  it("reports a double's contract violation as a defective provider response, naming it", () => {
+    // A contract violation is a defect in the double, not a decision the
+    // provider made, so it must not arrive wearing a provider's code. The real
+    // error class is constructed rather than a look-alike literal, because the
+    // branch exists to handle the other member of `ModelLikeError` and a
+    // structural stand-in would not prove it is reachable from that union.
+    const error = replayModelError(
+      new CapabilityContractError({
+        code: "capability_contract_violation",
+        capability: "model",
+        operation: "model/stream"
+      })
+    )
+    expect(error.code).toBe("invalid_provider_output")
+    expect(error.message).toContain("capability_contract_violation")
   })
 })
 

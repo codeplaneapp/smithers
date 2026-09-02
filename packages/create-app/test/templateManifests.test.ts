@@ -48,12 +48,18 @@ const smthrsSpecifiers = (manifest: Manifest): ReadonlyArray<readonly [string, s
  * decision about what a scaffold can be installed from, so it is spelled out
  * here rather than derived: a new private dependency fails this test until
  * someone writes it down.
+ *
+ * The list is three, not four. `@smthrs/ui-styleguide` was declared and never
+ * imported — `@smthrs/ui` resolves the token names itself — so it was dropped
+ * rather than recorded. `@smthrs/create-app` and `@smthrs/targets` are what a
+ * scaffold is built from and cannot be dropped; `@smthrs/ui` is imported by
+ * roughly twenty files of the aomi template and is the exposure that stays
+ * until it publishes.
  */
 const allowedPrivateDependencies = [
   "@smthrs/create-app",
   "@smthrs/targets",
-  "@smthrs/ui",
-  "@smthrs/ui-styleguide"
+  "@smthrs/ui"
 ] as const
 
 describe.each(templates)("template/%s", (template) => {
@@ -72,11 +78,30 @@ describe.each(templates)("template/%s", (template) => {
     ).toBe(workspace.version)
   })
 
+  /**
+   * A scaffolded app cannot install a private package from a registry, so each
+   * template's README tells its reader which of its dependencies are in that
+   * position. Both READMEs named the same four, because one was copied from the
+   * other: `template/default` depends on neither `@smthrs/ui` nor
+   * `@smthrs/ui-styleguide` and named both anyway, which is the one paragraph a
+   * reader consults when a `--no-link` install fails.
+   */
+  it("names in its README exactly the private packages it depends on", () => {
+    const readme = readFileSync(join(templateRoot, template, "README.md"), "utf8")
+    const isPrivate = (name: string): boolean =>
+      read(join(workspaceRoot, "packages", name.slice("@smthrs/".length), "package.json")).private === true
+    const declared = specifiers.map(([name]) => name).filter(isPrivate)
+    const named = allowedPrivateDependencies.filter((name) => readme.includes(`\`${name}\``))
+    expect([...named].sort()).toEqual([...declared].sort())
+  })
+
   it("depends on no private package outside the recorded allowlist", () => {
     const privateNames = specifiers
       .map(([name]) => name)
-      .filter((name) => read(join(workspaceRoot, "packages", name.slice("@smthrs/".length), "package.json")).private
-        === true)
+      .filter((name) =>
+        read(join(workspaceRoot, "packages", name.slice("@smthrs/".length), "package.json")).private
+          === true
+      )
     expect(privateNames).toEqual(privateNames.filter((name) => allowedPrivateDependencies.includes(name as never)))
   })
 })

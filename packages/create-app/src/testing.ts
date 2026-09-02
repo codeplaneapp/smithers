@@ -28,7 +28,7 @@ import type * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as ModelRequest from "@smthrs/model/ModelRequest"
 import type * as Route from "@smthrs/model/Route"
 import { Fixture, type RecordedCall } from "@smthrs/testing/Fixture"
-import type { ModelErrorLike, ModelEventLike, ModelRequestLike } from "@smthrs/testing/ModelLike"
+import type { ModelErrorLike, ModelEventLike, ModelLikeError, ModelRequestLike } from "@smthrs/testing/ModelLike"
 import { modelErrorTag } from "@smthrs/testing/ModelLike"
 import * as RecordedModel from "@smthrs/testing/RecordedModel"
 import * as Effect from "effect/Effect"
@@ -274,15 +274,25 @@ export const recordModel = (live: Model, sink: (call: RecordedCall) => void): Mo
  * here. `@smthrs/testing` dies on both, because a fixture that does not
  * describe the run is a defect in the test rather than an outcome the code
  * under test can handle.
+ *
+ * Exported because the contract-violation branch is unreachable from a
+ * fixture: `ModelErrorLike.code` is a closed union that has no
+ * `capability_contract_violation` member, so only a poisoned `ModelLike` can
+ * produce one, and only a caller that supplies its own replay can poison one.
+ * The branch is still the declared handler for half the error channel, so it
+ * is driven directly rather than left unproven.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
-const asModelError = (error: { readonly code: string; readonly message?: string | undefined }): ModelError => {
+export const replayModelError = (error: ModelLikeError): ModelError => {
   if (error.code === "capability_contract_violation") {
     return new ModelError({
       code: "invalid_provider_output",
       message: `recorded model replay failed: ${error.code}`
     })
   }
-  const recorded = error as ModelErrorLike
+  const recorded = error
   return new ModelError({
     code: recorded.code,
     message: recorded.message,
@@ -300,7 +310,7 @@ const asModel = (replay: RecordedModel.Replay): Model =>
   makeModel({
     stream: (request) =>
       replay.model.stream(request).pipe(
-        Stream.mapError(asModelError),
+        Stream.mapError(replayModelError),
         Stream.map((event): ModelEvent.ModelEvent => event)
       )
   })
@@ -385,9 +395,7 @@ const readFixture = (path: string): Effect.Effect<typeof Fixture.Type> =>
   }).pipe(
     Effect.flatMap((parsed) =>
       Schema.decodeUnknownEffect(Fixture)(parsed).pipe(
-        Effect.mapError((cause) =>
-          new Error(`${path} is not a @smthrs/testing fixture: ${cause.message}`, { cause })
-        )
+        Effect.mapError((cause) => new Error(`${path} is not a @smthrs/testing fixture: ${cause.message}`, { cause }))
       )
     ),
     Effect.orDie

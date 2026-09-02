@@ -6,6 +6,8 @@
  * that `pnpm test` cannot read.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Capability from "@smthrs/capability/Capability"
+import * as Permission from "@smthrs/capability/Permission"
 import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
@@ -164,6 +166,71 @@ describe("recordModel", () => {
       deferred: false,
       loader: undefined
     }])
+  })
+
+  it("records every field a provider refusal carried, retry metadata included", async () => {
+    // A consumer that parks on a reset-bearing refusal branches on these
+    // fields, so a recording that dropped them would replay a different
+    // decision than the provider made. The fixture is decoded here as well:
+    // a field the recorder writes that the schema rejects is a fixture the
+    // next `pnpm test` cannot read.
+    const calls: Array<RecordedCall> = []
+    const refused = Model.make({
+      stream: () =>
+        Stream.fail(
+          new ModelError({
+            code: "rate_limited",
+            message: "slow down",
+            retryAfterMillis: 1_500,
+            resetAtEpochMillis: 1_700_000_000_000,
+            resetSource: "header",
+            providerCode: "rate_limit_error",
+            requestId: "req-42",
+            httpStatus: 429
+          })
+        )
+    })
+    const exit = await Effect.runPromiseExit(
+      Stream.runDrain(recordModel(refused, (call) => calls.push(call)).stream(request("hi")))
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(calls[0]!.failure).toEqual({
+      code: "rate_limited",
+      message: "slow down",
+      retryAfterMillis: 1_500,
+      resetAtEpochMillis: 1_700_000_000_000,
+      resetSource: "header",
+      providerCode: "rate_limit_error",
+      requestId: "req-42",
+      httpStatus: 429
+    })
+    const decoded = Schema.decodeUnknownSync(Fixture)(JSON.parse(JSON.stringify({ calls })))
+    expect(decoded.calls[0]!.failure?.retryAfterMillis).toBe(1_500)
+  })
+
+  it("records no failure for a kernel refusal, which no provider made", async () => {
+    // `ModelFailure` is wider than `ModelError`: a permission decision is the
+    // kernel's, not the provider's, and `ModelErrorLike`'s contract is that a
+    // fixture never stores one. Replaying it would hand the code under test a
+    // provider refusal that never happened.
+    const calls: Array<RecordedCall> = []
+    const denied = Model.make({
+      stream: () =>
+        Stream.fail(
+          new Permission.PermissionRequired({
+            requestId: "req-1",
+            capability: Capability.make("model:call", "anthropic:claude-sonnet-4-5"),
+            tier: "sealed",
+            meta: {}
+          })
+        )
+    })
+    const exit = await Effect.runPromiseExit(
+      Stream.runDrain(recordModel(denied, (call) => calls.push(call)).stream(request("hi")))
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.failure).toBeUndefined()
   })
 
   it("decodes a recording as a Fixture and replays it byte-identically", async () => {

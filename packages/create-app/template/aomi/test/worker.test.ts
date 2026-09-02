@@ -27,7 +27,8 @@ import {
   type SessionSummary
 } from "../src/api.ts"
 import type { Env } from "../worker/env.ts"
-import { type Phase, runFlowRun } from "../worker/flowRunImpl.ts"
+import { type FlowRoute, type Phase, runFlowRun } from "../worker/flowRunImpl.ts"
+import { authorized, isSessionId, MAX_BODY_BYTES } from "../worker/guard.ts"
 import { INDEX_SESSION } from "../worker/registry.ts"
 import { handle } from "../worker/router.ts"
 
@@ -142,10 +143,10 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("GET /api/health", () => {
-  test("reports the app name and the build", async () => {
+  test("reports the app name, the build, and whether the API is credentialed", async () => {
     const response = await handle(get(Routes.health), app.env)
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, build: "dev", app: "aomi" })
+    expect(await response.json()).toEqual({ ok: true, build: "dev", app: "aomi", auth: "none" })
   })
 })
 
@@ -341,6 +342,14 @@ describe("POST /api/flows/run", () => {
  * model and does not run under workerd yet (`worker/flowRunImpl.ts`).
  */
 describe("runFlowRun", () => {
+  // The mock run reads nothing off a route but its id, so the injected table
+  // carries the ids `routes.gen.ts` records and nothing else. Loading the
+  // generated table here would pull every flow module, every layer file, and
+  // every tool module — `tools/tevm.ts` and its `tevm` dependency included —
+  // into a suite whose subject is what the Worker answers.
+  const routes = async (): Promise<ReadonlyArray<FlowRoute>> =>
+    ["chat", "build"].map((id) => ({ id }) as unknown as FlowRoute)
+
   const runCards = async (
     flowId: string,
     signal: AbortSignal = new AbortController().signal
@@ -350,6 +359,7 @@ describe("runFlowRun", () => {
       env: { APP_MOCK_TURN: "1" } as unknown as Env,
       request: { sessionId: "s1", flowId, payload: { app: "arb", prompt: "build it" } },
       executionId: "exec-1",
+      routes,
       signal,
       emit: (frame) => {
         expect(frame.type).toBe("card.update")
@@ -403,5 +413,182 @@ describe("runFlowRun", () => {
     expect(phase).toBe("failed")
     expect(cards).toHaveLength(1)
     expect(cards[0]?.error).toContain("saved/arb")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The guards
+// ---------------------------------------------------------------------------
+
+/**
+ * What a deployed instance is bounded by.
+ *
+ * The API shipped with no authentication, no request-size bound, and a Durable
+ * Object addressed by whatever string the caller sent, while `CreateApp` ships
+ * `deploy` as a first-class target with a custom domain. These cases pin the
+ * three bounds that closed that: the shared token, the body cap, and the
+ * session-id rule that stops a caller addressing the registry object.
+ */
+describe("guard", () => {
+  describe("authorized", () => {
+    const bearer = (value: string): Request =>
+      new Request("https://aomi.smithers.sh/api/health", { headers: { authorization: value } })
+
+    test("an unset token leaves the API open, which is what a dev run wants", () => {
+      expect(authorized(get("/api/health"), undefined)).toBe(true)
+      expect(authorized(bearer("Bearer anything"), undefined)).toBe(true)
+    })
+
+    test("a configured token admits its exact bearer header and nothing else", () => {
+      expect(authorized(bearer("Bearer s3cret"), "s3cret")).toBe(true)
+      expect(authorized(get("/api/health"), "s3cret")).toBe(false)
+      expect(authorized(bearer("Bearer s3cre"), "s3cret")).toBe(false)
+      expect(authorized(bearer("Bearer s3crett"), "s3cret")).toBe(false)
+      expect(authorized(bearer("Bearer wrong!"), "s3cret")).toBe(false)
+      expect(authorized(bearer("s3cret"), "s3cret")).toBe(false)
+    })
+  })
+
+  describe("isSessionId", () => {
+    test("accepts the ids the shell mints", () => {
+      expect(isSessionId("ses_2f1c9a04-77e2-4d8d-8f8b-2d1b1e2a0c11")).toBe(true)
+      expect(isSessionId("s1")).toBe(true)
+    })
+
+    test("refuses the registry object's own name, so it cannot be used as a session", () => {
+      expect(isSessionId(INDEX_SESSION)).toBe(false)
+    })
+
+    test("refuses an empty, oversized, or structured id", () => {
+      expect(isSessionId("")).toBe(false)
+      expect(isSessionId("a".repeat(129))).toBe(false)
+      expect(isSessionId("a".repeat(128))).toBe(true)
+      expect(isSessionId("../etc")).toBe(false)
+      expect(isSessionId("a/b")).toBe(false)
+      expect(isSessionId("has space")).toBe(false)
+      expect(isSessionId("-leading")).toBe(false)
+    })
+  })
+
+  describe("with APP_API_TOKEN set", () => {
+    const authed = (): Env => ({ ...app.env, APP_API_TOKEN: "s3cret" }) as Env
+    const withToken = (request: Request): Request => {
+      const next = new Request(request)
+      next.headers.set("authorization", "Bearer s3cret")
+      return next
+    }
+
+    test("health stays reachable without a token, so a deploy can be probed", async () => {
+      const response = await handle(get(Routes.health), authed())
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ ok: true, build: "dev", app: "aomi", auth: "token" })
+    })
+
+    test("health reports an open API when no token is configured", async () => {
+      expect(await (await handle(get(Routes.health), app.env)).json()).toEqual({
+        ok: true,
+        build: "dev",
+        app: "aomi",
+        auth: "none"
+      })
+    })
+
+    const guarded: ReadonlyArray<readonly [string, () => Request]> = [
+      [Routes.turn, () => post(Routes.turn, { sessionId: "s1", flowId: "chat", message: "hi" })],
+      [Routes.turnCancel, () => post(Routes.turnCancel, { sessionId: "s1" })],
+      [Routes.session, () => get(`${Routes.session}?id=s1`)],
+      [Routes.flows, () => get(Routes.flows)],
+      [Routes.flowRun, () => post(Routes.flowRun, { sessionId: "s1", flowId: "build", payload: {} })]
+    ]
+
+    test.each(guarded)("%s answers 401 with no credential", async (_route, build) => {
+      const response = await handle(build(), authed())
+      expect(response.status).toBe(401)
+    })
+
+    test.each(guarded)("%s answers 401 with the wrong credential", async (_route, build) => {
+      const request = new Request(build())
+      request.headers.set("authorization", "Bearer wrong")
+      expect((await handle(request, authed())).status).toBe(401)
+    })
+
+    test.each(guarded)("%s answers normally with the credential", async (_route, build) => {
+      const response = await handle(withToken(build()), authed())
+      expect(response.status).toBe(200)
+    })
+
+    test("a refusal never wakes a Durable Object", async () => {
+      await handle(post(Routes.turn, { sessionId: "s1", flowId: "chat", message: "hi" }), authed())
+      expect(app.session("s1").turns).toEqual([])
+    })
+
+    // 401 rather than 404: the credential is checked before the path is
+    // matched, so an uncredentialed caller cannot map which /api routes exist.
+    test("an unrouted /api path answers 401, not the 404 that would name it", async () => {
+      expect((await handle(get("/api/nope"), authed())).status).toBe(401)
+      expect((await handle(get("/api/nope"), app.env)).status).toBe(404)
+    })
+
+    test("an asset request needs no credential", async () => {
+      const response = await handle(get("/build/deep/link"), authed())
+      expect(response.status).toBe(200)
+      expect(app.assetRequests).toEqual(["/build/deep/link"])
+    })
+  })
+
+  describe("body size", () => {
+    const oversized = "x".repeat(MAX_BODY_BYTES + 1)
+
+    test("refuses a declared body over the cap without waking a session", async () => {
+      const response = await handle(post(Routes.turn, { sessionId: "s1", flowId: "chat", message: oversized }), app.env)
+      expect(response.status).toBe(413)
+      expect(app.session("s1").turns).toEqual([])
+    })
+
+    test("refuses an undeclared streamed body over the cap", async () => {
+      // A chunked body carries no content-length, so the cap has to be counted
+      // while reading rather than read off a header.
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new TextEncoder().encode("x".repeat(8 * 1024)))
+        }
+      })
+      const request = new Request(`https://aomi.smithers.sh${Routes.turn}`, {
+        method: "POST",
+        body,
+        // Undici requires this for a streamed request body; it declares no length.
+        duplex: "half"
+      } as RequestInit)
+      expect((await handle(request, app.env)).status).toBe(413)
+    })
+
+    test("accepts a body under the cap", async () => {
+      const message = "x".repeat(1024)
+      const response = await handle(post(Routes.turn, { sessionId: "s1", flowId: "chat", message }), app.env)
+      expect(response.status).toBe(200)
+    })
+  })
+
+  describe("session ids", () => {
+    test.each([
+      ["turn", () => post(Routes.turn, { sessionId: INDEX_SESSION, flowId: "chat", message: "hi" })],
+      ["cancel", () => post(Routes.turnCancel, { sessionId: INDEX_SESSION })],
+      ["flow run", () => post(Routes.flowRun, { sessionId: INDEX_SESSION, flowId: "build", payload: {} })],
+      ["session read", () => get(`${Routes.session}?id=${INDEX_SESSION}`)],
+      ["flow list", () => get(`${Routes.flows}?sessionId=${INDEX_SESSION}`)]
+    ] as ReadonlyArray<readonly [string, () => Request]>)(
+      "the %s route refuses the registry object's name",
+      async (_label, build) => {
+        const response = await handle(build(), app.env)
+        expect(response.status).toBe(400)
+        expect((await response.json() as { error: string }).error).toContain("session id")
+      }
+    )
+
+    test("refuses a structured id before it names a Durable Object", async () => {
+      const response = await handle(post(Routes.turn, { sessionId: "../s1", flowId: "chat", message: "hi" }), app.env)
+      expect(response.status).toBe(400)
+      expect(app.session("../s1").turns).toEqual([])
+    })
   })
 })

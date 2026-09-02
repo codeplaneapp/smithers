@@ -29,6 +29,15 @@ export default defineConfig({
       // The default `./coverage` is shared, so two concurrent `vitest run`
       // invocations destroy each other (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-create-app-coverage-${process.pid}`),
+      // `src/**` only, and `bin/**` deliberately not. The v8 provider
+      // instruments this process; `bin/routes.mjs` only ever runs in a spawned
+      // child, so including it reports 0% for it and drops the package from
+      // 100% to 96.06%, which would mean lowering these floors to admit a file
+      // no measurement can reach. The shim carries three branches — installed,
+      // source checkout, installed with no build — and each has a spawned
+      // regression case in `test/routesBin.test.ts` instead. That is the
+      // stronger check anyway: only a real process proves that Node refuses to
+      // strip types under `node_modules`.
       include: ["src/**"],
       thresholds: {
         branches: 100,

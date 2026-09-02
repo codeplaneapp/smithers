@@ -15,3 +15,9 @@ TEVM_FORK_RPC_URL=
 # 1 streams the mock turn (milestone 1). 0 asks for the real Agent.run path,
 # which does not run under workerd yet — see worker/README.md.
 APP_MOCK_TURN=1
+
+# The shared credential every /api/* route but GET /api/health requires.
+# Leave it empty locally: an empty or absent value keeps the API open, which is
+# what `pnpm dev` wants. A DEPLOY must set it as a secret, not as a var:
+#   wrangler secret put APP_API_TOKEN --config worker/wrangler.jsonc
+APP_API_TOKEN=

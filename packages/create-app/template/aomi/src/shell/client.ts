@@ -20,6 +20,7 @@ import {
   TurnFrame,
   TurnRequest
 } from "../api.ts"
+import { authHeaders } from "./token.ts"
 
 const decodeSessionState = Schema.decodeUnknownSync(SessionState)
 const decodeSessionList = Schema.decodeUnknownSync(SessionList)
@@ -42,10 +43,12 @@ const json = async (response: Response, route: string): Promise<unknown> => {
   return await response.json()
 }
 
+// Every call carries the credential when one is configured. `authHeaders` is
+// empty against an open Worker, which is what local development runs.
 const postJson = (route: string, body: unknown): Promise<Response> =>
   fetch(route, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...authHeaders() },
     body: JSON.stringify(body)
   })
 
@@ -96,7 +99,7 @@ export const streamTurn = async function* (
 ): AsyncGenerator<TurnFrame> {
   const response = await fetch(Routes.turn, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/x-ndjson" },
+    headers: { "content-type": "application/json", accept: "application/x-ndjson", ...authHeaders() },
     body: JSON.stringify(request satisfies TurnRequest),
     ...(signal === undefined ? {} : { signal })
   })
@@ -118,20 +121,26 @@ export const cancelTurn = async (sessionId: string): Promise<boolean> => {
 /** `GET /api/session?id=<sessionId>`. */
 export const getSession = async (id: string): Promise<SessionState> => {
   const route = `${Routes.session}?id=${encodeURIComponent(id)}`
-  return decodeSessionState(await json(await fetch(route), route))
+  return decodeSessionState(await json(await fetch(route, { headers: authHeaders() }), route))
 }
 
 /** `GET /api/session`: the Recent column. */
 export const listSessions = async (): Promise<ReadonlyArray<SessionSummary>> =>
-  decodeSessionList(await json(await fetch(Routes.session), Routes.session)).sessions
+  decodeSessionList(await json(await fetch(Routes.session, { headers: authHeaders() }), Routes.session)).sessions
 
 /** `GET /api/flows`. */
 export const listFlows = async () =>
-  decodeFlowList(await json(await fetch(Routes.flows), Routes.flows)).flows
+  decodeFlowList(await json(await fetch(Routes.flows, { headers: authHeaders() }), Routes.flows)).flows
 
 /** `POST /api/flows/run`. */
 export const runFlow = async (request: typeof FlowRunRequest.Type): Promise<string> =>
   decodeFlowRunResponse(await json(await postJson(Routes.flowRun, request), Routes.flowRun)).executionId
 
-/** `GET /api/health`. */
+/**
+ * `GET /api/health`.
+ *
+ * Sent without a credential on purpose: health is the one route a Worker with
+ * `APP_API_TOKEN` set still answers to anyone, so this reports reachability
+ * rather than whether the browser holds the right token.
+ */
 export const health = async (): Promise<boolean> => (await fetch(Routes.health)).ok

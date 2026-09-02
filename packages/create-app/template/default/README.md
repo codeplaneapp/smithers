@@ -35,10 +35,9 @@ it runs, `pnpm routes:check` exits 1 on drift, and `smithers-build lint
 
 `pnpm exec smithers-build create-app` rewrites every `@smthrs/*` dependency to
 a `link:` path into the checkout the app was scaffolded from, which is how
-those specifiers resolve. Four of them are private packages no registry serves:
-`@smthrs/create-app`, `@smthrs/targets`, `@smthrs/ui`, and
-`@smthrs/ui-styleguide`. Until those publish, an app moved off that checkout
-keeps the links or vendors what it uses.
+those specifiers resolve. Two of them are private packages no registry serves:
+`@smthrs/create-app` and `@smthrs/targets`. Until those publish, an app moved
+off that checkout keeps the links or vendors what it uses.
 
 ## What is not wired
 

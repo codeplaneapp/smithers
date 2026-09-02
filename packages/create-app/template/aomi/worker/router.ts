@@ -15,6 +15,29 @@
  * Durable Object class and therefore imports `cloudflare:workers`, which only
  * workerd resolves. Keeping the routing here lets `test/worker.test.ts` call
  * {@link handle} with stub bindings on plain Node.
+ *
+ * ## What bounds a deployed instance
+ *
+ * `CreateApp` ships `deploy` as a first-class target with a custom domain, so
+ * read this before you point one at it. Three bounds run ahead of every route,
+ * and `worker/guard.ts` owns all three:
+ *
+ * - **Credential.** `APP_API_TOKEN` is a Worker secret. When it is set, every
+ *   `/api/*` path but `GET /api/health` requires `Authorization: Bearer <it>`
+ *   and answers 401 otherwise, before any Durable Object is woken. **When it is
+ *   unset the API is open**, which is what a `pnpm dev` run wants and what a
+ *   deploy does not. `GET /api/health` reports `auth: "none"` or `auth:
+ *   "token"` so an operator can tell which one is running from outside.
+ * - **Size.** Every JSON body is read through a 64 KiB cap and answers 413 past
+ *   it, whether or not the request declared a `content-length`.
+ * - **Identity.** A session id is a flat identifier of at most 128 characters,
+ *   and never the registry object's own name, so a caller can neither address
+ *   `INDEX_SESSION` as a session nor name an object with arbitrary text.
+ *
+ * What is still unbounded: per-session Durable Object storage, model spend, and
+ * request rate. One shared token is one tenant, not tenancy: a holder of the
+ * token reaches every session. `worker/README.md` says the same in its Security
+ * section.
  */
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -26,6 +49,7 @@ import {
   TurnRequest
 } from "../src/api.ts"
 import type { Env } from "./env.ts"
+import { authorized, isSessionId, readJson } from "./guard.ts"
 import { indexSession, sessionOf } from "./registry.ts"
 
 /** The build this Worker was cut from. Vite replaces it; dev leaves the default. */
@@ -42,14 +66,18 @@ const decodeTurn = Schema.decodeUnknownOption(TurnRequest)
 const decodeCancel = Schema.decodeUnknownOption(CancelRequest)
 const decodeFlowRun = Schema.decodeUnknownOption(FlowRunRequest)
 
-/** Reads a JSON body, or `undefined` when it is absent or malformed. */
-const body = async (request: Request): Promise<unknown> => {
-  try {
-    return await request.json()
-  } catch {
-    return undefined
-  }
-}
+/**
+ * The refusal a caller-supplied session id gets when it cannot name an object.
+ *
+ * The value is echoed so a caller can see what was rejected, and truncated
+ * because a body is capped at 64 KiB rather than at an id's length: reflecting
+ * the whole of it would turn a refusal into an amplifier.
+ */
+const badSessionId = (value: string): Response =>
+  fail(
+    400,
+    `"${value.slice(0, 64)}" is not a usable session id. A session id is a flat identifier of at most 128 characters.`
+  )
 
 /** The flows the router found on disk, in the shape `GET /api/flows` answers. */
 // Loaded lazily: routes.gen.ts pulls in the agent runtime, and Workers
@@ -84,23 +112,43 @@ export const handle = async (request: Request, env: Env): Promise<Response> => {
   const url = new URL(request.url)
   const path = url.pathname
 
+  // Health answers before the credential check so an operator can probe a
+  // deploy they hold no token for, and it reports which mode that deploy is in.
   if (path === Routes.health) {
-    return json({ ok: true, build: build(), app: env.APP_NAME })
+    return json({
+      ok: true,
+      build: build(),
+      app: env.APP_NAME,
+      auth: env.APP_API_TOKEN === undefined || env.APP_API_TOKEN === "" ? "none" : "token"
+    })
+  }
+
+  // Every other API path, the 404 included: an unrouted path that answered
+  // before the credential check would report which paths exist to a caller with
+  // no credential at all.
+  if (path.startsWith("/api/") && !authorized(request, env.APP_API_TOKEN)) {
+    return fail(401, "This API requires `Authorization: Bearer <APP_API_TOKEN>`.")
   }
 
   if (path === Routes.turn) {
     if (request.method !== "POST") return fail(405, "POST only.")
-    const decoded = decodeTurn(await body(request))
+    const read = await readJson(request)
+    if (!read.ok) return fail(read.status, read.message)
+    const decoded = decodeTurn(read.value)
     if (Option.isNone(decoded)) return fail(400, "Expected { sessionId, flowId, message }.")
     const turn = decoded.value
+    if (!isSessionId(turn.sessionId)) return badSessionId(turn.sessionId)
     return sessionOf(env, turn.sessionId).turn(turn)
   }
 
   if (path === Routes.turnCancel) {
     if (request.method !== "POST") return fail(405, "POST only.")
-    const decoded = decodeCancel(await body(request))
+    const read = await readJson(request)
+    if (!read.ok) return fail(read.status, read.message)
+    const decoded = decodeCancel(read.value)
     if (Option.isNone(decoded)) return fail(400, "Expected { sessionId }.")
     const { sessionId } = decoded.value
+    if (!isSessionId(sessionId)) return badSessionId(sessionId)
     return json(await sessionOf(env, sessionId).cancel(sessionId))
   }
 
@@ -111,6 +159,7 @@ export const handle = async (request: Request, env: Env): Promise<Response> => {
     // Recent column is one read of the registry object every session writes to
     // on its first turn (worker/registry.ts).
     if (id === null || id === "") return json({ sessions: await indexSession(env).sessions() })
+    if (!isSessionId(id)) return badSessionId(id)
     return json(await sessionOf(env, id).state(id))
   }
 
@@ -119,15 +168,19 @@ export const handle = async (request: Request, env: Env): Promise<Response> => {
     const id = url.searchParams.get("sessionId")
     // Saved flows belong to the session that wrote them, so a caller with no
     // session id gets the routed flows only.
+    if (id !== null && id !== "" && !isSessionId(id)) return badSessionId(id)
     const saved = id === null || id === "" ? [] : await sessionOf(env, id).listFlows()
     return json({ flows: [...(await fileFlows()), ...saved] })
   }
 
   if (path === Routes.flowRun) {
     if (request.method !== "POST") return fail(405, "POST only.")
-    const decoded = decodeFlowRun(await body(request))
+    const read = await readJson(request)
+    if (!read.ok) return fail(read.status, read.message)
+    const decoded = decodeFlowRun(read.value)
     if (Option.isNone(decoded)) return fail(400, "Expected { sessionId, flowId, payload }.")
     const run = decoded.value
+    if (!isSessionId(run.sessionId)) return badSessionId(run.sessionId)
     const refusal = await flowRunRefusal(run.flowId)
     if (refusal !== undefined) return fail(400, refusal)
     return json(await sessionOf(env, run.sessionId).runFlow(run))

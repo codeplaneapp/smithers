@@ -159,7 +159,74 @@ describe("runRoutesBin", () => {
   })
 })
 
+/**
+ * A copy of the shim beside a source module and a stale compiled one.
+ *
+ * `where` is the directory the copy is planted in, relative to a throwaway
+ * root: `"pkg"` is an ordinary checkout and `"node_modules/@smthrs/create-app"`
+ * is an install. Both entries print a marker the real generator never prints,
+ * so the assertion is which of the two ran and not what it produced.
+ */
+const planted = (root: string, where: string, options: { readonly dist?: boolean } = {}): string => {
+  const home = join(root, ...where.split("/"))
+  mkdirSync(join(home, "bin"), { recursive: true })
+  mkdirSync(join(home, "src"), { recursive: true })
+  copyFileSync(binPath, join(home, "bin", "routes.mjs"))
+  writeFileSync(
+    join(home, "src", "routesBin.ts"),
+    "export const runRoutesBin = (argv: ReadonlyArray<string>, options: {\n"
+      + "  readonly io: { readonly out: (line: string) => void }\n"
+      + "}): number => {\n"
+      + "  options.io.out(`from source ${argv.length}`)\n"
+      + "  return 0\n"
+      + "}\n"
+  )
+  if (options.dist !== false) {
+    mkdirSync(join(home, "dist", "esm"), { recursive: true })
+    writeFileSync(
+      join(home, "dist", "esm", "routesBin.js"),
+      "export const runRoutesBin = (argv, options) => {\n"
+        + "  options.io.out(`from dist ${argv.length}`)\n"
+        + "  return 0\n"
+        + "}\n"
+    )
+  }
+  return join(home, "bin", "routes.mjs")
+}
+
 describe("bin/routes.mjs", () => {
+  // `tsc -b tsconfig.json` is this package's `check` script and writes
+  // `dist/esm`, so a source checkout has one after any `pnpm check` or any
+  // `smithers-build ci` run. A shim that preferred `dist` whenever it existed
+  // therefore ran the last compiled generator rather than the working tree, and
+  // reported success either way.
+  it("runs the working tree's source when it is not installed, stale dist or not", () => {
+    const root = appTree({ ...layers })
+    const shim = planted(root, "pkg")
+    const result = spawnSync(process.execPath, [shim, "--root", root], { encoding: "utf8" })
+    expect(result.stderr).toBe("")
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe("from source 2")
+  })
+
+  it("names the missing build rather than failing on a module specifier", () => {
+    const root = appTree({ ...layers })
+    const shim = planted(root, "node_modules/@smthrs/create-app", { dist: false })
+    const result = spawnSync(process.execPath, [shim, "--root", root], { encoding: "utf8" })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("no dist/esm/routesBin.js")
+    expect(result.stderr).not.toContain("ERR_MODULE_NOT_FOUND")
+  })
+
+  it("runs an install's compiled entry even beside a newer source", () => {
+    const root = appTree({ ...layers })
+    const shim = planted(root, "node_modules/@smthrs/create-app")
+    const result = spawnSync(process.execPath, [shim, "--root", root], { encoding: "utf8" })
+    expect(result.stderr).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING")
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe("from dist 2")
+  })
+
   it("runs the shipped bin end to end against a real tree", () => {
     const root = appTree({ ...layers, "app/page.tsx": "export default () => null\n" })
     const result = spawnSync(process.execPath, [binPath, "--root", root], { encoding: "utf8" })

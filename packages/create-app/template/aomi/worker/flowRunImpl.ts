@@ -23,7 +23,6 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type { FlowRunRequest, TurnFrame } from "../src/api.ts"
-import { flows } from "../routes.gen.ts"
 import { layerCrypto } from "./crypto.ts"
 import type { Env } from "./env.ts"
 import { seatsFor } from "./seats.ts"
@@ -34,6 +33,33 @@ export type Phase = FlowRunCard["phase"]
 /** One row of the card's step list. */
 export type Step = FlowRunCard["steps"][number]
 
+/** One routed flow, as `routes.gen.ts` records it. */
+export interface FlowRoute {
+  readonly id: string
+  readonly spec: AnyFlowSpec
+  readonly agent: AgentSpec
+  readonly sandbox: SandboxSpec
+  readonly tools: ToolsSpec
+}
+
+/**
+ * Loads the routed flows a run resolves `flowId` against.
+ *
+ * Injectable for the reason `TurnLoader` is (`worker/turn.ts`): `routes.gen.ts`
+ * imports every flow module, every layer file, and every tool module the app
+ * declares — the chain tools and their `tevm` dependency included — so a test of
+ * what a run emits would otherwise need the whole app's dependency tree
+ * installed, and this module is the one place the API's own suite could not
+ * reach without it. `AppSession` passes nothing and gets the generated table
+ * through the default, which is a dynamic import for the same reason
+ * `AppSession` imports this module dynamically: the table is only needed once a
+ * run starts.
+ */
+export type RoutesLoader = () => Promise<ReadonlyArray<FlowRoute>>
+
+const generatedRoutes: RoutesLoader = async () =>
+  (await import("../routes.gen.ts")).flows as unknown as ReadonlyArray<FlowRoute>
+
 export interface FlowRunOptions {
   readonly env: Env
   readonly request: FlowRunRequest
@@ -42,19 +68,9 @@ export interface FlowRunOptions {
   /** Aborted by `POST /api/agent/turn/cancel`. */
   readonly signal: AbortSignal
   readonly emit: (frame: TurnFrame) => void
+  /** Defaults to the generated table; see {@link RoutesLoader}. */
+  readonly routes?: RoutesLoader | undefined
 }
-
-/** One routed flow, as `routes.gen.ts` records it. */
-interface FlowRoute {
-  readonly id: string
-  readonly spec: AnyFlowSpec
-  readonly agent: AgentSpec
-  readonly sandbox: SandboxSpec
-  readonly tools: ToolsSpec
-}
-
-const routeFor = (flowId: string): FlowRoute | undefined =>
-  (flows as unknown as ReadonlyArray<FlowRoute>).find((flow) => flow.id === flowId)
 
 // ---------------------------------------------------------------------------
 // The card
@@ -137,7 +153,8 @@ class RunCard {
  */
 export const runFlowRun = async (options: FlowRunOptions): Promise<Phase> => {
   const card = new RunCard(options.request.flowId, options.executionId, options.emit)
-  const route = routeFor(options.request.flowId)
+  const routes = await (options.routes ?? generatedRoutes)()
+  const route = routes.find((candidate) => candidate.id === options.request.flowId)
   // The router refuses an unrouted flow before the object is woken
   // (`worker/router.ts`, `flowRunRefusal`). This repeats the check because
   // `AppSession.runFlow` is also reachable from a Durable Object stub call,

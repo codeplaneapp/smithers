@@ -15,10 +15,10 @@ pnpm dev        # vite, with workerd in the loop
 
 `pnpm exec smithers-build create-app` rewrites every `@smthrs/*` dependency to
 a `link:` path into the checkout the app was scaffolded from, which is how
-those specifiers resolve. Four of them are private packages no registry serves:
-`@smthrs/create-app`, `@smthrs/targets`, `@smthrs/ui`, and
-`@smthrs/ui-styleguide`. Until those publish, an app moved off that checkout
-keeps the links or vendors what it uses.
+those specifiers resolve. Three of them are private packages no registry
+serves: `@smthrs/create-app`, `@smthrs/targets`, and `@smthrs/ui`. Until those
+publish, an app moved off that checkout keeps the links or vendors what it
+uses.
 
 ## Layout
 
@@ -67,12 +67,27 @@ them: `worker/seats.ts` reads `ANTHROPIC_API_KEY` for an `anthropic:` seat.
 
 ```sh
 wrangler secret put OPENAI_API_KEY --config worker/wrangler.jsonc
+wrangler secret put APP_API_TOKEN --config worker/wrangler.jsonc
 pnpm build
 pnpm deploy
 ```
 
-The deployed API is unauthenticated. Read the note at the top of
-`worker/router.ts` before you point a public domain at it.
+`APP_API_TOKEN` is what closes the API. While it is unset every `/api/*` route
+answers any caller, which is what `pnpm dev` wants and what a public domain does
+not: an anonymous caller can allocate Durable Object storage and read or
+overwrite any session id it guesses. Set it before the first deploy.
+`GET /api/health` reports `auth: "none"` or `auth: "token"`, so you can tell
+which mode a running instance is in without a credential.
+
+Open the deployed app once as `https://<your domain>/?token=<the token>`. The
+shell stores it and strips it back out of the address bar (`src/shell/token.ts`),
+and every later request carries it.
+
+Two bounds come with it and need no configuration: a JSON body over 64 KiB is
+refused with 413, and a session id must be a flat identifier of at most 128
+characters, so the registry object cannot be addressed as a session. Per-session
+storage, model spend, and request rate stay unbounded; `worker/README.md` has
+the full list.
 
 `domain` in `PACKAGE.ts` and the `routes` entry in `worker/wrangler.jsonc` name
 the same hostname. Point both at a zone your Cloudflare account owns before the

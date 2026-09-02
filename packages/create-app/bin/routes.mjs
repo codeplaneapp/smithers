@@ -5,18 +5,35 @@
 // write mode and compares the declared `changes`; the bare `smithers-build
 // '//:routes'` form is the write form and checks nothing.
 //
-// A published install ships `dist/esm/routesBin.js`, and Node refuses to strip
-// types from any file under node_modules, so the built entry is preferred
-// whenever it exists. A source checkout has no `dist`, so the source module
-// runs through Node's own type stripping and `pnpm exec smithers-routes` needs
-// no build step.
+// Which entry runs is decided by where this file sits, not by what exists next
+// to it. Node refuses to strip types from any file under a `node_modules`
+// directory (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so an installed copy
+// must run the compiled `dist/esm/routesBin.js`; anywhere else the source
+// module runs through Node's own type stripping. Preferring `dist` whenever it
+// existed was wrong: `tsc -b tsconfig.json` is this package's `check` script and
+// writes `dist/esm`, so after any `pnpm check` or any `smithers-build ci` run a
+// source checkout has one, and every `pnpm routes` invocation silently ran the
+// last compiled generator instead of the working tree. A pnpm `link:` install
+// resolves to its realpath in the checkout, so a scaffolded app linked at a
+// source checkout runs that checkout's source too.
 import { existsSync } from "node:fs"
+import { sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
-const built = new URL("../dist/esm/routesBin.js", import.meta.url)
-let entry = built
+const here = fileURLToPath(import.meta.url)
+// An exact path segment, so a directory named `node_modules_backup` is not one.
+const installed = here.split(sep).includes("node_modules")
 
-if (!existsSync(fileURLToPath(built))) {
+let entry
+if (installed) {
+  entry = new URL("../dist/esm/routesBin.js", import.meta.url)
+  if (!existsSync(fileURLToPath(entry))) {
+    console.error(
+      "smithers-routes: this install has no dist/esm/routesBin.js, and Node cannot strip types under node_modules. Reinstall @smthrs/create-app."
+    )
+    process.exit(1)
+  }
+} else {
   // Type stripping is experimental on Node 22, and its warning would prepend a
   // paragraph of noise to every development invocation. Only that one warning
   // is dropped; everything else still reaches stderr.

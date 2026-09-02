@@ -274,7 +274,11 @@ export interface ToolsGrant {
  */
 export const defineTools = (
   options: Omit<ToolsSpec, "_tag" | "grant"> & { readonly grant?: ReadonlyArray<ToolsGrant> }
-): ToolsSpec => ({ _tag: "ToolsSpec", sources: options.sources, grant: options.grant ?? [{ action: "*", resource: "*" }] })
+): ToolsSpec => ({
+  _tag: "ToolsSpec",
+  sources: options.sources,
+  grant: options.grant ?? [{ action: "*", resource: "*" }]
+})
 
 /**
  * One flow: a payload, an output schema, and the prompt that opens the run.
@@ -418,6 +422,49 @@ export interface AppDirs {
  * @since 0.1.0
  */
 export const defaultDirs: AppDirs = { app: "app", flows: "flows", tools: "tools" }
+
+const SEGMENT = /^[a-z][a-z0-9-]*$/
+
+/**
+ * Whether `value` may be one segment of a route: a flow directory, a page
+ * directory, or a pane file's base name.
+ *
+ * Lowercase letters, digits and hyphens, starting with a letter. A route
+ * segment reaches both a generated import specifier and a URL path, so the
+ * grammar is what keeps the two unambiguous, and
+ * `@smthrs/create-app/router` refuses a tree that breaks it.
+ *
+ * It sits here, in the browser-safe half, rather than in the router, because
+ * anything that predicts what the router will accept has to ask for the rule
+ * and most of those callers cannot import a filesystem walk:
+ * `template/aomi/tools/promote.ts` runs inside a Worker and refuses a flow id
+ * the router would refuse, before writing `flows/<id>/flow.ts` for it. It kept
+ * its own copy of this expression to do that. Two spellings of one grammar
+ * drift, and the one that drifts is never the router's.
+ *
+ * @example
+ * ```ts
+ * import { isRouteSegment } from "@smthrs/create-app/app"
+ *
+ * isRouteSegment("build-plan") // true
+ * isRouteSegment("Build")      // false
+ * ```
+ *
+ * @category predicates
+ * @since 0.1.0
+ */
+export const isRouteSegment = (value: string): boolean => SEGMENT.test(value)
+
+/**
+ * {@link isRouteSegment}'s grammar as text, for a refusal that states the rule.
+ *
+ * A string rather than the `RegExp` itself: a caller cannot reassign its
+ * `lastIndex` or otherwise reach the predicate through it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const routeSegmentGrammar: string = String(SEGMENT)
 
 /**
  * How many host calls one cell may make when the agent layer declares no

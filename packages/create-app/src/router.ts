@@ -29,6 +29,7 @@
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, posix, relative, resolve, sep } from "node:path"
+import { isRouteSegment, routeSegmentGrammar } from "./app.ts"
 import type { AppDirs, AppRoutes, FlowRoute, PageRoute, PaneRoute } from "./app.ts"
 
 /**
@@ -80,8 +81,6 @@ export class RouterError extends Error {
 
 const IGNORED = new Set(["node_modules", ".git", "dist", ".flows", ".wrangler", ".smithers"])
 type LayerKind = "AGENT.ts" | "SANDBOX.ts" | "TOOLS.ts"
-const NAME = /^[a-z][a-z0-9-]*$/
-
 const toPosix = (path: string): string => path.split(sep).join(posix.sep)
 
 // `withFileTypes` reports each entry's own type, so nothing here follows a
@@ -183,7 +182,9 @@ export const discover = (options: RouterOptions): AppRoutes => {
     // `/panes/deep`, and put a routed file outside the target's `data` set.
     if (posix.dirname(file) === panesDir && file.endsWith(".tsx")) {
       const name = posix.basename(file, ".tsx")
-      if (!NAME.test(name)) throw new RouterError("invalid_name", `pane file name must match ${NAME}: ${file}`)
+      if (!isRouteSegment(name)) {
+        throw new RouterError("invalid_name", `pane file name must match ${routeSegmentGrammar}: ${file}`)
+      }
       claim(`pane:${name}`, file)
       panes.push({ name, file })
       continue
@@ -194,8 +195,8 @@ export const discover = (options: RouterOptions): AppRoutes => {
       // Every directory segment names the route, so it obeys the same grammar
       // a pane and a flow segment do. Unvalidated, `app/v1.2/page.tsx` was
       // accepted and any character at all reached the generated import.
-      if (route !== "/" && !route.slice(1).split("/").every((segment) => NAME.test(segment))) {
-        throw new RouterError("invalid_name", `page directory segments must match ${NAME}: ${file}`)
+      if (route !== "/" && !route.slice(1).split("/").every(isRouteSegment)) {
+        throw new RouterError("invalid_name", `page directory segments must match ${routeSegmentGrammar}: ${file}`)
       }
       claim(`page:${route}`, file)
       pages.push({ route, file })
@@ -203,8 +204,8 @@ export const discover = (options: RouterOptions): AppRoutes => {
     }
     if (file.startsWith(flowsPrefix) && (posix.basename(file) === "flow.ts" || posix.basename(file) === "flow.mdx")) {
       const id = posix.dirname(file).slice(flowsPrefix.length)
-      if (!id.split("/").every((segment) => NAME.test(segment))) {
-        throw new RouterError("invalid_name", `flow directory segments must match ${NAME}: ${file}`)
+      if (!id.split("/").every(isRouteSegment)) {
+        throw new RouterError("invalid_name", `flow directory segments must match ${routeSegmentGrammar}: ${file}`)
       }
       claim(`flow:${id}`, file)
       const dir = join(root, posix.dirname(file))

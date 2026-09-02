@@ -12,14 +12,17 @@
  * rather than as namespaces, because it is an authoring API rather than a
  * service API — an app writes `defineFlow`, not `App.defineFlow`.
  *
- * `./app` is browser-safe (layer files, flow files, types); `./package` is
- * Node-only (`CreateApp` over `@smthrs/targets`). `sideEffects: []` lets a
- * bundler drop the Node half from a browser or Worker bundle that imports only
- * `defineAgent` and friends.
- *
- * The other subpaths are `./ui` (panes and cards), `./router` (the file
- * router), `./runtime` (flows made executable), `./vite` (the plugin), and
- * `./testing` (`cachedModelTest`).
+ * Three subpaths ship into a running app and bundle for the browser and for
+ * workerd: `./app` (layer files, flow files, types), `./ui` (panes and cards),
+ * and `./runtime` (flows made executable), which is what a scaffolded
+ * Cloudflare Worker imports. The rest are Node-only build and test tooling:
+ * `./package` (`CreateApp` over `@smthrs/targets`), `./router` (the file
+ * router), `./vite` (the plugin), `./testing` (`cachedModelTest`), and
+ * `./routesBin` (the `smithers-routes` body). This entry point re-exports
+ * `./package`, so it is Node-only too; `sideEffects: []` lets a bundler drop
+ * the Node half from a browser or Worker bundle that imports only
+ * `defineAgent` and friends. `test/bundle.test.ts` holds each subpath to that
+ * classification.
  *
  * @since 0.1.0
  */
