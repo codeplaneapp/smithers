@@ -383,6 +383,10 @@ export const createTargetsController = (
      * arrives on its own.
      */
     await loadRepos()
+    // An open repository satisfies the files flows' repo-source requirement:
+    // a command parked on it (files.read while signed out, nothing open)
+    // re-enters the run path now, the way sign-in resumes one.
+    ctx.resumeDeferredCommand()
   }
 
   const listTargets: TargetsController["listTargets"] = async (repoIdArg) => {

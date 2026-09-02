@@ -85,7 +85,7 @@ export const SMITHERS_INSTRUCTIONS = [
 const NAMED_CANT_YETS = [
   "send or draft email",
   "post to Slack or any messaging app",
-  "read files off the user's machine",
+  "read arbitrary files off the user's machine — only a repository opened in Smithers, through files.list and files.read",
   "push to a branch or open a pull request — not directly, and not through a run",
   "deploy, publish, or touch any service not listed above"
 ] as const

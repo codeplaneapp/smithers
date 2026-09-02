@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { REPO_FILE_READ_CAP_BYTES } from "smithers-shared/LocalApp"
+import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "smithers-shared/LocalApp"
 import { isAgentTurnFrame } from "smithers-shared/NativeAgent"
 import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
 import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "smithers-shared/LocalSession"
@@ -242,11 +242,11 @@ describe("the local origin", () => {
 
   test("a proxied ready claim re-scopes the session cookie and the trail says the cookie was there", async () => {
     // A fake identity upstream: the claim answers ready with a Domain-scoped session cookie.
+    const upstreamHeaders: Array<Headers> = []
     const upstream = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (request) =>
-        new URL(request.url).pathname === "/api/auth/native/claim"
+      fetch: (request) => (upstreamHeaders.push(request.headers), new URL(request.url).pathname === "/api/auth/native/claim")
           ? new Response(JSON.stringify({ status: "ready" }), {
             headers: {
               "content-type": "application/json",
@@ -291,6 +291,10 @@ describe("the local origin", () => {
         "/api/auth/native/claim -> 200, set-cookie present: smithers_session=<redacted>; Path=/; HttpOnly; SameSite=Lax"
       )
       expect(proxyLogs.join("\n")).not.toContain("sealed")
+      // The local session capability authorizes this origin only; the seam never receives it.
+      expect(upstreamHeaders).toHaveLength(1)
+      expect(upstreamHeaders[0]?.get(LOCAL_SESSION_HEADER)).toBeNull()
+      expect(upstreamHeaders[0]?.get("origin")).toBe(`http://127.0.0.1:${upstream.port}`)
     } finally {
       await proxied.stop()
       upstream.stop(true)
@@ -419,6 +423,23 @@ describe("POST /api/repo/files", () => {
     const missing = await files({ repoId, path: "missing.txt" })
     expect(missing.status).toBe(404)
     expect(((await missing.json()) as { error: { message: string } }).error.message).toBe("Path not found: missing.txt")
+  })
+
+  test("a directory past the listing cap answers its first page by name and says so", async () => {
+    const crowded = join(repoDir, "crowded")
+    await mkdir(crowded)
+    await Promise.all(
+      Array.from({ length: REPO_LISTING_CAP_ENTRIES + 3 }, (_entry, index) =>
+        writeFile(join(crowded, `f${String(index).padStart(5, "0")}.txt`), "")
+      )
+    )
+    const body = (await (await files({ repoId, path: "crowded" })).json()) as { entries: Array<{ name: string }>; truncated?: boolean }
+    expect(body.truncated).toBe(true)
+    expect(body.entries).toHaveLength(REPO_LISTING_CAP_ENTRIES)
+    expect(body.entries[0]?.name).toBe("f00000.txt")
+    // Errors never carry the checkout's absolute path.
+    const missing = (await (await files({ repoId, path: "crowded/nope" })).json()) as { error: { message: string } }
+    expect(missing.error.message).not.toContain(repoDir)
   })
 
   test("404s an unknown repository and 400s a malformed body", async () => {

@@ -268,6 +268,8 @@ export type Repo = z.infer<typeof RepoSchema>
  */
 export const REPO_FILES_PATH = "/api/repo/files"
 export const REPO_FILE_READ_CAP_BYTES = 256 * 1024
+/** A directory answers at most this many entries (sorted by name), and says so with `truncated`. */
+export const REPO_LISTING_CAP_ENTRIES = 2000
 export const RepoFilesRequestSchema = z.object({
   repoId: z.string().min(1),
   /** Relative to the repository root; "" or absent is the root. */
@@ -277,7 +279,13 @@ export type RepoFilesRequest = z.infer<typeof RepoFilesRequestSchema>
 export const RepoFileEntrySchema = z.object({ name: z.string(), kind: z.enum(["file", "dir"]) })
 export type RepoFileEntry = z.infer<typeof RepoFileEntrySchema>
 export const RepoFilesResponseSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("dir"), path: z.string(), entries: z.array(RepoFileEntrySchema) }),
+  z.object({
+    kind: z.literal("dir"),
+    path: z.string(),
+    entries: z.array(RepoFileEntrySchema),
+    /** True when the directory holds more than REPO_LISTING_CAP_ENTRIES; the entries are the first page by name. */
+    truncated: z.boolean().optional()
+  }),
   z.object({
     kind: z.literal("file"),
     path: z.string(),

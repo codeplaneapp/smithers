@@ -209,6 +209,8 @@ const proxyIdentity = async (
   headers.set("host", target.host)
   headers.set("origin", new URL(upstream).origin)
   headers.delete("content-length")
+  // The per-launch local capability authorizes THIS origin; the seam has no use for it.
+  headers.delete(LOCAL_SESSION_HEADER)
   let response: Response
   try {
     response = await fetch(target, {

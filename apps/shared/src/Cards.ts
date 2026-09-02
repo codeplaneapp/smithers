@@ -490,7 +490,9 @@ export const CardSchema = z.discriminatedUnion("kind", [
     payload: z.object({
       repo: z.string(),
       path: z.string(),
-      entries: z.array(z.object({ name: z.string(), kind: z.enum(["file", "dir"]) }))
+      entries: z.array(z.object({ name: z.string(), kind: z.enum(["file", "dir"]) })),
+      /** True when the listing was cut (a local directory past its cap); optional so older cards parse. */
+      truncated: z.boolean().optional()
     })
   }),
   z.object({

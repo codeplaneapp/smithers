@@ -4,13 +4,17 @@
  * this module owns the one rule that keeps the read inside the repository:
  * the path is split into plain segments (no `..`, no absolute prefix, no
  * NUL), joined under the root, and its REAL path must still sit under the
- * root — a symlink that points out of the checkout is refused, not followed.
- * Reads are bounded (REPO_FILE_READ_CAP_BYTES) and binary is stated, never
- * printed.
+ * root — a symlink that points out of the checkout is refused at that check.
+ * (The check and the open are two calls; a component swapped for an
+ * out-of-repo link in between is followed. The origin is loopback and
+ * session-gated, and the writer of such a swap already owns the checkout.)
+ * Reads are bounded (REPO_FILE_READ_CAP_BYTES), listings are bounded
+ * (REPO_LISTING_CAP_ENTRIES), binary is stated, never printed, and no error
+ * body carries an absolute path.
  */
 import { open, readdir, realpath, stat } from "node:fs/promises"
 import { join, sep } from "node:path"
-import { REPO_FILE_READ_CAP_BYTES } from "smithers-shared/LocalApp"
+import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "smithers-shared/LocalApp"
 import type { RepoFileEntry, RepoFilesResponse } from "smithers-shared/LocalApp"
 
 export type RepoFilesResult =
@@ -88,11 +92,14 @@ export const readRepoPath = async (root: string, path: string): Promise<RepoFile
     let names: ReadonlyArray<string>
     try {
       names = await readdir(real)
-    } catch (error) {
-      return refuse(500, "read_failed", error instanceof Error ? error.message : String(error))
+    } catch {
+      return refuse(500, "read_failed", `Could not list ${relative === "" ? "/" : relative}.`)
     }
+    // Bounded before the per-entry stat: a 100k-entry directory answers its first page, and says so.
+    const truncated = names.length > REPO_LISTING_CAP_ENTRIES
+    const sortedNames = [...names].sort((left, right) => left.localeCompare(right)).slice(0, REPO_LISTING_CAP_ENTRIES)
     const entries: Array<RepoFileEntry> = []
-    for (const name of names) {
+    for (const name of sortedNames) {
       const kind = await entryKind(real, name)
       // A symlink out of the repository lists, but a read of it is refused above.
       if (kind !== null) entries.push({ name, kind })
@@ -100,28 +107,34 @@ export const readRepoPath = async (root: string, path: string): Promise<RepoFile
     entries.sort((left, right) =>
       left.kind !== right.kind ? (left.kind === "dir" ? -1 : 1) : left.name.localeCompare(right.name)
     )
-    return { status: "ok", body: { kind: "dir", path: relative, entries } }
+    return { status: "ok", body: { kind: "dir", path: relative, entries, ...(truncated ? { truncated: true } : {}) } }
   }
   if (!facts.isFile()) return refuse(404, "path_not_found", `${relative} is not a file or directory.`)
   const size = facts.size
   const truncated = size > REPO_FILE_READ_CAP_BYTES
   const length = Math.min(size, REPO_FILE_READ_CAP_BYTES)
-  const bytes = new Uint8Array(length)
+  const buffer = new Uint8Array(length)
+  let read = 0
   try {
     const handle = await open(real, "r")
     try {
-      let offset = 0
-      while (offset < length) {
-        const { bytesRead } = await handle.read(bytes, offset, length - offset, offset)
+      while (read < length) {
+        const { bytesRead } = await handle.read(buffer, read, length - read, read)
         if (bytesRead === 0) break
-        offset += bytesRead
+        read += bytesRead
       }
     } finally {
       await handle.close()
     }
-  } catch (error) {
-    return refuse(500, "read_failed", error instanceof Error ? error.message : String(error))
+  } catch {
+    return refuse(500, "read_failed", `Could not read ${relative}.`)
   }
-  const { content, binary } = decodeText(bytes, truncated)
-  return { status: "ok", body: { kind: "file", path: relative, size, content, truncated: binary ? false : truncated, binary } }
+  // A file that shrank between stat and read (fewer bytes than asked for) is described as read, not as its stat: the unread tail is not NUL bytes.
+  const shrank = read < length
+  const bytes = buffer.subarray(0, read)
+  const { content, binary } = decodeText(bytes, shrank ? false : truncated)
+  return {
+    status: "ok",
+    body: { kind: "file", path: relative, size: shrank ? read : size, content, truncated: binary || shrank ? false : truncated, binary }
+  }
 }

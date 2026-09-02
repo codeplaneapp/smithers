@@ -453,6 +453,12 @@ const localFilesBackend = () => {
         entries: [{ name: "zeta.txt", kind: "file" }, { name: "src", kind: "dir" }, { name: "README.md", kind: "file" }]
       }),
     "src": () => json(200, { kind: "dir", path: "src", entries: [] }),
+    "node_modules": () =>
+      json(200, {
+        kind: "dir",
+        path: "node_modules",
+        entries: Array.from({ length: 1000 }, (_entry, index) => ({ name: `pkg-${String(index).padStart(4, "0")}`, kind: "dir" as const }))
+      }),
     "README.md": () =>
       json(200, { kind: "file", path: "README.md", size: 14, content: "# Local — hi\n", truncated: false, binary: false }),
     "big.txt": () =>
@@ -503,6 +509,8 @@ describe("files seam — a repository open in the local app", () => {
     const { store, controller, requests } = await localController([SMITHERS])
     const outcome = await controller.commands.run("files.read", "README.md")
     expect(outcome.status).toBe("executed")
+    // The model reads the value: the same text the card shows, never a bare "executed".
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe("README.md in smithersai/smithers:\n# Local — hi\n")
     expect(requests).toEqual([{ url: "/api/repo/files", body: { repoId: "repo-smithers", path: "README.md" } }])
     const card = fileCard(store, "file-smithersai/smithers-README.md")
     expect(card?.payload).toEqual({ repo: "smithersai/smithers", path: "README.md", content: "# Local — hi\n", truncated: false })
@@ -511,13 +519,25 @@ describe("files seam — a repository open in the local app", () => {
 
   test("a bare /files.list renders the file-list card, dirs first, whose rows name the local repository", async () => {
     const { store, controller } = await localController([SMITHERS])
-    expect((await controller.commands.run("files.list", "")).status).toBe("executed")
+    const listed = await controller.commands.run("files.list", "")
+    expect(listed.status).toBe("executed")
+    expect(listed.status === "executed" ? listed.value : undefined).toBe("/ in smithersai/smithers:\nsrc/\nREADME.md\nzeta.txt")
     const card = listCard(store, "files-smithersai/smithers-/")
     expect(card?.payload).toEqual({
       repo: "smithersai/smithers",
       path: "",
       entries: [{ name: "src", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "zeta.txt", kind: "file" }]
     })
+  })
+
+  test("the model's copy of a huge listing is bounded while the card keeps every entry", async () => {
+    const { store, controller } = await localController([SMITHERS])
+    const listed = await controller.commands.run("files.list", "node_modules")
+    expect(listed.status).toBe("executed")
+    const value = listed.status === "executed" ? listed.value ?? "" : ""
+    expect(value.split("\n").length).toBe(1 + 400 + 1)
+    expect(value.endsWith("… and 600 more (the card lists them all)")).toBe(true)
+    expect(listCard(store, "files-smithersai/smithers-node_modules")?.payload.entries).toHaveLength(1000)
   })
 
   test("the repository's owner/repo name or folder name routes locally; any other name is still a Cloud read", async () => {
@@ -535,7 +555,9 @@ describe("files seam — a repository open in the local app", () => {
     const { store, controller } = await localController([SMITHERS])
     expect((await controller.commands.run("files.read", "big.txt")).status).toBe("executed")
     expect(fileCard(store, "file-smithersai/smithers-big.txt")?.payload.truncated).toBe(true)
-    expect((await controller.commands.run("files.read", "logo.png")).status).toBe("executed")
+    const binary = await controller.commands.run("files.read", "logo.png")
+    expect(binary.status).toBe("executed")
+    expect(binary.status === "executed" ? binary.value : undefined).toBe("logo.png in smithersai/smithers is a binary file; its bytes are not shown.")
     expect(fileCard(store, "file-smithersai/smithers-logo.png")?.payload).toEqual({
       repo: "smithersai/smithers",
       path: "logo.png",
@@ -560,5 +582,15 @@ describe("files seam — a repository open in the local app", () => {
     await settled()
     expect((await controller.commands.run("files.read", "README.md")).status).toBe("executed")
     expect(requests[1]?.body).toEqual({ repoId: "repo-zeta", path: "README.md" })
+  })
+})
+
+describe("files seam — the model's copy of a Cloud read", () => {
+  test("a Cloud files.read answers the file's text as its value, so the model quotes the file and never invents one", async () => {
+    const { controller } = await freshController()
+    await ready(controller.store ?? (await createAppStore({ kind: "localStorage", storage: memoryStorage() })))
+    const outcome = await controller.commands.run("files.read", "README.md")
+    expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe(`README.md in will/flows:\n${README_TEXT}`)
   })
 })

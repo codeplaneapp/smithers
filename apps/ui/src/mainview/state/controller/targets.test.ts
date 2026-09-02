@@ -419,3 +419,85 @@ test("a pattern run posts the verb and pattern, then folds node, summary, output
   expect(card()).toMatchObject({ status: "error", payload: { status: "failed", exitCode: 1 } })
   expect(typeof card().payload.endedAt).toBe("number")
 })
+
+
+/*
+ * 2026-09-01: opening a repository renders nothing in the transcript; the
+ * targets table is the explicit target.list act, and a bare call means the
+ * active open repository.
+ */
+const openedRepo = (id: string, detected: boolean) => ({
+  id,
+  path: `/tmp/${id}`,
+  name: `acme/${id}`,
+  git: { branch: "main", remote: null },
+  warnings: [],
+  smithers: {
+    detected,
+    workspaceFile: detected ? "WORKSPACE.ts" : null,
+    declarationFiles: [],
+    reason: detected ? "1 workspace detected" : "no WORKSPACE.ts or smthrs BUILD.ts",
+    workspaces: [{ path: ".", title: id }]
+  }
+})
+
+test("opening a repository renders no card and no message; it only refreshes the open set", async () => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const repo = openedRepo("fresh", true)
+  const loads: Array<string> = []
+  let resumed = 0
+  const ctx = {
+    store,
+    baseUrl: "",
+    commandActor: "user",
+    boundedFetch: async () => new Response(JSON.stringify({ repo }), { status: 200, headers: { "content-type": "application/json" } }),
+    http: async () => new Response("{}", { status: 500 }),
+    errorMessageOf: async (_response: Response, fallback: string) => fallback,
+    resumeDeferredCommand: () => {
+      resumed += 1
+    }
+  } as unknown as ControllerContext
+  const controller = createTargetsController(ctx, {
+    nextOrdinal: () => 1,
+    loadRepos: async () => {
+      loads.push("repos")
+    },
+    runs: { attach: () => () => {}, dispose: () => {} }
+  })
+  const before = store.collections.messages.size
+  await controller.openRepo({ path: "/tmp/fresh" })
+  expect(loads).toEqual(["repos"])
+  expect([...store.collections.cards.values()]).toEqual([])
+  expect(store.collections.messages.size).toBe(before)
+  // The open satisfies a parked files command's repo-source requirement.
+  expect(resumed).toBe(1)
+})
+
+test("target.list names the missing repository, the missing workspace, or loads the active repository's table", async () => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const queries: Array<unknown> = []
+  const ctx = {
+    store,
+    baseUrl: "",
+    commandActor: "user",
+    boundedFetch: async () => new Response(JSON.stringify({ runs: [] }), { status: 200, headers: { "content-type": "application/json" } }),
+    http: async (_url: string, init?: RequestInit) => {
+      queries.push(JSON.parse(String(init?.body ?? "{}")))
+      return new Response(JSON.stringify({ targets: [], warnings: [], durationMs: 1 }), { status: 200, headers: { "content-type": "application/json" } })
+    },
+    errorMessageOf: async (_response: Response, fallback: string) => fallback,
+    resumeDeferredCommand: () => {}
+  } as unknown as ControllerContext
+  const controller = createTargetsController(ctx, { nextOrdinal: () => 1, loadRepos: async () => {}, runs: { attach: () => () => {}, dispose: () => {} } })
+  expect(await controller.listTargets()).toBe("Open a repository first — there are no targets to list.")
+  store.dispatch({ type: "repos.loaded", actor: "system", repos: [openedRepo("plain", false)] })
+  expect(await controller.listTargets()).toBe("acme/plain has no Smithers workspace (no WORKSPACE.ts or smthrs BUILD.ts).")
+  expect(await controller.listTargets("nope")).toBe("No open repository has id nope.")
+  store.dispatch({ type: "repos.loaded", actor: "system", repos: [openedRepo("plain", false), openedRepo("built", true)] })
+  // "acme/built" sorts before "acme/plain": the store names it active when both load at once.
+  expect(await controller.listTargets()).toBeUndefined()
+  expect(queries).toEqual([{ repoId: "built" }])
+  const card = store.collections.cards.get(targetsCardId("built"))
+  expect(card?.kind).toBe("targets")
+  expect(card?.kind === "targets" ? card.payload.status : undefined).toBe("done")
+})

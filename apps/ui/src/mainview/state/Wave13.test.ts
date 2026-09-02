@@ -124,7 +124,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
     expect(prompt).toContain("can't-yet")
     expect(prompt).toContain("email")
     expect(prompt).toContain("Slack")
-    expect(prompt).toContain("read files off the user's machine")
+    expect(prompt).toContain("read arbitrary files off the user's machine")
     expect(prompt).toContain("push to a branch or open a pull request — not directly, and not through a run")
     // A workflow does not launder an impossible effect.
     expect(prompt).toContain("Offering a workflow never launders an impossible effect")
@@ -163,7 +163,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
    */
   test.each([
     ["F-1 (email)", "send or draft email"],
-    ["F-2 (local files)", "read files off the user's machine"],
+    ["F-2 (local files)", "read arbitrary files off the user's machine"],
     ["F-3 (Slack)", "post to Slack or any messaging app"],
     ["F-4 (push)", "push to a branch or open a pull request — not directly, and not through a run"],
     ["F-5 (pull request)", "push to a branch or open a pull request — not directly, and not through a run"]

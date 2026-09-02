@@ -7,7 +7,32 @@
  */
 import { Button } from "@smthrs/ui"
 import { FileText, Folder } from "lucide-react"
+import { lazy, Suspense } from "react"
 import type { Card } from "../state/AppState"
+
+/*
+ * A markdown file renders through the shared WYSIWYG editor the World notes
+ * use (will, 2026-09-01), read only: nothing writes a repository file back.
+ * The adapter is heavy, so it loads only when a markdown card is on screen.
+ */
+const MarkdownEditorSurface = lazy(() =>
+  import("../MarkdownEditorSurface").then((module) => ({ default: module.MarkdownEditorSurface }))
+)
+
+/** Markdown by extension: the editor renders these; everything else is a fenced block. */
+export const isMarkdownPath = (path: string): boolean => /\.(md|mdx|markdown)$/i.test(path)
+
+/*
+ * The editor reseeds its document only when resetKey changes (the adapter's
+ * contract), so the key follows the CONTENT: a re-read after a same-length
+ * edit must not show the old text. djb2 over the string is cheap at the card
+ * cap and distinct enough for a key.
+ */
+export const contentKey = (content: string): string => {
+  let hash = 5381
+  for (let index = 0; index < content.length; index += 1) hash = ((hash << 5) + hash + content.charCodeAt(index)) | 0
+  return `${content.length}:${(hash >>> 0).toString(36)}`
+}
 
 export interface FileCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -63,6 +88,9 @@ export const FileListCardBody = ({
             ))
           )}
       </ul>
+      {card.payload.truncated === true ?
+        <p className="world-card-empty">Truncated — the directory holds more entries than the listing shows.</p> :
+        null}
     </div>
   )
 }
@@ -79,6 +107,19 @@ export const FileCardBody = ({
         <p className="world-card-empty">
           This file is binary, so its bytes are not shown here — open it in the repository.
         </p>
+      ) :
+      isMarkdownPath(card.payload.path) ?
+      (
+        <div className="world-card-doc" data-file-markdown="">
+          <Suspense fallback={<p className="smithers-card-note">Loading editor…</p>}>
+            <MarkdownEditorSurface
+              value={card.payload.content}
+              resetKey={`${card.id}:${contentKey(card.payload.content)}`}
+              label={`${card.payload.path} in ${card.payload.repo}`}
+              readOnly
+            />
+          </Suspense>
+        </div>
       ) :
       <pre className="world-card-path">{card.payload.content}</pre>}
     {card.payload.truncated ?

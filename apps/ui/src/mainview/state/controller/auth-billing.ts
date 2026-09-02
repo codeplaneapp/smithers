@@ -145,8 +145,8 @@ export const createAuthBillingController = (
     // The local app's repositories are the ones opened on this machine; the
     // GitHub watch-list chooser is the cloud client's onboarding question,
     // and nothing appears on its own after sign-in here.
-    if (session.allowlisted && services.bootstrap?.host !== "local") {
-      void openFirstRunRepos()
+    if (session.allowlisted) {
+      if (services.bootstrap?.host !== "local") void openFirstRunRepos()
       // Wave 11: a live run card's event pump resumes from its lastSeq.
       resumeWorkflowRuns()
     }

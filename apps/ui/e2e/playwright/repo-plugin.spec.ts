@@ -129,6 +129,11 @@ test("the aomi checkout opens with its declared plugin groups when present", asy
   await page.goto("/")
   await openRepo(page, AOMI)
   opened.push(realpathSync(AOMI))
+  // Opening renders nothing; the plugin card is /target.list's answer.
+  await page.waitForTimeout(1500)
+  await expect(pluginCard(page)).toHaveCount(0)
+  await page.getByTestId("composer-input").fill("/target.list")
+  await page.getByTestId("composer-send").click()
 
   const plugin = pluginCard(page)
   await expect(plugin).toBeVisible({ timeout: 30_000 })

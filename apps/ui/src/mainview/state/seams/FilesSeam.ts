@@ -20,10 +20,39 @@ import { resolveOpenRepo, resolveTargetRepo } from "../RepoContext"
 import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
+/*
+ * Both commands answer a `value` beside the card: the card is what the human
+ * sees, the value is what the MODEL reads. 2026-09-01: asked "what does the
+ * README say?", the model called files.read, got back only "executed
+ * /files.read", and wrote a README that does not exist — the card it had
+ * just rendered never reaches its context. A read the model cannot read is
+ * a confabulation waiting to happen.
+ */
 export interface FilesSeam {
-  readonly listFiles: (path: string, repo?: string) => Promise<string | void>
-  readonly readFile: (path: string, repo?: string) => Promise<string | void>
+  readonly listFiles: (path: string, repo?: string) => Promise<string | void | { readonly value: string }>
+  readonly readFile: (path: string, repo?: string) => Promise<string | void | { readonly value: string }>
 }
+
+/** The model's copy of a listing stops here (a node_modules has thousands of entries); the card keeps them all. */
+const LISTING_VALUE_CAP = 400
+
+/** The model's copy of a directory listing: one entry per line, directories marked, bounded. */
+const listingValue = (repo: string, path: string, entries: ReadonlyArray<{ name: string; kind: "file" | "dir" }>): string => {
+  if (entries.length === 0) return `${path || "/"} in ${repo} is empty.`
+  const shown = entries.slice(0, LISTING_VALUE_CAP).map((entry) => (entry.kind === "dir" ? `${entry.name}/` : entry.name))
+  const rest = entries.length - shown.length
+  return `${path || "/"} in ${repo}:\n${shown.join("\n")}${rest > 0 ? `\n… and ${rest} more (the card lists them all)` : ""}`
+}
+
+/** The model's copy of a file: the same bounded text the card shows, with truncation and binary stated. */
+const fileValue = (
+  repo: string,
+  path: string,
+  payload: { readonly content: string; readonly truncated: boolean; readonly binary?: boolean }
+): string =>
+  payload.binary === true
+    ? `${path} in ${repo} is a binary file; its bytes are not shown.`
+    : `${path} in ${repo}${payload.truncated ? " (truncated at the card cap; the rest stays in the repository)" : ""}:\n${payload.content}`
 
 type FileListPayload = Extract<Card, { kind: "file-list" }>["payload"]
 type FileListEntry = FileListPayload["entries"][number]
@@ -183,12 +212,13 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     return { body: parsed.data }
   }
 
-  const listLocal = async (repo: Repo, path: string): Promise<string | void> => {
+  const listLocal = async (repo: Repo, path: string): Promise<string | { readonly value: string }> => {
     const normalized = normalizePath(path)
     const label = normalized === "" ? "/" : normalized
     const answer = await localRequest(repo, normalized, label, "list")
     if ("error" in answer) return answer.error
     if (answer.body.kind === "file") return `${normalized} in ${repo.name} is a file — run /files.read ${normalized} instead`
+    const entries = sortEntries(answer.body.entries)
     upsert({
       id: `files-${repo.name}-${label}`,
       kind: "file-list",
@@ -196,11 +226,15 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
       status: "active",
       createdAt: Date.now(),
       ordinal: ctx.nextOrdinal(),
-      payload: { repo: repo.name, path: normalized, entries: sortEntries(answer.body.entries) }
+      payload: { repo: repo.name, path: normalized, entries, ...(answer.body.truncated === true ? { truncated: true } : {}) }
     })
+    return {
+      value: listingValue(repo.name, normalized, entries) +
+        (answer.body.truncated === true ? "\n(the directory holds more entries than the listing cap; this is the first page by name)" : "")
+    }
   }
 
-  const readLocal = async (repo: Repo, path: string): Promise<string | void> => {
+  const readLocal = async (repo: Repo, path: string): Promise<string | { readonly value: string }> => {
     const normalized = normalizePath(path)
     if (normalized === "") return "files.read needs a file path"
     const answer = await localRequest(repo, normalized, normalized, "read")
@@ -208,6 +242,13 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     if (answer.body.kind === "dir") return `${normalized} in ${repo.name} is a directory — run /files.list ${normalized} instead`
     const { content, binary } = answer.body
     const truncated = !binary && (answer.body.truncated || content.length > CARD_CONTENT_CAP)
+    const payload = {
+      repo: repo.name,
+      path: normalized,
+      content: binary ? "" : content.slice(0, CARD_CONTENT_CAP),
+      truncated,
+      ...(binary ? { binary: true } : {})
+    }
     upsert({
       id: `file-${repo.name}-${normalized}`,
       kind: "file",
@@ -215,14 +256,9 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
       status: "active",
       createdAt: Date.now(),
       ordinal: ctx.nextOrdinal(),
-      payload: {
-        repo: repo.name,
-        path: normalized,
-        content: binary ? "" : content.slice(0, CARD_CONTENT_CAP),
-        truncated,
-        ...(binary ? { binary: true } : {})
-      }
+      payload
     })
+    return { value: fileValue(repo.name, normalized, payload) }
   }
 
   return {
@@ -272,6 +308,7 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
         ordinal: ctx.nextOrdinal(),
         payload: { repo, path: normalized, entries }
       })
+      return { value: listingValue(repo, normalized, entries) }
     },
 
     readFile: async (path, explicitRepo) => {
@@ -320,7 +357,7 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
        * is decoded and checked. A real text file never matches — the
        * alphabet excludes every punctuation mark prose and code use.
        */
-      const binaryCard = (): void =>
+      const binaryCard = (): { readonly value: string } => {
         upsert({
           id: `file-${repo}-${normalized}`,
           kind: "file",
@@ -330,6 +367,8 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
           ordinal: ctx.nextOrdinal(),
           payload: { repo, path: normalized, content: "", truncated: false, binary: true }
         })
+        return { value: fileValue(repo, normalized, { content: "", truncated: false, binary: true }) }
+      }
       let content: string
       if (body.encoding === "base64") {
         const decoded = decodeBase64(rawContent)
@@ -341,6 +380,12 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
         content = rawContent
       }
       const truncated = content.length > CARD_CONTENT_CAP
+      const payload = {
+        repo,
+        path: normalized,
+        content: truncated ? content.slice(0, CARD_CONTENT_CAP) : content,
+        truncated
+      }
       upsert({
         id: `file-${repo}-${normalized}`,
         kind: "file",
@@ -348,13 +393,9 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
         status: "active",
         createdAt: Date.now(),
         ordinal: ctx.nextOrdinal(),
-        payload: {
-          repo,
-          path: normalized,
-          content: truncated ? content.slice(0, CARD_CONTENT_CAP) : content,
-          truncated
-        }
+        payload
       })
+      return { value: fileValue(repo, normalized, payload) }
     }
   }
 }
