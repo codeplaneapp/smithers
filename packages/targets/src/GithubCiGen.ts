@@ -699,6 +699,27 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       with: { args: needs.workflowLint.workflows.join(" ") }
     })
   }
+  // Language toolchains go BEFORE the package manager and its install.
+  // `actions/setup-go` prepends its own bin directories to PATH, which
+  // displaced the pnpm shim corepack had put there: the job's own
+  // `pnpm exec smithers-build` still resolved, but every nested target the
+  // build tool spawned died with `spawn pnpm ENOENT` in under a second. That
+  // took 51 targets down at once and read like 51 defects. Installing them
+  // first leaves the package manager's setup last, so its PATH entry wins.
+  if (needs.go !== undefined) {
+    steps.push({
+      name: "Install Go",
+      uses: actions.setupGo,
+      with: { "go-version": needs.go.release }
+    })
+  }
+  if (needs.foundry !== undefined) {
+    steps.push({
+      name: "Install Foundry",
+      uses: actions.foundryToolchain,
+      with: { version: needs.foundry.release }
+    })
+  }
   const managerSetup = managerSetupAction(attrs.packageManager)
   if (needs.install && managerSetup !== undefined) steps.push({ uses: managerSetup })
   for (const setup of needs.runtimes) steps.push(...runtimeSteps(setup))
@@ -727,20 +748,6 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       name: "Install ripgrep",
       uses: actions.installTool,
       with: { tool: `ripgrep@${needs.ripgrep.release}` }
-    })
-  }
-  if (needs.go !== undefined) {
-    steps.push({
-      name: "Install Go",
-      uses: actions.setupGo,
-      with: { "go-version": needs.go.release }
-    })
-  }
-  if (needs.foundry !== undefined) {
-    steps.push({
-      name: "Install Foundry",
-      uses: actions.foundryToolchain,
-      with: { version: needs.foundry.release }
     })
   }
   if (needs.browser !== undefined) {

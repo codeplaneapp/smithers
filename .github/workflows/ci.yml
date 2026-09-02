@@ -16,6 +16,14 @@ jobs:
         uses: docker://rhysd/actionlint:1.7.11
         with:
           args: ".github/workflows/ci.yml .github/workflows/release.yml .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/docs-deploy.yml .github/workflows/pr-review.yml"
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.0
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.1
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
@@ -35,14 +43,6 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: ripgrep@14.1.1
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.26.0
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.8.1
       - name: Workspace targets
         run: pnpm exec smithers-build ci '//packages/...' --jobs 2
         env:
@@ -277,6 +277,14 @@ jobs:
     continue-on-error: ${{ matrix.advisory }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.0
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.1
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
@@ -296,14 +304,6 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: ripgrep@14.1.1
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.26.0
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.8.1
       - name: Package test targets
         run: pnpm exec smithers-build test '//packages/...'
         env:
