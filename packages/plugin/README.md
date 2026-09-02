@@ -39,10 +39,13 @@ The root exports hook, plugin, and error declarations and the `Config`,
 `@smthrs/plugin/Plugins`, and `@smthrs/plugin/Resolve`.
 
 Plugin names use exact Unicode equality and are never normalized. Resolution
-validates the entire preset before filtering, snapshots plugin records and hook
-objects, and exposes an immutable handler-map facade. Config and cache identity
-are detached, bounded, strict JSON snapshots. Caller mutation after startup
-cannot change dispatch or sealed cache keys.
+validates every plugin record and hook entry before `apply` filtering, checks
+hook names against the host catalog for the plugins it selected, snapshots
+plugin records and hook objects, and exposes an immutable handler-map facade.
+Config and cache identity are detached, bounded, strict JSON snapshots.
+Configuration holds strict JSON only: an `undefined` member is refused, not
+dropped. Caller mutation after startup cannot change dispatch or sealed cache
+keys.
 
 See the [API reference](https://smithers.sh/api/plugin) for error codes,
 dispatch semantics, and limits. The production cell hooks are documented by
