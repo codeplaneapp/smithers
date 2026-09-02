@@ -259,32 +259,35 @@ describe("Plan.compile", () => {
       expect(plan.nodes.map((node) => node.id)).toEqual(["root", "left", "right", "final", "independent"])
     }))
 
-  it.effect("compiles a 10,000-node Ref chain in both declaration orders without native recursion", () =>
-    Effect.gen(function*() {
-      const size = Plan.maximumPlanNodes
-      const ids = Array.from({ length: size }, (_, index) => `chain-${index}`)
-      const nodes = ids.map((id, index) =>
-        draft(id, {
-          inputs: index === 0 ? [] : [{ _tag: "Ref", from: ids[index - 1]!, path: [] }]
-        })
-      )
-      const forward = yield* withCrypto(compile(nodes, "large-forward"))
-      const reverse = yield* withCrypto(compile([...nodes].reverse(), "large-reverse"))
+  it.effect(
+    "compiles a 10,000-node Ref chain in both declaration orders without native recursion",
+    () =>
+      Effect.gen(function*() {
+        const size = Plan.maximumPlanNodes
+        const ids = Array.from({ length: size }, (_, index) => `chain-${index}`)
+        const nodes = ids.map((id, index) =>
+          draft(id, {
+            inputs: index === 0 ? [] : [{ _tag: "Ref", from: ids[index - 1]!, path: [] }]
+          })
+        )
+        const forward = yield* withCrypto(compile(nodes, "large-forward"))
+        const reverse = yield* withCrypto(compile([...nodes].reverse(), "large-reverse"))
 
-      expect(forward.nodes.map((node) => node.id)).toEqual(ids)
-      expect(reverse.nodes.map((node) => node.id)).toEqual(ids)
-      const overflow = yield* withCryptoFailure(Plan.append(forward, [draft("chain-overflow")]))
-      expect(overflow).toMatchObject({
-        code: "graph_too_large",
-        message: `A plan may contain at most ${Plan.maximumPlanNodes} nodes, received ${Plan.maximumPlanNodes + 1}`
-      })
-    }),
+        expect(forward.nodes.map((node) => node.id)).toEqual(ids)
+        expect(reverse.nodes.map((node) => node.id)).toEqual(ids)
+        const overflow = yield* withCryptoFailure(Plan.append(forward, [draft("chain-overflow")]))
+        expect(overflow).toMatchObject({
+          code: "graph_too_large",
+          message: `A plan may contain at most ${Plan.maximumPlanNodes} nodes, received ${Plan.maximumPlanNodes + 1}`
+        })
+      }),
     // Measured 5.7s on the developer machine and roughly seven times that on a
     // two-core runner, against vitest's 30s default: five times the headroom
     // here and none there, so it timed out on CI while passing locally. The
     // budget is explicit rather than inherited, and generous enough that only
     // a real complexity regression in `Plan.compile` can reach it.
-    120_000)
+    120_000
+  )
 
   it.effect("refuses a graph above the documented node bound before quadratic analysis", () =>
     Effect.gen(function*() {
