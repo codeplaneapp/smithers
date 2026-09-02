@@ -497,13 +497,13 @@ export const WorkflowRunCardBody = ({
             <ul className="flow-run-steps" data-testid={`flow-run-transcript-${runId}`}>
               {card.payload.transcriptRows.map((row) => (
                 <li key={row.sequence}>
-                  {row.turn !== undefined ? `turn ${row.turn} · ` : ""}{row.text}
+                  {row.turn !== undefined ? `turn ${row.turn} · ` : ""}{row.at !== undefined ? `${clockLabel(row.at)} · ` : ""}{row.kind !== undefined ? `${row.kind} · ` : ""}{row.text}
                 </li>
               ))}
             </ul>
           ) :
         null}
-      {facet === "events" ?
+      {facet === "events" && debugVerbose ?
         card.payload.events === undefined || card.payload.events.length === 0 ?
           <p className="smithers-card-note">No events recorded yet.</p> :
           (
@@ -604,7 +604,8 @@ export const WorkflowRunCardBody = ({
 /** The phases a run can still be steered, resumed, or stopped in. */
 const LIVE_RUN_PHASES: ReadonlySet<string> = new Set(["launching", "running", "waiting-approval", "reconnecting"])
 /** The phases a Run again answers. */
-const TERMINAL_RUN_PHASES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "no-capacity", "stopped"])
+// "stopped" is the phase a REFUSED cancel leaves (workflow-pump stopWatchingRun): the run may still be live, so it is not terminal.
+const TERMINAL_RUN_PHASES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "no-capacity"])
 
 /** The thinking levels a steer may name — the wire's own vocabulary (@smthrs/notifications). */
 const THINKING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const
