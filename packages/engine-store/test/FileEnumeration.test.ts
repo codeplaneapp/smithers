@@ -8,11 +8,21 @@ import * as FileEnumeration from "../src/internal/FileEnumeration.ts"
 
 const fixture = () => {
   const directories = new Map<string, ReadonlyArray<string>>([
-    [".", ["root.json", "root.txt", "src"]],
+    [".", ["packages", "root.json", "root.txt", "src"]],
+    ["packages", ["a"]],
+    ["packages/a", ["node_modules"]],
+    ["packages/a/node_modules", ["pkg"]],
+    ["packages/a/node_modules/pkg", ["config.json"]],
     ["src", ["link", "node_modules", "visible.json"]],
     ["src/node_modules", ["hidden.json"]]
   ])
-  const files = new Set(["root.json", "root.txt", "src/visible.json", "src/node_modules/hidden.json"])
+  const files = new Set([
+    "packages/a/node_modules/pkg/config.json",
+    "root.json",
+    "root.txt",
+    "src/visible.json",
+    "src/node_modules/hidden.json"
+  ])
   const reads: Array<string> = []
   const stats: Array<string> = []
   const descendants = (directory: string): ReadonlyArray<string> => {
@@ -38,7 +48,7 @@ const fixture = () => {
 }
 
 describe("FileEnumeration", () => {
-  it.effect("skips ignored directories unless the static prefix names one", () =>
+  it.effect("skips ignored directories for root globs unless an include names one", () =>
     Effect.gen(function*() {
       const host = fixture()
       const rootGlob: FileSet.Glob = { _tag: "Glob", include: ["**/*.json"] }
@@ -57,6 +67,20 @@ describe("FileEnumeration", () => {
       expect(yield* FileEnumeration.expandGlob(host.fs, explicitGlob)).toEqual([
         "src/node_modules/hidden.json"
       ])
+    }))
+
+  it.effect("walks an ignored directory named after a wildcard segment", () =>
+    Effect.gen(function*() {
+      const host = fixture()
+      const glob: FileSet.Glob = {
+        _tag: "Glob",
+        include: ["packages/*/node_modules/**/*.json"]
+      }
+
+      expect(yield* FileEnumeration.expandGlob(host.fs, glob)).toEqual([
+        "packages/a/node_modules/pkg/config.json"
+      ])
+      expect(host.reads).toContain("packages/a/node_modules")
     }))
 
   it.effect("fails typed when a walk exceeds maxEntries", () =>
@@ -86,6 +110,7 @@ describe("FileEnumeration", () => {
         "src/visible.json"
       ])
       expect(yield* FileEnumeration.filesUnder(host.fs, "")).toEqual([
+        "packages/a/node_modules/pkg/config.json",
         "root.json",
         "root.txt",
         "src/node_modules/hidden.json",

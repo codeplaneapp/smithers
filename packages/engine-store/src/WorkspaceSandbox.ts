@@ -710,8 +710,8 @@ const notFound = (path: string): WorkspaceError =>
  * The `FileSystem` is built from `makeNoop` on purpose. Only the operations
  * listed here are meaningful over a functional map, and a body reaching for
  * one that is not — a temp file, a watch, a stream — gets the platform's own
- * refusal rather than a plausible lie. Widening the surface is a ticket
- * (`.smithers/tickets/sandbox-filesystem-surface.md`), never a silent default.
+ * refusal rather than a plausible lie. Widening the surface is a deliberate
+ * change to this list, never a silent default.
  */
 const transaction = (base: ReadonlyMap<string, Uint8Array>, trace: Trace, root: string) => {
   const files = new Map(base)

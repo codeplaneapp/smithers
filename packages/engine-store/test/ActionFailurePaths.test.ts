@@ -368,6 +368,35 @@ describe("action executor failure paths", () => {
       })
     }))
 
+  it.effect("reduces a large array-buffer view without persisting one key per byte", () =>
+    Effect.gen(function*() {
+      const result = yield* settleDefect("array-buffer-view-defect", {
+        bytes: new Uint8Array(1_000_000)
+      })
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: { bytes: "[ArrayBufferView]" } }] }
+      })
+    }))
+
+  it.effect("charges every enumerated own key against a bounded walk", () =>
+    Effect.gen(function*() {
+      const defect: Record<PropertyKey, unknown> = {}
+      for (let index = 0; index <= ActionPersistence.maxInertJsonNodes; index++) {
+        Object.defineProperty(defect, Symbol(index), { value: index, enumerable: true })
+      }
+
+      const result = yield* settleDefect("own-key-budget-defect", defect)
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: null }] }
+      })
+    }))
+
   it.effect("rejects a defect deeper than the inert JSON depth bound", () =>
     Effect.gen(function*() {
       let defect: unknown = "leaf"
@@ -434,6 +463,39 @@ describe("action executor failure paths", () => {
         state: "failed",
         error: { reasons: [{ _tag: "Die", defect: half }, { _tag: "Die", defect: null }] }
       })
+    }))
+
+  it.effect("collapses an over-budget interrupt cause into a replayable terminal failure", () =>
+    Effect.gen(function*() {
+      const runId = "interrupt-cause-budget"
+      const key = `failure/${runId}`
+      const reasonCount = Math.floor(AttemptStore.maximumJsonNodes / 3) + 1
+      const cause = Cause.fromReasons(
+        Array.from({ length: reasonCount }, (_, fiberId) => Cause.makeInterruptReason(fiberId))
+      )
+      const result = yield* run(Effect.gen(function*() {
+        yield* activate(runId, ownerA)
+        const first = yield* executor({ runId, execute: () => Effect.failCause(cause) })(input(key)).pipe(
+          Effect.exit
+        )
+        const attempts = yield* AttemptStore.AttemptStore
+        const row = yield* attempts.get({ runId, stepKeyDigest: sha256(key), attempt: 1 })
+        const replayed = Option.isSome(row) && row.value.state === "failed"
+          ? yield* executor({ runId, execute: () => Effect.die("replay executed the body") })(input(key)).pipe(
+            Effect.exit
+          )
+          : undefined
+        return { first, row, replayed }
+      }))
+
+      expect(Exit.isFailure(result.first)).toBe(true)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: null }] }
+      })
+      expect(result.replayed).toBeDefined()
+      if (result.replayed === undefined || Exit.isSuccess(result.replayed)) return
+      expect(result.replayed.cause.reasons).toMatchObject([{ _tag: "Die", defect: null }])
     }))
 
   /**

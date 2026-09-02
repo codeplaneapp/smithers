@@ -529,7 +529,9 @@ const checkedFile = (
  * snapshot references is captured (publication precedes reference). Blobs are
  * digest-verified as they are copied; a blob whose bytes no longer hash to
  * its address fails the backup loudly rather than capturing corruption. The
- * manifest is written last.
+ * manifest is encoded and admitted under the same file-size ceiling before it
+ * is written last, so a successful backup remains readable with its own
+ * options.
  *
  * @since 0.1.0
  * @category operations
@@ -626,10 +628,16 @@ export const backup = <R = never, E = never>(
         },
         artifacts
       }
-      yield* fs.writeFileString(
-        `${options.directory}/${manifestFileName}`,
-        `${JSON.stringify(manifest, null, 2)}\n`
-      ).pipe(Effect.mapError(ioFailure("backup", `writing ${manifestFileName}`)))
+      const manifestPath = `${options.directory}/${manifestFileName}`
+      const manifestBytes = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`)
+      if (manifestBytes.byteLength > maxFileSizeBytes) {
+        const message =
+          `${manifestPath} is ${manifestBytes.byteLength} bytes, which exceeds the ${maxFileSizeBytes}-byte file limit`
+        return yield* Effect.fail(error("backup", "io", message, new RangeError(message)))
+      }
+      yield* fs.writeFile(manifestPath, manifestBytes).pipe(
+        Effect.mapError(ioFailure("backup", `writing ${manifestFileName}`))
+      )
       return manifest
     })
 

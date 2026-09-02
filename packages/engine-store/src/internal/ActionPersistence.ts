@@ -408,9 +408,11 @@ export const maxInertJsonDepth = AttemptStore.maximumJsonDepth - 4
 /**
  * Maximum JSON values copied from one persisted cause.
  *
- * The budget is spent across every reason of one cause, so the reduction of a
- * whole cause stays inside the node count `AttemptStore` admits however many
- * reasons it carries.
+ * The budget is spent across the cause object, its reasons array, every reason
+ * envelope, and every reduced leaf. A cause that cannot fit collapses to one
+ * bounded reason before it reaches `AttemptStore`. Own-key enumeration has a
+ * separate allowance of the same size so ignored keys cannot make traversal
+ * unbounded.
  *
  * @since 1.0.0
  * @category constants
@@ -420,10 +422,10 @@ export const maxInertJsonNodes = AttemptStore.maximumJsonNodes - 8
 /**
  * Maximum UTF-16 units copied from one persisted cause, keys included.
  *
- * Spent across the whole cause, like {@link maxInertJsonNodes}. JSON spends at
- * most six bytes on one UTF-16 unit, the escape a control character needs, so
- * this budget holds a reduced cause under the store's 4 MiB byte ceiling while
- * still carrying every ordinary message, stack, and payload intact.
+ * Spent across every caller-supplied key and string leaf. This bounds text the
+ * reduction inspects and retains, not the serialized byte length: numeric
+ * spellings, punctuation, and the fixed cause envelope are outside this
+ * character count and are bounded separately by {@link maxInertJsonNodes}.
  *
  * @since 1.0.0
  * @category constants
@@ -440,6 +442,7 @@ type InertJsonValue =
 
 const inertJsonRejected = Symbol("inertJsonRejected")
 const inertJsonOmitted = Symbol("inertJsonOmitted")
+const arrayBufferViewMarker = "[ArrayBufferView]"
 
 type InertJsonReduction = InertJsonValue | typeof inertJsonRejected | typeof inertJsonOmitted
 
@@ -447,6 +450,14 @@ type InertJsonReduction = InertJsonValue | typeof inertJsonRejected | typeof ine
 interface InertJsonBudget {
   nodes: number
   characters: number
+  enumeratedKeys: number
+}
+
+/** Charges JSON values against the cause-wide node allowance. */
+const spendNodes = (budget: InertJsonBudget, nodes: number): boolean => {
+  if (budget.nodes + nodes > maxInertJsonNodes) return false
+  budget.nodes += nodes
+  return true
 }
 
 /** The store rejects unpaired surrogates, so an ill-formed string is refused. */
@@ -470,6 +481,13 @@ const spend = (budget: InertJsonBudget, value: string): boolean => {
   return budget.characters <= maxInertJsonCharacters && isWellFormedInertString(value)
 }
 
+/** Charges every own key before its type or descriptor can make it ignorable. */
+const spendEnumeratedKey = (budget: InertJsonBudget, key: PropertyKey): boolean => {
+  budget.enumeratedKeys += 1
+  if (budget.enumeratedKeys > maxInertJsonNodes) return false
+  return typeof key !== "string" || spend(budget, key)
+}
+
 /**
  * Projects one failure value into the inert JSON data `AttemptStore` admits.
  *
@@ -482,26 +500,29 @@ const spend = (budget: InertJsonBudget, value: string): boolean => {
  *
  * The reduction reads only own data-property descriptors. It never invokes a
  * getter or `toJSON`, and a host-detected proxy is rejected before any of its
- * traps can run. JSON leaves, arrays, and enumerable string-keyed object data
- * keep their ordinary JSON shape. Unsupported object members are omitted and
- * unsupported array members become `null`, matching JSON's container rules.
+ * traps can run. An array-buffer view becomes the fixed
+ * `"[ArrayBufferView]"` marker before its indexed own keys can be materialized;
+ * its bytes and attached properties are deliberately omitted. JSON leaves,
+ * arrays, and enumerable string-keyed object data otherwise keep their ordinary
+ * JSON shape. Unsupported object members are omitted and unsupported array
+ * members become `null`, matching JSON's container rules. Every key returned
+ * by an own-key enumeration spends from a cause-wide allowance before its type,
+ * enumerability, or descriptor is inspected.
  *
  * Depth, node, and character bounds apply before the attempt store's admission
- * boundary, and `budget` carries the node and character allowances across every
- * reason of one cause. A cycle, proxy, inspection refusal, or exceeded bound
- * rejects the whole value as `null`, so persistence on the failure path neither
- * executes user code nor leaves an attempt running because its error was too
- * large for the store. The bounds are the store's own, less the envelope
- * {@link persistCause} adds, so a value the store would have taken is never
- * discarded here.
+ * boundary, and `budget` carries the allowances across every reason of one
+ * cause. The caller charges the root value as part of its reason envelope; this
+ * walk charges every descendant. A cycle, proxy, inspection refusal, or
+ * exceeded bound rejects the whole value as `null`, so persistence on the
+ * failure path neither executes user code nor leaves an attempt running because
+ * its error was too large for the store.
  */
 const inertJson = (value: unknown, budget: InertJsonBudget): unknown => {
   const active = new WeakSet<object>()
 
   const reduce = (current: unknown, depth: number): InertJsonReduction => {
     if (depth > maxInertJsonDepth) return inertJsonRejected
-    budget.nodes += 1
-    if (budget.nodes > maxInertJsonNodes) return inertJsonRejected
+    if (depth > 0 && !spendNodes(budget, 1)) return inertJsonRejected
 
     if (current === null) return null
     switch (typeof current) {
@@ -518,6 +539,7 @@ const inertJson = (value: unknown, budget: InertJsonBudget): unknown => {
         return inertJsonOmitted
       case "object": {
         if (HostReflection.host.isProxy(current) || active.has(current)) return inertJsonRejected
+        if (ArrayBuffer.isView(current)) return arrayBufferViewMarker
         active.add(current)
         try {
           if (Array.isArray(current)) {
@@ -542,12 +564,12 @@ const inertJson = (value: unknown, budget: InertJsonBudget): unknown => {
 
           const output: Record<string, InertJsonValue> = {}
           for (const key of Reflect.ownKeys(current)) {
+            if (!spendEnumeratedKey(budget, key)) return inertJsonRejected
             if (typeof key !== "string") continue
             const descriptor = Object.getOwnPropertyDescriptor(current, key)
             /* v8 ignore next -- A key returned by Reflect.ownKeys exists on a non-proxy object. */
             if (descriptor === undefined) continue
             if (!descriptor.enumerable || !("value" in descriptor)) continue
-            if (!spend(budget, key)) return inertJsonRejected
             const reduced = reduce(descriptor.value, depth + 1)
             if (reduced === inertJsonRejected) return inertJsonRejected
             if (reduced === inertJsonOmitted) continue
@@ -584,20 +606,28 @@ const inertJson = (value: unknown, budget: InertJsonBudget): unknown => {
  * the store's encoding silently broke failed-attempt replay. The write side
  * now owns the shape explicitly. {@link inertJson} makes every live leaf
  * inert and bounded before the store sees it, against one budget shared by
- * every reason, so a cause of many reasons is bounded as a whole and not
- * merely one reason at a time.
+ * the fixed envelope and every reason. The loop stops at the first reason that
+ * cannot fit and returns one `Die(null)` reason, which {@link rehydrateCause}
+ * decodes on replay, so even an adversarial reason count remains admissible.
  */
 const persistCause = (cause: Cause.Cause<unknown>): typeof CauseJson.Type => {
-  const budget: InertJsonBudget = { nodes: 0, characters: 0 }
-  return {
-    reasons: cause.reasons.map((reason) =>
-      Cause.isFailReason(reason)
-        ? { _tag: "Fail" as const, error: inertJson(reason.error, budget) }
-        : Cause.isDieReason(reason)
-        ? { _tag: "Die" as const, defect: inertJson(reason.defect, budget) }
-        : { _tag: "Interrupt" as const, fiberId: reason.fiberId ?? null }
-    )
+  // The cause object and its `reasons` array are the two fixed envelope nodes.
+  const budget: InertJsonBudget = { nodes: 2, characters: 0, enumeratedKeys: 0 }
+  const reasons: Array<typeof CauseJson.Type.reasons[number]> = []
+  for (const reason of cause.reasons) {
+    // One object, its `_tag` string, and its error, defect, or fiber-id value.
+    if (!spendNodes(budget, 3)) {
+      return { reasons: [{ _tag: "Die", defect: null }] }
+    }
+    if (Cause.isFailReason(reason)) {
+      reasons.push({ _tag: "Fail", error: inertJson(reason.error, budget) })
+    } else if (Cause.isDieReason(reason)) {
+      reasons.push({ _tag: "Die", defect: inertJson(reason.defect, budget) })
+    } else {
+      reasons.push({ _tag: "Interrupt", fiberId: reason.fiberId ?? null })
+    }
   }
+  return { reasons }
 }
 
 /**

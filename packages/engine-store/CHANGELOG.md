@@ -86,6 +86,21 @@
   are pruned from glob expansion only; pruning them from `filesUnder` and
   `entriesUnder` left files out of a tree's captured identity and left stale
   copies of them behind on replay.
+- Derived glob-pruning exemptions from every full include that shares a walk
+  prefix. An ignored-directory segment after a wildcard now remains in a
+  declared read set instead of disappearing from boundary measurement, while a
+  root glob still skips undeclared repository metadata and dependency trees.
+- Charged the persisted cause envelope and interrupt reasons against one node
+  budget, with a replayable one-reason fallback when it is exhausted. A large
+  interrupted fan-out can no longer make `AttemptStore.finish` reject the
+  terminal update and leave the attempt `running`.
+- Reduced array-buffer views to a bounded marker before own-key enumeration and
+  charged every other enumerated key against a shared walk allowance. A large
+  typed-array defect can no longer materialize one property name per byte on
+  the terminal failure path.
+- Measured the encoded backup manifest against `maxFileSizeBytes` before its
+  final write. Backup can no longer report success for a manifest that verify
+  and restore reject under the same file-size option.
 - Dropped quarantined boundary evidence by omitting the key rather than writing
   `undefined` over it, which the attempt store refuses.
 

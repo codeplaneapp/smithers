@@ -143,6 +143,40 @@ describe("backup", () => {
       expect(verified).toEqual(manifest)
     }))
 
+  it.effect("refuses an encoded manifest above the shared file-size ceiling", () =>
+    Effect.gen(function*() {
+      const base = root()
+      const objects = join(base, "objects")
+      const backupDirectory = join(base, "backup")
+      const result = yield* withCrypto(
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`CREATE TABLE flows_migrations (migration_id INTEGER PRIMARY KEY, name TEXT NOT NULL)`
+          yield* sql`CREATE TABLE flows_step_cache (meta_json TEXT NOT NULL)`
+          yield* sql`CREATE TABLE flows_attempts (meta_json TEXT NOT NULL, checkpoint_json TEXT)`
+
+          const baseline = yield* backup({ directory: join(base, "baseline") })
+          const maxFileSizeBytes = baseline.database.sizeBytes + 4_096
+          const artifactCount = Math.ceil(maxFileSizeBytes / 64) + 1
+          for (let index = 0; index < artifactCount; index++) {
+            plantBlob(objects, `manifest-entry-${index}`)
+          }
+          const exit = yield* backup({
+            directory: backupDirectory,
+            objectsDirectory: objects,
+            maxFileSizeBytes
+          }).pipe(Effect.exit)
+          return { exit, maxFileSizeBytes }
+        }).pipe(Effect.provide(Layer.mergeAll(TestDatabase.layer, NodeFileSystem.layer)))
+      )
+      const error = failure(result.exit)
+      expect(error).toBeInstanceOf(DisasterRecovery.DisasterRecoveryError)
+      expect(error).toMatchObject({ code: "io", method: "backup" })
+      expect(error.message).toContain(DisasterRecovery.manifestFileName)
+      expect(error.message).toContain(`${result.maxFileSizeBytes}-byte file limit`)
+      expect(() => readFileSync(join(backupDirectory, DisasterRecovery.manifestFileName))).toThrow()
+    }))
+
   it.effect("accepts a pre-created empty directory and no artifact tier at all", () =>
     Effect.gen(function*() {
       const backupDirectory = join(root(), "backup")

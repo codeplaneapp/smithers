@@ -98,8 +98,15 @@ const budgetFor = (pattern: string, options: EnumerationOptions): EnumerationBud
   pattern
 })
 
-const explicitIgnoredDirectories = (dir: string): ReadonlySet<string> =>
-  new Set(dir.replaceAll("\\", "/").split("/").filter((part) => ignoredDirectoryNames.has(part)))
+const explicitIgnoredDirectories = (patterns: Iterable<string>): ReadonlySet<string> => {
+  const explicit = new Set<string>()
+  for (const pattern of patterns) {
+    for (const part of pattern.replaceAll("\\", "/").split("/")) {
+      if (ignoredDirectoryNames.has(part)) explicit.add(part)
+    }
+  }
+  return explicit
+}
 
 const visit = (budget: EnumerationBudget): Effect.Effect<void, FileEnumerationError> => {
   budget.count += 1
@@ -126,7 +133,8 @@ const enumerateUnder = (
   dir: string,
   resolve: (path: string) => string,
   budget: EnumerationBudget,
-  pruneIgnoredDirectories: boolean
+  pruneIgnoredDirectories: boolean,
+  explicit: ReadonlySet<string> = new Set()
 ): Effect.Effect<EnumeratedEntries, PlatformError.PlatformError | FileEnumerationError> =>
   Effect.gen(function*() {
     // The workspace root itself always exists; a host may not even answer
@@ -137,7 +145,6 @@ const enumerateUnder = (
     const files: Array<string> = []
     const directories: Array<string> = [dir]
     const pending: Array<string> = [dir]
-    const explicit = explicitIgnoredDirectories(dir)
     while (pending.length > 0) {
       const current = pending.pop()!
       const entries = [...yield* fs.readDirectory(resolve(current))].sort()
@@ -235,9 +242,10 @@ export const staticPrefix = (pattern: string): string => {
  * Expands one glob against the workspace: walk each include's static prefix,
  * keep the files `FileSet.matchesGlob` covers. Sorted and deduplicated, so
  * expansion is deterministic. A glob walk prunes `.git`, `.jj`, and
- * `node_modules` unless its static prefix explicitly names that directory.
- * This keeps a root glob from traversing repository metadata and dependency
- * trees while preserving an explicitly declared match.
+ * `node_modules` unless an include sharing that walk prefix names the
+ * directory as a path segment. This keeps a root glob from traversing
+ * repository metadata and dependency trees while preserving an explicitly
+ * declared match after either a fixed or wildcard segment.
  *
  * @since 0.1.0
  * @category accessors
@@ -250,14 +258,18 @@ export const expandGlob = (
   Effect.gen(function*() {
     const resolve = options.resolve ?? defaultResolve
     const matched = new Set<string>()
-    const walked = new Set<string>()
     const budget = budgetFor("", options)
+    const groups = new Map<string, Array<string>>()
     for (const include of glob.include) {
       const prefix = staticPrefix(include)
-      if (walked.has(prefix)) continue
-      walked.add(prefix)
-      budget.pattern = include
-      for (const path of (yield* enumerateUnder(fs, prefix, resolve, budget, true)).files) {
+      const group = groups.get(prefix)
+      if (group === undefined) groups.set(prefix, [include])
+      else group.push(include)
+    }
+    for (const [prefix, includes] of groups) {
+      budget.pattern = includes[0]!
+      const explicit = explicitIgnoredDirectories(includes)
+      for (const path of (yield* enumerateUnder(fs, prefix, resolve, budget, true, explicit)).files) {
         if (FileSet.matchesGlob(glob, path)) matched.add(path)
       }
     }

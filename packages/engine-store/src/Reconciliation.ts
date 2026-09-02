@@ -13,8 +13,7 @@
  * Pluggability is dependency injection at the owning seam, per the repository's
  * extension doctrine — there is no hook kernel. {@link layerDefault} installs a
  * deterministic verdict function; a model-backed reconciler is a different
- * `Layer`, lives in the agent repository, and is tracked in
- * `.smithers/tickets/agent-reconciliation-flow.md`. This package has no model
+ * `Layer` and lives in the agent packages. This package has no model
  * dependency and must not grow one.
  *
  * The three verdicts are exactly the vault's: **fail** the step where the
