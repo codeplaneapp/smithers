@@ -228,6 +228,14 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
    * 404 means the repo itself is unknown, and the fix is the import.
    */
   const explain404 = async (response: Response, repo: string, fallback: string): Promise<string> => {
+    /*
+     * A checkout the sidebar still pins but this launch has not opened is
+     * the common way a bare files command lands here: the local route was
+     * never tried, the Cloud one 404s. Say that, with the act — never
+     * "Path not found" for a path that exists on disk.
+     */
+    const pinned = [...ctx.store.collections.pinnedRepos.values()].find((pin) => pin.name === repo)
+    if (pinned !== undefined) return `${repo} is pinned but not open on this machine — open it with /repo.open, then retry.`
     const message = await readErrorMessage(response, fallback)
     if (/path not found/i.test(message)) return message
     return `${repo} isn't imported yet — run /repos.import ${repo} first`
