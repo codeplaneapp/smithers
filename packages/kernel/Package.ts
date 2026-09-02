@@ -11,6 +11,18 @@ export const Package = {
     source: "docs/api.md",
     target: "docs/pages/api/kernel.md"
   },
+  snippets: [
+    {
+      source: "docs/contract.md",
+      region: "kernel-contract",
+      target: "docs/pages/architecture.md"
+    },
+    {
+      source: "docs/testing.md",
+      region: "kernel-testing",
+      target: "docs/pages/api-tests.md"
+    }
+  ],
   references: [
     "docs/pages/api/capability.md",
     "docs/pages/api/platform-node.md",

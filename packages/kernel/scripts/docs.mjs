@@ -85,6 +85,23 @@ const exportedDocs = (source, moduleName) => {
       "kernel docs: documented module " + moduleName + " export matches no supported shape: " + line
     )
   }
+  const documented = new Set(entries.map((entry) => entry.name))
+  const exported = new Set()
+  for (const match of source.matchAll(/^export (?:type|const|class|interface|function) (\w+)/gm)) {
+    exported.add(match[1])
+  }
+  for (const match of source.matchAll(/^export (?:type )?\{\s*([^}]+)\s*\} from "[^"]+";?$/gm)) {
+    for (const piece of match[1].split(",")) {
+      const alias = /^(\w+)(?:\s+as\s+(\w+))?$/.exec(piece.trim())
+      if (alias !== null) exported.add(alias[2] ?? alias[1])
+    }
+  }
+  const missing = [...exported].filter((name) => !documented.has(name))
+  if (missing.length > 0) {
+    throw new Error(
+      "kernel docs: public exports missing documented table entries in " + moduleName + ": " + missing.join(", ")
+    )
+  }
   return entries
 }
 
@@ -161,6 +178,15 @@ const exportReference = [
   ...entries.sections
 ].filter((value) => value !== "").join("\n\n")
 
+const regionStart = (name) => `{/* generated:${name} start */}`
+const regionEnd = (name) => `{/* generated:${name} end */}`
+const replaceRegion = (source, name, body) => {
+  const start = source.indexOf(regionStart(name))
+  const end = source.indexOf(regionEnd(name))
+  if (start < 0 || end < 0 || end < start) throw new Error("kernel docs: region " + name + " is missing")
+  return source.slice(0, start) + regionStart(name) + "\n\n" + body.trim() + "\n\n" + source.slice(end)
+}
+
 const apiPage = [
   "---",
   "description: \"" + manifest.description + ".\"",
@@ -181,6 +207,12 @@ const apiPage = [
   ""
 ].join("\n")
 
+const outputs = new Map([[Package.api.target, apiPage]])
+for (const snippet of Package.snippets) {
+  const current = outputs.get(snippet.target) ?? read(join(repoRoot, snippet.target))
+  outputs.set(snippet.target, replaceRegion(current, snippet.region, read(join(packageRoot, snippet.source))))
+}
+
 const failures = []
 for (const path of Package.references) {
   const content = read(join(repoRoot, path))
@@ -188,8 +220,8 @@ for (const path of Package.references) {
     failures.push(path + ": must reference " + Package.name + " and /api/kernel")
   }
 }
-if (apiPage.includes("—")) {
-  failures.push(Package.api.target + ": generated content contains an em-dash")
+for (const [path, content] of outputs) {
+  if (content.includes("—")) failures.push(path + ": generated content contains an em-dash")
 }
 if (apiPage.includes("formatPattern")) {
   failures.push(Package.api.target + ": generated content contains removed export formatPattern")
@@ -211,13 +243,15 @@ for (const specifier of requiredSpecifiers) {
 }
 
 let drifted = false
-const absolute = join(repoRoot, Package.api.target)
-if (read(absolute) !== apiPage) {
-  drifted = true
-  if (check) failures.push(Package.api.target + ": drifted; run node packages/kernel/scripts/docs.mjs")
-  else {
-    writeFileSync(absolute, apiPage)
-    console.log("wrote " + Package.api.target)
+for (const [path, content] of outputs) {
+  const absolute = join(repoRoot, path)
+  if (read(absolute) !== content) {
+    drifted = true
+    if (check) failures.push(path + ": drifted; run node packages/kernel/scripts/docs.mjs")
+    else {
+      writeFileSync(absolute, content)
+      console.log("wrote " + path)
+    }
   }
 }
 
