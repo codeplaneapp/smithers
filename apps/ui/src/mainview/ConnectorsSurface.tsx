@@ -4,6 +4,7 @@ import { FolderGit2, GitPullRequest, HardDrive, Plug, RefreshCw, Server, Trash2 
 import type { KeyboardEvent } from "react"
 import { useController } from "./ControllerContext"
 import { ConfirmDialog, SurfaceHeader } from "./SurfaceChrome"
+import { ageLabel } from "./Timestamps"
 
 const shortHead = (head: string | null): string => head?.slice(0, 8) ?? "No commits yet"
 
@@ -36,9 +37,10 @@ export function ConnectorsSurface() {
   const { data: gitHubAppStatusRows } = useLiveQuery(collections.githubAppStatuses)
   const { data: linearIntegrationRows } = useLiveQuery(collections.linearIntegrations)
   const installedRepositories = gitHubAppStatusRows.filter((row) => row.installed && row.configured).length
+  /* ADR 0005 "Connectors surface": Linear per team, WITH last sync — the age off the DTO's last_sync_at; nothing when it never synced. */
   const linearTeams = [...linearIntegrationRows]
     .sort((left, right) => left.teamKey.localeCompare(right.teamKey))
-    .map((row) => row.teamKey)
+    .map((row) => (row.lastSyncAt !== null ? `${row.teamKey} (last sync ${ageLabel(row.lastSyncAt)})` : row.teamKey))
   const operation = operationRows.find((candidate) => candidate.id === "connector-operation") ??
     collections.connectorOperations.get("connector-operation")
   const selecting = operation?.phase === "selecting-local-repository"
