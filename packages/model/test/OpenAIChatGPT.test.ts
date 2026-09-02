@@ -1,7 +1,8 @@
 /**
  * The ChatGPT-subscription Responses route: the deltas the subscription
  * backend imposes on the API-key surface, each of which was confirmed against
- * the live backend (2026-08-25). The route must send `store:false`, never send
+ * the live backend (2026-08-25). The route must send `store:false`, refuse a
+ * `params.maxTokens` budget locally because the backend rejects
  * `max_output_tokens`, request encrypted reasoning, replay it verbatim instead
  * of `item_reference` ids, and keep every credential out of the sealed view.
  */
@@ -71,9 +72,9 @@ describe("OpenAIChatGPT.make", () => {
     expect(JSON.stringify(view)).not.toContain("chatgpt-access")
   })
 
-  it("pins the subscription body deltas: store false, stream true, encrypted reasoning, no output cap", async () => {
+  it("pins the subscription body deltas: store false, stream true, encrypted reasoning", async () => {
     const view = await prepared(request({
-      params: ModelRequest.GenerationParams.make({ maxTokens: 4096, reasoningEffort: "high" })
+      params: ModelRequest.GenerationParams.make({ reasoningEffort: "high" })
     }))
     const body = JSON.parse(view.bodyText)
 
@@ -81,8 +82,24 @@ describe("OpenAIChatGPT.make", () => {
     expect(body.stream).toBe(true)
     expect(body.include).toEqual(["reasoning.encrypted_content"])
     expect(body.reasoning).toEqual({ effort: "high" })
-    // The backend rejects the field outright, so the route never sends it.
     expect(body).not.toHaveProperty("max_output_tokens")
+  })
+
+  it("refuses params.maxTokens before signing: the backend rejects max_output_tokens", () => {
+    // The backend rejects `max_output_tokens` outright and offers no other
+    // output cap, so the budget cannot be honored. Dropping it would send a
+    // request the caller did not bound; refusing names the member instead.
+    const error = Effect.runSync(
+      Route.prepare(route(), request({ params: ModelRequest.GenerationParams.make({ maxTokens: 4096 }) })).pipe(
+        Effect.flip
+      )
+    )
+
+    expect(error).toBeInstanceOf(ModelError)
+    expect(error).toMatchObject({ code: "invalid_request", path: "params.maxTokens" })
+    expect(error.message).toContain("max_output_tokens")
+    // The path says where, never what: a journal must not learn the budget.
+    expect(JSON.stringify(error)).not.toContain("4096")
   })
 
   it("rejects the account id as a route header: identity is applied through Auth", () => {

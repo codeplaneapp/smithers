@@ -29,30 +29,37 @@ export interface Resolution {
 
 const normalizedName = (name: string): string => name.trim().toLowerCase()
 
-/**
- * Anthropic support is a VERSION FLOOR, not an allowlist: every
- * `claude-{sonnet,opus,fable}` id at 4.5 or later reports native support,
- * including families that do not exist yet. Anthropic versions its Messages
- * capabilities by family generation and has added deferred tools to every
- * generation since 4.5, so a floor is forward-compatible and a new model works
- * on the day it ships. A model below the floor, a dated pre-4.5 id, and haiku
- * are all false.
- *
- * OpenAI support is an ALLOWLIST ({@link OPENAI_DEFERRED_MODELS}): its ids do
- * not carry a comparable capability version, so a new family stays opt-in until
- * its wire support has been verified against the live backend.
- *
- * The two policies are deliberately different. Neither is "the exact matrix".
- */
-const isAnthropicDeferredModel = (modelId: string): boolean => {
-  const match = /^claude-(sonnet|opus|fable)-(\d+)(?:[-.](\d+))?(?:-|$)/i.exec(modelId)
-  if (match === null) return false
-  // Dated ids such as `claude-sonnet-4-20250514` designate the pre-4.5
-  // family, rather than a fictional 4.20250514 capability version.
-  const major = Number(match[2])
-  const minor = match[3] === undefined || match[3].length >= 8 ? 0 : Number(match[3])
-  return major > 4 || (major === 4 && minor >= 5)
-}
+// Both providers are allowlists. Native deferral changes the wire body, so a
+// model answers true only once its support is documented or verified against
+// the live backend. Every other id, including a family or version released
+// after this code, lowers through the portable non-native path until somebody
+// adds it here: a version comparison would enable unverified wire behavior
+// without a release, which is the one thing this predicate must never do.
+//
+// The Anthropic list mirrors the model compatibility table on
+// https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool
+// (fetched 2026-09-01) plus the undated alias of each dated 4.5 id, which
+// Anthropic serves for the same model. Sonnet 5 is absent from that table, so
+// it is absent here; Opus 4.1 and earlier do not support the feature.
+const ANTHROPIC_DEFERRED_MODELS = new Set([
+  "claude-fable-5-1",
+  "claude-mythos-5-1",
+  "claude-fable-5",
+  "claude-mythos-5",
+  "claude-opus-5",
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+  "claude-opus-4-5",
+  "claude-opus-4-5-20251101",
+  "claude-sonnet-4-5",
+  "claude-sonnet-4-5-20250929",
+  "claude-haiku-4-5",
+  "claude-haiku-4-5-20251001"
+])
+
+const isAnthropicDeferredModel = (modelId: string): boolean => ANTHROPIC_DEFERRED_MODELS.has(modelId.toLowerCase())
 
 // Seeded from pi's generated model compatibility metadata. New families remain
 // opt-in until their wire support is verified against the live backend.
@@ -134,12 +141,11 @@ const lazyTool = (tool: ToolDefinition): ToolDefinition => ({
  * Reports whether a protocol and model pair supports pi's native deferred
  * tool-loading wire representation.
  *
- * The two providers follow different policies on purpose. Anthropic is a
- * version floor: any `claude-{sonnet,opus,fable}` id at 4.5 or later answers
- * true, including families released after this code, because Anthropic versions
- * the capability by family generation. OpenAI is an allowlist: its ids carry no
- * comparable version, so a new family answers false until its wire support has
- * been verified against the live backend and added here.
+ * Both providers answer from an explicit allowlist, matched case-insensitively.
+ * An id absent from its provider's list answers false, including a family or
+ * version released after this code, because native deferral changes the wire
+ * body and an unverified body must not be enabled without a release. Such a
+ * model still receives every tool through the portable non-native lowering.
  *
  * @category predicates
  * @since 0.1.0

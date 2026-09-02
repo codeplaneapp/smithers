@@ -105,9 +105,11 @@ const { max_output_tokens: _maxOutputTokens, ...chatgptFields } = Body.fields
 /**
  * JSON schema for a ChatGPT-plan Responses request body. The subscription
  * backend narrows the API-key surface (each delta confirmed against the live
- * backend, 2026-08-25): `store` must be `false` — nothing is persisted
- * server-side — `max_output_tokens` is rejected outright, and
- * `include: ["reasoning.encrypted_content"]` is how reasoning survives the
+ * backend, 2026-08-25). `store` must be `false`, because nothing is persisted
+ * server-side. `max_output_tokens` is rejected outright, so a request that
+ * sets `params.maxTokens` fails locally as `invalid_request` naming that
+ * member rather than being sent unbounded. `include:
+ * ["reasoning.encrypted_content"]` is how reasoning survives the
  * statelessness: the returned items carry their own encrypted state and are
  * replayed verbatim on the next request.
  *
@@ -335,7 +337,9 @@ const fromRequest = Effect.fn("OpenAIResponses.fromRequest")((
 ): Effect.Effect<Body, ModelError> => Effect.succeed(buildBody(request, options)))
 
 const chatgptBody = (request: ModelRequest, options: { readonly native: boolean }): ChatGPTBody => {
-  const { max_output_tokens: _dropped, ...base } = buildBody(request, options)
+  // `chatgptFromRequest` has already refused a request carrying `maxTokens`,
+  // so the lowered body carries no `max_output_tokens` to strip here.
+  const base = buildBody(request, options)
   return {
     ...base,
     // `item_reference` names a stored response, and this backend stores none:
@@ -349,7 +353,22 @@ const chatgptBody = (request: ModelRequest, options: { readonly native: boolean 
 const chatgptFromRequest = Effect.fn("OpenAIResponses.chatgptFromRequest")((
   request: ModelRequest,
   options: { readonly native: boolean }
-): Effect.Effect<ChatGPTBody, ModelError> => Effect.succeed(chatgptBody(request, options)))
+): Effect.Effect<ChatGPTBody, ModelError> =>
+  // The subscription backend rejects `max_output_tokens` and offers no other
+  // output cap, so a budget it cannot honor is refused here, before signing
+  // and transport, rather than dropped: a caller who bounded the request must
+  // not receive an unbounded one. The path names the member, never its value.
+  request.params.maxTokens === undefined
+    ? Effect.succeed(chatgptBody(request, options))
+    : Effect.fail(
+      new ModelError({
+        code: "invalid_request",
+        message:
+          "The ChatGPT-subscription backend rejects max_output_tokens, so this route cannot honor params.maxTokens: omit the budget or use an API-key route",
+        path: "params.maxTokens"
+      })
+    )
+)
 
 const eventType = (value: OpenAIEvent): string => value.type
 

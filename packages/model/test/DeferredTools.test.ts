@@ -21,11 +21,17 @@ const request = (tools: ReadonlyArray<ToolDefinition>, messages: ReadonlyArray<M
   ModelRequest.make({ modelId: "model", system: [], messages, tools, params: {} })
 
 describe("DeferredTools", () => {
-  it("floors Anthropic support at 4.5 and allowlists OpenAI families", () => {
+  it("allowlists the documented Anthropic and OpenAI families", () => {
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-4-5")).toBe(true)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-4-5-20250929")).toBe(true)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-opus-4-5-20251101")).toBe(true)
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-opus-4-6")).toBe(true)
-    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-fable-4.5")).toBe(true)
-    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-haiku-4-5")).toBe(false)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-fable-5-1")).toBe(true)
+    // Anthropic's model compatibility table lists Haiku 4.5 (fetched
+    // 2026-09-01), so the alias and its dated id both answer true.
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-haiku-4-5")).toBe(true)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-haiku-4-5-20251001")).toBe(true)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "CLAUDE-OPUS-5")).toBe(true)
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-4-20250514")).toBe(false)
     expect(DeferredTools.supportsDeferred("openai-responses", "gpt-5.4")).toBe(true)
     expect(DeferredTools.supportsDeferred("openai-responses", "gpt-5.4-mini")).toBe(true)
@@ -40,15 +46,27 @@ describe("DeferredTools", () => {
     expect(DeferredTools.supportsDeferred("openai-responses", "gpt-5.3")).toBe(false)
   })
 
-  it("keeps the Anthropic floor open to unreleased families and the OpenAI allowlist closed", () => {
-    // The floor is deliberate policy, not an accident of the regex: a family
-    // Anthropic has not shipped yet reports native support on the day it does,
-    // because every generation since 4.5 has carried deferred tools.
-    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-9-0")).toBe(true)
+  it("keeps both allowlists closed to unreleased, undocumented, and malformed ids", () => {
+    // Native deferral changes the wire body, so an id nobody has verified
+    // against the live backend lowers through the portable non-native path.
+    // Every documented id answers true; every other shape answers false, even
+    // one a version comparison would have accepted.
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-opus-5")).toBe(true)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-mythos-5-1")).toBe(true)
+    // A future major, a future minor, and a future family.
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-9-0")).toBe(false)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-opus-6")).toBe(false)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-opus-5-1")).toBe(false)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-legend-5")).toBe(false)
+    // A date suffix the table does not list, and a dot-separated version the
+    // old floor regex accepted.
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-4-5-20991231")).toBe(false)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-fable-4.5")).toBe(false)
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-4-4")).toBe(false)
-    // The allowlist is the opposite policy: an unreleased OpenAI family stays
-    // off until somebody verifies it on the wire and adds it.
+    // Sonnet 5 ships, but the compatibility table omits it (fetched
+    // 2026-09-01), so it stays off until the table or a live probe says so.
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-5")).toBe(false)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-haiku")).toBe(false)
     expect(DeferredTools.supportsDeferred("openai-responses", "gpt-9.9-sol")).toBe(false)
   })
 
