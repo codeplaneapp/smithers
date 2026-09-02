@@ -11,7 +11,7 @@
  * boundary, then apply the transition it returned. The cell owns the state that
  * carries forward and the exact context the next frame sees.
  *
- * Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`.
+ * Governing design: `../docs/concepts.md#durable-cell-loop`.
  *
  * @since 0.1.0
  */
@@ -31,6 +31,7 @@ import * as ContextWindow from "./ContextWindow.ts"
 import * as EngineLike from "./EngineLike.ts"
 import { HarnessError } from "./HarnessError.ts"
 import * as cellPrompt from "./internal/cellPrompt.ts"
+import * as DemandText from "./internal/demandText.ts"
 import * as elide from "./internal/elide.ts"
 import { printsObservation } from "./internal/printsObservation.ts"
 import * as NarrowedCheck from "./NarrowedCheck.ts"
@@ -941,13 +942,8 @@ const permissionRequired = (error: unknown): Permission.PermissionRequired | und
 }
 
 /**
- * Appends one observation turn to the transcript.
- *
- * A malformed cell, a thrown cell, or a rejected transition is durable
- * evidence, not a crash: the assistant text stays on the record and the
- * harness states plainly what went wrong so the next frame can fix it.
- *
- * How much of a cell that RAN is echoed back into the next prompt.
+ * How much of a cell that RAN is echoed back into the next prompt, in UTF-8
+ * bytes.
  *
  * Generous, because the model is being asked to fix source it can no longer
  * see: the cell it wrote is only in the transcript, and a raise is repaired by
@@ -956,7 +952,8 @@ const permissionRequired = (error: unknown): Permission.PermissionRequired | und
 const liveCellEcho = 8192
 
 /**
- * How much of a cell that never RAN is echoed back into the next prompt.
+ * How much of a cell that never RAN is echoed back into the next prompt, in
+ * UTF-8 bytes.
  *
  * Tight, because a dead cell is answered by its error and not by its text. The
  * r90 wave charged `sympy__sympy-20154` $0.10 to read back a 53 KB program that
@@ -1110,17 +1107,27 @@ const revalidationNote = (rejection: Cell.Rejected): string =>
 /**
  * The assistant's own reply, shortened from the middle when it is too long to
  * re-read at input price, with the elision stated.
+ *
+ * The echo ceilings are UTF-8 bytes, which is what `elide` counts and what the
+ * notice it writes reports, so the decision to shorten is taken in the same
+ * unit rather than in UTF-16 code units: a reply of three thousand emoji is
+ * six thousand code units and twelve thousand bytes, and measuring it in code
+ * units let it past an eight-thousand-byte ceiling unshortened. `elide.middle`
+ * returns its input unchanged when the whole already fits, so the comparison
+ * is the elision's own and there is no second reading to disagree with it.
  */
 const bounded = (
   assistant: ModelRequest.AssistantMessage,
   echo: number
 ): ModelRequest.AssistantMessage => {
   const text = assistantText(assistant)
-  if (text.length <= echo) return assistant
-  return ModelRequest.Message.assistant(
-    elide.middle(text, echo, "the reply is not re-read in full; the observation below names what went wrong"),
-    { stopReason: assistant.stopReason }
+  const shortened = elide.middle(
+    text,
+    echo,
+    "the reply is not re-read in full; the observation below names what went wrong"
   )
+  if (shortened === text) return assistant
+  return ModelRequest.Message.assistant(shortened, { stopReason: assistant.stopReason })
 }
 
 const clip = (text: string, width: number): string => elide.head(text, width, "clipped")
@@ -1174,33 +1181,6 @@ const invalidProbeNotice = (
 }
 
 /**
- * The intervention text, which asks for a decision and not for a keystroke.
- *
- * The first version of this said "write something". It was answered: on the
- * SWE-bench pytest instance the demanded frame ran `git show <base>:<path> >
- * <path>`, which satisfied nothing the cap is for and deleted the fix the run
- * had already landed. So the two ways out are stated as equals, the evidence a
- * real edit carries is named, and the writes that are worse than another quiet
- * frame are named too.
- *
- * The justification is asked to say what the *next* frames will do differently,
- * and that clause is priced in evidence. The wave that armed this recorded one
- * instance that volunteered twelve justifications across 24 frames, never
- * wrote, and died on the hard stop; every one of them named what it was about
- * to look at, and none of them named a difference from the frame before. A
- * justification is a plan, and a plan that is the same plan the last quiet
- * frame had is the stall itself rather than a reason for it. The harness does
- * not grade the answer — it is accepted as written, as every way out here is —
- * but it asks the question that a run repeating itself cannot answer twice.
- */
-const readOnlyDemand = (cap: number, frames: number): string =>
-  `Read-only discipline — ${frames} consecutive frames have made no call that declares a write, and this run's read-only budget is ${cap}. The next cell must do one of two things, and they are equally acceptable: land an edit you can already name the evidence for — the file, the change, and the check you have watched fail that will now pass — or call ctx.justify("<the evidence you are still missing, the exact call that will get it, and what that makes the next frames do differently from these ${frames}>"). Do not write something merely to answer this notice. A restore, a revert, an overwrite from captured output, or any edit whose evidence you cannot name is worse than another read-only frame, because it destroys work this run has already done. A justification is recorded and buys ${cap} quiet frames; it does not reset this counter, and one that names the same next step the last quiet frame named has bought a repeat of that frame. At ${
-    cap * 2
-  } consecutive read-only frames the run stops as a failure, so ${
-    cap * 2 - frames
-  } frames remain in which to commit to a change.`
-
-/**
  * How many distinct call signatures one run carries forward.
  *
  * The ledger is durable controller state, so it is bounded. Sixty-four covers a
@@ -1244,31 +1224,6 @@ const remember = (
   const distinct = [...newest]
   return distinct.slice(Math.max(0, distinct.length - retainedSignatures))
 }
-
-/**
- * The intervention that names a run's own repetition back to it.
- *
- * Separate text from the read-only demand because it is a different diagnosis
- * with a different way out. The read-only cap says nothing has been written and
- * asks for a change; this says the run keeps asking questions it has already
- * answered, and a run in this state has usually already written something. On
- * the SWE-bench pytest instance of wave 7 the run made a real, surviving edit
- * and then spent ten frames re-reading it — the diff, then the diff and the
- * status, then the status and the names, then the diff of the one file — and
- * re-running the same two check files, until the process budget ended it. The
- * text therefore does not ask for another edit. It states that the change is
- * real, that the failure is in the mechanism, and names the three places
- * evidence it does not hold actually lives.
- */
-const repeatDemand = (frames: number, cap: number): string =>
-  `Repeated observation — the last ${frames} frames issued only calls this run had already issued, byte for byte, and none of them changed the workspace. You are re-confirming what you already know: a call repeated over an unchanged tree returns what it returned the first time. If you have already made a change, it is real and it is recorded, and looking at it again cannot tell you whether it is the right change — what is left to establish is the mechanism, not the presence.
-
-Spend the next frame on evidence you do not have. Three places hold some, and none of them is the diff:
-- the failing check itself — what it asserts, the values it asserts about, and the setup that produces them;
-- the history of the symbol you changed — \`git log -L <start>,<end>:<file>\` over its line range, or \`git blame\` on the line — which says why it is written the way it is and what it was written to handle;
-- a different site — the callers of the symbol rather than its definition, which is where a wrong mechanism shows first.
-
-If no call you can name would tell you something you do not already know, say which mechanism you now believe is wrong and change that instead. This notice returns after another ${cap} repeated frames.`
 
 /**
  * The answer a park gets when nothing is listening for it.
@@ -2927,8 +2882,18 @@ const frame = (
     const justified = readOnly && state.pendingReadOnlyDemand !== undefined &&
       (transition.justification ?? "").trim().length > 0
     const readOnlyGrace = justified ? cap : Math.max(0, graceLeft - 1)
+    if (demanded && !justified) {
+      yield* emit(
+        new AgentEvent.ReadOnlyDemandIssued({
+          eventType: eventType.readOnlyDemandIssued,
+          streak: readOnlyFrames,
+          cap,
+          nextFrame: state.frame + 1
+        })
+      )
+    }
     const demand = demanded && !justified
-      ? [ModelRequest.Message.user(readOnlyDemand(cap, readOnlyFrames))]
+      ? [ModelRequest.Message.user(DemandText.readOnly(cap, readOnlyFrames))]
       : []
     // The convergence intervention. It is journaled when it is *issued* rather
     // than when the next frame answers it, because what answers it is the
@@ -2948,7 +2913,7 @@ const frame = (
       )
     }
     const repeated = repeatDemanded
-      ? [ModelRequest.Message.user(repeatDemand(repeatFrames, state.repeatCap))]
+      ? [ModelRequest.Message.user(DemandText.repeat(repeatFrames, state.repeatCap))]
       : []
     const alerts = probeNotice === undefined ? [] : [ModelRequest.Message.user(probeNotice)]
     // The counterweight, and the only notice here that asks for nothing. It is

@@ -46,6 +46,7 @@
  * @since 0.1.0
  */
 import type { Schema } from "effect"
+import * as DemandText from "./internal/demandText.ts"
 import type * as NarrowedCheck from "./NarrowedCheck.ts"
 import { targeting } from "./NarrowedCheck.ts"
 
@@ -222,9 +223,4 @@ export const find = (options: {
  * @since 0.1.0
  */
 export const demand = (found: Displaced): string =>
-  `Unanswered failure — a check you ran over this exact tree reported a failing exit status, and you went back to what it covered with a different command instead of running it again.
-
-- the check that failed, over the tree you are completing on: ${found.failed.flow} ${found.failed.label}
-- the reading you took instead: ${found.instead.flow} ${found.instead.label}
-
-The second names the same subject as the first, so the run itself treated that subject as still open; the first was never run again, and its result is the one this completion is standing on. Fix what it reported and run it again, byte for byte, and complete once you have seen what it prints; or complete and state in your output why the failures it reported are expected and not yours. Nothing re-runs it for you, and what you return next is the answer that stands.`
+  DemandText.unresolved(found.failed.flow, found.failed.label, found.instead.label)

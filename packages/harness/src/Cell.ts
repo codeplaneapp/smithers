@@ -18,9 +18,9 @@
  * surface that asked for it, and the fields survive here for one purpose only:
  * decoding the journals that were written while it existed.
  *
- * Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`,
- * `packages/harness/docs/concepts.md#repl-realm` and
- * `packages/harness/docs/concepts.md#agent-cell-context`.
+ * Governing design: `../docs/concepts.md#durable-cell-loop`,
+ * `../docs/concepts.md#repl-realm` and
+ * `../docs/concepts.md#agent-cell-context`.
  *
  * @since 0.1.0
  */
@@ -135,7 +135,7 @@ export class Continue extends Schema.TaggedClass<Continue>("flows/harness/Cell/C
    *
    * **Deprecated: decode-only.** The realm is the run's memory now — a name a
    * cell binds is still bound in the next cell — so there is nothing to file
-   * and nothing to re-read. See `packages/harness/docs/concepts.md#repl-realm`.
+   * and nothing to re-read. See `../docs/concepts.md#repl-realm`.
    *
    * @deprecated
    */
@@ -511,30 +511,29 @@ export class CallIdentity extends Schema.Class<CallIdentity>("flows/harness/Cell
 /**
  * Computes the declaration digest folded into a call identity.
  *
- * Every field a call's outcome can depend on is material, and the set is stated
- * here rather than sampled. `CellCalls` re-derives this digest at the boundary
- * and refuses a call whose entry no longer matches with `declaration_changed`,
- * so a field left out of the hash is a field a flow can be redeclared on
- * between the frame that showed the model the catalog and the boundary that
- * runs the call: the call is then dispatched to a declaration the model never
- * saw and fails as an ordinary `invalid_input` or `flow_failed`, which teaches
- * the model to fix a call that was never wrong.
- *
- * The set the digest used to cover was name, capabilities, effects, placement,
- * the body's path and two provenance fields — so a refreshed registry could
- * change a flow's input schema, its output schema, its description, its model
- * or its body content behind the same path and the drift check said nothing.
+ * Every top-level field `FlowDescriptor` declares is material. Within
+ * `provenance`, the only deliberate exclusion is `pack`: it describes where
+ * discovery found the declaration, not what the call depends on.
  *
  * `capabilities` is sorted because a set is what it means; every other array is
  * hashed in declaration order, because order is part of what was declared.
- * `Option` fields hash as `null` when absent so an omitted field and a field
- * that is present and null are one value, which is what they are once the
- * descriptor has crossed JSON.
+ * `Option` and optional fields hash as `null` when absent so an omitted field
+ * and a field that is present and null are one value, which is what they are
+ * once the descriptor has crossed JSON.
  *
- * `packages/chain/src/RegistryCatalog.ts` hashes the same descriptor for the
- * same purpose. The two cover the same fields; unifying them behind one
- * exported identity in the package that owns `FlowDescriptor` is the standing
- * follow-up.
+ * `BodyRef.contentDigest` is the source identity discovery or
+ * `FlowBinding.make` measured. It makes an in-place body edit material even
+ * when the locator is unchanged. The field remains optional only to decode
+ * pre-rc descriptors; current constructors always supply it.
+ *
+ * `@smthrs/chain`'s `RegistryCatalog.declarationDigest` hashes the same
+ * descriptor for its own catalog-entry key over a strictly narrower set — no
+ * `modelInvocable`, `budget`, `path`, `frontmatter` or provenance, and
+ * capabilities in declaration order rather than sorted — so the two numbers are
+ * different numbers for one declaration and neither may be compared against the
+ * other. Exporting one identity from the package that owns `FlowDescriptor` is
+ * the standing follow-up; until it lands, each digest is only ever compared
+ * with itself.
  *
  * @category constructors
  * @since 0.1.0
@@ -553,6 +552,10 @@ export const declarationDigest = (descriptor: Descriptor.FlowDescriptor): string
       input: { ...descriptor.input },
       output: { ...descriptor.output },
       body: { ...descriptor.body },
+      modelInvocable: descriptor.modelInvocable,
+      budget: descriptor.budget ?? null,
+      path: descriptor.path,
+      frontmatter: { ...descriptor.frontmatter },
       provenance: { source: descriptor.provenance.source, root: descriptor.provenance.root }
     })
   )

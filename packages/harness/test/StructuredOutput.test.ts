@@ -63,7 +63,11 @@ describe("StructuredOutput.digest", () => {
 })
 
 describe("StructuredOutput.issuesDigest", () => {
-  const issue = (path: string, message: string) => new StructuredOutput.OutputIssue({ path, message })
+  const issue = (
+    path: string,
+    message: string,
+    code: StructuredOutput.OutputIssueCode = "invalid_type"
+  ) => new StructuredOutput.OutputIssue({ code, path, message })
   const failure = (issues: ReadonlyArray<StructuredOutput.OutputIssue>) =>
     new StructuredOutput.StructuredOutputFailure({
       code: "schema_mismatch",
@@ -88,6 +92,9 @@ describe("StructuredOutput.issuesDigest", () => {
     )
     expect(StructuredOutput.issuesDigest(failure([issue("left", "same")]))).not.toBe(
       StructuredOutput.issuesDigest(failure([issue("right", "same")]))
+    )
+    expect(StructuredOutput.issuesDigest(failure([issue("same", "same", "invalid_type")]))).toBe(
+      StructuredOutput.issuesDigest(failure([issue("same", "same", "constraint")]))
     )
   })
 })
@@ -195,6 +202,19 @@ describe("StructuredOutput.decode", () => {
     expect(failure?.issues.length).toBeLessThanOrEqual(StructuredOutput.maxIssues)
   })
 
+  it("classifies invalid JSON issues without changing their path or message", () => {
+    const result = decode(Review, "not JSON")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.issues).toEqual([
+      {
+        code: "invalid_json",
+        path: "",
+        message: "Unexpected token 'o', \"not JSON\" is not valid JSON"
+      }
+    ])
+  })
+
   it("reports the extracted container's issues when the whole answer is not JSON", () => {
     const result = decode(Review, "Verdict: {\"approved\":\"yes\"}")
     expect(result._tag).toBe("Failure")
@@ -220,6 +240,15 @@ describe("StructuredOutput.decode", () => {
     expect(failure?.code).toBe("no_candidate")
     expect(failure?.candidate).toBe(Digest.digest(""))
     expect(failure?.issues.length).toBeGreaterThan(0)
+  })
+
+  it("classifies the empty answer's seed issue without changing its prose", () => {
+    const result = decode(Review, "")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.issues).toEqual([
+      { code: "no_candidate", path: "", message: "the answer held no JSON document" }
+    ])
   })
 
   it("digests the extracted container, not the prose the model wrapped it in", () => {
@@ -296,6 +325,32 @@ describe("StructuredOutput.decode", () => {
     expect(failure?.code).toBe("schema_mismatch")
     expect(failure?.issues[0]).toMatchObject({ path: "outer.count", message: expect.stringContaining("number") })
     expect(StructuredOutput.correction(failure!)).toContain("outer.count")
+  })
+
+  it("classifies a missing struct field without changing its path or message", () => {
+    const result = decode(Schema.Struct({ name: Schema.String }), "{}")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.issues[0]).toMatchObject({ code: "missing_key", path: "name", message: "Missing key" })
+  })
+
+  it("classifies a field of the wrong type without changing its path or message", () => {
+    const result = decode(Schema.Struct({ name: Schema.String }), "{\"name\":1}")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.issues[0]).toMatchObject({ code: "invalid_type", path: "name", message: "Expected string" })
+  })
+
+  it("classifies a refinement failure without changing its path or message", () => {
+    const NonEmpty = Schema.String.check(Schema.isMinLength(3))
+    const result = decode(NonEmpty, "\"x\"")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.issues[0]).toMatchObject({
+      code: "constraint",
+      path: "",
+      message: "Expected a value with a length of at least 3"
+    })
   })
 
   it("reports a root schema mismatch with an empty path", () => {

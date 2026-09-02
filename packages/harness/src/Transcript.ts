@@ -16,6 +16,7 @@ import { Result, Schema } from "effect"
 import * as AgentEvent from "./AgentEvent.ts"
 import type * as Cell from "./Cell.ts"
 import type * as EngineLike from "./EngineLike.ts"
+import * as DemandText from "./internal/demandText.ts"
 import { printsObservation } from "./internal/printsObservation.ts"
 
 /**
@@ -132,6 +133,12 @@ const decodeCellSettled = Schema.decodeUnknownResult(AgentEvent.CellSettled)
 const decodeTransitionApplied = Schema.decodeUnknownResult(AgentEvent.TransitionApplied)
 const decodeSuspended = Schema.decodeUnknownResult(AgentEvent.Suspended)
 const decodeAborted = Schema.decodeUnknownResult(AgentEvent.Aborted)
+const decodeReadOnlyDemandIssued = Schema.decodeUnknownResult(AgentEvent.ReadOnlyDemandIssued)
+const decodeRepeatDemanded = Schema.decodeUnknownResult(AgentEvent.RepeatDemanded)
+const decodeNarrowedDemanded = Schema.decodeUnknownResult(AgentEvent.NarrowedDemanded)
+const decodeNarrowOnlyDemanded = Schema.decodeUnknownResult(AgentEvent.NarrowOnlyDemanded)
+const decodeUnmovedDemanded = Schema.decodeUnknownResult(AgentEvent.UnmovedDemanded)
+const decodeUnresolvedDemanded = Schema.decodeUnknownResult(AgentEvent.UnresolvedDemanded)
 
 const transcriptMessage = (
   message: ModelRequest.AssistantMessage
@@ -152,6 +159,19 @@ const transcriptMessage = (
  * Projects journal events into their model-visible transcript state as typed
  * data, preserving malformed payload failures instead of throwing.
  *
+ * This rebuilds turn structure, the settlement's own message, and every
+ * journaled controller demand. The controller also folds frame-local
+ * settled-call salvage and the memory-probe alert into failure notes. A raised
+ * cell's `bindingPathMiss` hint is live-only, so the projection rebuilds a
+ * shorter note exactly where that hint would name a missed binding.
+ *
+ * A terminal frame has the opposite skew: `observe` appends no observation
+ * once the frame budget is spent, while this projection rebuilds its journaled
+ * print and settlement. On a run whose last frame was terminal, it therefore
+ * over-reports by one trailing user turn. `AgentEvent.TurnClosed.outcome` is the
+ * journaled signal a future projection would key on to drop it: `"resolved"`
+ * on the terminal frame and `"continue"` otherwise.
+ *
  * @category projections
  * @since 0.1.0
  * @slop
@@ -162,7 +182,7 @@ export const projectStateResult = (
   const events = ordered(entries)
   const produced: Array<Cell.Source> = []
   const printed: Array<AgentEvent.CellPrinted> = []
-  const prints = new Map<number, ProjectedMessage>()
+  const prints = new Map<number, AgentEvent.CellPrinted>()
   const callsStarted: Array<Cell.Call> = []
   const callsSettled: Array<AgentEvent.CellCallSettled> = []
   const settledCells: Array<AgentEvent.CellSettled> = []
@@ -188,18 +208,10 @@ export const projectStateResult = (
         const decoded = decode(decodeCellPrinted, entry)
         if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
         printed.push(decoded.success)
-        // Decoded once, here, and read back by sequence below.
-        //
-        // Rendered through the controller's own helper rather than replayed
-        // raw: the journal carries the buffer and the controller sends
-        // `printsObservation` of it, so projecting the raw text rebuilds a
-        // window the run never had. A frame that printed nothing is a message
-        // too — the turn it opened told the model so — and dropping it loses a
-        // user turn the model read.
-        prints.set(entry.seq, {
-          kind: "transcript",
-          message: ModelRequest.Message.user(printsObservation(decoded.success.text))
-        })
+        // Decoded once, here, and read back by sequence below. The payload is
+        // retained so a failed settlement can prove the immediately preceding
+        // print belongs to the same cell before merging the two observations.
+        prints.set(entry.seq, decoded.success)
         break
       }
       case eventType.cellCallStarted: {
@@ -257,6 +269,13 @@ export const projectStateResult = (
       message: compaction.payload.summary
     })
   }
+  // Set only after emitting a print and cleared whenever another message is
+  // emitted, so presence means the last projected turn is exactly this print.
+  let precedingPrint: AgentEvent.CellPrinted | undefined
+  const appendDemand = (text: string): void => {
+    messages.push({ kind: "transcript", message: ModelRequest.Message.user(text) })
+    precedingPrint = undefined
+  }
 
   for (const entry of events) {
     if (compaction !== undefined && entry.seq <= compaction.sequence) continue
@@ -264,7 +283,11 @@ export const projectStateResult = (
     // next model turn read, in the place the journal put it.
     const print = prints.get(entry.seq)
     if (print !== undefined) {
-      messages.push(print)
+      messages.push({
+        kind: "transcript",
+        message: ModelRequest.Message.user(printsObservation(print.text))
+      })
+      precedingPrint = print
       continue
     }
     switch (entry.eventType) {
@@ -273,6 +296,7 @@ export const projectStateResult = (
         if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
         if (decoded.success.message.content.length === 0) break
         messages.push({ kind: "transcript", message: transcriptMessage(decoded.success.message) })
+        precedingPrint = undefined
         break
       }
       case eventType.steeringDrained: {
@@ -280,26 +304,67 @@ export const projectStateResult = (
         if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
         for (const message of decoded.success.messages) {
           messages.push({ kind: "steering", message })
+          precedingPrint = undefined
         }
+        break
+      }
+      case eventType.readOnlyDemandIssued: {
+        const decoded = decode(decodeReadOnlyDemandIssued, entry)
+        if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
+        appendDemand(DemandText.readOnly(decoded.success.cap, decoded.success.streak))
+        break
+      }
+      case eventType.repeatDemanded: {
+        const decoded = decode(decodeRepeatDemanded, entry)
+        if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
+        appendDemand(DemandText.repeat(decoded.success.frames, decoded.success.cap))
+        break
+      }
+      case eventType.narrowedDemanded: {
+        const decoded = decode(decodeNarrowedDemanded, entry)
+        if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
+        appendDemand(DemandText.narrowed(decoded.success.flow, decoded.success.broader, decoded.success.narrower))
+        break
+      }
+      case eventType.narrowOnlyDemanded: {
+        const decoded = decode(decodeNarrowOnlyDemanded, entry)
+        if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
+        appendDemand(DemandText.narrowOnly(decoded.success.flow, decoded.success.check, decoded.success.targets))
+        break
+      }
+      case eventType.unmovedDemanded: {
+        const decoded = decode(decodeUnmovedDemanded, entry)
+        if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
+        appendDemand(DemandText.unmoved(decoded.success.openedDigest, decoded.success.currentDigest))
+        break
+      }
+      case eventType.unresolvedDemanded: {
+        const decoded = decode(decodeUnresolvedDemanded, entry)
+        if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
+        appendDemand(DemandText.unresolved(decoded.success.flow, decoded.success.failed, decoded.success.instead))
         break
       }
       case eventType.cellSettled: {
         const decoded = decode(decodeCellSettled, entry)
         /* v8 ignore next -- the first pass ran `decodeCellSettled` over every `cellSettled` entry of this same `events` array and returned on failure, and `decode` is a pure function of `entry.payload`, so re-decoding an entry that survived that pass cannot fail; the branch exists because `Result` has no way to carry that proof */
         if (Result.isFailure(decoded)) return Result.fail(decoded.failure)
-        if (decoded.success.outcome._tag === "rejected") {
+        const outcome = decoded.success.outcome
+        if (outcome._tag !== "rejected" && outcome._tag !== "raised") break
+        const note = outcome._tag === "rejected"
+          ? outcome.message
+          : `The cell threw ${outcome.name}: ${outcome.message}. Emit a corrected cell.`
+        if (precedingPrint !== undefined && precedingPrint.cell === decoded.success.cell) {
+          messages[messages.length - 1] = {
+            kind: "transcript",
+            message: ModelRequest.Message.user(`${printsObservation(precedingPrint.text)}\n\n${note}`)
+          }
+        } else {
           messages.push({
             kind: "transcript",
-            message: ModelRequest.Message.user(decoded.success.outcome.message)
-          })
-        } else if (decoded.success.outcome._tag === "raised") {
-          messages.push({
-            kind: "transcript",
-            message: ModelRequest.Message.user(
-              `The cell threw ${decoded.success.outcome.name}: ${decoded.success.outcome.message}. Emit a corrected cell.`
-            )
+            message: ModelRequest.Message.user(note)
           })
         }
+        precedingPrint = undefined
         break
       }
     }

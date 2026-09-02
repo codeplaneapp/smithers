@@ -23,8 +23,8 @@
  * durable host wires it in without this browser-safe package depending on the
  * engine binding.
  *
- * Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and
- * `packages/harness/docs/concepts.md#flow-registry`.
+ * Governing design: `../docs/concepts.md#durable-cell-loop` and
+ * `../docs/concepts.md#flow-registry`.
  *
  * @since 0.1.0
  */

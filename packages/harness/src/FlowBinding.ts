@@ -32,12 +32,13 @@
  * permission requirement, an abort, a suspension — stays in the typed error
  * channel, and an interruption is never caught at all.
  *
- * Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and
- * `packages/harness/docs/concepts.md#flow-registry`.
+ * Governing design: `../docs/concepts.md#durable-cell-loop` and
+ * `../docs/concepts.md#flow-registry`.
  *
  * @since 0.1.0
  */
 import * as Permission from "@smthrs/capability/Permission"
+import * as Digest from "@smthrs/core/Digest"
 import type * as Effects from "@smthrs/core/Effects"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
@@ -83,6 +84,12 @@ export interface DescriptorOptions {
   readonly name?: string | undefined
   /** The stable locator recorded as the descriptor's body and path. */
   readonly path?: string | undefined
+  /**
+   * Content identity of the executable body. `make` derives this from the
+   * handler when omitted; direct descriptor projections derive it from the
+   * declaration they can observe.
+   */
+  readonly bodyDigest?: string | undefined
   readonly modelInvocable?: boolean | undefined
   readonly placement?: Option.Option<Descriptor.Placement> | undefined
   readonly provenance?: Descriptor.Provenance | undefined
@@ -155,10 +162,16 @@ export const descriptorOf = (
 ): Descriptor.FlowDescriptor => {
   const name = options.name ?? declaration.name ?? ""
   const path = options.path ?? `binding://${name}`
+  const bodyDigest = options.bodyDigest ?? Digest.digest(Digest.canonical({
+    capabilities: declaration.capabilities,
+    description: declaration.description ?? "",
+    effects: declaration.effects ?? null,
+    name
+  }))
   return new Descriptor.FlowDescriptor({
     name,
     description: declaration.description ?? "",
-    body: new Descriptor.BodyRefModule({ path }),
+    body: new Descriptor.BodyRefModule({ path, contentDigest: bodyDigest }),
     input: options.inputDocument === undefined
       ? new Descriptor.SchemaRefModule({ path, field: "input" })
       : new Descriptor.SchemaRefInline({ document: options.inputDocument }),
@@ -200,17 +213,38 @@ const refused = (code: Cell.CallFailureCode, message: string): CallResult =>
   new CallResult({ outcome: "failure", value: null, code, message })
 
 /**
+ * What a failure that cannot be read is described as.
+ *
+ * Named rather than written inline because it is the one description this
+ * module can promise for every value: the failure happened, and the value
+ * carrying it answered a read with a throw.
+ */
+const undescribable = "the handler failed with a value that throws when it is read"
+
+/**
  * Renders an arbitrary failure value as stable text for the next frame.
+ *
+ * Every read here is a read of a value a handler chose: `message` can be a
+ * throwing accessor, `toJSON` can throw under `JSON.stringify`, and `toString`
+ * or `Symbol.toPrimitive` can throw under `String`. A throw escaping this
+ * function would leave the boundary as a defect instead of the catchable
+ * `CallResult` the cell contract promises, and a cell cannot catch a defect —
+ * so the whole rendering runs under one guard and a value that refuses to
+ * describe itself is described as exactly that.
  */
 const describe = (error: unknown): string => {
-  if (typeof error === "string") return error
-  if (error instanceof Error) return error.message
-  const message = (error as { readonly message?: unknown } | null)?.message
-  if (typeof message === "string") return message
   try {
-    return JSON.stringify(error) ?? String(error)
+    if (typeof error === "string") return error
+    if (error instanceof Error) return error.message
+    const message = (error as { readonly message?: unknown } | null)?.message
+    if (typeof message === "string") return message
+    try {
+      return JSON.stringify(error) ?? String(error)
+    } catch {
+      return String(error)
+    }
   } catch {
-    return String(error)
+    return undescribable
   }
 }
 
@@ -282,6 +316,7 @@ export const make = <
 >(options: Options<I, O, E, R>): Binding<R> => {
   const descriptor = descriptorOf(options.flow, {
     ...options,
+    bodyDigest: options.bodyDigest ?? Digest.digest(Function.prototype.toString.call(options.handler)),
     ...(options.inputDocument === undefined ? { inputDocument: document(options.flow.input) } : {}),
     ...(options.outputDocument === undefined ? { outputDocument: document(options.flow.output) } : {})
   })

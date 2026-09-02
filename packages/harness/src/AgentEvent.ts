@@ -334,6 +334,28 @@ export class TransitionApplied extends Schema.TaggedClass<TransitionApplied>(
 }) {}
 
 /**
+ * The controller issuing a read-cap intervention to the next frame.
+ *
+ * Kept separately from {@link ReadOnlyDemanded}: this event records the user
+ * message entering the model transcript, while that event records how a later
+ * frame answered it. A crash between those boundaries must retain the demand.
+ *
+ * @category events
+ * @since 1.0.0-rc.0
+ */
+export class ReadOnlyDemandIssued extends Schema.TaggedClass<ReadOnlyDemandIssued>(
+  "flows/harness/AgentEvent/ReadOnlyDemandIssued"
+)("read-only-demand-issued", {
+  eventType: Schema.Literal("flows.harness.read-only-demand-issued.v1"),
+  /** Consecutive read-only frames the run had spent. */
+  streak: Schema.Int,
+  /** The armed threshold that streak reached. */
+  cap: Schema.Int,
+  /** The frame the demand was attached to, which is the one that must answer it. */
+  nextFrame: Schema.Int
+}) {}
+
+/**
  * The outcome of the frame immediately following a read-cap intervention.
  *
  * @category events
@@ -354,10 +376,11 @@ export class ReadOnlyDemanded extends Schema.TaggedClass<ReadOnlyDemanded>(
  *
  * Written when a run reaches its repeat-observation threshold: consecutive
  * frames that issued calls, issued none the run had not already issued, and
- * changed nothing. The read-cap event above is written when its demand is
- * *answered*, because the answer is a field on a transition; this one is
- * written when the demand is *issued*, because what answers it is the shape of
- * the next frame's calls and the journal already writes those one by one.
+ * changed nothing. Both this and {@link ReadOnlyDemandIssued} are written when
+ * their demand is issued; {@link ReadOnlyDemanded} additionally records the
+ * read-cap demand's later answer because that answer is a field on a
+ * transition. A repeat demand is answered by the shape of the next frame's
+ * calls, which the journal already writes one by one.
  *
  * @category events
  * @since 0.1.0
@@ -777,6 +800,7 @@ export const AgentEvent = Schema.Union([
   TransitionApplied,
   MutationObserved,
   CheckpointMinted,
+  ReadOnlyDemandIssued,
   ReadOnlyDemanded,
   RepeatDemanded,
   NarrowedDemanded,
@@ -835,6 +859,7 @@ export const eventType = {
   narrowOnlyDemanded: "flows.harness.narrow-only-demanded.v1",
   narrowedDemanded: "flows.harness.narrowed-demanded.v1",
   permissionRequired: "flows.harness.permission-required.v1",
+  readOnlyDemandIssued: "flows.harness.read-only-demand-issued.v1",
   readOnlyDemanded: "flows.harness.read-only-demanded.v1",
   repeatDemanded: "flows.harness.repeat-demanded.v1",
   resolved: "flows.harness.resolved.v1",

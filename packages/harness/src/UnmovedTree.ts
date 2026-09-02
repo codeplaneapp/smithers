@@ -33,6 +33,7 @@
  *
  * @since 0.1.0
  */
+import * as DemandText from "./internal/demandText.ts"
 
 /**
  * A completion taken over the tree the run was handed.
@@ -105,10 +106,4 @@ export const find = (options: {
  * @category constructors
  * @since 0.1.0
  */
-export const demand = (found: Unmoved): string =>
-  `Unmoved workspace — the tree you are completing on is the tree this run was handed.
-
-- digest the run opened on: ${found.opened}
-- digest this frame closed on: ${found.closed}
-
-Nothing in this workspace differs from the tree this run opened on, so there is no change behind the completion you wrote. Make the change, or complete again stating that no change is needed and naming what you ran to conclude it — the calls you made, what they printed, and why that shows the behaviour asked for is already the behaviour this tree has. Both answers are accepted exactly as you write them and nothing re-checks either one; "no change is needed" with its working shown is a finished answer, and the same words with nothing behind them are the completion you just had handed back. Nothing makes the change for you, and what you return next is the answer that stands.`
+export const demand = (found: Unmoved): string => DemandText.unmoved(found.opened, found.closed)

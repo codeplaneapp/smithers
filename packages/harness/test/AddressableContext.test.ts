@@ -210,6 +210,26 @@ describe("CellTurn honest observations", () => {
     expect(conversation).not.toContain("z".repeat(9_000))
   })
 
+  it("measures the echo ceiling in the bytes it is stated in and not in code units", async () => {
+    // 3,000 astral characters: 6,000 UTF-16 code units, under the 8,192 echo
+    // ceiling, and 12,000 UTF-8 bytes, over it. Measured in code units this
+    // reply was echoed back whole and the run paid input price for half again
+    // the ceiling it declared.
+    const filler = `const note = "${"\u{1F600}".repeat(3_000)}"\n`
+    expect(filler.length).toBeLessThan(8_192)
+    expect(new TextEncoder().encode(filler).byteLength).toBeGreaterThan(8_192)
+    const { model } = await run({
+      script: [
+        emits(`${filler}throw new Error("boom")`),
+        emits(`ctx.done("done")`)
+      ]
+    })
+
+    const conversation = JSON.stringify(model.recorder.requests[1]?.messages ?? [])
+    expect(conversation).toContain("bytes elided from the middle.")
+    expect(conversation).toContain("the reply is not re-read in full")
+  })
+
   it("names the realm's bindings when a cell threw reading a path that is not there", async () => {
     const { model } = await run({
       state: state({ maxFrames: 3 }),

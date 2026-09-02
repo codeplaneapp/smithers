@@ -969,6 +969,7 @@ describe("CellTurn read-only cap", () => {
     const demanded = JSON.stringify(model.recorder.requests[2]?.messages)
     expect(demanded).toContain("Read-only discipline")
     expect(demanded).toContain("justification")
+    expect(of(events, "read-only-demand-issued")[0]).toMatchObject({ streak: 2, cap: 2, nextFrame: 2 })
     expect(of(events, "read-only-demanded")[0]).toMatchObject({
       streak: 2,
       cap: 2,

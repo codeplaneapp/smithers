@@ -2,9 +2,8 @@
  * Local structural plan nodes used at the harness-to-engine boundary.
  *
  * These values project the canonical registry metadata defined by
- * `packages/registry/src/Descriptor.ts` and consumed by the core contracts in
- * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary` and the splice boundary in
- * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`. Source order is retained
+ * `@smthrs/registry`'s `Descriptor` and consumed at the splice boundary
+ * described in `../docs/concepts.md#child-plans-and-the-splice-boundary`. Source order is retained
  * only for result correlation; graph dependencies are the sole sequencing
  * signal.
  *

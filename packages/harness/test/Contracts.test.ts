@@ -243,6 +243,12 @@ describe("AgentEvent", () => {
         nextFrame: 13,
         nextAction: "write"
       }),
+      new AgentEvent.ReadOnlyDemandIssued({
+        eventType: "flows.harness.read-only-demand-issued.v1",
+        streak: 12,
+        cap: 12,
+        nextFrame: 13
+      }),
       new AgentEvent.RepeatDemanded({
         eventType: "flows.harness.repeat-demanded.v1",
         frames: 4,

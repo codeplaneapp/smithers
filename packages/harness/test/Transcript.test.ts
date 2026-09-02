@@ -1,7 +1,7 @@
 /**
  * Journal-to-transcript projection: what a resumed run rebuilds from what the
  * loop journaled, and what it refuses to rebuild from a payload that no longer
- * decodes. See `packages/harness/docs/concepts.md#durable-cell-loop`.
+ * decodes. See `../docs/concepts.md#durable-cell-loop`.
  */
 import type { JournalEvent } from "@smthrs/journal"
 import { ModelEvent, ModelRequest } from "@smthrs/model"
@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest"
 import * as AgentEvent from "../src/AgentEvent.ts"
 import * as Cell from "../src/Cell.ts"
 import * as EngineLike from "../src/EngineLike.ts"
+import * as DemandText from "../src/internal/demandText.ts"
 import * as Transcript from "../src/Transcript.ts"
 import { entry, journal } from "./fixtures/journal.ts"
 
@@ -223,7 +224,56 @@ describe("Transcript", () => {
     expect(projected.cell.aborts).toEqual(["host interrupted"])
   })
 
-  it("reconstructs rejected and raised cell observations", () => {
+  it("merges a cell's print and rejection into one user turn", () => {
+    const cell = "cell-rejected"
+
+    expect(project([
+      entry(
+        1,
+        AgentEvent.eventType.cellPrinted,
+        new AgentEvent.CellPrinted({ eventType: AgentEvent.eventType.cellPrinted, cell, text: "before failing" })
+      ),
+      entry(
+        2,
+        AgentEvent.eventType.cellSettled,
+        new AgentEvent.CellSettled({
+          eventType: AgentEvent.eventType.cellSettled,
+          cell,
+          outcome: new Cell.Rejected({ code: "invalid_transition", message: "emit a corrected cell" })
+        })
+      )
+    ])).toEqual([
+      ModelRequest.Message.user("What your cell printed:\nbefore failing\n\nemit a corrected cell")
+    ])
+  })
+
+  it("merges an empty print observation and raise into one user turn", () => {
+    const cell = "cell-raised"
+
+    expect(project([
+      entry(
+        1,
+        AgentEvent.eventType.cellPrinted,
+        new AgentEvent.CellPrinted({ eventType: AgentEvent.eventType.cellPrinted, cell, text: "" })
+      ),
+      entry(
+        2,
+        AgentEvent.eventType.cellSettled,
+        new AgentEvent.CellSettled({
+          eventType: AgentEvent.eventType.cellSettled,
+          cell,
+          outcome: new Cell.Raised({ name: "RangeError", message: "off by one" })
+        })
+      )
+    ])).toEqual([
+      ModelRequest.Message.user(
+        "Your cell printed nothing, so this turn opens with nothing new to read. Everything it bound is still in the realm; print what you need to look at.\n\n" +
+          "The cell threw RangeError: off by one. Emit a corrected cell."
+      )
+    ])
+  })
+
+  it("keeps a rejected settlement standalone without a preceding print", () => {
     const rejected = new AgentEvent.CellSettled({
       eventType: "flows.harness.cell-settled.v1",
       cell: "",
@@ -249,6 +299,89 @@ describe("Transcript", () => {
         ModelRequest.Message.user("emit a cell"),
         ModelRequest.Message.user("The cell threw RangeError: off by one. Emit a corrected cell.")
       ])
+  })
+
+  it("rebuilds every journaled demand as the exact user message issued live", () => {
+    const events: ReadonlyArray<AgentEvent.AgentEvent> = [
+      new AgentEvent.ReadOnlyDemandIssued({
+        eventType: AgentEvent.eventType.readOnlyDemandIssued,
+        streak: 12,
+        cap: 12,
+        nextFrame: 13
+      }),
+      new AgentEvent.RepeatDemanded({
+        eventType: AgentEvent.eventType.repeatDemanded,
+        frames: 4,
+        cap: 4,
+        nextFrame: 14
+      }),
+      new AgentEvent.UnmovedDemanded({
+        eventType: AgentEvent.eventType.unmovedDemanded,
+        openedDigest: "opened",
+        currentDigest: "opened",
+        nextFrame: 15
+      }),
+      new AgentEvent.UnresolvedDemanded({
+        eventType: AgentEvent.eventType.unresolvedDemanded,
+        flow: "bash",
+        failed: "pytest tests",
+        instead: "pytest tests -k one",
+        currentDigest: "current",
+        nextFrame: 16
+      }),
+      new AgentEvent.NarrowedDemanded({
+        eventType: AgentEvent.eventType.narrowedDemanded,
+        flow: "bash",
+        broader: "pytest tests",
+        narrower: "pytest tests -k one",
+        broaderDigest: "before",
+        currentDigest: "after",
+        nextFrame: 17
+      }),
+      new AgentEvent.NarrowOnlyDemanded({
+        eventType: AgentEvent.eventType.narrowOnlyDemanded,
+        flow: "bash",
+        check: "pytest tests/a.py tests/b.py -k one",
+        targets: ["tests/a.py", "tests/b.py"],
+        currentDigest: "after",
+        nextFrame: 18
+      })
+    ]
+
+    expect(project(events.map((event, index) => entry(index + 1, event.eventType, event)))).toEqual([
+      ModelRequest.Message.user(DemandText.readOnly(12, 12)),
+      ModelRequest.Message.user(DemandText.repeat(4, 4)),
+      ModelRequest.Message.user(DemandText.unmoved("opened", "opened")),
+      ModelRequest.Message.user(DemandText.unresolved("bash", "pytest tests", "pytest tests -k one")),
+      ModelRequest.Message.user(DemandText.narrowed("bash", "pytest tests", "pytest tests -k one")),
+      ModelRequest.Message.user(
+        DemandText.narrowOnly("bash", "pytest tests/a.py tests/b.py -k one", ["tests/a.py", "tests/b.py"])
+      )
+    ])
+  })
+
+  it("does not merge a settlement with the immediately preceding print from another cell", () => {
+    const print = (seq: number, cell: string, text: string) =>
+      entry(
+        seq,
+        AgentEvent.eventType.cellPrinted,
+        new AgentEvent.CellPrinted({ eventType: AgentEvent.eventType.cellPrinted, cell, text })
+      )
+    const settled = new AgentEvent.CellSettled({
+      eventType: AgentEvent.eventType.cellSettled,
+      cell: "cell-a",
+      outcome: new Cell.Rejected({ code: "invalid_transition", message: "try cell-a again" })
+    })
+
+    expect(project([
+      print(1, "cell-a", "from a"),
+      print(2, "cell-b", "from b"),
+      entry(3, settled.eventType, settled)
+    ])).toEqual([
+      ModelRequest.Message.user("What your cell printed:\nfrom a"),
+      ModelRequest.Message.user("What your cell printed:\nfrom b"),
+      ModelRequest.Message.user("try cell-a again")
+    ])
   })
 
   it("projects an empty journal as an empty transcript", () => {
@@ -508,7 +641,13 @@ describe("Transcript", () => {
     "flows.harness.cell-settled.v1",
     "flows.harness.transition-applied.v1",
     "flows.harness.suspended.v1",
-    "flows.harness.aborted.v1"
+    "flows.harness.aborted.v1",
+    "flows.harness.read-only-demand-issued.v1",
+    "flows.harness.repeat-demanded.v1",
+    "flows.harness.narrowed-demanded.v1",
+    "flows.harness.narrow-only-demanded.v1",
+    "flows.harness.unmoved-demanded.v1",
+    "flows.harness.unresolved-demanded.v1"
   ])("rejects malformed %s evidence", (eventType) => {
     const result = Transcript.projectStateResult([entry(1, eventType, { eventType })])
     expect(Result.isFailure(result) && result.failure.code).toBe("projection_failed")

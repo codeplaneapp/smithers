@@ -1,11 +1,9 @@
 /**
  * Narrow engine port consumed by the built-in harness.
  *
- * Governing contracts:
- * `packages/harness/docs/concepts.md#durable-cell-loop`,
- * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`,
- * `packages/harness/docs/concepts.md#step-keys-and-the-model-layer`, and
- * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`.
+ * Governing contracts: `../docs/concepts.md#durable-cell-loop`,
+ * `../docs/concepts.md#child-plans-and-the-splice-boundary`, and
+ * `../docs/concepts.md#step-keys-and-the-model-layer`.
  *
  * @since 0.1.0
  */
@@ -237,15 +235,15 @@ export interface EngineLike {
    *
    * The harness contributes the assembled-context input, resolved layer set,
    * capability envelope, effect tier, placement, and provider-neutral
-   * `ModelRequest` as core key material. Route resolution happens on the
-   * step-key contract (`packages/harness/docs/concepts.md#step-keys-and-the-model-layer`,
-   * `packages/harness/docs/concepts.md#step-keys-and-the-model-layer`) requires the exact wire request in
-   * the key. An implementation MUST therefore resolve the route, run
+   * `ModelRequest` as core key material. The step-key contract
+   * (`../docs/concepts.md#step-keys-and-the-model-layer`) requires the exact
+   * wire request in the key, so route resolution happens before the key is
+   * sealed. An implementation MUST therefore resolve the route, run
    * `Route.prepare` (`/model/Route`), and digest the credential-free
    * `PreparedRequest` — canonical body bytes included — together with
    * declared material into the sealed-step key before executing. A provider
    * wire change must produce a new key; credentials are signed on after the
-   * digest and never enter it (`packages/harness/docs/concepts.md#step-keys-and-the-model-layer`).
+   * digest and never enter it.
    */
   readonly sealStep: (
     step: SealedModelStep

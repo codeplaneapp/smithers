@@ -117,7 +117,7 @@ frame boundary.
 
 ## Reference
 
-27 public modules, 335 documented exports.
+27 public modules, 336 documented exports.
 
 | Module | Public exports | Description |
 | --- | --- | --- |
@@ -137,7 +137,7 @@ frame boundary.
 | `CellHistory` | `ExecutedCell`, `Service`, `CellHistory`, `make`, `makeCells`, `makeNoop`, `layer`, `layerCells`, `layerNoop` | The source of every cell the current turn executed. |
 | `CellCalls` | `Implementation`, `Prompt`, `PromptRunner`, `Options`, `Resolver`, `make` | Registry-backed resolution for the flow calls a cell makes. |
 | `FlowBinding` | `Declared`, `DescriptorOptions`, `descriptorOf`, `Binding`, `Options`, `make`, `provide`, `Source`, `source`, `Catalog`, `empty`, `catalogResult`, `catalog`, `registry` | The executable-flow binding contract. |
-| `StructuredOutput` | `StructuredOutputFailureCode`, `OutputIssue`, `StructuredOutputFailure`, `maxIssues`, `jsonSchema`, `digest`, `instructions`, `issuesDigest`, `correction`, `lastBalanced`, `candidates`, `decode` | Turning one agent's final text into a value the declared output schema accepts, or into a typed failure. |
+| `StructuredOutput` | `StructuredOutputFailureCode`, `OutputIssueCode`, `OutputIssue`, `StructuredOutputFailure`, `maxIssues`, `jsonSchema`, `digest`, `instructions`, `issuesDigest`, `correction`, `lastBalanced`, `candidates`, `decode` | Turning one agent's final text into a value the declared output schema accepts, or into a typed failure. |
 | `TruncatedOutput` | `flagSuffix`, `droppedSuffix`, `flagKey`, `minimumBytes`, `retained`, `Capture`, `Reuse`, `captures`, `reuse`, `refusal`, `retain`, `Ledger` | The truncation ledger: |
 | `CallLedger` | `bound`, `width`, `members`, `Entry`, `Ledger`, `subject`, `target`, `digest`, `payload`, `Settlement`, `entry`, `settled`, `remember`, `render` | The call ledger: |
 | `NarrowedCheck` | `retained`, `maxTerms`, `targeting`, `names`, `lex`, `terms`, `conditions`, `Check`, `Narrowing`, `check`, `narrows`, `find`, `demand`, `Only`, `findOnly`, `demandOnly`, `remember`, `Ledger` | The narrowing ledger: |
@@ -206,7 +206,7 @@ Serializable events emitted by harness adapters.
 
 Local structural plan nodes used at the harness-to-engine boundary.
 
-These values project the canonical registry metadata defined by `packages/registry/src/Descriptor.ts` and consumed by the core contracts in `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary` and the splice boundary in `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`. Source order is retained only for result correlation; graph dependencies are the sole sequencing signal.
+These values project the canonical registry metadata defined by `@smthrs/registry`'s `Descriptor` and consumed at the splice boundary described in `../docs/concepts.md#child-plans-and-the-splice-boundary`. Source order is retained only for result correlation; graph dependencies are the sole sequencing signal.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -223,7 +223,7 @@ These values project the canonical registry metadata defined by `packages/regist
 
 Narrow engine port consumed by the built-in harness.
 
-Governing contracts: `packages/harness/docs/concepts.md#durable-cell-loop`, `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`, `packages/harness/docs/concepts.md#step-keys-and-the-model-layer`, and `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`.
+Governing contracts: `../docs/concepts.md#durable-cell-loop`, `../docs/concepts.md#child-plans-and-the-splice-boundary`, and `../docs/concepts.md#step-keys-and-the-model-layer`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -262,9 +262,9 @@ Deterministic token accounting for context windows.
 
 `import * as ContextWindow from "@smthrs/harness/ContextWindow"`
 
-The immutable, provider-neutral context assembled for one model request. Every array it exposes is frozen, so a runtime mutation throws in strict mode instead of silently invalidating the cached digest.
+The immutable, provider-neutral context assembled for one model request. Every value it exposes is frozen — the arrays, the segments, and the messages, parts and tool declarations they hold — so a runtime mutation throws in strict mode instead of silently invalidating the cached digest.
 
-Governing design: `packages/harness/docs/concepts.md#context-window`.
+Governing design: `../docs/concepts.md#context-window`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -331,7 +331,7 @@ Declarations for sealed transcript-summary steps.
 
 Turn-boundary steering values and their source contract.
 
-Governing designs: `packages/harness/docs/concepts.md#notification-queue` and `packages/harness/docs/concepts.md#notification-queue`.
+Governing design: `../docs/concepts.md#notification-queue`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -366,7 +366,7 @@ Governing designs: `packages/harness/docs/concepts.md#notification-queue` and `p
 
 Adapter from the durable notification queue to harness turn boundaries.
 
-Governing contract: `packages/harness/docs/concepts.md#notification-queue`.
+Governing contract: `../docs/concepts.md#notification-queue`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -386,7 +386,7 @@ Nothing here executes anything. Execution is `Sandbox`; durability is `EngineLik
 
 A cell does not *return* its transition. The realm is a REPL that outlives the cell, so a cell states its intent by calling `ctx.done` or `ctx.park` and `Sandbox.replTransition` builds the value; there is no returned object to decode. What the cell filed by hand — durable state, a projected context, a list of keys to re-render, a list of ordinals to recall — is gone with the surface that asked for it, and the fields survive here for one purpose only: decoding the journals that were written while it existed.
 
-Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`, `packages/harness/docs/concepts.md#repl-realm` and `packages/harness/docs/concepts.md#agent-cell-context`.
+Governing design: `../docs/concepts.md#durable-cell-loop`, `../docs/concepts.md#repl-realm` and `../docs/concepts.md#agent-cell-context`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -482,7 +482,7 @@ Smithers is a state machine. This module is its deterministic outer loop: it dec
 
 One frame is: seal a model step, recover the cell from the settlement, run it in the sandbox, resolve each of its flow calls as its own keyed durable boundary, then apply the transition it returned. The cell owns the state that carries forward and the exact context the next frame sees.
 
-Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`.
+Governing design: `../docs/concepts.md#durable-cell-loop`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -537,7 +537,7 @@ The split between a failed result and a failed effect is the contract `EngineLik
 
 The resolver's shape is exactly `FlowEngineLike.CallRunner["run"]`, so a durable host wires it in without this browser-safe package depending on the engine binding.
 
-Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and `packages/harness/docs/concepts.md#flow-registry`.
+Governing design: `../docs/concepts.md#durable-cell-loop` and `../docs/concepts.md#flow-registry`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -564,7 +564,7 @@ This is deliberately *not* a second registry. The descriptors a catalog projects
 
 The failure split is the one `EngineLike.call` declares. A refusal the agent could plausibly correct — malformed input, a flow that failed, output that is not serializable — becomes a `failure` `CallResult` the cell observes as a catchable exception. Anything the cell must never swallow — a permission requirement, an abort, a suspension — stays in the typed error channel, and an interruption is never caught at all.
 
-Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and `packages/harness/docs/concepts.md#flow-registry`.
+Governing design: `../docs/concepts.md#durable-cell-loop` and `../docs/concepts.md#flow-registry`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -589,7 +589,7 @@ Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and `pac
 
 Turning one agent's final text into a value the declared output schema accepts, or into a typed failure.
 
-A model may answer with a bare JSON document, prose wrapped around a JSON document, a fenced block, or JSON of the wrong shape. Downstream nodes must never receive that ambiguity, so this module implements the recovery contract in `packages/harness/docs/concepts.md#structured-output`:
+A model may answer with a bare JSON document, prose wrapped around a JSON document, a fenced block, or JSON of the wrong shape. Downstream nodes must never receive that ambiguity, so this module implements the recovery contract in `../docs/concepts.md#structured-output`:
 
 1. parse the complete, BOM-stripped response and decode it; 2. otherwise scan once for balanced JSON containers, take the container whose matching close ends last, and decode that; 3. otherwise report a typed `StructuredOutputFailure` carrying bounded diagnostics, which is what a caller re-prompts with when it still holds a correction slot.
 
@@ -597,11 +597,12 @@ Every candidate is decoded by the declared schema. Extraction never relaxes vali
 
 The prompt half is `instructions`. It renders the declared schema as a JSON Schema document placed in the run's system teaching, which is BAML's `ctx.output_format` injection reached through the seam the vault note specifies — the model is told the shape before it answers, and the answer is still validated locally. Provider acceptance is not a cast.
 
-Reference consulted: `reference/effect` `packages/effect/src/unstable/ai/LanguageModel.ts` `generateObject`, which sends `responseFormat: { type: "json", schema }` and then decodes the result with the same schema, failing `AiError.InvalidOutputError` on mismatch. The decode-and-fail-typed half is copied. The provider `responseFormat` half is not reachable here: `@smthrs/model`'s `ModelRequest.GenerationParams` has no response-format field, and the cell loop's final answer is a `Cell.Complete` `output` string rather than a provider-decoded value, so the schema is carried in the prompt and enforced at this boundary.
+Reference consulted: the `generateObject` function from Effect's `effect/unstable/ai/LanguageModel` module, which sends `responseFormat: { type: "json", schema }` and then decodes the result with the same schema, failing `AiError.InvalidOutputError` on mismatch. The decode-and-fail-typed half is copied. The provider `responseFormat` half is not reachable here: `@smthrs/model`'s `ModelRequest.GenerationParams` has no response-format field, and the cell loop's final answer is a `Cell.Complete` `output` string rather than a provider-decoded value, so the schema is carried in the prompt and enforced at this boundary.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
 | `StructuredOutputFailureCode` | const | models | Stable reasons a structured-output boundary failed. |
+| `OutputIssueCode` | const | models | Stable reasons an individual structured-output issue was reported. |
 | `OutputIssue` | class | models | One bounded issue raised while decoding structured output. |
 | `StructuredOutputFailure` | class | errors | The terminal failure of one structured-output boundary. |
 | `maxIssues` | const | constants | The most validation issues a failure or a correction prompt carries. |

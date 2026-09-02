@@ -1,7 +1,7 @@
 /**
  * Steering at safe turn boundaries: what a queue may promote, what a drain
  * carries, and what a resumed run replays instead of draining again. See
- * `packages/harness/docs/concepts.md#notification-queue`.
+ * `../docs/concepts.md#notification-queue`.
  */
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import { Cause, Effect, Exit, Schema } from "effect"

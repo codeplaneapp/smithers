@@ -63,11 +63,24 @@ describe("NarrowedCheck.check", () => {
     expect(recorded.label).toBe("{\"command\":\"check suite\",\"mode\":\"unhermetic\"}")
   })
 
-  it("clips a label that would not fit, so the ledger stays bounded", () => {
+  it("elides a label that would not fit and says where to recover it", () => {
     const recorded = ran("bash", command(`check ${"a".repeat(400)}`), "tree-1")
 
-    expect(recorded.label.length).toBe(320)
-    expect(recorded.label.endsWith("…")).toBe(true)
+    expect(recorded.label).toContain("… [+")
+    expect(recorded.label).toContain("the issuing cell in the run record has the whole input")
+  })
+
+  it("measures a multibyte label in UTF-8 bytes without splitting a character", () => {
+    const emoji = "😀".repeat(100)
+    const whole = `{"command":"check ${emoji}","mode":"unhermetic"}`
+    const recorded = ran("bash", command(`check ${emoji}`), "tree-1")
+    const kept = recorded.label.slice(0, recorded.label.indexOf("… [+"))
+    const missing = new TextEncoder().encode(whole).byteLength - new TextEncoder().encode(kept).byteLength
+
+    expect(whole.length).toBeLessThan(320)
+    expect(new TextEncoder().encode(whole).byteLength).toBeGreaterThan(320)
+    expect(recorded.label).toContain(`… [+${missing}b,`)
+    expect(new TextDecoder().decode(new TextEncoder().encode(recorded.label))).toBe(recorded.label)
   })
 
   it("refuses an input that is content rather than a question", () => {

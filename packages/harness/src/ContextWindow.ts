@@ -1,9 +1,10 @@
 /**
  * The immutable, provider-neutral context assembled for one model request.
- * Every array it exposes is frozen, so a runtime mutation throws in strict mode
- * instead of silently invalidating the cached digest.
+ * Every value it exposes is frozen — the arrays, the segments, and the
+ * messages, parts and tool declarations they hold — so a runtime mutation
+ * throws in strict mode instead of silently invalidating the cached digest.
  *
- * Governing design: `packages/harness/docs/concepts.md#context-window`.
+ * Governing design: `../docs/concepts.md#context-window`.
  *
  * @since 0.1.0
  */
@@ -256,6 +257,39 @@ const segmentText = (content: Content): string => CanonicalJson.stringify(jsonVa
 
 const digest = (value: unknown): string => Digest.digest(CanonicalJson.stringify(value))
 
+/** Every node in every graph this module has undertaken to freeze whole. */
+const frozenWhole = new WeakSet<object>()
+
+/**
+ * Freezes one value and everything reachable from it.
+ *
+ * Freezing only the outer array kept the immutability promise for
+ * `segments.push` and left `segments[0].content[0].content[0].text = "…"`
+ * silent. A segment's digest is taken once, at construction, so a message or a
+ * part edited in place afterwards renders content the window's own identity no
+ * longer describes — and that identity is what the sealed step is keyed on.
+ *
+ * The module's own memo ends the walk. A value a caller froze is evidence only
+ * that node cannot change, not that every descendant was frozen with it; a
+ * segment this module already walked, on the other hand, can be reused across
+ * turns in O(1). Recording a node before descending also makes a cycle end at
+ * its first repeated edge.
+ *
+ * Members are limited to own enumerable string keys, as they were when this
+ * walk used `Object.values`, but each one is read through its own descriptor.
+ * An accessor is caller code, not data the freeze walk may execute.
+ */
+const freezeDeep = (value: unknown): void => {
+  if (value === null || typeof value !== "object" || frozenWhole.has(value)) return
+  // Recorded before the walk, so a graph that points at itself ends it.
+  frozenWhole.add(value)
+  Object.freeze(value)
+  for (const key of Object.keys(value)) {
+    const property = Object.getOwnPropertyDescriptor(value, key)
+    if (property !== undefined && "value" in property) freezeDeep(property.value)
+  }
+}
+
 /** Creates one segment, computing its identity and estimated token count.
  * @category constructors
  * @since 0.1.0
@@ -263,10 +297,11 @@ const digest = (value: unknown): string => Digest.digest(CanonicalJson.stringify
  */
 export const makeSegment = (input: Segment | SegmentInput): Segment => {
   if (isSegment(input)) {
-    Object.freeze(input.content)
+    freezeDeep(input.content)
     return input
   }
-  const content = Object.freeze([...input.content])
+  const content: Content = [...input.content]
+  freezeDeep(content)
   const segment = new Segment({
     kind: input.kind,
     zone: input.zone,
@@ -279,7 +314,7 @@ export const makeSegment = (input: Segment | SegmentInput): Segment => {
     tokens: input.tokens ?? Tokens.count(segmentText(content)),
     content
   })
-  Object.freeze(segment.content)
+  freezeDeep(segment.content)
   return segment
 }
 
@@ -305,8 +340,8 @@ const windowDigest = (
   })
 
 const construct = (options: MakeOptions): ContextWindow => {
-  const segments = Object.freeze((options.segments ?? []).map(makeSegment))
-  const activeTools = Object.freeze(unique(options.activeTools ?? []))
+  const segments = (options.segments ?? []).map(makeSegment)
+  const activeTools = unique(options.activeTools ?? [])
   const window = new ContextWindow({
     modelId: options.modelId,
     segments,
@@ -321,8 +356,10 @@ const construct = (options: MakeOptions): ContextWindow => {
       })
     ))
   })
-  Object.freeze(window.segments)
-  Object.freeze(window.activeTools)
+  // The whole window, not its two outer arrays: a segment, a message, a part
+  // and the token accounting are all values a caller holds a reference to, and
+  // the digest above was taken over every one of them.
+  freezeDeep(window)
   return window
 }
 

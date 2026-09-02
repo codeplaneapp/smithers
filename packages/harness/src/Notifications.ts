@@ -1,7 +1,7 @@
 /**
  * Adapter from the durable notification queue to harness turn boundaries.
  *
- * Governing contract: `packages/harness/docs/concepts.md#notification-queue`.
+ * Governing contract: `../docs/concepts.md#notification-queue`.
  *
  * @since 0.1.0
  */

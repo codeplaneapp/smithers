@@ -15,7 +15,7 @@
  * its successor's `context` by hand — is recorded as a design error rather than
  * as an arm that lost: it made the model do the realm's job, which is why it
  * never worked like a REPL. will ruled it out on 2026-08-24. The evidence and
- * the ruling are in `packages/harness/docs/concepts.md#repl-realm`.
+ * the ruling are in `../../docs/concepts.md#repl-realm`.
  *
  * The teaching here is measured, not preferred, and the measurement has now run
  * both ways. The merged optimal-trace program
@@ -54,8 +54,8 @@
  * without the trace that says the failure stopped happening, and do not add one
  * without a trace that says teaching — rather than a tool — is the gap.
  *
- * Governing design: `packages/harness/docs/concepts.md#model-authoring-surface` (the
- * ruling) and `packages/harness/docs/concepts.md#agent-cell-context` (the surface).
+ * Governing design: `../../docs/concepts.md#model-authoring-surface` (the
+ * ruling) and `../../docs/concepts.md#agent-cell-context` (the surface).
  *
  * @since 0.1.0
  */
@@ -137,7 +137,7 @@ export interface Environment {
  * checked. That is will's ruling of 2026-08-23, and it is why the pinned length
  * in `test/CellPrompt.test.ts` moved.
  *
- * Governing design: `packages/harness/docs/concepts.md#repl-realm`.
+ * Governing design: `../../docs/concepts.md#repl-realm`.
  */
 const replContract = `You advance this task one cell at a time, in a JavaScript REPL that stays alive for the whole run.
 

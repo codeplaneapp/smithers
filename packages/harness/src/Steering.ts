@@ -1,8 +1,7 @@
 /**
  * Turn-boundary steering values and their source contract.
  *
- * Governing designs: `packages/harness/docs/concepts.md#notification-queue` and
- * `packages/harness/docs/concepts.md#notification-queue`.
+ * Governing design: `../docs/concepts.md#notification-queue`.
  *
  * @since 0.1.0
  */

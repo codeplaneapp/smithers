@@ -4,6 +4,7 @@ import * as Request from "@smthrs/model/ModelRequest"
 import * as Result from "effect/Result"
 import { describe, expect, it } from "vitest"
 import * as ContextWindow from "../src/ContextWindow.ts"
+import * as Tokens from "../src/Tokens.ts"
 
 const system = Request.SystemPart.make({ text: "Be concise." })
 const tool = Request.ToolDefinition.make({ name: "read", description: "Read", parameters: {} })
@@ -100,6 +101,98 @@ describe("ContextWindow", () => {
     expect(() => (value.segments as Array<ContextWindow.Segment>).push(value.segments[0]!)).toThrow(TypeError)
     expect(() => (value.activeTools as Array<string>).push("write")).toThrow(TypeError)
     expect(() => (value.segments[0]!.content as Array<typeof system>).push(system)).toThrow(TypeError)
+  })
+
+  it("freezes the segments, messages and parts behind those arrays", () => {
+    // The digest is taken once, at construction, and it is what the sealed step
+    // is keyed on. Freezing only the outer arrays left every value inside them
+    // editable in place, so a window could render content its own identity no
+    // longer described.
+    const message = Request.Message.user("first")
+    const declaration = Request.ToolDefinition.make({
+      name: "read",
+      description: "Read",
+      // A JSON `null` inside the declaration, because the walk has to reach
+      // one: it is the value a naive `typeof value === "object"` test freezes
+      // by calling `Object.values` on it.
+      parameters: { type: "object", properties: null }
+    })
+    const value = ContextWindow.make({
+      modelId: "test-model",
+      segments: [
+        { kind: "tools", zone: "prefix", content: [declaration] },
+        { kind: "transcript", zone: "tail", content: [message] }
+      ]
+    })
+    const rendered = ContextWindow.render(value)
+    const digest = value.digest
+    const segment = value.segments[1]!
+    const projected = segment.content[0] as Request.UserMessage
+
+    expect(() => ((segment as { digest: string }).digest = "forged")).toThrow(TypeError)
+    expect(() => ((projected as { role: string }).role = "assistant")).toThrow(TypeError)
+    expect(() => ((projected.content as Array<never>).length = 0)).toThrow(TypeError)
+    expect(() => ((projected.content[0] as { text: string }).text = "rewritten")).toThrow(TypeError)
+    expect(() => {
+      ;(value.segments[0]!.content[0] as { name: string }).name = "write"
+    }).toThrow(TypeError)
+
+    // The value handed in is the value frozen: a caller holding its own
+    // reference to a message cannot edit the copy the window rendered.
+    expect(Object.isFrozen(message)).toBe(true)
+    expect(ContextWindow.render(value)).toEqual(rendered)
+    expect(value.digest).toBe(digest)
+  })
+
+  it("freezes what a caller froze only shallowly", () => {
+    // A caller's frozen array says nothing about the message and part below it.
+    // Treating that outer marker as a completed walk left both mutable, so the
+    // rendered request could move while its construction-time digest stood still.
+    const message = Request.Message.user("before")
+    const content = Object.freeze([message])
+    const segment = new ContextWindow.Segment({
+      kind: "transcript",
+      zone: "tail",
+      digest: "caller-derived",
+      tokens: Tokens.count("before"),
+      content
+    })
+    const value = ContextWindow.make({
+      modelId: "test-model",
+      segments: [segment]
+    })
+    const rendered = ContextWindow.render(value)
+    const digest = value.digest
+    const projected = value.segments[0]!.content[0] as Request.UserMessage
+
+    expect(() => ((projected.content[0] as { text: string }).text = "after")).toThrow(TypeError)
+    expect(ContextWindow.render(value)).toEqual(rendered)
+    expect(value.digest).toBe(digest)
+  })
+
+  it("never executes an accessor while freezing", () => {
+    // `Object.values` invoked enumerable accessors while looking for children.
+    // Freezing is structural work, so a getter could otherwise make an ordinary
+    // window construction run caller code and throw for reasons outside it.
+    let reads = 0
+    const trapped = {}
+    Object.defineProperty(trapped, "trap", {
+      enumerable: true,
+      get() {
+        reads += 1
+        throw new Error("read")
+      }
+    })
+    const message = Request.Message.user("safe")
+    Object.defineProperty(message.content, "trapped", { enumerable: true, value: trapped })
+
+    const value = ContextWindow.make({
+      modelId: "test-model",
+      segments: [{ kind: "transcript", zone: "tail", content: [message] }]
+    })
+
+    expect(value.segments).toHaveLength(1)
+    expect(reads).toBe(0)
   })
 
   it("uses the canonical keys SHA-256 digest for window identity", () => {

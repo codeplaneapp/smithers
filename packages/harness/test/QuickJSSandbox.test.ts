@@ -281,6 +281,40 @@ describe("QuickJSSandbox limits", () => {
 })
 
 describe("QuickJSSandbox realm", () => {
+  it("does not invoke an array index accessor while weighing the realm", async () => {
+    const frames = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.make
+      const realm = yield* sandbox.openRealm!({ flows })
+      const installed = yield* realm.evaluate({
+        cell: Cell.source(`globalThis.probeTouched = false
+globalThis.probedArray = []
+Object.defineProperty(globalThis.probedArray, "0", {
+  enumerable: true,
+  get: function () {
+    globalThis.probeTouched = true
+    throw new Error("the memory probe invoked the getter")
+  }
+})`),
+        frame: 0,
+        call: succeeds
+      })
+      const observed = yield* realm.evaluate({
+        cell: Cell.source(`ctx.done(String(globalThis.probeTouched))`),
+        frame: 1,
+        call: succeeds
+      })
+      return { installed, observed }
+    }).pipe(Effect.scoped, Effect.runPromise)
+
+    expect(frames.installed.bindings).toContainEqual(
+      expect.objectContaining({ name: "probedArray", type: "array", size: "1 items" })
+    )
+    expect(frames.observed.outcome).toMatchObject({
+      _tag: "settled",
+      transition: { _tag: "complete", output: "false" }
+    })
+  })
+
   it("projects a thrown non-object into a stable raised outcome", async () => {
     expect(await outcomeOf(`throw "plain"`)).toStrictEqual(new Cell.Raised({ name: "Error", message: "plain" }))
     expect(await outcomeOf(`throw 42`)).toStrictEqual(new Cell.Raised({ name: "Error", message: "42" }))

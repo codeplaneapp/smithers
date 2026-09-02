@@ -5,7 +5,7 @@
  * A model may answer with a bare JSON document, prose wrapped around a JSON
  * document, a fenced block, or JSON of the wrong shape. Downstream nodes must
  * never receive that ambiguity, so this module implements the recovery
- * contract in `packages/harness/docs/concepts.md#structured-output`:
+ * contract in `../docs/concepts.md#structured-output`:
  *
  * 1. parse the complete, BOM-stripped response and decode it;
  * 2. otherwise scan once for balanced JSON containers, take the container
@@ -24,8 +24,8 @@
  * specifies — the model is told the shape before it answers, and the answer is
  * still validated locally. Provider acceptance is not a cast.
  *
- * Reference consulted: `reference/effect`
- * `packages/effect/src/unstable/ai/LanguageModel.ts` `generateObject`, which
+ * Reference consulted: the `generateObject` function from Effect's
+ * `effect/unstable/ai/LanguageModel` module, which
  * sends `responseFormat: { type: "json", schema }` and then decodes the result
  * with the same schema, failing `AiError.InvalidOutputError` on mismatch. The
  * decode-and-fail-typed half is copied. The provider `responseFormat` half is
@@ -71,6 +71,43 @@ export const StructuredOutputFailureCode = Schema.Literals([
 export type StructuredOutputFailureCode = typeof StructuredOutputFailureCode.Type
 
 /**
+ * Stable reasons an individual structured-output issue was reported.
+ *
+ * `invalid_json` means candidate text was not JSON. `no_candidate` means the
+ * answer contained no candidate text. `invalid_type` means a decoded value had
+ * the wrong type. `invalid_value` means a value of the expected type was still
+ * invalid. `missing_key` means a required property was absent.
+ * `unexpected_key` means a prohibited extra property was present. `forbidden`
+ * means decoding attempted an operation the schema forbids. `one_of` means
+ * more than one exclusive union member matched. `constraint` means a schema
+ * check or empty-union fallback failed.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export const OutputIssueCode = Schema.Literals([
+  "invalid_json",
+  "no_candidate",
+  "invalid_type",
+  "invalid_value",
+  "missing_key",
+  "unexpected_key",
+  "forbidden",
+  "one_of",
+  "constraint"
+])
+
+/**
+ * Stable reasons an individual structured-output issue was reported.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export type OutputIssueCode = typeof OutputIssueCode.Type
+
+/**
  * One bounded issue raised while decoding structured output.
  *
  * @category models
@@ -78,6 +115,8 @@ export type StructuredOutputFailureCode = typeof StructuredOutputFailureCode.Typ
  * @slop
  */
 export class OutputIssue extends Schema.Class<OutputIssue>("flows/harness/StructuredOutput/OutputIssue")({
+  /** The stable reason this issue was reported. */
+  code: OutputIssueCode,
   /** The JSON path of the offending value, dot/bracket joined; empty for the root. */
   path: Schema.String,
   /** What the decoder wanted there. */
@@ -302,16 +341,35 @@ type FormattedIssue = {
   readonly path: ReadonlyArray<PropertyKey>
 }
 
-const formatSchemaIssues = SchemaIssue.makeFormatterStandardSchemaV1()
+const issueCodeSeparator = "\u0000"
+
+const leafCodes: Record<SchemaIssue.Leaf["_tag"], OutputIssueCode> = {
+  InvalidType: "invalid_type",
+  InvalidValue: "invalid_value",
+  MissingKey: "missing_key",
+  UnexpectedKey: "unexpected_key",
+  Forbidden: "forbidden",
+  OneOf: "one_of"
+}
+
+const formatSchemaIssues = SchemaIssue.makeFormatterStandardSchemaV1({
+  leafHook: (issue) => `${issue._tag}${issueCodeSeparator}${SchemaIssue.defaultLeafHook(issue)}`
+})
 
 const schemaIssuesOf = (error: Schema.SchemaError): ReadonlyArray<OutputIssue> =>
-  (formatSchemaIssues(error.issue).issues as ReadonlyArray<FormattedIssue>).slice(0, maxIssues).map((issue) =>
-    new OutputIssue({ path: issuePath(issue.path), message: issueMessage(issue.message) })
-  )
+  (formatSchemaIssues(error.issue).issues as ReadonlyArray<FormattedIssue>).slice(0, maxIssues).map((issue) => {
+    const separator = issue.message.indexOf(issueCodeSeparator)
+    const tagged = separator >= 0
+    return new OutputIssue({
+      code: tagged ? leafCodes[issue.message.slice(0, separator) as SchemaIssue.Leaf["_tag"]] : "constraint",
+      path: issuePath(issue.path),
+      message: issueMessage(tagged ? issue.message.slice(separator + issueCodeSeparator.length) : issue.message)
+    })
+  })
 
-const textIssuesOf = (message: string): ReadonlyArray<OutputIssue> =>
+const textIssuesOf = (code: OutputIssueCode, message: string): ReadonlyArray<OutputIssue> =>
   message.split("\n").map((line) => line.trim()).filter((line) => line.length > 0).slice(0, maxIssues).map((line) =>
-    new OutputIssue({ path: "", message: issueMessage(line) })
+    new OutputIssue({ code, path: "", message: issueMessage(line) })
   )
 
 /**
@@ -336,7 +394,7 @@ export const decode = <S extends Schema.Top>(
     const decoder = Schema.decodeUnknownEffect(schema)
     let code: StructuredOutputFailureCode = "no_candidate"
     let issues: ReadonlyArray<OutputIssue> = [
-      new OutputIssue({ path: "", message: "the answer held no JSON document" })
+      new OutputIssue({ code: "no_candidate", path: "", message: "the answer held no JSON document" })
     ]
     for (const candidate of offered) {
       if (candidate.length === 0) continue
@@ -346,7 +404,7 @@ export const decode = <S extends Schema.Top>(
       } catch (error) {
         code = "invalid_json"
         // The ECMAScript JSON parser throws a SyntaxError with a message.
-        issues = textIssuesOf((error as SyntaxError).message)
+        issues = textIssuesOf("invalid_json", (error as SyntaxError).message)
         continue
       }
       const result = yield* Effect.result(decoder(parsed))

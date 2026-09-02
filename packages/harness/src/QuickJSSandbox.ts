@@ -628,10 +628,8 @@ const weighDepth = 32
  * accounting, because there is no reading of a proxy the realm can be trusted to
  * take.
  *
- * Two holes stay open, and both are stated rather than papered over. An array is
- * walked by index and an index accessor therefore runs (see the array arm below
- * for why a descriptor per element is not affordable here). And nothing weighs
- * what a closure retains: a function is 8 bytes to this walk whatever its scope
+ * One hole stays open and is stated rather than papered over: nothing weighs
+ * what a closure retains. A function is 8 bytes to this walk whatever its scope
  * holds, which no walk over reachable properties can change. So this reading is
  * honest accounting of the realm's own named data, and the ceiling it feeds
  * bounds the realm a cell builds in the open — not one built to evade it.
@@ -656,7 +654,7 @@ const weighDepth = 32
  * is measured here instead. See {@link openRealm}.
  */
 const panelProbe = (baseline: string): string =>
-  `(function (ownNames, descriptorOf, keysOf, isArray, stringify, render, skip) {
+  `(function (ownNames, descriptorOf, keysOf, isArray, stringify, String, skip) {
   return function () {
     var names = ownNames(globalThis)
     var out = []
@@ -702,19 +700,18 @@ const panelProbe = (baseline: string): string =>
       for (var up = 0; up < path.length; up++) if (path[up] === value) return 8
       path.push(value)
       var sum = 8
-      // An array is walked by index, and it is the one walk here that reads a
-      // value rather than its descriptor. Both of the allocation-free readings
-      // are gone otherwise: keysOf on a large array builds a second array as
-      // long as the first, and a descriptor per element builds one object per
-      // element — inside a realm that is at its ceiling, which is the realm this
-      // probe exists to weigh, either one is what throws. A walk that cannot run
-      // reports nothing at all, and reporting nothing is the failure this whole
-      // probe is here to end. An index getter is therefore reachable; a getter on
-      // an ordinary property is not, which is the shape a cell would hide weight
-      // behind.
+      // An array is walked by index so keysOf never allocates a second array as
+      // long as the first. Each transient descriptor dies with its iteration,
+      // and the same node budget that bounds the walk bounds that pressure.
+      // Reading through the descriptor is load-bearing: an index accessor is
+      // cell code, not data the memory probe may execute.
       if (isArray(value)) {
         var count = value.length
-        for (var item = 0; item < count && !partial; item++) sum = sum + weigh(value[item], depth + 1)
+        for (var item = 0; item < count && !partial; item++) {
+          var property = descriptorOf(value, String(item))
+          if (property === undefined || !("value" in property)) sum = sum + 8
+          else sum = sum + weigh(property.value, depth + 1)
+        }
         path.pop()
         return sum
       }
@@ -753,7 +750,7 @@ const panelProbe = (baseline: string): string =>
         else if (kind === "function") out.push({ name: name, type: "function", size: "arity " + dataProperty(value, "length", 0), bytes: bytes })
         else if (isArray(value)) out.push({ name: name, type: "array", size: dataProperty(value, "length", 0) + " items", bytes: bytes })
         else if (kind === "object") out.push({ name: name, type: "object", size: keysOf(value).length + " keys", bytes: bytes })
-        else out.push({ name: name, type: kind, size: render(value), bytes: bytes })
+        else out.push({ name: name, type: kind, size: String(value), bytes: bytes })
         if (partial) {
           partialRoot = name
           partialBytes = bytes

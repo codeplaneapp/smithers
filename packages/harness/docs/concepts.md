@@ -4,8 +4,10 @@ The source JSDoc in this package cites the design each module implements. Those
 designs used to live in a `docs/specs/` tree that is not part of this repository
 and is not shipped in the published tarball, so a reader following a citation
 found nothing. This file is the replacement: one section per design, stating
-what it decides and where the decision is enforced. Cite it from JSDoc as
-`packages/harness/docs/concepts.md#<anchor>`.
+what it decides and where the decision is enforced. Cite it from JSDoc by its
+path relative to the citing file — `../docs/concepts.md#<anchor>` from `src/`,
+`../../docs/concepts.md#<anchor>` from `src/internal/` — because `src/**` ships
+in the tarball and a monorepo-rooted path does not resolve once it is there.
 
 ## Repl realm
 

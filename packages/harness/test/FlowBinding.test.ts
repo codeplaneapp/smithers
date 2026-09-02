@@ -410,6 +410,41 @@ describe("FlowBinding.make", () => {
     })
   })
 
+  it("settles a failure whose every read throws as catchable data", async () => {
+    // The three reads the renderer makes, each answered with a throw: the
+    // `message` accessor, `toJSON` under `JSON.stringify`, and `toString`
+    // under `String`. A defect here would reach the cell as an uncatchable
+    // crash of the whole frame rather than as the failure the flow had.
+    const hostile = new Error("unreadable")
+    Object.defineProperty(hostile, "message", {
+      get: () => {
+        throw new Error("message getter")
+      }
+    })
+    Object.defineProperty(hostile, "toJSON", {
+      value: () => {
+        throw new Error("toJSON")
+      }
+    })
+    Object.defineProperty(hostile, "toString", {
+      value: () => {
+        throw new Error("toString")
+      }
+    })
+    const binding = FlowBinding.make({ flow: echo, handler: () => Effect.fail(hostile) })
+
+    const exit = await run(binding.run(call("echo", { text: "hi" })))
+
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: {
+        outcome: "failure",
+        code: "flow_failed",
+        message: "Flow echo failed: the handler failed with a value that throws when it is read"
+      }
+    })
+  })
+
   it("keeps a permission requirement in the typed channel where a cell cannot swallow it", async () => {
     const required = new Permission.PermissionRequired({
       requestId: "request-1",

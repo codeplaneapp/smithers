@@ -39,6 +39,8 @@
  */
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import { Effect, Schema } from "effect"
+import * as DemandText from "./internal/demandText.ts"
+import * as elide from "./internal/elide.ts"
 
 /**
  * How many distinct checks one run carries forward.
@@ -88,15 +90,14 @@ export const maxTerms = 256
 const separator = /[^A-Za-z0-9_./@+-]+/
 
 /**
- * How much of a check's input the demand may quote back.
+ * How many UTF-8 bytes of a check's input the demand may quote back.
  *
  * The demand has to name the check the run is missing, and a name it cannot
  * read is not a name. Bounded because the label lives in controller state,
- * once per retained entry.
+ * once per retained entry. The honest-elision notice may exceed this content
+ * bound so it can say how many bytes are missing and where the whole input is.
  */
 const labelWidth = 320
-
-const clip = (text: string, width: number): string => text.length > width ? `${text.slice(0, width - 1)}…` : text
 
 /**
  * Whether a term names a target rather than a condition.
@@ -362,7 +363,11 @@ export const check = (options: {
     terms: collected,
     conditions: conditions(options.input),
     digest: options.digest,
-    label: clip(CanonicalJson.stringify(options.input), labelWidth),
+    label: elide.head(
+      CanonicalJson.stringify(options.input),
+      labelWidth,
+      "the issuing cell in the run record has the whole input"
+    ),
     failing: options.failing ?? false,
     passing: options.passing ?? false,
     stable: options.stable ?? false
@@ -464,12 +469,7 @@ export const find = (options: {
  * @since 0.1.0
  */
 export const demand = (found: Narrowing): string =>
-  `Narrowed verification — your last verification is narrower than a check this run has already run in full, and the workspace has changed since that broader check last ran.
-
-- the broader check, last run before your latest change: ${found.earlier.flow} ${found.earlier.label}
-- the check this frame ran instead: ${found.later.flow} ${found.later.label}
-
-The second repeats every term of the first and adds conditions to it, so it reports on a part of what the first covered and says nothing about the rest — and the rest is exactly where a change breaks something that was passing. Re-run ${found.earlier.flow} with that earlier input, byte for byte, and complete once you have seen what it prints; or complete and state in your output why that check no longer applies to the change you made. Nothing re-runs it for you, and what you return next is the answer that stands.`
+  DemandText.narrowed(found.earlier.flow, found.earlier.label, found.later.label)
 
 /**
  * The reading a completion stands on, when the run holds no other reading of
@@ -614,12 +614,7 @@ export const findOnly = (options: {
  * @since 0.1.0
  */
 export const demandOnly = (found: Only): string =>
-  `Only reading — the check you are completing on is the only reading this run has of what it names.
-
-- the check: ${found.later.flow} ${found.later.label}
-- what it names: ${found.targets.join(", ")}
-
-Every one of those this run has looked at somewhere else, but no other call it made covers them all, so nothing in this run says what they report on their own. Any term this check carries beyond them — a filter, a selector, a subset of cases, a flag that stops early — is a condition you have never taken off, and what a condition hides is exactly where a change breaks something that was passing. Run ${found.later.flow} over the same subjects with those conditions removed and complete once you have seen what it prints; or complete and state in your output that it carries no condition and the reading is already whole. Nothing re-runs it for you, and what you return next is the answer that stands.`
+  DemandText.narrowOnly(found.later.flow, found.later.label, found.targets)
 
 /**
  * Folds this frame's checks into the run's ledger, newest last and bounded.
