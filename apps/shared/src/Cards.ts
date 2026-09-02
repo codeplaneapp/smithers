@@ -1,5 +1,16 @@
 import { z } from "zod"
 import { AgentRoleIdSchema } from "./AgentRoles"
+import {
+  ChangeCheckSchema,
+  ChangeDiffSchema,
+  ChangeFacetSchema,
+  ChangeFindingSchema,
+  ChangeRevisionSchema,
+  ChangeThreadSchema,
+  ChangeVerdictSchema,
+  ChangesetStateSchema,
+  RevisionPinSchema
+} from "./Changes"
 import { HARNESS_IDS, RepoPluginSchema, RepoSchema, TargetSchema } from "./LocalApp"
 import {
   AffectedCardPayloadSchema,
@@ -586,11 +597,112 @@ export const CardSchema = z.discriminatedUnion("kind", [
       binary: z.boolean().optional(),
       /** The global path (`/org/repo/path`); absent on cards written before lane piper. */
       address: z.string().optional(),
+      /*
+       * Lane change (ADR 0003 §3): the revision pin `{ changeId, seq,
+       * commitId }`. `seq` stays absent until plue#450 records revisions —
+       * a card read from a local working copy pins by commit id, never a
+       * server seq. Optional so cards persisted before the lane parse.
+       */
       readAt: z.object({
         changeId: z.string().nullable(),
         commitId: z.string().nullable(),
+        seq: z.number().int().positive().nullable().optional(),
         source: z.enum(["head", "working-copy"]).optional()
       }).optional()
+    })
+  }),
+  /*
+   * Lane change (ADR 0003 — the change is the unit): the change card. One
+   * fact per line of the ADR's mockup and nothing else: the header (change
+   * id, `rev N of M` once plue#450 records revisions, stack position,
+   * landing state), the description, the per-repo stat, checks / findings /
+   * review at the current revision, the conflict line, the current
+   * revision's provenance, and the facet strip (Diff, Findings, Checks,
+   * Review, History).
+   *
+   * Degraded until #450-#457 land: `currentSeq`/`revisionCount` are null and
+   * `revisions` is empty (the header reads `qupxosqw · a03f5f`, the History
+   * facet reads "revision history not recorded yet"); `diff` offers
+   * `parent → current` only (interdiff is #451); `findings` is null (no
+   * route, #454); verdicts and threads carry `commitId: null` and
+   * `state: null` (#453). Nothing is inferred from timestamps.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("change"),
+    payload: z.object({
+      /** `org/repo` the change was read from. */
+      repo: z.string(),
+      changeId: z.string(),
+      description: z.string(),
+      /** The current revision's commit (today's DTO carries exactly one). */
+      commitId: z.string().nullable(),
+      /** Today's DTO carries none — null until plue#450, never invented. */
+      currentSeq: z.number().int().positive().nullable(),
+      revisionCount: z.number().int().nonnegative().nullable(),
+      revisions: z.array(ChangeRevisionSchema),
+      /** The current revision's provenance: the author and timestamp the DTO states. */
+      authorName: z.string().nullable(),
+      timestamp: z.string().nullable(),
+      /** One entry per repo touched, with its stat (one repo is one entry, not a group header). */
+      repos: z.array(
+        z.object({
+          repo: z.string(),
+          additions: z.number().int().nonnegative(),
+          deletions: z.number().int().nonnegative()
+        })
+      ),
+      /** The diff the Diff facet renders; null while unread. */
+      diff: ChangeDiffSchema.nullable(),
+      /** Check rows at the current commit (the statuses route); null while unread. */
+      checks: z.array(ChangeCheckSchema).nullable(),
+      /** Findings per revision; null — the route does not exist (plue#454). */
+      findings: z.array(ChangeFindingSchema).nullable(),
+      /** Verdicts and threads on the change's landing request; null = no landing request carries this change. */
+      reviews: z.array(ChangeVerdictSchema).nullable(),
+      threads: z.array(ChangeThreadSchema).nullable(),
+      /** The change's per-file conflicts; the conflict line renders only when non-empty. */
+      conflicts: z.array(z.object({ path: z.string(), state: z.string() })),
+      /** The landing request carrying this change: its state, the change's stack position, the target. */
+      stack: z.object({
+        landingNumber: z.number().int(),
+        state: z.string(),
+        /** 1-based from the bottom, like `jj log`. */
+        position: z.number().int().positive(),
+        size: z.number().int().positive(),
+        targetBookmark: z.string(),
+        conflictStatus: z.string()
+      }).nullable(),
+      /** The changeset this change belongs to (live at /api/orgs/{org}/changesets); null when none. */
+      changeset: ChangesetStateSchema.nullable(),
+      /** Which body tab the card shows; the diff by default. */
+      facet: ChangeFacetSchema.optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * Lane change (ADR 0003 §1/§3): the `diff` card — one change's diff at two
+   * pinned revisions (`parent ▾ → rev 5 ▾`; degraded: `parent → current`
+   * only). The header carries the revision pin; when the change's current
+   * revision moves past the pin and BOTH seqs are known, one mono line
+   * `rev N exists · view` — never a claim a commit comparison cannot name.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("diff"),
+    payload: z.object({
+      repo: z.string(),
+      changeId: z.string(),
+      /** The pickers' tokens: "parent", "current", or "rev N" once revisions exist. */
+      from: z.string(),
+      to: z.string(),
+      /** Where the `to` side pins: seq null until plue#450 records revisions. */
+      pin: RevisionPinSchema,
+      files: ChangeDiffSchema.shape.files,
+      /** The one file this card was cut at, when the flow named one. */
+      path: z.string().optional(),
+      error: z.string().optional()
     })
   }),
   /*
