@@ -14,11 +14,12 @@ import { FixtureEncodingError } from "./TestingError.ts"
  *
  * `model` is the model the exchange was recorded against, and it is the same
  * value as `request.modelId`: every recorder in this package writes it from
- * the projected request. It is stored separately because
- * {@link canonicalRequestDigest} erases `modelId` before hashing, so `model`
- * is what {@link RecordedCall} still has to answer "was this recorded against
- * the model now asking?" with. The two agreeing is a decoding rule, not a
- * convention — see {@link Fixture}.
+ * the projected request. It is stored separately because `RecordedModel`
+ * matches a call by request SHAPE, with `modelId` erased, so `model` is what
+ * answers "was this recorded against the model now asking?" once the shape has
+ * already matched. {@link canonicalRequestDigest} itself erases nothing:
+ * `CachedModel` keys on the whole canonical request, `modelId` included. The
+ * two agreeing is a decoding rule, not a convention: see {@link Fixture}.
  *
  * @category models
  * @since 0.0.0
@@ -220,10 +221,13 @@ const recordedCallSchema = Schema.Struct({
 }).check(
   // `model` and `request.modelId` name the same thing, and a hand-written
   // fixture where they disagree replays two different ways for no stated
-  // reason: `canonicalRequestDigest` erases `modelId`, so a request carrying
-  // `model` matches this call's shape and replays a conversation recorded for
-  // another model, while a request carrying `request.modelId` is rejected as a
-  // harness mismatch against a model it was in fact recorded with.
+  // reason. `RecordedModel` matches by request SHAPE, with `modelId` erased,
+  // and only then compares `model`: a request carrying `model` matches this
+  // call's shape and replays a conversation recorded for another model, while
+  // a request carrying `request.modelId` is rejected as a harness mismatch
+  // against a model it was in fact recorded with. `CachedModel` keys on the
+  // whole canonical request, `modelId` included, so the same fixture answers a
+  // third way there.
   Schema.makeFilter(
     (call) =>
       call.model === call.request.modelId

@@ -30,14 +30,88 @@ const _schemaSatisfiesInterface: Fixture = {} as Decoded
 // field added to one side and not the other fails `tsc` here, which is the
 // drift the single forward assignment could not see.
 type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
-const _fixtureKeys: Exact<keyof Decoded, keyof Fixture> = true
-const _callKeys: Exact<keyof DecodedCall, keyof RecordedCall> = true
-const _requestKeys: Exact<keyof DecodedCall["request"], keyof ModelRequestLike> = true
-const _paramsKeys: Exact<keyof DecodedCall["request"]["params"], keyof ModelRequestLike["params"]> = true
-const _toolKeys: Exact<
-  keyof DecodedCall["request"]["tools"][number],
-  keyof ModelRequestLike["tools"][number]
+
+/** One member of a discriminated union, selected by its tag. */
+type Member<U, K extends PropertyKey, V> = Extract<U, { readonly [P in K]: V }>
+
+/** Both key sets, at one level of both shapes. */
+type Keys<A, B> = Exact<keyof A, keyof B>
+
+const _fixtureKeys: Keys<Decoded, Fixture> = true
+const _callKeys: Keys<DecodedCall, RecordedCall> = true
+const _requestKeys: Keys<DecodedCall["request"], ModelRequestLike> = true
+const _paramsKeys: Keys<DecodedCall["request"]["params"], ModelRequestLike["params"]> = true
+const _toolKeys: Keys<DecodedCall["request"]["tools"][number], ModelRequestLike["tools"][number]> = true
+
+// The levels below the request's own key set. `tools` and `params` alone left
+// system blocks, every message role, every content part, every event member,
+// and the recorded failure free to drift: they are separate `Schema.Struct`s
+// in the schema and separate members of a union in the interface, and neither
+// the forward assignment nor a top-level key comparison reaches them.
+type DecodedRequest = DecodedCall["request"]
+type DecodedMessage = DecodedRequest["messages"][number]
+type Message = ModelRequestLike["messages"][number]
+
+const _systemKeys: Keys<DecodedRequest["system"][number], ModelRequestLike["system"][number]> = true
+const _toolChoice: Exact<DecodedRequest["toolChoice"], ModelRequestLike["toolChoice"]> = true
+
+// The union membership itself, before the members' fields: a role or an event
+// type present on one side and not the other is the drift that would make a
+// fixture decode into a value the replay vocabulary cannot describe.
+const _messageRoles: Exact<DecodedMessage["role"], Message["role"]> = true
+
+type DecodedUser = Member<DecodedMessage, "role", "user">
+type User = Member<Message, "role", "user">
+const _userKeys: Keys<DecodedUser, User> = true
+const _userPartKeys: Keys<DecodedUser["content"][number], User["content"][number]> = true
+
+type DecodedAssistant = Member<DecodedMessage, "role", "assistant">
+type Assistant = Member<Message, "role", "assistant">
+const _assistantKeys: Keys<DecodedAssistant, Assistant> = true
+const _stopReasons: Exact<DecodedAssistant["stopReason"], Assistant["stopReason"]> = true
+
+type DecodedPart = DecodedAssistant["content"][number]
+type Part = Assistant["content"][number]
+const _partTypes: Exact<DecodedPart["type"], Part["type"]> = true
+const _textPartKeys: Keys<Member<DecodedPart, "type", "text">, Member<Part, "type", "text">> = true
+const _thinkingPartKeys: Keys<Member<DecodedPart, "type", "thinking">, Member<Part, "type", "thinking">> = true
+const _toolCallPartKeys: Keys<Member<DecodedPart, "type", "tool-call">, Member<Part, "type", "tool-call">> = true
+
+type DecodedTool = Member<DecodedMessage, "role", "tool">
+type Tool = Member<Message, "role", "tool">
+const _toolMessageKeys: Keys<DecodedTool, Tool> = true
+const _toolResultKeys: Keys<DecodedTool["content"][number], Tool["content"][number]> = true
+
+type DecodedEvent = DecodedCall["events"][number]
+type Event = RecordedCall["events"][number]
+const _eventTypes: Exact<DecodedEvent["type"], Event["type"]> = true
+type EventKeys<T extends Event["type"]> = Keys<Member<DecodedEvent, "type", T>, Member<Event, "type", T>>
+const _textStart: EventKeys<"text-start"> = true
+const _textDelta: EventKeys<"text-delta"> = true
+const _textEnd: EventKeys<"text-end"> = true
+const _thinkingStart: EventKeys<"thinking-start"> = true
+const _thinkingDelta: EventKeys<"thinking-delta"> = true
+const _thinkingEnd: EventKeys<"thinking-end"> = true
+const _toolCallStart: EventKeys<"tool-call-start"> = true
+const _toolCallDelta: EventKeys<"tool-call-delta"> = true
+const _toolCallEnd: EventKeys<"tool-call-end"> = true
+const _toolResult: EventKeys<"tool-result"> = true
+const _usage: EventKeys<"usage"> = true
+const _retry: EventKeys<"retry"> = true
+const _settle: EventKeys<"settle"> = true
+const _settleStopReasons: Exact<
+  Member<DecodedEvent, "type", "settle">["stopReason"],
+  Member<Event, "type", "settle">["stopReason"]
 > = true
+
+// The recorded failure is the schema's second deliberate narrowing. A fixture
+// stores a refusal's fields and not its `_tag`; `RecordedModel` stamps the tag
+// back on so a consumer that classifies a provider refusal still recognizes
+// it. Every other field, and the whole closed code union, must match.
+type DecodedFailure = NonNullable<DecodedCall["failure"]>
+type Failure = NonNullable<RecordedCall["failure"]>
+const _failureKeys: Exact<keyof DecodedFailure, Exclude<keyof Failure, "_tag">> = true
+const _failureCodes: Exact<DecodedFailure["code"], Failure["code"]> = true
 
 const request = (modelId: string): ModelRequestLike => ({
   modelId,

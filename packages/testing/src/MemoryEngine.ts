@@ -612,9 +612,6 @@ export const make = (
         fiber: Deferred.makeUnsafe(),
         activeStep: undefined
       }
-      active.set(executionId, activeExecution)
-      yield* setStatus(store, executionId, "running", execution.value)
-
       const worker = execute(store, executionId, activeExecution).pipe(
         Effect.onInterrupt(() =>
           suspendIfRunning(
@@ -635,8 +632,29 @@ export const make = (
         Effect.tap((result) => Deferred.succeed(deferred, result)),
         Effect.orDie
       )
-      const fiber = yield* Effect.forkIn(worker, scope)
-      yield* Deferred.succeed(activeExecution.fiber, fiber)
+
+      // Publishing an active entry and the fiber that owns it is one
+      // interruption boundary. If cancellation could land between those two
+      // writes, interrupt and resume would wait forever on deferreds no worker
+      // can complete. A typed store failure still rolls the provisional entry
+      // back, because no worker was successfully published to own its cleanup.
+      yield* Effect.gen(function*() {
+        active.set(executionId, activeExecution)
+        yield* setStatus(store, executionId, "running", execution.value)
+        const fiber = yield* Effect.forkIn(worker, scope)
+        yield* Deferred.succeed(activeExecution.fiber, fiber)
+      }).pipe(
+        Effect.onError(() =>
+          Effect.sync(() => {
+            active.delete(executionId)
+          })
+        ),
+        Effect.uninterruptible
+      )
+
+      // Only arming is protected. A caller may stop waiting without stopping
+      // the independently scoped execution, which is the engine's join
+      // contract for run and resume.
       return yield* Deferred.await(deferred)
     })
 

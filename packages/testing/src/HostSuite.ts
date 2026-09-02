@@ -144,6 +144,14 @@ const assertCapabilityError = <R>(
   code: string
 ): Effect.Effect<void, CapabilityContractError, R> =>
   effect.pipe(
+    // A refusal that arrives as a defect is still a refusal. `Clock` and
+    // `Random` are `Context.Reference`s, so their unsupported branch runs over
+    // the poisoned base, which dies rather than failing; matching only the
+    // recoverable channel meant a bundle that declares either unsupported was
+    // a shape this suite could not assert at all, and the case died with a
+    // defect instead of reporting the code it observed. Interruption is not a
+    // refusal and still propagates.
+    Effect.catchDefect((defect) => Effect.fail(defect)),
     Effect.matchEffect({
       onFailure: (error) => {
         const actual = typeof error === "object" && error !== null && "code" in error &&

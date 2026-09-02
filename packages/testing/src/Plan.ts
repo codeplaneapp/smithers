@@ -2,7 +2,7 @@
  * Pure projection and presentation helpers for built plans.
  *
  * Keys are derived from the graph's digest-free key material through
- * `/keys` — sealed nodes get cross-run content keys, non-sealed nodes
+ * `/keys`: sealed nodes get cross-run content keys, non-sealed nodes
  * get run-local ordinal keys. Plan projection is pure: it never touches Host,
  * Model, or Clock, and is expected to succeed under `TestLayers.poisoned`.
  *

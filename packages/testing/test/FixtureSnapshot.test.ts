@@ -12,8 +12,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Model from "@smthrs/model/Model"
 import type * as ModelEvent from "@smthrs/model/ModelEvent"
-import { Effect, Ref, Stream } from "effect"
+import { Effect, Option, Ref, Stream } from "effect"
 import { canonicalRequestDigest, index, type RecordedCall, recordedRequest } from "../src/Fixture.ts"
+import * as FixtureStore from "../src/FixtureStore.ts"
 import type { ModelRequestLike } from "../src/ModelLike.ts"
 import * as RecordingModel from "../src/RecordingModel.ts"
 import { FixtureEncodingError } from "../src/TestingError.ts"
@@ -110,6 +111,77 @@ describe("Fixture.index encodes each recorded call once", () => {
     expect(built.get(canonicalRequestDigest(fixture.calls[1]!.request))).toBe(fixture.calls[1])
     expect(built.size).toBe(2)
   })
+})
+
+describe("FixtureStore owns what it stores", () => {
+  const call = (text: string): RecordedCall => ({
+    request: mutableRequest() as ModelRequestLike,
+    model: "openai:gpt-5-mini",
+    events: [{ type: "text-delta", id: "text_1", text } as ModelEvent.ModelEvent]
+  })
+
+  it.effect("keeps an appended call as it was appended", () =>
+    Effect.gen(function*() {
+      const store = yield* FixtureStore.makeMemory()
+      // The caller keeps its own value and rewrites it after the append.
+      const appended = call("before")
+      yield* store.append(appended)
+      ;(appended.events[0] as { text: string }).text = "after"
+      const loaded = yield* store.load()
+      const stored = Option.getOrThrow(loaded).calls[0]!
+      expect((stored.events[0] as { text: string }).text).toBe("before")
+    }))
+
+  it.effect("keeps the fixture it was seeded with", () =>
+    Effect.gen(function*() {
+      const seed = { calls: [call("before")] }
+      const store = yield* FixtureStore.makeMemory(seed)
+      ;(seed.calls[0]!.events[0] as { text: string }).text = "after"
+      const stored = Option.getOrThrow(yield* store.load()).calls[0]!
+      expect((stored.events[0] as { text: string }).text).toBe("before")
+    }))
+
+  it.effect("stops owning at the snapshot's own depth boundary", () =>
+    Effect.gen(function*() {
+      let deep: Record<string, unknown> = { leaf: 1 }
+      for (let level = 0; level < 50_000; level += 1) deep = { nested: deep }
+      const store = yield* FixtureStore.makeMemory()
+      // Below the cap the snapshot is the caller's own object, so freezing it
+      // would freeze the caller's value, and a walk with no cap would overflow
+      // the stack inside `append`.
+      yield* store.append({
+        ...call("before"),
+        request: {
+          ...(mutableRequest() as ModelRequestLike),
+          tools: [{
+            name: "search",
+            description: "search",
+            parameters: deep
+          }]
+        }
+      })
+      const stored = Option.getOrThrow(yield* store.load()).calls[0]!
+      expect(Object.isFrozen(stored.request.tools[0]!.parameters)).toBe(true)
+      // The caller's own value is untouched, at every level.
+      expect(Object.isFrozen(deep)).toBe(false)
+      let tail: unknown = stored.request.tools[0]!.parameters
+      for (let level = 0; level < 200; level += 1) tail = (tail as Record<string, unknown>).nested
+      expect(Object.isFrozen(tail)).toBe(false)
+    }))
+
+  it.effect("hands back a value a consumer cannot rewrite, at a stable identity", () =>
+    Effect.gen(function*() {
+      const store = yield* FixtureStore.makeMemory()
+      yield* store.append(call("before"))
+      const loaded = Option.getOrThrow(yield* store.load())
+      // Frozen rather than re-copied per load: `Fixture.index` memoizes on
+      // fixture identity, so a fresh copy per load would rebuild the digest
+      // index on every model call.
+      expect(Option.getOrThrow(yield* store.load())).toBe(loaded)
+      expect(() => {
+        ;(loaded.calls[0]!.events[0] as { text: string }).text = "after"
+      }).toThrow(TypeError)
+    }))
 })
 
 describe("RecordingModel snapshots what the provider saw", () => {

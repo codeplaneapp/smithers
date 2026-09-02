@@ -133,8 +133,17 @@ export const expectJournal = (unordered: ReadonlyArray<JournalEntryLike>): Journ
           : named.length > 0
           ? notAnEffect()
           : notExecuted(),
+      // A journal that carries the key only as an ordinary step is refused
+      // here too. It used to answer `Success`, because zero effect entries is
+      // trivially "at most once", so a test could claim an at-most-once
+      // external effect was journaled when the engine journaled no effect at
+      // all under that key -- the exact claim this vocabulary exists to make.
+      // A key that appears nowhere still satisfies the claim: nothing was
+      // journaled more than once.
       journaledAtMostOnce: () =>
-        matching.length <= 1
+        matching.length === 0 && named.length > 0
+          ? notAnEffect()
+          : matching.length <= 1
           ? Effect.void
           : failure(
             "effect_journaled_more_than_once",

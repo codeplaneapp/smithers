@@ -26,15 +26,21 @@ export interface ConformanceCase {
   readonly run: (engine: EngineSubject) => Effect.Effect<void, ConformanceViolation | EngineSubjectError>
 }
 
-// Frozen at definition. `coreSuite()` with no filter used to hand back this
-// very array, so a consumer could splice a mandatory pin out of the registry
-// and every later call in the process returned the shortened list.
-const coreCases: ReadonlyArray<ConformanceCase> = Object.freeze([
-  ...Identity.cases,
-  ...Interrupt.cases,
-  ...Replay.cases,
-  ...Race.cases
-])
+// Frozen at definition, case by case as well as as a list. `coreSuite()` with
+// no filter used to hand back this very array, so a consumer could splice a
+// mandatory pin out of the registry and every later call in the process
+// returned the shortened list. Freezing only the array left the same hole one
+// level down: the case records are shared objects, so assigning to a returned
+// case's `run` replaced a mandatory pin's assertion for every later caller,
+// and `ReadonlyArray`/`readonly` are erased at runtime.
+const coreCases: ReadonlyArray<ConformanceCase> = Object.freeze(
+  [
+    ...Identity.cases,
+    ...Interrupt.cases,
+    ...Replay.cases,
+    ...Race.cases
+  ].map((conformanceCase) => Object.freeze({ ...conformanceCase }))
+)
 
 /**
  * Builds the mandatory black-box suite every `EngineSubject` must pass:

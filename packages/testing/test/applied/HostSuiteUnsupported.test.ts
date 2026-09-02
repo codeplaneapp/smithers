@@ -11,6 +11,7 @@ import * as TestHost from "@smthrs/kernel/test/TestHost"
 import { Effect, FileSystem } from "effect"
 import { describe, expect, it } from "vitest"
 import * as HostSuite from "../../src/HostSuite.ts"
+import * as TestLayers from "../../src/TestLayers.ts"
 
 /** Every capability declared unsupported, with the code TestHost really raises. */
 const declaredUnsupported: HostSuite.HostProfile = {
@@ -45,11 +46,6 @@ const outcome = (suiteCase: HostSuite.HostSuiteCase): Promise<"passed" | HostSui
 describe("a capability declared unsupported must fail with its declared code", () => {
   const cases = byName(declaredUnsupported)
 
-  // Clock and Random are deliberately absent: their unsupported branch runs
-  // over the poisoned base, which raises a DEFECT, and `assertCapabilityError`
-  // inspects the recoverable channel. A bundle that declares those unsupported
-  // is a shape the suite cannot assert today, and inventing a passing
-  // expectation for it here would claim coverage that does not exist.
   it.each([
     "FileSystem round-trips",
     "Jj has a declared capability result",
@@ -58,12 +54,15 @@ describe("a capability declared unsupported must fail with its declared code", (
     expect(await outcome(cases.get(name)!)).toBe("passed")
   })
 
-  // TestHost really does normalize paths and really does spawn, so declaring
-  // either unsupported is a wrong profile and the suite says so rather than
-  // accepting the declaration.
+  // TestHost really does normalize paths, really does spawn, and really does
+  // supply a `TestClock` and a seeded `Random`, so declaring any of them
+  // unsupported is a wrong profile and the suite says so rather than accepting
+  // the declaration.
   it.each([
     ["Path normalizes", "Path", "fromFileUrl"],
-    ["Shell behavior is deterministic", "ChildProcessSpawner", "spawn"]
+    ["Shell behavior is deterministic", "ChildProcessSpawner", "spawn"],
+    ["Clock is monotonic", "Clock", "currentTimeMillis"],
+    ["Random produces a valid value", "Random", "next"]
   ])("%s reports a capability the host actually has", async (name, capability, operation) => {
     expect(await outcome(cases.get(name)!)).toMatchObject({
       _tag: "CapabilityContractError",
@@ -91,6 +90,48 @@ describe("a capability declared unsupported must fail with its declared code", (
       operation: "readFileString",
       expectedCode: "not-the-code-it-raises",
       actualCode: "NotFound"
+    })
+  })
+})
+
+// `Clock` and `Random` are `Context.Reference`s, so a bundle that supplies
+// neither leaves the suite's poisoned base in force, and that base raises a
+// DEFECT rather than a recoverable failure. `assertCapabilityError` used to
+// inspect the recoverable channel only, so this shape -- the one the profile's
+// `clock`/`random` unsupported branch exists for -- could not be asserted at
+// all: the case died with the poisoned defect instead of reporting the code it
+// observed.
+describe("a bundle that supplies no Clock or Random can declare them unsupported", () => {
+  // Every Host service is present and refuses; no `Clock` and no `Random` are
+  // supplied, which is the whole point of the bundle here.
+  const bare: HostSuite.HostBundle = TestLayers.poisoned
+
+  const profile = (code: string): HostSuite.HostProfile => ({
+    ...declaredUnsupported,
+    clock: { supported: false, code },
+    random: { supported: false, code }
+  })
+
+  const caseNamed = (code: string, name: string) =>
+    HostSuite.hostSuite(bare, profile(code)).find((suiteCase) => suiteCase.name === name)!
+
+  it.each(["Clock is monotonic", "Random produces a valid value"])(
+    "%s accepts the declaration when the raised code matches",
+    async (name) => {
+      expect(await outcome(caseNamed("capability_contract_violation", name))).toBe("passed")
+    }
+  )
+
+  it.each([
+    ["Clock is monotonic", "Clock", "currentTimeMillis"],
+    ["Random produces a valid value", "Random", "next"]
+  ])("%s reports the code it observed when the declaration is wrong", async (name, capability, operation) => {
+    expect(await outcome(caseNamed("not-the-code-it-raises", name))).toMatchObject({
+      _tag: "CapabilityContractError",
+      capability,
+      operation,
+      expectedCode: "not-the-code-it-raises",
+      actualCode: "capability_contract_violation"
     })
   })
 })

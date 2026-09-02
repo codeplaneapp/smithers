@@ -3,6 +3,7 @@ import * as ProductionModelRequest from "@smthrs/model/ModelRequest"
 import { Effect } from "effect"
 import { canonicalRequestDigest, decode, recordedRequest } from "../src/Fixture.ts"
 import type { ModelRequestLike } from "../src/ModelLike.ts"
+import { FixtureEncodingError } from "../src/TestingError.ts"
 
 const request = (overrides: Partial<ModelRequestLike> = {}): ModelRequestLike => ({
   modelId: "openai:gpt-5-mini",
@@ -57,6 +58,27 @@ describe("Fixture", () => {
     expect(projected.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool"])
     expect(projected.toolChoice).toBe("none")
     expect(canonicalRequestDigest(production)).toBe(canonicalRequestDigest(projected))
+  })
+
+  it("reports a 50,000-level tool schema through the typed depth error", () => {
+    let parameters: Record<string, unknown> = { leaf: true }
+    for (let depth = 0; depth < 50_000; depth++) parameters = { nested: parameters }
+
+    let failure: unknown
+    try {
+      canonicalRequestDigest(request({
+        tools: [{ name: "deep", description: "deep schema", parameters }]
+      }))
+    } catch (error) {
+      failure = error
+    }
+
+    expect(failure).toBeInstanceOf(FixtureEncodingError)
+    expect(failure).toMatchObject({
+      _tag: "FixtureEncodingError",
+      code: "fixture_not_encodable",
+      reason: "too-deep"
+    })
   })
 
   it.effect("decodes a recorded toolChoice", () =>

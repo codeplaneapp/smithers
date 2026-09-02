@@ -6,6 +6,12 @@ import { describe, expect, it } from "vitest"
 import { canonical, compare, same, snapshot } from "../src/internal/Structural.ts"
 import * as ModelLike from "../src/ModelLike.ts"
 
+const deeplyNested = (depth: number): Record<string, unknown> => {
+  let value: Record<string, unknown> = { leaf: 1 }
+  for (let level = 0; level < depth; level++) value = { nested: value }
+  return value
+}
+
 describe("same", () => {
   it("separates the values Object.keys collapsed to an empty record", () => {
     expect(same(new Date(0), new Date(1))).toBe(false)
@@ -24,6 +30,21 @@ describe("same", () => {
   it("separates a missing key from an undefined one, and arrays from records", () => {
     expect(same({ a: undefined }, {})).toBe(false)
     expect(same([1], { 0: 1 })).toBe(false)
+  })
+
+  it("uses symbol reference identity instead of collapsing equal descriptions", () => {
+    const shared = Symbol("x")
+    expect(same(shared, shared)).toBe(true)
+    expect(same({ a: shared }, { a: shared })).toBe(true)
+    expect(same(Symbol("x"), Symbol("x"))).toBe(false)
+    expect(same({ a: Symbol("x") }, { a: Symbol("x") })).toBe(false)
+  })
+
+  it("uses function reference identity instead of collapsing equal names", () => {
+    const shared = () => 1
+    expect(same(shared, shared)).toBe(true)
+    expect(same([shared], [shared])).toBe(true)
+    expect(same(() => 1, () => 1)).toBe(false)
   })
 })
 
@@ -72,6 +93,23 @@ describe("canonical", () => {
     bare.a = 1
     expect(canonical(bare)).toBe(canonical({ a: 1 }))
   })
+
+  it("describes a throwing accessor without invoking it", () => {
+    let reads = 0
+    const value = Object.defineProperty({}, "answer", {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        throw new Error("must not run")
+      }
+    })
+    expect(canonical(value)).toContain(`"_tag":"Accessor"`)
+    expect(reads).toBe(0)
+  })
+
+  it("tags a value deeper than the fixture encoder's matching cap", () => {
+    expect(canonical(deeplyNested(50_000))).toContain(`"_tag":"TooDeep"`)
+  })
 })
 
 describe("snapshot", () => {
@@ -102,6 +140,19 @@ describe("snapshot", () => {
   it("keeps a symbol-keyed property so the fixture encoder can still reject it", () => {
     const key = Symbol("s")
     expect(Object.getOwnPropertySymbols(snapshot({ [key]: 1 }))).toEqual([key])
+  })
+
+  it("copies to the depth cap and passes the remaining tail through by reference", () => {
+    const source = deeplyNested(50_000)
+    const copied = snapshot(source)
+    let sourceTail: unknown = source
+    let copiedTail: unknown = copied
+    for (let depth = 0; depth < 128; depth++) {
+      sourceTail = (sourceTail as Record<string, unknown>).nested
+      copiedTail = (copiedTail as Record<string, unknown>).nested
+    }
+    expect(copied).not.toBe(source)
+    expect(copiedTail).toBe(sourceTail)
   })
 })
 

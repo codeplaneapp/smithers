@@ -61,6 +61,20 @@ describe("effect assertions answer about effect entries only", () => {
     )
   })
 
+  it("refuses a step-only journal in journaledAtMostOnce", async () => {
+    // Zero effect entries is trivially "at most once", so this used to pass
+    // while the engine journaled no effect under the key at all.
+    const stepsOnly = [step("publish", 0)]
+    const error = await errorOf(expectJournal(stepsOnly).effect("publish").journaledAtMostOnce())
+    expect(error.code).toBe("effect_kind_mismatch")
+    expect(error.actual).toEqual(["step"])
+  })
+
+  it("still satisfies journaledAtMostOnce when the key appears nowhere", async () => {
+    const exit = await Effect.runPromiseExit(expectJournal(mixed).effect("absent").journaledAtMostOnce())
+    expect(exit._tag).toBe("Success")
+  })
+
   it("reads the idempotency key off the effect entry, not the step entry", async () => {
     const exit = await Effect.runPromiseExit(expectJournal(mixed).effect("publish").idempotencyKey("publish-1"))
     expect(exit._tag).toBe("Success")

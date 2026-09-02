@@ -88,8 +88,8 @@ export interface TestEffect<R> {
 
 /**
  * Builds a **fresh** environment from the supplied layer for every test case
- * and runs each body in its own Scope, so no state — including the
- * deterministic variant's `TestClock` — is shared between tests and no test
+ * and runs each body in its own Scope, so no state, including the
+ * deterministic variant's `TestClock`, is shared between tests and no test
  * can depend on registration order. The deterministic variant includes
  * TestClock; `live` intentionally uses the supplied layer with only
  * TestConsole added.

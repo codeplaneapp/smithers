@@ -12,6 +12,8 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
+import * as Ref from "effect/Ref"
+import * as Scheduler from "effect/Scheduler"
 import * as Scope from "effect/Scope"
 import type { EngineSubject as Subject, FlowSpec, StepSpec } from "../src/EngineSubject.ts"
 import * as EngineSubject from "../src/EngineSubject.ts"
@@ -163,6 +165,107 @@ describe("failed flow bodies", () => {
 })
 
 describe("MemoryEngine live execution joins", () => {
+  // Real elapsed time: the timeout is the assertion that a startup entry did
+  // not leave either public lifecycle operation parked on an empty deferred.
+  it.live("does not wedge lifecycle operations when the run caller is interrupted during startup", () =>
+    Effect.gen(function*() {
+      for (let schedulerTurns = 0; schedulerTurns < 12; schedulerTurns++) {
+        const store = yield* MemoryEngine.makeStore()
+        const engine = yield* MemoryEngine.make(store)
+        const release = yield* Latch.make()
+        const executionId = `testing/memory/interrupted-start-${schedulerTurns}`
+        const running = yield* engine.run({
+          flow: {
+            name: executionId,
+            steps: [{
+              key: "waiting",
+              sealed: false,
+              kind: "step",
+              run: () => Effect.as(release.await, "done")
+            }]
+          },
+          payload: undefined,
+          executionId
+        }).pipe(
+          Effect.provideService(Scheduler.MaxOpsBeforeYield, 4),
+          Effect.forkChild()
+        )
+
+        for (let turn = 0; turn < schedulerTurns; turn++) yield* Effect.yieldNow
+        yield* Fiber.interrupt(running).pipe(Effect.timeout("2 seconds"))
+        yield* release.open
+
+        const resumed = yield* Effect.exit(engine.resume(executionId)).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.exit
+        )
+        const interrupted = yield* Effect.exit(engine.interrupt(executionId)).pipe(
+          Effect.timeout("2 seconds"),
+          Effect.exit
+        )
+        expect(Exit.isSuccess(resumed), `resume wedged after ${schedulerTurns} scheduler turns`).toBe(true)
+        expect(Exit.isSuccess(interrupted), `interrupt wedged after ${schedulerTurns} scheduler turns`).toBe(true)
+      }
+    }))
+
+  it.live("removes a provisional active entry when arming fails", () =>
+    Effect.gen(function*() {
+      const store = yield* MemoryEngine.makeStore()
+      const engine = yield* MemoryEngine.make(store)
+      const executionId = "testing/memory/failed-arming"
+      let attempts = 0
+      const flow: FlowSpec = {
+        name: executionId,
+        steps: [{
+          key: "suspend-once",
+          sealed: false,
+          kind: "step",
+          run: () =>
+            Effect.suspend(() => {
+              attempts += 1
+              return attempts === 1 ? Effect.interrupt : Effect.succeed("done")
+            })
+        }]
+      }
+      expect((yield* engine.run({ flow, payload: undefined, executionId })).status).toBe("suspended")
+
+      interface ReflectedStoreState {
+        readonly executions: ReadonlyMap<string, unknown>
+        readonly idempotencyIndex: ReadonlyMap<string, string>
+        readonly nextExecutionId: number
+      }
+      class MissingSecondReadMap<K, V> extends Map<K, V> {
+        private reads = 0
+
+        override get(key: K): V | undefined {
+          this.reads += 1
+          return this.reads === 2 ? undefined : super.get(key)
+        }
+      }
+
+      // The store intentionally exposes no mutation API. Reflection here only
+      // creates the otherwise impossible failure between start's successful
+      // read and its status write, proving the provisional map entry is rolled
+      // back rather than testing a second happy-path resume.
+      const stateRef = Reflect.get(
+        store,
+        Object.getOwnPropertySymbols(store)[0]!
+      ) as Ref.Ref<ReflectedStoreState>
+      const state = yield* Ref.get(stateRef)
+      yield* Ref.set(stateRef, {
+        ...state,
+        executions: new MissingSecondReadMap(state.executions)
+      })
+
+      const failure = yield* Effect.flip(engine.resume(executionId))
+      expect(failure.code).toBe("engine_unavailable")
+      expect(yield* engine.resume(executionId).pipe(Effect.timeout("2 seconds"))).toEqual({
+        executionId,
+        status: "completed",
+        value: "done"
+      })
+    }))
+
   it.scoped("resume joins the deferred of an execution that is still running", () =>
     Effect.gen(function*() {
       const store = yield* MemoryEngine.makeStore()
