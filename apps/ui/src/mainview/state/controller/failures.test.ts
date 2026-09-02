@@ -7,8 +7,9 @@ import { createFailureController } from "./failures"
 /*
  * The toast run counter used to be write-only: every withToast set an entry
  * and nothing ever removed one, so the map grew for the session's lifetime.
- * Terminal paths now delete their entry equality-guarded — a newer run of
- * the same key keeps its own slot untouched.
+ * Settling deletes the entry equality-guarded — a newer run of the same key
+ * keeps its own slot untouched — and the ok toast's later self-dismissal is
+ * guarded by the toast's own state, never by the counter.
  */
 
 const memoryStorage = (): StorageApi => {
@@ -38,8 +39,8 @@ const fakeContext = async (options?: {
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("the toast run counter's terminal cleanup", () => {
-  test("an ok run's entry leaves when its auto-dismiss fires", async () => {
-    const { ctx } = await fakeContext()
+  test("an ok run's entry leaves at settle; the toast then dismisses itself on its own state", async () => {
+    const { ctx, store } = await fakeContext()
     const failures = createFailureController(ctx)
     let release!: () => void
     const gate = new Promise<void>((resolve) => {
@@ -49,11 +50,13 @@ describe("the toast run counter's terminal cleanup", () => {
     await settled()
     release()
     await pending
-    // The toast showed and resolved; the entry stays until the auto-dismiss
-    // — the slot's terminal act — fires.
-    expect(ctx.toastRuns.has("flow.ok")).toBe(true)
-    await settled()
+    // Settling is the slot's terminal act: the entry is gone at once. The
+    // ok toast's self-dismissal is guarded by the toast's own state
+    // (resolveToast), not by the counter, so nothing stale can misfire.
     expect(ctx.toastRuns.has("flow.ok")).toBe(false)
+    expect(store.collections.toasts.get("toast-flow.ok")?.status).toBe("ok")
+    await settled()
+    expect(store.collections.toasts.get("toast-flow.ok")).toBeUndefined()
   })
 
   test("a failed run's entry leaves at settle even though its toast stays", async () => {
@@ -96,10 +99,12 @@ describe("the toast run counter's terminal cleanup", () => {
     const current = failures.withToast("flow.race", "Working…", "Done", () => currentGate.then(() => true))
     await settled()
     releaseStale()
-    releaseCurrent()
     await stale
-    await current
     // The current run owns the slot; the stale run settled without touching it.
     expect(ctx.toastRuns.get("flow.race")).toBe(2)
+    releaseCurrent()
+    await current
+    // The current run's settle is the slot's terminal act.
+    expect(ctx.toastRuns.has("flow.race")).toBe(false)
   })
 })

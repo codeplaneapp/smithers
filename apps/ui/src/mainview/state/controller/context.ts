@@ -101,6 +101,11 @@ export interface ControllerContext {
     doneTitle: string,
     work: () => Promise<T | string>
   ) => Promise<T | string>
+  /** Resolve a toast; an ok outcome dismisses itself (failures.ts resolveToast). */
+  resolveToast: (
+    key: string,
+    outcome: { readonly status: "ok" | "failed"; readonly title?: string; readonly detail: string }
+  ) => void
 }
 
 /**
@@ -170,6 +175,7 @@ export const createControllerContext = (
     gateway: undefined as unknown as GatewaySeam,
     commands: undefined as unknown as CommandRegistry,
     withToast: undefined as unknown as ControllerContext["withToast"],
+    resolveToast: undefined as unknown as ControllerContext["resolveToast"],
     unref,
     onDispose: (finalizer) => {
       // Registering after disposal runs the finalizer at once, so a late

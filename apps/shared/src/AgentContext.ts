@@ -77,6 +77,23 @@ export const AgentRuntimeContextSchema = z.object({
   selectedWorldDocument: z.string().nullable(),
   connectors: z.array(AgentRuntimeConnectorSchema),
   /*
+   * Repositories open in the LOCAL app (docs/LOCAL-APP.md), by name and
+   * path: what files.list / files.read / target.list act on. Optional so a
+   * boundary built before this field, and the cloud client, still validate.
+   */
+  repositories: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        path: z.string(),
+        branch: z.string().nullable(),
+        /** A Smithers workspace was detected (target.list has something to list). */
+        smithers: z.boolean()
+      })
+    )
+    .optional(),
+  /*
    * Sign-in IS the GitHub connector — one act, one truth (Wave 10, §2a′):
    * a valid GitHub session means the GitHub connector IS connected, so the
    * model never routes a signed-in user toward "connecting GitHub" again.
@@ -160,6 +177,19 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
       lines.push(
         `  - ${connector.kind} "${connector.name}" (${connector.status}, ${connector.access} access) at ${connector.root}${
           connector.branch === null ? "" : `, branch ${connector.branch}`
+        }`
+      )
+    }
+  }
+  const repositories = context.repositories ?? []
+  if (repositories.length > 0) {
+    lines.push(
+      "- Open repositories (local checkouts in this app; files.list / files.read / target.list act on them, a bare call on the active one):"
+    )
+    for (const repo of repositories) {
+      lines.push(
+        `  - "${repo.name}" (id ${repo.id}) at ${repo.path}${repo.branch === null ? "" : `, branch ${repo.branch}`}${
+          repo.smithers ? ", Smithers workspace detected" : ""
         }`
       )
     }

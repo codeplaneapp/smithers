@@ -1,9 +1,5 @@
 import type { Target } from "./LocalApp"
 
-/** The deterministic transcript message emitted after a repository's targets load. */
-export const defaultTargetsMessage = (count: number, repoName: string): string =>
-  `Loaded ${count} ${count === 1 ? "target" : "targets"} for ${repoName}.`
-
 /** Targets grouped by package, preserving the loader's first-seen package order. */
 export const groupTargets = (
   targets: ReadonlyArray<Target>

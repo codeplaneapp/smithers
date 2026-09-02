@@ -7,9 +7,10 @@ import { join, resolve } from "node:path"
 import { localApiGet, localApiPost } from "./localApi"
 
 /*
- * Lane L3 (docs/LOCAL-APP.md "Auto-load flow"): opening a repository through
- * the chrome loads its Smithers targets into a trusted typed card, and that
- * card's parent-owned Run button streams a target run into a target-run card.
+ * Lane L3 (docs/LOCAL-APP.md "Target presentation"): opening a repository
+ * through the chrome renders nothing; /target.list loads its Smithers targets
+ * into a trusted typed card, and that card's parent-owned Run button streams a
+ * target run into a target-run card.
  * The demo repository proves the loader at scale
  * (>= 82 targets); target execution happens in a throwaway copy of the
  * build-cli force-spec fixture, never in the demo checkout.
@@ -32,6 +33,19 @@ const openRepo = async (page: Page, path: string): Promise<void> => {
   page.once("dialog", (dialog) => void dialog.accept(path))
   await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
+}
+
+/** Type a registered slash command into the composer and send it. */
+const command = async (page: Page, text: string): Promise<void> => {
+  await page.getByTestId("composer-input").fill(text)
+  await page.getByTestId("composer-send").click()
+}
+
+/** Opening renders nothing in the transcript: no repo card, no targets card, no message. */
+const expectNothingAutomatic = async (page: Page): Promise<void> => {
+  await page.waitForTimeout(1500)
+  await expect(repoCard(page)).toHaveCount(0)
+  await expect(targetsCard(page)).toHaveCount(0)
 }
 
 test.beforeEach(async ({ page }) => {
@@ -70,8 +84,10 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   // The selector names the repo; the origin chip shows WHERE it is (the ~-abbreviated path), never the name again.
   await expect(page.getByTestId("composer-repo-trigger")).toContainText("artsy/force")
   await expect(page.getByTestId("repo-chip")).toContainText("~/artsy/force")
-  await expect(repoCard(page)).toBeVisible()
+  await expectNothingAutomatic(page)
 
+  // The targets table is the explicit act.
+  await command(page, "/target.list")
   const targets = targetsCard(page)
   await expect(targets).toBeVisible()
   await expect(targets.getByTestId("card-kind-targets")).toBeVisible()
@@ -81,7 +97,6 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   expect(await targets.locator("[data-target-row]").count()).toBeGreaterThanOrEqual(1)
   await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
 
-  await expect(page.locator(".smithers-chat-message[data-role=\"assistant\"]").last()).toContainText("Loaded 82 targets for artsy/force")
   await expect(page.locator(".smithers-card[data-kind=\"html\"]")).toHaveCount(0)
 
   // The table scrolls inside the card, never the transcript: a bounded, overflow-auto container.
@@ -151,7 +166,7 @@ test("a trusted Run button streams a target run to completion", async ({ page, r
   await openRepo(page, copy)
   const copyPath = realpathSync(copy)
   opened.push(copyPath)
-  await expect(repoCard(page)).toBeVisible()
+  await command(page, "/target.list")
   await expect(targetsCard(page).getByTestId("targets-count")).toHaveText(/^8[12] of 8[12]$/, { timeout: 60_000 })
   // //.github:dangerCi renders a workflow file and exits 0 with no network.
   const danger = targetsCard(page).locator('[data-target-row="//.github:dangerCi"]')
@@ -201,18 +216,16 @@ test("a trusted Run button streams a target run to completion", async ({ page, r
   expect(repos.find((repo) => repo.path === copyPath)?.smithers.detected).toBe(true)
 })
 
-test("a directory without Smithers files opens as a repo card and loads no targets", async ({ page }) => {
+test("a directory without Smithers files opens silently, and /target.list says why there are none", async ({ page }) => {
   const plain = mkdtempSync(join(tmpdir(), "smithers-plain-"))
   temporary.push(plain)
   await page.goto("/")
   await openRepo(page, plain)
   opened.push(realpathSync(plain))
-  const card = repoCard(page)
-  await expect(card).toBeVisible()
-  await expect(card).toContainText("no WORKSPACE.ts")
   await expect(page.getByTestId("repo-chip")).toBeVisible()
-  // Nothing else follows: no targets card or run.
-  await page.waitForTimeout(1500)
+  await expectNothingAutomatic(page)
+  await command(page, "/target.list")
+  await expect(page.locator("body")).toContainText("no WORKSPACE.ts")
   await expect(targetsCard(page)).toHaveCount(0)
 })
 
@@ -254,6 +267,7 @@ test("a featured pattern run renders one row per resolved target, failures first
   await page.goto("/")
   await openRepo(page, copy)
   opened.push(realpathSync(copy))
+  await command(page, "/target.list")
   const targets = targetsCard(page)
   await expect(targets.getByTestId("targets-count")).toHaveText(/of 8[12]$/, { timeout: 60_000 })
   // Featured is the default when the manifest features anything; the strip lists the pattern run.

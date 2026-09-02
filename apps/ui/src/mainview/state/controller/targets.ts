@@ -9,9 +9,9 @@ import {
   TargetGraphResponseSchema
 } from "smithers-shared/TargetGraph"
 import { featuredLabels, featuredPatternRuns } from "smithers-shared/LocalApp"
-import { defaultTargetsMessage } from "smithers-shared/TargetPresentation"
 import { groupLabel, groupRows, isGroupLabel, pickedMembers, targetRows, toggled } from "../../cards/TargetsTable"
 import type { Card } from "../AppState"
+import { resolveOpenRepo } from "../RepoContext"
 import { repoKeyOf, starredTargetId } from "../AppState"
 import type { TargetRunClient } from "../TargetRunClient"
 import type { ControllerContext } from "./context"
@@ -26,6 +26,8 @@ import type { ControllerContext } from "./context"
 export interface TargetsController {
   /** `POST /api/repo/open`, then the repo card and the auto-load flow. */
   readonly openRepo: (request: RepositoryOpenRequest) => Promise<string | void>
+  /** List the repository's Smithers targets as the trusted targets card (the explicit act; opening renders nothing). */
+  readonly listTargets: (repoId?: string) => Promise<string | void>
   /** `POST /api/targets/run`, then a target-run card fed from the run topic. */
   readonly runTarget: (repoId: string, workspace: string, label: string) => Promise<string | void>
   /**
@@ -78,7 +80,6 @@ export interface TargetsControllerDependencies {
   readonly onRunStarted?: (repoId: string, runId: string, label: string) => void
 }
 
-export const repoCardId = (repoId: string): string => `repo-${repoId}`
 export const targetsCardId = (repoId: string): string => `targets-${repoId}`
 export const repoPluginCardId = (repoId: string): string => `repo-plugin-${repoId}`
 export const targetRunCardId = (runId: string): string => `target-run-${runId}`
@@ -175,8 +176,6 @@ export const createTargetsController = (
     }
     const { targets, warnings } = parsed.data
     patch(id, "targets", (card) => ({ payload: { ...card.payload, status: "done", targets, warnings }, status: "acted" }))
-
-    store.dispatch({ type: "message.appended", actor: "system", text: defaultTargetsMessage(targets.length, repo.name) })
     void loadRuns(repo.id)
   }
 
@@ -376,18 +375,28 @@ export const createTargetsController = (
     const body = (await response.json().catch(() => undefined)) as { repo?: unknown } | undefined
     const parsed = RepoSchema.safeParse(body?.repo)
     if (!parsed.success) return "The server's answer carried no repository."
-    const repo = parsed.data
+    /*
+     * Opening renders nothing in the transcript (will, 2026-09-01: "remove
+     * everything that shows up automatically"). The sidebar pin and the
+     * composer's selector name the repository; its targets are an explicit
+     * act — /target.list, or the model's target.list — never a card that
+     * arrives on its own.
+     */
     await loadRepos()
-    upsert({
-      id: repoCardId(repo.id),
-      kind: "repo",
-      title: repo.name,
-      status: "acted",
-      createdAt: Date.now(),
-      ordinal: nextOrdinal(),
-      payload: { repo }
-    })
-    if (repo.smithers.detected) void loadTargets(repo)
+  }
+
+  const listTargets: TargetsController["listTargets"] = async (repoIdArg) => {
+    let repo: Repo | undefined
+    if (repoIdArg !== undefined && repoIdArg !== "") {
+      repo = [...store.collections.repos.values()].find((candidate) => candidate.id === repoIdArg)
+      if (repo === undefined) return `No open repository has id ${repoIdArg}.`
+    } else {
+      const open = resolveOpenRepo(store)
+      if ("error" in open) return "Open a repository first — there are no targets to list."
+      repo = open.repo
+    }
+    if (!repo.smithers.detected) return `${repo.name} has no Smithers workspace (${repo.smithers.reason}).`
+    await loadTargets(repo)
   }
 
   /*
@@ -546,5 +555,5 @@ export const createTargetsController = (
     void selectTarget(repoId, label)
   }
 
-  return { openRepo, runTarget, runPattern, openTarget, filterTargets, selectTarget, starTarget, expandTargetGroup, pickTargets, runTargetSet }
+  return { openRepo, listTargets, runTarget, runPattern, openTarget, filterTargets, selectTarget, starTarget, expandTargetGroup, pickTargets, runTargetSet }
 }

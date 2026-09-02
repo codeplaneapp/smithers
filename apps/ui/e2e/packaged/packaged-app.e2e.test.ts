@@ -348,9 +348,9 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       const plain = await fixture.makeDirectory("plain-repository")
       await runCommand(["git", "init", "--quiet"], plain)
       await openRepository(app, plain)
-      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo"]') !== null`)).toBe(
-        true
-      )
+      // Opening renders nothing; why a repository has no targets is /target.list's answer.
+      expect(await app.eval<boolean>(`document.querySelector('.smithers-card[data-kind="repo"]') === null`)).toBe(true)
+      await sendMessage(app, "/target.list")
       expect(await app.waitFor<boolean>(`document.body.innerText.includes('no WORKSPACE.ts')`)).toBe(true)
       expect(await app.eval<boolean>(`document.querySelector('.smithers-card[data-kind="targets"]') === null`)).toBe(
         true
@@ -383,6 +383,7 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       expect(manual.body.error.code).toBe("manual_repository_paths_disabled")
 
       await openRepository(app, repository)
+      await sendMessage(app, "/target.list")
       expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo-plugin"]') !== null`))
         .toBe(true)
       const targets = await app.waitFor<{ status: string; count: string; alert: string }>(

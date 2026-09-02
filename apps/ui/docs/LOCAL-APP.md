@@ -109,6 +109,7 @@ All mutations require `Content-Type: application/json`; failures use
 | POST | `/api/repo/open` | Consume `{ authorizationId }`, or dev-only `{ path }` |
 | GET | `/api/repos` | Open repository snapshot |
 | POST | `/api/repo/close` | Close `{ repoId }` |
+| POST | `/api/repo/files` | `{ repoId, path? }`: a directory's entries or one file's text (read access; bounded; binary stated) |
 | POST | `/api/targets/query` | Query `{ repoId }` and mint target ids |
 | POST | `/api/targets/run` | Run `{ repoId, targetId }` |
 | POST | `/api/targets/cancel` | Cancel `{ runId }` |
@@ -122,7 +123,11 @@ limited to subscription control, `target-run.attach`, and `pty.input`.
 
 ## Target presentation
 
-Target discovery appends a deterministic message and trusted typed React card.
+Opening a repository renders nothing in the transcript; the sidebar pin and
+the composer's selector name it. Target discovery is the explicit
+`/target.list` act (the model has the same flow): it appends the trusted typed
+React card, and a repository with no Smithers workspace answers the reason as
+text.
 Models can provide explanatory text but cannot author markup, scripts, command
 labels, bridge messages, or action handlers. Historical HTML cards remain
 decodable for migration and render in a CSP-restricted inert iframe with

@@ -84,6 +84,11 @@ test("a repo with smithers-ui.json opens with the plugin card, no panel, and Run
   await openRepo(page, copy)
   // The server stores the realpath (/var/... is a symlink into /private/var on macOS).
   opened.push(realpathSync(copy))
+  // Opening renders nothing; the plugin card and the targets table are /target.list's answer.
+  await page.waitForTimeout(1500)
+  await expect(pluginCard(page)).toHaveCount(0)
+  await page.getByTestId("composer-input").fill("/target.list")
+  await page.getByTestId("composer-send").click()
 
   // The plugin card leads: manifest summary, group sections, entries, badges.
   const plugin = pluginCard(page)

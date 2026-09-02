@@ -18,11 +18,48 @@ export interface FailureController {
     doneTitle: string,
     work: () => Promise<T | string>
   ) => Promise<T | string>
+  /**
+   * Resolve the toast on `key`; an ok outcome dismisses itself after
+   * toastAutoDismissMs. Every ok resolution goes through here.
+   */
+  readonly resolveToast: (
+    key: string,
+    outcome: { readonly status: "ok" | "failed"; readonly title?: string; readonly detail: string }
+  ) => void
   readonly dismissToast: (id: string) => void
   readonly surfaceCommandFailure: (name: string, outcome: CommandOutcome) => void
 }
 
 export const createFailureController = (ctx: ControllerContext): FailureController => {
+  /*
+   * The one place an ok toast learns to leave. The sign-in handoff's
+   * "Signed in" (2026-09-01) dispatched toast.resolved directly, so nothing
+   * ever dismissed it: it stood for the rest of the session, and only a
+   * failure toast offers a dismiss control. The dismissal is guarded by the
+   * toast's own state, never by who scheduled it: a newer toast.shown or
+   * toast.resolved on the same key moves updatedAt (and status), and that
+   * owner dismisses its own.
+   */
+  const resolveToast: FailureController["resolveToast"] = (key, outcome) => {
+    const id = `toast-${key}`
+    if (ctx.store.collections.toasts.get(id) === undefined) return
+    ctx.store.dispatch({
+      type: "toast.resolved",
+      actor: "system",
+      key,
+      status: outcome.status,
+      ...(outcome.title === undefined ? {} : { title: outcome.title }),
+      detail: outcome.detail
+    })
+    if (outcome.status !== "ok") return
+    const resolvedAt = ctx.store.collections.toasts.get(id)?.updatedAt
+    const dismiss = setTimeout(() => {
+      const current = ctx.store.collections.toasts.get(id)
+      if (current === undefined || current.status !== "ok" || current.updatedAt !== resolvedAt) return
+      ctx.store.dispatch({ type: "toast.dismissed", actor: "system", id })
+    }, ctx.toastAutoDismissMs)
+    ctx.unref(dismiss)
+  }
   /*
    * The 300ms toast law (2026-08-09): background work not settled within
    * 300ms states what is running on the shared toast stack; work under
@@ -74,34 +111,16 @@ export const createFailureController = (ctx: ControllerContext): FailureControll
     // A string outcome is the honest failure line; anything else is success
     // (true, or a value the caller consumes — e.g. the browser tool's read).
     const ok = typeof outcome !== "string"
-    ctx.store.dispatch({
-      type: "toast.resolved",
-      actor: "system",
-      key,
-      status: ok ? "ok" : "failed",
-      // Settled work states its result, never the running sentence: an ok
-      // toast reads as done for the seconds before it dismisses itself, and
-      // a failure keeps the attempt's title with the honest line under it.
-      ...(ok ? { title: doneTitle } : {}),
-      detail: ok ? "" : (outcome as string)
-    })
-    if (ok) {
-      const dismiss = setTimeout(() => {
-        if (ctx.toastRuns.get(key) !== run) return
-        ctx.store.dispatch({ type: "toast.dismissed", actor: "system", id: `toast-${key}` })
-        // The auto-dismiss is the slot's terminal act: the counter entry
-        // leaves once nothing stale can claim it. A newer run owns the key
-        // by then, and the equality guard above already returned for it.
-        ctx.toastRuns.delete(key)
-      }, ctx.toastAutoDismissMs)
-      ctx.unref(dismiss)
-    } else {
-      // A failure toast stays until dismissed, but the run that produced it
-      // is over — its counter entry is terminal and leaves now. The toast
-      // itself is keyed `toast-${key}` in the collection, so a later run of
-      // the same flow still resolves it through the line above.
-      ctx.toastRuns.delete(key)
-    }
+    // Settled work states its result, never the running sentence: an ok
+    // toast reads as done for the seconds before it dismisses itself, and
+    // a failure keeps the attempt's title with the honest line under it.
+    resolveToast(key, ok ? { status: "ok", title: doneTitle, detail: "" } : { status: "failed", detail: outcome as string })
+    // The run is over either way, so its counter entry is terminal and
+    // leaves now. The ok toast's self-dismissal is guarded by the toast's
+    // own state in resolveToast, so no stale timer can claim the slot a
+    // newer run is using. The toast itself stays keyed `toast-${key}`, so a
+    // later run of the same flow still resolves it.
+    ctx.toastRuns.delete(key)
     return outcome
   }
 
@@ -127,5 +146,5 @@ export const createFailureController = (ctx: ControllerContext): FailureControll
     ctx.store.dispatch({ type: "toast.resolved", actor: "system", key, status: "failed", detail: outcome.error })
   }
 
-  return { withToast, dismissToast, surfaceCommandFailure }
+  return { withToast, resolveToast, dismissToast, surfaceCommandFailure }
 }

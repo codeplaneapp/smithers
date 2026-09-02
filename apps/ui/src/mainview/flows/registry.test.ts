@@ -622,6 +622,7 @@ describe("command registry bindings", () => {
       "target.pick",
       "target.run.set",
       // The target-graph cards (docs/LOCAL-APP.md "Cards: target graph").
+      "target.list",
       "target.graph",
       "target.graph.focus",
       "target.timeline",

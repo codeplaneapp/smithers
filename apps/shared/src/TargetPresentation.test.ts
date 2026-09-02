@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Target } from "./LocalApp"
-import { defaultTargetsMessage, groupTargets, groupTargetsByWorkspace } from "./TargetPresentation"
+import { groupTargets, groupTargetsByWorkspace } from "./TargetPresentation"
 
 const targets: ReadonlyArray<Target> = [
   { id: "one", label: "//src:lint", target: "Shell.Test", kinds: ["lint"], package: "//src", name: "lint", workspace: "." },
@@ -14,11 +14,6 @@ describe("trusted target presentation data", () => {
       { package: "//src", targets: [targets[0], targets[2]] },
       { package: "//", targets: [targets[1]] }
     ])
-  })
-
-  test("builds the deterministic transcript message", () => {
-    expect(defaultTargetsMessage(1, "force")).toBe("Loaded 1 target for force.")
-    expect(defaultTargetsMessage(82, "force")).toBe("Loaded 82 targets for force.")
   })
 
   test("groups workspaces and packages without changing target order", () => {

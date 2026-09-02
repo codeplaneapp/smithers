@@ -5,6 +5,8 @@
  * repository is the target; otherwise the answer is an honest error naming the
  * choice — the target is a genuine user decision, never a guess.
  */
+import type { Repo } from "smithers-shared/LocalApp"
+import { activeRepoOf } from "./AppState"
 import type { AppStore } from "./AppStore"
 
 const REPO_TOKEN = /^[\w.-]+\/[\w.-]+$/
@@ -43,4 +45,16 @@ export const resolveTargetRepo = (
   return {
     error: `Several repositories are watched (${selected.join(", ")}) — name one as owner/repo`
   }
+}
+
+/**
+ * The open LOCAL repository a bare repo-scoped command means (files, targets,
+ * graph): the active one — activeRepoOf, the rule the sidebar highlight, the
+ * composer's selector, and a new terminal already follow, and the store
+ * names one whenever any repository is open (the one that just opened, else
+ * the first by name). A command must act where the chrome says it will.
+ */
+export const resolveOpenRepo = (store: AppStore): { readonly repo: Repo } | { readonly error: string } => {
+  const active = activeRepoOf(store.session(), store.collections.repos.values())
+  return active === undefined ? { error: "Open a repository first." } : { repo: active }
 }

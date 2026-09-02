@@ -258,6 +258,37 @@ export const RepoSchema = z.object({
 })
 export type Repo = z.infer<typeof RepoSchema>
 
+/*
+ * Files in an open repository (LOCAL-APP.md "HTTP and WebSocket surface"):
+ * one route answers a directory or a file, the way the Cloud contents route
+ * does, so the files seam renders the same file-list / file cards for both.
+ * Reads are bounded: the server stops at REPO_FILE_READ_CAP_BYTES and says
+ * so with `truncated`; a NUL byte or undecodable UTF-8 answers `binary` with
+ * no content.
+ */
+export const REPO_FILES_PATH = "/api/repo/files"
+export const REPO_FILE_READ_CAP_BYTES = 256 * 1024
+export const RepoFilesRequestSchema = z.object({
+  repoId: z.string().min(1),
+  /** Relative to the repository root; "" or absent is the root. */
+  path: z.string().max(4096).optional()
+}).strict()
+export type RepoFilesRequest = z.infer<typeof RepoFilesRequestSchema>
+export const RepoFileEntrySchema = z.object({ name: z.string(), kind: z.enum(["file", "dir"]) })
+export type RepoFileEntry = z.infer<typeof RepoFileEntrySchema>
+export const RepoFilesResponseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("dir"), path: z.string(), entries: z.array(RepoFileEntrySchema) }),
+  z.object({
+    kind: z.literal("file"),
+    path: z.string(),
+    size: z.number().int().nonnegative(),
+    content: z.string(),
+    truncated: z.boolean(),
+    binary: z.boolean()
+  })
+])
+export type RepoFilesResponse = z.infer<typeof RepoFilesResponseSchema>
+
 export const PtySessionSchema = z.object({
   sessionId: z.string(),
   kind: z.enum(["terminal", "harness"]),

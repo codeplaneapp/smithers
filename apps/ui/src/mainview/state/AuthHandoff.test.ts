@@ -75,6 +75,7 @@ const harness = async (options: {
   readonly startAnswer?: { readonly status: number; readonly body: unknown }
   /** What the session probe answers after a ready claim; default signed-in as will. */
   readonly sessionAnswer?: { readonly status: number; readonly body: unknown }
+  readonly toastAutoDismissMs?: number
 }): Promise<Harness> => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const opened: string[] = []
@@ -84,6 +85,7 @@ const harness = async (options: {
   const services: AppServices = {
     baseUrl: "https://app.test",
     handoffPollMs: 1,
+    ...(options.toastAutoDismissMs === undefined ? {} : { toastAutoDismissMs: options.toastAutoDismissMs }),
     openExternal: async (url) => {
       opened.push(url)
       return options.openResult ?? true
@@ -135,6 +137,35 @@ describe("the native sign-in handoff", () => {
     expect(identity?.login).toBe("will")
     const toasts = [...h.store.collections.toasts.values()]
     expect(toasts.some((toast) => toast.title === "Signed in")).toBe(true)
+  })
+
+  /*
+   * 2026-09-01: "Signed in — Connected as roninjin10" stood for the rest of
+   * the session. The handoff resolved its toast directly and skipped the
+   * self-dismissal every other settled-ok toast gets; an ok toast offers no
+   * dismiss control, so nothing could clear it.
+   */
+  test("the 'Signed in' toast dismisses itself like every settled-ok toast", async () => {
+    const h = await harness({ claims: [{ status: 200, body: { status: "ready" } }], toastAutoDismissMs: 20 })
+    await h.signIn()
+    await until(() => h.store.collections.toasts.get("toast-auth.sign-in.handoff")?.title === "Signed in")
+    expect(h.store.collections.toasts.get("toast-auth.sign-in.handoff")?.status).toBe("ok")
+    await until(() => h.store.collections.toasts.get("toast-auth.sign-in.handoff") === undefined)
+    expect(h.store.collections.toasts.get("toast-auth.sign-in.handoff")).toBeUndefined()
+  })
+
+  test("a reopen notice leaves on its own while the arc's toast keeps running", async () => {
+    // The claim never readies: the arc stays in flight for the whole test.
+    const h = await harness({ claims: [{ status: 200, body: { status: "pending" } }], toastAutoDismissMs: 20 })
+    await h.signIn()
+    await until(() => h.opened.length === 1)
+    await h.signIn()
+    await until(() => h.store.collections.toasts.get("toast-auth.sign-in.handoff.reopened") !== undefined)
+    expect(h.store.collections.toasts.get("toast-auth.sign-in.handoff.reopened")?.status).toBe("ok")
+    expect(h.store.collections.toasts.get("toast-auth.sign-in.handoff")?.status).toBe("running")
+    await until(() => h.store.collections.toasts.get("toast-auth.sign-in.handoff.reopened") === undefined)
+    // The notice's departure never took the running arc with it.
+    expect(h.store.collections.toasts.get("toast-auth.sign-in.handoff")?.status).toBe("running")
   })
 
   test("a failed OAuth propagates the recorded reason and never fabricates a session", async () => {

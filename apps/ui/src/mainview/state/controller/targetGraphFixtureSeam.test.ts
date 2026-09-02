@@ -68,11 +68,7 @@ const boot = async () => {
     { available: false, pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "native only" }) } as NativeRepositories,
     { available: false, startTurn: async () => ({ status: "error", message: "unavailable" }), cancelTurn: async () => {}, subscribe: () => () => {} } as NativeAgent
   )
-  store.dispatch({
-    type: "card.upsert",
-    actor: "user",
-    card: { id: "repo-force", kind: "repo", title: "force", status: "acted", createdAt: 0, ordinal: 0, payload: { repo: REPO } }
-  })
+  store.dispatch({ type: "repos.loaded", actor: "system", repos: [REPO] })
   return { store, controller }
 }
 

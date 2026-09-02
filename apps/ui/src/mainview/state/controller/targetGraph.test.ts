@@ -127,20 +127,8 @@ const stubRoutes = (): (() => void) => {
 const freshController = async () => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const controller = createAppController(store, unavailableRepositories, unavailableAgent)
-  /* The commands resolve the one open repository, so open one. */
-  store.dispatch({
-    type: "card.upsert",
-    actor: "user",
-    card: {
-      id: "repo-force",
-      kind: "repo",
-      title: "force",
-      status: "acted",
-      createdAt: 0,
-      ordinal: 0,
-      payload: { repo: REPO }
-    }
-  })
+  /* The commands resolve the active open repository, so open one. */
+  store.dispatch({ type: "repos.loaded", actor: "system", repos: [REPO] })
   return { store, controller }
 }
 

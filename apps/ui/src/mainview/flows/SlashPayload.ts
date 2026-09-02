@@ -354,6 +354,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     if (first === undefined) return ok({})
     return second === undefined ? ok({ runId: first }) : ok({ repoId: first, runId: second })
   },
+  "target.list": (args) => optional("repoId", args),
   "target.history": (args) => optional("repoId", args),
   "target.affected": (args) => optional("repoId", args),
   "target.ci": (args) => optional("repoId", args),

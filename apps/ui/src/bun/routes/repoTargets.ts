@@ -4,9 +4,10 @@
  */
 import type { NodeSidecar } from "../Node"
 import type { Target } from "smithers-shared/LocalApp"
-import { TARGET_PATTERN, TargetRunVerbSchema } from "smithers-shared/LocalApp"
+import { REPO_FILES_PATH, RepoFilesRequestSchema, TARGET_PATTERN, TargetRunVerbSchema } from "smithers-shared/LocalApp"
 import type { RepositoryAccess } from "smithers-shared/NativeRepository"
 import { z } from "zod"
+import { readRepoPath } from "../RepoFiles"
 import { createRepoStore } from "../Repos"
 import type { RepoStore } from "../Repos"
 import type { RepositoryAuthority } from "../RepositoryAuthority"
@@ -133,6 +134,27 @@ export const registerRepoTargetRoutes = (
   })
 
   router.add("GET", "/api/repos", () => json({ repos: repos.list() }))
+
+  /*
+   * Files in an open repository (LOCAL-APP.md "HTTP and WebSocket surface"):
+   * read access suffices, the path is relative, and RepoFiles.ts keeps the
+   * read inside the checkout. One route answers a directory or a file, so
+   * the renderer's files seam renders the same cards it does for Cloud.
+   */
+  router.add("POST", REPO_FILES_PATH, async ({ request }) => {
+    const parsed = await readJson(request)
+    if ("error" in parsed) return parsed.error
+    const body = RepoFilesRequestSchema.safeParse(parsed.body)
+    if (!body.success) return jsonError(400, "invalid_request", "Body must be { repoId, path? }.")
+    const resolved = resolveRepo(body.data.repoId, "read")
+    if (resolved.status !== "ok") {
+      return resolved.status === "not-found"
+        ? jsonError(404, "repo_not_found", `No open repository with id ${body.data.repoId}.`)
+        : jsonError(403, "repository_read_denied", "This repository was not opened with read access.")
+    }
+    const answer = await readRepoPath(resolved.path, body.data.path ?? "")
+    return answer.status === "ok" ? json(answer.body) : jsonError(answer.http, answer.code, answer.message)
+  })
 
   router.add("POST", "/api/repo/close", async ({ request }) => {
     const parsed = await readJson(request)

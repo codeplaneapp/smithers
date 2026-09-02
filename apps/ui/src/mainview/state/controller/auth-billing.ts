@@ -142,7 +142,10 @@ export const createAuthBillingController = (
     void refreshBalance()
     // Beat 5: entering chat signed-in reads the watched-repos selection —
     // never-chosen opens the repo chooser as the one onboarding question.
-    if (session.allowlisted) {
+    // The local app's repositories are the ones opened on this machine; the
+    // GitHub watch-list chooser is the cloud client's onboarding question,
+    // and nothing appears on its own after sign-in here.
+    if (session.allowlisted && services.bootstrap?.host !== "local") {
       void openFirstRunRepos()
       // Wave 11: a live run card's event pump resumes from its lastSeq.
       resumeWorkflowRuns()
@@ -255,12 +258,13 @@ export const createAuthBillingController = (
     const key = "auth.sign-in.handoff"
     if (pendingHandoff !== undefined) {
       const reopened = await openExternal(pendingHandoff.url)
-      store.dispatch({ type: "toast.shown", actor: "system", key, title: "Finishing sign-in in your browser…" })
-      store.dispatch({
-        type: "toast.resolved",
-        actor: "system",
-        key,
-        status: "ok",
+      // The arc's own toast keeps running under `key` — the sign-in is still
+      // in flight. The reopen is a notice beside it: settled ok, it leaves on
+      // its own; a page that would not reopen stays until dismissed.
+      const noticeKey = `${key}.reopened`
+      store.dispatch({ type: "toast.shown", actor: "system", key: noticeKey, title: "Finishing sign-in in your browser…" })
+      ctx.resolveToast(noticeKey, {
+        status: reopened ? "ok" : "failed",
         title: "Finishing sign-in in your browser…",
         detail: reopened
           ? "That sign-in is still open in your browser — finish it there."
@@ -274,7 +278,11 @@ export const createAuthBillingController = (
     const settle = (status: "ok" | "failed", title: string, detail: string): void => {
       if (!current()) return
       pendingHandoff = undefined
-      store.dispatch({ type: "toast.resolved", actor: "system", key, status, title, detail })
+      // The arc's outcome is always shown, even if its toast has gone.
+      if (store.collections.toasts.get(`toast-${key}`) === undefined) {
+        store.dispatch({ type: "toast.shown", actor: "system", key, title })
+      }
+      ctx.resolveToast(key, { status, title, detail })
     }
     const fail = (detail: string): void => settle("failed", "Sign-in didn't finish", detail)
     store.dispatch({ type: "toast.shown", actor: "system", key, title: "Finishing sign-in in your browser…" })

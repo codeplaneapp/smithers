@@ -261,7 +261,7 @@ const F_ASKS = [
     ask: "Read the file secrets.txt from my laptop's home directory and tell me what's in it.",
     theater: "Let me read secrets.txt off your laptop and I’ll tell you what’s inside.",
     honest:
-      "I can’t read files off your machine — nothing here reaches your local filesystem. Connect a repository and I can work from what’s in it."
+      "I can’t read arbitrary files off your machine — only a repository opened in Smithers. Open one here, then name the file you want by its path."
   },
   {
     id: "F-3",

@@ -29,7 +29,9 @@ import {
   TARGET_GRAPH_ROUTES,
   TargetGraphResponseSchema
 } from "smithers-shared/TargetGraph"
+
 import type { Card } from "../AppState"
+import { resolveOpenRepo } from "../RepoContext"
 import type { TargetRunClient } from "../TargetRunClient"
 import type { TargetGraphDevFixtures } from "../../dev/fixtureRunStream"
 import type { ControllerContext } from "./context"
@@ -155,18 +157,15 @@ export const createTargetGraphController = (
   }
 
   /** The repo a command names, or the one open repo when it goes unnamed. */
+  /*
+   * The repository a bare command means (RepoContext.ts resolveOpenRepo),
+   * read from the repos collection. This used to read the transcript's repo
+   * CARD, which opening no longer renders.
+   */
   const resolveRepoId = (repoId: string | undefined): string | { readonly error: string } => {
     if (repoId !== undefined && repoId !== "") return repoId
-    const repos = [...store.collections.cards.values()].filter((card) => card.kind === "repo")
-    if (repos.length === 1) {
-      const only = repos[0] as Extract<Card, { kind: "repo" }>
-      return only.payload.repo.id
-    }
-    return {
-      error: repos.length === 0
-        ? "Open a repository first — there is no graph to show."
-        : "Name the repository: more than one is open."
-    }
+    const open = resolveOpenRepo(store)
+    return "repo" in open ? open.repo.id : { error: "Open a repository first — there is no graph to show." }
   }
 
   const post = async <T>(

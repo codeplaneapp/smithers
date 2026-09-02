@@ -148,8 +148,9 @@ export interface AppController {
   readonly notePtyExit: TabsController["notePtyExit"]
   /** The PTY transport the terminal tabs attach to (docs/LOCAL-APP.md "/ws"). */
   readonly pty: PtyClient
-  /* Lane L3 (docs/LOCAL-APP.md "Auto-load flow"); see controller/targets.ts. */
+  /* Lane L3 (docs/LOCAL-APP.md "Target presentation"); see controller/targets.ts. */
   readonly openRepo: TargetsController["openRepo"]
+  readonly listTargets: TargetsController["listTargets"]
   readonly runTarget: TargetsController["runTarget"]
   readonly runPattern: TargetsController["runPattern"]
   readonly openTarget: TargetsController["openTarget"]
@@ -384,8 +385,9 @@ export const createAppController = (
   if (store.dispose !== undefined) ctx.onDispose(store.dispose)
   const { baseUrl, http } = ctx
   const features: Required<AppFeatures> = { suggestionPills: services.features?.suggestionPills === true }
-  const { withToast, dismissToast, surfaceCommandFailure } = createFailureController(ctx)
+  const { withToast, resolveToast, dismissToast, surfaceCommandFailure } = createFailureController(ctx)
   ctx.withToast = withToast
+  ctx.resolveToast = resolveToast
 
   const nextTranscriptOrdinal = (): number => {
     let highest = -1
@@ -518,7 +520,7 @@ export const createAppController = (
     runs: targetRuns,
     devFixtures: createTargetGraphDevFixtures()
   })
-  const { openRepo, runTarget, runPattern, openTarget, filterTargets, selectTarget, starTarget, expandTargetGroup, pickTargets, runTargetSet } =
+  const { openRepo, listTargets, runTarget, runPattern, openTarget, filterTargets, selectTarget, starTarget, expandTargetGroup, pickTargets, runTargetSet } =
     createTargetsController(ctx, {
     nextOrdinal: nextTranscriptOrdinal,
     loadRepos,
@@ -708,10 +710,7 @@ export const createAppController = (
     const key = `command.resume.${pending.name}`
     store.dispatch({ type: "toast.shown", actor: "system", key, title: `Continuing /${pending.name}` })
     void commands.run(pending.name, pending.args ?? undefined).then((outcome) => {
-      store.dispatch({
-        type: "toast.resolved",
-        actor: "system",
-        key,
+      resolveToast(key, {
         status: outcome.status === "failed" ? "failed" : "ok",
         detail: outcome.status === "failed"
           ? outcome.error
@@ -812,6 +811,7 @@ export const createAppController = (
     notePtyExit,
     pty,
     openRepo,
+    listTargets,
     runTarget,
     runPattern,
     openTarget,
@@ -917,6 +917,7 @@ export const createAppController = (
           (import.meta.env?.DEV as boolean | string | undefined) === true,
         needsSelection: signedIn && identity.allowlisted && (watched === undefined || watched.selected === null),
         signedOut: identity?.state === "signed-out",
+        hasOpenRepos: store.collections.repos.size > 0,
         recent: store.session().recentCommands ?? [],
         identity: identity === undefined
           ? "unknown"
@@ -1024,6 +1025,7 @@ export const createAppController = (
     notePtyExit,
     pty,
     openRepo,
+    listTargets,
     runTarget,
     runPattern,
     openTarget,

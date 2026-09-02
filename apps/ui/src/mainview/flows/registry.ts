@@ -49,6 +49,12 @@ export interface FlowMetadata {
   /** Host services this flow needs; unavailable flows do not register. */
   readonly runtime?: ReadonlyArray<RuntimeCapability>
   /**
+   * Host services of which at least ONE must be present. A flow that serves
+   * two hosts (a Cloud repository via jjhub, or a repository opened in the
+   * local app) names both; `runtime` alone cannot say "either".
+   */
+  readonly runtimeAny?: ReadonlyArray<RuntimeCapability>
+  /**
    * A consequential act the MODEL may ask for but never perform: an
    * agent invocation does not run the handler — it posts a confirmation
    * message whose action button runs the flow as the user. The string is
@@ -142,6 +148,18 @@ export const flowRequirements: ReadonlyArray<FlowRequirement> = [
     satisfied: (state) => !state.needsSelection,
     fulfill: "repos.watch",
     reason: "Choose which repositories Smithers watches first"
+  },
+  {
+    /*
+     * Repository reads have two sources: the GitHub session (Cloud
+     * repositories) or a repository opened in this app. An open local
+     * repository satisfies the reads on its own; signed out with nothing
+     * open, sign-in is the step.
+     */
+    id: "repo-source",
+    satisfied: (state) => !state.signedOut || state.hasOpenRepos === true,
+    fulfill: "auth.sign-in",
+    reason: "Sign in with GitHub, or open a local repository first"
   }
 ]
 
@@ -167,6 +185,8 @@ export interface CommandState {
   readonly needsSelection: boolean
   /** No validated session: the one next step is sign-in. */
   readonly signedOut: boolean
+  /** A repository is open in the local app (the repos collection); optional so fixtures stay minimal. */
+  readonly hasOpenRepos?: boolean
   /**
    * The user's recently run commands, most recent first (session
    * recentCommands). Optional so state fixtures stay minimal; missing = [].

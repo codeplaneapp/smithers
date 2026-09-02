@@ -129,9 +129,13 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
   const base = baseFlows(actions)
   const admin = adminFlows(actions)
 
-  const available = (entry: FlowEntry): boolean =>
-    actions.bootstrap === undefined ||
-    (entry.metadata.runtime ?? []).every((capability) => hasCapability(actions.bootstrap!, capability))
+  const available = (entry: FlowEntry): boolean => {
+    const bootstrap = actions.bootstrap
+    if (bootstrap === undefined) return true
+    const { runtime = [], runtimeAny } = entry.metadata
+    return runtime.every((capability) => hasCapability(bootstrap, capability)) &&
+      (runtimeAny === undefined || runtimeAny.some((capability) => hasCapability(bootstrap, capability)))
+  }
 
   const entries = (): ReadonlyArray<FlowEntry> =>
     (actions.snapshot().admin ? [...base, ...admin] : base).filter(available)

@@ -986,18 +986,18 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "files.list",
     summary: "List a repository directory",
-    runtime: ["jjhub"],
+    runtimeAny: ["jjhub", "local.repositories"],
     args: "[path] [owner/repo]",
-    requires: ["signed-in"],
+    requires: ["repo-source"],
     input: Schema.Struct({ path: Schema.String, repo: Schema.optional(Schema.String) }),
     handler: ({ path, repo }) => actions.listFiles(path, repo)
   }),
   flow({
     name: "files.read",
     summary: "Read a file from a repository",
-    runtime: ["jjhub"],
+    runtimeAny: ["jjhub", "local.repositories"],
     args: "<path> [owner/repo]",
-    requires: ["signed-in"],
+    requires: ["repo-source"],
     input: Schema.Struct({ path: Schema.String, repo: Schema.optional(Schema.String) }),
     handler: ({ path, repo }) => actions.readFile(path, repo)
   }),
@@ -1328,6 +1328,18 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    * ci" the generated matrix. The repo id may go unnamed when exactly one
    * repository is open — the controller resolves it.
    */
+  flow({
+    /*
+     * The targets table on request: opening a repository renders nothing,
+     * so the table is this explicit act (a bare call means the active repo).
+     */
+    name: "target.list",
+    summary: "List the repository's Smithers targets",
+    runtime: ["local.targets"],
+    args: "[repoId]",
+    input: Schema.Struct({ repoId: Schema.optional(Schema.String) }),
+    handler: ({ repoId }) => actions.listTargets(repoId)
+  }),
   flow({
     name: "target.graph",
     summary: "Show the target graph",

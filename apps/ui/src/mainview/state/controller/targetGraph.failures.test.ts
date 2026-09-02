@@ -15,6 +15,7 @@ import { TARGET_GRAPH_ROUTES } from "smithers-shared/TargetGraph"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import { createAppController } from "../AppController"
 import { createAppStore } from "../AppStore"
+import { repoKeyOf } from "../AppState"
 import type { Card } from "../AppState"
 
 const memoryStorage = (): StorageApi => {
@@ -68,21 +69,7 @@ const answerWith = (reply: (url: string) => Response | Promise<Response>): (() =
 const controllerWith = async (repos: ReadonlyArray<string>) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const controller = createAppController(store, unavailableRepositories, unavailableAgent)
-  repos.forEach((id, index) => {
-    store.dispatch({
-      type: "card.upsert",
-      actor: "user",
-      card: {
-        id: `repo-${id}`,
-        kind: "repo",
-        title: id,
-        status: "acted",
-        createdAt: index,
-        ordinal: index,
-        payload: { repo: repo(id) }
-      }
-    })
-  })
+  store.dispatch({ type: "repos.loaded", actor: "system", repos: repos.map((id) => repo(id)) })
   return { store, controller }
 }
 
@@ -111,12 +98,19 @@ test("with no repository open, every command says to open one and lands no card"
   expect([...store.collections.cards.values()].length).toBe(0)
 })
 
-test("with two repositories open, every command asks which one", async () => {
-  const { controller } = await controllerWith(["force", "eigen"])
-  for (const name of COMMANDS) {
-    const result = await controller.commands.run(name)
-    expect(JSON.stringify(result)).toContain("Name the repository")
-  }
+test("with two repositories open, every command acts on the active one — the first by name until one is selected", async () => {
+  const { store, controller } = await controllerWith(["force", "eigen"])
+  restore = answerWith(() =>
+    new Response(JSON.stringify({ error: { message: "down" } }), { status: 500, headers: { "content-type": "application/json" } })
+  )
+  for (const name of COMMANDS) await controller.commands.run(name)
+  const cards = [...store.collections.cards.values()]
+  expect(cards.length).toBe(COMMANDS.length)
+  // "eigen" sorts before "force": the store named it active when both loaded at once.
+  expect(cards.map((card) => (card.payload as { repoId?: string }).repoId)).toEqual(COMMANDS.map(() => "eigen"))
+  store.dispatch({ type: "repo.selected", actor: "user", id: repoKeyOf("/tmp/force") })
+  await controller.commands.run("target.graph")
+  expect((cardOf(store, "graph-force")?.payload as { repoId?: string } | undefined)?.repoId).toBe("force")
 })
 
 test("a route that 500s leaves each card failed with the backend's words", async () => {

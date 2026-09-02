@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { REPO_FILE_READ_CAP_BYTES } from "smithers-shared/LocalApp"
 import { isAgentTurnFrame } from "smithers-shared/NativeAgent"
 import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
 import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "smithers-shared/LocalSession"
@@ -319,6 +320,111 @@ describe("the local origin", () => {
     const session = await apiFetch("/api/auth/session")
     expect(await session.json()).toEqual({ status: "signed-out" })
     expect((await apiFetch("/api/auth/native/start", { method: "POST" })).status).toBe(501)
+  })
+})
+
+describe("POST /api/repo/files", () => {
+  let repoDir = ""
+  let outside = ""
+  let repoId = ""
+  const files = (body: unknown) =>
+    apiFetch("/api/repo/files", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+
+  beforeAll(async () => {
+    repoDir = await mkdtemp(join(tmpdir(), "smithers-repo-files-"))
+    outside = await mkdtemp(join(tmpdir(), "smithers-repo-outside-"))
+    await mkdir(join(repoDir, "src"))
+    await writeFile(join(repoDir, "README.md"), "# Smithers — files\n")
+    await writeFile(join(repoDir, "src", "app.ts"), "export const x = 1\n")
+    await writeFile(join(repoDir, "logo.bin"), Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47]))
+    await writeFile(join(repoDir, "big.txt"), "x".repeat(REPO_FILE_READ_CAP_BYTES + 10))
+    await writeFile(join(outside, "secret.txt"), "top secret")
+    await symlink(join(outside, "secret.txt"), join(repoDir, "escape.txt"))
+    const opened = await apiFetch("/api/repo/open", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: repoDir })
+    })
+    expect(opened.status).toBe(200)
+    repoId = ((await opened.json()) as { repo: { id: string } }).repo.id
+  })
+
+  afterAll(async () => {
+    await apiFetch("/api/repo/close", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repoId }) })
+    await rm(repoDir, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  test("lists a directory dirs-first then by name; a symlink lists as what it points at", async () => {
+    const root = await files({ repoId })
+    expect(root.status).toBe(200)
+    expect(await root.json()).toEqual({
+      kind: "dir",
+      path: "",
+      entries: [
+        { name: "src", kind: "dir" },
+        { name: "big.txt", kind: "file" },
+        { name: "escape.txt", kind: "file" },
+        { name: "logo.bin", kind: "file" },
+        { name: "README.md", kind: "file" }
+      ]
+    })
+    const src = await files({ repoId, path: "/src/" })
+    expect(await src.json()).toEqual({ kind: "dir", path: "src", entries: [{ name: "app.ts", kind: "file" }] })
+  })
+
+  test("reads a text file whole, states its size, and keeps UTF-8 intact", async () => {
+    const response = await files({ repoId, path: "README.md" })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      kind: "file",
+      path: "README.md",
+      size: Buffer.byteLength("# Smithers — files\n"),
+      content: "# Smithers — files\n",
+      truncated: false,
+      binary: false
+    })
+  })
+
+  test("bounds a large file at the read cap and says so", async () => {
+    const body = (await (await files({ repoId, path: "big.txt" })).json()) as { content: string; truncated: boolean; size: number }
+    expect(body.truncated).toBe(true)
+    expect(body.content.length).toBe(REPO_FILE_READ_CAP_BYTES)
+    expect(body.size).toBe(REPO_FILE_READ_CAP_BYTES + 10)
+  })
+
+  test("states a binary file instead of printing it", async () => {
+    expect(await (await files({ repoId, path: "logo.bin" })).json()).toEqual({
+      kind: "file",
+      path: "logo.bin",
+      size: 5,
+      content: "",
+      truncated: false,
+      binary: true
+    })
+  })
+
+  test("refuses traversal, refuses a symlink out of the repository, and 404s a missing path", async () => {
+    for (const path of ["../secret.txt", "src/../../x", String.raw`src\..\..\x`, "a/./b"]) {
+      const refused = await files({ repoId, path })
+      expect(refused.status).toBe(400)
+      expect(((await refused.json()) as { error: { code: string } }).error.code).toBe("invalid_path")
+    }
+    const escape = await files({ repoId, path: "escape.txt" })
+    expect(escape.status).toBe(403)
+    expect(((await escape.json()) as { error: { code: string } }).error.code).toBe("path_outside_repository")
+    // An absolute path is read relative to the root, never from the filesystem root.
+    const absolute = await files({ repoId, path: "/etc/passwd" })
+    expect(absolute.status).toBe(404)
+    const missing = await files({ repoId, path: "missing.txt" })
+    expect(missing.status).toBe(404)
+    expect(((await missing.json()) as { error: { message: string } }).error.message).toBe("Path not found: missing.txt")
+  })
+
+  test("404s an unknown repository and 400s a malformed body", async () => {
+    expect((await files({ repoId: "nope" })).status).toBe(404)
+    expect((await files({ repoId, path: 3 })).status).toBe(400)
+    expect((await files({ repoId, cwd: "/" })).status).toBe(400)
   })
 })
 

@@ -1,6 +1,8 @@
 /*
  * The repo files seam: GET /api/repos/{owner}/{repo}/contents[/path] lists a
- * directory ("file-list" card) or reads a file ("file" card, capped). The
+ * directory ("file-list" card) or reads a file ("file" card, capped). A
+ * repository open in the LOCAL app is read through its own route instead
+ * (localTarget, POST /api/repo/files) and renders the same two cards. The
  * agent shares these commands, so reads must stay bounded. Reference: multi
  * src/files/filesClient.ts — buildContentsPath (:61, per-segment encoding via
  * encodeRepoPath :53), the directory answer is a JSON array of {name, path,
@@ -10,8 +12,11 @@
  * decodeContent :117). Parsing is defensive: unknown JSON in, typed card
  * payload out, malformed rows drop; failures are honest strings, never throws.
  */
+import { REPO_FILES_PATH, RepoFilesResponseSchema } from "smithers-shared/LocalApp"
+import type { Repo, RepoFilesResponse } from "smithers-shared/LocalApp"
 import type { Card } from "../AppState"
-import { resolveTargetRepo } from "../RepoContext"
+import type { AppStore } from "../AppStore"
+import { resolveOpenRepo, resolveTargetRepo } from "../RepoContext"
 import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
@@ -95,6 +100,31 @@ const decodeBase64 = (value: string): { readonly text: string; readonly binary: 
 
 const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error)
 
+/**
+ * The open LOCAL repository a files command means, if any (LOCAL-APP.md): an
+ * explicit token that matches an open repository's name (`owner/repo` off its
+ * remote, or its folder name), its folder name, or its path; with no token,
+ * the repository a bare command means (resolveOpenRepo: the active one, as
+ * the chrome shows it). A token that matches nothing open, or a bare call
+ * with nothing open, is undefined: the Cloud rule applies, so a Cloud read
+ * is still one name away.
+ */
+const localTarget = (
+  store: AppStore,
+  explicit: string | undefined
+): { readonly repo: Repo } | { readonly error: string } | undefined => {
+  const repos = [...store.collections.repos.values()]
+  if (explicit !== undefined && explicit !== "") {
+    const named = repos.find((repo) =>
+      repo.name === explicit || repo.path === explicit || repo.path.split("/").pop() === explicit
+    )
+    return named === undefined ? undefined : { repo: named }
+  }
+  if (repos.length === 0) return undefined
+  const open = resolveOpenRepo(store)
+  return "repo" in open ? { repo: open.repo } : { error: open.error }
+}
+
 export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
   const contentsUrl = (repo: string, path: string): string => {
     const [owner = "", name = ""] = repo.split("/")
@@ -120,9 +150,86 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     return `${repo} isn't imported yet — run /repos.import ${repo} first`
   }
 
+  /*
+   * The local route (`POST /api/repo/files`, LOCAL-APP.md): one request
+   * answers a directory or a file, already bounded and already honest about
+   * binary, so the seam only renders. Failures are the same honest strings
+   * the Cloud path answers.
+   */
+  const localRequest = async (
+    repo: Repo,
+    path: string,
+    label: string,
+    verb: "list" | "read"
+  ): Promise<{ readonly body: RepoFilesResponse } | { readonly error: string }> => {
+    let response: Response
+    try {
+      response = await ctx.http(`${ctx.baseUrl}${REPO_FILES_PATH}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repoId: repo.id, path })
+      })
+    } catch (error) {
+      return { error: `Could not reach the local app to ${verb} ${label} in ${repo.name}: ${errorText(error)}` }
+    }
+    if (response.status === 404) return { error: await readErrorMessage(response, `Path not found: ${label} in ${repo.name}`) }
+    if (!response.ok) {
+      return {
+        error: await readErrorMessage(response, `${verb === "list" ? "Listing" : "Reading"} ${label} in ${repo.name} failed (${response.status})`)
+      }
+    }
+    const parsed = RepoFilesResponseSchema.safeParse(await response.json().catch(() => null))
+    if (!parsed.success) return { error: `The local app answered ${label} in ${repo.name} with an unreadable payload` }
+    return { body: parsed.data }
+  }
+
+  const listLocal = async (repo: Repo, path: string): Promise<string | void> => {
+    const normalized = normalizePath(path)
+    const label = normalized === "" ? "/" : normalized
+    const answer = await localRequest(repo, normalized, label, "list")
+    if ("error" in answer) return answer.error
+    if (answer.body.kind === "file") return `${normalized} in ${repo.name} is a file — run /files.read ${normalized} instead`
+    upsert({
+      id: `files-${repo.name}-${label}`,
+      kind: "file-list",
+      title: `Files · ${repo.name} · ${label}`,
+      status: "active",
+      createdAt: Date.now(),
+      ordinal: ctx.nextOrdinal(),
+      payload: { repo: repo.name, path: normalized, entries: sortEntries(answer.body.entries) }
+    })
+  }
+
+  const readLocal = async (repo: Repo, path: string): Promise<string | void> => {
+    const normalized = normalizePath(path)
+    if (normalized === "") return "files.read needs a file path"
+    const answer = await localRequest(repo, normalized, normalized, "read")
+    if ("error" in answer) return answer.error
+    if (answer.body.kind === "dir") return `${normalized} in ${repo.name} is a directory — run /files.list ${normalized} instead`
+    const { content, binary } = answer.body
+    const truncated = !binary && (answer.body.truncated || content.length > CARD_CONTENT_CAP)
+    upsert({
+      id: `file-${repo.name}-${normalized}`,
+      kind: "file",
+      title: `File · ${repo.name} · ${normalized}`,
+      status: "active",
+      createdAt: Date.now(),
+      ordinal: ctx.nextOrdinal(),
+      payload: {
+        repo: repo.name,
+        path: normalized,
+        content: binary ? "" : content.slice(0, CARD_CONTENT_CAP),
+        truncated,
+        ...(binary ? { binary: true } : {})
+      }
+    })
+  }
+
   return {
     listFiles: async (path, explicitRepo) => {
       if (unsafePath(path)) return "File paths must stay inside the repository."
+      const local = localTarget(ctx.store, explicitRepo)
+      if (local !== undefined) return "error" in local ? local.error : listLocal(local.repo, path)
       const target = resolveTargetRepo(ctx.store, explicitRepo)
       if ("error" in target) return target.error
       const { repo } = target
@@ -169,6 +276,8 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
 
     readFile: async (path, explicitRepo) => {
       if (unsafePath(path)) return "File paths must stay inside the repository."
+      const local = localTarget(ctx.store, explicitRepo)
+      if (local !== undefined) return "error" in local ? local.error : readLocal(local.repo, path)
       const target = resolveTargetRepo(ctx.store, explicitRepo)
       if ("error" in target) return target.error
       const { repo } = target

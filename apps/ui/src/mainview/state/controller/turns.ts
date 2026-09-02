@@ -121,6 +121,13 @@ export const createTurnController = (
         root: connector.root,
         branch: connector.branch
       })),
+      repositories: [...store.collections.repos.values()].map((repo) => ({
+        id: repo.id,
+        name: repo.name,
+        path: repo.path,
+        branch: repo.git?.branch ?? null,
+        smithers: repo.smithers.detected
+      })),
       /*
        * Sign-in IS the GitHub connector (§2a′): connection truth derives
        * from the validated session + the watched-repos selection, never
@@ -201,6 +208,11 @@ export const createTurnController = (
         "Run app commands through the \"commands\" tool — the same code path as the UI buttons and slash commands.",
         "Render structured cards (plans, approvals, statuses, recommendations) in the transcript.",
         "Create, list, and run Smithers workflows on the user's watched repositories (flow.create, flow.list, flow.run) — runs report live as embedded cards in this chat.",
+        ...(store.collections.repos.size > 0
+          ? [
+            "Read the open repositories listed above: files.list <path> [repo] lists a directory and files.read <path> [repo] renders a file as a card in this chat (a bare call means the active repository); target.list shows a repository's Smithers targets."
+          ]
+          : []),
         ...(repositories.available
           ? ["Connect a local repository the user picks in the native picker."]
           : [])
@@ -235,7 +247,12 @@ export const createTurnController = (
           ? "unselected"
           : watched.selected.length
       },
-      localRepositories: [...store.collections.connectors.values()].map((connector) => connector.name),
+      localRepositories: [
+        ...new Set([
+          ...[...store.collections.connectors.values()].map((connector) => connector.name),
+          ...[...store.collections.repos.values()].map((repo) => repo.name)
+        ])
+      ],
       localRepositoriesAvailable: repositories.available
     }, instructionRoles())
   }
