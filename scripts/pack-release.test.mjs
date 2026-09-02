@@ -1,11 +1,13 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, join, resolve, sep } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 import {
+  defaultBindings,
   dependencyOrder,
+  esmOnlyModules,
   packResultFilename,
   publicationManifest,
   publishedPackages,
@@ -381,4 +383,112 @@ test("the install line pins @effect/platform-node-shared beside @effect/platform
       `${relative} install lines must name @effect/platform-node-shared@${pin} beside @effect/platform-node`
     )
   }
+})
+
+
+test("an export with no require condition is the only thing that exempts a module from the CommonJS check", () => {
+  const manifest = {
+    publishConfig: {
+      exports: {
+        "./package.json": "./package.json",
+        ".": { types: "./dist/esm/index.d.ts", import: "./dist/esm/index.js", require: "./dist/cjs/index.js" },
+        "./Vitest": { types: "./dist/esm/Vitest.d.ts", import: "./dist/esm/Vitest.js" },
+        "./*": { types: "./dist/esm/*.d.ts", import: "./dist/esm/*.js" },
+        "./internal/*": null
+      }
+    }
+  }
+  assert.deepEqual([...esmOnlyModules(manifest)], ["Vitest"])
+  assert.deepEqual([...esmOnlyModules({})], [])
+  assert.deepEqual([...esmOnlyModules({ publishConfig: { exports: { ".": "./dist/esm/index.js" } } })], [])
+})
+
+test("every ESM-only export in the workspace names one concrete module its build program can skip", () => {
+  for (const [directory, manifest] of readWorkspaceManifests()) {
+    for (const [subpath, conditions] of Object.entries(manifest.publishConfig?.exports ?? {})) {
+      if (typeof conditions !== "object" || conditions === null || "require" in conditions) continue
+      if (typeof conditions.import !== "string") continue
+      assert.equal(
+        conditions.import.includes("*"),
+        false,
+        `${directory} publishes ${subpath} without a require condition through a pattern; the CommonJS check cannot exempt a pattern`
+      )
+      assert.equal(
+        esmOnlyModules(manifest).has(conditions.import.replace(/^\.\/dist\/esm\//, "").replace(/\.js$/, "")),
+        true,
+        `${directory} publishes ${subpath} import-only but the pack script does not recognise it as ESM-only`
+      )
+    }
+  }
+})
+
+test("defaultBindings reports the default import and export sites and nothing spelled inside a string or comment", () => {
+  const source = [
+    "/**",
+    " * import skeleton from \"./Skeleton.ts\"",
+    " * export default skeleton",
+    " */",
+    "import * as Layer from \"effect/Layer\"",
+    "import React from \"react\"",
+    "import type Shape from \"./Shape.ts\"",
+    "import initial from \"./migrations/0001_initial.ts\"",
+    "import lineage, { later } from \"../migrations/0002_lineage.ts\"",
+    "// import commented from \"./Commented.ts\"",
+    "const fence = \"```ts\"",
+    "export const template = `\"use server\"",
+    "",
+    "export default Flow.make({ name: ${JSON.stringify(\"x\")} })",
+    "`",
+    "export const named = initial",
+    "export default named"
+  ].join("\n")
+
+  assert.deepEqual(defaultBindings(source), [
+    { line: 8, kind: "import", text: "import initial from \"./migrations/0001_initial.ts\"" },
+    { line: 9, kind: "import", text: "import lineage, { later } from \"../migrations/0002_lineage.ts\"" },
+    { line: 17, kind: "export", text: "export default named" }
+  ])
+  assert.deepEqual(defaultBindings("export const set = {}\n"), [])
+})
+
+test("no published source module default-imports a sibling or exports a default", () => {
+  // scripts/build.mjs converts every src file to CommonJS with esbuild
+  // (bundle: false) inside a "type": "module" package. For `import x from
+  // "./y.ts"` esbuild emits `__toESM(require("./y.js"), 1)` and reads
+  // `.default`, which in Node mode is the whole exports object, not the value.
+  // `initial.pipe(...)` then threw at module init in the CommonJS entries of
+  // @smthrs/control, @smthrs/gateway, and @smthrs/cli while the ESM build was
+  // fine, which is how the release smoke found it. The convention that keeps
+  // it out is named exports only, and this walk is what holds the convention.
+  //
+  // The walk covers exactly the packages the RC contract publishes, and only
+  // their `src`: legacy/, private workspaces, tests, and docs are never read.
+  const manifests = readWorkspaceManifests()
+  assert.equal(manifests.size, publishedPackages.length)
+  const sites = []
+  let modules = 0
+  for (const directory of manifests.keys()) {
+    const source = join(repoRoot, "packages", directory, "src")
+    if (!existsSync(source)) continue
+    for (const entry of readdirSync(source, { recursive: true })) {
+      const relative = `src/${String(entry).split(sep).join("/")}`
+      if (!relative.endsWith(".ts")) continue
+      const path = join(source, String(entry))
+      if (!statSync(path).isFile()) continue
+      modules += 1
+      for (const site of defaultBindings(readFileSync(path, "utf8"))) {
+        sites.push(`packages/${directory}/${relative}:${site.line}  ${site.text}`)
+      }
+    }
+  }
+
+  assert.ok(modules > 100, `the walk read ${modules} modules, too few to be the published set`)
+  assert.deepEqual(
+    sites,
+    [],
+    "these published modules default-import a relative module or declare `export default`, and esbuild's " +
+      "CommonJS pass (scripts/build.mjs, bundle: false, in a \"type\": \"module\" package) rewrites such an import " +
+      "to `__toESM(require(...), 1).default`, which in Node mode is the whole exports object instead of the " +
+      "exported value, so the published CommonJS entry throws at module init; use a named export and a named import"
+  )
 })

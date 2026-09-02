@@ -233,14 +233,200 @@ const sourceFiles = async (directory) => {
   return nested.flat()
 }
 
-const assertBuilt = async (packageRoot) => {
+/**
+ * The modules a manifest publishes as ESM only: every `publishConfig.exports`
+ * entry that names a concrete `dist/esm` file under `import` and declares no
+ * `require` condition. `@smthrs/testing/Vitest` is one: `vitest` refuses to
+ * load through `require()`, so the package's build program emits no
+ * `dist/cjs/Vitest.js` and the export map is what tells consumers so. The
+ * built-output check below reads the same map, so the two cannot disagree.
+ */
+export const esmOnlyModules = (manifest) => {
+  const modules = new Set()
+  for (const conditions of Object.values(manifest.publishConfig?.exports ?? {})) {
+    if (typeof conditions !== "object" || conditions === null || "require" in conditions) continue
+    const match = /^\.\/dist\/esm\/([^*]+)\.js$/.exec(conditions.import ?? "")
+    if (match !== null) modules.add(match[1])
+  }
+  return modules
+}
+
+/**
+ * Replaces every comment and template literal in `source` with spaces, one per
+ * character, so a line-anchored regex sees only declarations and every offset
+ * and line number still points at the original text. Quoted strings are kept,
+ * because an import declaration's module specifier is one, but they are
+ * tracked so a backtick inside `"```ts"` does not open a template.
+ *
+ * The scanner knows five states and nothing else: a `'` or `"` string ends at
+ * its closing quote or at the end of its line, a template literal ends at its
+ * closing backtick and nests through `${ }`, and a comment ends at the end of
+ * its line or at the closing star-slash. Regular-expression literals are not
+ * recognised, so an unescaped quote inside one costs at most the rest of its
+ * own line and an unescaped backtick opens a template; neither occurs in a
+ * published package today, and dprint escapes both.
+ */
+const declarationText = (source) => {
+  const out = []
+  // Brace depth inside each open `${ }` hole, innermost last. While a hole is
+  // open the scanner is back in code, and the hole's closing brace returns it
+  // to the template.
+  const holes = []
+  let state = "code"
+  let i = 0
+  const keep = (ch) => out.push(ch)
+  const blank = (ch) => out.push(ch === "\n" ? "\n" : " ")
+  while (i < source.length) {
+    const ch = source[i]
+    const next = source[i + 1]
+    switch (state) {
+      case "code": {
+        if (ch === "/" && next === "/") {
+          state = "line"
+          blank(ch)
+          blank(next)
+          i += 2
+        } else if (ch === "/" && next === "*") {
+          state = "block"
+          blank(ch)
+          blank(next)
+          i += 2
+        } else if (ch === "'" || ch === "\"") {
+          state = ch
+          keep(ch)
+          i += 1
+        } else if (ch === "`") {
+          state = "template"
+          blank(ch)
+          i += 1
+        } else if (holes.length > 0 && ch === "{") {
+          holes[holes.length - 1] += 1
+          keep(ch)
+          i += 1
+        } else if (holes.length > 0 && ch === "}" && holes[holes.length - 1] === 0) {
+          holes.pop()
+          state = "template"
+          blank(ch)
+          i += 1
+        } else if (holes.length > 0 && ch === "}") {
+          holes[holes.length - 1] -= 1
+          keep(ch)
+          i += 1
+        } else {
+          keep(ch)
+          i += 1
+        }
+        break
+      }
+      case "line": {
+        if (ch === "\n") state = "code"
+        blank(ch)
+        i += 1
+        break
+      }
+      case "block": {
+        if (ch === "*" && next === "/") {
+          state = "code"
+          blank(ch)
+          blank(next)
+          i += 2
+        } else {
+          blank(ch)
+          i += 1
+        }
+        break
+      }
+      case "'":
+      case "\"": {
+        if (ch === "\\" && next !== undefined) {
+          keep(ch)
+          keep(next)
+          i += 2
+        } else {
+          if (ch === state || ch === "\n") state = "code"
+          keep(ch)
+          i += 1
+        }
+        break
+      }
+      case "template": {
+        if (ch === "\\" && next !== undefined) {
+          blank(ch)
+          blank(next)
+          i += 2
+        } else if (ch === "`") {
+          state = "code"
+          blank(ch)
+          i += 1
+        } else if (ch === "$" && next === "{") {
+          holes.push(0)
+          state = "code"
+          blank(ch)
+          blank(next)
+          i += 2
+        } else {
+          blank(ch)
+          i += 1
+        }
+        break
+      }
+    }
+  }
+  return out.join("")
+}
+
+const defaultImportPattern =
+  /^[ \t]*import\s+([A-Za-z_$][\w$]*)(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*)\s*|\s+)from\s+["'](\.\.?\/[^"'\n]*)["']/gm
+const defaultExportPattern = /^[ \t]*export\s+default\b/gm
+
+/**
+ * The default-binding sites in one TypeScript module: every default import of
+ * a relative module (`import x from "./y.ts"`, with or without named or
+ * namespace bindings beside it) and every `export default` declaration. Each
+ * site carries the one-based `line`, its `kind`, and the original line `text`.
+ *
+ * Both are forbidden in a published package's `src`. `scripts/build.mjs`
+ * converts every source file to CommonJS with esbuild (`bundle: false`) inside
+ * a `"type": "module"` package, and for a default import of a sibling esbuild
+ * emits Node-style interop: `__toESM(require("./y.js"), 1)` and then reads
+ * `.default`, which in Node mode is the whole exports object
+ * `{ __esModule, default }` rather than the exported value. A migration module
+ * imported that way reached `initial.pipe(...)` at module init and threw in
+ * the CommonJS entries of `@smthrs/control`, `@smthrs/gateway`, and
+ * `@smthrs/cli`. `export default` alone is harmless to `require()`, but it is
+ * the only thing a default import can bind to, so it is refused as well.
+ *
+ * Type-only imports (`import type x from "./y.ts"`) erase before the build and
+ * are not reported. Bare and scoped specifiers (`import React from "react"`)
+ * cross a package boundary where the interop is the consumer's, not ours, and
+ * are not reported either. Comments and template literals are blanked before
+ * matching, so a flow skeleton spelled inside a template string is not a site.
+ */
+export const defaultBindings = (source) => {
+  const text = declarationText(source)
+  const lines = source.split("\n")
+  const lineAt = (index) => text.slice(0, index).split("\n").length
+  const sites = []
+  for (const match of text.matchAll(defaultImportPattern)) {
+    const line = lineAt(match.index)
+    sites.push({ line, kind: "import", text: lines[line - 1].trim() })
+  }
+  for (const match of text.matchAll(defaultExportPattern)) {
+    const line = lineAt(match.index)
+    sites.push({ line, kind: "export", text: lines[line - 1].trim() })
+  }
+  return sites.sort((a, b) => a.line - b.line)
+}
+
+const assertBuilt = async (packageRoot, manifest) => {
   const sourceRoot = join(packageRoot, "src")
+  const esmOnly = esmOnlyModules(manifest)
   for (const source of await sourceFiles(sourceRoot)) {
     const modulePath = relative(sourceRoot, source).slice(0, -3)
     await Promise.all([
       access(join(packageRoot, "dist", "esm", `${modulePath}.js`)),
       access(join(packageRoot, "dist", "esm", `${modulePath}.d.ts`)),
-      access(join(packageRoot, "dist", "cjs", `${modulePath}.js`))
+      ...(esmOnly.has(modulePath) ? [] : [access(join(packageRoot, "dist", "cjs", `${modulePath}.js`))])
     ])
   }
 }
@@ -280,10 +466,10 @@ const run = (command, args, options = {}) =>
 
 const packWorkspace = async (name, outputDirectory, stagingRoot) => {
   const packageRoot = join(repoRoot, "packages", name)
-  await assertBuilt(packageRoot)
-
   const manifestPath = join(packageRoot, "package.json")
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
+  await assertBuilt(packageRoot, manifest)
+
   const stagedPackage = join(stagingRoot, name)
   await cp(packageRoot, stagedPackage, {
     recursive: true,
