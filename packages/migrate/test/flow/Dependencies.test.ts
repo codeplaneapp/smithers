@@ -13,6 +13,8 @@
  * @since 0.1.0
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Cli from "@smthrs/migrate/flow/Cli"
+import * as Report from "@smthrs/migrate/Report"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
@@ -50,6 +52,7 @@ const packageOf = (specifier: string): string =>
   specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : (specifier.split("/")[0] ?? specifier)
 
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+  version: string
   dependencies: Record<string, string>
   optionalDependencies: Record<string, string>
   devDependencies: Record<string, string>
@@ -135,6 +138,16 @@ describe("the flow surface's dependency boundary", () => {
       expect(map["./internal/*"]).toBeNull()
       expect(map["./flow/internal/*"]).toBeNull()
     }
+  })
+
+  it("reports the package's own version, in the report and at --version", () => {
+    // The manifest is the release version; two literals in source repeat it
+    // because a report and a `--version` flag cannot read a manifest at run
+    // time from a packed install. `scripts/set-release-version.mjs` rewrites
+    // both on a bump, and this pins them until it does.
+    expect(Report.tool.version).toBe(manifest.version)
+    expect(Cli.version).toBe(manifest.version)
+    expect(manifest.version).toBe("1.0.0-rc.0")
   })
 
   it("declares the executable as the side effect it is", () => {

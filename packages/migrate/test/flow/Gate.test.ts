@@ -7,6 +7,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Gate from "@smthrs/migrate/flow/Gate"
 import * as Scan from "@smthrs/migrate/Scan"
 import * as Effect from "effect/Effect"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { copyFixture, fixture, hashTree, nodeLayer } from "../fixtures/helpers.ts"
@@ -101,6 +102,27 @@ describe("Gate.evaluate", () => {
       expect(Gate.unwaived(scan, undefined)).toEqual(unsafe)
 
       yield* Gate.evaluate(scan, { mode: "apply", acknowledgeRunState: true, allowUnsafe: unsafe })
+    }))
+
+  it.effect("refuses apply over a scan that left part of the project unread, and names what it skipped", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const deep = join(root, ...Array.from({ length: 14 }, (_, index) => `d${index}`))
+      mkdirSync(deep, { recursive: true })
+      writeFileSync(join(deep, "lost.jsx"), "/** @jsxImportSource smthrs */\n")
+      const scan = yield* scanOf(root)
+
+      expect(scan.detection.warnings.some((warning) => warning.code === "incomplete-scan")).toBe(true)
+      // Reading is still allowed; editing an incomplete plan is not.
+      yield* Gate.evaluate(scan, { mode: "plan" })
+      const failure = yield* Effect.flip(Gate.evaluate(scan, { mode: "apply" }))
+      expect(failure.code).toBe("unsupported-project")
+      expect(failure.message).toContain("did not read the whole project")
+      expect(failure.details).toContain("d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11/d12")
+      // The report-side gate reads the same warnings the report carries.
+      const report = Scan.toReport(scan, "apply", "2026-09-01T00:00:00.000Z")
+      const fromReport = yield* Effect.flip(Gate.evaluateReport(report, { mode: "apply" }))
+      expect(fromReport.code).toBe("unsupported-project")
     }))
 
   it.effect("passes a clean project with nothing unsafe", () =>

@@ -226,6 +226,7 @@ export const layerNode = (config: {
   readonly seat?: string | undefined
   readonly flowsDir?: string | undefined
   readonly reportDir?: string | undefined
+  readonly state?: Options.State | undefined
   readonly commands?: Units.CommandOverrides | undefined
 }) =>
   Layers.layerNodeScanned({
@@ -234,6 +235,7 @@ export const layerNode = (config: {
     ...(config.seat === undefined ? {} : { seat: config.seat }),
     ...(config.flowsDir === undefined ? {} : { flowsDir: config.flowsDir }),
     ...(config.reportDir === undefined ? {} : { reportDir: config.reportDir }),
+    ...(config.state === undefined ? {} : { state: config.state }),
     ...(config.commands === undefined ? {} : { commands: config.commands })
   })
 
@@ -336,6 +338,9 @@ export const runNode = (
       root: options.root,
       flowsDir: Options.flowsDir(options),
       reportDir: Options.reportDir(options),
+      // The same state paths the flow's own scan reads, so the host's grant
+      // rules deny the same run-state paths the report names.
+      ...(options.state === undefined ? {} : { state: options.state }),
       ...(options.seat === undefined ? {} : { seat: options.seat }),
       ...(config.environment === undefined ? {} : { environment: config.environment }),
       // The host verifies and spawns with the same commands the units do.
@@ -398,10 +403,18 @@ const list = (value: string | undefined): ReadonlyArray<string> | undefined =>
  * `--scan` wins over `--apply` when both are given: of two contradictory
  * instructions, the safer one is the one to obey.
  *
+ * `environment` is where the three state paths come from (`SMITHERS_HOME`,
+ * `HOME`, `TMPDIR`); nothing else in it reaches the payload.
+ *
  * @category conversions
  * @since 0.1.0
  */
-export const optionsOf = (flags: Flags, cwd: string): MigrateOptions => {
+export const optionsOf = (
+  flags: Flags,
+  cwd: string,
+  environment: Readonly<Record<string, string | undefined>> = {}
+): MigrateOptions => {
+  const state = Options.stateOf(environment)
   const unsafe = flags.allowUnsafe
   const units = list(flags.unit)
   // One empty value is how a shell says "none": `--verify-typecheck ""` runs no
@@ -431,6 +444,7 @@ export const optionsOf = (flags: Flags, cwd: string): MigrateOptions => {
     ...(flags.maxRepairRounds === undefined ? {} : { maxRepairRounds: flags.maxRepairRounds }),
     ...(flags.reportDir === undefined ? {} : { reportDir: flags.reportDir }),
     ...(flags.flowsDir === undefined ? {} : { layout: { flowsDir: flags.flowsDir } }),
-    ...(Object.keys(commands).length === 0 ? {} : { commands })
+    ...(Object.keys(commands).length === 0 ? {} : { commands }),
+    ...(state === undefined ? {} : { state })
   }
 }

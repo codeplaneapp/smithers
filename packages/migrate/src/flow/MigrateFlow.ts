@@ -101,6 +101,11 @@ const scanOptions = (options: Options.MigrateOptions): Scan.Options => ({
   // of what a previous run replaced, and a second run must not plan to
   // migrate the archive.
   ignore: [Options.reportDir(options)],
+  // The host's state paths reach the scanners here, so the global state
+  // directory and the gateway's temporary files are found by the run's own
+  // scan and not only by a scanner test that passed them by hand.
+  environment: Options.scanEnvironment(options.state),
+  ...(options.state?.tmpdir === undefined ? {} : { runState: { tmpdir: options.state.tmpdir } }),
   flowsDir: Options.flowsDir(options),
   ...(options.units === undefined ? {} : { units: options.units }),
   ...(options.commands === undefined ? {} : {

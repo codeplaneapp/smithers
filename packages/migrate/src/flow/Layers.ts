@@ -57,6 +57,7 @@ import * as Scan from "../Scan.ts"
 import * as Units from "../Units.ts"
 import * as Contract from "./Contract.ts"
 import * as MigrateFlow from "./MigrateFlow.ts"
+import * as Options from "./Options.ts"
 import * as Transform from "./Transform.ts"
 
 /**
@@ -399,6 +400,12 @@ export interface ScannedConfig {
   /** The tool's own directory, which the scan skips. Defaults to `.smithers-migrate`. */
   readonly reportDir?: string | undefined
   /**
+   * The state paths the scan reads. Absent, they are derived from
+   * `environment`, so a host that passes its process environment gets the
+   * same scan the run's own scan step makes.
+   */
+  readonly state?: Options.State | undefined
+  /**
    * The operator's own command overrides, if they named any.
    *
    * They have to reach the host, not only the units. The host binds
@@ -453,8 +460,11 @@ export const layerNodeScanned = (config: ScannedConfig) => {
   absoluteRoot(config.root)
   return Layer.unwrap(
     Effect.gen(function*() {
+      const state = config.state ?? Options.stateOf(config.environment ?? {})
       const result = yield* Scan.scan(config.root, {
         ignore: [config.reportDir ?? ".smithers-migrate"],
+        environment: Options.scanEnvironment(state),
+        ...(state?.tmpdir === undefined ? {} : { runState: { tmpdir: state.tmpdir } }),
         ...(config.flowsDir === undefined ? {} : { flowsDir: config.flowsDir })
       })
       return layerNode({

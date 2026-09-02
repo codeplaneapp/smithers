@@ -16,7 +16,7 @@ import * as Detect from "./Detect.ts"
 import * as Sort from "./internal/Sort.ts"
 import * as Inventory from "./Inventory.ts"
 import * as Mapping from "./Mapping.ts"
-import type { MigrateError } from "./MigrateError.ts"
+import { make, type MigrateError } from "./MigrateError.ts"
 import * as PromptHints from "./PromptHints.ts"
 import * as Report from "./Report.ts"
 import * as RunState from "./RunState.ts"
@@ -127,11 +127,40 @@ export const scan = (
       zod: ZodSchemaHints.hints(detection),
       prompt: PromptHints.hints(detection)
     }
-    const units = Units.plan({ detection, inventory, hints }, {
+    // The whole plan first, then the selection. A `--unit` id the plan does
+    // not carry used to filter every unit away: nothing ran, no unit was
+    // `failed` or `blocked`, and the run reported a successful migration that
+    // did nothing. The plan is also the only place a duplicate id is visible,
+    // because everything downstream keys units by that id.
+    const planned = Units.plan({ detection, inventory, hints }, {
       ...(options.flowsDir === undefined ? {} : { flowsDir: options.flowsDir }),
-      ...(options.commands === undefined ? {} : { commands: options.commands }),
-      ...(options.units === undefined ? {} : { units: options.units })
+      ...(options.commands === undefined ? {} : { commands: options.commands })
     })
+    const duplicates = Units.duplicateIds(planned)
+    if (duplicates.length > 0) {
+      return yield* Effect.fail(make(
+        "unsupported-project",
+        `two units share one id, so one would overwrite the other: ${
+          duplicates
+            .map((entry) => `"${entry.id}" is planned for ${entry.sources.map((file) => `"${file}"`).join(" and ")}`)
+            .join("; ")
+        }`
+      ))
+    }
+    const asked = options.units
+    if (asked !== undefined) {
+      const known = new Set(planned.map((unit) => unit.id))
+      const unknown = [...new Set(asked)].filter((id) => !known.has(id)).sort(Sort.byText)
+      if (unknown.length > 0) {
+        return yield* Effect.fail(make(
+          "unsupported-project",
+          `no unit is planned for ${unknown.map((id) => `"${id}"`).join(", ")}; this project plans ${
+            planned.map((unit) => `"${unit.id}"`).join(", ")
+          }`
+        ))
+      }
+    }
+    const units = asked === undefined ? planned : planned.filter((unit) => asked.includes(unit.id))
     return { root, detection, runState, inventory, mapping: decisions(inventory), hints, units }
   })
 

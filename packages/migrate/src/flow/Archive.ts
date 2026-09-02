@@ -32,6 +32,7 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Detect from "../Detect.ts"
 import * as Fs from "../internal/Fs.ts"
+import * as Versions from "../internal/Versions.ts"
 import { io, make, MigrateError } from "../MigrateError.ts"
 import * as Report from "../Report.ts"
 import * as Units from "../Units.ts"
@@ -42,7 +43,7 @@ import * as Units from "../Units.ts"
  * @category models
  * @since 0.1.0
  */
-export const effectVersion = "4.0.0-rc.108"
+export const effectVersion = Versions.effectVersion
 
 /**
  * The version every `@smthrs/*` package a migrated project depends on ends on.
@@ -50,7 +51,7 @@ export const effectVersion = "4.0.0-rc.108"
  * @category models
  * @since 0.1.0
  */
-export const smithersVersion = "1.0.0-rc.0"
+export const smithersVersion = Versions.smithersVersion
 
 /**
  * What a manifest rewrite removes and adds.

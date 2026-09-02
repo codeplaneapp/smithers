@@ -73,6 +73,40 @@ export const ignoredPaths: ReadonlyArray<string> = [
 export const maxDepth = 12
 
 /**
+ * The largest file the scanners read. A source file is application code; a
+ * file past this size is an asset, a log, or a database that leaked into the
+ * source tree, and reading it would spend the process on text no scanner
+ * uses. The skip is reported, never silent.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export const maxFileBytes = 8 * 1024 * 1024
+
+/**
+ * One path a walk did not descend into or read, and why.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export interface Skipped {
+  readonly path: string
+  readonly reason: "unreadable" | "depth"
+  readonly message: string
+}
+
+/**
+ * What a walk found and what it could not: the files, and every skip.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export interface Walked {
+  readonly files: ReadonlyArray<string>
+  readonly skipped: ReadonlyArray<Skipped>
+}
+
+/**
  * Options for {@link walk}.
  *
  * @since 0.1.0
@@ -90,9 +124,86 @@ const relative = (root: string, path: Path.Path, absolute: string): string => {
 
 /**
  * Lists every file under `root`, as paths relative to `root` with `/`
- * separators, sorted. Unreadable directories are skipped rather than failing
- * the walk: a project the operator cannot fully read is still worth reporting
- * on, and `Detect` records the skip as a warning.
+ * separators, sorted, and every directory the walk could not read or would
+ * not descend into.
+ *
+ * A directory the operator cannot read, and a directory past {@link maxDepth},
+ * are recorded rather than dropped: a scan that left something out has to say
+ * so, because a plan built on it may be incomplete and `Gate` refuses to apply
+ * one. A path that vanished between the listing and the stat is not a skip;
+ * it was not there.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export const walkReport = (
+  root: string,
+  options: WalkOptions = {}
+): Effect.Effect<Walked, never, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const ignored = new Set([...ignoredPaths, ...(options.ignore ?? [])])
+    const limit = options.maxDepth ?? maxDepth
+    const found: Array<string> = []
+    const skipped: Array<Skipped> = []
+    // A root whose own name is `.smithers` is a pack directory, so the keys
+    // above still apply once their prefix is put back.
+    const packPrefix = path.basename(root) === ".smithers" ? ".smithers/" : undefined
+    const isIgnored = (key: string): boolean =>
+      ignored.has(key) || (packPrefix !== undefined && ignored.has(`${packPrefix}${key}`))
+
+    const visit = (directory: string, depth: number): Effect.Effect<void> =>
+      Effect.gen(function*() {
+        const key = relative(root, path, directory)
+        if (depth > limit) {
+          skipped.push({
+            path: key,
+            reason: "depth",
+            message: `"${key}" is more than ${limit} directories deep and was not scanned`
+          })
+          return
+        }
+        const listed = yield* Effect.result(fs.readDirectory(directory))
+        if (listed._tag === "Failure") {
+          skipped.push({
+            path: key === "" ? "." : key,
+            reason: "unreadable",
+            message: `"${key === "" ? "." : key}" could not be listed: ${listed.failure.message}`
+          })
+          return
+        }
+        for (const name of listed.success.slice().sort()) {
+          if (ignoredDirectories.includes(name)) continue
+          const absolute = path.join(directory, name)
+          const child = relative(root, path, absolute)
+          if (isIgnored(child)) continue
+          const info = yield* Effect.result(optionalNotFound(fs.stat(absolute)))
+          if (info._tag === "Failure") {
+            skipped.push({
+              path: child,
+              reason: "unreadable",
+              message: `"${child}" could not be inspected: ${info.failure.message}`
+            })
+            continue
+          }
+          if (Option.isNone(info.success)) continue
+          if (info.success.value.type === "Directory") {
+            yield* visit(absolute, depth + 1)
+          } else if (info.success.value.type === "File") {
+            found.push(child)
+          }
+        }
+      })
+
+    yield* visit(root, 0)
+    return { files: found.sort(), skipped: skipped.sort((left, right) => (left.path < right.path ? -1 : 1)) }
+  })
+
+/**
+ * Lists every file under `root`, as paths relative to `root` with `/`
+ * separators, sorted. The walk's skips are dropped; callers that have to
+ * account for them use {@link walkReport}.
  *
  * @since 0.1.0
  * @private
@@ -101,40 +212,7 @@ export const walk = (
   root: string,
   options: WalkOptions = {}
 ): Effect.Effect<ReadonlyArray<string>, never, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const skipped = new Set([...ignoredPaths, ...(options.ignore ?? [])])
-    const limit = options.maxDepth ?? maxDepth
-    const found: Array<string> = []
-    // A root whose own name is `.smithers` is a pack directory, so the keys
-    // above still apply once their prefix is put back.
-    const packPrefix = path.basename(root) === ".smithers" ? ".smithers/" : undefined
-    const isSkipped = (key: string): boolean =>
-      skipped.has(key) || (packPrefix !== undefined && skipped.has(`${packPrefix}${key}`))
-
-    const visit = (directory: string, depth: number): Effect.Effect<void> =>
-      Effect.gen(function*() {
-        if (depth > limit) return
-        const names = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed(() => [] as Array<string>))
-        for (const name of names.slice().sort()) {
-          if (ignoredDirectories.includes(name)) continue
-          const absolute = path.join(directory, name)
-          const key = relative(root, path, absolute)
-          if (isSkipped(key)) continue
-          const info = yield* fs.stat(absolute).pipe(Effect.option)
-          if (info._tag === "None") continue
-          if (info.value.type === "Directory") {
-            yield* visit(absolute, depth + 1)
-          } else if (info.value.type === "File") {
-            found.push(key)
-          }
-        }
-      })
-
-    yield* visit(root, 0)
-    return found.sort()
-  })
+  Effect.map(walkReport(root, options), (walked) => walked.files)
 
 /**
  * Lists every file under `root` with no ignore rules at all, as paths relative

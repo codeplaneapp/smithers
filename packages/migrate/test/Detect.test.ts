@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { userInfo } from "node:os"
 import { join } from "node:path"
 import * as Detect from "../src/Detect.ts"
+import * as Fs from "../src/internal/Fs.ts"
 import { copyFixture, nodeLayer } from "./fixtures/helpers.ts"
 
 const detect = (root: string, options: Detect.ScanOptions = {}) =>
@@ -70,6 +72,120 @@ describe("Detect.scan over jsx-single", () => {
       expect(tsconfig?.jsx).toBe("react-jsx")
       expect(tsconfig?.jsxImportSource).toBe("smthrs")
     }))
+
+  it.effect("judges every effect declaration against the exact release pin, manifests and lockfiles alike", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+        dependencies: Record<string, string>
+        devDependencies?: Record<string, string>
+      }
+      // A range, a later prerelease, and a second manifest that disagrees:
+      // each is a version this release was not built against.
+      manifest.dependencies["effect"] = "^4.0.0-rc.108"
+      manifest.devDependencies = { effect: "4.0.0-rc.999" }
+      writeFileSync(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
+      mkdirSync(join(root, "packages", "member"), { recursive: true })
+      writeFileSync(
+        join(root, "packages", "member", "package.json"),
+        `${JSON.stringify({ name: "member", dependencies: { effect: "4.0.0-rc.107" } })}\n`
+      )
+      writeFileSync(
+        join(root, "pnpm-lock.yaml"),
+        "lockfileVersion: '9.0'\n\npackages:\n\n  effect@4.0.0-rc.107:\n    resolution: {integrity: sha512-x}\n\n  '@effect/platform-node@4.0.0-rc.108':\n    resolution: {integrity: sha512-y}\n"
+      )
+
+      const detection = yield* detect(root)
+
+      expect(detection.effectPin).toBe("^4.0.0-rc.108")
+      expect(detection.effectDeclarations).toEqual([
+        { file: "package.json", field: "dependencies", version: "^4.0.0-rc.108" },
+        { file: "package.json", field: "devDependencies", version: "4.0.0-rc.999" },
+        { file: "packages/member/package.json", field: "dependencies", version: "4.0.0-rc.107" }
+      ])
+      const conflicts = detection.warnings.filter((warning) => warning.code === "effect-pin-conflict")
+      expect(conflicts.map((warning) => `${warning.file}: ${warning.message}`)).toEqual([
+        "package.json: dependencies.\"effect\" is \"^4.0.0-rc.108\"; Smithers 1.0 requires exactly 4.0.0-rc.108",
+        "package.json: devDependencies.\"effect\" is \"4.0.0-rc.999\"; Smithers 1.0 requires exactly 4.0.0-rc.108",
+        "packages/member/package.json: dependencies.\"effect\" is \"4.0.0-rc.107\"; Smithers 1.0 requires exactly 4.0.0-rc.108",
+        "package.json: the manifests declare effect as \"4.0.0-rc.107\", \"4.0.0-rc.999\", \"^4.0.0-rc.108\"; one version, 4.0.0-rc.108, has to be declared everywhere",
+        "pnpm-lock.yaml: \"pnpm-lock.yaml\" resolves effect to \"4.0.0-rc.107\"; Smithers 1.0 requires exactly 4.0.0-rc.108"
+      ])
+
+      // The exact pin everywhere is the one shape that earns no warning.
+      manifest.dependencies["effect"] = "4.0.0-rc.108"
+      manifest.devDependencies = { effect: "4.0.0-rc.108" }
+      writeFileSync(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
+      writeFileSync(
+        join(root, "packages", "member", "package.json"),
+        `${JSON.stringify({ name: "member", dependencies: { effect: "4.0.0-rc.108" } })}\n`
+      )
+      writeFileSync(
+        join(root, "pnpm-lock.yaml"),
+        "packages:\n\n  effect@4.0.0-rc.108:\n    resolution: {integrity: sha512-x}\n"
+      )
+      const pinned = yield* detect(root)
+      expect(pinned.warnings.filter((warning) => warning.code === "effect-pin-conflict")).toEqual([])
+    }))
+
+  it("reads the version each lockfile dialect resolved effect to", () => {
+    expect(
+      Detect.resolvedEffectVersions(
+        "  effect@4.0.0-rc.108:\n  '@effect/platform-node@4.0.0-rc.108':\n  redux-effect@1.2.3:\n"
+      )
+    )
+      .toEqual(["4.0.0-rc.108"])
+    expect(Detect.resolvedEffectVersions("\"effect\": [\"effect@4.0.0-rc.107\", \"\", {}, \"sha512-x\"],"))
+      .toEqual(["4.0.0-rc.107"])
+    expect(
+      Detect.resolvedEffectVersions("\"node_modules/effect\": {\n  \"version\": \"3.19.0\",\n  \"resolved\": \"x\"\n}")
+    )
+      .toEqual(["3.19.0"])
+    expect(Detect.resolvedEffectVersions("\"effect@npm:^4.0.0-rc.108\":\n  version: 4.0.0-rc.112\n  resolution: x\n"))
+      .toEqual(["4.0.0-rc.112"])
+    expect(Detect.resolvedEffectVersions("nothing here")).toEqual([])
+  })
+
+  it.effect("reports every path it could not read or would not descend into, instead of dropping it", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      // Deeper than the walk goes: fourteen directories, a workflow at the bottom.
+      const deep = join(root, ...Array.from({ length: 14 }, (_, index) => `d${index}`))
+      mkdirSync(deep, { recursive: true })
+      writeFileSync(join(deep, "lost.jsx"), "/** @jsxImportSource smthrs */\n")
+      // Larger than the scanner reads.
+      writeFileSync(join(root, "huge.js"), Buffer.alloc(Fs.maxFileBytes + 1, 0x20))
+
+      const detection = yield* detect(root)
+
+      const skipped = detection.warnings.filter((warning) => warning.code === "incomplete-scan")
+      expect(skipped.map((warning) => warning.file)).toEqual([
+        "d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11/d12",
+        "huge.js"
+      ])
+      expect(skipped[0]?.message).toContain("more than 12 directories deep")
+      expect(skipped[1]?.message).toContain("above the 8388608 byte scan limit")
+      expect(detection.files).not.toContain("d0/d1/d2/d3/d4/d5/d6/d7/d8/d9/d10/d11/d12/d13/lost.jsx")
+    }))
+
+  it.effect.skipIf(userInfo().uid === 0)(
+    "reports a directory it cannot list as an incomplete scan",
+    () =>
+      Effect.gen(function*() {
+        const root = copyFixture("jsx-single")
+        mkdirSync(join(root, "locked"))
+        writeFileSync(join(root, "locked", "hidden.jsx"), "/** @jsxImportSource smthrs */\n")
+        chmodSync(join(root, "locked"), 0o000)
+        try {
+          const detection = yield* detect(root)
+          const skipped = detection.warnings.filter((warning) => warning.code === "incomplete-scan")
+          expect(skipped.map((warning) => warning.file)).toEqual(["locked"])
+          expect(skipped[0]?.message).toContain("could not be listed")
+        } finally {
+          chmodSync(join(root, "locked"), 0o755)
+        }
+      })
+  )
 
   it.effect("finds one workflow with no pragma, both prompts, and the test file", () =>
     Effect.gen(function*() {

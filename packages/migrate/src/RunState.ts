@@ -17,6 +17,7 @@
  *
  * @since 0.1.0
  */
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
@@ -83,6 +84,28 @@ export interface DatabaseFinding {
 }
 
 /**
+ * A configured 0.x database that resolves outside the project root.
+ *
+ * It is recorded here rather than in {@link DatabaseFinding} because every
+ * consumer of a `DatabaseFinding.path` treats it as project-relative: the
+ * grant rules build a deny pattern under the root from it, the checkpoint
+ * digests it under the root, the membership walk walks it under the root, and
+ * the archive refuses writes under it. Fed an absolute or `../` path, all four
+ * silently watch nothing while the report says the project is protected. The
+ * tool cannot protect a file outside the tree it was pointed at, so it says so
+ * instead and blocks.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ExternalDatabase {
+  /** The path exactly as the project's own configuration spells it. */
+  readonly declared: string
+  /** Where that spelling resolves from the project root. */
+  readonly resolved: string
+}
+
+/**
  * A Postgres or PGlite backend setting found in configuration, environment, or
  * a deployment manifest. The tool records it and never connects.
  *
@@ -123,6 +146,7 @@ export interface StateDir {
  */
 export interface RunStateReport {
   readonly databases: ReadonlyArray<DatabaseFinding>
+  readonly external: ReadonlyArray<ExternalDatabase>
   readonly postgres: BackendSetting | undefined
   readonly pglite: BackendSetting | undefined
   readonly stateDirs: ReadonlyArray<StateDir>
@@ -130,8 +154,9 @@ export interface RunStateReport {
   /**
    * `clean` when the project holds no 0.x run state, `history-only` when every
    * run it holds has finished, `blocked` when a run is live, parked, or
-   * unreadable, or a non-SQLite backend is configured. `apply` requires
-   * `--acknowledge-run-state` for both non-clean verdicts.
+   * unreadable, a database resolves outside the project, or a non-SQLite
+   * backend is configured. `apply` requires `--acknowledge-run-state` for both
+   * non-clean verdicts.
    */
   readonly verdict: "clean" | "history-only" | "blocked"
   readonly instructions: ReadonlyArray<string>
@@ -382,7 +407,11 @@ export const scan = (
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const now = options.now ?? Date.now()
+    // The Clock service, not the wall clock. The live-versus-parked split
+    // decides the verdict, the operator instructions, the gate, and the exit
+    // code, and that answer crosses the journal as part of a sealed scan: a
+    // step that replays has to reach the same verdict it recorded.
+    const now = options.now ?? (yield* Clock.currentTimeMillis)
     const liveWindowMs = options.liveWindowMs ?? defaultLiveWindowMs
     const fileSet = new Set(detection.files)
 
@@ -401,14 +430,28 @@ export const scan = (
     }
 
     const databases: Array<DatabaseFinding> = []
+    const external: Array<ExternalDatabase> = []
     for (const candidate of [...candidates].sort()) {
       const normalized = candidate.replace(/^\.\//, "")
-      const absolute = path.isAbsolute(normalized) ? normalized : path.join(root, ...normalized.split("/"))
+      const absolute = path.isAbsolute(normalized)
+        ? path.normalize(normalized)
+        : path.resolve(root, ...normalized.split("/"))
       if (!(yield* Fs.exists(absolute))) continue
+      // Containment is decided by where the path resolves, never by how it was
+      // spelled. `dbPath: "/var/data/smithers.db"` and `SMITHERS_DB=../shared.db`
+      // both name real 0.x run state this tool cannot checkpoint, deny, digest,
+      // or archive, so they are reported and they block instead of being
+      // recorded as a project-relative path that matches nothing.
+      const inside = path.relative(root, absolute)
+      if (inside === "" || inside === ".." || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside)) {
+        external.push({ declared: candidate, resolved: absolute })
+        continue
+      }
+      const relative = inside.split(path.sep).join("/")
       const siblings = ["-wal", "-shm"]
-        .map((suffix) => `${normalized}${suffix}`)
+        .map((suffix) => `${relative}${suffix}`)
         .filter((sibling) => fileSet.has(sibling))
-      databases.push(readDatabase(absolute, normalized, siblings, now, liveWindowMs))
+      databases.push(readDatabase(absolute, relative, siblings, now, liveWindowMs))
     }
 
     // Postgres and PGlite: recorded from settings, never connected to.
@@ -518,6 +561,7 @@ export const scan = (
     const blocked = live.length > 0 ||
       parked.length > 0 ||
       unreadable.length > 0 ||
+      external.length > 0 ||
       postgres !== undefined ||
       pglite !== undefined ||
       gatewayState.length > 0
@@ -537,6 +581,11 @@ export const scan = (
         } could not be opened read only; close whatever holds it, then rerun the scan`
       )
     }
+    for (const entry of external) {
+      instructions.push(
+        `${entry.declared} names a 0.x database at ${entry.resolved}, outside this project; the migration cannot protect a file it cannot reach, so archive it and remove the setting before migrating`
+      )
+    }
     if (history) instructions.push(instructionText.archive)
     if (postgres !== undefined || pglite !== undefined) instructions.push(instructionText.backend)
     if (gatewayState.length > 0) {
@@ -547,5 +596,5 @@ export const scan = (
       )
     }
 
-    return { databases, postgres, pglite, stateDirs, gatewayState, verdict, instructions }
+    return { databases, external, postgres, pglite, stateDirs, gatewayState, verdict, instructions }
   })

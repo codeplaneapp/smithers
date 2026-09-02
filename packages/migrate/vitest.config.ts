@@ -22,11 +22,20 @@ export default defineConfig({
       // each other's coverage scratch state.
       reportsDirectory: join(tmpdir(), `flows-migrate-coverage-${process.pid}`),
       include: ["src/**"],
+      // `src/flow/bin.ts` is the one statement `NodeRuntime.runMain(main)` and
+      // stays in the denominator uncovered: a test can only reach it by
+      // spawning a process, which `test/flow/Bin.test.ts` does against the
+      // built binary, and the command it runs is `flow/Cli.ts`, covered in
+      // process. The floor below allows for it.
+      // A ratchet, not the goal. The rc contract's baseline is 100 on every
+      // default run; the package measures 92.7 / 83.2 / 94.0 / 95.2 today, so
+      // the floor sits just under that and a change that lowers coverage
+      // fails here rather than passing under a threshold nobody meets.
       thresholds: {
-        branches: 70,
-        functions: 70,
-        lines: 70,
-        statements: 70
+        branches: 83,
+        functions: 93,
+        lines: 95,
+        statements: 92
       }
     }
   }

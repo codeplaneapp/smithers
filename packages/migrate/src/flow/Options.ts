@@ -69,6 +69,68 @@ export const Layout = Schema.Struct({
   flowsDir: Schema.String
 })
 
+/**
+ * The three places outside the project where 0.x keeps state, as the host
+ * found them in its environment: `SMITHERS_HOME`, the home directory (whose
+ * `.smithers` is the global state directory), and the temporary directory
+ * (whose `smithers-gateway` holds gateway state).
+ *
+ * A payload field rather than the environment itself, because the payload
+ * crosses the journal: these three are paths, never secrets, and they are the
+ * only environment the scanners read.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const State = Schema.Struct({
+  smithersHome: Schema.optional(Schema.String),
+  home: Schema.optional(Schema.String),
+  tmpdir: Schema.optional(Schema.String)
+})
+
+/**
+ * The three state paths a host derives from its environment.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type State = typeof State.Type
+
+/**
+ * The state paths one environment names, or `undefined` when it names none.
+ *
+ * Only the three variables the scanners read leave the environment here; a
+ * provider key stays with the seat resolver and never reaches a payload.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const stateOf = (
+  environment: Readonly<Record<string, string | undefined>>
+): State | undefined => {
+  const state: State = {
+    ...(environment["SMITHERS_HOME"] === undefined || environment["SMITHERS_HOME"] === ""
+      ? {}
+      : { smithersHome: environment["SMITHERS_HOME"] }),
+    ...(environment["HOME"] === undefined || environment["HOME"] === "" ? {} : { home: environment["HOME"] }),
+    ...(environment["TMPDIR"] === undefined || environment["TMPDIR"] === "" ? {} : { tmpdir: environment["TMPDIR"] })
+  }
+  return Object.keys(state).length === 0 ? undefined : state
+}
+
+/**
+ * The environment the scanners read, rebuilt from a {@link State}: exactly
+ * the three variables, spelled as the detector expects them.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const scanEnvironment = (state: State | undefined): Readonly<Record<string, string>> => ({
+  ...(state?.smithersHome === undefined ? {} : { SMITHERS_HOME: state.smithersHome }),
+  ...(state?.home === undefined ? {} : { HOME: state.home }),
+  ...(state?.tmpdir === undefined ? {} : { TMPDIR: state.tmpdir.endsWith("/") ? state.tmpdir : `${state.tmpdir}/` })
+})
+
 /** The fields of {@link MigrateOptions}, before the layout check. */
 const MigrateOptionsFields = Schema.Struct({
   root: Schema.String,
@@ -82,7 +144,8 @@ const MigrateOptionsFields = Schema.Struct({
   maxRepairRounds: Schema.optional(Schema.Int),
   commands: Schema.optional(Commands),
   reportDir: Schema.optional(Schema.String),
-  layout: Schema.optional(Layout)
+  layout: Schema.optional(Layout),
+  state: Schema.optional(State)
 })
 
 /**

@@ -131,6 +131,56 @@ describe("ZodSchemaHints.classify outside the safe subset", () => {
   })
 })
 
+describe("ZodSchemaHints.print refuses what it cannot translate faithfully", () => {
+  it("keeps a record's key schema when it is a string or a literal set, and refuses any other", () => {
+    expect(ZodSchemaHints.print("z.record(z.string(), z.number())")).toBe("Schema.Record(Schema.String, Schema.Number)")
+    expect(ZodSchemaHints.print("z.record(z.enum([\"a\", \"b\"]), z.number())"))
+      .toBe("Schema.Record(Schema.Literals([\"a\", \"b\"]), Schema.Number)")
+    expect(ZodSchemaHints.print("z.record(z.number())")).toBe("Schema.Record(Schema.String, Schema.Number)")
+    // A numeric key changes what the record accepts; it is not printed as a string key.
+    expect(ZodSchemaHints.print("z.record(z.number(), z.string())")).toBeUndefined()
+    expect(ZodSchemaHints.classify("z.record(z.number(), z.string())").class).not.toBe("automatic")
+  })
+
+  it("checks a length on a string or an array and a bound on a number, never the other way round", () => {
+    expect(ZodSchemaHints.print("z.array(z.number()).min(1)"))
+      .toBe("Schema.Array(Schema.Number).pipe(Schema.check(Schema.isMinLength(1)))")
+    expect(ZodSchemaHints.print("z.array(z.string()).max(3)"))
+      .toBe("Schema.Array(Schema.String).pipe(Schema.check(Schema.isMaxLength(3)))")
+    expect(ZodSchemaHints.print("z.number().min(1)"))
+      .toBe("Schema.Number.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(1)))")
+    expect(ZodSchemaHints.print("z.string().max(2)")).toBe("Schema.String.pipe(Schema.check(Schema.isMaxLength(2)))")
+    expect(ZodSchemaHints.print("z.boolean().min(1)")).toBeUndefined()
+    expect(ZodSchemaHints.print("z.string().int()")).toBeUndefined()
+    expect(ZodSchemaHints.print("z.string().positive()")).toBeUndefined()
+    // The printed array check is a real check: one element passes, none fails.
+    const printed = ZodSchemaHints.print("z.array(z.number()).min(1)")!
+    expect(decodes(printed, [1])).toEqual([1])
+    expect(() => decodes(printed, [])).toThrow()
+  })
+
+  it("refuses a nested optional or default rather than dropping it, and keeps a nested description", () => {
+    expect(ZodSchemaHints.print("z.array(z.string().optional())")).toBeUndefined()
+    expect(ZodSchemaHints.print("z.array(z.string().default(\"x\"))")).toBeUndefined()
+    expect(ZodSchemaHints.print("z.union([z.string().optional(), z.number()])")).toBeUndefined()
+    expect(ZodSchemaHints.print("z.record(z.string(), z.number().default(1))")).toBeUndefined()
+    expect(ZodSchemaHints.print("z.array(z.string().describe(\"d\"))"))
+      .toBe("Schema.Array(Schema.String.annotate({ description: \"d\" }))")
+  })
+
+  it("prints a top-level optional, default, or description as the field it is", () => {
+    expect(ZodSchemaHints.printField("z.string().optional()")).toBe("Schema.optional(Schema.String)")
+    expect(ZodSchemaHints.printField("z.number().default(3)"))
+      .toBe("Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(3)))")
+    expect(ZodSchemaHints.printField("z.string().describe(\"d\").optional()"))
+      .toBe("Schema.optional(Schema.String.annotate({ description: \"d\" }))")
+    expect(ZodSchemaHints.printField("z.string()")).toBe("Schema.String")
+    expect(ZodSchemaHints.printField("z.nope()")).toBeUndefined()
+    // `print` alone stays the bare schema, which is what an output wants.
+    expect(ZodSchemaHints.print("z.string().optional()")).toBe("Schema.String")
+  })
+})
+
 describe("ZodSchemaHints.hints", () => {
   it.effect("converts the jsx-single schemas and decodes the sample the workflow produces", () =>
     Effect.gen(function*() {

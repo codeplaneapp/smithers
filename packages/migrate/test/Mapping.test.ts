@@ -322,6 +322,57 @@ describe("Mapping.classify", () => {
   })
 })
 
+describe("Mapping.snippet keeps the TypeScript it generates valid", () => {
+  it("prefixes an id that starts with a digit and quotes a key, a tag, and a seat the source spelled unusually", () => {
+    const text = Mapping.snippet(hit("Task", ["id", "agent"], {
+      id: "1st \"quoted\" step",
+      outputChain: "z.string()",
+      payloadFields: JSON.stringify({ "a-b": "z.string().optional()", plain: "z.number().default(2)" }),
+      promptText: "do it",
+      agentProvider: "anthropic",
+      agentModel: "model \"x\""
+    }))
+
+    expect(text).toBeDefined()
+    expect(text).toContain("export const Step1stQuotedStep = AgentAction.make(\"flow/1st \\\"quoted\\\" step\", {")
+    expect(text).toContain("\"a-b\": Schema.optional(Schema.String)")
+    expect(text).toContain("plain: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(2)))")
+    expect(text).toContain("seat: \"anthropic:model \\\"x\\\"\",")
+    expect(transpiles(`async function wrap() {\n${text}\n}`), text).toBe(true)
+  })
+
+  it("refuses a group whose step ids would print as one identifier", () => {
+    for (const construct of ["Sequence", "Parallel"]) {
+      const text = Mapping.snippet(hit(construct, [], {
+        childConstructs: "Task:a-b,Task:a_b",
+        childPayloads: JSON.stringify({ "a-b": {}, "a_b": {} })
+      }))
+      expect([construct, text]).toEqual([construct, undefined])
+    }
+    expect(Mapping.snippet(hit("Branch", ["if"], {
+      if: "true",
+      thenConstructs: "Task:go-on",
+      thenPayloads: JSON.stringify({ "go-on": {} }),
+      elseConstructs: "Task:go_on",
+      elsePayloads: JSON.stringify({ "go_on": {} })
+    }))).toBeUndefined()
+    // Distinct ids that print distinctly are still automatic.
+    expect(Mapping.snippet(hit("Sequence", [], {
+      childConstructs: "Task:first,Task:second",
+      childPayloads: JSON.stringify({ first: {}, second: {} })
+    }))).toContain("Second.call")
+  })
+
+  it("emits a numeric timer as milliseconds, a duration phrase as a string, and refuses an expression", () => {
+    expect(Mapping.snippet(hit("Timer", ["duration"], { duration: "1000" })))
+      .toBe("Sleep.action.call({ name: \"wait\", duration: 1000 })")
+    expect(Mapping.snippet(hit("Timer", ["duration", "id"], { duration: "1 hour", id: "nap" })))
+      .toBe("Sleep.action.call({ name: \"nap\", duration: \"1 hour\" })")
+    expect(Mapping.snippet(hit("Timer", ["duration"], { duration: "config.waitMs" }))).toBeUndefined()
+    expect(Mapping.snippet(hit("Timer", ["duration"], { duration: "1000 * 60" }))).toBeUndefined()
+  })
+})
+
 describe("Mapping.snippet", () => {
   it("emits TypeScript that parses for every construct it covers", () => {
     const covered = [

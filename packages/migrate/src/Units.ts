@@ -314,15 +314,54 @@ const renderArgv = (command: ArgvCommand): string => CommandLine.renderArgv(comm
  *
  * A file under `.smithers/workflows/` keeps its position, so
  * `.smithers/workflows/pipelines/ci-fast.tsx` becomes `pipelines/ci-fast` and
- * lands at `flows/pipelines/ci-fast/flow.ts`. Anything else uses its basename.
+ * lands at `flows/pipelines/ci-fast/flow.ts`. Anything else keeps its own
+ * directories, so `examples/hello.jsx` becomes `examples/hello` and
+ * `src/wf/hello.tsx` becomes `src/wf/hello`.
+ *
+ * The directories are kept because the name is a unit id and a target path at
+ * once. Collapsing to the basename gave two workflows in different directories
+ * one id and one `flow.ts`: the second agent overwrote the first agent's flow,
+ * one unit's outcome vanished from the report because `Report.withUnit`
+ * replaces by id, and both units wrote the same artifact file. A root-level
+ * file is unaffected, because it has no directories to keep.
  *
  * @category combinators
  * @since 0.1.0
  */
 export const flowName = (path: string): string => {
   const match = /(?:^|\/)\.smithers\/workflows\/(.+)$/.exec(path)
-  const relative = match?.[1] ?? path.split("/").pop() ?? path
+  const relative = match?.[1] ?? path
   return relative.replace(/\.[^./]+$/, "")
+}
+
+/**
+ * Every unit id carried by more than one plan, with the sources behind it.
+ *
+ * {@link flowName} makes a collision rare rather than impossible: a project
+ * holding both `.smithers/workflows/hello.tsx` and `hello.tsx` still names one
+ * flow twice. A duplicate id cannot be caught downstream — the stale-plan gate
+ * joins the ids into one string, so both strings carry the duplicate — so the
+ * plan is checked here and the scan refuses.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const duplicateIds = (
+  units: ReadonlyArray<UnitPlan>
+): ReadonlyArray<{ readonly id: string; readonly sources: ReadonlyArray<string> }> => {
+  const byId = new Map<string, { count: number; sources: Array<string> }>()
+  for (const unit of units) {
+    const seen = byId.get(unit.id)
+    if (seen === undefined) byId.set(unit.id, { count: 1, sources: [...unit.sources] })
+    else {
+      seen.count += 1
+      seen.sources.push(...unit.sources)
+    }
+  }
+  return [...byId.entries()]
+    .filter(([, seen]) => seen.count > 1)
+    .map(([id, seen]) => ({ id, sources: [...new Set(seen.sources)].sort(Sort.byText) }))
+    .sort(Sort.by((entry: { readonly id: string }) => entry.id))
 }
 
 /**
@@ -483,22 +522,40 @@ export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<Uni
         suggestion: "migrate these workflows together, or break the cycle before running apply"
       }))
 
-  const reachable = (from: string, depth: number): ReadonlyArray<string> => {
-    if (depth === 0) return []
-    const direct = input.detection.imports
-      .filter((hit) => hit.file === from && (hit.kind === "relative" || hit.kind === "mdx"))
-      .map((hit) => hit.specifier)
-    return [...direct, ...direct.flatMap((next) => reachable(next, depth - 1))]
+  // Breadth-first with a visited set, and computed once per workflow. The
+  // depth-first spelling this replaces re-walked every path to every file, so
+  // its cost was the fan-out to the power of the cap: ten relative imports per
+  // file at depth 8 is a hundred million calls, which hangs `plan` — the mode
+  // the README calls safe to run on any project. Every other traversal in the
+  // package keeps a `seen` set for the same reason.
+  const reachable = (from: string, depth: number): ReadonlySet<string> => {
+    const visited = new Set<string>()
+    let frontier = [from]
+    for (let remaining = depth; remaining > 0 && frontier.length > 0; remaining -= 1) {
+      const next: Array<string> = []
+      for (const file of frontier) {
+        for (const hit of input.detection.imports) {
+          if (hit.file !== file) continue
+          if (hit.kind !== "relative" && hit.kind !== "mdx") continue
+          if (visited.has(hit.specifier)) continue
+          visited.add(hit.specifier)
+          next.push(hit.specifier)
+        }
+      }
+      frontier = next
+    }
+    return visited
   }
 
   for (const workflow of workflows) {
-    const attached = [...new Set(reachable(workflow.path, 8))]
+    const closure = reachable(workflow.path, 8)
+    const attached = [...closure]
       .filter((file) => shared.has(file) && !claimed.has(file))
       .sort(Sort.byText)
     for (const file of attached) claimed.add(file)
     // A prompt is claimed like a component: two workflows can import the same
     // `.mdx`, and migrating it twice would give one prompt two homes.
-    const prompts = [...new Set(reachable(workflow.path, 8))]
+    const prompts = [...closure]
       .filter((file) => promptByFile.has(file) && !claimed.has(file))
       .sort(Sort.byText)
     for (const file of prompts) claimed.add(file)

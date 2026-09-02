@@ -86,6 +86,35 @@ export const runStateBlocks = (
 export const instructions = (scan: Scan.ScanResult): ReadonlyArray<string> => scan.runState.instructions
 
 /**
+ * The refusal a scan that left part of the project unread earns, or
+ * `undefined` when it read everything.
+ *
+ * A plan built over a directory the scanner could not list or a file it would
+ * not read may be missing a workflow, a manifest, or a run-state path, and a
+ * migration of an incomplete plan is a migration of the wrong project. The
+ * fix is the operator's: make the path readable, or point the tool at a
+ * smaller root.
+ *
+ * @category checks
+ * @since 0.1.0
+ */
+export const incompleteScan = (
+  warnings: ReadonlyArray<{ readonly code: string; readonly file: string; readonly message: string }>
+): MigrateError | undefined => {
+  const skipped = warnings.filter((warning) => warning.code === "incomplete-scan")
+  if (skipped.length === 0) return undefined
+  return make(
+    "unsupported-project",
+    `The scan did not read the whole project, so the plan may be incomplete: ${skipped.length} path${
+      skipped.length === 1 ? " was" : "s were"
+    } skipped. Make ${skipped.length === 1 ? "it" : "them"} readable or move ${
+      skipped.length === 1 ? "it" : "them"
+    } out of the project, then rerun.`,
+    skipped.map((warning) => warning.message).join("\n")
+  )
+}
+
+/**
  * Decides whether this run may edit the project.
  *
  * `scan` and `plan` always pass: neither writes a project file, so neither
@@ -99,6 +128,8 @@ export const evaluate = (
   options: Options
 ): Effect.Effect<void, MigrateError> => {
   if (options.mode !== "apply") return Effect.void
+  const incomplete = incompleteScan(scan.detection.warnings)
+  if (incomplete !== undefined) return Effect.fail(incomplete)
   if (runStateBlocks(scan, options.acknowledgeRunState)) {
     const lines = instructions(scan)
     return Effect.fail(make(
@@ -164,6 +195,8 @@ export const evaluateReport = (
   options: Options
 ): Effect.Effect<void, MigrateError> => {
   if (options.mode !== "apply") return Effect.void
+  const incomplete = incompleteScan(report.project.warnings)
+  if (incomplete !== undefined) return Effect.fail(incomplete)
   if (
     options.acknowledgeRunState !== true &&
     (report.runState.verdict === "blocked" || report.runState.verdict === "history-only")

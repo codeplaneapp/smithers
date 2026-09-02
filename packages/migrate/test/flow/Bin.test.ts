@@ -35,6 +35,14 @@ describe("smithers-migrate", () => {
     expect([...after.keys()].filter((path) => !before.has(path)).every((path) => path.startsWith(".out/"))).toBe(true)
   })
 
+  it("prints the release version, not a placeholder", () => {
+    const result = runBin(["--version"])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toContain("1.0.0-rc.0")
+    expect(result.stdout).not.toContain("0.1.0")
+  })
+
   it("renders a machine-readable report when it is asked for one", () => {
     const root = copyFixture("jsx-single")
 

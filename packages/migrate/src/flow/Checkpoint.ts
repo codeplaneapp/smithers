@@ -304,6 +304,10 @@ export const digest = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const found: Array<{ path: string; digest: string }> = []
+    // Directories already descended into, by real path. A run-state directory
+    // reached through a symlink cycle would otherwise be walked forever, and
+    // reached twice by two names it would be digested twice.
+    const walked = new Set<string>()
     const walk = (relative: string, rootEntry: boolean): Effect.Effect<void, MigrateError, never> =>
       Effect.gen(function*() {
         const target = path.join(root, ...relative.split("/"))
@@ -315,6 +319,11 @@ export const digest = (
           return yield* Effect.fail(make("io", `run-state path "${relative}" disappeared during checkpointing`))
         }
         if (info.value.type === "Directory") {
+          const real = yield* fs.realPath(target).pipe(
+            Effect.mapError(io(`could not resolve the run-state path "${relative}"`))
+          )
+          if (walked.has(real)) return
+          walked.add(real)
           const entries = yield* fs.readDirectory(target).pipe(
             Effect.mapError(io(`could not list the run-state path "${relative}"`))
           )
@@ -405,7 +414,10 @@ export const tree = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const files: Record<string, string> = {}
-    const walk = (relative: string): Effect.Effect<void, MigrateError, never> =>
+    const rootReal = yield* fs.realPath(root).pipe(
+      Effect.mapError(io(`could not resolve the project root "${root}"`))
+    )
+    const walk = (relative: string, parentReal: string): Effect.Effect<void, MigrateError, never> =>
       Effect.gen(function*() {
         const target = relative === "" ? root : path.join(root, ...relative.split("/"))
         const entries = yield* fs.readDirectory(target).pipe(
@@ -415,21 +427,39 @@ export const tree = (
           if (unwalked.includes(entry)) continue
           const child = relative === "" ? entry : `${relative}/${entry}`
           if (excluded(child, exclude)) continue
-          const info = yield* fs.stat(path.join(root, ...child.split("/"))).pipe(
+          const childPath = path.join(root, ...child.split("/"))
+          const info = yield* fs.stat(childPath).pipe(
             Effect.mapError(io(`could not inspect the project path "${child}"`))
           )
           if (info.type === "Directory") {
-            yield* walk(child)
+            // `stat` follows symlinks, so a link that points at an ancestor —
+            // `docs/latest -> .`, `assets -> ../..` — would recurse until the
+            // process died, and this walk runs at least twice per unit. A
+            // symlinked directory is recorded by where it points instead of
+            // descended into: the link target is what a change to it changes,
+            // and whatever it points at inside the project is walked on its
+            // own path anyway.
+            const childReal = yield* fs.realPath(childPath).pipe(
+              Effect.mapError(io(`could not resolve the project path "${child}"`))
+            )
+            if (childReal !== path.join(parentReal, entry)) {
+              const link = yield* fs.readLink(childPath).pipe(
+                Effect.mapError(io(`could not read the project link "${child}"`))
+              )
+              files[child] = sha256(new TextEncoder().encode(`symlink:${link}`))
+              continue
+            }
+            yield* walk(child, childReal)
             continue
           }
           if (info.type !== "File") continue
-          const bytes = yield* fs.readFile(path.join(root, ...child.split("/"))).pipe(
+          const bytes = yield* fs.readFile(childPath).pipe(
             Effect.mapError(io(`could not read the project path "${child}"`))
           )
           files[child] = sha256(bytes)
         }
       })
-    yield* walk("")
+    yield* walk("", rootReal)
     return { exclude: [...exclude].sort(), files }
   }).pipe(Effect.mapError(io(`could not read the project tree under "${root}"`)))
 
@@ -458,13 +488,16 @@ export const treeDiff = (
     })
     const after = yield* tree(root, before.exclude)
     const changes: Array<Report.ChangedFile> = []
+    // The size comes from the stat, not from reading the file: a changed file
+    // is reported by its length, and re-reading every byte of every changed
+    // file to take `.length` costs the whole diff for nothing.
     const sizeOf = (file: string): Effect.Effect<number, MigrateError, FileSystem.FileSystem | Path.Path> =>
       Effect.gen(function*() {
         const path = yield* Path.Path
-        const bytes = yield* fs.readFile(path.join(root, ...file.split("/"))).pipe(
-          Effect.mapError(io(`could not read changed project path "${file}"`))
+        const info = yield* fs.stat(path.join(root, ...file.split("/"))).pipe(
+          Effect.mapError(io(`could not inspect changed project path "${file}"`))
         )
-        return bytes.length
+        return Number(info.size)
       })
     for (const file of Object.keys(after.files).sort()) {
       const recorded = before.files[file]

@@ -11,7 +11,8 @@
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
-import type * as FileSystem from "effect/FileSystem"
+import * as FileSystem from "effect/FileSystem"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import ts from "typescript"
 import * as Constructs from "./Constructs.ts"
@@ -19,6 +20,7 @@ import * as Fs from "./internal/Fs.ts"
 import * as Semver from "./internal/Semver.ts"
 import * as Sort from "./internal/Sort.ts"
 import * as Ts from "./internal/Ts.ts"
+import * as Versions from "./internal/Versions.ts"
 import type { MigrateError } from "./MigrateError.ts"
 
 /**
@@ -373,8 +375,25 @@ export interface Warning {
     | "uncatalogued-import"
     | "mixed-authoring-api"
     | "already-migrated"
+    | "incomplete-scan"
   readonly file: string
   readonly message: string
+}
+
+/**
+ * One place a manifest declares `effect`.
+ *
+ * Every declaration is kept, with its file and its field, because the frozen
+ * contract wants exactly one version in every manifest and every lockfile,
+ * and a warning that names the field is one an operator can act on.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface EffectDeclaration {
+  readonly file: string
+  readonly field: string
+  readonly version: string
 }
 
 /**
@@ -402,6 +421,8 @@ export interface Detection {
   readonly config: ConfigFindings
   readonly integrations: ReadonlyArray<IntegrationHit>
   readonly effectPin: string | undefined
+  /** Every `effect` declaration in every manifest, in manifest order. */
+  readonly effectDeclarations: ReadonlyArray<EffectDeclaration>
   readonly globalState: ReadonlyArray<string>
   readonly warnings: ReadonlyArray<Warning>
   /** File contents, by project-relative path, for every file a scanner reads. */
@@ -672,25 +693,66 @@ export const scan = (
 ): Effect.Effect<Detection, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const path = yield* Path.Path
-    const files = yield* Fs.walk(root, options.ignore === undefined ? {} : { ignore: options.ignore })
+    const walked = yield* Fs.walkReport(root, options.ignore === undefined ? {} : { ignore: options.ignore })
+    const files = walked.files
     const fileSet = new Set(files)
-    const warnings: Array<Warning> = []
+    const warnings: Array<Warning> = walked.skipped.map((skip) => ({
+      code: "incomplete-scan",
+      file: skip.path,
+      message: skip.message
+    }))
     const sources = new Map<string, string>()
 
+    // A file the scan could not read is reported, never treated as empty:
+    // a manifest that reads as nothing would plan a project with no
+    // dependencies. Only the platform's typed NotFound is silence, because a
+    // file that is not there was not there.
+    const unreadable = new Set<string>()
     const readText = (file: string): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
       Effect.gen(function*() {
         const cached = sources.get(file)
         if (cached !== undefined) return cached
-        const text = yield* Fs.readOption(path.join(root, ...file.split("/")))
-        if (text !== undefined) sources.set(file, text)
-        return text
+        // Reported once, however many scanners ask for the file.
+        if (unreadable.has(file)) return undefined
+        unreadable.add(file)
+        const fs = yield* FileSystem.FileSystem
+        const absolute = path.join(root, ...file.split("/"))
+        const info = yield* Effect.result(Fs.optionalNotFound(fs.stat(absolute)))
+        if (info._tag === "Failure") {
+          warnings.push({
+            code: "incomplete-scan",
+            file,
+            message: `"${file}" could not be inspected: ${info.failure.message}`
+          })
+          return undefined
+        }
+        if (Option.isNone(info.success)) return undefined
+        const size = Number(info.success.value.size)
+        if (size > Fs.maxFileBytes) {
+          warnings.push({
+            code: "incomplete-scan",
+            file,
+            message: `"${file}" is ${size} bytes, above the ${Fs.maxFileBytes} byte scan limit, and was not read`
+          })
+          return undefined
+        }
+        const read = yield* Effect.result(Fs.readIfExists(absolute, file))
+        if (read._tag === "Failure") {
+          warnings.push({ code: "incomplete-scan", file, message: read.failure.message })
+          return undefined
+        }
+        if (read.success !== undefined) {
+          sources.set(file, read.success)
+          unreadable.delete(file)
+        }
+        return read.success
       })
 
     // 3.1 Packages.
     const manifestPaths = files.filter((file) => file === "package.json" || file.endsWith("/package.json"))
     const manifests: Array<ManifestFinding> = []
     let packageManager: string | undefined
-    let effectPin: string | undefined
+    const effectDeclarations: Array<EffectDeclaration> = []
 
     for (const file of manifestPaths) {
       const text = yield* readText(file)
@@ -708,7 +770,7 @@ export const scan = (
           if (reason !== undefined) oldPackages.push({ name, version, field, reason })
           if (companionPackages.some((candidate) => name === candidate || name.startsWith(candidate))) {
             companions.push({ name, version, field })
-            if (name === "effect") effectPin = version
+            if (name === "effect") effectDeclarations.push({ file, field, version })
           }
         }
       }
@@ -735,11 +797,30 @@ export const scan = (
       })
     }
 
-    if (effectPin !== undefined && !effectPin.includes("4.0.0-rc.")) {
+    // The root manifest's declaration is the pin the report names; every
+    // declaration is judged. Exactly one version, `4.0.0-rc.108`, is
+    // acceptable: a range resolves to whatever is newest on install day, a
+    // later prerelease is one this release was never built against, and two
+    // manifests that disagree install two Effects.
+    const rootDeclaration = effectDeclarations.find((entry) => entry.file === "package.json")
+    const effectPin = (rootDeclaration ?? effectDeclarations[0])?.version
+    for (const declaration of effectDeclarations) {
+      if (declaration.version === Versions.effectVersion) continue
       warnings.push({
         code: "effect-pin-conflict",
-        file: "package.json",
-        message: `effect is pinned to "${effectPin}"; Smithers 1.0 requires exactly 4.0.0-rc.108`
+        file: declaration.file,
+        message:
+          `${declaration.field}."effect" is "${declaration.version}"; Smithers 1.0 requires exactly ${Versions.effectVersion}`
+      })
+    }
+    const distinctPins = [...new Set(effectDeclarations.map((entry) => entry.version))].sort()
+    if (distinctPins.length > 1) {
+      warnings.push({
+        code: "effect-pin-conflict",
+        file: rootDeclaration?.file ?? effectDeclarations[0]!.file,
+        message: `the manifests declare effect as ${
+          distinctPins.map((version) => `"${version}"`).join(", ")
+        }; one version, ${Versions.effectVersion}, has to be declared everywhere`
       })
     }
 
@@ -748,6 +829,23 @@ export const scan = (
         file.split("/").pop() ?? ""
       )
     )
+    // What the lockfiles resolved `effect` to. A manifest can pin the right
+    // version while the lockfile still holds the one an earlier install
+    // resolved, and the lockfile is what the next install obeys.
+    for (const lockfile of lockfiles) {
+      if (lockfile.endsWith("bun.lockb")) continue
+      const lock = yield* readText(lockfile)
+      if (lock === undefined) continue
+      for (const resolved of resolvedEffectVersions(lock)) {
+        if (resolved === Versions.effectVersion) continue
+        warnings.push({
+          code: "effect-pin-conflict",
+          file: lockfile,
+          message:
+            `"${lockfile}" resolves effect to "${resolved}"; Smithers 1.0 requires exactly ${Versions.effectVersion}`
+        })
+      }
+    }
 
     // 3.2 tsconfig chains.
     const tsconfigs: Array<TsconfigFinding> = []
@@ -1309,8 +1407,27 @@ export const scan = (
       config,
       integrations,
       effectPin,
+      effectDeclarations,
       globalState,
       warnings,
       sources
     }
   })
+
+/**
+ * Every version a lockfile resolved the `effect` package to, deduplicated and
+ * sorted. Reads the four lockfile dialects by their own spelling of a resolved
+ * package: `effect@<version>` keys (pnpm, bun, yarn classic), the
+ * `node_modules/effect` entry (npm), and a yarn berry `effect@npm:` key with
+ * its `version:` line.
+ *
+ * @category scanners
+ * @since 0.1.0
+ */
+export const resolvedEffectVersions = (lock: string): ReadonlyArray<string> => {
+  const found = new Set<string>()
+  for (const match of lock.matchAll(/(?<![\w@/.-])effect@(\d[^\s"',:()]*)/g)) found.add(match[1]!)
+  for (const match of lock.matchAll(/"node_modules\/effect":\s*\{[^}]*?"version":\s*"([^"]+)"/g)) found.add(match[1]!)
+  for (const match of lock.matchAll(/^"?effect@npm:[^\n]*:\n\s+version:? "?([^"\n]+)"?/gm)) found.add(match[1]!)
+  return [...found].sort()
+}

@@ -1013,11 +1013,27 @@ export const classify = (hit: InventoryEntry): MappingClass => classifyWithReaso
 const identifier = (value: string | undefined, fallback: string): string => {
   const cleaned = (value ?? fallback).replace(/[^A-Za-z0-9]+/g, " ").trim()
   if (cleaned === "") return fallback
-  return cleaned
+  const named = cleaned
     .split(" ")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("")
+  // An identifier cannot start with a digit; the fallback is the noun the
+  // name stands for, so `1st` becomes `Step1st` rather than a syntax error.
+  return /^\d/.test(named) ? `${fallback}${named}` : named
 }
+
+/**
+ * Whether two of the ids would print as the same identifier.
+ *
+ * `identifier` folds punctuation away, so `a-b` and `a_b` both read `AB`. A
+ * group whose steps collide would declare one name twice, and a rewrite that
+ * does not compile is not a rewrite; the group becomes a guided decision.
+ */
+const collide = (ids: ReadonlyArray<string>): boolean =>
+  new Set(ids.map((id) => identifier(id, "Step"))).size !== new Set(ids).size
+
+/** A property key as TypeScript spells it: bare when it can be, quoted otherwise. */
+const propertyKey = (key: string): string => /^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key)
 
 const tagOf = (hit: InventoryEntry, id: string): string => {
   const flow = hit.file.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "flow"
@@ -1185,10 +1201,14 @@ const callArguments = (
 const payloadOf = (raw: string | undefined): string | undefined => {
   if (raw === undefined) return undefined
   const record = JSON.parse(raw) as Record<string, string>
-  const entries = Object.entries(record).map(([key, chain]) => [key, ZodSchemaHints.print(chain)] as const)
+  // A payload key is a struct field, so a default or an optional on the
+  // chain is part of the field and printed as such.
+  const entries = Object.entries(record).map(([key, chain]) => [key, ZodSchemaHints.printField(chain)] as const)
   if (entries.some(([, printed]) => printed === undefined)) return undefined
   if (entries.length === 0) return "{}"
-  return `{\n${entries.map(([key, printed]) => `  ${key}: ${indented(printed as string, "  ")}`).join(",\n")}\n}`
+  return `{\n${
+    entries.map(([key, printed]) => `  ${propertyKey(key)}: ${indented(printed as string, "  ")}`).join(",\n")
+  }\n}`
 }
 
 /**
@@ -1206,6 +1226,7 @@ const sequenced = (
   payloads: Record<string, Record<string, string> | null> | undefined
 ): string | undefined => {
   const [first, ...rest] = children as [{ id: string }, ...Array<{ id: string }>]
+  if (collide(children.map((child) => child.id))) return undefined
   const head = callArguments(payloads, first.id, [])
   if (head === undefined) return undefined
   let text = `${identifier(first.id, "Step")}.call(${head})`
@@ -1254,7 +1275,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
       if (hit.props.includes("agent")) {
         const prompt = detail["promptText"]
         if (prompt === undefined) return undefined
-        const lines = [`export const ${name} = AgentAction.make("${tag}", {`]
+        const lines = [`export const ${name} = AgentAction.make(${JSON.stringify(tag)}, {`]
         lines.push(`  payload: ${indented(payload, "  ")},`)
         lines.push(`  output: ${indented(success, "  ")},`)
         // A seat appears only when the source itself names the provider and the
@@ -1262,7 +1283,9 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
         // the source did not.
         const provider = detail["agentProvider"]
         const model = detail["agentModel"]
-        if (provider !== undefined && model !== undefined) lines.push(`  seat: "${provider}:${model}",`)
+        if (provider !== undefined && model !== undefined) {
+          lines.push(`  seat: ${JSON.stringify(`${provider}:${model}`)},`)
+        }
         const instructions = detail["agentInstructions"]
         if (instructions !== undefined) lines.push(`  system: [${JSON.stringify(instructions)}],`)
         lines.push(`  prompt: (payload) => \`${PromptHints.print(prompt)}\``)
@@ -1273,7 +1296,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
       const body = detail["children"]
       if (body === undefined) return undefined
       const lines = [
-        `export const ${name} = Action.make("${tag}", {`,
+        `export const ${name} = Action.make(${JSON.stringify(tag)}, {`,
         `  payload: ${indented(payload, "  ")},`,
         `  success: ${indented(success, "  ")}`,
         "})",
@@ -1308,7 +1331,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
         // discovery tokenizes the literal `export default Flow.make(`. The
         // durable flow therefore takes the alias, exactly as the migrated
         // fixture writes it.
-        `export const ${flow} = DurableFlow.make("${name}", {`,
+        `export const ${flow} = DurableFlow.make(${JSON.stringify(name)}, {`,
         `  payload: ${indented(payload, "  ")},`,
         `  success: ${indented(success, "  ")},`
       ]
@@ -1353,6 +1376,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
       const children = namedChildren(hit)
       if (children === undefined || children.length === 0) return undefined
       const payloads = childPayloads(hit)
+      if (collide(children.map((child) => child.id))) return undefined
       const entries: Array<string> = []
       for (const child of children) {
         // Nothing is in scope but the flow payload: the branches of a
@@ -1360,8 +1384,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
         // answer.
         const args = callArguments(payloads, child.id, [])
         if (args === undefined) return undefined
-        const key = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(child.id) ? child.id : JSON.stringify(child.id)
-        entries.push(`  ${key}: ${identifier(child.id, "Step")}.call(${args})`)
+        entries.push(`  ${propertyKey(child.id)}: ${identifier(child.id, "Step")}.call(${args})`)
       }
       return `Node.all({\n${entries.join(",\n")}\n})`
     }
@@ -1380,6 +1403,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
         ? undefined
         : callArguments(childPayloads(hit, "elsePayloads"), elseStep.id, [])
       if (elseStep !== undefined && elseArguments === undefined) return undefined
+      if (elseStep !== undefined && collide([first.id, elseStep.id])) return undefined
       const lines = [
         "Node.succeed(payload).pipe(Node.branch({",
         `  if: (value) => ${predicate},`,
@@ -1392,11 +1416,20 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
       return lines.join("\n")
     }
     case "Timer": {
+      // The attribute text is a string literal's content or an expression's
+      // source, and the two are told apart by what they are: a number is a
+      // count of milliseconds, a duration phrase is one Effect reads, and
+      // anything else names a value only the source knows.
       const duration = detail["duration"]
       if (duration === undefined) return undefined
-      return `Sleep.action.call({ name: ${JSON.stringify(detail["id"] ?? "wait")}, duration: ${
-        JSON.stringify(duration)
-      } })`
+      const literal = /^\d+(?:\.\d+)?$/.test(duration.trim())
+        ? duration.trim()
+        : /^\d+(?:\.\d+)?\s*(?:nanos?|micros?|millis?|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|ms|s|m|h|d|w)$/i
+            .test(duration.trim())
+        ? JSON.stringify(duration.trim())
+        : undefined
+      if (literal === undefined) return undefined
+      return `Sleep.action.call({ name: ${JSON.stringify(detail["id"] ?? "wait")}, duration: ${literal} })`
     }
     case "WaitForEvent":
     case "Signal": {

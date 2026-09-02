@@ -12,7 +12,8 @@ import { MigrateError } from "@smthrs/migrate/MigrateError"
 import * as Report from "@smthrs/migrate/Report"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { resolve } from "node:path"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { copyFixture, hashTree, nodeLayer } from "../fixtures/helpers.ts"
 
 const flags = (overrides: Partial<Command.Flags> = {}): Command.Flags => ({
@@ -166,6 +167,60 @@ describe("Command.optionsOf verification overrides", () => {
     expect(Command.optionsOf(flags({ verifyTypecheck: [""] }), "/work").commands).toEqual({ typecheck: [] })
     expect(Command.optionsOf(flags({ verifyTypecheck: [] }), "/work").commands).toBeUndefined()
   })
+})
+
+describe("Command.optionsOf state paths", () => {
+  it("carries the three state paths from the environment onto the payload, and nothing else from it", () => {
+    const options = Command.optionsOf(flags(), "/work", {
+      SMITHERS_HOME: "/srv/smithers",
+      HOME: "/home/op",
+      TMPDIR: "/tmp/t/",
+      ANTHROPIC_API_KEY: "sk-secret",
+      OPENAI_API_KEY: ""
+    })
+
+    expect(options.state).toEqual({ smithersHome: "/srv/smithers", home: "/home/op", tmpdir: "/tmp/t/" })
+    expect(JSON.stringify(options)).not.toContain("sk-secret")
+    expect(decode(options)).toEqual(options)
+    expect(Command.optionsOf(flags(), "/work").state).toBeUndefined()
+    expect(Command.optionsOf(flags(), "/work", { HOME: "" }).state).toBeUndefined()
+    expect(Options.scanEnvironment(options.state)).toEqual({
+      SMITHERS_HOME: "/srv/smithers",
+      HOME: "/home/op",
+      TMPDIR: "/tmp/t/"
+    })
+    expect(Options.scanEnvironment({ tmpdir: "/tmp/t" })).toEqual({ TMPDIR: "/tmp/t/" })
+    expect(Options.scanEnvironment(undefined)).toEqual({})
+  })
+
+  it.effect("reaches the survey's scan, so global state and gateway state are found by the run itself", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const home = copyFixture("jsx-single")
+      mkdirSync(join(home, "smithers-gateway"), { recursive: true })
+      // A gateway state file that names this project: 0.x run state outside
+      // the tree, which only the environment can point the scan at.
+      writeFileSync(join(home, "smithers-gateway", "gateway.json"), JSON.stringify({ workspace: root }))
+      const options = Command.optionsOf(flags({ root }), root, {
+        SMITHERS_HOME: join(home, ".smithers-home"),
+        HOME: home,
+        TMPDIR: `${home}/`
+      })
+
+      const surveyed = yield* Command.survey(options).pipe(Effect.provide(nodeLayer))
+
+      expect(surveyed.scan.detection.globalState).toEqual([
+        join(home, ".smithers-home"),
+        `${home}/.smithers`,
+        `${home}/smithers-gateway`
+      ])
+      expect(surveyed.scan.runState.gatewayState).toEqual([join(home, "smithers-gateway", "gateway.json")])
+      expect(surveyed.scan.runState.verdict).toBe("blocked")
+      // Without the state the same project scans clean.
+      const bare = yield* Command.survey(Command.optionsOf(flags({ root }), root)).pipe(Effect.provide(nodeLayer))
+      expect(bare.scan.runState.gatewayState).toEqual([])
+      expect(bare.scan.detection.globalState).toEqual([])
+    }))
 })
 
 describe("Command.isMigrateError", () => {
