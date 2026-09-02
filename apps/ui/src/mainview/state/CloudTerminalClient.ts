@@ -7,7 +7,8 @@ import { CLOUD_WS_ROUTE_PREFIX } from "smithers-shared/LocalApp"
  * renderer), to plue's terminal socket — binary frames are stdin/stdout,
  * a text JSON frame resizes. Mirrors PtyClient's stance: keystrokes sent
  * before the socket opens are queued, and the socket reconnects while
- * attachments exist.
+ * attachments exist — and only while they exist: detaching the last one
+ * closes the socket for good, and a refusal never redials.
  */
 
 export interface CloudTerminalAttachment {
@@ -30,11 +31,48 @@ export interface CloudTerminalClientOptions {
   readonly socketUrl: (repo: string, sessionId: string) => string | undefined
   /** The local-session capability subprotocol; undefined means no socket opens. */
   readonly socketProtocol: () => string | undefined
+  /** The first reconnect delay; every later one doubles, up to maxReconnectMs. */
   readonly reconnectMs?: number
+  readonly maxReconnectMs?: number
+  /**
+   * Reconnect dials the whole client may make per rolling minute, every
+   * session together. plue admits 20 terminal opens per user per minute
+   * (internal/middleware/rate_limit.go); the client's redials stay under
+   * half of it so the user's own opens are never the ones refused.
+   */
+  readonly maxReconnectsPerMinute?: number
+  /** A socket that stayed open this long was healthy: its drop redials promptly instead of continuing the backoff. */
+  readonly healthyMs?: number
 }
 
 /** Frames queued per session before its socket opens. */
 const MAX_PENDING = 256
+
+const DEFAULT_RECONNECT_MS = 1000
+const DEFAULT_MAX_RECONNECT_MS = 30_000
+const DEFAULT_MAX_RECONNECTS_PER_MINUTE = 8
+const DEFAULT_HEALTHY_MS = 30_000
+const MINUTE_MS = 60_000
+
+/*
+ * plue's close codes (internal/routes/workspace_terminal.go, ADR 0002
+ * "Terminal attach contract") and the tunnel's translations of its
+ * pre-upgrade refusals (src/bun/server.ts): 1001 "terminal client too slow"
+ * and an abnormal 1006 drop reconnect; 1011 "failed to attach terminal"
+ * retries once; everything here is final — the listeners hear the note once
+ * and no redial ever starts.
+ */
+const FINAL_NOTES: Readonly<Record<number, string>> = {
+  1000: "session closed",
+  1008: "access revoked",
+  4401: "not attached — sign in to Smithers Cloud first (/cloud.sign-in)",
+  4403: "not attached — this account can't open the workspace terminal",
+  4404: "not attached — the session is gone",
+  4409: "not attached — the session isn't running",
+  4429: "not attached — Smithers Cloud is rate limiting terminal opens; try again in a minute"
+}
+
+const RECONNECT_CODES: ReadonlySet<number> = new Set([1001, 1006])
 
 /** The same-origin tunnel URL of the page, or undefined outside a browser. */
 export const pageCloudSocketUrl = (repo: string, sessionId: string): string | undefined => {
@@ -49,13 +87,29 @@ interface Connection {
   readonly listeners: Set<CloudTerminalAttachment>
   readonly pending: Array<string>
   reconnect: ReturnType<typeof setTimeout> | undefined
+  /** Reconnects since the last healthy open; drives the backoff exponent. */
+  attempts: number
   /** A 1011 attach failure is retried once; the second is surfaced. */
-  retriedAttach?: boolean
+  retriedAttach: boolean
+}
+
+interface Entry {
+  readonly repo: string
+  readonly conn: Connection
 }
 
 export const createCloudTerminalClient = (options: CloudTerminalClientOptions): CloudTerminalClient => {
-  const connections = new Map<string, { readonly repo: string; readonly conn: Connection }>()
+  const connections = new Map<string, Entry>()
+  /** Every socket this client opened and has not seen close: dispose reaches each one, attached or not. */
+  const sockets = new Set<WebSocket>()
+  /** Reconnect dials reserved in the rolling minute (planned times, so simultaneous schedulers see each other). */
+  const reconnectDials: Array<number> = []
   let disposed = false
+
+  const reconnectMs = options.reconnectMs ?? DEFAULT_RECONNECT_MS
+  const maxReconnectMs = Math.max(options.maxReconnectMs ?? DEFAULT_MAX_RECONNECT_MS, reconnectMs)
+  const maxReconnectsPerMinute = options.maxReconnectsPerMinute ?? DEFAULT_MAX_RECONNECTS_PER_MINUTE
+  const healthyMs = options.healthyMs ?? DEFAULT_HEALTHY_MS
 
   const decode = (data: unknown): Promise<string | null> => {
     if (typeof data === "string") return Promise.resolve(data)
@@ -70,16 +124,44 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
     return Promise.resolve(null)
   }
 
-  const scheduleReconnect = (sessionId: string, entry: { readonly repo: string; readonly conn: Connection }): void => {
-    if (disposed || entry.conn.reconnect !== undefined) return
-    entry.conn.reconnect = setTimeout(() => {
-      entry.conn.reconnect = undefined
-      ensureSocket(sessionId, entry)
-    }, options.reconnectMs ?? 1000)
-    ;(entry.conn.reconnect as { unref?: () => void }).unref?.()
+  const say = (conn: Connection, note: string): void => {
+    for (const listener of conn.listeners) listener.onOutput(`\r\n[${note}]\r\n`)
   }
 
-  const ensureSocket = (sessionId: string, entry: { readonly repo: string; readonly conn: Connection }): void => {
+  /** The wait until the rolling-minute reconnect budget admits one more dial; reserves the slot. */
+  const reserveReconnectDial = (earliest: number): number => {
+    const now = Date.now()
+    while (reconnectDials.length > 0 && reconnectDials[0]! <= now - MINUTE_MS) reconnectDials.shift()
+    let at = earliest
+    if (reconnectDials.length >= maxReconnectsPerMinute) {
+      const frees = reconnectDials[reconnectDials.length - maxReconnectsPerMinute]! + MINUTE_MS
+      at = Math.max(at, frees)
+    }
+    reconnectDials.push(at)
+    reconnectDials.sort((left, right) => left - right)
+    return at
+  }
+
+  /*
+   * Only a connection somebody still listens to redials: the last detach
+   * closes the socket for good, and the closing socket's own onclose is
+   * silenced first, so a deliberate close never schedules anything.
+   */
+  const scheduleReconnect = (sessionId: string, entry: Entry): void => {
+    const { conn } = entry
+    if (disposed || conn.reconnect !== undefined || conn.listeners.size === 0) return
+    conn.attempts += 1
+    const backoff = Math.min(reconnectMs * 2 ** (conn.attempts - 1), maxReconnectMs)
+    const at = reserveReconnectDial(Date.now() + backoff)
+    conn.reconnect = setTimeout(() => {
+      conn.reconnect = undefined
+      if (disposed || conn.listeners.size === 0) return
+      ensureSocket(sessionId, entry)
+    }, Math.max(0, at - Date.now()))
+    ;(conn.reconnect as { unref?: () => void }).unref?.()
+  }
+
+  const ensureSocket = (sessionId: string, entry: Entry): void => {
     const { conn } = entry
     if (disposed || conn.socket !== undefined) return
     const url = options.socketUrl(entry.repo, sessionId)
@@ -87,8 +169,11 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
     if (url === undefined || protocol === undefined) return
     const opened = new WebSocket(url, [protocol])
     conn.socket = opened
+    sockets.add(opened)
+    let openedAt: number | undefined
     opened.onopen = () => {
       if (conn.socket !== opened) return
+      openedAt = Date.now()
       for (const text of conn.pending) opened.send(new TextEncoder().encode(text))
       conn.pending.length = 0
     }
@@ -99,21 +184,35 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
       })
     }
     opened.onclose = (event: CloseEvent) => {
+      sockets.delete(opened)
       if (conn.socket === opened) conn.socket = undefined
+      if (disposed) return
       /*
-       * plue's close codes (internal/routes/workspace_terminal.go): 1001 "terminal
-       * client too slow" and an abnormal 1006 drop reconnect; 1011 "failed to
-       * attach terminal" retries once; 1008 "access revoked: …" and a normal
-       * 1000 are final — the listeners hear the reason once and the 1 Hz retry
-       * never starts.
+       * A socket that lived past healthyMs was fine: its drop starts the
+       * backoff over and earns a fresh single 1011 retry. (plue's 1011
+       * arrives right after the 101, so an open alone proves nothing.)
        */
-      if (event.code === 1006 || event.code === 1001 || (event.code === 1011 && !conn.retriedAttach)) {
-        if (event.code === 1011) conn.retriedAttach = true
+      if (openedAt !== undefined && Date.now() - openedAt >= healthyMs) {
+        conn.attempts = 0
+        conn.retriedAttach = false
+      }
+      if (event.code === 1011 && !conn.retriedAttach) {
+        conn.retriedAttach = true
         scheduleReconnect(sessionId, entry)
         return
       }
-      const note = event.code === 1008 ? `access revoked${event.reason ? `: ${event.reason.replace(/^access revoked:\s*/, "")}` : ""}` : `session closed${event.reason ? `: ${event.reason}` : ""}`
-      for (const listener of conn.listeners) listener.onOutput(`\r\n[${note}]\r\n`)
+      if (RECONNECT_CODES.has(event.code)) {
+        scheduleReconnect(sessionId, entry)
+        return
+      }
+      const known = FINAL_NOTES[event.code]
+      const reason = event.reason.trim()
+      const note = event.code === 1008
+        ? `access revoked${reason ? `: ${reason.replace(/^access revoked:\s*/, "")}` : ""}`
+        : known !== undefined
+        ? `${known}${reason && event.code >= 4400 ? ` (${reason})` : ""}`
+        : `session closed${reason ? `: ${reason}` : ""}`
+      say(conn, note)
     }
     opened.onerror = () => {
       // onclose follows; the reconnect is its job.
@@ -123,7 +222,10 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
   const attach: CloudTerminalClient["attach"] = (repo, sessionId, attachment) => {
     let entry = connections.get(sessionId)
     if (entry === undefined) {
-      entry = { repo, conn: { socket: undefined, listeners: new Set(), pending: [], reconnect: undefined } }
+      entry = {
+        repo,
+        conn: { socket: undefined, listeners: new Set(), pending: [], reconnect: undefined, attempts: 0, retriedAttach: false }
+      }
       connections.set(sessionId, entry)
     }
     entry.conn.listeners.add(attachment)
@@ -141,7 +243,12 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
       }
       const closing = current.conn.socket
       current.conn.socket = undefined
-      closing?.close()
+      if (closing !== undefined) {
+        // The deliberate close: nobody listens, so nothing may redial from it.
+        closing.onclose = null
+        sockets.delete(closing)
+        closing.close()
+      }
     }
   }
 
@@ -170,9 +277,14 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
     for (const entry of connections.values()) {
       if (entry.conn.reconnect !== undefined) clearTimeout(entry.conn.reconnect)
       entry.conn.pending.length = 0
-      entry.conn.socket?.close()
+      entry.conn.socket = undefined
     }
     connections.clear()
+    for (const socket of sockets) {
+      socket.onclose = null
+      socket.close()
+    }
+    sockets.clear()
   }
 
   return { attach, input, resize, dispose }
