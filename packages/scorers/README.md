@@ -31,25 +31,25 @@ Use `SqlScoreStore.layer` for persistence, `ScoreStore.layerNoop` to run a flow 
 
 ## Public API
 
-The root entry point exports these namespaces; top-level modules are also importable from `@smthrs/scorers/<Module>`. `@smthrs/scorers/package.json` is exported too; `internal/*` and nested `*/index` subpaths are blocked, so the migration aggregator is root-only.
+The root entry point exports these namespaces; top-level modules are also importable from `@smthrs/scorers/<Module>`. `@smthrs/scorers/package.json` is exported too; `internal/*`, `migrations/*`, and nested `*/index` subpaths are blocked, so the migration aggregator is root-only.
 
 Every export is listed once, in the reference table in [`docs/api.md`](./docs/api.md), which `test/docs.test.ts` compares against the `@category` JSDoc in `src/`. This table names the modules only, so the two cannot drift apart.
 
-| Module                                  | Description                                                                         |
-| --------------------------------------- | ----------------------------------------------------------------------------------- |
-| `Binding`                               | Attaches a scorer, target, optional context and ground truth, and sampling policy.  |
-| `Runner`                                | Defines scorer batch execution, job identities, and inconclusive observations.      |
-| `RunnerLive`                            | Provides the queue and batch runner over a `ScoreStore`.                            |
-| `Sampling`                              | Defines and deterministically evaluates score sampling policies.                    |
-| `Scorer`                                | Declares typed scoring flows and validates results in the inclusive `[0, 1]` range. |
-| `ScorerError`                           | Defines typed scoring, storage, and runner failures.                                |
-| `ScoreStore`                            | Defines durable observation append, query, and aggregation.                         |
-| `SqlScoreStore`                         | Implements `ScoreStore` over the database service.                                  |
-| `Migrations`                            | Applies the score-store schema migrations; available through the root namespace.    |
-| `migrations/0001_scores`                | Creates the score observation table; available as a direct public subpath.          |
-| `migrations/0002_score_jobs`            | Creates the idempotent score-job table; available as a direct public subpath.       |
-| `migrations/0003_score_failure_codes`   | Adds the failure-code column.                                                       |
-| `migrations/0004_require_failure_codes` | Backfills and requires a code for every inconclusive row.                           |
+| Module                                  | Description                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Binding`                               | Attaches a scorer, target, optional context and ground truth, and sampling policy.    |
+| `Runner`                                | Defines scorer batch execution, job identities, and inconclusive observations.        |
+| `RunnerLive`                            | Provides the queue and batch runner over a `ScoreStore`.                              |
+| `Sampling`                              | Defines and deterministically evaluates score sampling policies.                      |
+| `Scorer`                                | Declares typed scoring flows and validates results in the inclusive `[0, 1]` range.   |
+| `ScorerError`                           | Defines typed scoring, storage, and runner failures.                                  |
+| `ScoreStore`                            | Defines durable observation append, query, and aggregation.                           |
+| `SqlScoreStore`                         | Implements `ScoreStore` over the database service.                                    |
+| `Migrations`                            | Applies the score-store schema migrations; available through the root namespace.      |
+| `migrations/0001_scores`                | Creates the score observation table; applied through `Migrations`, not importable.    |
+| `migrations/0002_score_jobs`            | Creates the idempotent score-job table; applied through `Migrations`, not importable. |
+| `migrations/0003_score_failure_codes`   | Adds the failure-code column.                                                         |
+| `migrations/0004_require_failure_codes` | Backfills and requires a code for every inconclusive row.                             |
 
 ## Failures and limits
 
