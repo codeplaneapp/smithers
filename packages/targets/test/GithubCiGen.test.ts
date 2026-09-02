@@ -956,6 +956,44 @@ describe("a platform matrix", () => {
     ).toThrow(/required job "rust" is advisory on every platform/)
   })
 
+  /**
+   * A language toolchain must be installed BEFORE the package manager.
+   *
+   * `actions/setup-go` prepends its own bin directories to PATH. Emitted after
+   * `pnpm/action-setup`, it displaced the pnpm shim corepack had put there, and
+   * the job's own `pnpm exec smithers-build` still resolved while every nested
+   * target the build tool spawned died with `spawn pnpm ENOENT` in under a
+   * second. Fifty-one targets failed at once, across every package, and read
+   * like fifty-one defects rather than one ordering mistake.
+   *
+   * Nothing about the YAML shows this: both steps are present and both are
+   * well-formed either way. Only the order says whose PATH entry survives, so
+   * the order is what this pins.
+   */
+  it("installs the language toolchains before the package manager claims PATH", () => {
+    const rendered = render(attrsOf({
+      ...goldenAttrs,
+      jobs: goldenAttrs.jobs.map((job) =>
+        job.id !== "test" ? job : {
+          ...job,
+          toolchain: CiToolchain.Needs({
+            runtimes: [node],
+            go: CiToolchain.Go({ release: "1.26.0" }),
+            foundry: CiToolchain.Foundry({ release: "v1.8.1" })
+          })
+        }
+      )
+    }))
+    const at = (needle: string): number => {
+      const index = rendered.indexOf(needle)
+      expect(index).toBeGreaterThan(-1)
+      return index
+    }
+    expect(at("actions/setup-go")).toBeLessThan(at("pnpm/action-setup"))
+    expect(at("foundry-rs/foundry-toolchain")).toBeLessThan(at("pnpm/action-setup"))
+    expect(at("pnpm/action-setup")).toBeLessThan(at("pnpm install --frozen-lockfile"))
+  })
+
   it("still admits no free-form command through the matrix", () => {
     expect(Object.keys(Job.fields).sort())
       .toEqual(["continueOnError", "id", "matrix", "name", "runsOn", "steps", "timeoutMinutes", "toolchain"])
