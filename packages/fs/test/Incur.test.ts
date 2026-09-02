@@ -1,9 +1,10 @@
 import * as Descriptor from "@smthrs/registry/Descriptor"
-import { Cause, Effect, Layer, Option } from "effect"
+import { Cause, Effect, Layer, Option, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import * as FlowInvoker from "../src/FlowInvoker.ts"
 import * as Incur from "../src/Incur.ts"
-import { makeRoute } from "./helpers.ts"
+import visible from "./fixtures/command/visible.ts"
+import { makeRoute, recordedImports, recordedModule, refinedModule } from "./helpers.ts"
 
 const makeCli = async (routes = [makeRoute("review")]) => {
   const seen: Array<FlowInvoker.Invocation> = []
@@ -39,6 +40,27 @@ const paths = async (cli: { readonly fetch: (request: Request) => Promise<Respon
     readonly paths: Readonly<Record<string, unknown>>
   }
   return Object.keys(spec.paths).sort()
+}
+
+/** Calls one tool on the MCP surface and returns the JSON-RPC payload. */
+const tool = async (
+  cli: { readonly fetch: (request: Request) => Promise<Response> },
+  name: string,
+  args: Readonly<Record<string, unknown>>
+) => {
+  const response = await cli.fetch(
+    new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })
+    })
+  )
+  return await response.json() as {
+    readonly result: {
+      readonly isError?: boolean
+      readonly content: ReadonlyArray<{ readonly text: string }>
+    }
+  }
 }
 
 describe("Incur projection", () => {
@@ -79,6 +101,86 @@ describe("Incur projection", () => {
     }
     expect(seen[0]?.input).toEqual({ number: 44 })
     expect(writes.join("")).toContain("44")
+  })
+
+  it("advertises the real input schema on every discovery surface", async () => {
+    const { cli } = await makeCli()
+    // The flow's own JSON Schema is the yardstick: a discovery surface that
+    // publishes anything narrower or vaguer misdescribes what the flow takes.
+    const declared = Schema.toJsonSchemaDocument(visible.input).schema as {
+      readonly properties: Readonly<Record<string, unknown>>
+      readonly required: ReadonlyArray<string>
+    }
+
+    const details = await tool(cli, "get_tool_details", { name: "review" })
+    const advertised = JSON.parse(details.result.content[0]!.text) as {
+      readonly inputSchema: {
+        readonly properties: Readonly<Record<string, unknown>>
+        readonly required: ReadonlyArray<string>
+      }
+    }
+    expect(advertised.inputSchema.properties).toEqual(declared.properties)
+    expect(advertised.inputSchema.required).toEqual(declared.required)
+
+    const spec = await (await cli.fetch(new Request("http://localhost/openapi.json"))).json() as {
+      readonly paths: {
+        readonly "/review": {
+          readonly post: {
+            readonly requestBody: {
+              readonly content: {
+                readonly "application/json": {
+                  readonly schema: { readonly properties: Readonly<Record<string, unknown>> }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(spec.paths["/review"].post.requestBody.content["application/json"].schema.properties).toEqual(
+      declared.properties
+    )
+
+    const help = capture()
+    await cli.serve(["review", "--schema"], help.options)
+    expect(help.writes.join("")).toContain("number")
+  })
+
+  it("carries MCP tool arguments through to the invoked flow", async () => {
+    const { cli, seen } = await makeCli()
+    const called = await tool(cli, "call_write_tool", { name: "review", arguments: { number: 42 } })
+    expect(called.result.isError).toBeUndefined()
+    expect(called.result.content[0]!.text).toContain("42")
+    expect(seen.map((invocation) => invocation.input)).toEqual([{ number: 42 }])
+  })
+
+  it("keeps an unprojectable route advertised and answers with its typed failure", async () => {
+    const unsupported = makeRoute("bad", undefined, { input: new Descriptor.SchemaRefMarkdownOutput({}) })
+    const { cli, seen } = await makeCli([makeRoute("review"), unsupported])
+
+    // A route that cannot be projected is still dispatchable, so hiding it from
+    // discovery would be the one failure this projection exists to prevent.
+    expect(await paths(cli)).toEqual(["/bad", "/review"])
+    const called = await tool(cli, "call_write_tool", { name: "bad", arguments: {} })
+    expect(called.result.isError).toBe(true)
+    expect(called.result.content[0]!.text).toContain("An output locator cannot describe command input")
+    expect(seen).toEqual([])
+  })
+
+  it("loads only the dispatched module until a discovery surface needs the rest", async () => {
+    const { cli, seen } = await makeCli([makeRoute("review"), makeRoute("recorded", recordedModule)])
+    expect(recordedImports()).toBe(0)
+
+    expect((await cli.fetch(new Request("http://localhost/review?number=1"))).status).toBe(200)
+    expect(seen.map((invocation) => invocation.name)).toEqual(["review"])
+    expect(recordedImports()).toBe(0)
+
+    // Discovery must publish real schemas, so it projects every command once
+    // and reuses that projection.
+    expect(await paths(cli)).toEqual(["/recorded", "/review"])
+    expect(recordedImports()).toBe(1)
+    expect(await paths(cli)).toEqual(["/recorded", "/review"])
+    expect(recordedImports()).toBe(1)
   })
 
   it("keeps parent routes and nested routes independently executable", async () => {
@@ -266,13 +368,33 @@ describe("Incur projection", () => {
     expect(await spec.text()).not.toContain("hidden")
   })
 
-  it("returns a stable typed refusal for invalid route input", async () => {
+  it("refuses input its advertised schema rejects without echoing the value", async () => {
     const { cli, seen } = await makeCli()
+    // The advertised schema is enforced, not decorative: the refusal names the
+    // field that failed and never repeats what the caller sent.
     const response = await cli.fetch(new Request("http://localhost/review?number=not-a-number"))
+    const body = await response.json() as {
+      readonly error: { readonly fieldErrors: ReadonlyArray<{ readonly path: string }> }
+    }
+    expect(response.status).toBeGreaterThanOrEqual(400)
+    expect(body.error.fieldErrors.map((field) => field.path)).toEqual(["number"])
+    expect(JSON.stringify(body)).not.toContain("not-a-number")
+
+    const run = capture()
+    await cli.serve(["review", "--number", "not-a-number", "--format", "json"], run.options)
+    expect(run.writes.join("")).toContain("\"path\": \"number\"")
+    expect(run.writes.join("")).not.toContain("not-a-number")
+    expect(seen).toEqual([])
+  })
+
+  it("returns a stable typed refusal when only the flow schema can reject the input", async () => {
+    // `Schema.NonEmptyString` projects to `string`, so the empty title passes
+    // the advertised schema and the authoritative decoder is what refuses it.
+    const { cli, seen } = await makeCli([makeRoute("refined", refinedModule)])
+    const response = await cli.fetch(new Request("http://localhost/refined?title="))
     const body = await response.json()
     expect(response.status).toBeGreaterThanOrEqual(400)
     expect(body.error).toMatchObject({ code: "decode_failed" })
-    expect(JSON.stringify(body)).not.toContain("not-a-number")
     expect(seen).toEqual([])
   })
 })

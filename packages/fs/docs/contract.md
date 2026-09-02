@@ -40,6 +40,35 @@ looked up. A decomposed directory name from the filesystem and a composed name
 from a browser or an agent therefore select the same route. Only the lookup key
 is normalized: unconsumed argument text stays exactly as the caller wrote it.
 
+## Advertised input schema
+
+Every mounted command publishes the JSON Schema of the flow's own Effect input
+schema, so `--help`, `--llms`, `--schema`, the OpenAPI document, and the MCP
+tool list describe the input the flow accepts. Unions and nullable fields keep
+every branch, and a literal set is advertised as its exact values, so
+`Schema.Number`, which Effect renders as `number | "Infinity" | "-Infinity" |
+"NaN"`, is published with that shape rather than as an untyped value. Building
+the metadata surface loads every command module once and reuses the result;
+dispatching one command still loads only that command.
+
+The projection is enforced, not decorative. Input that contradicts the
+advertised type is refused by Incur before the flow is loaded, with a
+field-level error naming the failing path and no copy of the offending value.
+A projection describes types only: refinements such as a minimum length or a
+pattern reach the authoritative Effect decoder, which refuses them with
+`decode_failed`. A flag value is never coerced by shape, so `""`, `null`, and
+`[]` are refused for a numeric field instead of becoming `0`.
+
+The published schema is the flow's, so it also inherits what that schema says
+about values this package will not carry. Effect renders a number's JSON form
+as `number | "Infinity" | "-Infinity" | "NaN"`, and a date as a string, while
+the authoritative decoder and the snapshot boundary accept only inert, finite
+JSON. Such a value is refused with `decode_failed` rather than invoked.
+
+A route that cannot be projected at all, such as one declaring an output
+locator as its input, stays advertised because it stays dispatchable. Calling
+it reports the `FsError` that stopped the projection.
+
 ## Command groups and the reserved `self` segment
 
 Incur cannot represent a node that is both runnable and a command group. A

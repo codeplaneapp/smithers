@@ -91,10 +91,26 @@ const zodFor = (input: unknown, definitions: JsonSchema): z.ZodType => {
   // Every node emitted by `Schema.toJsonSchemaDocument` is a JSON object.
   const raw = input as JsonSchema
   const schema = resolveReference(raw, definitions)
+  const variants = schema.anyOf
+  // Effect renders `Schema.Number` as `number | "Infinity" | "-Infinity" |
+  // "NaN"`, and every union or nullable field the same way, so a projection
+  // that ignored `anyOf` would advertise the most common field in the
+  // repository as an untyped `{}` on `--schema`, OpenAPI, and the MCP tool
+  // list, and would forward anything at all to the authoritative decoder.
+  if (Array.isArray(variants)) return z.union(variants.map((variant) => zodFor(variant, definitions)))
   const type = schema.type
-  if (type === "string") return z.string()
-  if (type === "number" || type === "integer") return z.coerce.number()
+  if (type === "string") {
+    const values = schema.enum
+    // A literal set is advertised exactly, so an agent reading the tool list
+    // learns which words the flow accepts instead of "any string".
+    return Array.isArray(values) ? z.enum(values as ReadonlyArray<string> as [string, ...Array<string>]) : z.string()
+  }
+  if (type === "integer") return z.preprocess(jsonValue, z.int())
+  // `jsonValue` rather than `z.coerce`: coercion turns `""`, `null`, and `[]`
+  // into `0`, which would silently invent input for a durable run.
+  if (type === "number") return z.preprocess(jsonValue, z.number())
   if (type === "boolean") return z.preprocess(jsonValue, z.boolean())
+  if (type === "null") return z.preprocess(jsonValue, z.null())
   if (type === "array") return z.array(zodFor(schema.items, definitions))
   if (type === "object") return z.preprocess(jsonValue, z.record(z.string(), z.unknown()))
   return z.preprocess(jsonValue, z.unknown())
@@ -115,7 +131,7 @@ const objectDescriptors = (
   root: JsonSchema,
   definitions: JsonSchema
 ): {
-  readonly args: z.ZodObject<any>
+  readonly args: z.ZodObject<any> | undefined
   readonly options: z.ZodObject<any>
 } => {
   const properties = record(root.properties)!
@@ -128,11 +144,11 @@ const objectDescriptors = (
     shape[name] = required.has(name) ? field : field.optional()
   }
   const options = z.object(shape).strict()
-  const positional = Object.hasOwn(shape, "args")
-    ? shape.args!
-    : z.array(z.string()).optional()
+  // Positionals are advertised only when the flow schema really has an `args`
+  // field. Mounting one anywhere else would publish a parameter that the strict
+  // options object is guaranteed to refuse.
   return {
-    args: z.object({ args: positional }),
+    args: Object.hasOwn(shape, "args") ? z.object({ args: shape.args! }) : undefined,
     options
   }
 }
@@ -140,6 +156,22 @@ const objectDescriptors = (
 const positionalRecord = (args: Positional): Readonly<Record<string, unknown>> => {
   if (!Array.isArray(args)) return args as Readonly<Record<string, unknown>>
   return args.length === 0 ? {} : { args }
+}
+
+/**
+ * Joins positional tokens into the single argument string Markdown flows take.
+ *
+ * Incur delivers positionals as the record `{ args: ["a", "b"] }`, so the
+ * tokens have to be read out of that key rather than off the record's values.
+ * Anything that is not a list of strings is returned unchanged so the
+ * authoritative `args: string` decode refuses it: `String(value)` would invoke
+ * a caller-supplied `toString` and turn `["a", "b"]` into `"a,b"`.
+ */
+const positionalText = (args: Positional): unknown => {
+  const values: unknown = Array.isArray(args) ? args : (args as Readonly<Record<string, unknown>>).args
+  if (values === undefined) return ""
+  if (!Array.isArray(values)) return values
+  return values.every((value) => typeof value === "string") ? values.join(" ") : values
 }
 
 const decodeWith = (
@@ -196,7 +228,8 @@ export const toCommandSchema = (
   if (ref._tag === "None") {
     const empty = z.object({}).strict()
     return Effect.succeed(Object.freeze({
-      args: z.object({ args: z.array(z.string()).optional() }),
+      // A schema-free command takes nothing, so it advertises no positionals.
+      args: undefined,
       options: empty,
       assemble: (args: Positional, options: Readonly<Record<string, unknown>>) =>
         Object.freeze({ value: { ...positionalRecord(args), ...options } }),
@@ -216,9 +249,7 @@ export const toCommandSchema = (
       args: z.object({ args: z.array(z.string()).optional() }),
       options: z.object({}).strict(),
       assemble: (args: Positional, options: Readonly<Record<string, unknown>>) =>
-        Object.freeze({
-          value: { args: Array.isArray(args) ? args.join(" ") : Object.values(args).map(String).join(" "), ...options }
-        }),
+        Object.freeze({ value: { args: positionalText(args), ...options } }),
       decode: (assembly: Assembly) => decodeWith(schema, command, assembly)
     }))
   }

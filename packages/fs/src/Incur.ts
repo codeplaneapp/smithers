@@ -35,6 +35,11 @@ type Selection = SelectedRoute & {
   readonly dispatch: ReadonlyArray<string>
 }
 
+/** What one route contributes to the metadata surface once it is projected. */
+type Projection =
+  | { readonly _tag: "Ready"; readonly selected: SelectedRoute }
+  | { readonly _tag: "Failed"; readonly error: FsError }
+
 /**
  * The reserved child segment that invokes a route which also has children.
  *
@@ -153,24 +158,20 @@ const execute = (
     })
   )
 
-const metadataDefinition = (
+const failedDefinition = (
   route: Route.Route,
+  error: FsError,
   runEffect: <A, E>(
     effect: Effect.Effect<A, E, FlowInvoker.FlowInvoker>,
     options?: { readonly signal: AbortSignal } | undefined
   ) => Promise<A>
 ) => ({
   description: descriptionOf(route),
-  /* v8 ignore next -- the public serve/fetch wrappers hydrate and replace a selected definition before Incur may run it */
+  // A route whose input cannot be projected stays advertised, because it stays
+  // dispatchable. Calling it reports the exact failure that stopped the
+  // projection instead of a contentless error.
   run(context: IncurContext) {
-    return runEffect(
-      Effect.gen(function*() {
-        const flow = yield* Route.load(route)
-        const schema = yield* SchemaBridge.toCommandSchema(route.input, flow.input)
-        return yield* execute({ route, flow, schema }, context)
-      }),
-      runOptions(context.request)
-    )
+    return runEffect(Effect.sync(() => mapError(context, error)), runOptions(context.request))
   }
 })
 
@@ -189,21 +190,53 @@ const selectedDefinition = (
   }
 })
 
+const project = (route: Route.Route): Effect.Effect<Projection> =>
+  Effect.gen(function*() {
+    const flow = yield* Route.load(route)
+    const schema = yield* SchemaBridge.toCommandSchema(route.input, flow.input)
+    return { route, flow, schema }
+  }).pipe(
+    Effect.match({
+      onFailure: (error: FsError): Projection => ({ _tag: "Failed", error }),
+      onSuccess: (selected: SelectedRoute): Projection => ({ _tag: "Ready", selected })
+    })
+  )
+
+const projectAll = (
+  tree: CommandTree.CommandTree
+): Effect.Effect<ReadonlyMap<Route.Route, Projection>> =>
+  Effect.gen(function*() {
+    const projections = new Map<Route.Route, Projection>()
+    for (const route of CommandTree.traverse(tree)) projections.set(route, yield* project(route))
+    return projections
+  })
+
 const metadataCli = (
   name: string,
   tree: CommandTree.CommandTree,
+  projections: ReadonlyMap<Route.Route, Projection>,
   runEffect: <A, E>(
     effect: Effect.Effect<A, E, FlowInvoker.FlowInvoker>,
     options?: { readonly signal: AbortSignal } | undefined
   ) => Promise<A>
 ): IncurCli.Cli => {
   const cli = IncurCli.create(name)
+  // Every advertised command carries the same descriptors the dispatch path
+  // mounts, so `--llms`, `--schema`, the OpenAPI document, and the MCP tool
+  // list describe the input the flow actually accepts, and an MCP tool call
+  // reaches the flow with its arguments intact.
+  const definitionFor = (route: Route.Route) => {
+    const projection = projections.get(route)!
+    return projection._tag === "Ready"
+      ? selectedDefinition(projection.selected, runEffect)
+      : failedDefinition(route, projection.error, runEffect)
+  }
   const mountChildren = (parent: IncurCli.Cli, node: CommandTree.CommandTree): void => {
     for (const [segment, child] of node.children) {
       const route = Option.getOrUndefined(child.route)
       if (child.children.size === 0) {
         // A trie node without children is always the leaf of a route.
-        parent.command(segment, metadataDefinition(route!, runEffect))
+        parent.command(segment, definitionFor(route!))
         continue
       }
       const group = IncurCli.create(segment, {
@@ -213,7 +246,7 @@ const metadataCli = (
       // Incur cannot represent a node that is both runnable and a group, so a
       // route carrying children is advertised under the reserved segment
       // instead of disappearing from every discovery surface.
-      if (route !== undefined) group.command(selfSegment, metadataDefinition(route, runEffect))
+      if (route !== undefined) group.command(selfSegment, definitionFor(route))
       parent.command(group)
     }
   }
@@ -305,8 +338,11 @@ const hydrate = (
 /**
  * Projects routes onto an Incur CLI while preserving metadata-only discovery.
  *
- * Only an invoked module is loaded. Its actual Effect input schema is then
- * projected into Incur flags and remains the authoritative decoder.
+ * Dispatching one command loads only that command's module. Its actual Effect
+ * input schema is then projected into Incur flags and remains the
+ * authoritative decoder. A discovery surface must publish those flags, so the
+ * first discovery request loads every command module once and reuses the
+ * result.
  *
  * @category constructors
  * @since 0.1.0
@@ -322,9 +358,13 @@ export const createCli = (
     const grouped = yield* groupedRoutes(tree)
     const services = yield* Effect.context<FlowInvoker.FlowInvoker>()
     const runEffect = Effect.runPromiseWith(services)
-    const cli = metadataCli(name, tree, runEffect)
-    const metadataServe = cli.serve.bind(cli)
-    const metadataFetch = cli.fetch.bind(cli)
+    const cli = IncurCli.create(name)
+
+    // Built once, on the first request that needs it, so a caller that only
+    // ever dispatches keeps loading exactly one module.
+    let metadata: Promise<IncurCli.Cli> | undefined
+    const metadataSurface = (): Promise<IncurCli.Cli> =>
+      metadata ??= runEffect(projectAll(tree)).then((projections) => metadataCli(name, tree, projections, runEffect))
 
     const select = (
       tokens: ReadonlyArray<string>,
@@ -347,25 +387,25 @@ export const createCli = (
       )
 
     cli.serve = async (argv = process.argv.slice(2), options = {}) => {
-      if (isDiscovery(argv)) return metadataServe(argv, options)
+      if (isDiscovery(argv)) return (await metadataSurface()).serve(argv, options)
       const normalized = normalizeArgv(argv)
       const tokens = commandTokens(normalized)
       const outcome = await select(tokens, tokens)
       if (outcome._tag === "Error") return reportServe(outcome.error, options)
       return Option.isNone(outcome.selection)
-        ? metadataServe([...normalized], options)
+        ? (await metadataSurface()).serve([...normalized], options)
         : dispatchCli(name, outcome.selection.value, runEffect).serve([...normalized], options)
     }
 
     cli.fetch = async (request) => {
       const url = new URL(request.url)
-      if (isFetchDiscovery(url.pathname)) return metadataFetch(request)
+      if (isFetchDiscovery(url.pathname)) return (await metadataSurface()).fetch(request)
       const path = requestPath(url.pathname)
       if (path === undefined) return reportFetch(malformedPath())
       const outcome = await select(path.decoded, path.raw, { signal: request.signal })
       if (outcome._tag === "Error") return reportFetch(outcome.error)
       return Option.isNone(outcome.selection)
-        ? metadataFetch(request)
+        ? (await metadataSurface()).fetch(request)
         : dispatchCli(name, outcome.selection.value, runEffect).fetch(request)
     }
 

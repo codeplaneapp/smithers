@@ -1,5 +1,6 @@
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import { Cause, Context, Effect, Option, Schema, SchemaTransformation } from "effect"
+import { z } from "incur"
 import { describe, expect, it } from "vitest"
 import * as SchemaBridge from "../src/internal/SchemaBridge.ts"
 
@@ -32,9 +33,23 @@ describe("SchemaBridge", () => {
     expect(await Effect.runPromise(command.decode(command.assemble(["hello", "world"], {})))).toEqual({
       args: "hello world"
     })
-    expect(await Effect.runPromise(command.decode(command.assemble({ first: 1, second: "two" }, {})))).toEqual({
-      args: "1 two"
+    // Incur delivers positionals as `{ args: [...] }`, and they join with a
+    // single space exactly as the array form does.
+    expect(await Effect.runPromise(command.decode(command.assemble({ args: ["hello", "world"] }, {})))).toEqual({
+      args: "hello world"
     })
+    expect(await Effect.runPromise(command.decode(command.assemble({ args: "already text" }, {})))).toEqual({
+      args: "already text"
+    })
+    expect(await Effect.runPromise(command.decode(command.assemble({}, {})))).toEqual({ args: "" })
+    // An option of the same name wins, as it does in every other strategy.
+    expect(await Effect.runPromise(command.decode(command.assemble(["p1", "p2"], { args: "override" })))).toEqual({
+      args: "override"
+    })
+    // A non-string positional is refused rather than stringified through a
+    // caller-supplied `toString`.
+    expect((await failure(command.decode(command.assemble({ args: [1, 2] } as never, {})))).code).toBe("decode_failed")
+
     const unsupported = await failure(
       SchemaBridge.toCommandSchema(new Descriptor.SchemaRefMarkdownOutput({}), Schema.String)
     )
@@ -83,6 +98,43 @@ describe("SchemaBridge", () => {
         nested: {},
         anything: null
       })))).code
+    ).toBe("decode_failed")
+  })
+
+  it("advertises every option with the type its flow schema declares", async () => {
+    const Input = Schema.Struct({
+      count: Schema.Number,
+      mode: Schema.Literals(["fast", "slow"]),
+      note: Schema.NullOr(Schema.String)
+    })
+    const command = await Effect.runPromise(SchemaBridge.toCommandSchema(moduleRef, Input))
+    const advertised = z.toJSONSchema(command.options!, { unrepresentable: "any" }) as {
+      readonly properties: Readonly<Record<string, unknown>>
+      readonly required: ReadonlyArray<string>
+    }
+    const declared = Schema.toJsonSchemaDocument(Input).schema as typeof advertised
+
+    // The projection publishes the flow's own JSON Schema, so `--schema`, the
+    // OpenAPI document, and the MCP tool list describe exactly what decodes.
+    expect(advertised.properties).toEqual(declared.properties)
+    expect(advertised.required).toEqual(declared.required)
+
+    expect(
+      await Effect.runPromise(command.decode(command.assemble([], { count: "42", mode: "fast", note: null })))
+    ).toEqual({ count: 42, mode: "fast", note: null })
+    // An empty flag value is refused rather than coerced to zero.
+    expect((await failure(command.decode(command.assemble([], { count: "", mode: "fast", note: null })))).code).toBe(
+      "decode_failed"
+    )
+    // The published schema is Effect's own, which renders a number as
+    // `number | "Infinity" | "-Infinity" | "NaN"`. The authoritative decoder
+    // takes the number side only, and the invocation boundary refuses
+    // non-finite values, so a token is refused rather than invoked.
+    expect(
+      (await failure(command.decode(command.assemble([], { count: "Infinity", mode: "fast", note: null })))).code
+    ).toBe("decode_failed")
+    expect(
+      (await failure(command.decode(command.assemble([], { count: 1, mode: "sideways", note: null })))).code
     ).toBe("decode_failed")
   })
 
