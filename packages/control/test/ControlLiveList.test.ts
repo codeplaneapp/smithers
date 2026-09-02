@@ -6,7 +6,7 @@
 import { Journal } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Registry } from "@smthrs/registry"
-import { Effect, Layer, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
 import { InvalidInput, LaunchFailed, PersistenceError, PlanDenied } from "../src/ControlError.ts"
@@ -237,6 +237,183 @@ describe("ControlLive listings", () => {
 })
 
 describe("ControlLive mutations", () => {
+  it("refuses accessor-backed intent without executing it", async () => {
+    let reads = 0
+    const payload = Object.defineProperty({}, "decision", {
+      enumerable: true,
+      get: () => {
+        reads++
+        return "ship"
+      }
+    })
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { runId } = yield* start("system/test", "accessor-intent")
+      const failure = yield* Effect.flip(control.signal({
+        runId,
+        signal: { name: "reviewed", payload },
+        idempotencyKey: "signal:accessor"
+      } as never))
+      return { failure, delivered: yield* runtime.deliveredSignals(runId) }
+    }))
+
+    expect(observed.failure).toBeInstanceOf(InvalidInput)
+    expect(reads).toBe(0)
+    expect(observed.delivered).toEqual([])
+  })
+
+  it("does not consult proxy reads or toJSON while snapshotting intent", async () => {
+    let proxyReads = 0
+    let toJsonCalls = 0
+    const payload = new Proxy({ decision: "ship" }, {
+      get: (target, key, receiver) => {
+        proxyReads++
+        return Reflect.get(target, key, receiver)
+      }
+    })
+    Object.defineProperty(payload, "toJSON", {
+      configurable: true,
+      value: () => {
+        toJsonCalls++
+        return { decision: "rewritten" }
+      }
+    })
+
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { runId } = yield* start("system/test", "inert-intent")
+      const receipt = yield* control.signal({
+        runId,
+        signal: { name: "reviewed", payload },
+        idempotencyKey: "signal:inert"
+      })
+      return { receipt, delivered: yield* runtime.deliveredSignals(runId) }
+    }))
+
+    expect(observed.receipt._tag).toBe("Accepted")
+    expect(proxyReads).toBe(0)
+    expect(toJsonCalls).toBe(0)
+    expect(observed.delivered.map((signal) => signal.payload)).toEqual([{ decision: "ship" }])
+  })
+
+  it("scopes one caller key to the authenticated actor without using its timestamp", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const notifications = yield* NotificationQueue.NotificationQueue
+      const { runId } = yield* start("system/test", "actor-scope")
+      const first = yield* control.steer({
+        runId,
+        message: {
+          messageId: "actor-a",
+          runId,
+          body: "first",
+          principal: { id: "alice", kind: "bearer", stampedAt: 1 },
+          createdAt: 1
+        },
+        idempotencyKey: "shared-key"
+      })
+      const retry = yield* control.steer({
+        runId,
+        message: {
+          messageId: "actor-a",
+          runId,
+          body: "first",
+          principal: { id: "alice", kind: "bearer", stampedAt: 2 },
+          createdAt: 1
+        },
+        idempotencyKey: "shared-key"
+      })
+      const second = yield* control.steer({
+        runId,
+        message: {
+          messageId: "actor-b",
+          runId,
+          body: "second",
+          principal: { id: "bob", kind: "bearer", stampedAt: 3 },
+          createdAt: 1
+        },
+        idempotencyKey: "shared-key"
+      })
+      return { first, retry, second, pending: yield* notifications.pending(runId) }
+    }))
+
+    expect(observed.first._tag).toBe("Accepted")
+    expect(observed.retry._tag).toBe("AlreadyApplied")
+    expect(observed.second._tag).toBe("Accepted")
+    expect(observed.pending.map((item) => item.provenance.sourceActor)).toEqual([
+      "bearer:alice",
+      "bearer:bob"
+    ])
+  })
+
+  it("detaches intent before a downstream suspension", async () => {
+    const entered = Effect.runSync(Deferred.make<ControlExecutor.Signal>())
+    const release = Effect.runSync(Deferred.make<void>())
+    const executor = ControlExecutor.makeNoop({
+      deliverSignal: (input) =>
+        Deferred.succeed(entered, input).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as("unknown" as const)
+        )
+    })
+    const payload = { decision: "before" }
+
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        const { runId } = yield* start("system/test", "snapshot-intent")
+        const fiber = yield* control.signal({
+          runId,
+          signal: { name: "reviewed", payload },
+          idempotencyKey: "signal:snapshot"
+        }).pipe(Effect.forkChild({ startImmediately: true }))
+        const handedOff = yield* Deferred.await(entered)
+        payload.decision = "after"
+        yield* Deferred.succeed(release, undefined)
+        const receipt = yield* Fiber.join(fiber)
+        return { handedOff, receipt, delivered: yield* runtime.deliveredSignals(runId) }
+      }),
+      live({ runtime: memoryRuntime({ flows }), executor })
+    )
+
+    expect(observed.receipt._tag).toBe("Accepted")
+    expect(observed.handedOff.signal.payload).toEqual({ decision: "before" })
+    expect(observed.delivered.map((signal) => signal.payload)).toEqual([{ decision: "before" }])
+    expect(payload).toEqual({ decision: "after" })
+  })
+
+  it("preserves valid Unicode and refuses ill-formed or oversized intent", async () => {
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const runtime = yield* ControlRuntime
+      const { runId } = yield* start("system/test", "unicode-intent")
+      const accepted = yield* control.signal({
+        runId,
+        signal: { name: "reviewed", payload: { text: "e\u0301 😀" } },
+        idempotencyKey: "signal:unicode"
+      })
+      const malformed = yield* Effect.flip(control.signal({
+        runId,
+        signal: { name: "reviewed", payload: { text: "\ud800" } },
+        idempotencyKey: "signal:malformed"
+      }))
+      const oversized = yield* Effect.flip(control.signal({
+        runId,
+        signal: { name: "reviewed", payload: { text: "x".repeat(4 * 1024 * 1024 + 1) } },
+        idempotencyKey: "signal:oversized"
+      }))
+      return { accepted, malformed, oversized, delivered: yield* runtime.deliveredSignals(runId) }
+    }))
+
+    expect(observed.accepted._tag).toBe("Accepted")
+    expect(observed.malformed).toBeInstanceOf(InvalidInput)
+    expect(observed.oversized).toBeInstanceOf(InvalidInput)
+    expect(observed.delivered.map((signal) => signal.payload)).toEqual([{ text: "e\u0301 😀" }])
+  })
+
   it("reports a key reused for a different mutation as a conflict without applying it", async () => {
     const observed = await run(Effect.gen(function*() {
       const control = yield* Control

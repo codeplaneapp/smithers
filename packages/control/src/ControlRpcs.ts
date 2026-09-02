@@ -61,7 +61,7 @@ export class ControlAuth extends RpcMiddleware.Service<ControlAuth, {
   provides: ControlPrincipal
 }>()("/control/ControlAuth", { error: Unauthorized }) {}
 
-const mutationErrors = Schema.Union([RunNotFound, ClaimLost, PersistenceError, Unavailable])
+const mutationErrors = Schema.Union([RunNotFound, ClaimLost, InvalidInput, PersistenceError, Unavailable])
 
 /**
  * The ten remote procedures corresponding to `Control` operations.
@@ -86,6 +86,7 @@ export const ControlRpcs = RpcGroup.make(
       PlanDigestMismatch,
       EnvelopeMismatch,
       ClaimLost,
+      InvalidInput,
       LaunchFailed,
       PersistenceError,
       Unavailable
@@ -100,6 +101,7 @@ export const ControlRpcs = RpcGroup.make(
       AlreadyResolved,
       PlanNotFound,
       RunNotFound,
+      InvalidInput,
       PersistenceError,
       Unavailable
     ])
@@ -113,6 +115,7 @@ export const ControlRpcs = RpcGroup.make(
       AlreadyResolved,
       PlanNotFound,
       RunNotFound,
+      InvalidInput,
       PersistenceError,
       Unavailable
     ])
@@ -125,7 +128,7 @@ export const ControlRpcs = RpcGroup.make(
   Rpc.make("Signal", {
     payload: SignalInputSchema,
     success: Receipt,
-    error: Schema.Union([RunNotFound, NoMatchingWait, PersistenceError, Unavailable])
+    error: Schema.Union([RunNotFound, NoMatchingWait, InvalidInput, PersistenceError, Unavailable])
   }),
   Rpc.make("Cancel", { payload: CancelInputSchema, success: Receipt, error: mutationErrors }),
   Rpc.make("Resume", { payload: ReasonedMutationInputSchema, success: Receipt, error: mutationErrors }),

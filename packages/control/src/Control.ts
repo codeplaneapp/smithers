@@ -62,7 +62,10 @@ export interface PlanInput {
  * @since 0.1.0
  * @slop
  */
-export type RunInput = typeof RunInputSchema.Type
+export type RunInput = typeof RunInputSchema.Type & {
+  /** Authenticated actor used only to scope durable idempotency. */
+  readonly principal?: Principal | undefined
+}
 
 /**
  * @category models
@@ -102,7 +105,10 @@ export type SteerInput = typeof SteerInputSchema.Type
  * @since 0.1.0
  * @slop
  */
-export type SignalInput = typeof SignalInputSchema.Type
+export type SignalInput = typeof SignalInputSchema.Type & {
+  /** Authenticated actor used only to scope durable idempotency. */
+  readonly principal?: Principal | undefined
+}
 
 /**
  * Run lifecycle mutation arguments.
@@ -155,6 +161,7 @@ export interface Service {
     | PlanDigestMismatch
     | EnvelopeMismatch
     | ClaimLost
+    | InvalidInput
     | LaunchFailed
     | PersistenceError
     | Unavailable
@@ -168,6 +175,7 @@ export interface Service {
     | AlreadyResolved
     | PlanNotFound
     | RunNotFound
+    | InvalidInput
     | PersistenceError
     | Unavailable
   >
@@ -180,6 +188,7 @@ export interface Service {
     | AlreadyResolved
     | PlanNotFound
     | RunNotFound
+    | InvalidInput
     | PersistenceError
     | Unavailable
   >
@@ -188,13 +197,13 @@ export interface Service {
   ) => Effect.Effect<Receipt, RunNotFound | InvalidInput | PersistenceError | Unavailable>
   readonly signal: (
     input: SignalInput
-  ) => Effect.Effect<Receipt, RunNotFound | NoMatchingWait | PersistenceError | Unavailable>
+  ) => Effect.Effect<Receipt, RunNotFound | NoMatchingWait | InvalidInput | PersistenceError | Unavailable>
   readonly cancel: (
     input: RunMutationInput
-  ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError | Unavailable>
+  ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | InvalidInput | PersistenceError | Unavailable>
   readonly resume: (
     input: RunMutationInput
-  ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | PersistenceError | Unavailable>
+  ) => Effect.Effect<Receipt, RunNotFound | ClaimLost | InvalidInput | PersistenceError | Unavailable>
   readonly list: (input: ListRequest) => Effect.Effect<ListResponse, ControlError>
   readonly watch: (filter: WatchFilter) => Stream.Stream<ControlEvent, ControlError>
 }

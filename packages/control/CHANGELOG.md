@@ -66,9 +66,11 @@
   marks. The former 1,024-key cache could re-emit old overlap after eviction.
 - A cancel that learns the engine row already settled reconciles the control row
   onto the engine's own status instead of leaving it non-terminal forever.
-- Idempotency fingerprints are canonical bytes with the two server-stamped
-  principals removed, so key order no longer decides identity and a nested
-  `principal` in a payload is caller intent again.
+- Mutations now snapshot at an inert, schema-decoded 4 MiB boundary before
+  their first wait. Durable identity is a fixed-size canonical SHA-256 digest
+  scoped to the authenticated actor's stable id and kind; accessors and
+  `toJSON` never participate, server timestamps do not split retries, and a
+  nested `principal` remains caller intent.
 - `Monitor` records `control.monitor.healed` only for an `Accepted` or
   `AlreadyApplied` receipt, stops on a `Terminal` one, and no longer resets its
   stall evidence for a remedy that was refused.

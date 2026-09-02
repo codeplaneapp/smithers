@@ -26,7 +26,12 @@ export const layer = ControlRpcs.toLayer(
     const control = yield* Control
     return ControlRpcs.of({
       Plan: Effect.fn("Control.plan")((input) => control.plan(input)),
-      Run: Effect.fn("Control.run")((input) => control.run(input)),
+      Run: Effect.fn("Control.run")((input) =>
+        Effect.gen(function*() {
+          const principal = yield* ControlPrincipal
+          return yield* control.run({ ...input, principal })
+        })
+      ),
       Approve: Effect.fn("Control.approve")((input) =>
         Effect.gen(function*() {
           const principal = yield* ControlPrincipal
@@ -51,7 +56,12 @@ export const layer = ControlRpcs.toLayer(
           return yield* control.steer({ ...input, message: { ...input.message, principal } })
         })
       ),
-      Signal: Effect.fn("Control.signal")((input) => control.signal(input)),
+      Signal: Effect.fn("Control.signal")((input) =>
+        Effect.gen(function*() {
+          const principal = yield* ControlPrincipal
+          return yield* control.signal({ ...input, principal })
+        })
+      ),
       Cancel: Effect.fn("Control.cancel")((input) =>
         Effect.gen(function*() {
           const principal = yield* ControlPrincipal

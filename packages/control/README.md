@@ -279,6 +279,13 @@ a different intent, `Parked` means the plan is waiting for an approval, and
 `Terminal` means the run had already settled and reports the status it settled
 with.
 
+Before its first wait, each mutation copies only bounded JSON own data fields
+and schema-decodes that detached value. Its durable fingerprint is a canonical
+SHA-256 digest, and an authenticated request namespaces its idempotency key by
+the principal's stable `kind` and `id`, not the changing server timestamp.
+Accessors, `toJSON`, sparse arrays, cycles, and non-JSON objects are refused
+with `InvalidInput` before any collaborator sees them.
+
 `Channels.ingest` copies inbound bytes and own string header fields before
 verification. A channel lists only the non-secret headers that change its
 decoded command in `fingerprintHeaders`; those names are normalized
@@ -287,16 +294,16 @@ cookie, token, and credential headers stay outside durable identity. Reusing a
 key with different declared semantics returns `Conflict`, while rotating an
 excluded credential header remains the same delivery.
 
-| Verb                       | Receipts                                             | Typed failures                                                                                                                         |
-| -------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                      |
-| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
-| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
-| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable`          |
-| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                       |
-| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable`                                                                     |
-| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
-| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                         |
+| Verb                       | Receipts                                             | Typed failures                                                                                                                                         |
+| -------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                      |
+| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `InvalidInput`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
+| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
+| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`          |
+| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                       |
+| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                     |
+| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
+| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                                         |
 
 `ControlError.ControlErrorSchema` is the single membership list for the union,
 including `CredentialConflict`, and `ControlClient.isControlError` is derived
@@ -329,6 +336,7 @@ above are empty there.
 | `list` run filters          | `runId`, `flowId`, `status`, `parentRunId`, `lineageId`                                     | `InvalidInput` for `principalId`, which rc.0 records nothing to evaluate |
 | `watch` cursor              | `afterSequence` requires `runId`                                                            | `InvalidInput`, naming `afterSequence`                                   |
 | `watch` follow-mode handoff | one high-water mark per partition present when the watch starts                             | snapshot rows at or below the mark; buffered tail rows above it          |
+| mutation identity           | 4 MiB, 128 levels, 100,000 values and members; idempotency keys are 1 to 1,024 characters   | `InvalidInput` before the first wait                                     |
 
 A `steer` whose `message.runId` disagrees with the run the call names is
 refused with `InvalidInput` before anything is admitted to the queue.
