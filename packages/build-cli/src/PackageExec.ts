@@ -3524,6 +3524,14 @@ export const execute = async (
     patterns.some((pattern) => minimatch(path, pattern, { dot: true }) || path === pattern)
 
   /**
+   * The stash of gitignored bytes every guarded body in this run shares,
+   * opened by the first one and released after the scheduler settles. Bodies
+   * are serialized through the tree gate, so one census refreshes it at a
+   * time.
+   */
+  let ignoredStash: PackageTree.IgnoredStash | undefined
+
+  /**
    * Runs one mutating body with mechanical write-set confinement: every
    * change the body makes to the tree is judged by its resolved location
    * against `writeSet`; out-of-set changes are reverted and fail the body,
@@ -3544,11 +3552,17 @@ export const execute = async (
       // Git omits gitignored paths, so a separate guard records them with
       // their bytes; a write to a gitignored path would otherwise be invisible
       // to the change set and never reverted. A gitignored tree the guard
-      // cannot stash whole refuses the body here, before it runs.
-      ignored = await PackageTree.snapshotIgnored(root, cacheDirectory)
+      // cannot stash whole refuses the body here, before it runs. The stash
+      // is one per run: every guarded body re-measures the ignored tree by
+      // lstat and copies only the files whose identity moved since the stash
+      // last held them, so an unchanged ignored file costs one lstat per body
+      // rather than a copy.
+      ignoredStash ??= await PackageTree.openIgnoredStash()
+      ignored = await PackageTree.snapshotIgnored(root, cacheDirectory, PackageTree.ignoredLimits, ignoredStash)
       // Git cannot see a write that lands through an in-workspace symlink whose
-      // real target leaves the workspace; those portals are measured directly.
-      portals = await PackageTree.snapshotPortals(root, cacheDirectory)
+      // real target leaves the workspace; those portals are measured directly,
+      // with the gitignored links taken from the census just taken.
+      portals = await PackageTree.snapshotPortals(root, cacheDirectory, ignored)
       let ran: ExecOutcome
       try {
         ran = await body()
@@ -5204,6 +5218,7 @@ export const execute = async (
   )
   supervisorRef.current = undefined
   await store.close().catch(() => undefined)
+  if (ignoredStash !== undefined) await PackageTree.releaseIgnoredStash(ignoredStash)
   if (Exit.isFailure(exit)) throw Cause.squash(exit.cause)
 
   const results = planned.workList

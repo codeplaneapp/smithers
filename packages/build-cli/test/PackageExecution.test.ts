@@ -483,6 +483,40 @@ export const Package = S.Package({ targets: { fmt } })
     }
   )
 
+  /**
+   * One stash of gitignored bytes serves every guarded body in a run. The
+   * second body's census must hold what the first body wrote, so a failure
+   * after it restores the first body's output, not the pre-run bytes.
+   */
+  it("restores a failed body's gitignored writes from the stash shared with an earlier body in the run", async () => {
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const aaa = S.Shell.Diff({ command: "printf first > dist/a.js", changes: ["dist/**"] })
+const bbb = S.Shell.Diff({
+  command: "printf broken > dist/a.js && printf partial > dist/b.js && exit 1",
+  changes: ["dist/**"]
+})
+export const Package = S.Package({ targets: { aaa, bbb } })
+`
+    )
+    await write(root, "dist/a.js", "old")
+    await write(root, ".gitignore", "dist/\n")
+    commitAll(root)
+    const { exitCode, logs } = await serve(root, ["//...", "--write"])
+    expect(exitCode).toBe(1)
+    expect(logs).toContain("//:aaa  ran")
+    expect(logs).toContain("//:bbb  failed")
+    // In either order the failed body went back to the bytes its own census
+    // saw, and the successful body's write stands.
+    expect(await Fs.readFile(NodePath.join(root, "dist", "a.js"), "utf8")).toBe("first")
+    const partialGone = await Fs.access(NodePath.join(root, "dist", "b.js")).then(() => false, () => true)
+    expect(partialGone).toBe(true)
+  })
+
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     "refuses a write target over an escaping symlink the portal census cannot read, before the body runs",
     async () => {

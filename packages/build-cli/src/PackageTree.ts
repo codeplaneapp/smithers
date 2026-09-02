@@ -300,14 +300,23 @@ export interface TreeSnapshot {
   readonly stashDirectory: string
 }
 
+/**
+ * Whether one path segment names host state the write-set guard never
+ * measures, wherever it sits in the tree.
+ *
+ * Version-control internals are never workspace source. The installed
+ * dependency tree is host state too: in the e2e clone the root one is a
+ * symlink into the live checkout, its cache writes are expected, and a
+ * workspace installs one under every package (the nested ones on this
+ * repository held 15,000 ignored files and 672 MiB, 11,500 of them under
+ * `marketing/hermes-site/node_modules`). The rule applies at every depth,
+ * because a root-only skip left each nested one in the census.
+ */
+const hostStateSegment = (segment: string): boolean =>
+  segment === "node_modules" || segment === ".git" || segment === ".jj"
+
 const skipStatusPath = (cacheDirectory: string, path: string): boolean =>
-  path === cacheDirectory || path.startsWith(`${cacheDirectory}/`) ||
-  // Version-control internals are host state, never workspace source.
-  path === ".git" || path.startsWith(".git/") || path === ".jj" || path.startsWith(".jj/") ||
-  // The installed dependency tree is host state, not workspace source: in the
-  // e2e clone it is a symlink into the live checkout, and its cache writes are
-  // expected. It is kept out of the write-set entirely rather than reverted.
-  path === "node_modules" || path.startsWith("node_modules/")
+  path === cacheDirectory || path.startsWith(`${cacheDirectory}/`) || path.split("/").some(hostStateSegment)
 
 /**
  * Records the dirty state of a git workspace before a tool runs.
@@ -446,8 +455,14 @@ export const releaseSnapshot = async (snapshot: TreeSnapshot): Promise<void> => 
   await Fs.rm(snapshot.stashDirectory, { recursive: true, force: true })
 }
 
-/** The recorded identity of one gitignored path, plus what restoring it needs. */
-interface IgnoredEntry {
+/**
+ * The recorded `lstat` identity of one gitignored path, plus what restoring
+ * it needs.
+ *
+ * @category write sets
+ * @since 0.1.0
+ */
+export interface IgnoredEntry {
   readonly kind: "file" | "link" | "dir"
   readonly size: number
   readonly mtimeMs: number
@@ -466,18 +481,22 @@ interface IgnoredEntry {
 export interface IgnoredLimits {
   /** Gitignored files, links, and unentered directories counted. */
   readonly entries: number
-  /** Bytes across every gitignored file the census stashes. */
+  /** Bytes across every gitignored file the census holds in its stash. */
   readonly totalBytes: number
 }
 
 /**
  * The ceilings the gitignored census may not cross.
  *
- * The census stashes every gitignored file's bytes so a write to one can be
- * restored exactly, and that copy is a per-run cost paid before the body
- * runs. A tree over either ceiling is refused with {@link IgnoredCensusError}
- * rather than guarded partially: the guard has no mode in which a claimed
- * rollback can silently fail to hold. `node_modules`, the cache directory,
+ * The census records every gitignored path by `lstat` identity and holds
+ * every gitignored file's bytes in a stash, so a write to one can be restored
+ * exactly. A stash shared across a run ({@link IgnoredStash}) is refreshed
+ * incrementally: a file whose identity the stash already holds is not read
+ * again, so an unchanged file costs one `lstat` per census and only the
+ * files that changed since the previous census are copied. A tree over
+ * either ceiling is refused with {@link IgnoredCensusError} rather than
+ * guarded partially: the guard has no mode in which a claimed rollback can
+ * silently fail to hold. `node_modules` at any depth, the cache directory,
  * and version-control internals never count.
  *
  * @category write sets
@@ -486,7 +505,7 @@ export interface IgnoredLimits {
 export const ignoredLimits = {
   /** Gitignored files, links, and unentered directories counted. */
   entries: 50_000,
-  /** Bytes across every gitignored file the census stashes. */
+  /** Bytes across every gitignored file the census holds in its stash. */
   totalBytes: 1024 * 1024 * 1024
 } as const satisfies IgnoredLimits
 
@@ -524,17 +543,81 @@ export class IgnoredCensusError extends Error {
 }
 
 /**
+ * A stash of gitignored files' bytes, shared by every census taken over one
+ * run so an unchanged file is copied once and afterwards only measured.
+ *
+ * `held` records the identity of the bytes each stash file holds, keyed by
+ * workspace-relative path. A census refreshes it: a file whose current
+ * identity matches is reused, one whose identity moved is copied again, and
+ * one the census no longer lists is dropped, so the stash is never larger
+ * than the census it serves. One census at a time may refresh a stash; the
+ * package executor serializes guarded bodies through its tree gate.
+ *
+ * @category write sets
+ * @since 0.1.0
+ */
+export interface IgnoredStash {
+  readonly directory: string
+  readonly held: Map<string, IgnoredEntry>
+}
+
+/**
+ * Opens an empty stash for gitignored bytes, removed by
+ * {@link releaseIgnoredStash}.
+ *
+ * @category write sets
+ * @since 0.1.0
+ */
+export const openIgnoredStash = async (): Promise<IgnoredStash> => ({
+  directory: await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-ignored-")),
+  held: new Map()
+})
+
+/**
+ * Removes a stash and every file it holds.
+ *
+ * @category write sets
+ * @since 0.1.0
+ */
+export const releaseIgnoredStash = async (stash: IgnoredStash): Promise<void> => {
+  stash.held.clear()
+  await Fs.rm(stash.directory, { recursive: true, force: true })
+}
+
+/**
+ * What one gitignored census recorded and what it cost: the tool's own
+ * account of its work, so the claim that unchanged files are measured and
+ * not copied is checkable without a stopwatch.
+ *
+ * @category write sets
+ * @since 0.1.0
+ */
+export interface IgnoredCensus {
+  /** Gitignored files, links, and unentered directories recorded. */
+  readonly entries: number
+  /** Bytes across every gitignored file recorded, all of which the stash holds. */
+  readonly bytes: number
+  /** Files this census copied into the stash because it did not hold their current identity. */
+  readonly copied: number
+  /** Bytes those copies read. */
+  readonly copiedBytes: number
+  /** Files whose held bytes this census reused unchanged, at the cost of one `lstat` each. */
+  readonly reused: number
+}
+
+/**
  * A snapshot of the workspace's gitignored paths before a tool runs: each
- * path's identity, plus a stash of every gitignored file's bytes.
+ * path's identity, backed by a stash that holds every gitignored file's
+ * bytes.
  *
  * `git status` omits ignored paths unless asked, so a write to a gitignored
  * path is invisible to {@link changedSinceSnapshot}. This guard closes that
- * gap. It records each ignored path's `lstat` identity and copies each
- * ignored file into the stash, so an overwritten, deleted, or replaced
+ * gap. It records each ignored path's `lstat` identity and holds each
+ * ignored file's bytes in the stash, so an overwritten, deleted, or replaced
  * ignored path goes back to exactly what it was. A directory git does not
  * enter (a nested repository) is recorded by identity alone: a change under
- * it can be reported, never restored. `node_modules`, the cache, and
- * version-control internals are excluded.
+ * it can be reported, never restored. `node_modules` at any depth, the
+ * cache, and version-control internals are excluded.
  *
  * @category write sets
  * @since 0.1.0
@@ -542,7 +625,11 @@ export class IgnoredCensusError extends Error {
 export interface IgnoredSnapshot {
   readonly root: string
   readonly entries: ReadonlyMap<string, IgnoredEntry>
-  readonly stashDirectory: string
+  readonly stash: IgnoredStash
+  /** Whether the snapshot opened its own stash, which {@link releaseIgnored} then removes. */
+  readonly ownsStash: boolean
+  readonly limits: IgnoredLimits
+  readonly census: IgnoredCensus
 }
 
 /** The identity of one gitignored path now, or undefined once it is gone. */
@@ -567,7 +654,63 @@ const sameIgnored = (left: IgnoredEntry, right: IgnoredEntry): boolean =>
   left.kind === right.kind && left.size === right.size && left.mtimeMs === right.mtimeMs &&
   left.mode === right.mode && left.target === right.target
 
-const listIgnored = async (root: string, cacheDirectory: string): Promise<Map<string, IgnoredEntry>> => {
+const recordIgnored = (
+  entries: Map<string, IgnoredEntry>,
+  path: string,
+  entry: IgnoredEntry,
+  limits: IgnoredLimits
+): void => {
+  entries.set(path, entry)
+  if (entries.size > limits.entries) throw new IgnoredCensusError("entries", path, limits)
+}
+
+/**
+ * Records every gitignored path under one directory git reported as ignored.
+ *
+ * A directory that matches an ignore pattern is ignored whole: git never
+ * re-includes a path whose parent is excluded, so every entry under it is
+ * gitignored and the walk needs no pattern matching of its own. It stops
+ * where git stops, at a nested repository (a `.git` entry), which is
+ * recorded by identity alone, and it skips host state (`node_modules`,
+ * version-control internals, the cache directory) at any depth. Symlinks are
+ * recorded, never followed. A directory it cannot read fails the census:
+ * a guard that cannot measure must fail its target.
+ */
+const walkIgnored = async (
+  root: string,
+  cacheDirectory: string,
+  directory: string,
+  entries: Map<string, IgnoredEntry>,
+  limits: IgnoredLimits
+): Promise<void> => {
+  let dirents: Array<NodeFs.Dirent>
+  try {
+    dirents = await Fs.readdir(NodePath.join(root, directory), { withFileTypes: true })
+  } catch (cause) {
+    throw new IgnoredCensusError("unreadable", directory, limits, { cause })
+  }
+  if (dirents.some((dirent) => dirent.name === ".git")) {
+    const entry = await identityOf(NodePath.join(root, directory))
+    if (entry !== undefined) recordIgnored(entries, directory, entry, limits)
+    return
+  }
+  for (const dirent of dirents) {
+    const path = `${directory}/${dirent.name}`
+    if (skipStatusPath(cacheDirectory, path)) continue
+    if (dirent.isDirectory()) {
+      await walkIgnored(root, cacheDirectory, path, entries, limits)
+      continue
+    }
+    const entry = await identityOf(NodePath.join(root, path))
+    if (entry !== undefined) recordIgnored(entries, path, entry, limits)
+  }
+}
+
+const listIgnored = async (
+  root: string,
+  cacheDirectory: string,
+  limits: IgnoredLimits
+): Promise<Map<string, IgnoredEntry>> => {
   // The failure propagates instead of reading as an empty census. This runs
   // once before the body and once after: swallowing a failure after leaves the
   // guard silently blind to writes to gitignored paths, and swallowing one
@@ -575,25 +718,46 @@ const listIgnored = async (root: string, cacheDirectory: string): Promise<Map<st
   // each one to `revertIgnored` as a path the tool created, which removes it.
   // Either way a guard that cannot measure must fail its target, not report
   // that it found nothing.
-  const raw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"])
+  //
+  // `--ignored=matching` reports the paths that match an ignore pattern and
+  // does not enter a matched directory. That keeps git out of every
+  // `node_modules` tree (600,000 files and 13 s per status on this
+  // repository, under the `traditional` mode that listed each file) and
+  // leaves the walk under each matched directory to `walkIgnored`, which
+  // skips host state at any depth. A path reported with a trailing slash is
+  // a directory; every other one is a file or a symlink.
+  const raw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored=matching"])
   const entries = new Map<string, IgnoredEntry>()
   for (const status of parseStatusZ(raw)) {
     if (!status.status.startsWith("!!")) continue
-    const path = status.path.endsWith("/") ? status.path.slice(0, -1) : status.path
+    const directory = status.path.endsWith("/")
+    const path = directory ? status.path.slice(0, -1) : status.path
     if (path === "" || skipStatusPath(cacheDirectory, path)) continue
+    if (directory) {
+      await walkIgnored(root, cacheDirectory, path, entries, limits)
+      continue
+    }
     const entry = await identityOf(NodePath.join(root, path))
-    if (entry !== undefined) entries.set(path, entry)
+    if (entry !== undefined) recordIgnored(entries, path, entry, limits)
   }
   return entries
 }
 
-const ignoredStashFile = (snapshot: IgnoredSnapshot, path: string): string =>
-  NodePath.join(snapshot.stashDirectory, digestBytes(Buffer.from(path, "utf8")))
+const stashFileFor = (stash: IgnoredStash, path: string): string =>
+  NodePath.join(stash.directory, digestBytes(Buffer.from(path, "utf8")))
 
 /**
- * Records the gitignored paths present before a tool runs and stashes their
- * bytes, or refuses with {@link IgnoredCensusError} when the tree crosses
- * `limits` or holds a file the census cannot read.
+ * Records the gitignored paths present before a tool runs and brings the
+ * stash up to date with their bytes, or refuses with
+ * {@link IgnoredCensusError} when the tree crosses `limits` or holds a path
+ * the census cannot read.
+ *
+ * The census is an `lstat` walk. With a `stash` from an earlier census, only
+ * a file whose identity moved since the stash last held it is copied, and
+ * one the stash already holds costs its `lstat` alone; without one the
+ * snapshot opens a private stash, copies every file into it, and removes it
+ * in {@link releaseIgnored}. The `census` field on the result accounts for
+ * both.
  *
  * @category write sets
  * @since 0.1.0
@@ -601,37 +765,57 @@ const ignoredStashFile = (snapshot: IgnoredSnapshot, path: string): string =>
 export const snapshotIgnored = async (
   root: string,
   cacheDirectory: string,
-  limits: IgnoredLimits = ignoredLimits
+  limits: IgnoredLimits = ignoredLimits,
+  stash?: IgnoredStash
 ): Promise<IgnoredSnapshot> => {
-  const entries = await listIgnored(root, cacheDirectory)
-  const stashDirectory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-ignored-"))
-  const snapshot: IgnoredSnapshot = { root, entries, stashDirectory }
+  const entries = await listIgnored(root, cacheDirectory, limits)
+  const ownsStash = stash === undefined
+  const held = stash ?? await openIgnoredStash()
   try {
-    let count = 0
-    let totalBytes = 0
+    let bytes = 0
+    let copied = 0
+    let copiedBytes = 0
+    let reused = 0
     for (const [path, entry] of entries) {
-      count += 1
-      if (count > limits.entries) throw new IgnoredCensusError("entries", path, limits)
       if (entry.kind !== "file") continue
-      totalBytes += entry.size
-      if (totalBytes > limits.totalBytes) throw new IgnoredCensusError("totalBytes", path, limits)
+      bytes += entry.size
+      if (bytes > limits.totalBytes) throw new IgnoredCensusError("totalBytes", path, limits)
+      const holding = held.held.get(path)
+      if (holding !== undefined && sameIgnored(holding, entry)) {
+        reused += 1
+        continue
+      }
+      held.held.delete(path)
       try {
         // A reflink where the filesystem offers one, a byte copy elsewhere:
         // the stash is exact either way, and cheap where it can be.
-        await Fs.copyFile(
-          NodePath.join(root, path),
-          ignoredStashFile(snapshot, path),
-          NodeFs.constants.COPYFILE_FICLONE
-        )
+        await Fs.copyFile(NodePath.join(root, path), stashFileFor(held, path), NodeFs.constants.COPYFILE_FICLONE)
       } catch (cause) {
         throw new IgnoredCensusError("unreadable", path, limits, { cause })
       }
+      held.held.set(path, entry)
+      copied += 1
+      copiedBytes += entry.size
+    }
+    // A path the census no longer lists as a file leaves the stash, so the
+    // stash never outgrows the census it serves.
+    for (const path of [...held.held.keys()]) {
+      if (entries.get(path)?.kind === "file") continue
+      held.held.delete(path)
+      await Fs.rm(stashFileFor(held, path), { force: true })
+    }
+    return {
+      root,
+      entries,
+      stash: held,
+      ownsStash,
+      limits,
+      census: { entries: entries.size, bytes, copied, copiedBytes, reused }
     }
   } catch (cause) {
-    await releaseIgnored(snapshot)
+    if (ownsStash) await releaseIgnoredStash(held)
     throw cause
   }
-  return snapshot
 }
 
 /**
@@ -645,7 +829,7 @@ export const changedIgnored = async (
   snapshot: IgnoredSnapshot,
   cacheDirectory: string
 ): Promise<ReadonlyArray<string>> => {
-  const after = await listIgnored(snapshot.root, cacheDirectory)
+  const after = await listIgnored(snapshot.root, cacheDirectory, snapshot.limits)
   const changed = new Set<string>()
   for (const [path, entry] of after) {
     const before = snapshot.entries.get(path)
@@ -697,19 +881,20 @@ export const revertIgnored = async (snapshot: IgnoredSnapshot, path: string): Pr
     await Fs.symlink(before.target, absolute)
     return true
   }
-  await Fs.copyFile(ignoredStashFile(snapshot, path), absolute)
+  await Fs.copyFile(stashFileFor(snapshot.stash, path), absolute)
   await Fs.chmod(absolute, before.mode)
   return true
 }
 
 /**
- * Releases the stash an ignored snapshot holds.
+ * Releases an ignored snapshot: the stash it opened for itself is removed,
+ * and a stash it was given is left for the next census.
  *
  * @category write sets
  * @since 0.1.0
  */
 export const releaseIgnored = async (snapshot: IgnoredSnapshot): Promise<void> => {
-  await Fs.rm(snapshot.stashDirectory, { recursive: true, force: true })
+  if (snapshot.ownsStash) await releaseIgnoredStash(snapshot.stash)
 }
 
 /**
@@ -857,11 +1042,17 @@ const listTrackedSymlinks = async (root: string): Promise<Array<string>> => {
 /**
  * Records every escaping-symlink portal's target before a tool runs.
  *
- * Portals are the in-workspace symlinks — tracked or untracked — whose real
- * target leaves the workspace. `node_modules`, `.git`, and the cache are
- * excluded (`node_modules` is installed host state whose writes are expected).
- * Git cannot see a write that lands through such a symlink, so the portal's
- * contents are measured directly here and again after the run.
+ * Portals are the in-workspace symlinks, tracked, untracked, or gitignored,
+ * whose real target leaves the workspace. `node_modules` at any depth,
+ * version-control internals, and the cache are excluded (`node_modules` is
+ * installed host state whose writes are expected). Git cannot see a write
+ * that lands through such a symlink, so the portal's contents are measured
+ * directly here and again after the run.
+ *
+ * The links under gitignored directories come from the gitignored census,
+ * taken from `ignored` when the caller already holds that snapshot so the
+ * tree is walked once per guarded body, and otherwise measured here under
+ * {@link ignoredLimits}.
  *
  * A portal the census cannot measure — over {@link portalEntryCap} entries, or
  * unreadable — raises {@link PortalCensusError} and refuses the target. The
@@ -872,14 +1063,19 @@ const listTrackedSymlinks = async (root: string): Promise<Array<string>> => {
  */
 export const snapshotPortals = async (
   root: string,
-  cacheDirectory: string
+  cacheDirectory: string,
+  ignored?: IgnoredSnapshot
 ): Promise<PortalSnapshot> => {
   const realRoot = await Fs.realpath(root)
   const candidates = new Set<string>(await listTrackedSymlinks(root))
-  const statusRaw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"])
+  const statusRaw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all"])
   for (const entry of parseStatusZ(statusRaw)) {
     const path = entry.path.endsWith("/") ? entry.path.slice(0, -1) : entry.path
     if (path !== "") candidates.add(path)
+  }
+  const ignoredEntries = ignored?.entries ?? await listIgnored(root, cacheDirectory, ignoredLimits)
+  for (const [path, entry] of ignoredEntries) {
+    if (entry.kind === "link") candidates.add(path)
   }
   const stashDirectory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-portal-"))
   const portals: Array<Portal> = []

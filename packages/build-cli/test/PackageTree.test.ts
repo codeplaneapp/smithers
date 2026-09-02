@@ -605,7 +605,8 @@ describe("the ignored guard restores what a body changed", () => {
     } finally {
       await PackageTree.releaseIgnored(snapshot)
     }
-    expect(await exists(snapshot.stashDirectory)).toBe(false)
+    expect(snapshot.ownsStash).toBe(true)
+    expect(await exists(snapshot.stash.directory)).toBe(false)
   })
 
   it("restores a deleted ignored file and removes a created one", async () => {
@@ -768,6 +769,189 @@ describe("the ignored guard restores what a body changed", () => {
         expect((refused as PackageTree.IgnoredCensusError).path).toBe("sealed.txt")
       } finally {
         await Fs.chmod(sealed, 0o644)
+      }
+    }
+  )
+})
+
+describe("the ignored census costs what a body can change", () => {
+  const git = (cwd: string, ...args: ReadonlyArray<string>): void => {
+    ChildProcess.execFileSync("git", [...args], { cwd, stdio: "ignore" })
+  }
+  const ignoring = async (patterns: string): Promise<void> => {
+    git(root, "init", "--quiet", ".")
+    await Fs.writeFile(NodePath.join(root, ".gitignore"), patterns)
+  }
+  const file = async (relative: string, content: string | Buffer): Promise<void> => {
+    const absolute = NodePath.join(root, relative)
+    await Fs.mkdir(NodePath.dirname(absolute), { recursive: true })
+    await Fs.writeFile(absolute, content)
+  }
+  const exists = (path: string): Promise<boolean> => Fs.lstat(path).then(() => true, () => false)
+  const stashFiles = async (stash: PackageTree.IgnoredStash): Promise<number> =>
+    (await Fs.readdir(stash.directory)).length
+  const mib = 1024 * 1024
+
+  /**
+   * The skip applied to the root `node_modules` alone, so a workspace's
+   * nested ones were censused (15,000 entries and 672 MiB on this
+   * repository, most of it under `marketing/hermes-site/node_modules`) and
+   * counted against ceilings the JSDoc said they never touched.
+   */
+  it("excludes node_modules at every depth from the census and its ceilings, and still censuses the sibling", async () => {
+    await ignoring("node_modules/\n*.log\n")
+    await file("node_modules/root/index.js", "r".repeat(64))
+    await file("marketing/site/node_modules/dep/index.js", "d".repeat(4096))
+    await file("marketing/site/node_modules/dep/nested/node_modules/deep/index.js", "n".repeat(4096))
+    await file("marketing/site/build.log", "log")
+    // Ceilings only the sibling fits under: one entry of three bytes. The
+    // census refuses if any node_modules entry counts toward either.
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows", { entries: 1, totalBytes: 3 })
+    try {
+      expect([...snapshot.entries.keys()]).toEqual(["marketing/site/build.log"])
+      expect(snapshot.census).toEqual({ entries: 1, bytes: 3, copied: 1, copiedBytes: 3, reused: 0 })
+      // A write under a nested node_modules is host state, out of the guard's
+      // sight like a write under the root one; the sibling is still judged.
+      await file("marketing/site/node_modules/dep/index.js", "rewritten")
+      await file("marketing/site/node_modules/cache/new.js", "new")
+      await file("marketing/site/build.log", "changed")
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual(["marketing/site/build.log"])
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  /**
+   * The stash was taken fresh for every guarded body, copying every ignored
+   * file each time. Shared across bodies, a census copies only what moved,
+   * and the tool's own accounting says so: no stopwatch needed.
+   */
+  it("measures unchanged large ignored files by lstat and copies none of them again", async () => {
+    await ignoring("blobs/\n")
+    const blob = Buffer.alloc(mib, 7)
+    for (let index = 0; index < 24; index += 1) await file(`blobs/${index}.bin`, blob)
+    const stash = await PackageTree.openIgnoredStash()
+    try {
+      const first = await PackageTree.snapshotIgnored(root, ".flows", PackageTree.ignoredLimits, stash)
+      expect(first.ownsStash).toBe(false)
+      expect(first.census).toEqual({ entries: 24, bytes: 24 * mib, copied: 24, copiedBytes: 24 * mib, reused: 0 })
+      await PackageTree.releaseIgnored(first)
+      // Releasing a snapshot leaves the shared stash, and its files, in place.
+      expect(await stashFiles(stash)).toBe(24)
+      const second = await PackageTree.snapshotIgnored(root, ".flows", PackageTree.ignoredLimits, stash)
+      expect(second.census).toEqual({ entries: 24, bytes: 24 * mib, copied: 0, copiedBytes: 0, reused: 24 })
+      await PackageTree.releaseIgnored(second)
+      // One rewritten file is the only copy the next census makes, and a
+      // removed one leaves the stash, which never outgrows the census.
+      await file("blobs/3.bin", Buffer.alloc(mib + 1, 9))
+      await Fs.rm(NodePath.join(root, "blobs", "5.bin"))
+      const third = await PackageTree.snapshotIgnored(root, ".flows", PackageTree.ignoredLimits, stash)
+      expect(third.census).toEqual({ entries: 23, bytes: 23 * mib + 1, copied: 1, copiedBytes: mib + 1, reused: 22 })
+      expect(stash.held.size).toBe(23)
+      expect(await stashFiles(stash)).toBe(23)
+      await PackageTree.releaseIgnored(third)
+      expect(await exists(stash.directory)).toBe(true)
+    } finally {
+      await PackageTree.releaseIgnoredStash(stash)
+    }
+    expect(await exists(stash.directory)).toBe(false)
+  })
+
+  it("restores a changed ignored file byte for byte from the stash shared with an earlier census", async () => {
+    await ignoring("dist/\n")
+    const original = Buffer.from([0, 255, 10, 13, 0, 128, 7])
+    const target = NodePath.join(root, "dist", "a.bin")
+    await file("dist/a.bin", original)
+    await Fs.chmod(target, 0o640)
+    const stash = await PackageTree.openIgnoredStash()
+    try {
+      // An earlier body's census filled the stash; this one reuses it whole.
+      const earlier = await PackageTree.snapshotIgnored(root, ".flows", PackageTree.ignoredLimits, stash)
+      await PackageTree.releaseIgnored(earlier)
+      const snapshot = await PackageTree.snapshotIgnored(root, ".flows", PackageTree.ignoredLimits, stash)
+      expect(snapshot.census).toMatchObject({ copied: 0, reused: 1 })
+      // The body truncates and rewrites in place, then fails.
+      await Fs.writeFile(target, Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]))
+      await Fs.chmod(target, 0o600)
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual(["dist/a.bin"])
+      expect(await PackageTree.revertIgnored(snapshot, "dist/a.bin")).toBe(true)
+      expect((await Fs.readFile(target)).equals(original)).toBe(true)
+      expect((await Fs.lstat(target)).mode & 0o777).toBe(0o640)
+      await PackageTree.releaseIgnored(snapshot)
+    } finally {
+      await PackageTree.releaseIgnoredStash(stash)
+    }
+  })
+
+  it("records an ignored symlink by its target without walking through it, and hands ignored links to the portal census", async () => {
+    await ignoring("alias\nvendor/\n")
+    await file("vendor/real/x.txt", "x")
+    await Fs.symlink("vendor/real", NodePath.join(root, "alias"))
+    await Fs.mkdir(NodePath.join(outside, "target"), { recursive: true })
+    await Fs.symlink(NodePath.join(outside, "target"), NodePath.join(root, "vendor", "portal"))
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      expect([...snapshot.entries.keys()].sort()).toEqual(["alias", "vendor/portal", "vendor/real/x.txt"])
+      expect(snapshot.entries.get("alias")).toMatchObject({ kind: "link", target: "vendor/real" })
+      // The link under the ignored directory reaches the portal census from
+      // this snapshot, and from a census of its own when no snapshot is given.
+      const fromSnapshot = await PackageTree.snapshotPortals(root, ".flows", snapshot)
+      try {
+        expect(fromSnapshot.portals.map((portal) => portal.link)).toEqual(["vendor/portal"])
+      } finally {
+        await PackageTree.releasePortals(fromSnapshot)
+      }
+      const fromCensus = await PackageTree.snapshotPortals(root, ".flows")
+      try {
+        expect(fromCensus.portals.map((portal) => portal.link)).toEqual(["vendor/portal"])
+      } finally {
+        await PackageTree.releasePortals(fromCensus)
+      }
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("stops walking at a nested repository inside an ignored directory", async () => {
+    await ignoring("vendor/\n")
+    await file("vendor/plain/a.txt", "a")
+    await file("vendor/nested/x.txt", "x")
+    git(NodePath.join(root, "vendor", "nested"), "init", "--quiet", ".")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      expect([...snapshot.entries.keys()].sort()).toEqual(["vendor/nested", "vendor/plain/a.txt"])
+      expect(snapshot.entries.get("vendor/nested")?.kind).toBe("dir")
+      expect(snapshot.census).toEqual({ entries: 2, bytes: 1, copied: 1, copiedBytes: 1, reused: 0 })
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("applies the entry ceiling while walking an ignored directory", async () => {
+    await ignoring("dist/\n")
+    for (let index = 0; index < 5; index += 1) await file(`dist/${index}.js`, "x")
+    const refused = await PackageTree.snapshotIgnored(root, ".flows", { ...PackageTree.ignoredLimits, entries: 3 })
+      .then((snapshot) => PackageTree.releaseIgnored(snapshot).then(() => undefined), (cause: unknown) => cause)
+    expect(refused).toBeInstanceOf(PackageTree.IgnoredCensusError)
+    expect((refused as PackageTree.IgnoredCensusError).reason).toBe("entries")
+    expect((refused as PackageTree.IgnoredCensusError).path).toMatch(/^dist\/\d\.js$/)
+  })
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses a census with an ignored directory it cannot read",
+    async () => {
+      await ignoring("sealed/\n")
+      await file("sealed/x.txt", "x")
+      const sealed = NodePath.join(root, "sealed")
+      await Fs.chmod(sealed, 0o000)
+      try {
+        const refused = await PackageTree.snapshotIgnored(root, ".flows")
+          .then((snapshot) => PackageTree.releaseIgnored(snapshot).then(() => undefined), (cause: unknown) => cause)
+        expect(refused).toBeInstanceOf(PackageTree.IgnoredCensusError)
+        expect((refused as PackageTree.IgnoredCensusError).reason).toBe("unreadable")
+        expect((refused as PackageTree.IgnoredCensusError).path).toBe("sealed")
+      } finally {
+        await Fs.chmod(sealed, 0o755)
       }
     }
   )
