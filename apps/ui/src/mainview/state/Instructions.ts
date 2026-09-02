@@ -189,14 +189,66 @@ const orchestratorLines = (roles: ReadonlyArray<InstructionRole>): ReadonlyArray
  * The system prompt for one chat turn: the standing rules, then the GENERATED
  * capability section — the live catalog and connector state as of this turn.
  */
+/*
+ * The chat seam refuses instructions past 16 KiB (flows/ui/workers/chat
+ * MAX_INSTRUCTIONS_BYTES) with "instructions must be a string within the size
+ * limit" — which the app rendered as a failed turn on 2026-09-02 once the
+ * catalog passed ~170 flows. The prompt therefore has a budget with headroom
+ * for the connector line and the roles, and degrades the catalog HONESTLY in
+ * two stages rather than being cut: first the argument grammars go (the
+ * commands tool's list action answers them), then the catalog becomes one line
+ * per namespace naming its commands, with the instruction to read summaries
+ * from the list action. The model always knows the full set; only the
+ * per-command prose leaves the prompt.
+ */
+/** The chat seam's cap on the COMPOSED instructions (prompt + rendered runtime context). */
+export const CHAT_INSTRUCTIONS_CAP_BYTES = 16 * 1024
+/** Headroom the composer keeps under the cap for its own separator and drift. */
+export const INSTRUCTIONS_HEADROOM_BYTES = 512
+/** The default prompt budget when the caller knows nothing about the context it will be composed with. */
+export const INSTRUCTIONS_BUDGET_BYTES = 14 * 1024
+export const bytesOf = (text: string): number => new TextEncoder().encode(text).length
+
+const catalogLinesFor = (catalog: ReadonlyArray<InstructionCommand>, stage: 0 | 1 | 2): ReadonlyArray<string> => {
+  if (stage === 2) {
+    const byNamespace = new Map<string, string[]>()
+    for (const command of catalog) {
+      const dot = command.name.indexOf(".")
+      const namespace = dot === -1 ? command.name : command.name.slice(0, dot)
+      const rest = byNamespace.get(namespace) ?? []
+      rest.push(`/${command.name}`)
+      byNamespace.set(namespace, rest)
+    }
+    return [
+      "Commands, by namespace (call the \"commands\" tool with action \"list\" for each one's summary and arguments before you use it):",
+      ...[...byNamespace.entries()].map(([namespace, names]) => `- ${namespace}: ${names.join(", ")}`)
+    ]
+  }
+  return catalog.map((command) =>
+    `- /${command.name}${stage === 0 && command.args !== undefined ? ` ${command.args}` : ""} — ${command.summary}`
+  )
+}
+
 export const smithersInstructions = (
   catalog: ReadonlyArray<InstructionCommand>,
   honesty: InstructionHonesty,
-  roles: ReadonlyArray<InstructionRole> = []
+  roles: ReadonlyArray<InstructionRole> = [],
+  options: { readonly budgetBytes?: number } = {}
 ): string => {
-  const catalogLines = catalog.map(
-    (command) => `- /${command.name}${command.args === undefined ? "" : ` ${command.args}`} — ${command.summary}`
-  )
+  const budget = Math.max(0, options.budgetBytes ?? INSTRUCTIONS_BUDGET_BYTES)
+  const render = (stage: 0 | 1 | 2): string => assembleInstructions(catalogLinesFor(catalog, stage), honesty, roles)
+  for (const stage of [0, 1, 2] as const) {
+    const text = render(stage)
+    if (bytesOf(text) <= budget || stage === 2) return text
+  }
+  return render(2)
+}
+
+const assembleInstructions = (
+  catalogLines: ReadonlyArray<string>,
+  honesty: InstructionHonesty,
+  roles: ReadonlyArray<InstructionRole>
+): string => {
   return [
     SMITHERS_INSTRUCTIONS,
     ...orchestratorLines(roles),

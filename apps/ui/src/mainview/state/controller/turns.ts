@@ -1,4 +1,4 @@
-import { AGENT_RUNTIME_CONTEXT_VERSION } from "smithers-shared/AgentContext"
+import { AGENT_RUNTIME_CONTEXT_VERSION, renderAgentRuntimeContext } from "smithers-shared/AgentContext"
 import type { AgentRuntimeContext } from "smithers-shared/AgentContext"
 import type { AgentChatMessage, AgentTurnFrame } from "smithers-shared/NativeAgent"
 import { agentVisibleCatalog } from "../../flows/agentTools"
@@ -9,7 +9,7 @@ import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
 import { roleMenuEntries } from "../../AgentRoleMenu"
 import type { ImpossibleAskClass, InstructionRole } from "../Instructions"
-import { smithersInstructions } from "../Instructions"
+import { CHAT_INSTRUCTIONS_CAP_BYTES, INSTRUCTIONS_HEADROOM_BYTES, bytesOf, smithersInstructions } from "../Instructions"
 import {
   impossibleAskOf,
   renderedAskTurnText,
@@ -236,9 +236,18 @@ export const createTurnController = (
    * truth — so the model's offers are bounded by what actually exists, and a
    * workflow is never presented as laundering an effect the catalog lacks.
    */
-  const turnInstructions = (): string => {
+  const turnInstructions = (context?: AgentRuntimeContext): string => {
     const identity = store.collections.identitySessions.get("identity")
     const signedIn = identity?.state === "signed-in"
+    /*
+     * The Bun side composes prompt + rendered context into ONE string the chat
+     * seam caps at CHAT_INSTRUCTIONS_CAP_BYTES, so the prompt's budget is what
+     * the cap leaves after this turn's context (world notes ride under their
+     * own 8 000-char budget, tabs and repositories grow with the session).
+     * The catalog degrades in stages to fit; the turn never fails on size.
+     */
+    const contextBytes = context === undefined ? 0 : bytesOf(renderAgentRuntimeContext(context)) + 2
+    const budgetBytes = CHAT_INSTRUCTIONS_CAP_BYTES - INSTRUCTIONS_HEADROOM_BYTES - contextBytes
     return smithersInstructions(agentVisibleCatalog(ctx.commands.callable()), {
       github: {
         connected: signedIn,
@@ -252,7 +261,7 @@ export const createTurnController = (
         ])
       ],
       localRepositoriesAvailable: repositories.available
-    }, instructionRoles())
+    }, instructionRoles(), { budgetBytes })
   }
 
   /*
@@ -288,13 +297,14 @@ export const createTurnController = (
      * every later turn failed the same way, and /clear could not recover it
      * because /clear runs a model turn of its own into the same wall.
      */
+    const context = agentRuntimeContext()
     const { request } = boundTurnRequest(
       {
         runId: turnId,
         messages,
-        instructions: turnInstructions(),
+        instructions: turnInstructions(context),
         tools: ctx.commands.toolSpecs(),
-        context: agentRuntimeContext()
+        context
       },
       keepTail
     )

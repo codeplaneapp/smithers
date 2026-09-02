@@ -67,6 +67,11 @@ const streamTurn = (
   config: CloudAgentConfig
 ): Effect.Effect<void, Error, Scope.Scope> =>
   Effect.gen(function*() {
+    // The hidden runtime context is rendered server-side into the
+    // instructions: upstream sees one string, secrets and structure stay on
+    // this side, and the visible transcript never holds it. The chat seam caps
+    // that one string (16 KiB), so its size is named when the seam refuses.
+    const composedInstructions = composeAgentInstructions(request.instructions, request.context)
     const response = yield* Effect.tryPromise({
       try: (signal) =>
         (config.fetchImpl ?? fetch)(config.chatUrl?.trim() || DEFAULT_CHAT_URL, {
@@ -79,10 +84,7 @@ const streamTurn = (
           },
           body: JSON.stringify({
             messages: request.messages,
-            // The hidden runtime context is rendered server-side into the
-            // instructions: upstream sees one string, secrets and structure
-            // stay on this side, and the visible transcript never holds it.
-            instructions: composeAgentInstructions(request.instructions, request.context),
+            instructions: composedInstructions,
             // The tool-loop contract (Wave 3b): the tool specs ride every turn on
             // this boundary exactly as they do on the product Worker, otherwise the
             // model is never offered a command and the loop can never start.
@@ -98,7 +100,12 @@ const streamTurn = (
       catch: asError
     })
     if (!response.ok) {
-      return yield* Effect.fail(new Error(yield* Effect.promise(() => responseError(response))))
+      const message = yield* Effect.promise(() => responseError(response))
+      // A size refusal names the size it refused, so the failure is diagnosable from the transcript.
+      const sized = response.status === 400 && /instructions/i.test(message)
+        ? `${message} (this turn's composed instructions were ${new TextEncoder().encode(composedInstructions).length} bytes)`
+        : message
+      return yield* Effect.fail(new Error(sized))
     }
     if (response.body === null) {
       return yield* Effect.fail(new Error("Smithers Cloud returned no response stream."))
