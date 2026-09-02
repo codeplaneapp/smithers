@@ -419,7 +419,11 @@ describe("smithers claude monitor", () => {
   it("prints nothing for a session that follows no run", async () => {
     const root = project()
 
-    const rendered = await run(text(["claude", "monitor", "--session", "unfollowed"]), historyControl(transitions), root)
+    const rendered = await run(
+      text(["claude", "monitor", "--session", "unfollowed"]),
+      historyControl(transitions),
+      root
+    )
 
     // Without `--all-runs` the mirror reports only what this session
     // subscribed to, and this one subscribed to nothing.

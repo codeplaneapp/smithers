@@ -160,6 +160,14 @@ export const terminate = async (
 ): Promise<boolean> => {
   const grace = Number.isFinite(graceMs) ? Math.max(1, Math.trunc(graceMs)) : defaultTerminationGraceMs
   const pid = child.pid
+  // A spawn that never became a process. Node reports the failure
+  // asynchronously and leaves the handle with no pid, and it sets `exitCode`
+  // to -2, so the liveness check below reads the handle as already ended and
+  // the function used to answer `true`. That is a containment claim for a
+  // child the host never reached: the caller renders "was terminated" for
+  // something it never had. There is no group to signal and no exit to
+  // observe, so the honest answer is that containment was not confirmed.
+  if (pid === undefined) return false
   if (pid !== undefined && process.platform !== "win32") {
     if (!processGroupAlive(pid)) return true
     try {

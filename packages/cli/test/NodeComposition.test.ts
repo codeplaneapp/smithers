@@ -24,6 +24,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import * as Application from "../src/Application.ts"
+import * as CliError from "../src/CliError.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
 import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
@@ -621,6 +622,27 @@ describe("NodeControl memory", () => {
     expect(failure.code).toBe("store")
     expect(failure.message).toContain("--remote")
     expect(failure.message).toContain(".flows/control.db")
+  })
+
+  it("names the verb the operator typed in every one of the four refusals", async () => {
+    // A refusal that named the store rather than the verb sent an operator
+    // looking for a `memory` subcommand that did not exist. Each of the four
+    // reads and writes the CLI exposes has to say which one it was.
+    const namesTheVerb = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* MemoryStore.MemoryStore
+        const namespace = { kind: "user", id: "cli" } as const
+        const messages = [
+          yield* Effect.flip(store.putFact({ namespace, key: "k", value: 1, provenance: {} })),
+          yield* Effect.flip(store.getFact({ namespace, key: "k" })),
+          yield* Effect.flip(store.deleteFact({ namespace, key: "k" })),
+          yield* Effect.flip(store.listFacts({ namespace }))
+        ]
+        return messages.map((failure) => failure.message.slice(0, failure.message.indexOf(" is not available")))
+      }).pipe(Effect.provide(NodeControl.layerMemoryRemote))
+    )
+
+    expect(namesTheVerb).toEqual(["memory set", "memory get", "memory rm", "memory list"])
   })
 
   it("reads and writes the control database for a local invocation", async () => {

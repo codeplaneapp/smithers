@@ -10,9 +10,10 @@
  */
 import { Cause, Effect, Exit } from "effect"
 import { CliError as EffectCliError } from "effect/unstable/cli"
-import { mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { PassThrough } from "node:stream"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { packageVersion } from "../src/Version.ts"
 
@@ -32,6 +33,8 @@ interface Entrypoint {
   readonly onSigterm: () => void
   /** The failure classes of the same module instance the entrypoint matches on. */
   readonly cliError: typeof import("../src/CliError.ts")
+  /** The database refusal class of that same module instance, for the same reason. */
+  readonly database: typeof import("@smthrs/database/node/NodeDatabase")
 }
 
 /** Imports a fresh copy of the entrypoint and captures what it registered. */
@@ -43,6 +46,7 @@ const load = async (): Promise<Entrypoint> => {
   // The entrypoint matches its own failures with `instanceof`, so the classes
   // it is checked against must come from the same fresh module graph.
   const cliError = await import("../src/CliError.ts")
+  const database = await import("@smthrs/database/node/NodeDatabase")
   await import("../src/bin.ts")
   const call = runMain.mock.calls[0]
   if (call === undefined) throw new Error("the entrypoint did not start a Node runtime")
@@ -56,7 +60,8 @@ const load = async (): Promise<Entrypoint> => {
     teardown: (call[1] as { readonly teardown: Teardown }).teardown,
     onSigint: onSigint as () => void,
     onSigterm: onSigterm as () => void,
-    cliError
+    cliError,
+    database
   }
 }
 
@@ -141,6 +146,43 @@ describe("smithers entrypoint", () => {
     expect(status(entrypoint, failure(new Error("boom")))).toBe(1)
   })
 
+  it("names a tagged failure by its class and a refused open by its contract code", () => {
+    const written: Array<string> = []
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      written.push(String(chunk))
+      return true
+    })
+    try {
+      // Every `@smthrs/control` failure carries a namespaced `_tag`, and
+      // Effect makes that whole path the error's `name`. The operator wants
+      // the class out of it, not the namespace it lives in.
+      status(entrypoint, failure(Object.assign(new Error("no wait matched"), { _tag: "/control/NoMatchingWait" })))
+      // rc-contract section 2 promises a refused database open renders by its
+      // stable code, which is what a script greps for. The refusal arrives as
+      // a defect rather than a typed failure because `NodeDatabase.layer`
+      // keeps the `never` error channel eleven packages compose against.
+      status(
+        entrypoint,
+        failure(
+          new entrypoint.database.UnsupportedDatabase({
+            code: "unsupported_runtime",
+            message: "the durable engine requires Node.js >=22.19.0"
+          })
+        )
+      )
+      // A thrown non-Error still owes the operator a line rather than silence.
+      status(entrypoint, failure("a bare string"))
+    } finally {
+      stderr.mockRestore()
+    }
+
+    expect(written).toEqual([
+      "NoMatchingWait: no wait matched\n",
+      "unsupported_runtime: the durable engine requires Node.js >=22.19.0\n",
+      "a bare string\n"
+    ])
+  })
+
   it("prefers a received signal over the exit the runtime produced", async () => {
     const interrupted = await load()
     interrupted.onSigint()
@@ -180,4 +222,111 @@ describe("smithers entrypoint", () => {
     // and runs the tree over the Node composition those arguments select.
     expect(written.join("")).toContain(packageVersion)
   }, 60_000)
+
+  it("refuses a removed verb before it resolves a project or opens a database", async () => {
+    const fresh = await load()
+    const argv = process.argv
+    const cwd = process.cwd()
+    const project = mkdtempSync(join(tmpdir(), "flows-cli-bin-"))
+    let exit: Exit.Exit<void, unknown>
+    try {
+      process.chdir(project)
+      // No flag anywhere in the vector, which is the only way the document
+      // scan runs off the end of the arguments and answers "not a document".
+      process.argv = [process.execPath, "smithers", "hijack"]
+      exit = await Effect.runPromiseExit(fresh.main)
+    } finally {
+      process.argv = argv
+      process.chdir(cwd)
+    }
+
+    // The refusal is the entrypoint's own, raised before `NodeControl.config`
+    // reads anything, and the teardown maps it to exit 1.
+    const error = exit._tag === "Failure" ? Cause.squash(exit.cause) : undefined
+    expect(error).toBeInstanceOf(fresh.cliError.UnsupportedError)
+    expect((error as InstanceType<typeof fresh.cliError.UnsupportedError>).message)
+      .toBe(
+        "smithers hijack was removed in 1.0.0-rc.0: not available; use `steer`, `signal`, `approve`, " +
+          "`deny`, `cancel`, `run --resume`. See https://smithers.sh/migration/1.0#hijack"
+      )
+    expect(status(fresh, exit)).toBe(1)
+
+    // The point of refusing here rather than from the hidden command in the
+    // tree: a removed verb leaves no `.flows/` behind in the directory an
+    // operator happened to type it in.
+    expect(existsSync(join(project, ".flows"))).toBe(false)
+    rmSync(project, { recursive: true, force: true })
+  }, 60_000)
+
+  it("builds the durable composition inside the handler a real verb selects", async () => {
+    const fresh = await load()
+    const argv = process.argv
+    const cwd = process.cwd()
+    const home = process.env.HOME
+    const project = mkdtempSync(join(tmpdir(), "flows-cli-bin-"))
+    const written: Array<string> = []
+    const write = vi.spyOn(globalThis.console, "log").mockImplementation((...parts: ReadonlyArray<unknown>) => {
+      written.push(parts.map(String).join(" "))
+    })
+    try {
+      // `Project.root` walks up for a `.flows/` marker, and this checkout grows
+      // one, so the case has to run somewhere outside the repository with a
+      // `HOME` that cannot reach it either.
+      process.chdir(project)
+      process.env.HOME = project
+      process.argv = [process.execPath, "smithers", "ls", "--json"]
+      await Effect.runPromise(fresh.main)
+    } finally {
+      write.mockRestore()
+      process.argv = argv
+      process.chdir(cwd)
+      if (home === undefined) delete process.env.HOME
+      else process.env.HOME = home
+    }
+
+    // `Command.provide` puts `NodeControl.layer` inside the selected handler,
+    // so a verb that really runs gets the whole durable stack: the state
+    // directory exists afterwards and the document is the empty listing this
+    // project honestly has. The refusal case above is the other half of the
+    // same promise — that an invocation which never reaches a handler leaves
+    // the directory alone.
+    expect(JSON.parse(written.join(""))).toEqual({ _tag: "flows", items: [] })
+    expect(existsSync(join(project, ".flows"))).toBe(true)
+    rmSync(project, { recursive: true, force: true })
+  }, 120_000)
+
+  it("serves MCP over stdio when `--mcp` is anywhere in the vector", async () => {
+    const fresh = await load()
+    const argv = process.argv
+    const cwd = process.cwd()
+    const home = process.env.HOME
+    const project = mkdtempSync(join(tmpdir(), "flows-cli-bin-"))
+    // `--mcp` is a mode rather than a verb, so the entrypoint reads it before
+    // the parser exists and hands the session the real `process.stdin`. An
+    // already-ended stream is a client that connected and hung up: the server
+    // has nothing to answer and the mode returns, which is the whole promise
+    // this case can hold without a live client.
+    const stdin = new PassThrough()
+    stdin.end()
+    const descriptor = Object.getOwnPropertyDescriptor(process, "stdin")!
+    Object.defineProperty(process, "stdin", { configurable: true, value: stdin })
+    try {
+      process.chdir(project)
+      process.env.HOME = project
+      process.argv = [process.execPath, "smithers", "--mcp", "--read-only"]
+      await Effect.runPromise(fresh.main)
+    } finally {
+      Object.defineProperty(process, "stdin", descriptor)
+      process.argv = argv
+      process.chdir(cwd)
+      if (home === undefined) delete process.env.HOME
+      else process.env.HOME = home
+    }
+
+    // The mode still builds the durable composition the verbs use, which is
+    // why an MCP client configured with a launch command sees the same runs
+    // `smithers ps` does.
+    expect(existsSync(join(project, ".flows"))).toBe(true)
+    rmSync(project, { recursive: true, force: true })
+  }, 120_000)
 })

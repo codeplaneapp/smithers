@@ -8,6 +8,7 @@
  * failed launch with its output attached, and a child that is alive but silent
  * past the grace window is terminated rather than left running.
  */
+import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -249,4 +250,23 @@ describe("launching", () => {
     expect(Detached.defaultTimeoutMs).toBe(30_000)
     expect(Detached.admissionVariable).toBe("SMITHERS_INTERNAL_DETACHED_ADMISSION")
   })
+})
+
+describe("terminating a child the host gave no process group", () => {
+  it("reports that containment could not be confirmed rather than claiming a kill", async () => {
+    // A spawn that never became a process: the executable does not exist, so
+    // Node reports the failure asynchronously and the handle carries no pid.
+    // There is no group to signal and no exit to observe, and `terminate` has
+    // to say so. Reporting `true` here is the failure mode this case exists
+    // for — the caller renders "was terminated" for a child it never reached,
+    // and an operator reads a containment claim the host never made.
+    const spawned = spawn(join(tmpdir(), "smithers-no-such-executable"), [], { stdio: "ignore" })
+    const failed = new Promise<void>((resolve) => spawned.once("error", () => resolve()))
+    await failed
+    expect(spawned.pid).toBeUndefined()
+
+    // A short grace: the two reap windows are the whole cost of this case, and
+    // nothing about the answer changes with a longer one.
+    expect(await Detached.terminate(spawned, 20)).toBe(false)
+  }, 30_000)
 })

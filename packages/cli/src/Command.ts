@@ -1179,24 +1179,28 @@ const migrate = Command.make("migrate", {
     // looking for `flows/**/migrate-smithers-v1` made the verb unreachable for
     // every project it exists for. This is the same entry `smithers-migrate`
     // runs, so the two spellings are one implementation.
-    const options = MigrateCommand.optionsOf({
-      root: target,
-      scan: config.scan,
-      apply: config.apply,
-      seat: Option.getOrUndefined(config.seat),
-      allowUnsafe: Option.getOrUndefined(config.allowUnsafe),
-      acknowledgeRunState: config.acknowledgeRunState,
-      allowNoVcs: config.allowNoVcs,
-      keepOldSources: config.keepOldSources,
-      unit: Option.getOrUndefined(config.unit),
-      maxRepairRounds: Option.getOrUndefined(config.maxRepairRounds),
-      reportDir: Option.getOrUndefined(config.reportDir),
-      flowsDir: Option.getOrUndefined(config.flowsDir),
-      verifyInstall: Option.getOrUndefined(config.verifyInstall),
-      verifyFormat: Option.getOrUndefined(config.verifyFormat),
-      verifyTypecheck: config.verifyTypecheck,
-      verifyTest: Option.getOrUndefined(config.verifyTest)
-    }, target, process.env)
+    const options = MigrateCommand.optionsOf(
+      {
+        root: target,
+        scan: config.scan,
+        apply: config.apply,
+        seat: Option.getOrUndefined(config.seat),
+        allowUnsafe: Option.getOrUndefined(config.allowUnsafe),
+        acknowledgeRunState: config.acknowledgeRunState,
+        allowNoVcs: config.allowNoVcs,
+        keepOldSources: config.keepOldSources,
+        unit: Option.getOrUndefined(config.unit),
+        maxRepairRounds: Option.getOrUndefined(config.maxRepairRounds),
+        reportDir: Option.getOrUndefined(config.reportDir),
+        flowsDir: Option.getOrUndefined(config.flowsDir),
+        verifyInstall: Option.getOrUndefined(config.verifyInstall),
+        verifyFormat: Option.getOrUndefined(config.verifyFormat),
+        verifyTypecheck: config.verifyTypecheck,
+        verifyTest: Option.getOrUndefined(config.verifyTest)
+      },
+      target,
+      process.env
+    )
     const root = yield* rootCommand
     const outcome = yield* Effect.result(MigrateCommand.runNode(options, { environment: process.env }))
     if (outcome._tag === "Failure") {
