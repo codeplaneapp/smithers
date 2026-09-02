@@ -195,7 +195,7 @@ export const createTurnController = (
           title: tab.title,
           ...(tab.kind === "harness" ? { harnessId: tab.harnessId } : {}),
           ...(account === undefined ? {} : { account }),
-          ...(tab.kind === "terminal" || tab.kind === "harness" ? { cwd: tab.cwd } : {}),
+          ...((tab.kind === "terminal" || tab.kind === "harness") && tab.cwd !== undefined ? { cwd: tab.cwd } : {}),
           status: tab.kind === "terminal" || tab.kind === "harness"
             ? tab.exitCode === undefined ? ("running" as const) : ("exited" as const)
             : ("open" as const),

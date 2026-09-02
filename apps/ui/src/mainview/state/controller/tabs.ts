@@ -235,6 +235,9 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       if (card === undefined) return `The card behind tab ${tabId} is no longer in the conversation.`
       return { value: JSON.stringify({ kind: card.kind, title: card.title, status: card.status, payload: card.payload }) }
     }
+    if (tab.kind === "terminal" && tab.workspaceId !== undefined) {
+      return `"${tab.title}" runs inside workspace ${tab.workspaceId} in the cloud — the local PTY server holds no scrollback for it.`
+    }
     let response: Response
     try {
       response = await ctx.boundedFetch(
@@ -250,7 +253,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     if (!parsed.success) return `Could not read ${tab.title}: the server's answer had no output.`
     const header = `${tab.kind} "${tab.title}" (${parsed.data.alive ? "running" : "exited"}${
       tab.exitCode === undefined || tab.exitCode === null ? "" : `, code ${tab.exitCode}`
-    }) in ${tab.cwd}${parsed.data.truncated ? " — older output not shown" : ""}`
+    }) in ${tab.cwd ?? "~"}${parsed.data.truncated ? " — older output not shown" : ""}`
     return { value: parsed.data.output.trim() === "" ? `${header}\n(no output yet)` : `${header}\n${parsed.data.output}` }
   }
 
@@ -289,6 +292,12 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
 
   const endSession = async (tab: TabRow): Promise<void> => {
     if (!isProcessTab(tab)) return
+    /*
+     * A workspace terminal's process is a cloud workspace session: closing
+     * the tab detaches, never kills. The explicit act is
+     * `workspace.session.destroy` (lane citc).
+     */
+    if (tab.kind === "terminal" && tab.workspaceId !== undefined) return
     // An exited session is still listed on the server until deleted, so the
     // DELETE goes out either way; a 404 for one the server already dropped is fine.
     try {
