@@ -25,7 +25,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category migrations
  * @since 0.1.0
  */
-const lineage: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const lineage: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`ALTER TABLE flows_runs ADD COLUMN lineage_id TEXT CHECK (lineage_id IS NULL OR length(lineage_id) > 0)`
@@ -33,5 +33,3 @@ const lineage: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(fu
 
   yield* sql`CREATE UNIQUE INDEX flows_runs_lineage_idx ON flows_runs (lineage_id, round_ordinal)`
 })
-
-export default lineage

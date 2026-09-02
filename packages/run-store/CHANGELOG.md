@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the CommonJS build of the migration set. `migrations/0001_initial`
+  now exports `initial` and `migrations/0002_lineage` exports `lineage` as
+  named bindings, and every importer reads them by name, because esbuild's
+  Node interop for a default import of a sibling module resolved to the whole
+  exports object instead of the Effect, so `require("@smthrs/run-store")`
+  produced a migration set whose entries had no `pipe` and the migrator failed
+  at load.
+
 ### Changed
 
 - `RunStore.claim`, `claimAndOwn`, `steal`, `heartbeat`, and `recoverClaim`

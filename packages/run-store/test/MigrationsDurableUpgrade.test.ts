@@ -9,7 +9,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as AttemptStore from "../src/AttemptStore.ts"
 import * as Migrations from "../src/Migrations.ts"
-import initial from "../src/migrations/0001_initial.ts"
+import { initial } from "../src/migrations/0001_initial.ts"
 import * as RunStore from "../src/RunStore.ts"
 
 const database = (filename: string) => Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))
