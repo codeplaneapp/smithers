@@ -20,7 +20,7 @@ Plan-level and node-level (`ask`) approvals; principal stamped server-side. A no
 
 | Flag | Meaning |
 | --- | --- |
-| `--scope choice` | (choices: once, run, remembered) |
+| `--scope choice` | How far the grant reaches: this ask only, the whole run (the default, matching `up`), or every later run. The MCP resolve_approval tool defaults to `once` instead, because an argument a client never sent must not widen what it may do (choices: once, run, remembered) |
 
 ## Source
 

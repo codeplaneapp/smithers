@@ -105,6 +105,20 @@ Ask what would break if a boundary were removed, and its purpose becomes clear.
 
 The **host boundary** exists so flow code can run in a browser. `@smthrs/kernel` declares a closed set of five service tags and nothing else; every platform implementation lives in its own package: `@smthrs/platform-node`, `@smthrs/platform-bun`, `@smthrs/platform-browser`. Four of those five tags are Effect's own: `FileSystem`, `Path`, `ChildProcessSpawner`, and `HttpClient` are contracts `effect` already declares, so Smithers supplies implementations rather than wrappers. One more, `Jj`, is a contract of `@smthrs/jj`, whose tag the kernel decorates in place rather than shadowing with a second one, so a consumer that needs only that capability does not take the whole host surface. A module that depends only on the kernel root never statically resolves a `node:` built-in, which is what makes browser bundling possible at all. `@smthrs/kernel` sits in front of that surface and decorates each service with a grant check, so a flow that asks for a file it was never granted fails in the error channel rather than reading the file.
 
+{/* generated:kernel-contract start */}
+
+`@smthrs/kernel` owns the closed host boundary and decorates the same service
+tags supplied by each platform adapter. Capability checks happen before a host
+operation, and mutable inputs are snapshotted so the operation executed after
+an attended grant is the operation that was authorized. Native filesystems use
+a descriptor-relative executor; isolated browser and test volumes may attest
+whole-volume isolation. Process, network, Jujutsu, and filesystem refusals keep
+their structured permission error through the host service's fixed error
+channel. See the [Kernel API contract](/api/kernel) for the exact resources,
+stable error codes, limits, and public test subpaths.
+
+{/* generated:kernel-contract end */}
+
 The **database and journal** split separates the storage driver from the shapes stored in it. `@smthrs/database` owns no domain tables; it wraps any Effect `SqlClient` and adds the transactional write retry that the rest of the system assumes. `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/plan`, and `@smthrs/engine-store` each own their own tables and the migration set that creates them, composed over one migrations table. Swap the driver and every shape survives.
 
 The **canonical, crypto, keys, and engine** chain decides identity before storage sees anything. `@smthrs/canonical` owns RFC 8785 JSON, `@smthrs/crypto` owns SHA-256, [`@smthrs/keys`](/api/keys) owns canonical flow-key derivation and stored-key validation, and `@smthrs/engine` owns action-key policy above the seam. The engine computes a key before it calls `FlowEngine.Encoded.actionExecute`, so storage never implements key policy.

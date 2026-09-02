@@ -65,10 +65,14 @@ and a concurrent active run that buffers it again keeps it pending. If a
 process dies after claiming ordinary or buffered work but before launching it,
 expiration of that launch reservation restores the occurrence.
 
-The persisted `last_fired_at_ms` watermark only moves forward. SQL updates use
-the greater of the stored value and the completed occurrence. The scheduler's
-in-process watermark advances only past occurrences that it finished
-dispatching. It leaves a failed occurrence available to a later poll.
+The persisted `last_fired_at_ms` watermark only moves forward. A completed
+skip or buffer advances it inside the claim transaction; a fire or supersede
+reservation does not advance it until the launched run ID is durable. SQL
+updates use the greater of the stored value and the completed occurrence. A
+late terminal result with no run ID is fenced to the run recorded for its own
+occurrence, so it cannot clear a newer active run. The scheduler's in-process
+watermark advances only past occurrences that it finished dispatching. It
+leaves a failed occurrence available to a later poll.
 
 On its first poll, a newly registered trigger with no prior fire establishes a
 watermark at the latest boundary without firing that boundary. It fires from

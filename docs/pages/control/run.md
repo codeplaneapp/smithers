@@ -29,6 +29,8 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 | Error | Code |
 | --- | --- |
 | `RunNotFound` | `run_not_found` |
+| `PlanNotFound` | `plan_not_found` |
+| `PlanDenied` | `plan_denied` |
 | `PlanDigestMismatch` | `plan_digest_mismatch` |
 | `EnvelopeMismatch` | `envelope_mismatch` |
 | `ClaimLost` | `claim_lost` |

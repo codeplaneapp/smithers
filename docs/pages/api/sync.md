@@ -103,15 +103,18 @@ notification therefore costs latency and never state.
 above; `makeLive` and `layer` use the defaults. The live layer requires
 `Journal` and `RunCatalog`.
 
-A read fills its page in run order and stops at the first of three bounds: the
-request's `limit`, the frame ceiling, or the durable tail of every covered run,
-which is the only case that reports `done: true`. It is a catch-up API, not a
-fair scheduler: a run with a long backlog takes the page it is offered, and the
-runs behind it are served by the follower's next page from the cursors this one
-returned. The frame ceiling is a page budget rather than a verdict on the read,
-so a page whose entries sum past it reports `done: false`; only a SINGLE entry
-whose own encoded size exceeds the ceiling is refused with `frame_too_large`,
-because no page can ever carry it.
+A read shares its page across the runs it covers and stops at the first of three
+bounds: the request's `limit`, the frame ceiling, or the durable tail of every
+covered run, which is the only case that reports `done: true`. Every covered run
+takes a share of the budget before any run takes a second helping, and the
+budget the shares leave unspent is offered back in run order, so a run with a
+backlog takes the larger part of a page but never all of it. Filling in run
+order instead let a producer that stayed one page ahead take every slot of every
+page, so `done` never became true and a bootstrapping follower never reached the
+runs behind it. The frame ceiling is a page budget rather than a verdict on the
+read, so a page whose entries sum past it reports `done: false`; only a SINGLE
+entry whose own encoded size exceeds the ceiling is refused with
+`frame_too_large`, because no page can ever carry it.
 
 Cursors are unique per run. A request that names one run twice is refused with
 `invalid_request` on both `read` and `subscribe`, because the read position and

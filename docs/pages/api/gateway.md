@@ -35,6 +35,17 @@ a socket.
 messages. `GatewayServer.protectedPaths` adds the three sockets: every path in
 it passes edge authentication before a body is read or an upgrade is answered.
 
+A request target is classified the way the router will resolve it, not by its
+literal spelling. The router reaches `/rpc` from `/%72pc`,
+`/rpc;transport-parameter`, `/rpc/`, `//rpc`, `/rpc//`, `/RPC`, and `/foo/../rpc`,
+so the guard resolves dot segments, takes each segment without its `;`
+parameter, drops empty segments, decodes the rest with `decodeURI`, and
+compares without regard to case. A reserved character left encoded stays
+encoded, so `/rpc%2f` is a different path here exactly as it is to the router.
+This matters for more than aliases: `ControlClient`'s HTTP protocol posts every
+call to `/rpc/`, which a literal comparison did not recognize, so the credential
+check and the body limit were skipped on the path the product's own client uses.
+
 `GET /health` is deliberately unauthenticated. A supervisor decides whether to
 keep or replace a gateway process by asking which workspace it belongs to, and
 a probe that needed a credential could not answer that about a gateway it did
@@ -59,10 +70,10 @@ accepts `127.0.0.1`, `::1`, and `localhost` and nothing else.
 
 `NodeGateway.bindRefusal` answers the policy as a value: a `bind_failed`
 `GatewayError` naming the rule that refused, or `undefined`.
-`NodeGateway.listenOptions` and `NodeGateway.layer` raise exactly what it
-returns, because a layer is built rather than run. A listen failure the
-operating system reports, such as an address already in use, is not mapped: it
-stays the `NodeHttpServer` failure it is.
+`NodeGateway.listenOptions` returns that refusal in its typed effect channel,
+and `NodeGateway.layer` fails through its layer channel. Operating-system
+listen failures, such as an address already in use, are mapped to the same
+sanitized `bind_failed` contract.
 
 One shared bearer authenticates every mount and binds one principal. There are
 no users, no roles, no per-run ownership, and no scopes.
@@ -119,15 +130,24 @@ single read, so a client that follows the same selector from the advertised
 cursor sees each later change exactly once.
 
 `Projection.Subscribe` accepts an `after` cursor. With one it skips the snapshot
-and answers the deltas after that cursor. A cursor that names a different
-projection or a different run is refused with `malformed_request`, and so is a
-negative, fractional, or ahead-of-run cursor. A cursor on a workspace selector
-is refused too: control journal sequences belong to per-run partitions, so a
-workspace cursor is always `0` with a null run and no workspace projection is
+and answers the deltas after that cursor. The cursor embeds the exact selector
+and a `(sequence, offset)` position, so two node-output selectors in one run do
+not share a cursor and multiple derived events at one journal sequence resume
+without loss. A cursor that names another selector, was never issued, or is
+negative, fractional, or ahead of the run is refused with
+`malformed_request`. A workspace cursor is refused too: control journal
+sequences belong to per-run partitions, so no workspace projection is
 resumable from one.
 
-A workspace subscription therefore emits its snapshot and then keepalives; a
-client refreshes it by subscribing again.
+A workspace subscription follows every run partition and answers a full
+replacement of its rows on each change. It admits a run the snapshot did not
+see with one read and folds at most `Projections.maxWorkspaceRuns` runs, the
+same allowance as the snapshot. The unscoped follow replays each partition's
+history, so the gateway discards the prefix each snapshot already folded. The
+subscription is still not resumable because control journal sequences belong
+to per-run partitions, and its cursor is always `0` with a null run.
+An approvals inbox counts only runs that still have a pending gate toward that
+allowance; completed and otherwise irrelevant histories cannot exhaust it.
 
 ## Failures
 
@@ -140,7 +160,8 @@ constructed by a real path.
 | `unauthorized`      | 401    | the ingress guard, on any protected path without the configured credential                                                                               |
 | `malformed_request` | 400    | the ingress guard, for a `POST` body carrying no RPC request message or a body it could not read, and the read path, for an invalid resume cursor        |
 | `request_too_large` | 413    | the ingress guard, for a body over the configured limit                                                                                                  |
-| `run_unavailable`   | none   | the read path, when listing runs or reading a run's events failed                                                                                        |
+| `resource_limit`    | none   | the read path, when one run or projected row set exceeds its event or encoded-byte allowance                                                             |
+| `run_unavailable`   | none   | the read path, when listing runs, reading a run's events, or following a run or the workspace failed                                                     |
 | `run_not_found`     | none   | the read path, for a run the control plane does not have, identically for every run-scoped selector                                                      |
 
 `GatewayError.cause` carries only a redacted summary of an internal failure: its
@@ -165,9 +186,14 @@ A workspace listing pages the control plane with an explicit limit and folds at
 most `Projections.maxWorkspaceRuns` runs. A workspace with more runs is answered
 as its first `maxWorkspaceRuns` runs.
 
-What is not bounded at 1.0.0-rc.0: a projection read collects each selected
-run's whole journal. There is no event ceiling, no encoded-byte ceiling, and no
-overflow frame.
+A workspace delta re-reads the run row of the run whose event arrived, which is
+one indexed listing per event, and reads a run it has not seen before once.
+Neither cost grows with a run's length.
+
+One run admits at most `Projections.maxEventsPerRun` events, and both its event
+history and every encoded projected row set are capped at
+`Projections.maxProjectionBytes`. The fold fails at the first value past either
+bound instead of retaining the rest of a hostile or corrupt stream.
 
 ## Supervision
 
@@ -268,6 +294,7 @@ service for tests that need the port without a host.
 | `GatewayServer.layerSyncHttp`              | const        | layers       | Mounts the sync read path on `POST /sync` and `/sync/ws`.                                                                     |
 | `GatewayServer.rpcPaths`                   | const        | constants    | The POST mounts that carry RPC request messages and nothing else.                                                             |
 | `GatewayServer.protectedPaths`             | const        | constants    | RPC paths whose upgrade/request must pass edge authentication.                                                                |
+| `GatewayServer.routedPath`                 | const        | constructors | The mount a request target reaches, spelled the way `rpcPaths` and `protectedPaths` spell it.                                 |
 | `GatewayServer.defaultMaxRequestBodyBytes` | const        | constants    | Default maximum request body accepted by an RPC mount (one MiB).                                                              |
 | `GatewayServer.IngressOptions`             | interface    | models       | Ingress policy enforced before an RPC transport parses a request.                                                             |
 | `GatewayServer.exceededBodyLimit`          | const        | predicates   | Whether a failed request-body read hit the configured size limit rather than failing for another reason.                      |
@@ -278,6 +305,8 @@ service for tests that need the port without a host.
 | `GatewayServer.layer`                      | const        | layers       | The whole gateway surface, as one application layer a host serves.                                                            |
 | `Projections.heartbeatIntervalMillis`      | const        | models       | How often an idle subscription emits a keepalive frame.                                                                       |
 | `Projections.maxWorkspaceRuns`             | const        | models       | The most runs one workspace projection folds.                                                                                 |
+| `Projections.maxEventsPerRun`              | const        | models       | The most journal events one run projection admits.                                                                            |
+| `Projections.maxProjectionBytes`           | const        | models       | The largest encoded event history or projected row set one run admits.                                                        |
 | `Projections.Service`                      | interface    | models       | Read-path operations served by the gateway.                                                                                   |
 | `Projections.Projections`                  | class        | services     | The gateway read path.                                                                                                        |
 | `Projections.make`                         | const        | constructors | Builds the read path over a control plane.                                                                                    |

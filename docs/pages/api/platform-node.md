@@ -79,6 +79,23 @@ The barrel exports `NodeHost`, `HostLiveness`, and `ProcessReaper`.
 `AtomicFileSystem` is reached as `NodeHost.AtomicFileSystem` or through its own
 subpath, never from the barrel.
 
+`NodeHost` also re-exports the pieces it composes, so a program that wants one
+slot rather than the whole bundle needs no second dependency:
+
+| Re-export                          | What it is                                                       |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| `NodeHost.AtomicFileSystem`        | this package's descriptor-relative filesystem, the bundle's slot |
+| `NodeHost.ProcessReaper`           | this package's containment sweep                                 |
+| `NodeHost.NodeCrypto`              | Effect's Node `Crypto`                                           |
+| `NodeHost.NodeFileSystem`          | Effect's raw Node filesystem, which carries NO atomic extension  |
+| `NodeHost.NodeChildProcessSpawner` | Effect's Node spawner                                            |
+| `NodeHost.NodeHttpClient`          | Effect's Undici-backed `HttpClient`                              |
+
+`NodeCrypto` is there for a different reason from the rest. `Crypto` is not a
+Host service, so it is not in the closed list, but every durable composition
+needs one and a program that already depends on this package for its host
+should not need a second dependency for the digest.
+
 ## Layers
 
 | Layer                                       | Jj bound to           | Containment |
@@ -140,34 +157,76 @@ built, so the ceilings cannot change under a running host.
 across zero or more whole segments, `{a,b}` alternation, a trailing `/` for
 directory-only matching, and the dotfile rule, which keeps a wildcard out of a
 name beginning with `.` while letting a segment that spells the dot, `.*` or
-`[.]*`, match one. Exclusions prune: excluding a directory excludes everything
-below it, an absolute exclude is rewritten against the glob root so it applies
-to the same names the selecting pattern does, and a trailing `**` in an exclude
-removes what is under a directory while leaving the directory entry itself,
-which is the native globber's own asymmetry between selecting and excluding.
-Matching is segment-wise and linear in the candidate's length, never a compiled
-regular expression, because a pattern of repeated `*x` fragments costs a regex
-engine exponential backtracking.
+`[.]*`, match one. Exclusions prune the walk itself: excluding a directory
+excludes everything below it, and nothing under an excluded directory is listed,
+counted against the entry ceiling, or charged against the response ceiling. An
+exclusion that names the root stops before the walk begins. An absolute exclude
+is rewritten against the glob root so it applies to the same names the selecting
+pattern does. A trailing `**` spans zero segments, so it also names its own
+anchor: a directory always, and a non-directory only when every segment before it
+is literal, which is the shortcut the native globber takes when it can address
+the path directly rather than read a directory. `top.txt/**` names the file;
+`t*.txt/**` names nothing. A one-member class is the literal it spells, so `[.]`
+is a `.` path segment: the globber drops a SPELLED `.` before it parses and
+collapses `[.]` only afterwards, so this one survives and, as the last segment,
+names its anchor under the same rule. One addition: a `**` immediately before it
+addresses nothing, so `**/[.]` names nothing while `**/deep/[.]` names the
+directory. Anywhere but last, and in an exclusion, a `.` segment names an entry
+no directory holds. Matching is segment-wise and linear in the candidate's
+length, never a compiled regular expression, because a pattern of repeated `*x`
+fragments costs a regex engine exponential backtracking.
 
 Two grammar bounds are refusals rather than silent truncation: a pattern longer
 than 4096 characters, and one whose braces expand past 64 alternatives, both
-fail as `BadArgument`. So do the four constructs this grammar does not
-implement: extglob (`+(a|b)`), POSIX classes (`[[:digit:]]`), brace ranges
-(`{1..3}`), and backslash escaping. Each of them means something to the native
-globber, so reading them as ordinary characters would not fail; it would answer
-a different question, and in an exclusion that means handing the caller the very
-paths it forbade. The refusal therefore covers the exclude list as well as the
-pattern. Node's own globber does not agree with itself about one input
-across the supported range either: on 22.19.0 a dotted segment after `**`
-(`**/.hidden`) matches nothing, and on 24 it matches the dotfiles. The adapter
-follows the newer reading.
+fail as `BadArgument`. Both are enforced before any expansion or any walking, so
+an over-large pattern costs no listing and answers with the typed refusal rather
+than with a fail-closed transport error. So do the three constructs this grammar
+does not implement: extglob (`+(a|b)`), POSIX classes (`[[:digit:]]`), brace
+ranges (`{1..3}`). Each of them means something to the
+native globber, so reading them as ordinary characters would not fail; it would
+answer a different question, and in an exclusion that means handing the caller
+the very paths it forbade. The refusal therefore covers the exclude list as well
+as the pattern, and it recognises a character class, so `[!(]*` is an ordinary
+negated class and not an extglob.
+
+Backslashes follow Node's POSIX rules instead: an absolute selector and every
+exclude drop them while leaving following wildcard magic active; a relative
+selector containing one matches nothing. The public filesystem path is
+absolute, and the direct atomic protocol preserves the relative empty answer.
+
+Three answers are pinned rather than copied, because the native globber gives no
+single answer to copy.
+
+1. **Case.** Matching is case-sensitive on every host. Node's globber passes
+   `nocase: isMacOS || isWindows` with `nocaseMagicOnly: true`. On a
+   case-insensitive host a magic segment folds case (`*.TXT` finds `upper.txt`),
+   a literal segment the matcher decides is compared exactly (`**/MID.txt`
+   misses `mid.txt`), and a literal segment Node addresses directly comes back
+   with the pattern's own spelling (`TOP.TXT` returns `TOP.TXT`), even though the
+   directory does not hold that spelling. The adapter returns only names its
+   walk found. A pattern whose meaning depends on which host reads it is worse
+   than one that means the same everywhere, and worst of all in an exclusion,
+   so the adapter keeps one rule everywhere.
+2. **A trailing `**` in an exclusion** removes what is under a directory and
+   leaves the directory entry itself. Node's own answer here depends on the
+   shape of the SELECTING pattern: `**/*` with `exclude: ["nested/**"]` keeps
+   `nested`, and `**` with the same exclusion drops it. The adapter gives one
+   answer for every selector. Consequently, the directory-only `**/` names
+   directories below its own anchor but not that anchor: with `exclude: ["**/"]`,
+   `**` keeps the root and its files while pruning every directory.
+   Node empties the answer instead.
+3. **A dotted segment after `**`.** On 22.19.0 `**/.hidden` matches nothing and
+   on 24 it matches the dotfiles. The adapter follows the newer reading.
 
 **Removal.** `remove(path, { recursive: true })` walks iteratively with an
-explicit descriptor stack: depth is bounded at 512 levels, the total number of
-entries visited at 100000, and each directory is read incrementally so a wide
-one is refused rather than materialized. Progress is partial on refusal, since
-entries already unlinked stay unlinked. `force: true` succeeds for a path whose
-ancestors do not exist, exactly as `fs.rm` does.
+explicit descriptor stack: depth is bounded at 512 levels and the total number
+of entries visited at 100000, counted as each directory is read, so a hostile
+wide directory is refused after 100000 names rather than allocated whole. One
+directory's names are read before any of its entries is unlinked, because
+unlinking from a directory while iterating it is undefined; the entry ceiling
+is what bounds the names held across the whole walk. Progress is partial on
+refusal, since entries already unlinked stay unlinked. `force: true` succeeds
+for a path whose ancestors do not exist, exactly as `fs.rm` does.
 
 ## Liveness and reaping
 
@@ -247,9 +306,10 @@ with capability checks. [@smthrs/platform-bun](/api/platform-bun) and
 | `ProcessReaper.StartTime`             | type      | models       | What the operating system can say about when a pid started.                                                                                                                |
 | `ProcessReaper.System`                | interface | models       | The operating-system operations reaping needs.                                                                                                                             |
 | `ProcessReaper.defaultPsExecutable`   | const     | constants    | The absolute path the process probe is run from.                                                                                                                           |
-| `ProcessReaper.SystemOptions`         | interface | models       | How a POSIX `System` asks the operating system its questions.                                                                                                              |
+| `ProcessReaper.SystemOptions`         | interface | models       | How a `System` asks the operating system its questions, and whose identity it must never signal.                                                                           |
 | `ProcessReaper.posixSystemWith`       | const     | constructors | Reaping on a POSIX host, with the identity probe configured.                                                                                                               |
 | `ProcessReaper.posixSystem`           | const     | constructors | Reaping on a POSIX host: one `SIGKILL` to the abandoned process group, with the identity probe at `defaultPsExecutable`.                                                   |
+| `ProcessReaper.windowsSystemWith`     | const     | constructors | Reaping on Windows, with the identity the sweep must never signal configured.                                                                                              |
 | `ProcessReaper.windowsSystem`         | const     | constructors | Reaping on Windows, which has no process groups: `taskkill /T /F` by pid.                                                                                                  |
 | `ProcessReaper.systemFor`             | const     | constructors | Selects the reaping implementation a platform needs.                                                                                                                       |
 | `ProcessReaper.identityToleranceMs`   | const     | models       | How far apart a recorded start time and the operating system's may be and still describe the same process.                                                                 |

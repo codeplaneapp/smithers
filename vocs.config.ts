@@ -151,6 +151,7 @@ export default defineConfig({
         { text: "@smthrs/gateway", link: "/api/gateway" },
         { text: "@smthrs/cli", link: "/api/cli" },
         { text: "@smthrs/agent", link: "/api/agent" },
+        { text: "@smthrs/plugin", link: "/api/plugin" },
         { text: "@smthrs/integrations", link: "/api/integrations" },
         { text: "@smthrs/triggers", link: "/api/triggers" },
         {
@@ -164,6 +165,7 @@ export default defineConfig({
         },
         { text: "@smthrs/registry", link: "/api/registry" },
         { text: "@smthrs/memory", link: "/api/memory" },
+        { text: "@smthrs/model", link: "/api/model" },
         { text: "@smthrs/notifications", link: "/api/notifications" },
         { text: "@smthrs/journal", link: "/api/journal" },
         { text: "@smthrs/run-store", link: "/api/run-store" },

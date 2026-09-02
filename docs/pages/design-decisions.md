@@ -110,15 +110,33 @@ If an application extension later wraps agent CLIs into workflows the way Smithe
 
 The alternative was keeping the `@smthrs/pty` package that once shipped here. It was removed: its contract had no production consumer, and its Node implementation was piped stdio rather than a pseudo-terminal, so it could not honestly back the contract it named.
 
+## D14. Core extension is dependency injection; cell-loop extension uses the plugin kernel
+
+Durable-engine policy is injected at the service or constructor seam that
+applies it. The public [`@smthrs/plugin`](/api/plugin) package is the narrower,
+bounded extension point for the assembled agent cell host. Its shared catalog
+contains only configuration hooks; `@smthrs/agent` adds and dispatches the
+registry, flow-binding, and model-request waterfalls it owns.
+
+The alternative was an engine-wide lifecycle catalog. That would duplicate
+Effect services, make ordering part of durable execution semantics, and let a
+plugin intercept retry, cache, journal, ownership, or wait policy outside the
+component responsible for it.
+
+Cost: a host must declare both the augmented TypeScript hook interface and the
+matching runtime catalog. Resolution validates and freezes that bounded catalog
+at startup. Adding a typed hook without adding it to the host catalog does not
+make it dispatchable.
+
 ## Decisions the review contested and their outcome
 
-| Question | Review position | Outcome |
-| --- | --- | --- |
-| Ship 0.1.0 or an experimental preview | a full 0.1.0, with WAL atomicity fixed first | atomicity landed; the version is `0.1.0` |
-| Package naming | keep the `@smthrs/*` names | kept |
-| Publish `@smthrs/plugin` | hold it back as private until dispatch is wired, because publishing sells an extension API nothing calls | settled for the bounded assembled cell loop: `@smthrs/agent` dispatches its configuration, registry, flow-binding, and model-request hooks; durable-core policy remains dependency injection, with no engine-wide lifecycle hook catalog. The package exists and the decision whether to publish it remains open for the agent track. |
-| Browser claim | narrow the claim and gate it, rather than restructure subpaths for 0.1.0 | narrowed and gated by `pnpm run browser`; the gate has since grown to twenty-four browser entry points as each Node read moved behind a port, so the barrel and engine-store now bundle too; only the platform bundles, the jj and SQLite drivers, and the test host stay Node-only |
-| Positioning against Temporal, Restate, Inngest | lead with Effect integration, embeddability, content addressing, and time travel; do not lead with parity | adopted, see [External](/external) |
+| Question                                       | Review position                                                                                           | Outcome                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ship 0.1.0 or an experimental preview          | a full 0.1.0, with WAL atomicity fixed first                                                              | atomicity landed; the version is `0.1.0`                                                                                                                                                                                                                                                                                                       |
+| Package naming                                 | keep the `@smthrs/*` names                                                                                | kept                                                                                                                                                                                                                                                                                                                                           |
+| Publish `@smthrs/plugin`                       | hold it back as private until dispatch is wired, because publishing sells an extension API nothing calls  | published for the bounded assembled cell loop: `@smthrs/agent` dispatches its configuration, registry, flow-binding, and model-request hooks; durable-core policy remains dependency injection, with no engine-wide lifecycle hook catalog. See [D14](#d14-core-extension-is-dependency-injection-cell-loop-extension-uses-the-plugin-kernel). |
+| Browser claim                                  | narrow the claim and gate it, rather than restructure subpaths for 0.1.0                                  | narrowed and gated by `pnpm run browser`; the gate has since grown to twenty-four browser entry points as each Node read moved behind a port, so the barrel and engine-store now bundle too; only the platform bundles, the jj and SQLite drivers, and the test host stay Node-only                                                            |
+| Positioning against Temporal, Restate, Inngest | lead with Effect integration, embeddability, content addressing, and time travel; do not lead with parity | adopted, see [External](/external)                                                                                                                                                                                                                                                                                                             |
 
 ## Reading next
 

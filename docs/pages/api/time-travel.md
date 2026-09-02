@@ -78,16 +78,21 @@ lanes, and the lane is forgotten when the service scope is released.
 3. write the audit row and the rate-limit decision;
 4. read the suffix after the frame and assess every effect boundary in it;
 5. resolve descendants: a live child refuses the rewind under `"block"`;
-6. compensate tier-3 effects and persist their receipts;
+6. compensate tier-3 effects, persisting the accumulated receipts after each handler;
 7. restore the jj workspace to the frame's pointer;
-8. archive and truncate the suffix atomically, fenced on the ownership claim.
+8. persist the cancellation plan and claim every child it names;
+9. archive and truncate the suffix atomically, fenced on the parent owner and
+   every non-terminal attached child's exact owner.
 
-Step 8 is the recovery commit point. Cancelling a child under
+Step 9 is the recovery commit point. Cancelling a child under
 `detachedChildren: "cancel"` happens **after** it, because cancellation is
-terminal and has no inverse: a rewind that fails before the commit leaves every
-child exactly as it was. The planned cancellations are written to the audit
-detail before the commit, so a crash between the commit and the last
-cancellation is finished by the next recovery pass rather than silently dropped.
+terminal and has no inverse. Pre-commit child claims are reversible and are
+released when the archive fails: an originally suspended child returns to that
+status, while a child claimed from pending or dead-running is safely parked
+suspended because that is the run store's ownership-clearing reversible state.
+The planned cancellations are written to the audit detail before any archive
+mutation, so a crash between the commit and the last cancellation is finished
+by the next recovery pass rather than silently dropped.
 
 ## Recovery
 

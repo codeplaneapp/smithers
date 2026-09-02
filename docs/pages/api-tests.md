@@ -55,7 +55,7 @@ These are the behaviors that have to be exercised against real implementations, 
 | `@smthrs/run-store`             | 9      | run and attempt stores, ownership arbitration, run metadata, migrations                                                                                                                                                         |
 | `@smthrs/step-cache`            | 13     | bounded-JSON admission, the SQL head and its provenance ledger, durability and crash recovery, expiry and sweeping, fenced eviction, the remote HTTP tier, the combined tiers, metrics, redaction, artifact references, migrations, the barrel contract, and the test double |
 | `@smthrs/database`              | 4      | the write-serialization contract, concurrent open, artifact shape                                                                                                                                                               |
-| `@smthrs/kernel`                | 23     | capability parsing, matching, subsumption, tiers, ambient sets, grants and their journal persistence, every decorated service                                                                                                   |
+| `@smthrs/kernel`                | 38     | capability parsing, matching, subsumption, tiers, ambient sets, grants and their journal persistence, every decorated service                                                                                                   |
 | `@smthrs/canonical`             | 1      | RFC 8785 vectors, malformed Unicode, boundary values, and large values                                                                                                                                                          |
 | [`@smthrs/crypto`](/api/crypto) | 3      | package-owned vector, property, host-adversary, error, redaction, and parity coverage                                                                                                                                           |
 | [`@smthrs/keys`](/api/keys)     | 3      | frozen `key1_` vectors, stored-key identity and version rejection, canonical equality properties, typed host failures, diagnostic redaction, irreversibility, and browser-safe source imports                                   |
@@ -68,6 +68,20 @@ These are the behaviors that have to be exercised against real implementations, 
 | `@smthrs/time-travel`           | 21     | the `TimeTravel` service surface, replay, fork and its lineage, rewind with claims, concurrency and rollback, truncation, compensation, recovery, both stores                                                                   |
 | [`@smthrs/flows`](/api/flows)    | 14     | the barrel namespace universe and the absence of an unsupported Cloudflare runtime subpath, the real-SQLite `NodeRuntime` journey and its guarded host composition, three integration hosts (containment, reaping, signals), the AST spawn-containment gate, sandboxed child execution against both a scripted and a real provider plus its retry policy, the authoring end-to-end program and its error surface, the shipped CLI composition contract, and the repository-wide coverage-isolation conformance suite |
 | `@smthrs/examples`              | 11     | every documentation example, run end to end against the real packages                                                                                                                                                           |
+
+{/* generated:kernel-testing start */}
+
+The package-owned [`@smthrs/kernel` suite](/api/kernel) covers capability-set
+intersection, bounded and immutable grant state, journal replay and envelope
+limits, canonical filesystem resources and descriptor identity, command
+snapshots, process containment and ledger recovery, HTTP method/origin and
+redirect authorization, Jujutsu resources, browser-safe imports, and every
+supported and refused host operation. Its public
+`@smthrs/kernel/test/contract` matrix is also run by the Node, Bun, browser,
+test, and unsupported host bundles, including observable process liveness and
+multi-leg pipelines.
+
+{/* generated:kernel-testing end */}
 
 {/* generated:keys-testing start */}
 

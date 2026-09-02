@@ -56,12 +56,12 @@ against a remote `smithers serve` with `--remote`.
 
 | Flag | Meaning |
 | --- | --- |
-| `--credential string` | See the command pages. |
-| `--json` | See the command pages. |
-| `--remote string` | See the command pages. |
-| `--quiet` | See the command pages. |
-| `--mcp-config string` | See the command pages. |
-| `--root string` | See the command pages. |
+| `--credential string` | Bearer token for the remote control plane; falls back to SMITHERS_API_KEY |
+| `--json` | Print the machine-readable document instead of the human rendering |
+| `--remote string` | http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE |
+| `--quiet` | Drop the banners and notices commands write to stderr |
+| `--mcp-config string` | Path to the JSON array of MCP servers the local executor projects into a run's flow catalog |
+| `--root string` | Project root to act on, instead of walking up from the working directory |
 | `--help, -h` | Show help information |
 | `--version, -v` | Show version information |
 | `--wizard` | Start wizard mode for a command |

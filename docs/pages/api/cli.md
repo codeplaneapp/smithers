@@ -36,9 +36,17 @@ explicit listen opt-in and a bearer credential. The exact routes are listed by
 
 ## Process results
 
-`Output` renders keys in code-unit order and bounds recursive input. Exit codes
-come only from complete control receipts; use `Output.renderValue` for arbitrary
-stored or provider data so a caller-controlled `_tag` cannot imitate a receipt.
+`Output` renders keys in code-unit order after snapshotting inert plain data.
+It refuses proxies, accessors, callables, cycles, host objects, and values past
+its 128-level, 10,000-member, or 4 MiB output bounds with a typed code and path.
+Exit codes come only from complete control receipts; use `Output.renderValue`
+for arbitrary stored or provider data so a caller-controlled `_tag` cannot
+imitate a receipt.
+
+Finite CLI history reads retain at most 50,000 events and 16 MiB, with a 1 MiB
+per-event cap. MCP narrows that to 10,000 events and 1 MiB and admits request
+and response frames no larger than 4 MiB. Crossing a boundary returns a typed
+resource-limit failure rather than partial output.
 
 The stable process statuses are 0 for success, 1 for a failed operation or run,
 2 for usage, 3 for a run waiting on approval, 130 for cancellation, and 143 for
@@ -96,6 +104,8 @@ surface used to compose or embed that executable.
 | `ClaudeMirror.transition` (const) | constructors | Projects one event into a monitor line, or `undefined` when it is not notable. |
 | `CliError.UsageError` (class) | errors | The operator spelled the invocation wrong: an unparseable flag value, a payload that does not match its schema, an argument outside the accepted set. |
 | `CliError.UnsupportedError` (class) | errors | The invocation was spelled correctly and this projection cannot perform it: a verb or flag removed in 1.0.0-rc.0, a reserved system flow, or a local-only operation asked of a `--remote` composition. |
+| `CliError.ResourceLimitError` (class) | errors | A correctly spelled read would exceed a published in-memory or wire bound. |
+| `CliError.RenderingError` (class) | errors | Caller-controlled output was not inert bounded data. |
 | `CliError.CliError` (type) | models | Every failure the command-line projection adds on top of the control plane's own. |
 | `CliError.exitCode` (const) | getters | The process exit status one CLI failure ends on. |
 | `CodexAuth.refreshUrl` (const) | constants | The OAuth token endpoint the refresh grant is sent to. |
@@ -109,6 +119,7 @@ surface used to compose or embed that executable.
 | `Command.cli` (const) | constructors | The composed root command. |
 | `Detached.admissionVariable` (const) | constants | The environment name that tells a `smithers run` child it was launched detached, and which nonce to stamp its admission line with. |
 | `Detached.defaultTimeoutMs` (const) | constants | How long a launch waits for the admission line before giving up, and the multiple of that window a *live* child is granted on top. |
+| `Detached.defaultTerminationGraceMs` (const) | constants | Grace given to each of SIGTERM and SIGKILL during failed-launch cleanup. |
 | `Detached.admissionLine` (const) | constructors | The line a detached child writes once its run row is durable. |
 | `Detached.admittedRunId` (const) | getters | Reads the run id out of a log tail that contains this nonce's admission line, or `undefined` when it does not. |
 | `Detached.logTail` (const) | getters | Reads the last bytes of a log file, or `""` when there is nothing to read. |
@@ -161,7 +172,8 @@ surface used to compose or embed that executable.
 | `Gc.failureMessage` (const) | constructors | The stderr paragraph a sweep with failures owes its operator. |
 | `Init.ignoreRule` (const) | constants | The ignore rule rc.0 state needs. |
 | `Init.IgnoreStatus` (type) | models | What one ignore-file edit did. |
-| `Init.isValidName` (const) | predicates | Whether a scaffold name is one portable path segment and a safe YAML scalar. |
+| `Init.nameProblem` (const) | validation | Explains why a proposed flow name cannot be used by `init`. |
+| `Init.isValidName` (const) | predicates | Whether a scaffold name passes `nameProblem`. |
 | `Init.isRepository` (const) | predicates | Whether a directory is the root of a repository whose ignore file is worth editing. |
 | `Init.ensureIgnored` (const) | constructors | Adds `.flows/` to the repository ignore file, once. |
 | `Init.Seat` (interface) | models | The seat a scaffold declares, and the credential that chose it. |
@@ -176,6 +188,9 @@ surface used to compose or embed that executable.
 | `Legacy.read` (const) | getters | Lists the non-terminal runs in one 0.x database, read-only. |
 | `Legacy.refusal` (const) | constructors | The refusal `smithers migrate` prints when a project still holds runs the 1.0 runtime cannot take over. |
 | `McpServer.protocolVersion` (const) | constants | The MCP protocol revision this server implements. |
+| `McpServer.maximumFrameBytes` (const) | constants | Largest request or response frame accepted by the stdio server. |
+| `McpServer.maximumHistoryEvents` (const) | constants | Largest event count returned by one MCP history tool. |
+| `McpServer.maximumHistoryBytes` (const) | constants | Largest encoded event history returned by one MCP tool. |
 | `McpServer.Surface` (type) | models | Which tool families a session exposes. |
 | `McpServer.Envelope` (type) | models | The `{ ok, data?, error? }` envelope every tool answers with. |
 | `McpServer.succeeded` (const) | constructors | A successful envelope. |
@@ -212,7 +227,7 @@ surface used to compose or embed that executable.
 | `NodeControl.testFlows` (const) | constructors | The `test` flow's binding source, or none when this host declares no runner. |
 | `NodeControl.rebuildableTransport` (const) | constructors | A replaceable HTTP transport over Undici, given a way to acquire a dispatcher. |
 | `NodeControl.layerExecutor` (const) | layers | Provides the production run executor: the `@smthrs/agent` composition root over the durable control stores, the local flow registry, and the standard host capabilities: filesystem and shell through the kernel's guarded layers, durable memory over the control database, approval and steering wired back into the control plane by the session itself. |
-| `NodeControl.layerControl` (const) | layers | Provides the application-selected Control implementation with Node HTTP and WebSocket client transports. |
+| `NodeControl.layerControl` (const) | layers | Provides the application-selected Control service over Node transports. |
 | `NodeControl.layerOutput` (const) | layers | Provides deterministic rendering and transfers rendered statuses to the Node process exit code. |
 | `NodeControl.layer` (const) | layers | Provides the complete Node command-handler environment. |
 | `NodeControl.CompositionRootsAreComplete` (type) | models | Pins the executor and both complete control-plane compositions. |
@@ -228,14 +243,17 @@ surface used to compose or embed that executable.
 | `NodeOutput.find` (const) | getters | Finds one node by id. |
 | `NodeOutput.notFound` (const) | constructors | The message printed when a node id names nothing, listing what the run has. |
 | `NodeOutput.render` (const) | conversions | The human rendering of one node: its outcome line, then its value. |
-| `Output.Format` (type) | models | A CLI output format. |
-| `Output.Rendered` (interface) | models | Rendered output and its process status. |
+| `Output.Format` (type) | models | The two stable renderings exposed by CLI handlers. |
+| `Output.Rendered` (interface) | models | Text ready for stdout together with the status the process should publish. |
 | `Output.Service` (interface) | services | The rendering service consumed by command handlers. |
-| `Output.Output` (class) | services | Rendering service key. |
+| `Output.Output` (class) | services | Context key for the CLI rendering service. |
 | `Output.renderValue` (const) | constructors | Marks caller-controlled data as output, never as a control receipt. |
+| `Output.maximumDepth` (const) | constants | Maximum object/array nesting accepted by one render. |
+| `Output.maximumMembers` (const) | constants | Maximum enumerable data members accepted by one render. |
+| `Output.maximumOutputBytes` (const) | constants | Maximum UTF-8 bytes written by one rendered document. |
 | `Output.make` (const) | constructors | Renders a decoded value in a deterministic human or machine form. |
 | `Output.layer` (const) | layers | Default deterministic output layer. |
-| `Output.exitCode` (const) | getters | Maps decoded control values to process status codes. |
+| `Output.exitCode` (const) | getters | Maps validated control receipts to process status codes. |
 | `Project.legacyMarkers` (const) | constants | Directory and file names that mark a Smithers 0.x project. |
 | `Project.root` (const) | constructors | Resolves the project root for one invocation. |
 | `Project.legacyRoot` (const) | constructors | Resolves the 0.x project one `smithers migrate` invocation converts. |

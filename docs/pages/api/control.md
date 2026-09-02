@@ -29,6 +29,27 @@ replay, one claim scoped to runs this plane launched, and one
 `control.run.resume` entry carrying the authenticated principal and the stated
 reason.
 
+## Receipts and failures
+
+Every mutation answers a `Receipt`; `plan` returns a `PlanCard` instead. The
+typed error identifies the failed resource, so a plan that never became a run
+does not report a run failure.
+
+| Verb                       | Receipts                                             | Typed failures                                                                                                                         |
+| -------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                      |
+| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
+| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
+| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable`          |
+| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                       |
+| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable`                                                                     |
+| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
+| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                         |
+
+`PlanNotFound` carries `code: "plan_not_found"`; `PlanDenied` carries
+`code: "plan_denied"`. Their `planId` identifies the plan the operator must
+create or replace.
+
 A listing is bounded. `limit` is a positive integer no larger than
 `ControlSchema.maxPageSize` (500) and defaults to
 `ControlSchema.defaultPageSize` (100); a limit outside that range, and a cursor
@@ -43,12 +64,12 @@ every run.
 A run's ancestry is recorded by whoever created it. `RunSummary` reports all of
 it under one vocabulary:
 
-| Field | Source | Meaning |
-| --- | --- | --- |
-| `parentRunId` | `flows_runs.parent_run_id`, else the `flows_run_parents` spawn edge | The run this one branched from: its spawner, the run it was forked off, or the previous trampoline round. |
-| `lineageId` | `flows_runs.lineage_id` | The trampoline lineage this run is a round of. |
-| `roundOrdinal` | `flows_runs.round_ordinal` | Which round. Absent means a lineage of one, read as round 0 of itself. |
-| `origin` | derived | `child`, `fork`, or `continuation`. |
+| Field          | Source                                                              | Meaning                                                                                                   |
+| -------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `parentRunId`  | `flows_runs.parent_run_id`, else the `flows_run_parents` spawn edge | The run this one branched from: its spawner, the run it was forked off, or the previous trampoline round. |
+| `lineageId`    | `flows_runs.lineage_id`                                             | The trampoline lineage this run is a round of.                                                            |
+| `roundOrdinal` | `flows_runs.round_ordinal`                                          | Which round. Absent means a lineage of one, read as round 0 of itself.                                    |
+| `origin`       | derived                                                             | `child`, `fork`, or `continuation`.                                                                       |
 
 The engine records the two relationships in two places, so the projection reads
 both. `parent_run_id` is the trampoline chain: the round before this one. A run
@@ -68,12 +89,12 @@ run, not a reason a run exists.
 `list` selects on the same fields:
 
 ```ts
-const children = yield* control.list({
+const children = yield * control.list({
   _tag: "runs",
   filters: { parentRunId: "run-17" }
 })
 
-const rounds = yield* control.list({
+const rounds = yield * control.list({
   _tag: "runs",
   filters: { lineageId: "run-17" }
 })
@@ -101,11 +122,11 @@ plus one spawn-edge read per nesting level.
 `watch` streams committed journal entries as `ControlEvent` values, and expands
 three of them into an extra `control.run.lineage` delta:
 
-| Entry | Producer | Delta |
-| --- | --- | --- |
-| `flows.engine.run-decision` with `decision: "created"` at round 0 or with no round | `@smthrs/engine-store` | `{ runId, parentRunId, origin: "child" }` |
-| `flows.engine.run-decision` with `decision: "handed-off"` | `@smthrs/engine-store` | `{ runId, parentRunId, lineageId, roundOrdinal, origin: "continuation" }` |
-| `flows.time-travel.fork-created` | `@smthrs/time-travel` | `{ runId, parentRunId, origin: "fork" }` |
+| Entry                                                                              | Producer               | Delta                                                                     |
+| ---------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------- |
+| `flows.engine.run-decision` with `decision: "created"` at round 0 or with no round | `@smthrs/engine-store` | `{ runId, parentRunId, origin: "child" }`                                 |
+| `flows.engine.run-decision` with `decision: "handed-off"`                          | `@smthrs/engine-store` | `{ runId, parentRunId, lineageId, roundOrdinal, origin: "continuation" }` |
+| `flows.time-travel.fork-created`                                                   | `@smthrs/time-travel`  | `{ runId, parentRunId, origin: "fork" }`                                  |
 
 The handoff is what carries a trampoline, and a continuation round's own
 `created` decision is skipped. The engine journals both in one transaction: it
@@ -139,12 +160,12 @@ that reads the journal directly reaches the same conclusions the server does.
 enqueue beside it. `SteerMessage` is a union, because an operator steers a run
 for four different reasons and only one of them is something to tell the model:
 
-| Variant | Payload | What the next turn does |
-| --- | --- | --- |
-| `Message` (the default, and what a `body` alone decodes as) | `body` | Inserts the body into the transcript. |
-| `Seat` | `seat` | Runs the turn on that model seat. |
-| `Thinking` | `thinking` | Runs the turn at that thinking level. |
-| `Tools` | `toolNames` | Adds those tools to the active set. |
+| Variant                                                     | Payload     | What the next turn does               |
+| ----------------------------------------------------------- | ----------- | ------------------------------------- |
+| `Message` (the default, and what a `body` alone decodes as) | `body`      | Inserts the body into the transcript. |
+| `Seat`                                                      | `seat`      | Runs the turn on that model seat.     |
+| `Thinking`                                                  | `thinking`  | Runs the turn at that thinking level. |
+| `Tools`                                                     | `toolNames` | Adds those tools to the active set.   |
 
 `ControlSchema.steerItem` strips the control envelope: who asked, when, for
 which run, and returns the `@smthrs/notifications` `SteerPayload` the harness
@@ -154,9 +175,9 @@ spending a turn announcing it.
 
 A steer has two durable moments and two writers:
 
-| Event | Writer | Payload |
-| --- | --- | --- |
-| `control.steer.enqueued` | `Control.steer` | `{ runId, messageId, kind }` |
+| Event                     | Writer                                                                             | Payload                          |
+| ------------------------- | ---------------------------------------------------------------------------------- | -------------------------------- |
+| `control.steer.enqueued`  | `Control.steer`                                                                    | `{ runId, messageId, kind }`     |
 | `control.steer.delivered` | derived by `Steering.derive` from the queue's `flows/notifications/Promoted` entry | `{ runId, messageId, boundary }` |
 
 Delivery is derived rather than recorded, because the boundary that delivered
@@ -174,12 +195,12 @@ both halves. A queue that cannot answer leaves the field absent.
 
 A steer to a parked run resumes it when the park is one a message can end:
 
-| `waitingReason` | Steered |
-| --- | --- |
-| `event` | Resumed. The run is waiting for something to arrive, and a steer is something arriving. |
-| `released` | Resumed. A sweep took the run away from a dead owner, and nothing is coming to claim it. |
-| `approval`, `timer`, `quota` | Left parked. The run is waiting for a decision, a clock, or a budget that a message does not supply. |
-| absent | Left parked. A park with no reason is an operator's own park, and a message queued behind it is queued for when the operator resumes it. |
+| `waitingReason`              | Steered                                                                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `event`                      | Resumed. The run is waiting for something to arrive, and a steer is something arriving.                                                  |
+| `released`                   | Resumed. A sweep took the run away from a dead owner, and nothing is coming to claim it.                                                 |
+| `approval`, `timer`, `quota` | Left parked. The run is waiting for a decision, a clock, or a budget that a message does not supply.                                     |
+| absent                       | Left parked. A park with no reason is an operator's own park, and a message queued behind it is queued for when the operator resumes it. |
 
 `RunSummary.waitingReason` is the run row's `waiting_reason`, which the engine
 writes when it parks a run and clears on the wake. The control plane reads it
@@ -204,18 +225,18 @@ A durable cancellation is anonymous on its own: `flows_runs.cancel_requested_at_
 records that somebody asked and when, and nothing else. `RunSummary.cancellation`
 is the attribution the journal adds back.
 
-| Field | Meaning |
-| --- | --- |
-| `requestedAt` | When the cancellation was asked for. |
-| `source` | `control`, `cascade`, or `engine`. |
-| `principal` | Who asked. Present on a `control` source and on the `cascade` it started. |
-| `reason` | Why, as the operator stated it. |
-| `cascadedFrom` | The cancelled ancestor this run was swept up with. |
+| Field          | Meaning                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `requestedAt`  | When the cancellation was asked for.                                      |
+| `source`       | `control`, `cascade`, or `engine`.                                        |
+| `principal`    | Who asked. Present on a `control` source and on the `cascade` it started. |
+| `reason`       | Why, as the operator stated it.                                           |
+| `cascadedFrom` | The cancelled ancestor this run was swept up with.                        |
 
 `cancel` takes the reason and the principal:
 
 ```ts
-yield* control.cancel({
+yield * control.cancel({
   runId: "run-17",
   reason: "budget",
   idempotencyKey: "cancel:run-17"
@@ -266,17 +287,17 @@ record.
 right, and if not, what now. `classify` is pure, so the vocabulary an operator
 reads on a dashboard is the one a heal loop branches on:
 
-| Condition | Health | Because |
-| --- | --- | --- |
-| No summary | `unknown` | Nothing to say, and nothing to do. |
-| `failed` | `failing` | The run itself reported the failure. |
-| `completed`, `cancelled` | `healthy` | A finished run needs nothing. |
-| `waiting-approval`, or parked on `approval` | `awaiting-human` | A human owes it an answer. |
-| `roundOrdinal` at or past `roundBound` | `runaway-loop` | The lineage loops without converging. |
-| The last settled attempt failed | `failing` | The run is alive and its work is not landing. |
-| No progress for `stallBeats`, an attempt open | `wedged-node` | One attempt started and never settled. |
-| No progress for `stallBeats` | `stalled` | Nothing is happening and nothing is in flight. |
-| Anything else | `healthy` | Entries are still arriving. |
+| Condition                                     | Health           | Because                                        |
+| --------------------------------------------- | ---------------- | ---------------------------------------------- |
+| No summary                                    | `unknown`        | Nothing to say, and nothing to do.             |
+| `failed`                                      | `failing`        | The run itself reported the failure.           |
+| `completed`, `cancelled`                      | `healthy`        | A finished run needs nothing.                  |
+| `waiting-approval`, or parked on `approval`   | `awaiting-human` | A human owes it an answer.                     |
+| `roundOrdinal` at or past `roundBound`        | `runaway-loop`   | The lineage loops without converging.          |
+| The last settled attempt failed               | `failing`        | The run is alive and its work is not landing.  |
+| No progress for `stallBeats`, an attempt open | `wedged-node`    | One attempt started and never settled.         |
+| No progress for `stallBeats`                  | `stalled`        | Nothing is happening and nothing is in flight. |
+| Anything else                                 | `healthy`        | Entries are still arriving.                    |
 
 `awaiting-human` outranks `failing` on purpose. A run parked for approval after
 a failed attempt is waiting for a person, and resuming or cancelling it would
@@ -291,7 +312,7 @@ run in another process.
 `Monitor.run` beats over `Control`:
 
 ```ts
-const report = yield* Monitor.run({
+const report = yield * Monitor.run({
   runId: "run-17",
   monitorId: "oncall-supervisor",
   intervalMs: 5_000,
@@ -338,217 +359,231 @@ See [Time travel](/concepts/time-travel),
 Each module is importable as `@smthrs/control/<Module>` and re-exported as a
 namespace from the package root.
 
-| Module | Export | Kind | Summary |
-| --- | --- | --- | --- |
-| `Control` | `PlanInput` (interface) | models | Raw input submitted to planning. |
-| `Control` | `RunInput` (type) | models | Starts an approved plan or joins/resumes an existing run. |
-| `Control` | `ApprovalInput` (interface) | models | Full approval decision submitted to the authenticated server boundary. |
-| `Control` | `SteerInput` (interface) | models | Steering mutation arguments. |
-| `Control` | `SignalInput` (interface) | models | Signal mutation arguments. |
-| `Control` | `RunMutationInput` (interface) | models | Run lifecycle mutation arguments. |
-| `Control` | `Service` (interface) | models | Transport-independent control operations. |
-| `Control` | `Control` (class) | services | Service key for the authoritative control-plane vtable. |
-| `Control` | `make` (const) | constructors | Constructs a control service from an implementation record. |
-| `Control` | `layerNoop` (const) | layers | Provides an unavailable control implementation for optional integrations. |
-| `ControlError` | `RunNotFound` (class) | errors | No run with this id exists. |
-| `ControlError` | `FlowNotFound` (class) | errors | No flow with this id is registered. |
-| `ControlError` | `PlanDigestMismatch` (class) | errors | The submitted plan does not hash to the digest the caller declared, so the control plane refuses to store it. |
-| `ControlError` | `EnvelopeMismatch` (class) | errors | The plan's effect envelope differs from the one the caller declared. |
-| `ControlError` | `ClaimLost` (class) | errors | The caller's claim on this run lapsed or was fenced by a newer owner. |
-| `ControlError` | `AlreadyResolved` (class) | errors | This request was already answered; a second answer is refused rather than overwriting the first. |
-| `ControlError` | `InvalidInput` (class) | errors | The request did not satisfy its schema or a stated precondition. |
-| `ControlError` | `Unauthorized` (class) | errors | The caller presented no usable credential for this operation. |
-| `ControlError` | `Unavailable` (class) | errors | The operation is not implemented in this deployment. |
-| `ControlError` | `TransportError` (class) | errors | The request did not reach the control plane, or its reply did not come back. |
-| `ControlError` | `PersistenceError` (class) | errors | A control-plane store operation failed. |
-| `ControlError` | `LaunchFailed` (class) | errors | The executor refused or could not start the run. |
-| `ControlError` | `NoMatchingWait` (class) | errors | A signal named a wait point the run does not have open. |
-| `ControlError` | `CredentialConflict` (class) | errors | A credential write lost a race: the record moved on before this writer committed, so the update is refused rather than silently overwriting the winner. |
-| `ControlError` | `ControlErrorSchema` (const) | errors | Every stable failure emitted by the control plane, as one schema. |
-| `ControlError` | `ControlError` (type) | errors | Every stable failure emitted by the control plane. |
-| `ControlSchema` | `RunId` (const) | models | A durable control-plane run identifier. |
-| `ControlSchema` | `RunId` (type) | models | A durable control-plane run identifier. |
-| `ControlSchema` | `FlowId` (const) | models | A registry flow identifier. |
-| `ControlSchema` | `FlowId` (type) | models | A registry flow identifier. |
-| `ControlSchema` | `IdempotencyKey` (const) | models | A caller-supplied key that makes a control mutation idempotent. |
-| `ControlSchema` | `IdempotencyKey` (type) | models | A caller-supplied key that makes a control mutation idempotent. |
-| `ControlSchema` | `Principal` (const) | models | A server-authenticated identity stamped at the control boundary. |
-| `ControlSchema` | `Principal` (type) | models | A server-authenticated identity stamped at the control boundary. |
-| `ControlSchema` | `Envelope` (const) | models | The capabilities, flows, budget, and placement approved for a plan. |
-| `ControlSchema` | `Envelope` (type) | models | The capabilities, flows, budget, and placement approved for a plan. |
-| `ControlSchema` | `GrantScope` (const) | models | The durability selected for an approval grant. |
-| `ControlSchema` | `GrantScope` (type) | models | The durability selected for an approval grant. |
-| `ControlSchema` | `ApprovalTarget` (const) | models | A plan or in-run approval target. |
-| `ControlSchema` | `ApprovalTarget` (type) | models | A plan or in-run approval target. |
-| `ControlSchema` | `ApprovalPayload` (const) | models | The complete, reviewable payload emitted by planning and submitted unchanged when an approval decision is made. |
-| `ControlSchema` | `ApprovalPayload` (type) | models | The complete, reviewable payload emitted by planning. |
-| `ControlSchema` | `PlanNodeStatus` (const) | models | What `smithers plan` reports for one node before anything runs. |
-| `ControlSchema` | `PlanNodeStatus` (type) | models | What `smithers plan` reports for one node before anything runs. |
-| `ControlSchema` | `PlanNode` (const) | models | One keyed node of the plan an approval is being taken on. |
-| `ControlSchema` | `PlanNode` (type) | models | One keyed node of the plan an approval is being taken on. |
-| `ControlSchema` | `PlanCard` (const) | models | The reviewable, signed payload returned by planning and resubmitted to approval without reconstructing authority client-side. |
-| `ControlSchema` | `PlanCard` (type) | models | The reviewable, signed payload returned by planning and resubmitted to approval without reconstructing authority client-side. |
-| `ControlSchema` | `RunStatus` (const) | models | Stable statuses projected for a durable run. |
-| `ControlSchema` | `RunStatus` (type) | models | Stable statuses projected for a durable run. |
-| `ControlSchema` | `RunOrigin` (const) | models | How a run came to exist, when it did not start on its own. |
-| `ControlSchema` | `RunOrigin` (type) | models | How a run came to exist, when it did not start on its own. |
-| `ControlSchema` | `CancelSource` (const) | models | Where a cancellation came from. |
-| `ControlSchema` | `CancelSource` (type) | models | Where a cancellation came from. |
-| `ControlSchema` | `Cancellation` (const) | models | Who cancelled a run, why, and on whose behalf. |
-| `ControlSchema` | `Cancellation` (type) | models | Who cancelled a run, why, and on whose behalf. |
-| `ControlSchema` | `RunSummary` (const) | models | A compact summary for run listings and status projections. |
-| `ControlSchema` | `RunSummary` (type) | models | A compact summary for run listings and status projections. |
-| `ControlSchema` | `MessageSteer` (const) | models | An operator message inserted into the transcript at the next turn boundary. |
-| `ControlSchema` | `SeatSteer` (const) | models | A model-seat change that applies from the next turn on. |
-| `ControlSchema` | `ThinkingSteer` (const) | models | A thinking-level change that applies from the next turn on. |
-| `ControlSchema` | `ToolsSteer` (const) | models | Tools added to the active set for future turns. |
-| `ControlSchema` | `SteerMessage` (const) | models | A durable operator steer delivered at an execution turn boundary. |
-| `ControlSchema` | `SteerMessage` (type) | models | A durable operator steer delivered at an execution turn boundary. |
-| `ControlSchema` | `steerItem` (const) | conversions | The stored steering item one steer carries. |
-| `ControlSchema` | `SignalPayload` (const) | models | A durable, named signal delivered to a waiting run. |
-| `ControlSchema` | `SignalPayload` (type) | models | A durable, named signal delivered to a waiting run. |
-| `ControlSchema` | `WatchFilter` (const) | models | A journal-projection cursor, optional run restriction, and delivery mode. |
-| `ControlSchema` | `WatchFilter` (type) | models | A resumable journal-projection watch cursor and optional run restriction. |
-| `ControlSchema` | `ControlEvent` (const) | models | One ordered journal-projection delta streamed by `watch`. |
-| `ControlSchema` | `ControlEvent` (type) | models | One ordered journal-projection delta streamed by `watch`. |
-| `ControlSchema` | `defaultPageSize` (const) | models | How many items a listing returns when the caller names no `limit`. |
-| `ControlSchema` | `maxPageSize` (const) | models | The largest `limit` a listing accepts. |
-| `ControlSchema` | `PageLimit` (const) | models | A page size a listing can actually make progress on. |
-| `ControlSchema` | `ListRequest` (const) | models | A typed listing request for discovered flows or durable runs. |
-| `ControlSchema` | `ListRequest` (type) | models | A typed listing request for discovered flows or durable runs. |
-| `ControlSchema` | `ListResponse` (const) | models | A typed page returned for a flow or run listing. |
-| `ControlSchema` | `ListResponse` (type) | models | A typed page returned for a flow or run listing. |
-| `ControlSchema` | `Receipt` (const) | models | The idempotent outcome returned by every control mutation. |
-| `ControlSchema` | `Receipt` (type) | models | The idempotent outcome returned by every control mutation. |
-| `Cancellation` | `requestedEventType` (const) | constants | The journal event type the control plane records an attributed cancel under. |
-| `Cancellation` | `interruptedEventType` (const) | constants | The journal event type the engine records an interruption under. |
-| `Cancellation` | `Request` (interface) | models | One attributed cancel request, as the control plane journaled it. |
-| `Cancellation` | `Evidence` (interface) | models | What one run row discloses about its own cancellation. |
-| `Cancellation` | `Input` (interface) | models | Everything the fold reads. |
-| `Cancellation` | `attribute` (const) | projections | Attributes every cancelled run in one pass. |
-| `Lineage` | `Origin` (const) | models | How a run came to exist. |
-| `Lineage` | `Origin` (type) | models | How a run came to exist. |
-| `Lineage` | `Ancestry` (interface) | models | The ancestry facts an origin is decided from. |
-| `Lineage` | `runDecisionEventType` (const) | constants | The journal event type carrying an engine run decision. |
-| `Lineage` | `forkCreatedEventType` (const) | constants | The journal event type time travel writes on a forked child. |
-| `Lineage` | `lineageEventType` (const) | constants | The kind `watch` reports a derived ancestry delta under. |
-| `Lineage` | `originOf` (const) | projections | Decides how a run came to exist from its ancestry facts. |
-| `Lineage` | `derive` (const) | projections | Derives the ancestry edge one journal entry discloses, if it discloses one. |
-| `Lineage` | `expand` (const) | projections | Expands one projected entry into itself plus any ancestry delta it discloses. |
-| `Monitor` | `attemptStartedEventType` (const) | constants | The journal event type the engine records when an action attempt starts. |
-| `Monitor` | `attemptFinishedEventType` (const) | constants | The journal event type the engine records when an action attempt settles. |
-| `Monitor` | `beatEventType` (const) | constants | The journal event type one monitor beat is recorded under. |
-| `Monitor` | `healedEventType` (const) | constants | The journal event type one applied remedy is recorded under. |
-| `Monitor` | `Health` (const) | models | What a run looks like to a monitor. |
-| `Monitor` | `Health` (type) | models | What a run looks like to a monitor. |
-| `Monitor` | `Observation` (interface) | models | Everything one classification is decided from. |
-| `Monitor` | `classify` (const) | projections | Decides what a run's state means. |
-| `Monitor` | `Remedy` (type) | models | What a monitor does about one unhealthy run. |
-| `Monitor` | `remedyFor` (const) | projections | The remedy a health warrants, before `autoHeal` decides whether to apply it. |
-| `Monitor` | `Beat` (interface) | models | One beat of a monitor. |
-| `Monitor` | `Report` (interface) | models | What a monitor found. |
-| `Monitor` | `Options` (interface) | models | How a monitor beats. |
-| `Monitor` | `run` (const) | constructors | Watches one run and, when told to, heals it. |
-| `Steering` | `promotedEventType` (const) | constants | The journal event type the notification queue records a promotion under. |
-| `Steering` | `deliveredEventType` (const) | constants | The kind `watch` reports one delivered steer under. |
-| `Steering` | `enqueuedEventType` (const) | constants | The kind `Control.steer` records an accepted steer under. |
-| `Steering` | `derive` (const) | projections | Derives one delivery delta per message a promotion entry named. |
-| `Steering` | `expand` (const) | projections | Expands one projected entry into itself plus any deliveries it discloses. |
-| `ControlRuntime` | `StoredPlan` (interface) | models | A decoded input and immutable plan stored before execution. |
-| `ControlRuntime` | `ApprovalToken` (interface) | models | One unresolved durable approval token. |
-| `ControlRuntime` | `BulkGrant` (interface) | models | One bulk permission grant. |
-| `ControlRuntime` | `LaunchResult` (type) | models | Result of launching an approved plan. |
-| `ControlRuntime` | `PlanOutcome` (interface) | models | A plan card and whether this call is the one that created it. |
-| `ControlRuntime` | `MutationRecord` (interface) | models | A stored idempotency-key outcome and the mutation fingerprint that produced it. |
-| `ControlRuntime` | `MemoryFlow` (interface) | models | Flow metadata used by the memory runtime's input-decoding hook. |
-| `ControlRuntime` | `MemoryOptions` (interface) | models | In-memory runtime configuration. |
-| `ControlRuntime` | `PendingResume` (interface) | models | One run that has been told to resume, and the sequence of the request. |
-| `ControlRuntime` | `Service` (interface) | models | Execution-engine operations required by `ControlLive`. |
-| `ControlRuntime` | `ControlRuntime` (class) | services | Service key for the execution-engine port. |
-| `ControlRuntime` | `make` (const) | constructors | Constructs a runtime service from an implementation record. |
-| `ControlRuntime` | `layerMemory` (const) | layers | Deterministic in-memory runtime. |
-| `ControlExecutor` | `Launch` (interface) | models | One stored plan and the run summary it is being started as. |
-| `ControlExecutor` | `Acceptance` (type) | models | Whether the executor took the launch now or queued it. |
-| `ControlExecutor` | `CancelRequest` (interface) | models | One run whose cancellation has to become durable on the engine row. |
-| `ControlExecutor` | `CancelTerminal` (interface) | models | The engine row a cancel request arrived too late for. |
-| `ControlExecutor` | `CancelRecord` (type) | models | What the executor did with a cancel request. |
-| `ControlExecutor` | `ResumeRequest` (interface) | models | One parked run that has been told to resume. |
-| `ControlExecutor` | `ResumeUptake` (type) | models | What the executor did with a resume request. |
-| `ControlExecutor` | `Signal` (interface) | models | One signal to deliver to a run's open wait point. |
-| `ControlExecutor` | `SignalDelivery` (type) | models | What the executor did with a signal. |
-| `ControlExecutor` | `Service` (interface) | services | The executor port: the control plane hands work over to a real run executor and learns only what the executor did with it. |
-| `ControlExecutor` | `ControlExecutor` (class) | services | The `Service` tag. |
-| `ControlExecutor` | `make` (const) | constructors | Builds a `Service` from an implementation of its methods. |
-| `ControlExecutor` | `makeNoop` (const) | constructors | A `Service` that accepts every launch as `pending` and starts nothing. |
-| `ControlExecutor` | `layer` (const) | layers | Provides `ControlExecutor` from an implementation. |
-| `ControlExecutor` | `layerNoop` (const) | layers | Provides `makeNoop`. |
-| `ControlLive` | `layer` (const) | layers | Live in-process Control layer. |
-| `SystemFlows` | `SystemFlowEntry` (interface) | models | The projection metadata for one reserved system flow. |
-| `SystemFlows` | `catalog` (const) | models | The authoritative command-line verb to reserved-flow map. |
-| `SystemFlows` | `plannable` (const) | models | The catalog entries a control runtime may offer as flows. |
-| `ControlRpcs` | `ControlPrincipal` (class) | services | Authenticated principal made available to control RPC handlers. |
-| `ControlRpcs` | `ControlAuth` (class) | middleware | Middleware boundary that authenticates control RPC requests. |
-| `ControlRpcs` | `ControlRpcs` (const) | groups | The ten remote procedures corresponding to `Control` operations. |
-| `ControlRpcs` | `Authenticator` (interface) | models | Header authenticator used by the control RPC boundary. |
-| `ControlRpcs` | `BearerAuthOptions` (interface) | models | Configuration for the single-token bearer authenticator. |
-| `ControlRpcs` | `bearerAuthenticator` (const) | constructors | Authenticates one shared bearer token and stamps its server-owned principal. |
-| `ControlRpcs` | `layerAuth` (const) | layers | Provides `ControlAuth` from a transport-header authenticator. |
-| `ControlRpcs` | `layerBearerAuth` (const) | layers | Provides `ControlAuth` using one shared bearer token. |
-| `ControlRpcs` | `layerNoopAuth` (const) | layers | Permissive authentication middleware for tests and trusted in-process use. |
-| `ControlServer` | `layer` (const) | layers | Control RPC handlers delegating to the transport-independent service. |
-| `ControlServer` | `layerHttp` (const) | layers | Mounts control RPC on the ambient `HttpRouter`: unary procedures over POST `/rpc` and the `watch` stream over WebSocket `/rpc/ws`. |
-| `ControlClient` | `isControlError` (const) | refinements | Whether a value is one of the control plane's declared failures, as opposed to a defect that escaped some other layer. |
-| `ControlClient` | `ClientConfig` (interface) | models | Client transport configuration. |
-| `ControlClient` | `layer` (const) | layers | Provides `Control` through an RPC client while preserving the local vtable. |
-| `Channels` | `RawInbound` (interface) | models | Opaque request data passed to a channel before decoding. |
-| `Channels` | `InboundResult` (type) | models | The channel mapping after a verified payload has been decoded. |
-| `Channels` | `Delivery` (interface) | models | A persisted per-channel delivery record. |
-| `Channels` | `DeliveryProjection` (interface) | models | A side-effect-free outbound projection. |
-| `Channels` | `Channel` (interface) | services | A bidirectional platform adapter. |
-| `Channels` | `IngestRequest` (interface) | models | Arguments for ingesting one authenticated channel request. |
-| `Channels` | `ProjectRequest` (interface) | models | Arguments for projecting one run onto a channel. |
-| `Channels` | `Channels` (interface) | services | The channel coordinator. |
-| `Channels` | `Channels` (const) | services | Service tag for channel registration, ingestion, and pure projection. |
-| `Channels` | `make` (const) | constructors | Builds the coordinator over Control's durable mutation store. |
-| `Channels` | `makeMemory` (const) | constructors | Builds a process-local coordinator for adapter unit tests. |
-| `Channels` | `layer` (const) | layers | Channel layer with durable inbound receipts supplied by `ControlRuntime`. |
-| `Channels` | `layerMemory` (const) | layers | Process-local channel layer for adapter unit tests only. |
-| `WebhookChannel` | `SignatureVerifier` (type) | models | Signature verifier injected by a webhook transport. |
-| `WebhookChannel` | `Config` (interface) | models | Configuration for a schema-declared webhook channel. |
-| `WebhookChannel` | `make` (const) | constructors | Builds a webhook channel. |
-| `WebhookChannel` | `handler` (const) | handlers | Reads an abstract Effect HTTP request and dispatches it through Channels. |
-| `Credential` | `CredentialRef` (interface) | models | A journal-safe name for a stored connection credential. |
-| `Credential` | `Operation` (type) | models | One credential operation, as seen by a host authorization policy. |
-| `Credential` | `Credential` (interface) | services | Adapter-bound credential resolution. |
-| `Credential` | `Credential` (const) | services | Service tag for credential resolution. |
-| `Credential` | `makeNoop` (const) | constructors | A credential implementation that explicitly reports unavailable storage. |
-| `Credential` | `layerNoop` (const) | layers | Layer for the unavailable credential-storage boundary. |
-| `Credential` | `Options` (interface) | models | The collaborators a working credential boundary needs. |
-| `Credential` | `make` (const) | constructors | Constructs a working credential boundary over a store and a cipher. |
-| `Credential` | `layer` (const) | layers | Provides a working credential boundary over the ambient store and cipher. |
-| `CredentialCipher` | `Sealed` (interface) | models | One encrypted secret: base64 ciphertext and the nonce it was sealed under. |
-| `CredentialCipher` | `Service` (interface) | services | Authenticated encryption over credential plaintext. |
-| `CredentialCipher` | `CredentialCipher` (class) | services | Service key for credential encryption. |
-| `CredentialCipher` | `make` (const) | constructors | Constructs a cipher from an implementation record. |
-| `CredentialCipher` | `unavailable` (const) | constructors | The typed failure a host reports when no secure key material is reachable. |
-| `CredentialCipher` | `makeNoop` (const) | constructors | A cipher that reports unavailable key material for every operation. |
-| `CredentialCipher` | `layerNoop` (const) | layers | Provides a cipher that reports unavailable key material. |
-| `CredentialStore` | `SealedRecord` (interface) | models | One credential at rest: opaque metadata plus the sealed secret. |
-| `CredentialStore` | `Service` (interface) | services | The persistence operations `Credential` needs. |
-| `CredentialStore` | `CredentialStore` (class) | services | Service key for encrypted credential persistence. |
-| `CredentialStore` | `make` (const) | constructors | Constructs a store from an implementation record. |
-| `CredentialStore` | `makeNoop` (const) | constructors | A store that reports unavailable persistence for every operation. |
-| `CredentialStore` | `layerNoop` (const) | layers | Provides a store that reports unavailable persistence. |
-| `CredentialStore` | `makeMemory` (const) | constructors | Constructs a process-local store. |
-| `CredentialStore` | `layerMemory` (const) | layers | Provides a process-local store. |
-| `SqlCredentialStore` | `migrate` (const) | migrations | Creates the credential table if it does not exist. |
-| `SqlCredentialStore` | `make` (const) | constructors | Constructs a durable credential store over the ambient database. |
-| `SqlCredentialStore` | `layer` (const) | layers | Provides durable credential persistence over the ambient database. |
-| `WebCryptoCipher` | `Options` (interface) | models | Host-managed key material for the cipher. |
-| `WebCryptoCipher` | `make` (const) | constructors | Imports the host key and constructs the cipher. |
-| `WebCryptoCipher` | `layer` (const) | layers | Provides AES-256-GCM credential encryption under a host-managed key. |
-| `SqlControlRuntime` | `DurableFlow` (type) | models | A flow the durable runtime can plan. |
-| `SqlControlRuntime` | `Options` (interface) | models | Durable runtime configuration. |
-| `SqlControlRuntime` | `migrate` (const) | migrations | Creates every control-plane table. |
-| `SqlControlRuntime` | `layer` (const) | layers | Provides a durable runtime over the ambient database and run store. |
-| `SqlControlRuntime` | `layerWithStore` (const) | layers | Provides a durable runtime and the run store it needs over the ambient database. |
+| Module               | Export                                | Kind         | Summary                                                                                                                                                 |
+| -------------------- | ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Control`            | `PlanInput` (interface)               | models       | Raw input submitted to planning.                                                                                                                        |
+| `Control`            | `RunInput` (type)                     | models       | Starts an approved plan or joins/resumes an existing run.                                                                                               |
+| `Control`            | `ApprovalInput` (interface)           | models       | Full approval decision submitted to the authenticated server boundary.                                                                                  |
+| `Control`            | `SteerInput` (type)                   | models       | Steering mutation arguments.                                                                                                                            |
+| `Control`            | `SignalInput` (type)                  | models       | Signal mutation arguments.                                                                                                                              |
+| `Control`            | `RunMutationInput` (interface)        | models       | Run lifecycle mutation arguments.                                                                                                                       |
+| `Control`            | `Service` (interface)                 | models       | Transport-independent control operations.                                                                                                               |
+| `Control`            | `Control` (class)                     | services     | Service key for the authoritative control-plane vtable.                                                                                                 |
+| `Control`            | `make` (const)                        | constructors | Constructs a control service from an implementation record.                                                                                             |
+| `Control`            | `layerNoop` (const)                   | layers       | Provides an unavailable control implementation for optional integrations.                                                                               |
+| `ControlError`       | `RunNotFound` (class)                 | errors       | No run with this id exists.                                                                                                                             |
+| `ControlError`       | `PlanNotFound` (class)                | errors       | No plan with this id exists.                                                                                                                            |
+| `ControlError`       | `PlanDenied` (class)                  | errors       | The plan was denied and cannot be launched.                                                                                                             |
+| `ControlError`       | `FlowNotFound` (class)                | errors       | No flow with this id is registered.                                                                                                                     |
+| `ControlError`       | `PlanDigestMismatch` (class)          | errors       | The submitted plan does not hash to the digest the caller declared, so the control plane refuses to store it.                                           |
+| `ControlError`       | `EnvelopeMismatch` (class)            | errors       | The plan's effect envelope differs from the one the caller declared.                                                                                    |
+| `ControlError`       | `ClaimLost` (class)                   | errors       | The caller's claim on this run lapsed or was fenced by a newer owner.                                                                                   |
+| `ControlError`       | `AlreadyResolved` (class)             | errors       | This request was already answered; a second answer is refused rather than overwriting the first.                                                        |
+| `ControlError`       | `InvalidInput` (class)                | errors       | The request did not satisfy its schema or a stated precondition.                                                                                        |
+| `ControlError`       | `Unauthorized` (class)                | errors       | The caller presented no usable credential for this operation.                                                                                           |
+| `ControlError`       | `Unavailable` (class)                 | errors       | The operation is not implemented in this deployment.                                                                                                    |
+| `ControlError`       | `TransportError` (class)              | errors       | The request failed before a declared control response reached the caller.                                                                               |
+| `ControlError`       | `PersistenceError` (class)            | errors       | A control-plane store operation failed.                                                                                                                 |
+| `ControlError`       | `LaunchFailed` (class)                | errors       | The executor refused or could not start the run.                                                                                                        |
+| `ControlError`       | `NoMatchingWait` (class)              | errors       | A signal named a wait point the run does not have open.                                                                                                 |
+| `ControlError`       | `CredentialConflict` (class)          | errors       | A credential write lost a race: the record moved on before this writer committed, so the update is refused rather than silently overwriting the winner. |
+| `ControlError`       | `ControlErrorSchema` (const)          | errors       | Every stable failure emitted by the control plane, as one schema.                                                                                       |
+| `ControlError`       | `ControlError` (type)                 | errors       | Every stable failure emitted by the control plane.                                                                                                      |
+| `ControlSchema`      | `RunId` (const)                       | models       | A durable control-plane run identifier.                                                                                                                 |
+| `ControlSchema`      | `RunId` (type)                        | models       | A durable control-plane run identifier.                                                                                                                 |
+| `ControlSchema`      | `FlowId` (const)                      | models       | A registry flow identifier.                                                                                                                             |
+| `ControlSchema`      | `FlowId` (type)                       | models       | A registry flow identifier.                                                                                                                             |
+| `ControlSchema`      | `IdempotencyKey` (const)              | models       | A caller-supplied key that makes a control mutation idempotent.                                                                                         |
+| `ControlSchema`      | `IdempotencyKey` (type)               | models       | A caller-supplied key that makes a control mutation idempotent.                                                                                         |
+| `ControlSchema`      | `Principal` (const)                   | models       | A server-authenticated identity stamped at the control boundary.                                                                                        |
+| `ControlSchema`      | `Principal` (type)                    | models       | A server-authenticated identity stamped at the control boundary.                                                                                        |
+| `ControlSchema`      | `Envelope` (const)                    | models       | The capabilities, flows, budget, and placement approved for a plan.                                                                                     |
+| `ControlSchema`      | `Envelope` (type)                     | models       | The capabilities, flows, budget, and placement approved for a plan.                                                                                     |
+| `ControlSchema`      | `GrantScope` (const)                  | models       | The durability selected for an approval grant.                                                                                                          |
+| `ControlSchema`      | `GrantScope` (type)                   | models       | The durability selected for an approval grant.                                                                                                          |
+| `ControlSchema`      | `ApprovalTarget` (const)              | models       | A plan or in-run approval target.                                                                                                                       |
+| `ControlSchema`      | `ApprovalTarget` (type)               | models       | A plan or in-run approval target.                                                                                                                       |
+| `ControlSchema`      | `ApprovalPayload` (const)             | models       | The complete, reviewable payload emitted by planning and submitted unchanged when an approval decision is made.                                         |
+| `ControlSchema`      | `ApprovalPayload` (type)              | models       | The complete, reviewable payload emitted by planning.                                                                                                   |
+| `ControlSchema`      | `PlanNodeStatus` (const)              | models       | What `smithers plan` reports for one node before anything runs.                                                                                         |
+| `ControlSchema`      | `PlanNodeStatus` (type)               | models       | What `smithers plan` reports for one node before anything runs.                                                                                         |
+| `ControlSchema`      | `PlanNode` (const)                    | models       | One keyed node of the plan an approval is being taken on.                                                                                               |
+| `ControlSchema`      | `PlanNode` (type)                     | models       | One keyed node of the plan an approval is being taken on.                                                                                               |
+| `ControlSchema`      | `PlanCard` (const)                    | models       | The reviewable, signed payload returned by planning and resubmitted to approval without reconstructing authority client-side.                           |
+| `ControlSchema`      | `PlanCard` (type)                     | models       | The reviewable, signed payload returned by planning and resubmitted to approval without reconstructing authority client-side.                           |
+| `ControlSchema`      | `RunStatus` (const)                   | models       | Stable statuses projected for a durable run.                                                                                                            |
+| `ControlSchema`      | `RunStatus` (type)                    | models       | Stable statuses projected for a durable run.                                                                                                            |
+| `ControlSchema`      | `RunOrigin` (const)                   | models       | How a run came to exist, when it did not start on its own.                                                                                              |
+| `ControlSchema`      | `RunOrigin` (type)                    | models       | How a run came to exist, when it did not start on its own.                                                                                              |
+| `ControlSchema`      | `CancelSource` (const)                | models       | Where a cancellation came from.                                                                                                                         |
+| `ControlSchema`      | `CancelSource` (type)                 | models       | Where a cancellation came from.                                                                                                                         |
+| `ControlSchema`      | `Cancellation` (const)                | models       | Who cancelled a run, why, and on whose behalf.                                                                                                          |
+| `ControlSchema`      | `Cancellation` (type)                 | models       | Who cancelled a run, why, and on whose behalf.                                                                                                          |
+| `ControlSchema`      | `RunSummary` (const)                  | models       | A compact summary for run listings and status projections.                                                                                              |
+| `ControlSchema`      | `RunSummary` (type)                   | models       | A compact summary for run listings and status projections.                                                                                              |
+| `ControlSchema`      | `MessageSteer` (const)                | models       | An operator message inserted into the transcript at the next turn boundary.                                                                             |
+| `ControlSchema`      | `SeatSteer` (const)                   | models       | A model-seat change that applies from the next turn on.                                                                                                 |
+| `ControlSchema`      | `ThinkingSteer` (const)               | models       | A thinking-level change that applies from the next turn on.                                                                                             |
+| `ControlSchema`      | `ToolsSteer` (const)                  | models       | Tools added to the active set for future turns.                                                                                                         |
+| `ControlSchema`      | `SteerMessage` (const)                | models       | A durable operator steer delivered at an execution turn boundary.                                                                                       |
+| `ControlSchema`      | `SteerMessage` (type)                 | models       | A durable operator steer delivered at an execution turn boundary.                                                                                       |
+| `ControlSchema`      | `steerItem` (const)                   | conversions  | The stored steering item one steer carries.                                                                                                             |
+| `ControlSchema`      | `SignalPayload` (const)               | models       | A durable, named signal delivered to a waiting run.                                                                                                     |
+| `ControlSchema`      | `SignalPayload` (type)                | models       | A durable, named signal delivered to a waiting run.                                                                                                     |
+| `ControlSchema`      | `PlanInputSchema` (const)             | models       | The RPC request schema for planning.                                                                                                                    |
+| `ControlSchema`      | `RunInputSchema` (const)              | models       | The RPC request schema for starting a plan or resuming a run.                                                                                           |
+| `ControlSchema`      | `ApprovalInputSchema` (const)         | models       | The RPC request schema for an approval decision.                                                                                                        |
+| `ControlSchema`      | `SteerInputSchema` (const)            | models       | The RPC request schema for steering a run.                                                                                                              |
+| `ControlSchema`      | `SignalInputSchema` (const)           | models       | The RPC request schema for signaling a run.                                                                                                             |
+| `ControlSchema`      | `RunMutationInputSchema` (const)      | models       | The shared fields of an RPC run mutation request.                                                                                                       |
+| `ControlSchema`      | `ReasonedMutationInputSchema` (const) | models       | The RPC request schema for a lifecycle mutation that records a reason.                                                                                  |
+| `ControlSchema`      | `CancelInputSchema` (const)           | models       | The RPC request schema for cancellation.                                                                                                                |
+| `ControlSchema`      | `WatchFilter` (const)                 | models       | A journal-projection cursor, optional run restriction, and delivery mode.                                                                               |
+| `ControlSchema`      | `WatchFilter` (type)                  | models       | A resumable journal-projection watch cursor and optional run restriction.                                                                               |
+| `ControlSchema`      | `ControlEvent` (const)                | models       | One ordered journal-projection delta streamed by `watch`.                                                                                               |
+| `ControlSchema`      | `ControlEvent` (type)                 | models       | One ordered journal-projection delta streamed by `watch`.                                                                                               |
+| `ControlSchema`      | `defaultPageSize` (const)             | models       | How many items a listing returns when the caller names no `limit`.                                                                                      |
+| `ControlSchema`      | `maxPageSize` (const)                 | models       | The largest `limit` a listing accepts.                                                                                                                  |
+| `ControlSchema`      | `PageLimit` (const)                   | models       | A page size a listing can actually make progress on.                                                                                                    |
+| `ControlSchema`      | `ListRequest` (const)                 | models       | A typed listing request for discovered flows or durable runs.                                                                                           |
+| `ControlSchema`      | `ListRequest` (type)                  | models       | A typed listing request for discovered flows or durable runs.                                                                                           |
+| `ControlSchema`      | `ListResponse` (const)                | models       | A typed page returned for a flow or run listing.                                                                                                        |
+| `ControlSchema`      | `ListResponse` (type)                 | models       | A typed page returned for a flow or run listing.                                                                                                        |
+| `ControlSchema`      | `Receipt` (const)                     | models       | The idempotent outcome returned by every control mutation.                                                                                              |
+| `ControlSchema`      | `Receipt` (type)                      | models       | The idempotent outcome returned by every control mutation.                                                                                              |
+| `Cancellation`       | `requestedEventType` (const)          | constants    | The journal event type the control plane records an attributed cancel under.                                                                            |
+| `Cancellation`       | `interruptedEventType` (const)        | constants    | The journal event type the engine records an interruption under.                                                                                        |
+| `Cancellation`       | `Request` (interface)                 | models       | One attributed cancel request, as the control plane journaled it.                                                                                       |
+| `Cancellation`       | `Evidence` (interface)                | models       | What one run row discloses about its own cancellation.                                                                                                  |
+| `Cancellation`       | `Input` (interface)                   | models       | Everything the fold reads.                                                                                                                              |
+| `Cancellation`       | `attribute` (const)                   | projections  | Attributes every cancelled run in one pass.                                                                                                             |
+| `Lineage`            | `Origin` (const)                      | models       | How a run came to exist.                                                                                                                                |
+| `Lineage`            | `Origin` (type)                       | models       | How a run came to exist.                                                                                                                                |
+| `Lineage`            | `Ancestry` (interface)                | models       | The ancestry facts an origin is decided from.                                                                                                           |
+| `Lineage`            | `runDecisionEventType` (const)        | constants    | The journal event type carrying an engine run decision.                                                                                                 |
+| `Lineage`            | `forkCreatedEventType` (const)        | constants    | The journal event type time travel writes on a forked child.                                                                                            |
+| `Lineage`            | `lineageEventType` (const)            | constants    | The kind `watch` reports a derived ancestry delta under.                                                                                                |
+| `Lineage`            | `originOf` (const)                    | projections  | Decides how a run came to exist from its ancestry facts.                                                                                                |
+| `Lineage`            | `derive` (const)                      | projections  | Derives the ancestry edge one journal entry discloses, if it discloses one.                                                                             |
+| `Lineage`            | `expand` (const)                      | projections  | Expands one projected entry into itself plus any ancestry delta it discloses.                                                                           |
+| `Monitor`            | `attemptStartedEventType` (const)     | constants    | The journal event type the engine records when an action attempt starts.                                                                                |
+| `Monitor`            | `attemptFinishedEventType` (const)    | constants    | The journal event type the engine records when an action attempt settles.                                                                               |
+| `Monitor`            | `beatEventType` (const)               | constants    | The journal event type one monitor beat is recorded under.                                                                                              |
+| `Monitor`            | `healedEventType` (const)             | constants    | The journal event type one applied remedy is recorded under.                                                                                            |
+| `Monitor`            | `Health` (const)                      | models       | What a run looks like to a monitor.                                                                                                                     |
+| `Monitor`            | `Health` (type)                       | models       | What a run looks like to a monitor.                                                                                                                     |
+| `Monitor`            | `Observation` (interface)             | models       | Everything one classification is decided from.                                                                                                          |
+| `Monitor`            | `classify` (const)                    | projections  | Decides what a run's state means.                                                                                                                       |
+| `Monitor`            | `Remedy` (type)                       | models       | What a monitor does about one unhealthy run.                                                                                                            |
+| `Monitor`            | `remedyFor` (const)                   | projections  | The remedy a health warrants, before `autoHeal` decides whether to apply it.                                                                            |
+| `Monitor`            | `Beat` (interface)                    | models       | One beat of a monitor.                                                                                                                                  |
+| `Monitor`            | `Report` (interface)                  | models       | What a monitor found.                                                                                                                                   |
+| `Monitor`            | `Options` (interface)                 | models       | How a monitor beats.                                                                                                                                    |
+| `Monitor`            | `run` (const)                         | constructors | Watches one run and, when told to, heals it.                                                                                                            |
+| `Steering`           | `promotedEventType` (const)           | constants    | The journal event type the notification queue records a promotion under.                                                                                |
+| `Steering`           | `deliveredEventType` (const)          | constants    | The kind `watch` reports one delivered steer under.                                                                                                     |
+| `Steering`           | `enqueuedEventType` (const)           | constants    | The kind `Control.steer` records an accepted steer under.                                                                                               |
+| `Steering`           | `derive` (const)                      | projections  | Derives one delivery delta per message a promotion entry named.                                                                                         |
+| `Steering`           | `expand` (const)                      | projections  | Expands one projected entry into itself plus any deliveries it discloses.                                                                               |
+| `ControlRuntime`     | `StoredPlan` (interface)              | models       | A decoded input and immutable plan stored before execution.                                                                                             |
+| `ControlRuntime`     | `ApprovalToken` (interface)           | models       | One unresolved durable approval token.                                                                                                                  |
+| `ControlRuntime`     | `BulkGrant` (interface)               | models       | One bulk permission grant.                                                                                                                              |
+| `ControlRuntime`     | `LaunchResult` (type)                 | models       | Result of launching an approved plan.                                                                                                                   |
+| `ControlRuntime`     | `PlanOutcome` (interface)             | models       | A plan card and whether this call is the one that created it.                                                                                           |
+| `ControlRuntime`     | `MutationRecord` (interface)          | models       | A stored idempotency-key outcome and the mutation fingerprint that produced it.                                                                         |
+| `ControlRuntime`     | `MemoryFlow` (interface)              | models       | Flow metadata used by the memory runtime's input-decoding hook.                                                                                         |
+| `ControlRuntime`     | `MemoryOptions` (interface)           | models       | In-memory runtime configuration.                                                                                                                        |
+| `ControlRuntime`     | `PendingResume` (interface)           | models       | One run that has been told to resume, and the sequence of the request.                                                                                  |
+| `ControlRuntime`     | `Service` (interface)                 | models       | Execution-engine operations required by `ControlLive`.                                                                                                  |
+| `ControlRuntime`     | `ControlRuntime` (class)              | services     | Service key for the execution-engine port.                                                                                                              |
+| `ControlRuntime`     | `make` (const)                        | constructors | Constructs a runtime service from an implementation record.                                                                                             |
+| `ControlRuntime`     | `layerMemory` (const)                 | layers       | Deterministic in-memory runtime.                                                                                                                        |
+| `ControlExecutor`    | `Launch` (interface)                  | models       | One stored plan and the run summary it is being started as.                                                                                             |
+| `ControlExecutor`    | `Acceptance` (type)                   | models       | Whether the executor took the launch now or queued it.                                                                                                  |
+| `ControlExecutor`    | `CancelRequest` (interface)           | models       | One run whose cancellation has to become durable on the engine row.                                                                                     |
+| `ControlExecutor`    | `CancelTerminal` (interface)          | models       | The engine row a cancel request arrived too late for.                                                                                                   |
+| `ControlExecutor`    | `CancelRecord` (type)                 | models       | What the executor did with a cancel request.                                                                                                            |
+| `ControlExecutor`    | `ResumeRequest` (interface)           | models       | One parked run that has been told to resume.                                                                                                            |
+| `ControlExecutor`    | `ResumeUptake` (type)                 | models       | What the executor did with a resume request.                                                                                                            |
+| `ControlExecutor`    | `Signal` (interface)                  | models       | One signal to deliver to a run's open wait point.                                                                                                       |
+| `ControlExecutor`    | `SignalDelivery` (type)               | models       | What the executor did with a signal.                                                                                                                    |
+| `ControlExecutor`    | `Service` (interface)                 | services     | The executor port: the control plane hands work over to a real run executor and learns only what the executor did with it.                              |
+| `ControlExecutor`    | `ControlExecutor` (class)             | services     | The `Service` tag.                                                                                                                                      |
+| `ControlExecutor`    | `make` (const)                        | constructors | Builds a `Service` from an implementation of its methods.                                                                                               |
+| `ControlExecutor`    | `makeNoop` (const)                    | constructors | A `Service` that accepts every launch as `pending` and starts nothing.                                                                                  |
+| `ControlExecutor`    | `layer` (const)                       | layers       | Provides `ControlExecutor` from an implementation.                                                                                                      |
+| `ControlExecutor`    | `layerNoop` (const)                   | layers       | Provides `makeNoop`.                                                                                                                                    |
+| `ControlLive`        | `layer` (const)                       | layers       | Live in-process Control layer.                                                                                                                          |
+| `SystemFlows`        | `SystemFlowEntry` (interface)         | models       | The projection metadata for one reserved system flow.                                                                                                   |
+| `SystemFlows`        | `catalog` (const)                     | models       | The authoritative command-line verb to reserved-flow map.                                                                                               |
+| `SystemFlows`        | `plannable` (const)                   | models       | The catalog entries a control runtime may offer as flows.                                                                                               |
+| `ControlRpcs`        | `ControlPrincipal` (class)            | services     | Authenticated principal made available to control RPC handlers.                                                                                         |
+| `ControlRpcs`        | `ControlAuth` (class)                 | middleware   | Middleware boundary that authenticates control RPC requests.                                                                                            |
+| `ControlRpcs`        | `ControlRpcs` (const)                 | groups       | The ten remote procedures corresponding to `Control` operations.                                                                                        |
+| `ControlRpcs`        | `Authenticator` (interface)           | models       | Header authenticator used by the control RPC boundary.                                                                                                  |
+| `ControlRpcs`        | `BearerAuthOptions` (interface)       | models       | Configuration for the single-token bearer authenticator.                                                                                                |
+| `ControlRpcs`        | `bearerAuthenticator` (const)         | constructors | Authenticates one shared bearer token and stamps its server-owned principal.                                                                            |
+| `ControlRpcs`        | `layerAuth` (const)                   | layers       | Provides `ControlAuth` from a transport-header authenticator.                                                                                           |
+| `ControlRpcs`        | `layerBearerAuth` (const)             | layers       | Provides `ControlAuth` using one shared bearer token.                                                                                                   |
+| `ControlRpcs`        | `layerNoopAuth` (const)               | layers       | Permissive authentication middleware for tests and trusted in-process use.                                                                              |
+| `ControlServer`      | `layer` (const)                       | layers       | Control RPC handlers delegating to the transport-independent service.                                                                                   |
+| `ControlServer`      | `layerHttp` (const)                   | layers       | Mounts control RPC on the ambient `HttpRouter`: unary procedures over POST `/rpc` and the `watch` stream over WebSocket `/rpc/ws`.                      |
+| `ControlClient`      | `isControlError` (const)              | refinements  | Whether a value is one of the control plane's declared failures, as opposed to a defect that escaped some other layer.                                  |
+| `ControlClient`      | `ClientConfig` (interface)            | models       | Client transport configuration.                                                                                                                         |
+| `ControlClient`      | `layer` (const)                       | layers       | Provides `Control` through an RPC client while preserving the local vtable.                                                                             |
+| `Channels`           | `RawInbound` (interface)              | models       | Opaque request data passed to a channel before decoding.                                                                                                |
+| `Channels`           | `InboundResult` (type)                | models       | The channel mapping after a verified payload has been decoded.                                                                                          |
+| `Channels`           | `Delivery` (interface)                | models       | A persisted per-channel delivery record.                                                                                                                |
+| `Channels`           | `DeliveryProjection` (interface)      | models       | A side-effect-free outbound projection.                                                                                                                 |
+| `Channels`           | `Channel` (interface)                 | services     | A bidirectional platform adapter.                                                                                                                       |
+| `Channels`           | `IngestRequest` (interface)           | models       | Arguments for ingesting one authenticated channel request.                                                                                              |
+| `Channels`           | `ProjectRequest` (interface)          | models       | Arguments for projecting one run onto a channel.                                                                                                        |
+| `Channels`           | `Channels` (interface)                | services     | The channel coordinator.                                                                                                                                |
+| `Channels`           | `Channels` (const)                    | services     | Service tag for channel registration, ingestion, and pure projection.                                                                                   |
+| `Channels`           | `make` (const)                        | constructors | Builds the coordinator over Control's durable mutation store.                                                                                           |
+| `Channels`           | `makeMemory` (const)                  | constructors | Builds a process-local coordinator for adapter unit tests.                                                                                              |
+| `Channels`           | `layer` (const)                       | layers       | Channel layer with durable inbound receipts supplied by `ControlRuntime`.                                                                               |
+| `Channels`           | `layerMemory` (const)                 | layers       | Process-local channel layer for adapter unit tests only.                                                                                                |
+| `WebhookChannel`     | `SignatureVerifier` (type)            | models       | Signature verifier injected by a webhook transport.                                                                                                     |
+| `WebhookChannel`     | `Config` (interface)                  | models       | Configuration for a schema-declared webhook channel.                                                                                                    |
+| `WebhookChannel`     | `make` (const)                        | constructors | Builds a webhook channel.                                                                                                                               |
+| `WebhookChannel`     | `handler` (const)                     | handlers     | Reads an abstract Effect HTTP request and dispatches it through Channels.                                                                               |
+| `Credential`         | `CredentialRef` (interface)           | models       | A journal-safe name for a stored connection credential.                                                                                                 |
+| `Credential`         | `Operation` (type)                    | models       | One credential operation, as seen by a host authorization policy.                                                                                       |
+| `Credential`         | `Credential` (interface)              | services     | Adapter-bound credential resolution.                                                                                                                    |
+| `Credential`         | `Credential` (const)                  | services     | Service tag for credential resolution.                                                                                                                  |
+| `Credential`         | `makeNoop` (const)                    | constructors | A credential implementation that explicitly reports unavailable storage.                                                                                |
+| `Credential`         | `layerNoop` (const)                   | layers       | Layer for the unavailable credential-storage boundary.                                                                                                  |
+| `Credential`         | `Options` (interface)                 | models       | The collaborators a working credential boundary needs.                                                                                                  |
+| `Credential`         | `make` (const)                        | constructors | Constructs a working credential boundary over a store and a cipher.                                                                                     |
+| `Credential`         | `layer` (const)                       | layers       | Provides a working credential boundary over the ambient store and cipher.                                                                               |
+| `CredentialCipher`   | `Sealed` (interface)                  | models       | One encrypted secret: base64 ciphertext and the nonce it was sealed under.                                                                              |
+| `CredentialCipher`   | `Context` (interface)                 | models       | Credential metadata authenticated with one sealed secret.                                                                                               |
+| `CredentialCipher`   | `Service` (interface)                 | services     | Authenticated encryption over credential plaintext.                                                                                                     |
+| `CredentialCipher`   | `CredentialCipher` (class)            | services     | Service key for credential encryption.                                                                                                                  |
+| `CredentialCipher`   | `make` (const)                        | constructors | Constructs a cipher from an implementation record.                                                                                                      |
+| `CredentialCipher`   | `unavailable` (const)                 | constructors | The typed failure a host reports when no secure key material is reachable.                                                                              |
+| `CredentialCipher`   | `makeNoop` (const)                    | constructors | A cipher that reports unavailable key material for every operation.                                                                                     |
+| `CredentialCipher`   | `layerNoop` (const)                   | layers       | Provides a cipher that reports unavailable key material.                                                                                                |
+| `CredentialStore`    | `SealedRecord` (interface)            | models       | One credential at rest: opaque metadata plus the sealed secret.                                                                                         |
+| `CredentialStore`    | `Service` (interface)                 | services     | The persistence operations `Credential` needs.                                                                                                          |
+| `CredentialStore`    | `CredentialStore` (class)             | services     | Service key for encrypted credential persistence.                                                                                                       |
+| `CredentialStore`    | `make` (const)                        | constructors | Constructs a store from an implementation record.                                                                                                       |
+| `CredentialStore`    | `makeNoop` (const)                    | constructors | A store that reports unavailable persistence for every operation.                                                                                       |
+| `CredentialStore`    | `layerNoop` (const)                   | layers       | Provides a store that reports unavailable persistence.                                                                                                  |
+| `CredentialStore`    | `makeMemory` (const)                  | constructors | Constructs a process-local store.                                                                                                                       |
+| `CredentialStore`    | `layerMemory` (const)                 | layers       | Provides a process-local store.                                                                                                                         |
+| `SqlCredentialStore` | `migrate` (const)                     | migrations   | Creates the credential table if it does not exist.                                                                                                      |
+| `SqlCredentialStore` | `make` (const)                        | constructors | Constructs a durable credential store over the ambient database.                                                                                        |
+| `SqlCredentialStore` | `layer` (const)                       | layers       | Provides durable credential persistence over the ambient database.                                                                                      |
+| `WebCryptoCipher`    | `Options` (interface)                 | models       | Host-managed key material for the cipher.                                                                                                               |
+| `WebCryptoCipher`    | `make` (const)                        | constructors | Imports the host key and constructs the cipher.                                                                                                         |
+| `WebCryptoCipher`    | `layer` (const)                       | layers       | Provides AES-256-GCM credential encryption under a host-managed key.                                                                                    |
+| `SqlControlRuntime`  | `DurableFlow` (type)                  | models       | A flow the durable runtime can plan.                                                                                                                    |
+| `SqlControlRuntime`  | `Options` (interface)                 | models       | Durable runtime configuration.                                                                                                                          |
+| `SqlControlRuntime`  | `migrate` (const)                     | migrations   | Creates every control-plane table.                                                                                                                      |
+| `SqlControlRuntime`  | `layer` (const)                       | layers       | Provides a durable runtime over the ambient database and run store.                                                                                     |
+| `SqlControlRuntime`  | `layerWithStore` (const)              | layers       | Provides a durable runtime and the run store it needs over the ambient database.                                                                        |
+| `Migrations`         | `set` (const)                         | migrations   | The control package's namespaced migration set.                                                                                                         |
+| `Migrations`         | `run` (const)                         | migrations   | Creates every durable control-plane and credential table.                                                                                               |
+| `Migrations`         | `layer` (const)                       | layers       | Layer that runs control migrations before exposing the database to control services.                                                                    |
