@@ -6,6 +6,8 @@ import type { NodeSidecar } from "../Node"
 import type { Target } from "smithers-shared/LocalApp"
 import { REPO_FILES_PATH, RepoFilesRequestSchema, TARGET_PATTERN, TargetRunVerbSchema } from "smithers-shared/LocalApp"
 import type { RepositoryAccess } from "smithers-shared/NativeRepository"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { dirname, join } from "node:path"
 import { z } from "zod"
 import { readRepoPath } from "../RepoFiles"
 import { createRepoStore } from "../Repos"
@@ -24,11 +26,21 @@ export interface RepoTargetRoutesOptions {
   readonly authority: RepositoryAuthority
   /** Explicitly enabled only by the headless/dev host. Native mode is grant-only. */
   readonly allowManualRepositoryPaths?: boolean
+  /**
+   * Where opened repositories are remembered across launches
+   * (`<stateDir>/repositories.json`). A grant is the user's act once: the
+   * folder they picked reopens with the same access on the next launch, the
+   * way every editor's recent folders do. Absent = nothing is remembered
+   * (tests, one-shot hosts).
+   */
+  readonly stateDir?: string
   readonly cli?: string
   readonly log?: (line: string) => void
 }
 
 export interface RepoTargetRoutes {
+  /** Settles once the remembered repositories are reopened (or there were none). */
+  readonly restored: Promise<void>
   readonly repos: RepoStore
   readonly runner: TargetRunner
   readonly history: TargetRunHistory
@@ -73,11 +85,29 @@ const stringField = (body: unknown, field: string): string | undefined => {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined
 }
 
+/** The remembered grants file: every open repository's real path and access. */
+const REMEMBERED_FILE = "repositories.json"
+const RememberedSchema = z.object({
+  repositories: z.array(z.object({ path: z.string().min(1), access: z.enum(["read", "read-write"]) }))
+}).strict()
+
 export const registerRepoTargetRoutes = (
   server: Pick<LocalServer, "router" | "publish" | "onMessage">,
   options: RepoTargetRoutesOptions
 ): RepoTargetRoutes => {
   const repos = createRepoStore()
+  const rememberedPath = options.stateDir === undefined ? undefined : join(options.stateDir, REMEMBERED_FILE)
+  /** Write the open set; a failed write is logged, never fatal (the session still works). */
+  const remember = async (repoAccess: ReadonlyMap<string, RepositoryAccess>): Promise<void> => {
+    if (rememberedPath === undefined) return
+    const repositories = repos.list().map((repo) => ({ path: repo.path, access: repoAccess.get(repo.id) ?? "read" }))
+    try {
+      await mkdir(dirname(rememberedPath), { recursive: true })
+      await writeFile(rememberedPath, JSON.stringify({ repositories }, null, 2))
+    } catch (error) {
+      options.log?.(`could not remember open repositories at ${rememberedPath}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const history = createTargetRunHistory()
   const runner = createTargetRunner({
     publish: server.publish,
@@ -130,10 +160,42 @@ export const registerRepoTargetRoutes = (
     const result = await repos.open(path)
     if (result.status === "error") return jsonError(400, result.code, result.message)
     repoAccess.set(result.repo.id, access)
+    await remember(repoAccess)
     return json({ repo: result.repo })
   })
 
   router.add("GET", "/api/repos", () => json({ repos: repos.list() }))
+
+  /*
+   * Reopen what the last launch had open. A path that is gone, or no longer
+   * a repository, drops out silently: the next write forgets it. Ready is
+   * awaited by the host before it serves, so the first GET /api/repos already
+   * lists them and the sidebar's pins and the open set agree at boot.
+   */
+  const restored: Promise<void> = (async () => {
+    if (rememberedPath === undefined) return
+    let text: string
+    try {
+      text = await readFile(rememberedPath, "utf8")
+    } catch {
+      return
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      return
+    }
+    const remembered = RememberedSchema.safeParse(parsed)
+    if (!remembered.success) return
+    let changed = false
+    for (const entry of remembered.data.repositories) {
+      const result = await repos.open(entry.path)
+      if (result.status === "ok") repoAccess.set(result.repo.id, entry.access)
+      else changed = true
+    }
+    if (changed) await remember(repoAccess)
+  })()
 
   /*
    * Files in an open repository (LOCAL-APP.md "HTTP and WebSocket surface"):
@@ -164,6 +226,7 @@ export const registerRepoTargetRoutes = (
     if (!repos.close(repoId)) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)
     targetGrants.delete(repoId)
     repoAccess.delete(repoId)
+    await remember(repoAccess)
     return json({ ok: true })
   })
 
@@ -322,6 +385,7 @@ export const registerRepoTargetRoutes = (
   })
 
   return {
+    restored,
     repos,
     runner,
     history,

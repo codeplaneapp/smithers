@@ -120,6 +120,12 @@ export interface LocalServerOptions {
   readonly allowManualRepositoryPaths?: boolean
   /** A pre-resolved Node sidecar; the default probes once at startup. */
   readonly node?: NodeSidecar | null
+  /**
+   * Where the host remembers state across launches (open repositories). The
+   * native launcher passes the platform's application-support directory; a
+   * test passes a temp dir or nothing.
+   */
+  readonly stateDir?: string
   /** The smithers-build build-cli entry for the targets lane; the default resolves it from the checkout (or SMITHERS_BUILD_CLI). */
   readonly buildCli?: string
   /** The home directory used for PTYs without a repoId and reported by `/api/health`. */
@@ -288,6 +294,21 @@ interface TurnWriter {
 }
 
 const encoder = new TextEncoder()
+
+/*
+ * The product-API families the local origin forwards to the Worker (the
+ * identity upstream), mirroring apps/server's PLATFORM_PROXY_RULES plus the
+ * Worker's own billing and admin seams. Local routes match first; `/api/cloud/*`
+ * is the bearer proxy straight to plue and never forwards here.
+ */
+const PRODUCT_PROXY_PREFIXES: ReadonlyArray<string> = [
+  "/api/repos/",
+  "/api/github/",
+  "/api/user/",
+  "/api/notifications/",
+  "/api/billing/",
+  "/api/admin/"
+]
 
 /** The stub's stand-in for the identity seam: signed out, nothing else configured. */
 const stubIdentity = (pathname: string): Response =>
@@ -837,6 +858,23 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       if (pathname.startsWith(AUTH_ROUTE_PREFIX) || pathname.startsWith(IDENTITY_ROUTE_PREFIX)) {
         return identityUpstream === null ? stubIdentity(pathname) : proxyIdentity(request, url, identityUpstream, log)
       }
+      /*
+       * The product API. The cloud client is served BY the Worker, so every
+       * repo, issue, landing, file, notification, and billing seam calls
+       * `/api/…` on its own origin and the Worker bridges the GitHub session
+       * to a Smithers Cloud token per login (apps/server PLATFORM_PROXY_RULES).
+       * This local origin is that client's stand-in: the same families
+       * forward to the same Worker with the same re-scoped session cookie,
+       * or every one of those seams answers a local 404 in 0 ms — which is
+       * exactly what "Listing issues for smithersai/smithers failed (404)"
+       * was on 2026-09-02. An allowlist, mirroring the Worker's, never a
+       * wildcard.
+       */
+      if (PRODUCT_PROXY_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+        return identityUpstream === null
+          ? jsonError(501, "not_implemented", "Smithers Cloud is not reachable from this build (offline mode).")
+          : proxyIdentity(request, url, identityUpstream, log)
+      }
       return jsonError(404, "not_found", `No route for ${request.method} ${pathname}.`)
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -1025,8 +1063,10 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     authority: repositoryAuthority,
     allowManualRepositoryPaths: options.allowManualRepositoryPaths,
     log,
-    ...(options.buildCli === undefined ? {} : { cli: options.buildCli })
+    ...(options.buildCli === undefined ? {} : { cli: options.buildCli }),
+    ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir })
   })
+  await repoTargets.restored
 
   // L4: the harness table and PTY sessions. Browser input carries a repo id,
   // never a filesystem path; the server resolves the authorized cwd here.

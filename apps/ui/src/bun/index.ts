@@ -5,6 +5,8 @@
  * and this process; RPC carries just the two native doors (the folder dialog
  * and the system browser). Neither privileged operation has an HTTP fallback.
  */
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { BrowserView, BrowserWindow, BuildConfig, Screen, Utils } from "electrobun/main"
 import type { SmithersNativeRPC } from "smithers-shared/NativeRPC"
 import { encodeRgbaPng, startPackagedE2EBridge } from "./PackagedE2EBridge"
@@ -25,9 +27,15 @@ const openExternal = async (url: string): Promise<boolean> => {
   return Utils.openExternal(parsed.toString())
 }
 
+/** Application state that outlives a launch: macOS Application Support, else XDG data. */
+const stateDir = process.platform === "darwin"
+  ? join(homedir(), "Library", "Application Support", "Smithers")
+  : join(Bun.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "smithers")
+
 const server = await startLocalServer({
   port: Number.isInteger(port) && port >= 0 ? port : 0,
   distDir: defaultDistDir(import.meta.dir),
+  stateDir,
   chatStub: Bun.env.SMITHERS_CHAT_STUB === "1",
   cloudMode: Bun.env.SMITHERS_LOCAL_MODE === "offline" ? "offline" : "hybrid",
   allowManualRepositoryPaths: headless

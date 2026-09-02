@@ -320,6 +320,134 @@ describe("the local origin", () => {
     expect(logs.slice(before).some((line) => /^GET \/api\/health -> 200 in \d+ms$/.test(line))).toBe(true)
   })
 
+  test("an opened repository is remembered and reopened by the next launch with the same access; closing forgets it", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "smithers-state-"))
+    const repoDir = await mkdtemp(join(tmpdir(), "smithers-remembered-repo-"))
+    await writeFile(join(repoDir, "README.md"), "# remembered\n")
+    const boot = () =>
+      startLocalServer({
+        port: 0,
+        distDir: dist,
+        chatStub: true,
+        stateDir,
+        node: { path: "/fake/node", version: "v22.19.0" },
+        home: "/fake/home",
+        harnesses: async () => [],
+        log: () => {},
+        allowManualRepositoryPaths: true
+      })
+    const first = await boot()
+    let second: LocalServer | undefined
+    try {
+      const opened = await fetch(`${first.origin}/api/repo/open`, {
+        method: "POST",
+        headers: { [LOCAL_SESSION_HEADER]: first.sessionToken, "content-type": "application/json" },
+        body: JSON.stringify({ path: repoDir })
+      })
+      expect(opened.status).toBe(200)
+      const { repo } = (await opened.json()) as { repo: { id: string; path: string } }
+      await first.stop()
+      // The next launch lists it before it serves anything.
+      second = await boot()
+      const listed = (await (await fetch(`${second.origin}/api/repos`, { headers: { [LOCAL_SESSION_HEADER]: second.sessionToken } })).json()) as { repos: Array<{ id: string; path: string }> }
+      expect(listed.repos.map((entry) => entry.path)).toEqual([repo.path])
+      // The remembered grant carries its access: a read of the reopened repository works.
+      const files = await fetch(`${second.origin}/api/repo/files`, {
+        method: "POST",
+        headers: { [LOCAL_SESSION_HEADER]: second.sessionToken, "content-type": "application/json" },
+        body: JSON.stringify({ repoId: listed.repos[0]!.id, path: "README.md" })
+      })
+      expect(files.status).toBe(200)
+      // Closing forgets it for the launch after.
+      const closed = await fetch(`${second.origin}/api/repo/close`, {
+        method: "POST",
+        headers: { [LOCAL_SESSION_HEADER]: second.sessionToken, "content-type": "application/json" },
+        body: JSON.stringify({ repoId: listed.repos[0]!.id })
+      })
+      expect(closed.status).toBe(200)
+      await second.stop()
+      second = await boot()
+      const after = (await (await fetch(`${second.origin}/api/repos`, { headers: { [LOCAL_SESSION_HEADER]: second.sessionToken } })).json()) as { repos: Array<unknown> }
+      expect(after.repos).toEqual([])
+    } finally {
+      await second?.stop()
+      await rm(stateDir, { recursive: true, force: true })
+      await rm(repoDir, { recursive: true, force: true })
+    }
+  })
+
+  test("a remembered path that no longer exists is dropped, not an error", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "smithers-state-"))
+    await writeFile(join(stateDir, "repositories.json"), JSON.stringify({ repositories: [{ path: join(stateDir, "gone"), access: "read-write" }] }))
+    const booted = await startLocalServer({
+      port: 0,
+      distDir: dist,
+      chatStub: true,
+      stateDir,
+      node: { path: "/fake/node", version: "v22.19.0" },
+      home: "/fake/home",
+      harnesses: async () => [],
+      log: () => {}
+    })
+    try {
+      const listed = (await (await fetch(`${booted.origin}/api/repos`, { headers: { [LOCAL_SESSION_HEADER]: booted.sessionToken } })).json()) as { repos: Array<unknown> }
+      expect(listed.repos).toEqual([])
+      expect(JSON.parse(await Bun.file(join(stateDir, "repositories.json")).text())).toEqual({ repositories: [] })
+    } finally {
+      await booted.stop()
+      await rm(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  test("the product-API families forward to the Worker with the session cookie; unknown /api paths still 404 locally", async () => {
+    const seen: Array<{ path: string; cookie: string | null; origin: string | null }> = []
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => {
+        seen.push({ path: new URL(request.url).pathname, cookie: request.headers.get("cookie"), origin: request.headers.get("origin") })
+        return new Response(JSON.stringify([{ number: 7, title: "an issue" }]), { headers: { "content-type": "application/json" } })
+      }
+    })
+    const proxied = await startLocalServer({
+      port: 0,
+      distDir: dist,
+      cloudMode: "hybrid",
+      identityUpstream: `http://127.0.0.1:${upstream.port}`,
+      node: { path: "/fake/node", version: "v22.19.0" },
+      home: "/fake/home",
+      harnesses: async () => [],
+      log: () => {}
+    })
+    try {
+      const headers = { [LOCAL_SESSION_HEADER]: proxied.sessionToken, origin: proxied.origin, cookie: "smithers_identity=sealed" }
+      for (const path of ["/api/repos/smithersai/smithers/issues?state=open", "/api/user/github-repos/smithersai/smithers/issues", "/api/billing/balance", "/api/notifications/unread"]) {
+        const response = await fetch(`${proxied.origin}${path}`, { headers })
+        expect(response.status).toBe(200)
+      }
+      expect(seen.map((entry) => entry.path)).toEqual([
+        "/api/repos/smithersai/smithers/issues",
+        "/api/user/github-repos/smithersai/smithers/issues",
+        "/api/billing/balance",
+        "/api/notifications/unread"
+      ])
+      // The Worker authenticates by the identity session cookie; the Origin follows the upstream like every identity call.
+      expect(seen.every((entry) => entry.cookie === "smithers_identity=sealed")).toBe(true)
+      expect(seen.every((entry) => entry.origin === `http://127.0.0.1:${upstream.port}`)).toBe(true)
+      const unknown = await fetch(`${proxied.origin}/api/nothing/here`, { headers })
+      expect(unknown.status).toBe(404)
+      expect(seen).toHaveLength(4)
+    } finally {
+      await proxied.stop()
+      upstream.stop(true)
+    }
+  })
+
+  test("offline, the product-API families answer 501 instead of a misleading 404", async () => {
+    const response = await apiFetch("/api/repos/smithersai/smithers/issues")
+    expect(response.status).toBe(501)
+  })
+
   test("the stub identity seam answers signed-out and nothing else", async () => {
     const session = await apiFetch("/api/auth/session")
     expect(await session.json()).toEqual({ status: "signed-out" })
