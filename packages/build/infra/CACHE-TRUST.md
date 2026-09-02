@@ -142,3 +142,17 @@ carries the same split: `SMITHERS_CACHE_READ_TOKEN` and
 before the route is parsed. Its loopback-only development mode, which
 configures no token at all, is the one deployment shape without the split, and
 `variables.tf` cannot produce it.
+
+## Public read tokens on jjhub
+
+The jjhub-hosted cache makes the read credential a committed literal: a
+per-repository `smithers_cachero_…` token that can only read that
+repository's cache. That is the reader posture above taken to its conclusion.
+A reader is untrusted and the read credential is public within the
+organization already; publishing it in `BUILD.ts` changes who can see it, not
+what it can do. The server enforces the same split (`403` on every `PUT` and
+`DELETE` before the body is read), the token is refused on any other
+repository, and the general token loader never accepts its shape, so a leak
+costs a rotation and nothing else. The write credential stays where it was: a
+`write:repository` token in the environment of post-merge trunk jobs, or the
+per-run token an agent computer holds through the egress proxy.

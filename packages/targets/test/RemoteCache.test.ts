@@ -166,3 +166,67 @@ describe("S.Cache with a remote declaration", () => {
     expect(() => WorkspaceDeclaration.Cache(null as never)).toThrow(/must be an object/)
   })
 })
+
+describe("RemoteCache public read tokens and jjhub", () => {
+  const token = "smithers_cachero_" + "0123456789abcdef".repeat(2) + "01234567"
+
+  it("accepts a committed public read token and defaults the write secret", () => {
+    const declaration = RemoteCache.make({
+      endpoint: "https://api.jjhub.tech/api/repos/acme/app/build-cache",
+      publicReadToken: token
+    })
+    expect(declaration.publicReadToken).toBe(token)
+    expect(declaration.token).toEqual({ _tag: "Secret", env: "SMITHERS_CACHE_TOKEN" })
+    expect(declaration.write).toBeUndefined()
+    expect(RemoteCache.isRemoteCache(declaration)).toBe(true)
+  })
+
+  it("refuses any literal that is not a public read token", () => {
+    for (
+      const bad of [
+        "smithers_" + "a".repeat(40),
+        "ghp_" + "a".repeat(36),
+        "smithers_cachero_" + "a".repeat(39),
+        "smithers_cachero_" + "G".repeat(40),
+        ""
+      ]
+    ) {
+      expect(() => RemoteCache.make({ endpoint: "https://cache.example.test", publicReadToken: bad })).toThrow(
+        /publicReadToken must be a jjhub public read token/
+      )
+    }
+    expect(() => RemoteCache.make({ endpoint: "https://cache.example.test", publicReadToken: 42 as never })).toThrow(
+      /must be a string/
+    )
+  })
+
+  it("is exclusive with a declared read secret", () => {
+    expect(() =>
+      RemoteCache.make({ endpoint: "https://cache.example.test", publicReadToken: token, token: Secret("X") })
+    ).toThrow(/replaces token and read/)
+    expect(() =>
+      RemoteCache.make({ endpoint: "https://cache.example.test", publicReadToken: token, read: Secret("X") })
+    ).toThrow(/replaces token and read/)
+  })
+
+  it("derives the jjhub endpoint from the repository", () => {
+    const declaration = RemoteCache.jjhub({ repo: "acme/app", publicReadToken: token })
+    expect(declaration.endpoint).toBe("https://api.jjhub.tech/api/repos/acme/app/build-cache")
+    expect(declaration.publicReadToken).toBe(token)
+    expect(RemoteCache.jjhub({ repo: "acme/app", apiBase: "https://jjhub.example.test/" }).endpoint).toBe(
+      "https://jjhub.example.test/api/repos/acme/app/build-cache"
+    )
+    expect(RemoteCache.jjhub({ repo: "acme/app", write: Secret("CI_WRITE") }).write).toEqual({
+      _tag: "Secret",
+      env: "CI_WRITE"
+    })
+    expect(() => RemoteCache.jjhub({ repo: "not-a-repo" })).toThrow(/owner\/name/)
+    expect(() => RemoteCache.jjhub({ repo: "acme/app", extra: 1 } as never)).toThrow(/unknown option/)
+  })
+
+  it("rejects a forged declaration carrying a bad literal", () => {
+    const declaration = RemoteCache.make({ endpoint: "https://cache.example.test" })
+    const forged = { ...declaration, [RemoteCache.TypeId]: RemoteCache.TypeId, publicReadToken: "not-a-token" }
+    expect(RemoteCache.isRemoteCache(forged)).toBe(false)
+  })
+})

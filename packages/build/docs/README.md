@@ -24,28 +24,30 @@ wired is marked as such on the page that covers it.
 
 ## Workspace
 
-| Page                                                       | Description                                                                                                         |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| [Structure](workspace/structure.md)                        | Discovery, `BUILD.ts` placement, package boundaries, default-target synthesis.                                      |
-| [Writing BUILD files](workspace/writing-build-files.md)    | Targets as named exports, target calls, import edges, macros.                                                       |
-| [Configuration](workspace/configuration.md)                | The `Workspace` declaration, `cacheDirectory`, `gitignored`, `--cache-dir`.                                         |
-| [Running targets](workspace/running-targets.md)            | `install`, target verbs including `run` and `docs`, `ci`, and what actually executes.                               |
-| [Querying](workspace/querying.md)                          | `query`, `deps()`, and `graph`.                                                                                     |
-| [Caching](workspace/caching.md)                            | Content keys, the result cache, and what re-keys a target.                                                          |
-| [Remote caching](workspace/remote-caching.md)              | The HTTP read-through cache, the hosted and self-hosted `/ac` and `/cas` services, and the current engine boundary. |
-| [Smithers repo adoption](workspace/flows-repo-adoption.md) | What the Smithers monorepo runs through smithers build today, the shadow CI lane, and the promotion criteria.       |
+| Page                                                       | Description                                                                                                            |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [Structure](workspace/structure.md)                        | Discovery, `BUILD.ts` placement, package boundaries, default-target synthesis.                                         |
+| [Writing BUILD files](workspace/writing-build-files.md)    | Targets as named exports, target calls, import edges, macros.                                                          |
+| [Configuration](workspace/configuration.md)                | The `Workspace` declaration, `cacheDirectory`, `gitignored`, `--cache-dir`.                                            |
+| [Running targets](workspace/running-targets.md)            | `install`, target verbs including `run` and `docs`, `ci`, and what actually executes.                                  |
+| [Querying](workspace/querying.md)                          | `query`, `deps()`, and `graph`.                                                                                        |
+| [Caching](workspace/caching.md)                            | Content keys, the result cache, and what re-keys a target.                                                             |
+| [Remote caching](workspace/remote-caching.md)              | The HTTP read-through cache, the hosted and self-hosted `/ac` and `/cas` services, and the current engine boundary.    |
+| [The jjhub-hosted cache](workspace/jjhub-cache.md)         | Zero-config discovery from the jjhub remote, committed public read tokens, and publishing from CI and agent computers. |
+| [Smithers repo adoption](workspace/flows-repo-adoption.md) | What the Smithers monorepo runs through smithers build today, the shadow CI lane, and the promotion criteria.          |
 
 ## Concepts
 
-| Page                                                         | Description                                                                        |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| [Labels](concepts/labels.md)                                 | The `//pkg:target` grammar, package defaults, and `//...` patterns.                |
-| [Targets and targets](concepts/targets.md)                   | A target is a flow with planner metadata.                                          |
-| [Inputs](concepts/inputs.md)                                 | `file()`, `glob()`, `gitDiff()`, and when they are digested.                       |
-| [Dependencies](concepts/dependencies.md)                     | Import edges, `deps` attributes, and transitive planning.                          |
-| [Actions and boundaries](concepts/actions-and-boundaries.md) | Sealed actions, `TreeArtifact` writes, host state, and hermeticity.                |
-| [Install](concepts/install.md)                               | The measure round, fetch key material, the fetch/link split, and manager-as-layer. |
-| [Environments](concepts/environments.md)                     | The declared Nix closure tools resolve from, its key layer, and what it makes cacheable. |
+| Page                                                         | Description                                                                                                                       |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| [Labels](concepts/labels.md)                                 | The `//pkg:target` grammar, package defaults, and `//...` patterns.                                                               |
+| [Targets and targets](concepts/targets.md)                   | A target is a flow with planner metadata.                                                                                         |
+| [Inputs](concepts/inputs.md)                                 | `file()`, `glob()`, `gitDiff()`, and when they are digested.                                                                      |
+| [Dependencies](concepts/dependencies.md)                     | Import edges, `deps` attributes, and transitive planning.                                                                         |
+| [Actions and boundaries](concepts/actions-and-boundaries.md) | Sealed actions, `TreeArtifact` writes, host state, and hermeticity.                                                               |
+| [Install](concepts/install.md)                               | The measure round, fetch key material, the fetch/link split, and manager-as-layer.                                                |
+| [Environments](concepts/environments.md)                     | The declared Nix closure tools resolve from, its key layer, and what it makes cacheable.                                          |
+| [Ownership](concepts/ownership.md)                           | `owners` on a package: inheritance, per-file rules, agent policy, upstream claims, and the generated CODEOWNERS and OWNERS files. |
 
 ## Extending
 

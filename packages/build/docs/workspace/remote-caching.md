@@ -96,6 +96,19 @@ For generated CI, `cacheUrlSecret` optionally emits `SMITHERS_CACHE_URL`, so it
 has the same endpoint precedence as local use. `cacheTokenSecret` emits the
 bearer token under `cacheTokenEnv`, which defaults to `SMITHERS_CACHE_TOKEN`.
 
+## The jjhub-hosted cache
+
+jjhub serves this same protocol per repository at
+`https://api.jjhub.tech/api/repos/<owner>/<name>/build-cache`. Two things
+differ from the two services below. A checkout of a jjhub repository needs no
+declaration at all: with no `RemoteCache` and no `SMITHERS_CACHE_URL`, the CLI
+discovers the repository from the git remote and reads anonymously. And the
+read credential can be committed: `Smithers.RemoteCache.jjhub({ repo,
+publicReadToken })` carries a per-repository public read token that can only
+read that one cache, so every clone and every pull-request job reads without a
+secret while publishing still needs `SMITHERS_CACHE_TOKEN`. See
+[The jjhub-hosted cache](jjhub-cache.md).
+
 ## The engine step cache services
 
 The Smithers engine has its own two-store split: `RemoteCacheStore` for keyed step

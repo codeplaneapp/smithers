@@ -1,3 +1,4 @@
+import * as RemoteCache from "@smthrs/targets/RemoteCache"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -5,10 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { declaredToolchain, defaultToolchain } from "../src/engine.ts"
 import * as Planner from "../src/Planner.ts"
 import {
+  credentialEnvNames,
   discoverable,
+  discoverJjhubRepository,
   ensureGitignored,
   isGitPath,
   maximumGitignoreBytes,
+  parseJjhubRemote,
+  remoteCacheOf,
   resolveConfig,
   resolveInstallAttrs,
   resolveRemoteCache,
@@ -87,17 +92,32 @@ afterEach(async () => {
 
 describe("resolveConfig", () => {
   it("defaults to .flows when no BUILD.ts file exists", async () => {
-    expect(await resolveConfig(root)).toEqual({ cacheDirectory: ".flows", gitignored: false })
+    expect(await resolveConfig(root)).toEqual({
+      cacheDirectory: ".flows",
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
+    })
   })
 
   it("defaults to .flows when the root BUILD.ts declares no configuration", async () => {
     await write("BUILD.ts", "export const nothing = 1\n")
-    expect(await resolveConfig(root)).toEqual({ cacheDirectory: ".flows", gitignored: false })
+    expect(await resolveConfig(root)).toEqual({
+      cacheDirectory: ".flows",
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
+    })
   })
 
   it("reads the root BUILD.ts declaration", async () => {
     await write("BUILD.ts", buildFile(`{ cacheDirectory: "build/cache", gitignored: true }`))
-    expect(await resolveConfig(root)).toEqual({ cacheDirectory: "build/cache", gitignored: true })
+    expect(await resolveConfig(root)).toEqual({
+      cacheDirectory: "build/cache",
+      gitignored: true,
+      sandbox: "none",
+      sandboxes: undefined
+    })
   })
 
   it("evaluates BUILD.ts as ESM even when the workspace package type is CommonJS", async () => {
@@ -108,21 +128,30 @@ describe("resolveConfig", () => {
         "const cacheDirectory = await Promise.resolve(\"build/cache\")\n" +
         "export const workspace = Workspace({ cacheDirectory, gitignored: false })\n"
     )
-    expect(await resolveConfig(root)).toEqual({ cacheDirectory: "build/cache", gitignored: false })
+    expect(await resolveConfig(root)).toEqual({
+      cacheDirectory: "build/cache",
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
+    })
   })
 
   it("prefers the flag over the declaration", async () => {
     await write("BUILD.ts", buildFile(`{ cacheDirectory: "build/cache", gitignored: true }`))
     expect(await resolveConfig(root, "flag/dir")).toEqual({
       cacheDirectory: "flag/dir",
-      gitignored: true
+      gitignored: true,
+      sandbox: "none",
+      sandboxes: undefined
     })
   })
 
   it("prefers the flag over the .flows default", async () => {
     expect(await resolveConfig(root, "flag/dir/")).toEqual({
       cacheDirectory: "flag/dir",
-      gitignored: false
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
     })
   })
 
@@ -837,7 +866,12 @@ describe("BUILD.ts admission", () => {
   it("admits a BUILD.ts link that stays inside the workspace", async () => {
     await write("build/root.build.ts", buildFile(`{ cacheDirectory: "linked/cache" }`))
     await Fs.symlink(NodePath.join(root, "build/root.build.ts"), NodePath.join(root, "BUILD.ts"))
-    expect(await resolveConfig(root)).toEqual({ cacheDirectory: "linked/cache", gitignored: false })
+    expect(await resolveConfig(root)).toEqual({
+      cacheDirectory: "linked/cache",
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
+    })
   })
 })
 
@@ -853,14 +887,21 @@ describe("module namespace cache", () => {
     await Fs.mkdir(workspace, { recursive: true })
     const path = NodePath.join(workspace, "BUILD.ts")
     await Fs.writeFile(path, buildFile(`{ cacheDirectory: "first/cache" }`), "utf8")
-    expect(await resolveConfig(workspace)).toEqual({ cacheDirectory: "first/cache", gitignored: false })
+    expect(await resolveConfig(workspace)).toEqual({
+      cacheDirectory: "first/cache",
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
+    })
 
     const before = await Fs.stat(path)
     await Fs.writeFile(path, buildFile(`{ cacheDirectory: "other/cache" }`), "utf8")
     await Fs.utimes(path, before.atime, before.mtime)
     expect(await resolveConfig(workspace)).toEqual({
       cacheDirectory: "other/cache",
-      gitignored: false
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
     })
   })
 
@@ -872,7 +913,12 @@ describe("module namespace cache", () => {
       buildFile(`{ cacheDirectory: "one/cache" }`),
       "utf8"
     )
-    expect(await resolveConfig(workspace)).toEqual({ cacheDirectory: "one/cache", gitignored: false })
+    expect(await resolveConfig(workspace)).toEqual({
+      cacheDirectory: "one/cache",
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
+    })
 
     // A second, unrelated workspace occupies the same path. Nothing about the
     // string it is addressed by says which files it holds.
@@ -883,7 +929,12 @@ describe("module namespace cache", () => {
       buildFile(`{ cacheDirectory: "two/cache" }`),
       "utf8"
     )
-    expect(await resolveConfig(workspace)).toEqual({ cacheDirectory: "two/cache", gitignored: false })
+    expect(await resolveConfig(workspace)).toEqual({
+      cacheDirectory: "two/cache",
+      gitignored: false,
+      sandbox: "none",
+      sandboxes: undefined
+    })
   })
 
   it("keeps one evaluation, and one target identity, within one command", async () => {
@@ -947,5 +998,99 @@ describe("declared input confinement", () => {
     } finally {
       await Fs.rm(outside, { recursive: true, force: true })
     }
+  })
+})
+
+describe("jjhub cache discovery", () => {
+  const token = "smithers_cachero_" + "0123456789abcdef".repeat(2) + "01234567"
+  const roots: Array<string> = []
+  const makeRoot = async (): Promise<string> => {
+    const made = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-jjhub-"))
+    roots.push(made)
+    return made
+  }
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((made) => Fs.rm(made, { recursive: true, force: true })))
+  })
+
+  it("resolves a committed public read token as public credentials", () => {
+    const declaration = RemoteCache.jjhub({ repo: "acme/app", publicReadToken: token })
+    expect(remoteCacheOf(declaration)).toEqual({
+      endpoint: "https://api.jjhub.tech/api/repos/acme/app/build-cache",
+      credentials: { _tag: "public", publicReadToken: token, writeTokenEnv: "SMITHERS_CACHE_TOKEN" }
+    })
+    expect(credentialEnvNames({ _tag: "public", publicReadToken: token, writeTokenEnv: "W" })).toEqual(["W"])
+    expect(credentialEnvNames({ _tag: "anonymous", writeTokenEnv: "W" })).toEqual(["W"])
+  })
+
+  it("parses jjhub remotes in every git URL form and ignores other hosts", () => {
+    expect(parseJjhubRemote("git@ssh.jjhub.tech:acme/app.git")).toEqual({ repo: "acme/app", host: "ssh.jjhub.tech" })
+    expect(parseJjhubRemote("ssh://git@ssh.jjhub.tech/acme/app.git")).toEqual({
+      repo: "acme/app",
+      host: "ssh.jjhub.tech"
+    })
+    expect(parseJjhubRemote("https://api.jjhub.tech/acme/app.git")).toEqual({
+      repo: "acme/app",
+      host: "api.jjhub.tech"
+    })
+    expect(parseJjhubRemote("https://jjhub.tech/acme/app/")).toEqual({ repo: "acme/app", host: "jjhub.tech" })
+    expect(parseJjhubRemote("git@github.com:acme/app.git")).toBeUndefined()
+    expect(parseJjhubRemote("https://api.jjhub.tech/acme")).toBeUndefined()
+    expect(parseJjhubRemote("https://cache.example.test/acme/app", new Set(["cache.example.test"]))).toEqual({
+      repo: "acme/app",
+      host: "cache.example.test"
+    })
+  })
+
+  it("discovers the origin remote and resolves an anonymous jjhub cache when nothing is declared", async () => {
+    const root = await makeRoot()
+    await Fs.mkdir(NodePath.join(root, ".git"), { recursive: true })
+    await Fs.writeFile(
+      NodePath.join(root, ".git", "config"),
+      "[core]\n\tbare = false\n[remote \"upstream\"]\n\turl = git@github.com:acme/app.git\n[remote \"origin\"]\n\turl = git@ssh.jjhub.tech:acme/app.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+    )
+    expect(await discoverJjhubRepository(root, {})).toEqual({ repo: "acme/app", host: "ssh.jjhub.tech" })
+    expect(await resolveRemoteCache(root, undefined, { environment: {} })).toEqual({
+      endpoint: "https://api.jjhub.tech/api/repos/acme/app/build-cache",
+      credentials: { _tag: "anonymous", writeTokenEnv: "SMITHERS_CACHE_TOKEN" },
+      discovered: { repo: "acme/app", host: "ssh.jjhub.tech" }
+    })
+    expect(
+      await resolveRemoteCache(root, undefined, {
+        environment: { SMITHERS_JJHUB_API_URL: "https://jjhub.example.test" }
+      })
+    ).toMatchObject({
+      endpoint: "https://jjhub.example.test/api/repos/acme/app/build-cache"
+    })
+    expect(await resolveRemoteCache(root, undefined, { environment: { SMITHERS_CACHE_DISCOVERY: "0" } }))
+      .toBeUndefined()
+  })
+
+  it("reads the jj git backend config when the checkout is not colocated", async () => {
+    const root = await makeRoot()
+    await Fs.mkdir(NodePath.join(root, ".jj", "repo", "store", "git"), { recursive: true })
+    await Fs.writeFile(
+      NodePath.join(root, ".jj", "repo", "store", "git", "config"),
+      "[remote \"origin\"]\n\turl = https://api.jjhub.tech/acme/app.git\n"
+    )
+    expect(await discoverJjhubRepository(root, {})).toEqual({ repo: "acme/app", host: "api.jjhub.tech" })
+    expect(await discoverJjhubRepository(await makeRoot(), {})).toBeUndefined()
+  })
+
+  it("prefers a declaration over discovery", async () => {
+    const root = await makeRoot()
+    await Fs.mkdir(NodePath.join(root, ".git"), { recursive: true })
+    await Fs.writeFile(
+      NodePath.join(root, ".git", "config"),
+      "[remote \"origin\"]\n\turl = git@ssh.jjhub.tech:acme/app.git\n"
+    )
+    await Fs.writeFile(
+      NodePath.join(root, "BUILD.ts"),
+      "import { Smithers } from \"@smthrs/targets\"\nexport const cache = Smithers.RemoteCache.make({ endpoint: \"https://declared.example.test\" })\n"
+    )
+    expect(await resolveRemoteCache(root, undefined, { environment: {} })).toEqual({
+      endpoint: "https://declared.example.test",
+      credentials: { _tag: "shared", tokenEnv: "SMITHERS_CACHE_TOKEN" }
+    })
   })
 })

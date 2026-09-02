@@ -248,17 +248,52 @@ const remoteCacheAccess = (
       ? runtime.cacheToken ?? environmentOf(runtime)[name]
       : environmentOf(runtime)[name]
   const credentials = remoteCache.credentials
-  const readToken = tokenAt(
-    credentials._tag === "shared" ? credentials.tokenEnv : credentials.readTokenEnv
-  )
-  return {
-    ...remoteCache,
-    readToken,
-    // One declared credential authenticates both directions, which is the
-    // posture every deployment had before the split existed.
-    writeToken: credentials._tag === "shared" ? readToken : tokenAt(credentials.writeTokenEnv),
-    publishNamespace: publishNamespaceOf(runtime)
+  const publishNamespace = publishNamespaceOf(runtime)
+  switch (credentials._tag) {
+    case "shared": {
+      // One declared credential authenticates both directions, which is the
+      // posture every deployment had before the split existed.
+      const readToken = tokenAt(credentials.tokenEnv)
+      return { ...remoteCache, readToken, writeToken: readToken, publishNamespace }
+    }
+    case "split":
+      return {
+        ...remoteCache,
+        readToken: tokenAt(credentials.readTokenEnv),
+        writeToken: tokenAt(credentials.writeTokenEnv),
+        publishNamespace
+      }
+    case "public":
+      // The committed literal reads; the environment publishes. The literal
+      // never reaches a child process: it is not an environment variable.
+      return {
+        ...remoteCache,
+        readToken: () => credentials.publicReadToken,
+        writeToken: tokenAt(credentials.writeTokenEnv),
+        publishNamespace
+      }
+    case "anonymous": {
+      // Discovered from the jjhub remote with nothing committed: reads go out
+      // bare (a public repository answers them), and a credential in the
+      // environment, when one is there, serves both directions.
+      const token = tokenAt(credentials.writeTokenEnv)
+      return { ...remoteCache, readToken: token, writeToken: token, publishNamespace }
+    }
   }
+}
+
+/**
+ * Says once per process that the cache came from the jjhub remote rather
+ * than a declaration, and how to make that permanent.
+ */
+const discoveryNoted = new Set<string>()
+const noteDiscoveredCache = (remoteCache: ResolvedRemoteCache, runtime: RuntimeConfig): void => {
+  if (remoteCache.discovered === undefined || discoveryNoted.has(remoteCache.endpoint)) return
+  discoveryNoted.add(remoteCache.endpoint)
+  terminalsOf(runtime).stderr.write(
+    `smthrs: using the jjhub build cache for ${remoteCache.discovered.repo} (no declaration; anonymous reads, ` +
+      `SMITHERS_CACHE_TOKEN publishes). Run \`smithers cache connect\` to commit a read token.\n`
+  )
 }
 
 const prepare = async (
@@ -270,7 +305,8 @@ const prepare = async (
   const root = NodePath.resolve(flags.workspace)
   const config = await resolveConfig(root, flags.cacheDir)
   runtime.signal?.throwIfAborted()
-  const remoteCache = await resolveRemoteCache(root, runtime.cacheUrl)
+  const remoteCache = await resolveRemoteCache(root, runtime.cacheUrl, { environment: environmentOf(runtime) })
+  if (remoteCache !== undefined) noteDiscoveredCache(remoteCache, runtime)
   const preparedRemote = remoteCacheAccess(remoteCache, runtime)
   if (writeState && config.gitignored) await ensureGitignored(root, config.cacheDirectory)
   runtime.signal?.throwIfAborted()

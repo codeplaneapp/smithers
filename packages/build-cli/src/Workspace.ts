@@ -22,6 +22,7 @@ import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
 import { buildModuleUrl, importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
+import * as Environment from "./Environment.ts"
 import { errorCode, failureMessage, optionalOpenFlag } from "./internal/Fs.ts"
 import * as Path from "./internal/Path.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
@@ -522,6 +523,14 @@ export const resolveInstallAttrs = async (root: string): Promise<unknown> => {
 export type ResolvedRemoteCacheCredentials =
   | { readonly _tag: "shared"; readonly tokenEnv: string }
   | { readonly _tag: "split"; readonly readTokenEnv: string; readonly writeTokenEnv: string }
+  /** Reads use a committed public read token; writes read `writeTokenEnv`. */
+  | { readonly _tag: "public"; readonly publicReadToken: string; readonly writeTokenEnv: string }
+  /**
+   * No declaration: the endpoint was discovered from the jjhub remote. Reads
+   * go out anonymously (a public repository answers them) unless
+   * `writeTokenEnv` holds a credential, which then serves both directions.
+   */
+  | { readonly _tag: "anonymous"; readonly writeTokenEnv: string }
 
 /**
  * The remote-cache settings one command runs under.
@@ -533,6 +542,19 @@ export type ResolvedRemoteCacheCredentials =
 export interface ResolvedRemoteCache {
   readonly endpoint: string
   readonly credentials: ResolvedRemoteCacheCredentials
+  /** Present when the endpoint came from the workspace's jjhub remote, not a declaration. */
+  readonly discovered?: DiscoveredJjhubRepository | undefined
+}
+
+/**
+ * A repository found on a jjhub remote of the workspace.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface DiscoveredJjhubRepository {
+  readonly repo: string
+  readonly host: string
 }
 
 /**
@@ -548,10 +570,17 @@ export interface ResolvedRemoteCache {
  */
 export const credentialEnvNames = (
   credentials: ResolvedRemoteCacheCredentials
-): ReadonlyArray<string> =>
-  credentials._tag === "shared"
-    ? [credentials.tokenEnv]
-    : [credentials.readTokenEnv, credentials.writeTokenEnv]
+): ReadonlyArray<string> => {
+  switch (credentials._tag) {
+    case "shared":
+      return [credentials.tokenEnv]
+    case "split":
+      return [credentials.readTokenEnv, credentials.writeTokenEnv]
+    case "public":
+    case "anonymous":
+      return [credentials.writeTokenEnv]
+  }
+}
 
 /**
  * A resolved remote cache with the readers that fetch its credentials.
@@ -591,14 +620,154 @@ export interface RemoteCacheAccess extends ResolvedRemoteCache {
  */
 export const resolveRemoteCache = async (
   root: string,
-  endpointOverride?: string | undefined
+  endpointOverride?: string | undefined,
+  options: { readonly environment?: Readonly<Record<string, string | undefined>> | undefined } = {}
 ): Promise<ResolvedRemoteCache | undefined> => {
   const canonical = await SafeFs.canonicalRoot(root)
   const entry = await buildEntry(canonical, "BUILD.ts")
-  return remoteCacheOf(
+  const resolved = remoteCacheOf(
     entry === undefined ? undefined : declaredRemoteCache(await importNamespace(entry)),
     endpointOverride
   )
+  if (resolved !== undefined) return resolved
+  const environment = options.environment ?? Environment.ambientEnvironment()
+  if (environment["SMITHERS_CACHE_DISCOVERY"] === "0") return undefined
+  const discovered = await discoverJjhubRepository(canonical, environment)
+  if (discovered === undefined) return undefined
+  return {
+    endpoint: jjhubCacheEndpoint(discovered.repo, environment),
+    credentials: { _tag: "anonymous", writeTokenEnv: RemoteCache.defaultTokenEnv },
+    discovered
+  }
+}
+
+/**
+ * The hosts whose remotes identify a jjhub repository. `SMITHERS_JJHUB_HOSTS`
+ * (comma separated) adds a self-hosted deployment's hosts.
+ *
+ * @category discovery
+ * @since 0.1.0
+ */
+export const defaultJjhubHosts: ReadonlyArray<string> = [
+  "jjhub.tech",
+  "api.jjhub.tech",
+  "ssh.jjhub.tech",
+  "git.jjhub.tech"
+]
+
+const maximumGitConfigBytes = 256 * 1024
+const remoteSection = /^\s*\[remote\s+"([^"]+)"\]\s*$/
+const urlLine = /^\s*url\s*=\s*(.+?)\s*$/
+const scpLike = /^(?:[^@\s]+@)?([^:/\s]+):([^\s]+)$/
+
+const jjhubHostsOf = (environment: Readonly<Record<string, string | undefined>>): ReadonlySet<string> => {
+  const extra = (environment["SMITHERS_JJHUB_HOSTS"] ?? "").split(",").map((host) => host.trim().toLowerCase()).filter(
+    (host) => host !== ""
+  )
+  return new Set([...defaultJjhubHosts, ...extra])
+}
+
+/**
+ * The cache endpoint of a repository on jjhub. `SMITHERS_JJHUB_API_URL`
+ * overrides the API base for a self-hosted deployment.
+ *
+ * @category discovery
+ * @since 0.1.0
+ */
+export const jjhubCacheEndpoint = (
+  repo: string,
+  environment: Readonly<Record<string, string | undefined>>
+): string => {
+  const base = RemoteCache.normalizeEndpoint(environment["SMITHERS_JJHUB_API_URL"] ?? RemoteCache.defaultJjhubApiBase)
+  const [owner, name] = repo.split("/") as [string, string]
+  return `${base}/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/build-cache`
+}
+
+/**
+ * Parses one remote URL into `owner/name` when its host is a jjhub host.
+ *
+ * @category discovery
+ * @since 0.1.0
+ */
+export const parseJjhubRemote = (
+  url: string,
+  hosts: ReadonlySet<string> = new Set(defaultJjhubHosts)
+): DiscoveredJjhubRepository | undefined => {
+  const trimmed = url.trim()
+  let host: string | undefined
+  let path: string | undefined
+  try {
+    const parsed = new URL(trimmed)
+    host = parsed.hostname.toLowerCase()
+    path = parsed.pathname
+  } catch {
+    const match = scpLike.exec(trimmed)
+    if (match === null) return undefined
+    host = match[1]!.toLowerCase()
+    path = match[2]!
+  }
+  if (!hosts.has(host)) return undefined
+  const segments = path.replace(/^\/+/, "").replace(/\.git$/, "").replace(/\/+$/, "").split("/")
+  if (segments.length !== 2 || segments[0] === "" || segments[1] === "") return undefined
+  return { repo: `${segments[0]}/${segments[1]}`, host }
+}
+
+const readRemoteUrls = async (
+  path: string
+): Promise<ReadonlyArray<{ readonly name: string; readonly url: string }>> => {
+  let stats: NodeFs.Stats
+  try {
+    stats = await Fs.lstat(path)
+  } catch {
+    return []
+  }
+  if (!stats.isFile() || stats.size > maximumGitConfigBytes) return []
+  let text: string
+  try {
+    text = await Fs.readFile(path, "utf8")
+  } catch {
+    return []
+  }
+  const remotes: Array<{ readonly name: string; readonly url: string }> = []
+  let current: string | undefined
+  for (const line of text.split(/\r?\n/)) {
+    const section = remoteSection.exec(line)
+    if (section !== null) {
+      current = section[1]
+      continue
+    }
+    if (/^\s*\[/.test(line)) {
+      current = undefined
+      continue
+    }
+    const url = urlLine.exec(line)
+    if (current !== undefined && url !== null) remotes.push({ name: current, url: url[1]! })
+  }
+  return remotes
+}
+
+/**
+ * Finds the jjhub repository a workspace's `origin` (or any) remote points
+ * at, reading the colocated `.git/config` first and the jj git backend's
+ * config second. Never spawns git or jj.
+ *
+ * @category discovery
+ * @since 0.1.0
+ */
+export const discoverJjhubRepository = async (
+  root: string,
+  environment: Readonly<Record<string, string | undefined>>
+): Promise<DiscoveredJjhubRepository | undefined> => {
+  const hosts = jjhubHostsOf(environment)
+  for (const relative of [".git/config", ".jj/repo/store/git/config"]) {
+    const remotes = await readRemoteUrls(NodePath.join(root, relative))
+    const ordered = [...remotes.filter((r) => r.name === "origin"), ...remotes.filter((r) => r.name !== "origin")]
+    for (const remote of ordered) {
+      const found = parseJjhubRemote(remote.url, hosts)
+      if (found !== undefined) return found
+    }
+  }
+  return undefined
 }
 
 /**
@@ -621,6 +790,13 @@ export const remoteCacheOf = (
   const credentials = (): ResolvedRemoteCacheCredentials => {
     const read = declaration?.token.env ?? RemoteCache.defaultTokenEnv
     const write = declaration?.write?.env
+    if (declaration?.publicReadToken !== undefined) {
+      return {
+        _tag: "public",
+        publicReadToken: declaration.publicReadToken,
+        writeTokenEnv: RemoteCache.normalizeTokenEnv(write ?? read)
+      }
+    }
     // The endpoint may be overridden per host; which credentials the workspace
     // declared may not, so the split survives an override.
     return write === undefined
