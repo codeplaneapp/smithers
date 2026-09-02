@@ -120,8 +120,8 @@ const uniqueTools = (tools: ReadonlyArray<ToolDefinition>): ReadonlyArray<ToolDe
   return result
 }
 
-// docs/specs/Research/Pi Reference Findings 2026-07-27.md §4:
-// lazy schemas must not change the prompt prefix.
+// Measured against pi's reference implementation: a lazy schema must not
+// change the prompt prefix.
 const lazyTool = (tool: ToolDefinition): ToolDefinition => ({
   name: tool.name,
   description: tool.description,

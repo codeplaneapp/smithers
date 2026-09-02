@@ -191,7 +191,7 @@ describe("Route.prepare", () => {
             get boom() {
               throw "not an Error"
             }
-          } as unknown)
+          })
       }
     })
     const encoded = await Effect.runPromise(
@@ -500,7 +500,7 @@ describe("Route.prepare", () => {
       ...protocol,
       body: {
         schema: Schema.Unknown,
-        from: () => Effect.succeed({ generatedAt: new Date(0) } as unknown)
+        from: () => Effect.succeed({ generatedAt: new Date(0) })
       }
     })
     const route = Route.make({
@@ -524,7 +524,7 @@ describe("Route.prepare", () => {
       ...protocol,
       body: {
         schema: Schema.Unknown,
-        from: () => Effect.succeed({ thinking: { budget_tokens: undefined } } as unknown)
+        from: () => Effect.succeed({ thinking: { budget_tokens: undefined } })
       }
     })
     const route = Route.make({

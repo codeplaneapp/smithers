@@ -7,8 +7,8 @@
  *
  * @since 0.1.0
  */
-import { Effect, Option, Schema } from "effect"
-import { AssistantMessage, JsonObject, StopReason, ToolCallPart } from "./ModelRequest.ts"
+import { Effect, Schema } from "effect"
+import { AssistantMessage, StopReason, ToolCallPart } from "./ModelRequest.ts"
 
 /**
  * Token counts a provider reports for one request. Every field is
@@ -303,8 +303,9 @@ export const Settle = Schema.Struct({
   stopReason: StopReason,
   responseId: Schema.optional(Schema.String),
   /**
-   * Stored provider reasoning items required for replay-safe continuation.
-   * See docs/specs/Concepts/Model Layer.md.
+   * Stored provider reasoning items required for replay-safe continuation: a
+   * provider that keeps reasoning server side answers the next request with
+   * these ids rather than the text they stand for.
    */
   itemIds: Schema.optional(Schema.Array(Schema.String))
 })
@@ -368,10 +369,6 @@ export const ModelEvent = Object.assign(
  */
 export type ModelEvent = typeof ModelEvent.Type
 
-const decodeToolArguments = Schema.decodeUnknownOption(
-  Schema.fromJsonString(JsonObject)
-)
-
 /**
  * Folds a stream into the one durable assistant message. No settlement means
  * interruption, which is represented as an aborted message rather than an
@@ -381,13 +378,12 @@ const decodeToolArguments = Schema.decodeUnknownOption(
  * `ToolStream.end` refuses argument text that is not a JSON object with
  * `invalid_provider_output`, because a live stream that cannot say what the
  * model asked for must fail rather than execute a guess. This projection
- * instead substitutes `"{}"`, because it folds a stream that has already
- * happened into a transcript that must stay decodable and replayable; throwing
- * here would make an already-journaled turn unreadable. The built-in protocols
- * validate at `ToolStream.end` before they emit `tool-call-end`, so a repaired
- * `"{}"` never reaches a provider: it can only appear on an aborted turn, which
- * every built-in lowering omits from the next request. A consumer must still
- * validate arguments before executing a tool.
+ * preserves malformed text verbatim, because it folds a stream that has
+ * already happened and the durable transcript must remain truthful. Built-in
+ * protocols validate live completions before they emit `tool-call-end`; only
+ * an aborted turn can retain partial text, and every built-in lowering omits
+ * that turn from the next request. A consumer must still validate arguments
+ * before executing a tool.
  *
  * @category destructors
  * @since 0.1.0
@@ -449,7 +445,7 @@ export function settledMessage(
           const arguments_ = event.arguments ?? current.arguments
           parts[index] = {
             ...current,
-            arguments: Option.isSome(decodeToolArguments(arguments_)) ? arguments_ : "{}"
+            arguments: arguments_
           }
         }
         break

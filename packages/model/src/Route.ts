@@ -27,7 +27,7 @@ import * as RequestExecutor from "./RequestExecutor.ts"
  * The credential-free representation used to construct a sealed model step.
  * This view, including the canonical body bytes, is what the engine digests
  * into the sealed-step key when it services `EngineLike.sealStep`
- * (`packages/harness/src/EngineLike.ts`, `docs/reference/model.md`).
+ * (`packages/harness/src/EngineLike.ts`).
  * Credentials are signed onto a copy afterwards and never enter this value.
  *
  * @since 0.1.0

@@ -306,7 +306,7 @@ describe("AnthropicMessages streaming", () => {
     expect(events).toEqual([
       { type: "tool-call-start", id: "toolu_abort", name: "lookup" },
       { type: "tool-call-delta", id: "toolu_abort", arguments: "{\"query\":\"par" },
-      { type: "tool-call-end", id: "toolu_abort", arguments: "{}" }
+      { type: "tool-call-end", id: "toolu_abort", arguments: "{\"query\":\"par" }
     ])
     expect(events.some((event) => event.type === "settle")).toBe(false)
     expect(ModelEvent.settledMessage(events).message).toMatchObject({
@@ -316,7 +316,7 @@ describe("AnthropicMessages streaming", () => {
           type: "tool-call",
           id: "toolu_abort",
           name: "lookup",
-          arguments: "{}"
+          arguments: "{\"query\":\"par"
         }
       ]
     })

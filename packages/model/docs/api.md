@@ -84,7 +84,9 @@ waiting does not repair.
 A stream that ends without a `settle` event was interrupted.
 `ModelEvent.settledMessage` folds it into an assistant message with stop reason
 `aborted`, and every built-in lowering omits an aborted or errored turn from the
-next request rather than replaying content the provider will reject.
+next request rather than replaying content the provider will reject. Partial
+tool-call arguments on that interrupted turn are preserved verbatim for audit;
+they are never rewritten to `{}` or treated as executable input.
 
 ### The ChatGPT route drops maxTokens
 
@@ -110,8 +112,10 @@ stays readable.
 A failed response body stops being read at 64 KiB, so nothing beyond that is
 ever held, parsed, classified or redacted, and all three recursive walks over it
 stop at depth 12: past that a redacted subtree is replaced whole rather than
-descended. The text kept on the error is capped at 16 KiB, with `bodyTruncated`
-set when the cap bites. Endpoint URLs
+descended. The text kept on the error is capped at 16 KiB, reachable as
+`ModelError.body` with `ModelError.bodyTruncated` set when either cap bites.
+Both live outside the error's schema and are non-enumerable, so a journal never
+copies a provider body into run state. Endpoint URLs
 must be `http` or `https`, must not embed credentials or fragments, must not
 carry credential-shaped query keys, and must not contain relative path segments.
 

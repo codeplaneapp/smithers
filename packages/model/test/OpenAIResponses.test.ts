@@ -173,11 +173,11 @@ describe("OpenAIResponses", () => {
     expect(events).toEqual([
       { type: "tool-call-start", id: "call_abort", name: "write" },
       { type: "tool-call-delta", id: "call_abort", arguments: "{\"path\":" },
-      { type: "tool-call-end", id: "call_abort", arguments: "{}" }
+      { type: "tool-call-end", id: "call_abort", arguments: "{\"path\":" }
     ])
     expect(Events.ModelEvent.settledMessage(events).message).toMatchObject({
       stopReason: "aborted",
-      content: [{ type: "tool-call", id: "call_abort", name: "write", arguments: "{}" }]
+      content: [{ type: "tool-call", id: "call_abort", name: "write", arguments: "{\"path\":" }]
     })
 
     const followUp = Request.ModelRequest.make({

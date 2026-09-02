@@ -261,9 +261,8 @@ const lowerAssistant = (
   message: Extract<Message, { readonly role: "assistant" }>
 ): Result.Result<WireMessage | undefined, ModelError> =>
   Result.gen(function*() {
-    // docs/specs/Research/Pi Reference Findings 2026-07-27.md §7:
-    // replaying provider-interrupted assistant turns can make the next Messages
-    // request permanently invalid, so omit them as a unit.
+    // Replaying a provider-interrupted assistant turn can make the next
+    // Messages request permanently invalid, so omit it as a unit.
     if (message.stopReason === "aborted" || message.stopReason === "error") return undefined
 
     const content: Array<AssistantWireBlock> = []
@@ -273,8 +272,7 @@ const lowerAssistant = (
         continue
       }
       if (part.type === "thinking") {
-        // docs/specs/Research/Pi Reference Findings 2026-07-27.md §7:
-        // only a complete signed block may be replayed as Anthropic thinking.
+        // Only a complete signed block may be replayed as Anthropic thinking.
         if (part.signature === undefined) continue
         if (part.signature.startsWith(REDACTED_THINKING_PREFIX)) {
           // A turn whose reasoning was redacted still has to be replayed with
@@ -318,9 +316,9 @@ const lowerToolResults = (
   deferredNames: ReadonlyMap<string, string>,
   loadedNames: Set<string>
 ): WireMessage => {
-  // docs/specs/Research/Pi Reference Findings 2026-07-27.md §4 and pi's
-  // deferred-tools regression fixture: references replace ordinary
-  // tool_result content, while that output moves to sibling text content.
+  // Measured against pi's deferred-tools regression fixture: references
+  // replace ordinary tool_result content, while that output moves to sibling
+  // text content.
   const results: Array<UserWireBlock> = []
   const siblings: Array<UserWireBlock> = []
   for (const part of message.content) {
@@ -388,9 +386,8 @@ const buildBody = (
     const params = request.params
 
     // Field order is explicit even though Route performs canonical encoding.
-    // This keeps construction itself reviewable as one byte-deterministic sealed
-    // step declaration (docs/specs/Specs/Harness.md, "The model call is a
-    // sealed step").
+    // A model call is a sealed step, so this keeps construction itself
+    // reviewable as one byte-deterministic declaration.
     return {
       model: request.modelId,
       max_tokens: params.maxTokens ?? 4096,

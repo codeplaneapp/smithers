@@ -17,19 +17,11 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-model-coverage-${process.pid}`),
       include: ["src/**"],
-      // The rc.0 contract asks for 100% here. These are the honest measured
-      // floors, ratcheted up from 75/92/93/90 once the Chat Completions state
-      // machine, the executor's classification and redaction paths, and the
-      // route's preparation failures were actually covered. The remainder is a
-      // handful of defensive branches, and closing it is what removes "model"
-      // from `coverageFloorDeferred` in
-      // packages/flows/test/vitestCoverageIsolation.test.ts, which today
-      // requires at least one threshold below 100 for the packages it lists.
       thresholds: {
-        branches: 98,
-        functions: 99,
+        branches: 100,
+        functions: 100,
         lines: 100,
-        statements: 99
+        statements: 100
       }
     }
   }

@@ -275,8 +275,8 @@ export class AssistantMessage extends Schema.Class<AssistantMessage>("flows/mode
   stopReason: StopReason,
   responseId: Schema.optional(Schema.String),
   /**
-   * Stored OpenAI reasoning item ids that must be replayed as item references.
-   * See docs/specs/Concepts/Model Layer.md, "Flue adoption and deviation".
+   * Stored OpenAI reasoning item ids that must be replayed as item references
+   * rather than as the reasoning text they stand for.
    */
   itemIds: Schema.optional(Schema.Array(Schema.String))
 }) {}
@@ -356,9 +356,9 @@ export class ToolDefinition extends Schema.Class<ToolDefinition>("flows/model/To
   description: Schema.String,
   parameters: JsonObject,
   /**
-   * A lazy tool is wire metadata only. Per
-   * docs/specs/Research/Pi Reference Findings 2026-07-27.md §4 it may never
-   * add prompt text, snippets, or guidelines.
+   * A lazy tool is wire metadata only: it may never add prompt text,
+   * snippets, or guidelines, because changing the prompt prefix would change
+   * the sealed-step key of every request that declares it.
    */
   deferred: Schema.optional(Schema.Boolean),
   loader: Schema.optional(Schema.Boolean)

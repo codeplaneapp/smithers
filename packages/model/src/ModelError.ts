@@ -100,12 +100,13 @@ export const isQuotaExhausted = (providerCode: string | undefined, message: stri
  * Normalized provider failure. Its fields intentionally exclude credentials,
  * headers, request bodies, and client objects.
  *
- * `code` is the stable serialized field and the public error contract
- * (`docs/reference/model.md`). There is no separate `reason` field: flows
- * deliberately flattens opencode's tagged reason union into this one literal
- * set plus typed optional detail fields — the deviation is declared in
- * `docs/specs/Concepts/Model Layer.md`. Kernel permission and journal
- * failures are separate typed error classes, never `ModelError` codes.
+ * `code` is the stable serialized field and the public error contract; the
+ * table of codes and their meanings is in `packages/model/docs/api.md`. There
+ * is no separate `reason` field: this package deliberately flattens opencode's
+ * tagged reason union into one literal code set plus typed optional detail
+ * fields, so a consumer branches on one value instead of destructuring a union.
+ * Kernel permission and journal failures are separate typed error classes,
+ * never `ModelError` codes.
  *
  * @category errors
  * @since 0.1.0
@@ -125,9 +126,22 @@ export class ModelError extends Schema.TaggedError<ModelError>()("flows/model/Mo
   requestId: Schema.optional(Schema.String),
   httpStatus: Schema.optional(Schema.Number)
 }) {
-  // Provider diagnostics are redacted, capped, and kept outside the durable
-  // schema so journal serialization does not copy an error body into state.
+  /**
+   * The failed provider response body, redacted and capped at 16 KiB, present
+   * only on an error the shared request executor raised from an HTTP response.
+   *
+   * It is deliberately outside the schema above and defined non-enumerably, so
+   * a journal, a `JSON.stringify`, and a structural comparison all see the same
+   * value they saw before it existed: a provider body is diagnostic text, not
+   * durable state, and copying it into a run's history is how a long body
+   * becomes a permanent one.
+   */
   declare readonly body: string | undefined
+  /**
+   * Whether {@link body} is a prefix of what the provider sent, either because
+   * the read stopped at 64 KiB or because the redacted text exceeded the 16 KiB
+   * kept here.
+   */
   declare readonly bodyTruncated: boolean | undefined
 
   /** @category getters @since 0.1.0 */

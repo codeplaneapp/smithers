@@ -183,18 +183,18 @@ describe("ModelEvent", () => {
     expect(settled.message.content).toEqual([{ type: "text", text: "" }])
   })
 
-  // The projection is deliberately lenient where `ToolStream.end` is strict:
-  // `end` fails a live stream with `invalid_provider_output`, and this fold
-  // substitutes `{}` so an already-journaled turn stays decodable. See the
-  // JSDoc on both.
-  it("repairs unparseable end arguments to {} where ToolStream.end would fail, and keeps accumulated ones when none are repeated", () => {
-    const repaired = Events.settledMessage([
+  // The projection preserves what an interrupted provider sent, while
+  // `ToolStream.end` refuses the same malformed text on a live completion.
+  it("preserves unparseable end arguments and keeps accumulated ones when none are repeated", () => {
+    const partial = Events.settledMessage([
       { type: "tool-call-start", id: "call", name: "write" },
       { type: "tool-call-delta", id: "call", arguments: "{\"path\":\"a\"}" },
       { type: "tool-call-end", id: "call", arguments: "{\"path\":" },
       { type: "settle", stopReason: "tool-calls" }
     ])
-    expect(repaired.message.content).toEqual([{ type: "tool-call", id: "call", name: "write", arguments: "{}" }])
+    expect(partial.message.content).toEqual([
+      { type: "tool-call", id: "call", name: "write", arguments: "{\"path\":" }
+    ])
 
     const accumulated = Events.settledMessage([
       { type: "tool-call-start", id: "call", name: "write" },

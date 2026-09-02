@@ -87,9 +87,11 @@ const redactHeaders = (
 const redactUrl = (value: string): string => {
   if (!URL.canParse(value)) return REDACTED
   const url = new URL(value)
-  url.searchParams.forEach((_, key) => {
+  // Snapshot before replacing values: URLSearchParams.forEach observes its
+  // own mutations, and `set` on a credential key can revisit that key forever.
+  for (const key of [...url.searchParams.keys()]) {
     if (isSensitiveQueryName(key)) url.searchParams.set(key, REDACTED)
-  })
+  }
   return url.toString()
 }
 
@@ -343,7 +345,9 @@ const addSecret = (values: Set<string>, value: string): void => {
   values.add(value)
   values.add(encodeURIComponent(value))
   const json = encodeJsonString(value)
-  if (json.length >= 2) values.add(json.slice(1, -1))
+  // Encoding a string always emits its two JSON quotes, including for the
+  // empty string (which returned above), so the interior slice is total.
+  values.add(json.slice(1, -1))
 }
 
 const addStructuredSecrets = (values: Set<string>, value: unknown, depth = 0): void => {
@@ -558,7 +562,7 @@ const statusError = (
     const retry = retryAfter(headers, now)
     const parsed = parsedBody(body)
 
-    // docs/specs/Concepts/Run Ownership.md §4 needs one durable wake instant.
+    // A run that parks on this failure needs exactly one durable wake instant.
     // Retry-After is authoritative; otherwise only the exhausted resource's
     // window is eligible, preventing unrelated early wake/spin loops.
     const candidates: Array<ResetCandidate> = [

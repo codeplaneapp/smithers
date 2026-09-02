@@ -113,8 +113,9 @@ export const delta = (state: State, callId: string, fragment: string): State => 
  * argument text that is not a JSON object fails with
  * `invalid_provider_output`, because a live stream that cannot say what the
  * model asked for must not hand a guess to a tool. {@link flushAborted} and
- * `ModelEvent.settledMessage` take the lenient half for a stream that has
- * already ended, substituting `"{}"` so the journaled turn stays decodable.
+ * `ModelEvent.settledMessage` preserve the incomplete text for a stream that
+ * has already ended, so the journal records what arrived without making it
+ * executable.
  *
  * @category operations
  * @since 0.1.0
@@ -137,9 +138,11 @@ export const end = (state: State, callId: string): EndResult => {
 
 /**
  * Settles unfinished calls after a stream halt. Empty or partial arguments are
- * represented as `{}` so the historical assistant turn remains resumable. This
- * is the lenient half of the split documented on {@link end}: a halted stream
- * is history, and history has to stay decodable.
+ * preserved verbatim so the historical assistant turn records what arrived
+ * instead of laundering malformed provider output into an empty object. This
+ * is the non-executing half of the split documented on {@link end}: built-in
+ * lowerings omit aborted turns from continuations, while a live completion
+ * still passes through the strict validator above.
  *
  * @category operations
  * @since 0.1.0
@@ -150,9 +153,6 @@ export const flushAborted = (state: State): FlushResult => ({
   completed: state.open.map((call) => ({
     callId: call.callId,
     name: call.name,
-    arguments: (() => {
-      const arguments_ = call.fragments.join("") || "{}"
-      return Option.isSome(decodeArguments(arguments_)) ? arguments_ : "{}"
-    })()
+    arguments: call.fragments.join("")
   }))
 })

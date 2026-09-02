@@ -381,7 +381,7 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
     expect(replayData(fixture("abort-mid-stream.sse"))).toEqual([
       { type: "tool-call-start", id: "call_abort", name: "lookup" },
       { type: "tool-call-delta", id: "call_abort", arguments: "{\"query\":\"par" },
-      { type: "tool-call-end", id: "call_abort", arguments: "{}" }
+      { type: "tool-call-end", id: "call_abort", arguments: "{\"query\":\"par" }
     ])
   })
 

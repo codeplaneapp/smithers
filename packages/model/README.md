@@ -6,7 +6,10 @@ Schema-first Effect model protocols, routes, and streaming events for flows. It 
 npm install @smthrs/model
 ```
 
-Full documentation, including the failure vocabulary, the retry ladder, the redaction rules and the resource limits, is in [`docs/reference.md`](./docs/reference.md). It is generated from this package: the prose lives in `docs/api.md`, the reference lives in the JSDoc under `src/`. It becomes `/api/model` on the site once `vocs.config.ts` lists that page in its sidebar; `Package.ts` records the blocker.
+Full documentation, including the failure vocabulary, retry ladder, redaction
+rules, and resource limits, is in [`docs/reference.md`](./docs/reference.md)
+and on the [documentation site](../../docs/pages/api/model.md). Both are
+generated from `docs/api.md` and the JSDoc under `src/`.
 
 ## Public API
 

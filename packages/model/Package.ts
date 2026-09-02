@@ -9,12 +9,13 @@
  */
 export const Package = {
   name: "@smthrs/model",
-  /**
-   * The generated reference page, written whole from `docs/api.md` plus the
-   * export tables the barrel's namespaces declare.
-   */
+  /** The generated site reference page. */
   api: {
     source: "docs/api.md",
+    target: "docs/pages/api/model.md"
+  },
+  /** The same reference shipped beside the package README. */
+  reference: {
     target: "packages/model/docs/reference.md"
   },
   /**
@@ -31,20 +32,5 @@ export const Package = {
    * Pages elsewhere in the repository that must keep pointing readers at this
    * package rather than restating its contract. The generator verifies each.
    */
-  references: [],
-  /**
-   * The one surface this package does not yet own.
-   *
-   * A page at `docs/pages/api/model.md` needs a sidebar entry in the
-   * hand-written `vocs.config.ts` before it can exist: `scripts/check-docs.mjs`
-   * fails any published page the sidebar does not list, and that file is not a
-   * generated output. Until the entry lands, `docs/reference.md` is the
-   * generated reference and lives in the package. The support matrix row for
-   * `@smthrs/model` should gain the `/api/model` link in the same change.
-   */
-  site: {
-    target: "docs/pages/api/model.md",
-    sidebarEntry: "{ text: \"@smthrs/model\", link: \"/api/model\" }",
-    blockedBy: "vocs.config.ts must list the page in its sidebar first"
-  }
+  references: ["docs/pages/release/support-matrix.md"]
 } as const

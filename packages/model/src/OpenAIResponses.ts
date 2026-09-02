@@ -185,8 +185,7 @@ const systemInstructions = (request: ModelRequest): string | undefined => {
 }
 
 const assistantInput = (message: Extract<Message, { readonly role: "assistant" }>): ReadonlyArray<InputItem> => {
-  // docs/specs/Research/Pi Reference Findings 2026-07-27.md §7:
-  // incomplete historical output cannot be replayed as a completed Responses
+  // Incomplete historical output cannot be replayed as a completed Responses
   // item. Omitting it lets the next user input resume cleanly.
   if (message.stopReason === "aborted" || message.stopReason === "error") return []
   const result: Array<InputItem> = []
@@ -255,8 +254,8 @@ const searchItems = (
     return true
   })
   if (activated.length === 0) return []
-  // docs/specs/Research/Pi Reference Findings 2026-07-27.md §4:
-  // this exact synthetic pair is a completed client search at the load point.
+  // Measured against pi's reference implementation: this exact synthetic pair
+  // reads as a completed client search at the load point.
   const searchCallId = `pi_tool_load_${
     CanonicalJson.shortHash(`${toolCallId}:${activated.map((tool) => tool.name).join(",")}`)
   }`

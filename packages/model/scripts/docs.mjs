@@ -142,7 +142,10 @@ const replaceRegion = (source, name, body) => {
   return `${source.slice(0, start)}${regionStart(name)}\n\n${body.trim()}\n\n${source.slice(end)}`
 }
 
-const outputs = new Map([[Package.api.target, apiPage]])
+const outputs = new Map([
+  [Package.api.target, apiPage],
+  [Package.reference.target, apiPage]
+])
 for (const region of Package.regions) {
   const absolute = join(repoRoot, region.target)
   outputs.set(region.target, replaceRegion(read(absolute), region.region, readmeBlock))

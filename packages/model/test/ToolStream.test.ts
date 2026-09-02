@@ -66,17 +66,17 @@ describe("ToolStream", () => {
     expect(result.completed).toEqual({ callId: "call_1", name: "second", arguments: "{}" })
   })
 
-  it("splits one condition into a strict live policy and a lenient history policy", () => {
+  it("refuses malformed live arguments and preserves aborted history verbatim", () => {
     // The same partial argument text: `end` refuses it because a live stream
-    // must not hand a guess to a tool, and `flushAborted` repairs it because a
-    // halted stream is history that has to stay decodable. Both JSDoc blocks
-    // state the split; this pins it.
+    // must not hand a guess to a tool, while `flushAborted` records what the
+    // provider actually sent. The aborted turn is never lowered back onto the
+    // wire by a built-in protocol.
     let state = ToolStream.start(ToolStream.initial(), { callId: "call_1", name: "write" })
     state = ToolStream.delta(state, "call_1", "{\"path\":")
 
     expect(ToolStream.end(state, "call_1")).toMatchObject({ code: "invalid_provider_output" })
     expect(ToolStream.flushAborted(state).completed).toEqual([
-      { callId: "call_1", name: "write", arguments: "{}" }
+      { callId: "call_1", name: "write", arguments: "{\"path\":" }
     ])
   })
 
@@ -84,7 +84,7 @@ describe("ToolStream", () => {
     expect(ToolStream.flushAborted(ToolStream.initial())).toEqual({ state: { open: [] }, completed: [] })
   })
 
-  it("settles open calls with valid synthetic arguments after an abort", () => {
+  it("settles open calls with their exact partial and empty arguments after an abort", () => {
     let state = ToolStream.start(ToolStream.initial(), { callId: "partial", name: "one" })
     state = ToolStream.delta(state, "partial", "{\"not\":\"complete\"")
     state = ToolStream.start(state, { callId: "empty", name: "two" })
@@ -92,8 +92,8 @@ describe("ToolStream", () => {
     expect(ToolStream.flushAborted(state)).toEqual({
       state: { open: [] },
       completed: [
-        { callId: "partial", name: "one", arguments: "{}" },
-        { callId: "empty", name: "two", arguments: "{}" }
+        { callId: "partial", name: "one", arguments: "{\"not\":\"complete\"" },
+        { callId: "empty", name: "two", arguments: "" }
       ]
     })
   })

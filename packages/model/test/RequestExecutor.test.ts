@@ -128,8 +128,12 @@ const transportFailure = async (
   reason: (sent: HttpClientRequest.HttpClientRequest) => HttpClientError.HttpClientError["reason"],
   sent: HttpClientRequest.HttpClientRequest
 ): Promise<ModelError> => {
+  let attempts = 0
   const client = HttpClient.make((attempted) =>
-    Effect.fail(new HttpClientError.HttpClientError({ reason: reason(attempted) }))
+    Effect.sync(() => {
+      attempts += 1
+      return new HttpClientError.HttpClientError({ reason: reason(attempted) })
+    }).pipe(Effect.flatMap(Effect.fail))
   )
   const layer = RequestExecutor.layer.pipe(
     Layer.provide(Layer.succeed(KernelHttpClient.HttpClient)(client))
@@ -139,8 +143,20 @@ const transportFailure = async (
       Effect.gen(function*() {
         const executor = yield* RequestExecutor.RequestExecutor
         const fiber = yield* execute(executor, sent).pipe(Effect.flip, Effect.forkChild)
-        yield* Effect.yieldNow
-        yield* TestClock.adjust(120_000)
+        // Advance only after each attempt has actually installed its retry
+        // sleep. A single yield raced on heavier diagnostic work and could
+        // move the clock before the sleep existed, leaving the test parked.
+        if (!URL.canParse(sent.url)) {
+          // URL rejection happens before the low-level client callback, so no
+          // transport attempt can increment the counter. TestClock waits for
+          // the retry sleep to become stable before it advances.
+          yield* TestClock.adjust(120_000)
+        } else {
+          for (let expected = 1; expected < RequestExecutor.rebuildAfter; expected += 1) {
+            while (attempts < expected) yield* Effect.yieldNow
+            yield* TestClock.adjust(120_000)
+          }
+        }
         return yield* Fiber.join(fiber)
       }).pipe(
         Effect.provide(layer),
@@ -770,10 +786,11 @@ describe("RequestExecutor", () => {
     const credential = "MALFORMED-SECRET-VALUE"
     const error = await errorFor({
       status: 400,
-      body: `prefix {"api_key":"${credential}" trailing`
+      body: `prefix {"public":"VISIBLE","api_key":"${credential}" trailing`
     })
 
     expect(error.message).not.toContain(credential)
+    expect(error.message).toContain("\"public\":\"VISIBLE\"")
     expect(error.message).toContain("\"api_key\":\"<redacted>\"")
   })
 
@@ -1364,6 +1381,11 @@ describe("RequestExecutor", () => {
       resetAtEpochMillis: NOW + 4_000,
       resetSource: "body.nested.reset_after"
     })
+    // A later candidate cannot displace the earlier one already selected.
+    expect(await errorFor({ status: 400, body: "{\"retry_after\":4,\"nested\":{\"reset_after\":9}}" })).toMatchObject({
+      resetAtEpochMillis: NOW + 4_000,
+      resetSource: "body.retry_after"
+    })
     expect(await errorFor({ status: 400, body: "{\"reset_at\":1700000060000}" })).toMatchObject({
       resetAtEpochMillis: 1_700_000_060_000
     })
@@ -1390,6 +1412,7 @@ describe("RequestExecutor", () => {
         "{\"reset_at\":\"1sX2m\"}",
         "{\"reset_at\":{\"nested\":1}}",
         "{\"reset_at\":true}",
+        "{\"retry_after\":\"Infinity\"}",
         "{\"retry_after\":1e308}"
       ]
     ) {
@@ -1448,13 +1471,16 @@ describe("RequestExecutor", () => {
   })
 
   it("scrubs credentials carried as appended URL parameters", async () => {
-    const withParams = Request.post("https://provider.test/v1/models").pipe(
+    const withParams = Request.post(
+      "https://provider.test/v1/models?region=eu&api_key=embedded-secret"
+    ).pipe(
       Request.setUrlParam("access_token", "param-secret"),
       Request.setUrlParam("page", "2")
     )
 
     const error = await errorFor({ status: 400, body: "echoed param-secret" }, withParams)
     expect(JSON.stringify(error)).not.toContain("param-secret")
+    expect(JSON.stringify(error)).not.toContain("embedded-secret")
 
     const transport = await transportFailure(
       (attempted) => new HttpClientError.TransportError({ request: attempted, description: "echoed param-secret" }),
@@ -1462,7 +1488,10 @@ describe("RequestExecutor", () => {
     )
     expect(transport.message).toContain("access_token=%3Credacted%3E")
     expect(transport.message).toContain("page=2")
+    expect(transport.message).toContain("region=eu")
+    expect(transport.message).toContain("api_key=%3Credacted%3E")
     expect(transport.message).not.toContain("param-secret")
+    expect(transport.message).not.toContain("embedded-secret")
   })
 
   it("redacts the header names the caller's policy names, not only the built-in ones", async () => {
@@ -1529,6 +1558,37 @@ describe("RequestExecutor", () => {
     )
 
     expect(relative.message).toBe("HTTP transport failed: InvalidUrlError (POST <redacted>)")
+  })
+
+  it("keeps diagnostics typed when an injected client answers a malformed URL", async () => {
+    // `HttpClient.make` refuses the URL before calling its transport. A custom
+    // client may deliberately accept relative targets, so the response path's
+    // credential scan must also tolerate one without defecting.
+    const client = HttpClient.makeWith<
+      HttpClientError.HttpClientError,
+      never,
+      HttpClientError.HttpClientError,
+      never
+    >(
+      (requestEffect) =>
+        Effect.flatMap(
+          requestEffect,
+          (attempted) => Effect.succeed(response(attempted, { status: 400, body: "bad request" }))
+        ),
+      (attempted) => Effect.succeed(attempted)
+    )
+    const layer = RequestExecutor.layer.pipe(
+      Layer.provide(Layer.succeed(KernelHttpClient.HttpClient)(client))
+    )
+
+    const error = await run(
+      Effect.flatMap(
+        RequestExecutor.RequestExecutor,
+        (executor) => execute(executor, Request.post("/v1/models")).pipe(Effect.flip)
+      ),
+      layer
+    )
+    expect(error).toMatchObject({ code: "invalid_request", httpStatus: 400 })
   })
 
   it("replaces a poisoned transport once waiting has stopped being the explanation", async () => {
