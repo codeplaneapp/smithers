@@ -31,6 +31,73 @@ const NO_FINDINGS =
 const NO_STALE_TOKEN =
   "Whether this thread still points at the current revision isn't computed yet (plue#453) — no stale marker is shown."
 
+/*
+ * An unread auxiliary is null and `unread` names why; a null with no reason
+ * (a payload built before the rule) says so rather than pass as "none".
+ */
+const NO_REASON = "no reason recorded"
+
+/*
+ * The landing request's state on this card's pill vocabulary (done / failed /
+ * pending, as the changeset and check pills already use): `merged` is done,
+ * `failed` is failed, `closed` is a neutral end (the cancelled tint, plue's
+ * own word as the label — the shared table would tint "closed" green), and
+ * open / draft / queued / landing are pending.
+ */
+const landingPill = (state: string): { readonly status: string; readonly label?: string } =>
+  state === "merged"
+    ? { status: "done" }
+    : state === "failed"
+    ? { status: "failed" }
+    : state === "closed"
+    ? { status: "cancelled", label: "Closed" }
+    : { status: "pending" }
+
+interface LandAct {
+  readonly label: string
+  readonly ariaLabel: string
+  /** The blocking reason the disabled button wears; null when Land may run. */
+  readonly blocked: string | null
+}
+
+/*
+ * The Land act's label, scope, and blocking reason from the card's own state
+ * (ADR 0003: "Land (confirm; disabled with the blocking reason)"). A
+ * changeset lands every member together: `landing` and `landed` block,
+ * `failed` re-lands as "Retry land" under its verbatim failure_reason. A
+ * landing request lands its WHOLE stack, so the label names the scope
+ * (`Land 1 → N`), only the top change may land (a prefix land is plue#452),
+ * and plue lands a request only while it is open or failed.
+ */
+const landAct = (payload: ChangeCard["payload"]): LandAct => {
+  const { changeset, stack } = payload
+  if (changeset !== null) {
+    const ariaLabel = "Land the changeset"
+    if (changeset.state === "landing") return { label: "Land", ariaLabel, blocked: "landing…" }
+    if (changeset.state === "landed") return { label: "Land", ariaLabel, blocked: "landed" }
+    return { label: changeset.state === "failed" ? "Retry land" : "Land", ariaLabel, blocked: null }
+  }
+  if (stack === null) return { label: "Land", ariaLabel: "Land the change", blocked: null }
+  const scope = stack.size <= 1 ? ` ${payload.changeId} alone` : ` 1 → ${stack.size} together`
+  const ariaLabel = `Land the change: lands${scope}`
+  if (stack.position < stack.size) {
+    const top = stack.changeIds[stack.size - 1] ?? "its top change"
+    return {
+      label: "Land",
+      ariaLabel,
+      blocked:
+        `landing request #${stack.landingNumber} lands 1 → ${stack.size} together from ${top} (${stack.size} of ${stack.size}); landing a prefix alone isn't possible yet (plue#452)`
+    }
+  }
+  if (stack.state === "queued" || stack.state === "landing") return { label: "Land", ariaLabel, blocked: `${stack.state}…` }
+  if (stack.state === "merged") return { label: "Land", ariaLabel, blocked: "landed" }
+  if (stack.state !== "open" && stack.state !== "failed") {
+    return { label: "Land", ariaLabel, blocked: `${stack.state} — plue lands a request only while it is open or failed` }
+  }
+  const verb = stack.state === "failed" ? "Retry land" : "Land"
+  return { label: stack.size <= 1 ? verb : `${verb} 1 → ${stack.size}`, ariaLabel, blocked: null }
+}
+
 const FACET_LABELS: ReadonlyArray<readonly [ChangeFacet, string]> = [
   ["diff", "Diff"],
   ["findings", "Findings"],
@@ -43,7 +110,7 @@ const FACET_LABELS: ReadonlyArray<readonly [ChangeFacet, string]> = [
 const ChangeDiffFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
   const { payload } = card
   if (payload.diff === null) {
-    return <p className="world-card-empty">The diff of {payload.changeId} couldn't be read.</p>
+    return <p className="world-card-empty">diff of {payload.changeId} not read ({payload.unread?.diff ?? NO_REASON})</p>
   }
   if (payload.diff.files.length === 0) {
     return <p className="world-card-empty">{payload.changeId} changes no files.</p>
@@ -71,10 +138,13 @@ const ChangeDiffFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } &
   )
 }
 
-/* The checks facet: one row per context, newest answer per context. */
+/* The checks facet: one row per context, newest answer per context. Unread (null) is never "no checks". */
 const ChangeChecksFacet = ({ card }: { readonly card: ChangeCard }) => {
   const { payload } = card
-  if (payload.checks === null || payload.checks.length === 0) {
+  if (payload.checks === null) {
+    return <p className="world-card-empty">checks not read ({payload.unread?.checks ?? NO_REASON})</p>
+  }
+  if (payload.checks.length === 0) {
     return <p className="world-card-empty">No checks recorded at this revision.</p>
   }
   return (
@@ -92,16 +162,23 @@ const ChangeChecksFacet = ({ card }: { readonly card: ChangeCard }) => {
   )
 }
 
-/* The review facet: the verdicts, then the threads; stale/moved tokens never render until plue#453. */
+/*
+ * The review facet: the verdicts, then the threads; stale/moved tokens never
+ * render until plue#453. An unread list (null) says so with its reason; "No
+ * review is recorded" is stated only when both lists were read and are empty.
+ */
 const ChangeReviewFacet = ({ card }: { readonly card: ChangeCard }) => {
   const { payload } = card
   const reviews = payload.reviews ?? []
   const threads = payload.threads ?? []
-  if (payload.reviews === null && payload.threads === null) {
-    return <p className="world-card-empty">No review is recorded for {payload.changeId}.</p>
-  }
   return (
     <div className="world-card-list">
+      {payload.reviews === null ?
+        <p className="world-card-empty">reviews not read ({payload.unread?.reviews ?? NO_REASON})</p> :
+        null}
+      {payload.threads === null ?
+        <p className="world-card-empty">threads not read ({payload.unread?.threads ?? NO_REASON})</p> :
+        null}
       {reviews.length === 0 ? null : (
         <ul className="world-card-list">
           {reviews.map((review, index) => (
@@ -125,7 +202,7 @@ const ChangeReviewFacet = ({ card }: { readonly card: ChangeCard }) => {
         </ul>
       )}
       {threads.length > 0 ? <p className="world-card-empty">{NO_STALE_TOKEN}</p> : null}
-      {reviews.length === 0 && threads.length === 0 ?
+      {payload.reviews !== null && payload.threads !== null && reviews.length === 0 && threads.length === 0 ?
         <p className="world-card-empty">No review is recorded for {payload.changeId}.</p> :
         null}
     </div>
@@ -189,6 +266,7 @@ export const ChangeCardBody = ({
   const { payload } = card
   const facet: ChangeFacet = payload.facet ?? "diff"
   const landed = payload.changeset?.state === "landed" || payload.stack?.state === "merged"
+  const land = landAct(payload)
   return (
     <div className="world-card-list">
       <p className="world-card-row">
@@ -197,7 +275,7 @@ export const ChangeCardBody = ({
           {payload.commitId !== null ? ` · ${shortId(payload.commitId)}` : ""}
           {payload.authorName !== null ? ` · ${payload.authorName}` : ""}
         </span>
-        {payload.stack !== null ? <StatusPill status={payload.stack.state === "merged" ? "done" : "pending"} /> : null}
+        {payload.stack !== null ? <StatusPill {...landingPill(payload.stack.state)} /> : null}
       </p>
       {payload.timestamp !== null ? <p className="world-card-path">{payload.timestamp.replace("T", " ").slice(0, 16)}</p> : null}
       {payload.description !== "" ? <p className="world-card-title">{payload.description.split("\n")[0]}</p> : null}
@@ -208,15 +286,35 @@ export const ChangeCardBody = ({
           </p>
         ) :
         null}
-      {payload.conflicts.length > 0 ?
+      {payload.conflicts === null ?
+        <p className="world-card-empty">conflicts not read ({payload.unread?.conflicts ?? NO_REASON})</p> :
+        null}
+      {/* One row per conflicted file, each with its own Resolve (ADR 0003: the act belongs to the conflicted hunk, not the card). */}
+      {payload.conflicts !== null && payload.conflicts.length > 0 ?
         (
-          <p className="world-card-row">
-            <AlertTriangle size={14} aria-hidden="true" />
-            <span className="world-card-path">
-              Conflicted: {payload.conflicts.map((conflict) => conflict.path).join(", ")}
-            </span>
-          </p>
+          <ul className="world-card-list" aria-label="Conflicted files">
+            {payload.conflicts.map((conflict) => (
+              <li key={conflict.path} className="world-card-row">
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span className="world-card-path">
+                  Conflicted: {conflict.path} · {conflict.state}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-flow="change.resolve"
+                  aria-label={`Dispatch an agent to resolve the conflict in ${conflict.path}`}
+                  onClick={() => onRunCommand("change.resolve", `${payload.changeId} ${conflict.path}`)}
+                >
+                  Resolve
+                </Button>
+              </li>
+            ))}
+          </ul>
         ) :
+        null}
+      {payload.unread?.changeset !== undefined ?
+        <p className="world-card-empty">changesets not read ({payload.unread.changeset})</p> :
         null}
       {payload.changeset !== null ?
         (
@@ -230,17 +328,33 @@ export const ChangeCardBody = ({
                 status={payload.changeset.state === "landed" ? "done" : payload.changeset.state === "failed" ? "failed" : "pending"}
               />
             </p>
+            {/* The members an atomic land moves together: `repository · path` (ADR 0003's live DTO), visible before the confirm. */}
+            {payload.changeset.members.length > 0 ?
+              (
+                <ul className="world-card-list" aria-label="Changeset members">
+                  {payload.changeset.members.map((member) => (
+                    <li key={`${member.repository}:${member.path}`} className="world-card-row">
+                      <span className="world-card-path">{member.repository} · {member.path}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) :
+              null}
             {payload.changeset.state === "failed" && payload.changeset.failureReason !== null ?
               <p className="sui-approval-error" role="alert">{payload.changeset.failureReason}</p> :
               null}
           </div>
         ) :
         null}
+      {payload.unread?.stack !== undefined ?
+        <p className="world-card-empty">landing request not read ({payload.unread.stack})</p> :
+        null}
       {payload.stack !== null ?
         (
           <p className="world-card-path">
-            Landing #{payload.stack.landingNumber} · position {payload.stack.position} of {payload.stack.size} ·{" "}
+            Landing #{payload.stack.landingNumber} · position {payload.stack.position} of {payload.stack.size} by request order ·{" "}
             {payload.stack.state} → {payload.stack.targetBookmark}
+            {payload.stack.conflictStatus === "conflicted" ? " · conflicted" : ""}
           </p>
         ) :
         null}
@@ -267,13 +381,15 @@ export const ChangeCardBody = ({
         <Button
           size="sm"
           data-flow="change.land"
-          aria-label={payload.changeset !== null ? "Land the changeset" : "Land the change"}
+          aria-label={land.ariaLabel}
+          disabled={land.blocked !== null}
           onClick={() => onRunCommand("change.land", payload.changeId)}
         >
-          <GitMerge size={12} aria-hidden="true" />{" "}
-          {payload.changeset !== null && payload.changeset.state === "failed" ? "Retry land" : "Land"}
+          <GitMerge size={12} aria-hidden="true" /> {land.label}
         </Button>
-        {payload.changeset !== null ?
+        {land.blocked !== null ? <span className="world-card-path">{land.blocked}</span> : null}
+        {/* Split ready is an act on a changeset that can still land; a landed one has nothing left to split. */}
+        {payload.changeset !== null && payload.changeset.state !== "landed" ?
           (
             <Button
               size="sm"
@@ -283,19 +399,6 @@ export const ChangeCardBody = ({
               onClick={() => onRunCommand("change.split-ready", payload.changeId)}
             >
               <Split size={12} aria-hidden="true" /> Split ready
-            </Button>
-          ) :
-          null}
-        {payload.conflicts.length > 0 ?
-          (
-            <Button
-              size="sm"
-              variant="outline"
-              data-flow="change.resolve"
-              aria-label={`Dispatch an agent to resolve the conflict in ${payload.conflicts[0]?.path}`}
-              onClick={() => onRunCommand("change.resolve", `${payload.changeId} ${payload.conflicts[0]?.path ?? ""}`)}
-            >
-              Resolve
             </Button>
           ) :
           null}

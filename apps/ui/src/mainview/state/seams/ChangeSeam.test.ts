@@ -205,10 +205,12 @@ describe("createChangeSeam", () => {
       state: "open",
       position: 2,
       size: 2,
+      changeIds: ["mzxvbnmk", "qupxosqw"],
       targetBookmark: "main",
       conflictStatus: "none"
     })
     expect(payload?.changeset).toBeNull()
+    expect(payload?.unread).toBeUndefined()
     const card = changeCardOf(store)
     expect(card?.title).toBe("qupxosqw · Add the split flow")
     expect(card?.status).toBe("active")
@@ -233,15 +235,134 @@ describe("createChangeSeam", () => {
     expect(payloadOf(store)?.commitId).toBe("a03f5f")
   })
 
-  test("change.view leaves an absent answer as an absent field when an auxiliary 404s", async () => {
+  test("change.view leaves an absent answer as an absent field, with its reason, when an auxiliary 404s", async () => {
     const { store, seam } = await harness({ "api/repos/will/smithers/changes/qupxosqw": json(200, CHANGE) })
     await seam.viewChange("qupxosqw")
     const payload = payloadOf(store)
     expect(payload?.diff).toBeNull()
+    expect(payload?.repos).toEqual([])
     expect(payload?.checks).toBeNull()
     expect(payload?.reviews).toBeNull()
+    expect(payload?.threads).toBeNull()
     expect(payload?.stack).toBeNull()
-    expect(payload?.conflicts).toEqual([])
+    expect(payload?.conflicts).toBeNull()
+    expect(payload?.unread).toEqual({
+      diff: "no route GET api/repos/will/smithers/changes/qupxosqw/diff",
+      conflicts: "no route GET api/repos/will/smithers/changes/qupxosqw/conflicts",
+      checks: "no route GET api/repos/will/smithers/commits/a03f5f/statuses?limit=100",
+      reviews: "the landing list wasn't read: no route GET api/repos/will/smithers/landings?limit=100",
+      threads: "the landing list wasn't read: no route GET api/repos/will/smithers/landings?limit=100",
+      stack: "no route GET api/repos/will/smithers/landings?limit=100"
+    })
+  })
+
+  test("reviews and threads are [] — a fact — once the landing list was read and no request carries the change", async () => {
+    const { store, seam } = await harness({
+      ...viewRoutes,
+      "api/repos/will/smithers/landings?limit=100": json(200, { items: [] })
+    })
+    await seam.viewChange("qupxosqw")
+    expect(payloadOf(store)?.reviews).toEqual([])
+    expect(payloadOf(store)?.threads).toEqual([])
+    expect(payloadOf(store)?.stack).toBeNull()
+    expect(payloadOf(store)?.unread).toBeUndefined()
+  })
+
+  test("a failed re-read nulls every auxiliary with its reason — nothing from the earlier read survives", async () => {
+    const routes: Record<string, Route> = { ...viewRoutes }
+    const { store, seam } = await harness(routes)
+    await seam.viewChange("qupxosqw")
+    expect(payloadOf(store)?.conflicts).toEqual([{ path: "src/app.ts", state: "unresolved" }])
+    expect(payloadOf(store)?.stack?.landingNumber).toBe(42)
+
+    /* The second read: the change answers, every auxiliary 500s. */
+    for (const key of Object.keys(routes)) {
+      if (key !== "api/repos/will/smithers/changes/qupxosqw") routes[key] = json(500, { message: "upstream down" })
+    }
+    await seam.viewChange("qupxosqw")
+    const payload = payloadOf(store)
+    expect(payload?.conflicts).toBeNull()
+    expect(payload?.diff).toBeNull()
+    expect(payload?.repos).toEqual([])
+    expect(payload?.stack).toBeNull()
+    expect(payload?.checks).toBeNull()
+    expect(payload?.unread).toEqual({
+      diff: "upstream down",
+      conflicts: "upstream down",
+      checks: "upstream down",
+      reviews: "the landing list wasn't read: upstream down",
+      threads: "the landing list wasn't read: upstream down",
+      stack: "upstream down"
+    })
+
+    /* A facet switch reads nothing, so it keeps that honest state rather than resurrecting the first read. */
+    await seam.setFacet("qupxosqw", "checks")
+    expect(payloadOf(store)?.conflicts).toBeNull()
+    expect(payloadOf(store)?.unread?.stack).toBe("upstream down")
+  })
+
+  test("a changeset attaches only when its superproject or a member is THIS repository's change", async () => {
+    /* Another repo's changeset holding the same jj change id: a bare id match would attach — and land — it. */
+    const foreign = {
+      id: 7,
+      organization: "will",
+      description: "atom",
+      state: "pending",
+      failure_reason: null,
+      superproject: "will/api",
+      change_id: "qupxosqw",
+      commit_id: "a03f5f",
+      target_bookmark: "main",
+      members: [{ repository: "will/api", path: "api", change_id: "qupxosqw", commit_id: "a03f5f", target_bookmark: "main" }]
+    }
+    const { store, seam, requests } = await harness(
+      {
+        ...viewRoutes,
+        "api/orgs/will/changesets": json(200, { changesets: [foreign] }),
+        "POST api/orgs/will/changesets/7/land": json(200, { ...foreign, state: "landed" }),
+        "PUT api/repos/will/smithers/landings/42/land": json(202, { status: "queued" })
+      },
+      { ownerKind: "org" }
+    )
+    await seam.viewChange("qupxosqw")
+    expect(payloadOf(store)?.changeset).toBeNull()
+
+    await seam.landChange("qupxosqw")
+    expect(requests).not.toContain("POST api/orgs/will/changesets/7/land")
+    expect(requests).toContain("PUT api/repos/will/smithers/landings/42/land")
+  })
+
+  test("a changeset attaches through a member row in this repository", async () => {
+    const changeset = {
+      id: 7,
+      organization: "will",
+      description: "atom",
+      state: "pending",
+      failure_reason: null,
+      superproject: "will/super",
+      change_id: "zzzzzzzz",
+      commit_id: "ffffff",
+      target_bookmark: "main",
+      members: [{ repository: "will/smithers", path: "smithers", change_id: "qupxosqw", commit_id: "a03f5f", target_bookmark: "main" }]
+    }
+    const { store, seam } = await harness(
+      { ...viewRoutes, "api/orgs/will/changesets": json(200, { changesets: [changeset] }) },
+      { ownerKind: "org" }
+    )
+    await seam.viewChange("qupxosqw")
+    expect(payloadOf(store)?.changeset?.id).toBe(7)
+    expect(payloadOf(store)?.changeset?.superproject).toBe("will/super")
+    expect(payloadOf(store)?.changeset?.members).toEqual([
+      {
+        repository: "will/smithers",
+        path: "smithers",
+        changeId: "qupxosqw",
+        commitId: "a03f5f",
+        targetBookmark: "main",
+        previousCommitId: null,
+        landedCommitId: null
+      }
+    ])
   })
 
   test("change.diff renders the diff card pinned at the change's commit; conflicted files lead", async () => {
@@ -313,9 +434,54 @@ describe("createChangeSeam", () => {
     })
     const result = await seam.landChange("qupxosqw")
 
-    expect(textOf(result)).toBe("Landing request #42 is queued — the card tracks it.")
+    /* qupxosqw is the request's top (2 of 2), so the PUT is in scope — and the line names the whole scope it covered. */
+    expect(textOf(result)).toBe(
+      "Landing request #42 is queued — it lands 1 → 2 together (mzxvbnmk, qupxosqw); the card tracks it."
+    )
     expect(requests).toContain("PUT api/repos/will/smithers/landings/42/land")
     expect(payloadOf(store)?.stack?.landingNumber).toBe(42)
+    expect(payloadOf(store)?.stack?.changeIds).toEqual(["mzxvbnmk", "qupxosqw"])
+  })
+
+  test("change.land on a mid-stack change refuses, names the whole-request scope and the top, and PUTs nothing", async () => {
+    const { seam, requests } = await harness({
+      ...viewRoutes,
+      "api/repos/will/smithers/landings?limit=100": json(200, {
+        items: [{ ...LANDING, change_ids: ["qupxosqw", "ronvznsk"] }]
+      }),
+      "PUT api/repos/will/smithers/landings/42/land": json(202, { status: "queued" })
+    })
+    expect(textOf(await seam.landChange("qupxosqw"))).toBe(
+      "Landing request #42 lands its whole stack together (1 → 2: qupxosqw, ronvznsk) — qupxosqw is 1 of 2 by request order, and landing a prefix alone isn't possible yet (plue#452). /change.land ronvznsk lands all 2."
+    )
+    expect(requests.some((request) => request.startsWith("PUT "))).toBe(false)
+  })
+
+  test("change.land on a queued landing request refuses without a PUT — plue lands only open or failed", async () => {
+    const { seam, requests } = await harness({
+      ...viewRoutes,
+      "api/repos/will/smithers/landings?limit=100": json(200, { items: [{ ...LANDING, state: "queued" }] }),
+      "PUT api/repos/will/smithers/landings/42/land": json(202, { status: "queued" })
+    })
+    expect(textOf(await seam.landChange("qupxosqw"))).toBe(
+      "Landing request #42 is queued — plue lands a request only while it is open or failed; the card tracks it."
+    )
+    expect(requests.some((request) => request.startsWith("PUT "))).toBe(false)
+  })
+
+  test("change.land refuses when the org's changesets weren't read — a land can't clear the change of one", async () => {
+    const { seam, requests } = await harness(
+      {
+        ...viewRoutes,
+        "api/orgs/will/changesets": json(500, { message: "changesets down" }),
+        "PUT api/repos/will/smithers/landings/42/land": json(202, { status: "queued" })
+      },
+      { ownerKind: "org" }
+    )
+    expect(textOf(await seam.landChange("qupxosqw"))).toBe(
+      "The changesets qupxosqw might belong to weren't read (changesets down) — nothing was landed."
+    )
+    expect(requests.some((request) => request.startsWith("PUT ") || request.startsWith("POST "))).toBe(false)
   })
 
   test("change.land without a carrying landing request says so and names the way out", async () => {
@@ -334,6 +500,7 @@ describe("createChangeSeam", () => {
       description: "atom",
       state: "pending",
       failure_reason: null,
+      superproject: "will/smithers",
       change_id: "qupxosqw",
       commit_id: "a03f5f",
       target_bookmark: "main",
@@ -351,7 +518,9 @@ describe("createChangeSeam", () => {
 
     expect(textOf(result)).toBe("Changeset 7 landed — every member bookmark moved together.")
     expect(requests).toContain("POST api/orgs/will/changesets/7/land")
-    expect(requests.some((request) => request.startsWith("PUT /repos/"))).toBe(false)
+    /* Request keys are `${method} ${path}` with the cloud prefix stripped, so the landing-request route would record as `PUT api/repos/...`. */
+    expect(requests.some((request) => request.startsWith("PUT api/repos/"))).toBe(false)
+    expect(requests.some((request) => request.startsWith("PUT "))).toBe(false)
   })
 
   test("change.land on a failed changeset re-reads and renders the failure reason", async () => {
@@ -361,6 +530,7 @@ describe("createChangeSeam", () => {
       description: "atom",
       state: "pending",
       failure_reason: null,
+      superproject: "will/smithers",
       change_id: "qupxosqw",
       commit_id: "a03f5f",
       target_bookmark: "main",
@@ -387,6 +557,7 @@ describe("createChangeSeam", () => {
       description: "atom",
       state: "pending",
       failure_reason: null,
+      superproject: "will/smithers",
       change_id: "qupxosqw",
       commit_id: "a03f5f",
       target_bookmark: "main",

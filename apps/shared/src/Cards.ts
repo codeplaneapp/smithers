@@ -837,11 +837,15 @@ export const CardSchema = z.discriminatedUnion("kind", [
       checks: z.array(ChangeCheckSchema).nullable(),
       /** Findings per revision; null — the route does not exist (plue#454). */
       findings: z.array(ChangeFindingSchema).nullable(),
-      /** Verdicts and threads on the change's landing request; null = no landing request carries this change. */
+      /**
+       * Verdicts and threads on the change's landing request; null while unread
+       * (`unread.reviews` / `unread.threads` name why), [] once the landing list
+       * was read and no request carries the change.
+       */
       reviews: z.array(ChangeVerdictSchema).nullable(),
       threads: z.array(ChangeThreadSchema).nullable(),
-      /** The change's per-file conflicts; the conflict line renders only when non-empty. */
-      conflicts: z.array(z.object({ path: z.string(), state: z.string() })),
+      /** The change's per-file conflicts; null while unread (`unread.conflicts` names why). */
+      conflicts: z.array(z.object({ path: z.string(), state: z.string() })).nullable(),
       /** The landing request carrying this change: its state, the change's stack position, the target. */
       stack: z.object({
         landingNumber: z.number().int(),
@@ -849,11 +853,28 @@ export const CardSchema = z.discriminatedUnion("kind", [
         /** 1-based from the bottom, like `jj log`. */
         position: z.number().int().positive(),
         size: z.number().int().positive(),
+        /** The request's change ids in request order; the last is the top, whose Land lands 1 → size. */
+        changeIds: z.array(z.string()),
         targetBookmark: z.string(),
         conflictStatus: z.string()
       }).nullable(),
       /** The changeset this change belongs to (live at /api/orgs/{org}/changesets); null when none. */
       changeset: ChangesetStateSchema.nullable(),
+      /**
+       * Why an auxiliary above is null: the failed read's reason in the
+       * platform's words. One rule (ChangeSeam `surfaceChange`): a read writes
+       * every auxiliary from its own answer, a failed read writes null and
+       * names it here, and nothing from an earlier read survives.
+       */
+      unread: z.object({
+        diff: z.string().optional(),
+        conflicts: z.string().optional(),
+        checks: z.string().optional(),
+        reviews: z.string().optional(),
+        threads: z.string().optional(),
+        stack: z.string().optional(),
+        changeset: z.string().optional()
+      }).optional(),
       /** Which body tab the card shows; the diff by default. */
       facet: ChangeFacetSchema.optional(),
       /** The last act's honest refusal, kept on the card. */

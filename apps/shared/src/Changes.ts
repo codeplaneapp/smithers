@@ -142,6 +142,8 @@ export type ChangesetMember = z.infer<typeof ChangesetMemberSchema>
 export const ChangesetStateSchema = z.object({
   id: z.number().int(),
   organization: z.string(),
+  /** The superproject repository, `org/name` like a repo id; a change matches the changeset's own `changeId` only there. */
+  superproject: z.string(),
   /** The superproject change the changeset itself is. */
   changeId: z.string(),
   state: z.enum(["pending", "landing", "landed", "failed"]),

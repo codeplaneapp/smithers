@@ -118,7 +118,7 @@ test("T1: /change.view renders a landing request's change end to end", async ({ 
   await expect(card).toContainText("smithersai/smithers · qupxosqw · a03f5f11 · will")
   await expect(card).toContainText("Add the split flow")
   await expect(card).toContainText("smithersai/smithers +1 −1")
-  await expect(card).toContainText("Landing #42 · position 2 of 2 · open → main")
+  await expect(card).toContainText("Landing #42 · position 2 of 2 by request order · open → main")
 
   // The diff facet (the default) lists the file; the checks facet renders the newest answer per context.
   await expect(card).toContainText("src/app.ts")

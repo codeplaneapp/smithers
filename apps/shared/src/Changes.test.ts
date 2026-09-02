@@ -33,6 +33,7 @@ const changePayload = {
     state: "open",
     position: 2,
     size: 3,
+    changeIds: ["yyyrqlqw", "qupxosqw", "ronvznsk"],
     targetBookmark: "main",
     conflictStatus: "none"
   },
@@ -62,13 +63,14 @@ describe("the change card", () => {
         changeset: {
           id: 7,
           organization: "canary-changesets-e2e",
+          superproject: "canary-changesets-e2e/cs-super",
           changeId: "qupxosqw",
           state: "failed",
           failureReason: "member cs-web conflicted",
           targetBookmark: "main",
           members: [
             {
-              repository: "cs-api",
+              repository: "canary-changesets-e2e/cs-api",
               path: "api",
               changeId: "qupxosqw",
               commitId: "a03f5f1e",
@@ -89,6 +91,25 @@ describe("the change card", () => {
     const card = CardSchema.parse({ ...base, kind: "change", payload: { ...changePayload, stack: null, reviews: null, threads: null } })
     if (card.kind !== "change") throw new Error("wrong kind")
     expect(card.payload.stack).toBeNull()
+  })
+
+  test("an unread auxiliary is null and `unread` names why — conflicts included, never collapsed into []", () => {
+    const card = CardSchema.parse({
+      ...base,
+      kind: "change",
+      payload: {
+        ...changePayload,
+        conflicts: null,
+        checks: null,
+        stack: null,
+        unread: { conflicts: "Reading conflicts failed (500)", checks: "Reading statuses failed (500)", stack: "upstream down" }
+      }
+    })
+    if (card.kind !== "change") throw new Error("wrong kind")
+    expect(card.payload.conflicts).toBeNull()
+    expect(card.payload.unread?.conflicts).toBe("Reading conflicts failed (500)")
+    /* The stack keeps the request's change ids so the card can name the top change a whole-stack land runs from. */
+    expect(CardSchema.safeParse({ ...base, kind: "change", payload: { ...changePayload, stack: { ...changePayload.stack, changeIds: undefined } } }).success).toBe(false)
   })
 })
 

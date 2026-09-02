@@ -57,11 +57,54 @@ const changeCard = (overrides: Partial<ChangePayload> = {}): Extract<Card, { kin
     reviews: [{ author: null, type: "approve", body: "ship it", commitId: null }],
     threads: [],
     conflicts: [],
-    stack: { landingNumber: 42, state: "open", position: 2, size: 2, targetBookmark: "main", conflictStatus: "none" },
+    stack: stackOf(),
     changeset: null,
     ...overrides
   }
 })
+
+/** The default landing request: qupxosqw is its top, 2 of 2 by request order. */
+function stackOf(): NonNullable<ChangePayload["stack"]> {
+  return {
+    landingNumber: 42,
+    state: "open",
+    position: 2,
+    size: 2,
+    changeIds: ["mzxvbnmk", "qupxosqw"],
+    targetBookmark: "main",
+    conflictStatus: "none"
+  }
+}
+
+type Changeset = NonNullable<ChangePayload["changeset"]>
+
+const member = (repository: string, path: string): Changeset["members"][number] => ({
+  repository,
+  path,
+  changeId: "qupxosqw",
+  commitId: "a03f5f",
+  targetBookmark: "main",
+  previousCommitId: null,
+  landedCommitId: null
+})
+
+const changesetOf = (overrides: Partial<Changeset> = {}): Changeset => ({
+  id: 7,
+  organization: "will",
+  superproject: "will/smithers",
+  changeId: "qupxosqw",
+  state: "pending",
+  failureReason: null,
+  targetBookmark: "main",
+  members: [],
+  ...overrides
+})
+
+const landButton = (host: HTMLElement): HTMLButtonElement =>
+  host.querySelector('button[data-flow="change.land"]') as HTMLButtonElement
+
+/** The blocking reason a disabled Land wears: the span right after the button. */
+const landReason = (host: HTMLElement): string | null => landButton(host).nextElementSibling?.textContent ?? null
 
 const diffCard = (overrides: Partial<DiffPayload> = {}): Extract<Card, { kind: "diff" }> => ({
   id: "diff-will/smithers-qupxosqw",
@@ -201,7 +244,7 @@ describe("the change card", () => {
     expect(open.host.textContent ?? "").not.toContain("Revert")
     open.host.remove()
 
-    const landed = renderChange(changeCard({ stack: { landingNumber: 42, state: "merged", position: 2, size: 2, targetBookmark: "main", conflictStatus: "none" } }))
+    const landed = renderChange(changeCard({ stack: { ...stackOf(), state: "merged" } }))
     click(landed.host, "Revert the landed change")
     expect(landed.commands).toEqual([{ name: "change.revert", args: "qupxosqw" }])
     landed.host.remove()
@@ -209,23 +252,38 @@ describe("the change card", () => {
 
   test("a failed changeset renders its failure reason verbatim with Retry land", () => {
     const { host, commands } = renderChange(
-      changeCard({
-        changeset: {
-          id: 7,
-          organization: "will",
-          changeId: "qupxosqw",
-          state: "failed",
-          failureReason: "bookmark moved under the land",
-          targetBookmark: "main",
-          members: []
-        }
-      })
+      changeCard({ changeset: changesetOf({ state: "failed", failureReason: "bookmark moved under the land" }) })
     )
     const text = host.textContent ?? ""
     expect(text).toContain("bookmark moved under the land")
     expect(text).toContain("Changeset 7 → main")
+    expect(landButton(host).disabled).toBe(false)
+    expect(landButton(host).textContent).toContain("Retry land")
     click(host, "Land the changeset")
     expect(commands[0]).toEqual({ name: "change.land", args: "qupxosqw" })
+    host.remove()
+  })
+
+  test("Land is disabled with the reason while a changeset is landing or landed", () => {
+    const landing = renderChange(changeCard({ changeset: changesetOf({ state: "landing" }) }))
+    expect(landButton(landing.host).disabled).toBe(true)
+    expect(landReason(landing.host)).toBe("landing…")
+    landing.host.remove()
+
+    const landed = renderChange(changeCard({ changeset: changesetOf({ state: "landed" }) }))
+    expect(landButton(landed.host).disabled).toBe(true)
+    expect(landReason(landed.host)).toBe("landed")
+    landed.host.remove()
+  })
+
+  test("a changeset lists its members as repository · path before the Land confirm", () => {
+    const { host } = renderChange(
+      changeCard({ changeset: changesetOf({ members: [member("will/cs-api", "services/api"), member("will/cs-web", "apps/web")] }) })
+    )
+    const text = host.textContent ?? ""
+    expect(text).toContain("2 members")
+    expect(text).toContain("will/cs-api · services/api")
+    expect(text).toContain("will/cs-web · apps/web")
     host.remove()
   })
 
@@ -234,19 +292,20 @@ describe("the change card", () => {
     expect(plain.host.textContent ?? "").not.toContain("Split ready")
     plain.host.remove()
 
-    const { host, commands } = renderChange(
-      changeCard({
-        changeset: { id: 7, organization: "will", changeId: "qupxosqw", state: "pending", failureReason: null, targetBookmark: "main", members: [] }
-      })
-    )
+    const { host, commands } = renderChange(changeCard({ changeset: changesetOf() }))
     click(host, "Split the ready members into a new change")
     expect(commands).toEqual([{ name: "change.split-ready", args: "qupxosqw" }])
     host.remove()
+
+    /* Landed: nothing is left to split. */
+    const landed = renderChange(changeCard({ changeset: changesetOf({ state: "landed" }) }))
+    expect(landed.host.textContent ?? "").not.toContain("Split ready")
+    landed.host.remove()
   })
 
   test("the Land and Full diff acts carry complete invocations", () => {
     const { host, commands } = renderChange(changeCard())
-    click(host, "Land the change")
+    click(host, "Land 1 → 2")
     click(host, "Open the full diff card")
     expect(commands).toEqual([
       { name: "change.land", args: "qupxosqw" },
@@ -258,6 +317,125 @@ describe("the change card", () => {
   test("an error the seam recorded renders on the card", () => {
     const { host } = renderChange(changeCard({ error: "the land failed: bookmark moved" }))
     expect(host.textContent ?? "").toContain("the land failed: bookmark moved")
+    host.remove()
+  })
+
+  test("an unread checks list says so with its reason — never 'No checks recorded'", () => {
+    const unread = renderChange(
+      changeCard({ facet: "checks", checks: null, unread: { checks: "Reading statuses failed (500)" } })
+    )
+    expect(unread.host.textContent ?? "").toContain("checks not read (Reading statuses failed (500))")
+    expect(unread.host.textContent ?? "").not.toContain("No checks recorded")
+    unread.host.remove()
+
+    const empty = renderChange(changeCard({ facet: "checks", checks: [] }))
+    expect(empty.host.textContent ?? "").toContain("No checks recorded at this revision.")
+    empty.host.remove()
+  })
+
+  test("unread reviews and threads say so with their reasons — never 'No review is recorded'", () => {
+    const { host } = renderChange(
+      changeCard({
+        facet: "review",
+        reviews: null,
+        threads: null,
+        unread: { reviews: "the landing list wasn't read: 502", threads: "the landing list wasn't read: 502" }
+      })
+    )
+    const text = host.textContent ?? ""
+    expect(text).toContain("reviews not read (the landing list wasn't read: 502)")
+    expect(text).toContain("threads not read (the landing list wasn't read: 502)")
+    expect(text).not.toContain("No review is recorded")
+    host.remove()
+
+    const empty = renderChange(changeCard({ facet: "review", reviews: [], threads: [] }))
+    expect(empty.host.textContent ?? "").toContain("No review is recorded for qupxosqw.")
+    empty.host.remove()
+  })
+
+  test("unread conflicts render as unread, never as a clean change", () => {
+    const { host } = renderChange(changeCard({ conflicts: null, unread: { conflicts: "Reading conflicts failed (500)" } }))
+    expect(host.textContent ?? "").toContain("conflicts not read (Reading conflicts failed (500))")
+    expect(host.textContent ?? "").not.toContain("Conflicted:")
+    host.remove()
+  })
+
+  test("every conflicted file carries its own Resolve", () => {
+    const { host, commands } = renderChange(
+      changeCard({
+        conflicts: [{ path: "src/app.ts", state: "unresolved" }, { path: "docs/guide.md", state: "unresolved" }]
+      })
+    )
+    click(host, "Dispatch an agent to resolve the conflict in docs/guide.md")
+    click(host, "Dispatch an agent to resolve the conflict in src/app.ts")
+    expect(commands).toEqual([
+      { name: "change.resolve", args: "qupxosqw docs/guide.md" },
+      { name: "change.resolve", args: "qupxosqw src/app.ts" }
+    ])
+    host.remove()
+  })
+
+  test("a landing request's Land names its scope, and only its top change may land", () => {
+    const top = renderChange(changeCard())
+    expect(landButton(top.host).disabled).toBe(false)
+    expect(landButton(top.host).textContent).toContain("Land 1 → 2")
+    expect(landButton(top.host).getAttribute("aria-label")).toBe("Land the change: lands 1 → 2 together")
+    top.host.remove()
+
+    const mid = renderChange(
+      changeCard({ stack: { ...stackOf(), position: 1, changeIds: ["qupxosqw", "ronvznsk"] } })
+    )
+    expect(landButton(mid.host).disabled).toBe(true)
+    expect(landReason(mid.host)).toBe(
+      "landing request #42 lands 1 → 2 together from ronvznsk (2 of 2); landing a prefix alone isn't possible yet (plue#452)"
+    )
+    mid.host.remove()
+
+    const alone = renderChange(changeCard({ stack: { ...stackOf(), position: 1, size: 1, changeIds: ["qupxosqw"] } }))
+    expect(landButton(alone.host).disabled).toBe(false)
+    expect(landButton(alone.host).textContent?.trim()).toBe("Land")
+    expect(landButton(alone.host).getAttribute("aria-label")).toBe("Land the change: lands qupxosqw alone")
+    alone.host.remove()
+  })
+
+  test("Land is disabled with the state while a landing request is queued, landing, merged, or closed; failed re-lands", () => {
+    const blocked: ReadonlyArray<readonly [string, string]> = [
+      ["queued", "queued…"],
+      ["landing", "landing…"],
+      ["merged", "landed"],
+      ["closed", "closed — plue lands a request only while it is open or failed"]
+    ]
+    for (const [state, reason] of blocked) {
+      const { host } = renderChange(changeCard({ stack: { ...stackOf(), state } }))
+      expect(landButton(host).disabled).toBe(true)
+      expect(landReason(host)).toBe(reason)
+      host.remove()
+    }
+    const failed = renderChange(changeCard({ stack: { ...stackOf(), state: "failed" } }))
+    expect(landButton(failed.host).disabled).toBe(false)
+    expect(landButton(failed.host).textContent).toContain("Retry land 1 → 2")
+    failed.host.remove()
+  })
+
+  test("the landing pill: merged is done, failed is failed, closed is neutral with plue's own word", () => {
+    const pills: ReadonlyArray<readonly [string, string]> = [
+      ["open", "pending"],
+      ["merged", "done"],
+      ["failed", "failed"],
+      ["closed", "cancelled"]
+    ]
+    for (const [state, status] of pills) {
+      const { host } = renderChange(changeCard({ stack: { ...stackOf(), state } }))
+      const pill = host.querySelector("[data-status]")
+      expect(pill?.getAttribute("data-status")).toBe(status)
+      if (state === "closed") expect(pill?.textContent).toContain("Closed")
+      host.remove()
+    }
+  })
+
+  test("the stack line labels the position as inferred by request order", () => {
+    const { host } = renderChange(changeCard())
+    expect(host.textContent ?? "").toContain("Landing #42 · position 2 of 2 by request order · open → main")
     host.remove()
   })
 })

@@ -8,7 +8,7 @@
  *   GET /api/repos/{o}/{r}/landings?limit=100             — the landing requests; change_ids names the stack
  *   GET /api/repos/{o}/{r}/landings/{n}/reviews|comments  — verdicts and threads (no commit_id, no anchor state — plue#453)
  *   GET /api/repos/{o}/{r}/commits/{ref}/statuses?limit=100 — the checks at one commit
- *   PUT /api/repos/{o}/{r}/landings/{n}/land              — landing is QUEUED, never "merged"
+ *   PUT /api/repos/{o}/{r}/landings/{n}/land              — lands the request's WHOLE stack; QUEUED, never "merged"
  *   GET /api/orgs/{org}/changesets                        — the live changeset DTO (ADR 0003)
  *   POST /api/orgs/{org}/changesets/{id}/land             — synchronous; 409 carries failure_reason
  *
@@ -94,9 +94,22 @@ interface StackRow {
   readonly state: string
   readonly position: number
   readonly size: number
+  /** The request's change ids in request order; the last is the top. */
+  readonly changeIds: Array<string>
   readonly targetBookmark: string
   readonly conflictStatus: string
 }
+
+type ChangePayload = Extract<Card, { readonly kind: "change" }>["payload"]
+/** Why an auxiliary is null, keyed by the auxiliary (Cards.ts `unread`). */
+type ChangeUnread = NonNullable<ChangePayload["unread"]>
+
+/**
+ * A read's answer: the value, or why it was not read, in the platform's own
+ * words. An unread answer is never a fact — the card says "not read (why)",
+ * never "none".
+ */
+type Read<T> = { readonly value: T } | { readonly unread: string }
 
 /** The auxiliaries a change card renders beside the DTO row. */
 interface ChangeAux {
@@ -105,9 +118,10 @@ interface ChangeAux {
   readonly checks: ReadonlyArray<CheckRow> | null
   readonly reviews: ReadonlyArray<ChangeVerdict> | null
   readonly threads: ReadonlyArray<ChangeThread> | null
-  readonly conflicts: ReadonlyArray<ConflictRow>
+  readonly conflicts: ReadonlyArray<ConflictRow> | null
   readonly stack: StackRow | null
   readonly changeset: ChangesetState | null
+  readonly unread: ChangeUnread
   readonly facet?: ChangeFacet | undefined
   readonly error?: string | undefined
 }
@@ -248,6 +262,7 @@ const parseChangeset = (value: unknown): ChangesetState | null => {
   return {
     id,
     organization,
+    superproject: str(value.superproject) ?? "",
     changeId: str(value.change_id) ?? "",
     state,
     failureReason: str(value.failure_reason),
@@ -272,10 +287,21 @@ const parseChangeset = (value: unknown): ChangesetState | null => {
   }
 }
 
-/** The changeset whose own change id or one of whose members IS this change. */
-const changesetFor = (changesets: ReadonlyArray<ChangesetState>, changeId: string): ChangesetState | null =>
+/*
+ * The changeset this change belongs to, scoped by REPOSITORY: a jj change id
+ * is per-repo and nothing stops two repos from holding the same id, so a
+ * bare id match could attach — and land — another repo's changeset. A match
+ * is `superproject · change_id` or `member.repository · member.change_id`;
+ * plue spells both `org/name` (changeset.go), which is the app's repo id.
+ */
+const changesetFor = (
+  changesets: ReadonlyArray<ChangesetState>,
+  repoId: string,
+  changeId: string
+): ChangesetState | null =>
   changesets.find((changeset) =>
-    changeset.changeId === changeId || changeset.members.some((member) => member.changeId === changeId)
+    (changeset.superproject === repoId && changeset.changeId === changeId)
+    || changeset.members.some((member) => member.repository === repoId && member.changeId === changeId)
   ) ?? null
 
 const cardIdOf = (repoId: string, changeId: string): string => `change-${repoId}-${changeId}`
@@ -345,14 +371,16 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
 
   /* ---- the auxiliaries: absent answers, never inventions ---- */
 
-  /** The per-file conflicts; null = unread (an absent answer, not a fact). */
-  const loadConflicts = async (repoId: string, changeId: string): Promise<ReadonlyArray<ConflictRow> | null> => {
+  /** The per-file conflicts. */
+  const loadConflicts = async (repoId: string, changeId: string): Promise<Read<ReadonlyArray<ConflictRow>>> => {
     const answer = await getJson(repoPath(repoId, `/changes/${encodeURIComponent(changeId)}/conflicts`))
-    if ("error" in answer) return null
-    return arrayOf(answer.body, "conflicts").flatMap((entry) => {
-      const parsed = parseConflict(entry)
-      return parsed === null ? [] : [parsed]
-    })
+    if ("error" in answer) return { unread: answer.error }
+    return {
+      value: arrayOf(answer.body, "conflicts").flatMap((entry) => {
+        const parsed = parseConflict(entry)
+        return parsed === null ? [] : [parsed]
+      })
+    }
   }
 
   interface DiffRead {
@@ -360,10 +388,11 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
     readonly stat: RepoStat
   }
 
-  /** The change-vs-parent diff; null = unread. `path` cuts to one file, its hunk inline regardless of size. */
-  const loadDiff = async (repoId: string, changeId: string, path?: string): Promise<DiffRead | null> => {
+  /** The change-vs-parent diff. `path` cuts to one file, its hunk inline regardless of size. */
+  const loadDiff = async (repoId: string, changeId: string, path?: string): Promise<Read<DiffRead>> => {
     const answer = await getJson(repoPath(repoId, `/changes/${encodeURIComponent(changeId)}/diff`))
-    if ("error" in answer || !isRecord(answer.body)) return null
+    if ("error" in answer) return { unread: answer.error }
+    if (!isRecord(answer.body)) return { unread: `Smithers Cloud's answer for the diff of ${changeId} was malformed` }
     const files = arrayOf(answer.body.file_diffs, "file_diffs").flatMap((entry) => {
       const parsed = parseDiffFile(entry, path !== undefined)
       return parsed === null || (path !== undefined && parsed.path !== path) ? [] : [parsed]
@@ -374,72 +403,89 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
       additions += file.additions
       deletions += file.deletions
     }
-    return { files, stat: { repo: repoId, additions, deletions } }
+    return { value: { files, stat: { repo: repoId, additions, deletions } } }
   }
 
-  /** The landing request whose stack carries this change; null = none (or unread). */
-  const loadLanding = async (
-    repoId: string,
-    changeId: string
-  ): Promise<{ readonly landing: NonNullable<ReturnType<typeof parseLanding>>; readonly position: number } | null> => {
+  interface LandingHit {
+    readonly landing: NonNullable<ReturnType<typeof parseLanding>>
+    readonly position: number
+  }
+
+  /*
+   * The landing request whose stack carries this change; a read `null` means
+   * no request does. `position` is the change's 1-based index in the
+   * request's `change_ids` — REQUEST ORDER, the order the request's author
+   * submitted (plue landing.go `normalizeChangeIDs` trims and keeps it;
+   * nothing sorts it into stack order). It is an inference the card labels
+   * "by request order" until plue#450's `stack.position` is read.
+   */
+  const loadLanding = async (repoId: string, changeId: string): Promise<Read<LandingHit | null>> => {
     const answer = await getJson(repoPath(repoId, "/landings?limit=100"))
-    if ("error" in answer) return null
+    if ("error" in answer) return { unread: answer.error }
     for (const entry of arrayOf(answer.body, "items")) {
       const landing = parseLanding(entry)
       if (landing === null) continue
       const index = landing.changeIds.indexOf(changeId)
-      if (index !== -1) return { landing, position: index + 1 }
+      if (index !== -1) return { value: { landing, position: index + 1 } }
     }
-    return null
+    return { value: null }
   }
 
-  /** Verdicts on the landing; null = unread. */
-  const loadReviews = async (repoId: string, landingNumber: number): Promise<ReadonlyArray<ChangeVerdict> | null> => {
+  /** Verdicts on the landing. */
+  const loadReviews = async (repoId: string, landingNumber: number): Promise<Read<ReadonlyArray<ChangeVerdict>>> => {
     const answer = await getJson(repoPath(repoId, `/landings/${landingNumber}/reviews?limit=100`))
-    if ("error" in answer) return null
-    return arrayOf(answer.body, "reviews").flatMap((entry) => {
-      const parsed = parseReview(entry)
-      return parsed === null ? [] : [parsed]
-    })
-  }
-
-  /** Threads on the landing; null = unread. */
-  const loadComments = async (repoId: string, landingNumber: number): Promise<ReadonlyArray<ChangeThread> | null> => {
-    const answer = await getJson(repoPath(repoId, `/landings/${landingNumber}/comments?limit=100`))
-    if ("error" in answer) return null
-    return arrayOf(answer.body, "comments").flatMap((entry) => {
-      const parsed = parseComment(entry)
-      return parsed === null ? [] : [parsed]
-    })
-  }
-
-  /** The checks at one commit, newest per context; null = unread. */
-  const loadChecks = async (repoId: string, commitId: string | null): Promise<ReadonlyArray<CheckRow> | null> => {
-    if (commitId === null) return null
-    const answer = await getJson(repoPath(repoId, `/commits/${encodeURIComponent(commitId)}/statuses?limit=100`))
-    if ("error" in answer) return null
-    return newestPerContext(
-      arrayOf(answer.body, "statuses").flatMap((entry) => {
-        const parsed = parseCheck(entry)
+    if ("error" in answer) return { unread: answer.error }
+    return {
+      value: arrayOf(answer.body, "reviews").flatMap((entry) => {
+        const parsed = parseReview(entry)
         return parsed === null ? [] : [parsed]
       })
-    )
+    }
   }
 
-  /** The org's changesets, when the repository's owner IS an org; null = none applies (or unread). */
-  const loadChangeset = async (repoId: string, changeId: string): Promise<ChangesetState | null> => {
-    const repository = ctx.store.collections.repositories.get(repoId)
-    if (repository?.ownerKind !== "org") return null
-    const answer = await getJson(`/orgs/${encodeURIComponent(repository.org)}/changesets`)
-    if ("error" in answer) return null
-    const found = changesetFor(
-      arrayOf(answer.body, "changesets").flatMap((entry) => {
-        const parsed = parseChangeset(entry)
+  /** Threads on the landing. */
+  const loadComments = async (repoId: string, landingNumber: number): Promise<Read<ReadonlyArray<ChangeThread>>> => {
+    const answer = await getJson(repoPath(repoId, `/landings/${landingNumber}/comments?limit=100`))
+    if ("error" in answer) return { unread: answer.error }
+    return {
+      value: arrayOf(answer.body, "comments").flatMap((entry) => {
+        const parsed = parseComment(entry)
         return parsed === null ? [] : [parsed]
-      }),
-      changeId
-    )
-    return found
+      })
+    }
+  }
+
+  /** The checks at one commit, newest per context. */
+  const loadChecks = async (repoId: string, commitId: string | null): Promise<Read<ReadonlyArray<CheckRow>>> => {
+    if (commitId === null) return { unread: "the change carries no commit id to read statuses at" }
+    const answer = await getJson(repoPath(repoId, `/commits/${encodeURIComponent(commitId)}/statuses?limit=100`))
+    if ("error" in answer) return { unread: answer.error }
+    return {
+      value: newestPerContext(
+        arrayOf(answer.body, "statuses").flatMap((entry) => {
+          const parsed = parseCheck(entry)
+          return parsed === null ? [] : [parsed]
+        })
+      )
+    }
+  }
+
+  /** The org's changesets, when the repository's owner IS an org; a read `null` means none carries this change here. */
+  const loadChangeset = async (repoId: string, changeId: string): Promise<Read<ChangesetState | null>> => {
+    const repository = ctx.store.collections.repositories.get(repoId)
+    if (repository?.ownerKind !== "org") return { value: null }
+    const answer = await getJson(`/orgs/${encodeURIComponent(repository.org)}/changesets`)
+    if ("error" in answer) return { unread: answer.error }
+    return {
+      value: changesetFor(
+        arrayOf(answer.body, "changesets").flatMap((entry) => {
+          const parsed = parseChangeset(entry)
+          return parsed === null ? [] : [parsed]
+        }),
+        repoId,
+        changeId
+      )
+    }
   }
 
   /* ---- the card ---- */
@@ -469,9 +515,14 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
       findings: prior?.findings ?? null,
       reviews: overrides.reviews !== undefined ? overrides.reviews === null ? null : [...overrides.reviews] : prior?.reviews ?? null,
       threads: overrides.threads !== undefined ? overrides.threads === null ? null : [...overrides.threads] : prior?.threads ?? null,
-      conflicts: overrides.conflicts !== undefined ? [...overrides.conflicts] : prior?.conflicts ?? [],
+      conflicts: overrides.conflicts !== undefined
+        ? (overrides.conflicts === null ? null : [...overrides.conflicts])
+        : prior?.conflicts ?? null,
       stack: overrides.stack !== undefined ? overrides.stack : prior?.stack ?? null,
       changeset: overrides.changeset !== undefined ? overrides.changeset : prior?.changeset ?? null,
+      ...(overrides.unread !== undefined
+        ? (Object.keys(overrides.unread).length === 0 ? {} : { unread: overrides.unread })
+        : prior?.unread !== undefined ? { unread: prior.unread } : {}),
       ...(overrides.facet !== undefined
         ? { facet: overrides.facet }
         : prior?.facet !== undefined ? { facet: prior.facet } : {}),
@@ -501,36 +552,57 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
     const change = parseChangeWire(answer.body, repoId)
     if (change === null) return `Smithers Cloud's answer for change ${changeId} was malformed.`
     ctx.dispatch({ type: "change.loaded", actor: "system", change })
+    /*
+     * ONE retention rule for every auxiliary: this read writes each of them
+     * from its own answer — the value when the route answered, null plus the
+     * reason in `unread` when it did not — and nothing from an earlier read
+     * survives it. A transient failure can therefore never leave a stale
+     * "Conflicted" line or Land scope standing, nor a blank that reads as
+     * "no checks". Only a no-read act (change.facet) keeps the prior
+     * payload, through renderChange's fallback.
+     */
     const [conflicts, diff, landing, changeset] = await Promise.all([
       loadConflicts(repoId, changeId),
       loadDiff(repoId, changeId),
       loadLanding(repoId, changeId),
       loadChangeset(repoId, changeId)
     ])
+    /* Verdicts and threads live on the landing request: unread when its list was, [] when no request carries the change. */
+    const hit = "unread" in landing ? null : landing.value
+    const withoutLanding: Read<ReadonlyArray<never>> = "unread" in landing
+      ? { unread: `the landing list wasn't read: ${landing.unread}` }
+      : { value: [] }
     const [checks, reviews, threads] = await Promise.all([
       loadChecks(repoId, change.commitId),
-      landing === null ? Promise.resolve(null) : loadReviews(repoId, landing.landing.number),
-      landing === null ? Promise.resolve(null) : loadComments(repoId, landing.landing.number)
+      hit === null ? Promise.resolve(withoutLanding) : loadReviews(repoId, hit.landing.number),
+      hit === null ? Promise.resolve(withoutLanding) : loadComments(repoId, hit.landing.number)
     ])
     renderChange(change, {
-      ...(conflicts === null ? {} : { conflicts }),
-      ...(diff === null ? {} : { repos: [diff.stat], diff: { from: "parent", to: "current", files: diff.files } }),
-      checks,
-      reviews,
-      threads,
-      ...(landing === null
-        ? {}
-        : {
-          stack: {
-            landingNumber: landing.landing.number,
-            state: landing.landing.state,
-            position: landing.position,
-            size: Math.max(landing.landing.changeIds.length, 1),
-            targetBookmark: landing.landing.targetBookmark,
-            conflictStatus: landing.landing.conflictStatus
-          }
-        }),
-      changeset,
+      conflicts: "unread" in conflicts ? null : conflicts.value,
+      repos: "unread" in diff ? [] : [diff.value.stat],
+      diff: "unread" in diff ? null : { from: "parent", to: "current", files: diff.value.files },
+      checks: "unread" in checks ? null : checks.value,
+      reviews: "unread" in reviews ? null : reviews.value,
+      threads: "unread" in threads ? null : threads.value,
+      stack: hit === null ? null : {
+        landingNumber: hit.landing.number,
+        state: hit.landing.state,
+        position: hit.position,
+        size: Math.max(hit.landing.changeIds.length, 1),
+        changeIds: [...hit.landing.changeIds],
+        targetBookmark: hit.landing.targetBookmark,
+        conflictStatus: hit.landing.conflictStatus
+      },
+      changeset: "unread" in changeset ? null : changeset.value,
+      unread: {
+        ...("unread" in diff ? { diff: diff.unread } : {}),
+        ...("unread" in conflicts ? { conflicts: conflicts.unread } : {}),
+        ...("unread" in checks ? { checks: checks.unread } : {}),
+        ...("unread" in reviews ? { reviews: reviews.unread } : {}),
+        ...("unread" in threads ? { threads: threads.unread } : {}),
+        ...("unread" in landing ? { stack: landing.unread } : {}),
+        ...("unread" in changeset ? { changeset: changeset.unread } : {})
+      },
       ...overrides
     })
     return
@@ -569,9 +641,10 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
       loadConflicts(resolved.repo, changeId),
       loadDiff(resolved.repo, changeId, path === undefined || path === "" ? undefined : path)
     ])
-    if (diff === null) return `The diff of change ${changeId} on ${resolved.repo} couldn't be read right now.`
-    const conflicted = new Set((conflicts ?? []).map((conflict) => conflict.path))
-    const files = [...diff.files]
+    if ("unread" in diff) return `The diff of change ${changeId} on ${resolved.repo} couldn't be read right now (${diff.unread}).`
+    /* Unread conflicts mark no file; the change card is where an unread conflicts list is reported. */
+    const conflicted = new Set(("unread" in conflicts ? [] : conflicts.value).map((conflict) => conflict.path))
+    const files = [...diff.value.files]
       .map((file) => (conflicted.has(file.path) ? { ...file, conflicted: true } : file))
       .sort((left, right) => Number(right.conflicted === true) - Number(left.conflicted === true))
     const id = diffCardIdOf(resolved.repo, changeId)
@@ -603,8 +676,12 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
     const resolved = resolveRepo(changeId, repo)
     if ("error" in resolved) return resolved.error
     const repoId = resolved.repo
-    /* A changeset lands atomically through its own route — never partially. */
-    const changeset = await loadChangeset(repoId, changeId)
+    /* A changeset lands atomically through its own route — never partially; an unread list can't clear the change of one. */
+    const changesetRead = await loadChangeset(repoId, changeId)
+    if ("unread" in changesetRead) {
+      return `The changesets ${changeId} might belong to weren't read (${changesetRead.unread}) — nothing was landed.`
+    }
+    const changeset = changesetRead.value
     if (changeset !== null) {
       if (changeset.state === "landing") {
         return `Changeset ${changeset.id} is landing — the card tracks it.`
@@ -623,19 +700,43 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
       if (error !== undefined) return error
       return { value: `Changeset ${changeset.id} landed — every member bookmark moved together.` }
     }
-    const landing = await loadLanding(repoId, changeId)
-    if (landing === null) {
+    const landingRead = await loadLanding(repoId, changeId)
+    if ("unread" in landingRead) {
+      return `The landing requests of ${repoId} weren't read (${landingRead.unread}) — nothing was landed.`
+    }
+    if (landingRead.value === null) {
       return `No landing request carries ${changeId} on ${repoId} — /prs.create opens one.`
     }
-    const queued = await sendJson("PUT", repoPath(repoId, `/landings/${landing.landing.number}/land`))
+    const { landing, position } = landingRead.value
+    const size = landing.changeIds.length
+    const top = landing.changeIds[size - 1] ?? changeId
+    /*
+     * PUT /landings/{n}/land lands the request's WHOLE stack. The ADR's
+     * prefix land from a mid-stack change ("lands 1 → 2") needs plue#452's
+     * landable_prefix, so until it is read a mid-stack change refuses and
+     * names the blast radius, and the top change's land states the full
+     * scope in its own line — never a silent over-land.
+     */
+    if (position < size) {
+      return `Landing request #${landing.number} lands its whole stack together (1 → ${size}: ${
+        landing.changeIds.join(", ")
+      }) — ${changeId} is ${position} of ${size} by request order, and landing a prefix alone isn't possible yet (plue#452). /change.land ${top} lands all ${size}.`
+    }
+    /* plue lands a request only while it is open or failed (landing.go LandLandingRequest). */
+    if (landing.state !== "open" && landing.state !== "failed") {
+      return `Landing request #${landing.number} is ${landing.state} — plue lands a request only while it is open or failed; the card tracks it.`
+    }
+    const queued = await sendJson("PUT", repoPath(repoId, `/landings/${landing.number}/land`))
     if ("error" in queued) return queued.error
     /*
      * 202/200: the land is QUEUED, never a terminal claim the platform hasn't
-     * made. The re-read renders the state the platform answers.
+     * made. The re-read renders the state the platform answers; the line
+     * names the scope the PUT covered.
      */
     const error = await surfaceChange(repoId, changeId)
     if (error !== undefined) return error
-    return { value: `Landing request #${landing.landing.number} is queued — the card tracks it.` }
+    const scope = size <= 1 ? `${changeId} alone` : `1 → ${size} together (${landing.changeIds.join(", ")})`
+    return { value: `Landing request #${landing.number} is queued — it lands ${scope}; the card tracks it.` }
   }
 
   const splitReady: ChangeSeam["splitReady"] = async (changeId, repo) => {
@@ -643,8 +744,11 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
     if (refusal !== undefined) return refusal
     const resolved = resolveRepo(changeId, repo)
     if ("error" in resolved) return resolved.error
-    const changeset = await loadChangeset(resolved.repo, changeId)
-    if (changeset === null) {
+    const changesetRead = await loadChangeset(resolved.repo, changeId)
+    if ("unread" in changesetRead) {
+      return `The changesets ${changeId} might belong to weren't read (${changesetRead.unread}).`
+    }
+    if (changesetRead.value === null) {
       return `Split ready members applies to a changeset — ${changeId} on ${resolved.repo} belongs to none.`
     }
     return NO_SPLIT_REFUSAL
@@ -667,14 +771,22 @@ export const createChangeSeam = (ctx: SeamContext): ChangeSeam => {
     const resolved = resolveRepo(changeId, repo)
     if ("error" in resolved) return resolved.error
     /* Revert is offered only on a landed change: the carrying landing's terminal state, or the changeset's. */
-    const changeset = await loadChangeset(resolved.repo, changeId)
+    const changesetRead = await loadChangeset(resolved.repo, changeId)
+    if ("unread" in changesetRead) {
+      return `The changesets ${changeId} might belong to weren't read (${changesetRead.unread}).`
+    }
+    const changeset = changesetRead.value
     if (changeset !== null) {
       if (changeset.state !== "landed") {
         return `Revert is offered on a landed change — changeset ${changeset.id} is ${changeset.state}.`
       }
       return NO_REVERT_REFUSAL
     }
-    const landing = await loadLanding(resolved.repo, changeId)
+    const landingRead = await loadLanding(resolved.repo, changeId)
+    if ("unread" in landingRead) {
+      return `The landing requests of ${resolved.repo} weren't read (${landingRead.unread}).`
+    }
+    const landing = landingRead.value
     if (landing === null || landing.landing.state !== "merged") {
       return `Revert is offered on a landed change — ${changeId} has not landed${
         landing === null ? "" : ` (the landing request is ${landing.landing.state})`
