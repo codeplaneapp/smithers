@@ -507,9 +507,13 @@ export const scan = (
     const live = databases.flatMap((database) => database.live)
     const parked = databases.flatMap((database) => database.parked)
     const unreadable = databases.filter((database) => !database.readable)
-    const history = databases.some((database) =>
-      database.readable && (database.runsByStatus.length > 0 || database.migrations.count > 0)
-    ) || stateDirs.length > 0
+    // A 0.x database is history whether or not it holds a row. The file sits
+    // at the conventional path or at the path the project's own configuration
+    // names, and a 1.0 runtime can neither read nor move it, so the operator
+    // has to say what happens to it even when every table is empty. Zero
+    // rows, zero tables, and a zero-byte file all count; only an unreadable
+    // one is worse, and that blocks.
+    const history = databases.some((database) => database.readable) || stateDirs.length > 0
 
     const blocked = live.length > 0 ||
       parked.length > 0 ||
@@ -529,9 +533,7 @@ export const scan = (
     if (unreadable.length > 0) {
       instructions.push(
         `${
-          unreadable.map((database) =>
-            database.path
-          ).join(", ")
+          unreadable.map((database) => database.path).join(", ")
         } could not be opened read only; close whatever holds it, then rerun the scan`
       )
     }

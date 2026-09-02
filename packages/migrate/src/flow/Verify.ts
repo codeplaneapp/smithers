@@ -96,14 +96,18 @@ const skipped = (reason: string): Report.CommandResult => ({
 
 const one = (
   root: string,
-  command: string,
+  command: Contract.VerificationCommand,
   timeoutMs: number
 ): Effect.Effect<Report.CommandResult, never, ChildProcessSpawner> =>
   Effect.gen(function*() {
     const started = yield* Clock.currentTimeMillis
-    return yield* Exec.run(command, { cwd: root, timeoutMs }).pipe(
+    const line = Contract.commandLine(command)
+    const run = typeof command === "string"
+      ? Exec.run(command, { cwd: root, timeoutMs })
+      : Exec.run(command.executable, { args: command.args, cwd: root, timeoutMs })
+    return yield* run.pipe(
       Effect.map((result): Report.CommandResult => ({
-        command,
+        command: line,
         exitCode: result.exitCode,
         durationMs: result.durationMs,
         stdoutTail: Exec.tail(result.stdout),
@@ -113,7 +117,7 @@ const one = (
       // command rather than a failing tool: the repair round has to see it.
       Effect.catch((failure) =>
         Effect.map(Clock.currentTimeMillis, (finished): Report.CommandResult => ({
-          command,
+          command: line,
           exitCode: failure.reason === `exceeded ${timeoutMs}ms` ? 124 : 127,
           durationMs: Math.max(0, finished - started),
           stdoutTail: "",

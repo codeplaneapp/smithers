@@ -26,10 +26,13 @@ import { Action } from "@smthrs/flow"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { createHash } from "node:crypto"
+import * as Fs from "../internal/Fs.ts"
 import { io, make, MigrateError } from "../MigrateError.ts"
 import type * as Report from "../Report.ts"
 import * as Exec from "./internal/Exec.ts"
@@ -63,6 +66,17 @@ export const Ref = Schema.Struct({
   restore: Schema.String,
   backup: Schema.String,
   files: Schema.Array(Schema.String),
+  /**
+   * The checkpoint-time state of every declared source and target path.
+   *
+   * Restore decisions come only from this manifest. A later failed read is an
+   * I/O failure, never evidence that the original path was absent.
+   */
+  entries: Schema.Array(Schema.Struct({
+    path: Schema.String,
+    state: Schema.Literals(["absent", "file"]),
+    digest: Schema.optional(Schema.String)
+  })),
   /**
    * A digest of every file under the project's 0.x run-state paths, taken
    * before the unit runs.
@@ -146,13 +160,13 @@ export const action = Action.make("smithers/migrate-v1/Checkpoint", {
   tier: "irreversible"
 })
 
+const optionalNotFound = Fs.optionalNotFound
+
 const isDirectory = (target: string) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    return yield* fs.stat(target).pipe(
-      Effect.map((info) => info.type === "Directory"),
-      Effect.orElseSucceed(() => false)
-    )
+    const info = yield* optionalNotFound(fs.stat(target))
+    return Option.isSome(info) && info.value.type === "Directory"
   })
 
 /**
@@ -164,7 +178,7 @@ const isDirectory = (target: string) =>
  */
 export const detectVcs = (
   root: string
-): Effect.Effect<Vcs, never, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<Vcs, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const path = yield* Path.Path
     if (yield* isDirectory(path.join(root, ".jj"))) return "jj" as const
@@ -202,29 +216,74 @@ const pending = (
     return ref
   })
 
-/** Copies the unit's existing files into the backup directory, byte for byte. */
+/**
+ * One explicit checkpoint-time path state: what the path was when the
+ * checkpoint was taken, so a restore never has to infer it later.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Entry {
+  readonly path: string
+  readonly state: "absent" | "file"
+  readonly digest?: string | undefined
+}
+
+const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex")
+
+const verifiedBytes = (
+  fs: FileSystem.FileSystem,
+  file: string,
+  expected: string,
+  description: string
+): Effect.Effect<Uint8Array, MigrateError> =>
+  fs.readFile(file).pipe(
+    Effect.mapError(io(`could not read ${description}`)),
+    Effect.flatMap((bytes) =>
+      sha256(bytes) === expected
+        ? Effect.succeed(bytes)
+        : Effect.fail(make("checkpoint-failed", `${description} no longer matches its checkpoint digest`))
+    )
+  )
+
+/** Copies every existing declared path into the backup directory, byte for byte. */
 const backup = (
   root: string,
   files: ReadonlyArray<string>,
   directory: string
-): Effect.Effect<ReadonlyArray<string>, MigrateError, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<ReadonlyArray<Entry>, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const kept: Array<string> = []
+    const entries: Array<Entry> = []
     yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.mapError(io(`could not create ${directory}`)))
-    for (const file of files) {
+    for (const file of [...new Set(files)].sort()) {
       const source = absolute(path, root, file)
-      const bytes = yield* fs.readFile(source).pipe(Effect.option)
-      if (bytes._tag === "None") continue
+      const info = yield* optionalNotFound(fs.stat(source)).pipe(
+        Effect.mapError(io(`could not inspect ${file} while taking its checkpoint`))
+      )
+      if (Option.isNone(info)) {
+        entries.push({ path: file, state: "absent" })
+        continue
+      }
+      if (info.value.type !== "File") {
+        return yield* Effect.fail(
+          make("checkpoint-failed", `declared migration path "${file}" is ${info.value.type}, not a regular file`)
+        )
+      }
+      const bytes = yield* fs.readFile(source).pipe(
+        Effect.mapError(io(`could not read ${file} while taking its checkpoint`))
+      )
+      const digest = sha256(bytes)
       const target = path.join(directory, ...file.split("/"))
       yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
         Effect.mapError(io(`could not create ${path.dirname(target)}`))
       )
-      yield* fs.writeFile(target, bytes.value).pipe(Effect.mapError(io(`could not back up ${file}`)))
-      kept.push(file)
+      yield* fs.writeFile(target, bytes).pipe(Effect.mapError(io(`could not back up ${file}`)))
+      yield* verifiedBytes(fs, target, digest, `the backup of ${file}`)
+      entries.push({ path: file, state: "file", digest })
     }
-    return kept
+    return entries
   })
 
 /**
@@ -245,22 +304,29 @@ export const digest = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const found: Array<{ path: string; digest: string }> = []
-    const walk = (relative: string): Effect.Effect<void, MigrateError, never> =>
+    const walk = (relative: string, rootEntry: boolean): Effect.Effect<void, MigrateError, never> =>
       Effect.gen(function*() {
         const target = path.join(root, ...relative.split("/"))
-        const info = yield* fs.stat(target).pipe(Effect.option)
-        if (info._tag === "None") return
+        const info = yield* optionalNotFound(fs.stat(target)).pipe(
+          Effect.mapError(io(`could not inspect the run-state path "${relative}"`))
+        )
+        if (Option.isNone(info)) {
+          if (rootEntry) return
+          return yield* Effect.fail(make("io", `run-state path "${relative}" disappeared during checkpointing`))
+        }
         if (info.value.type === "Directory") {
-          const entries = yield* fs.readDirectory(target).pipe(Effect.orElseSucceed(() => []))
-          for (const entry of [...entries].sort()) yield* walk(`${relative}/${entry}`)
+          const entries = yield* fs.readDirectory(target).pipe(
+            Effect.mapError(io(`could not list the run-state path "${relative}"`))
+          )
+          for (const entry of [...entries].sort()) yield* walk(`${relative}/${entry}`, false)
           return
         }
-        const bytes = yield* fs.readFile(target).pipe(Effect.option)
-        if (bytes._tag === "Some") {
-          found.push({ path: relative, digest: createHash("sha256").update(bytes.value).digest("hex") })
-        }
+        const bytes = yield* fs.readFile(target).pipe(
+          Effect.mapError(io(`could not read the run-state path "${relative}"`))
+        )
+        found.push({ path: relative, digest: sha256(bytes) })
       })
-    for (const relative of [...roots].sort()) yield* walk(relative)
+    for (const relative of [...roots].sort()) yield* walk(relative, true)
     return found.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
   }).pipe(Effect.mapError(io(`could not read the run-state paths under "${root}"`)))
 
@@ -342,20 +408,25 @@ export const tree = (
     const walk = (relative: string): Effect.Effect<void, MigrateError, never> =>
       Effect.gen(function*() {
         const target = relative === "" ? root : path.join(root, ...relative.split("/"))
-        const entries = yield* fs.readDirectory(target).pipe(Effect.orElseSucceed(() => [] as Array<string>))
+        const entries = yield* fs.readDirectory(target).pipe(
+          Effect.mapError(io(`could not list the project path "${relative || "."}"`))
+        )
         for (const entry of [...entries].sort()) {
           if (unwalked.includes(entry)) continue
           const child = relative === "" ? entry : `${relative}/${entry}`
           if (excluded(child, exclude)) continue
-          const info = yield* fs.stat(path.join(root, ...child.split("/"))).pipe(Effect.option)
-          if (info._tag === "None") continue
-          if (info.value.type === "Directory") {
+          const info = yield* fs.stat(path.join(root, ...child.split("/"))).pipe(
+            Effect.mapError(io(`could not inspect the project path "${child}"`))
+          )
+          if (info.type === "Directory") {
             yield* walk(child)
             continue
           }
-          if (info.value.type !== "File") continue
-          const bytes = yield* fs.readFile(path.join(root, ...child.split("/"))).pipe(Effect.option)
-          if (bytes._tag === "Some") files[child] = createHash("sha256").update(bytes.value).digest("hex")
+          if (info.type !== "File") continue
+          const bytes = yield* fs.readFile(path.join(root, ...child.split("/"))).pipe(
+            Effect.mapError(io(`could not read the project path "${child}"`))
+          )
+          files[child] = sha256(bytes)
         }
       })
     yield* walk("")
@@ -387,11 +458,13 @@ export const treeDiff = (
     })
     const after = yield* tree(root, before.exclude)
     const changes: Array<Report.ChangedFile> = []
-    const sizeOf = (file: string): Effect.Effect<number, never, FileSystem.FileSystem | Path.Path> =>
+    const sizeOf = (file: string): Effect.Effect<number, MigrateError, FileSystem.FileSystem | Path.Path> =>
       Effect.gen(function*() {
         const path = yield* Path.Path
-        const bytes = yield* fs.readFile(path.join(root, ...file.split("/"))).pipe(Effect.option)
-        return bytes._tag === "Some" ? bytes.value.length : 0
+        const bytes = yield* fs.readFile(path.join(root, ...file.split("/"))).pipe(
+          Effect.mapError(io(`could not read changed project path "${file}"`))
+        )
+        return bytes.length
       })
     for (const file of Object.keys(after.files).sort()) {
       const recorded = before.files[file]
@@ -440,7 +513,9 @@ export const take = (payload: {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const takenAt = yield* Clock.currentTimeMillis
-    const vcs = yield* detectVcs(payload.root)
+    const vcs = yield* detectVcs(payload.root).pipe(
+      Effect.mapError(io(`could not inspect version control under "${payload.root}"`))
+    )
     if (vcs === "none" && !payload.allowNoVcs) {
       return yield* Effect.fail(make(
         "no-vcs",
@@ -448,7 +523,8 @@ export const take = (payload: {
       ))
     }
     const directory = path.join(payload.backupDir, ...payload.unit.split(/[:/]/))
-    const files = yield* backup(payload.root, payload.files, directory)
+    const entries = yield* backup(payload.root, payload.files, directory)
+    const files = entries.filter((entry) => entry.state === "file").map((entry) => entry.path)
     const digests = yield* digest(payload.root, payload.runStateRoots ?? [])
     // The whole tree, written beside the unit's backup rather than into it, so
     // the manifest can never collide with a source path the backup holds.
@@ -459,7 +535,7 @@ export const take = (payload: {
     yield* fs.writeFileString(manifest, `${JSON.stringify(walked)}\n`).pipe(
       Effect.mapError(io(`could not record the tree manifest ${manifest}`))
     )
-    const recorded = { backup: directory, files, digests, takenAt, tree: manifest }
+    const recorded = { backup: directory, files, entries, digests, takenAt, tree: manifest }
 
     if (vcs === "jj") {
       const shown = yield* runVcs("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id"], payload.root)
@@ -521,9 +597,14 @@ export const sources = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const recorded = new Map<string, string>()
-    for (const file of ref.files) {
-      const text = yield* fs.readFileString(path.join(ref.backup, ...file.split("/"))).pipe(Effect.option)
-      if (text._tag === "Some") recorded.set(file, text.value)
+    for (const entry of ref.entries) {
+      if (entry.state !== "file") continue
+      if (entry.digest === undefined) {
+        return yield* Effect.fail(make("checkpoint-failed", `the checkpoint entry for "${entry.path}" has no digest`))
+      }
+      const file = path.join(ref.backup, ...entry.path.split("/"))
+      const bytes = yield* verifiedBytes(fs, file, entry.digest, `the backup of ${entry.path}`)
+      recorded.set(entry.path, new TextDecoder().decode(bytes))
     }
     return recorded
   })
@@ -547,20 +628,31 @@ export const diff = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const changes: Array<Report.ChangedFile> = []
+    const entries = new Map(ref.entries.map((entry) => [entry.path, entry] as const))
     for (const file of [...new Set(touched)].sort()) {
-      const before = yield* fs.readFile(path.join(ref.backup, ...file.split("/"))).pipe(Effect.option)
-      const after = yield* fs.readFile(absolute(path, root, file)).pipe(Effect.option)
-      if (after._tag === "None") {
-        if (before._tag === "Some") changes.push({ path: file, change: "deleted", bytes: 0 })
+      const entry = entries.get(file)
+      if (entry === undefined) {
+        return yield* Effect.fail(
+          make("checkpoint-failed", `path "${file}" was not declared in the checkpoint manifest`)
+        )
+      }
+      const after = yield* optionalNotFound(fs.readFile(absolute(path, root, file))).pipe(
+        Effect.mapError(io(`could not read ${file} while comparing it to the checkpoint`))
+      )
+      if (Option.isNone(after)) {
+        if (entry.state === "file") changes.push({ path: file, change: "deleted", bytes: 0 })
         continue
       }
-      if (before._tag === "None") {
+      if (entry.state === "absent") {
         changes.push({ path: file, change: "added", bytes: after.value.length })
         continue
       }
-      const same = before.value.length === after.value.length &&
-        before.value.every((byte, index) => byte === after.value[index])
-      if (!same) changes.push({ path: file, change: "modified", bytes: after.value.length })
+      if (entry.digest === undefined) {
+        return yield* Effect.fail(make("checkpoint-failed", `the checkpoint entry for "${file}" has no digest`))
+      }
+      if (sha256(after.value) !== entry.digest) {
+        changes.push({ path: file, change: "modified", bytes: after.value.length })
+      }
     }
     return changes
   })
@@ -584,18 +676,44 @@ export const restore = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const restored: Array<string> = []
+    const entries = new Map(ref.entries.map((entry) => [entry.path, entry] as const))
     for (const file of [...new Set(touched)].sort()) {
       const target = absolute(path, root, file)
-      const before = yield* fs.readFile(path.join(ref.backup, ...file.split("/"))).pipe(Effect.option)
-      if (before._tag === "None") {
-        yield* fs.remove(target, { recursive: true }).pipe(Effect.ignore)
+      const entry = entries.get(file)
+      if (entry === undefined) {
+        return yield* Effect.fail(
+          make("checkpoint-failed", `path "${file}" was not declared in the checkpoint manifest`)
+        )
+      }
+      if (entry.state === "absent") {
+        yield* fs.remove(target, { recursive: true, force: true }).pipe(
+          Effect.mapError(io(`could not remove post-checkpoint path ${file}`))
+        )
+        const remaining = yield* optionalNotFound(fs.stat(target)).pipe(
+          Effect.mapError(io(`could not verify removal of post-checkpoint path ${file}`))
+        )
+        if (Option.isSome(remaining)) {
+          return yield* Effect.fail(
+            make("checkpoint-failed", `post-checkpoint path "${file}" still exists after rollback`)
+          )
+        }
         restored.push(file)
         continue
       }
+      if (entry.digest === undefined) {
+        return yield* Effect.fail(make("checkpoint-failed", `the checkpoint entry for "${file}" has no digest`))
+      }
+      const before = yield* verifiedBytes(
+        fs,
+        path.join(ref.backup, ...file.split("/")),
+        entry.digest,
+        `the backup of ${file}`
+      )
       yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
         Effect.mapError(io(`could not create ${path.dirname(target)}`))
       )
-      yield* fs.writeFile(target, before.value).pipe(Effect.mapError(io(`could not restore ${file}`)))
+      yield* fs.writeFile(target, before).pipe(Effect.mapError(io(`could not restore ${file}`)))
+      yield* verifiedBytes(fs, target, entry.digest, `the restored path ${file}`)
       restored.push(file)
     }
     return restored
@@ -627,8 +745,10 @@ const preserveAdded = (
     const directory = `${ref.backup}.post-checkpoint`
     const preserved: Array<{ path: string; backup: string }> = []
     for (const file of added) {
-      const bytes = yield* fs.readFile(absolute(path, root, file)).pipe(Effect.option)
-      if (bytes._tag === "None") continue
+      const bytes = yield* optionalNotFound(fs.readFile(absolute(path, root, file))).pipe(
+        Effect.mapError(io(`could not read the post-checkpoint file ${file}`))
+      )
+      if (Option.isNone(bytes)) continue
       const target = path.join(directory, ...file.split("/"))
       yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
         Effect.mapError(io(`could not create ${path.dirname(target)}`))
@@ -636,6 +756,8 @@ const preserveAdded = (
       yield* fs.writeFile(target, bytes.value).pipe(
         Effect.mapError(io(`could not preserve the post-checkpoint file ${file}`))
       )
+      const digest = sha256(bytes.value)
+      yield* verifiedBytes(fs, target, digest, `the preserved post-checkpoint file ${file}`)
       preserved.push({ path: file, backup: target })
     }
     return preserved
@@ -683,7 +805,8 @@ export const rollback = (
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const recorded = new Set(ref.files)
+    const entries = new Map(ref.entries.map((entry) => [entry.path, entry] as const))
+    const recorded = new Set(ref.entries.filter((entry) => entry.state === "file").map((entry) => entry.path))
     const changes = yield* treeDiff(root, ref)
     const added = changes
       .filter((file) => file.change === "added" && !recorded.has(file.path))
@@ -692,10 +815,36 @@ export const rollback = (
       .filter((file) => file.change !== "added" && !recorded.has(file.path))
       .map((file) => file.path)
     const deletedAdds = yield* preserveAdded(root, ref, added)
-    const restored = yield* restore(root, ref, [...recorded, ...added, ...(options.paths ?? [])])
+    const declared = [...new Set(options.paths ?? [])]
+    for (const file of declared) {
+      if (!entries.has(file)) {
+        return yield* Effect.fail(
+          make("checkpoint-failed", `path "${file}" was not declared in the checkpoint manifest`)
+        )
+      }
+    }
+    const declaredAdds = added.filter((file) => entries.get(file)?.state === "absent")
+    const outsideAdds = added.filter((file) => !entries.has(file))
+    for (const file of outsideAdds) {
+      const target = absolute(path, root, file)
+      yield* fs.remove(target, { recursive: true, force: true }).pipe(
+        Effect.mapError(io(`could not remove post-checkpoint path ${file}`))
+      )
+      const remaining = yield* optionalNotFound(fs.stat(target)).pipe(
+        Effect.mapError(io(`could not verify removal of post-checkpoint path ${file}`))
+      )
+      if (Option.isSome(remaining)) {
+        return yield* Effect.fail(
+          make("checkpoint-failed", `post-checkpoint path "${file}" still exists after rollback`)
+        )
+      }
+    }
+    const restored = yield* restore(root, ref, [...recorded, ...declaredAdds, ...declared])
     if (options.archiveDir !== undefined) {
       for (const file of restored) {
-        yield* fs.remove(path.join(options.archiveDir, ...file.split("/"))).pipe(Effect.ignore)
+        yield* fs.remove(path.join(options.archiveDir, ...file.split("/")), { recursive: true, force: true }).pipe(
+          Effect.mapError(io(`could not remove rolled-back archive path ${file}`))
+        )
       }
     }
     return { restored, unrestored, deletedAdds }
@@ -743,8 +892,10 @@ export const clearPending = (
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const file = pendingFile(path, backupDir)
-    const text = yield* fs.readFileString(file).pipe(Effect.option)
-    if (text._tag === "None") return
+    const text = yield* optionalNotFound(fs.readFileString(file)).pipe(
+      Effect.mapError(io(`could not read the pending checkpoint ${file}`))
+    )
+    if (Option.isNone(text)) return
     const record = yield* Effect.try({
       try: () => JSON.parse(text.value) as Pending,
       catch: io(`could not read the pending checkpoint ${file}`)

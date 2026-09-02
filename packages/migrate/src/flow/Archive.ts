@@ -31,6 +31,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Detect from "../Detect.ts"
+import * as Fs from "../internal/Fs.ts"
 import { io, make, MigrateError } from "../MigrateError.ts"
 import * as Report from "../Report.ts"
 import * as Units from "../Units.ts"
@@ -67,7 +68,16 @@ export interface ManifestRewrite {
   readonly flowsDir?: string | undefined
 }
 
-const dependencyFields = [
+/**
+ * Every manifest field a dependency can be declared or pinned in. The rewrite
+ * clears 0.x names from all six, and the project postcondition checks the
+ * same six, because a name that survives in `overrides` or `resolutions`
+ * still pins a package the migrated project no longer declares.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const dependencyFields = [
   "dependencies",
   "devDependencies",
   "peerDependencies",
@@ -498,13 +508,16 @@ export const run = (payload: {
       : []
     for (const file of rewritable) {
       const target = path.join(payload.root, ...file.split("/"))
-      const before = yield* fs.readFileString(target).pipe(Effect.option)
-      if (before._tag === "None") continue
+      // Absent is the one answer that means "nothing to rewrite"; every other
+      // failure is this step failing, and the checkpoint's restoring scope is
+      // what a failure here is for.
+      const before = yield* Fs.readIfExists(target, file)
+      if (before === undefined) continue
       const result = yield* Effect.try({
         try: () =>
           rewritten(
             file,
-            before.value,
+            before,
             payload.specifiers ?? {},
             payload.kind === "dependencies" ? "dependencies" : "project"
           ),
@@ -515,9 +528,22 @@ export const run = (payload: {
         if (script.unsupported === undefined) continue
         unsupportedScripts.push({ script: script.name, file, reason: script.unsupported })
       }
-      if (result.text === before.value) continue
+      if (result.text === before) continue
       yield* fs.writeFileString(target, result.text).pipe(Effect.mapError(io(`could not rewrite ${file}`)))
       changed.push({ path: file, change: "modified", bytes: new TextEncoder().encode(result.text).length })
+    }
+
+    // A project with no ignore file gets one: `.flows/` is runtime state a
+    // migrated project writes on its first run, and a repository that commits
+    // it has committed a database. The file is a target of the project unit,
+    // so writing it is inside the unit's own file set.
+    if (payload.kind === "project" && payload.targets.includes(".gitignore")) {
+      const target = path.join(payload.root, ".gitignore")
+      if ((yield* Fs.readIfExists(target, ".gitignore")) === undefined) {
+        const text = rewriteGitignore("")
+        yield* fs.writeFileString(target, text).pipe(Effect.mapError(io("could not create .gitignore")))
+        changed.push({ path: ".gitignore", change: "added", bytes: new TextEncoder().encode(text).length })
+      }
     }
 
     if (payload.keepOldSources) return { changed, unsupportedScripts }
@@ -534,7 +560,9 @@ export const run = (payload: {
     const copied: Array<{ readonly file: string; readonly bytes: number }> = []
     for (const file of archivable) {
       const source = path.join(payload.root, ...file.split("/"))
-      const bytes = yield* fs.readFile(source).pipe(Effect.option)
+      const bytes = yield* Fs.optionalNotFound(fs.readFile(source)).pipe(
+        Effect.mapError(io(`could not read ${file} to archive it`))
+      )
       if (bytes._tag === "None") continue
       const target = path.join(payload.archiveDir, ...file.split("/"))
       yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(

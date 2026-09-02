@@ -91,6 +91,18 @@ describe("plan over a single-file JSX project", () => {
       expect(hashTree(root)).toEqual(before)
     }))
 
+  it.effect("refuses a report directory that could leave the project, and reads nothing first", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const before = hashTree(root)
+
+      for (const reportDir of ["../escape", "/tmp/escape", ".flows/report", "prompts"]) {
+        const failure = yield* Effect.flip(plan(root, { reportDir } as Partial<Command.MigrateOptions>))
+        expect([reportDir, failure.code]).toEqual([reportDir, "invalid-layout"])
+      }
+      expect(hashTree(root)).toEqual(before)
+    }))
+
   it.effect("puts the report where the operator asked", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")

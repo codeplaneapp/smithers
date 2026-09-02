@@ -56,6 +56,18 @@ export interface CheckpointFiles {
    * ways.
    */
   readonly runStateRoots?: ReadonlyArray<string> | undefined
+  /**
+   * The unit's own declared sources and targets.
+   *
+   * A run-state root is a directory, and 0.x keeps configuration and
+   * workflow sources in the same directory as its run state
+   * (`.smithers/smithers.config.ts` beside `.smithers/smithers.db`). A file
+   * the unit was planned to rewrite or archive is the unit's, wherever it
+   * sits, so it is left out of the byte-identity check. The exact run-state
+   * paths are never sources: the scanner does not read them and the archive
+   * refuses to move them.
+   */
+  readonly owned?: ReadonlyArray<string> | undefined
 }
 
 /**
@@ -322,12 +334,10 @@ export const run = (
   decisions: ReadonlyArray<string> = []
 ): Effect.Effect<ReadonlyArray<CheckResult>, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const absolute = (file: string): string => path.join(root, ...file.split("/"))
     const flowsDir = unit.verification.discovery.flowsDir
     const specifierContext = unit.specifiers
-    const runStateRoots = checkpointFiles.runStateRoots ?? []
 
     const texts = new Map<string, string>()
     for (const file of changedFiles) {
@@ -481,38 +491,63 @@ export const run = (
       )
     )
 
-    const runStateFindings: Array<{ file: string; line: number; message: string }> = []
+    results.push(yield* runState(root, checkpointFiles))
+
+    return results
+  })
+
+/**
+ * Whether every 0.x run-state path holds exactly the bytes the checkpoint
+ * recorded, and no run-state root has gained a file since.
+ *
+ * On its own because it is asked twice: once with the other checks, before
+ * the archive, and once more over the final tree, after the archive and the
+ * final verification have run their own commands.
+ *
+ * @category checks
+ * @since 0.1.0
+ */
+export const runState = (
+  root: string,
+  checkpointFiles: CheckpointFiles
+): Effect.Effect<CheckResult, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const absolute = (file: string): string => path.join(root, ...file.split("/"))
+    const owned = new Set(checkpointFiles.owned ?? [])
+    const findings: Array<{ file: string; line: number; message: string }> = []
     for (const [file, expected] of checkpointFiles.digests) {
+      if (owned.has(file)) continue
       const target = absolute(file)
       if (!(yield* Fs.exists(target))) {
-        runStateFindings.push({ file, line: 1, message: "run state was removed; the tool must never touch it" })
+        findings.push({ file, line: 1, message: "run state was removed; the tool must never touch it" })
         continue
       }
       const bytes = yield* fs.readFile(target).pipe(Effect.mapError(io(`could not read "${file}"`)))
       if (digest(bytes) !== expected) {
-        runStateFindings.push({ file, line: 1, message: "run state changed; the tool must never write to it" })
+        findings.push({ file, line: 1, message: "run state changed; the tool must never write to it" })
       }
     }
     // The other direction: a file that appears under a run-state root after the
     // checkpoint is a write the checkpoint's digest map cannot see, because
     // that map holds only the paths that existed when it was taken.
-    for (const root of runStateRoots) {
-      for (const file of yield* Fs.walkAll(absolute(root))) {
-        const relative = `${root}/${file}`
-        if (checkpointFiles.digests.has(relative)) continue
-        runStateFindings.push({
+    for (const runStateRoot of checkpointFiles.runStateRoots ?? []) {
+      for (const file of yield* Fs.walkAll(absolute(runStateRoot))) {
+        const relative = `${runStateRoot}/${file}`
+        if (checkpointFiles.digests.has(relative) || owned.has(relative)) continue
+        findings.push({
           file: relative,
           line: 1,
           message: "run state was added; the tool must never write to it"
         })
       }
     }
-    check(
-      "run state is byte-identical",
-      runStateFindings.sort((left, right) => (left.file < right.file ? -1 : left.file > right.file ? 1 : 0))
-    )
-
-    return results
+    return {
+      name: "run state is byte-identical",
+      ok: findings.length === 0,
+      findings: findings.sort((left, right) => (left.file < right.file ? -1 : left.file > right.file ? 1 : 0))
+    }
   })
 
 /**

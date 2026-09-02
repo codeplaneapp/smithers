@@ -8,6 +8,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Command from "@smthrs/migrate/flow/Command"
 import * as Options from "@smthrs/migrate/flow/Options"
+import { MigrateError } from "@smthrs/migrate/MigrateError"
 import * as Report from "@smthrs/migrate/Report"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -164,6 +165,26 @@ describe("Command.optionsOf verification overrides", () => {
     // rather than mean the same thing.
     expect(Command.optionsOf(flags({ verifyTypecheck: [""] }), "/work").commands).toEqual({ typecheck: [] })
     expect(Command.optionsOf(flags({ verifyTypecheck: [] }), "/work").commands).toBeUndefined()
+  })
+})
+
+describe("Command.isMigrateError", () => {
+  it("accepts the package's own error and refuses an object that merely carries its tag", () => {
+    expect(Command.isMigrateError(new MigrateError({ code: "io", message: "real" }))).toBe(true)
+    // A forged tag on a plain object, on a class with the same tag, and on
+    // an instance whose fields no longer decode: none is an operator message.
+    expect(Command.isMigrateError({ _tag: "@smthrs/migrate/MigrateError", code: "io", message: "forged" })).toBe(false)
+    class Impostor {
+      readonly _tag = "@smthrs/migrate/MigrateError"
+      readonly code = "run-state-blocked"
+      readonly message = "forged"
+    }
+    expect(Command.isMigrateError(new Impostor())).toBe(false)
+    const tampered = new MigrateError({ code: "io", message: "real" })
+    ;(tampered as { code: string }).code = "not-a-code"
+    expect(Command.isMigrateError(tampered)).toBe(false)
+    expect(Command.isMigrateError(null)).toBe(false)
+    expect(Command.isMigrateError("@smthrs/migrate/MigrateError")).toBe(false)
   })
 })
 

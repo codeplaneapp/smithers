@@ -21,11 +21,12 @@ import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 import { resolve } from "node:path"
-import { make, type MigrateError } from "../MigrateError.ts"
+import { make, MigrateError, MigrateErrorCode } from "../MigrateError.ts"
 import * as Report from "../Report.ts"
 import * as RunState from "../RunState.ts"
-import * as Scan from "../Scan.ts"
+import type * as Scan from "../Scan.ts"
 import type * as Units from "../Units.ts"
 import type * as Contract from "./Contract.ts"
 import * as Layers from "./Layers.ts"
@@ -90,6 +91,8 @@ export interface Survey {
   readonly outlines: ReadonlyArray<Transform.UnitOutline>
   readonly runStateRoots: ReadonlyArray<string>
   readonly commands: Contract.Commands
+  /** The plan, sealed: what the flow's seal step checks the tree against before the first checkpoint. */
+  readonly seal: MigrateFlow.PlanSeal
 }
 
 /**
@@ -107,24 +110,17 @@ export const survey = (
   options: MigrateOptions
 ): Effect.Effect<Survey, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
-    const result = yield* Scan.scan(options.root, {
-      flowsDir: Options.flowsDir(options),
-      ...(options.units === undefined ? {} : { units: options.units }),
-      ...(options.commands === undefined ? {} : {
-        commands: {
-          ...(options.commands.install === undefined ? {} : { install: options.commands.install }),
-          ...(options.commands.format === undefined ? {} : { format: options.commands.format }),
-          ...(options.commands.typecheck === undefined ? {} : { typecheck: options.commands.typecheck }),
-          ...(options.commands.test === undefined ? {} : { test: options.commands.test })
-        }
-      })
-    })
+    // The same scan, the same layout checks, and the same refusals the flow's
+    // own scan step makes: a survey that read a project the flow would refuse
+    // would plan units against a layout nothing may write to.
+    const result = yield* MigrateFlow.scan(options)
     const outlines = MigrateFlow.outlines(result, options)
     return {
       scan: result,
       outlines,
       runStateRoots: RunState.roots(result.runState),
-      commands: commandsOf(result, options)
+      commands: commandsOf(result, options),
+      seal: yield* MigrateFlow.planSeal(result, options)
     }
   })
 
@@ -150,6 +146,17 @@ export const commandsOf = (
   )
 
 /**
+ * Whether a failure is this package's own error, decided by the class and
+ * its schema rather than by a `_tag` string any object can carry. A forged
+ * tag would otherwise be printed as an operator instruction.
+ *
+ * @category checks
+ * @since 0.1.0
+ */
+export const isMigrateError = (error: unknown): error is MigrateError =>
+  error instanceof MigrateError && Schema.is(MigrateErrorCode)(error.code) && typeof error.message === "string"
+
+/**
  * The execution id one migration invocation takes. The direct Node composition
  * uses an in-memory engine, so this id is intentionally unique per start and
  * cannot imply cross-process resume. The checkpoint's pending marker is the
@@ -170,19 +177,33 @@ export const executionId = (options: MigrateOptions, generatedAt: string): strin
 export const run = (
   options: MigrateOptions
 ): Effect.Effect<Report.MigrationReport, MigrateError, Requirements> =>
+  Effect.flatMap(survey(options), (surveyed) => launch(options, surveyed))
+
+/**
+ * Executes the migration flow over a survey taken earlier.
+ *
+ * This is the seam a durable host uses when the plan was approved in one
+ * process and run in another: the survey is the plan, and the flow's own seal
+ * step is what refuses it if the project has moved on since.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const launch = (
+  options: MigrateOptions,
+  surveyed: Survey
+): Effect.Effect<Report.MigrationReport, MigrateError, Requirements> =>
   Effect.gen(function*() {
     const generatedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
-    const surveyed = yield* survey(options)
     return yield* MigrateFlow.flow.execute({
       options,
       units: surveyed.outlines,
       runStateRoots: surveyed.runStateRoots,
-      generatedAt
+      generatedAt,
+      seal: surveyed.seal
     }, { executionId: executionId(options, generatedAt) }).pipe(
       Effect.mapError((error) =>
-        error._tag === "@smthrs/migrate/MigrateError"
-          ? error
-          : make("io", "the migration flow could not run", String(error))
+        isMigrateError(error) ? error : make("io", "the migration flow could not run", String(error))
       )
     )
   })
@@ -204,6 +225,7 @@ export const layerNode = (config: {
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   readonly seat?: string | undefined
   readonly flowsDir?: string | undefined
+  readonly reportDir?: string | undefined
   readonly commands?: Units.CommandOverrides | undefined
 }) =>
   Layers.layerNodeScanned({
@@ -211,6 +233,7 @@ export const layerNode = (config: {
     ...(config.environment === undefined ? {} : { environment: config.environment }),
     ...(config.seat === undefined ? {} : { seat: config.seat }),
     ...(config.flowsDir === undefined ? {} : { flowsDir: config.flowsDir }),
+    ...(config.reportDir === undefined ? {} : { reportDir: config.reportDir }),
     ...(config.commands === undefined ? {} : { commands: config.commands })
   })
 
@@ -312,6 +335,7 @@ export const runNode = (
     layerNode({
       root: options.root,
       flowsDir: Options.flowsDir(options),
+      reportDir: Options.reportDir(options),
       ...(options.seat === undefined ? {} : { seat: options.seat }),
       ...(config.environment === undefined ? {} : { environment: config.environment }),
       // The host verifies and spawns with the same commands the units do.
@@ -323,10 +347,7 @@ export const runNode = (
     // failing to start, which is an `io` failure with the cause attached
     // rather than a defect nobody can act on.
     Effect.mapError((error) =>
-      typeof error === "object" && error !== null && "_tag" in error &&
-        error._tag === "@smthrs/migrate/MigrateError"
-        ? error
-        : make("io", "the migration could not build its runtime", String(error))
+      isMigrateError(error) ? error : make("io", "the migration could not build its runtime", String(error))
     )
   )
 

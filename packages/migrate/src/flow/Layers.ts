@@ -55,7 +55,7 @@ import * as Stream from "effect/Stream"
 import { isAbsolute } from "node:path"
 import * as Scan from "../Scan.ts"
 import * as Units from "../Units.ts"
-import type * as Contract from "./Contract.ts"
+import * as Contract from "./Contract.ts"
 import * as MigrateFlow from "./MigrateFlow.ts"
 import * as Transform from "./Transform.ts"
 
@@ -190,10 +190,10 @@ export const seatResolver = (options: {
  */
 export const verificationCommands = (commands: Contract.Commands): ReadonlyArray<string> => [
   ...new Set([
-    ...(commands.install === undefined ? [] : [commands.install]),
-    ...(commands.format === undefined ? [] : [commands.format]),
-    ...commands.typecheck,
-    ...(commands.test === undefined ? [] : [commands.test])
+    ...(commands.install === undefined ? [] : [Contract.commandLine(commands.install)]),
+    ...(commands.format === undefined ? [] : [Contract.commandLine(commands.format)]),
+    ...commands.typecheck.map(Contract.commandLine),
+    ...(commands.test === undefined ? [] : [Contract.commandLine(commands.test)])
   ])
 ]
 
@@ -206,8 +206,8 @@ const absoluteRoot = (root: string): string => {
 
 /**
  * The permission rules one migration runs under: the project tree, the
- * commands that verify it, the model calls that rewrite it, and a denial for
- * every 0.x run-state path.
+ * commands that verify it, the model calls that rewrite it, and a denial of
+ * every filesystem action on every 0.x run-state path.
  *
  * `proc:spawn` is granted per command line rather than as a wildcard. The
  * kernel checks the capability against the line
@@ -254,9 +254,14 @@ export const rules = (options: {
     ...verificationCommands(options.commands).map((command) => allow("proc:spawn", command)),
     allow("net:*", "**"),
     allow("model:*", "**"),
+    // Every filesystem action, not only writes. The contract forbids reading
+    // run state too: a database, an execution log, or a subscription file
+    // read into a model call has left the machine, and a prompt sentence is
+    // not an enforcement. `fs:*` is the read, the write, the listing, the
+    // stat, and anything the kernel adds later.
     ...options.runStatePaths.flatMap((relative) => [
-      deny("fs:write", `${root}/${relative}`),
-      deny("fs:write", `${root}/${relative}/**`)
+      deny("fs:*", `${root}/${relative}`),
+      deny("fs:*", `${root}/${relative}/**`)
     ])
   ]
 }
@@ -391,6 +396,8 @@ export interface ScannedConfig {
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   readonly seat?: string | undefined
   readonly flowsDir?: string | undefined
+  /** The tool's own directory, which the scan skips. Defaults to `.smithers-migrate`. */
+  readonly reportDir?: string | undefined
   /**
    * The operator's own command overrides, if they named any.
    *
@@ -447,6 +454,7 @@ export const layerNodeScanned = (config: ScannedConfig) => {
   return Layer.unwrap(
     Effect.gen(function*() {
       const result = yield* Scan.scan(config.root, {
+        ignore: [config.reportDir ?? ".smithers-migrate"],
         ...(config.flowsDir === undefined ? {} : { flowsDir: config.flowsDir })
       })
       return layerNode({

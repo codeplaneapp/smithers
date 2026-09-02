@@ -14,6 +14,7 @@ import { Capability, GrantStore, Workspace } from "@smthrs/kernel"
 import type * as Contract from "@smthrs/migrate/flow/Contract"
 import * as Layers from "@smthrs/migrate/flow/Layers"
 import * as Scan from "@smthrs/migrate/Scan"
+import * as Units from "@smthrs/migrate/Units"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { copyFixture, nodeLayer } from "../fixtures/helpers.ts"
@@ -81,7 +82,9 @@ describe("Layers.commandsFor over a real project", () => {
 
       expect(derived.flowsDir).toBe("flows")
       expect(derived.typecheck.length).toBeGreaterThan(0)
-      expect(derived.test).toBe("npm run test")
+      expect(derived.test).toEqual(Units.argv("npm", "run", "test"))
+      // What the host grants is the rendered line of the same argv.
+      expect(Layers.verificationCommands(derived)).toContain("npm run test")
     }).pipe(Effect.provide(nodeLayer)))
 
   it.effect("takes the operator's overrides, so the host permits what the brief lists", () =>
@@ -135,6 +138,21 @@ describe("Layers.rules over a real grant store", () => {
       expect(yield* permitted("fs:write", `${root}/.smithers/smithers.db`)).toBe(false)
       expect(yield* permitted("fs:write", `${root}/.smithers/executions/run-1/stdout.log`)).toBe(false)
       expect(yield* permitted("fs:write", `${root}/.smithers/claude-mirror-subscriptions.json`)).toBe(false)
+    }))
+
+  it.effect("refuses to read, list, or stat run state too, because a read is a copy into the model", () =>
+    Effect.gen(function*() {
+      // The contract says "do not read", and a sentence is not an enforcement.
+      // Every filesystem action on the exact path and on everything under it
+      // is vetoed, and the veto is configured, so no envelope lifts it.
+      expect(yield* permitted("fs:read", `${root}/.smithers/smithers.db`)).toBe(false)
+      expect(yield* permitted("fs:read", `${root}/.smithers/executions`)).toBe(false)
+      expect(yield* permitted("fs:read", `${root}/.smithers/executions/run-1/stdout.log`)).toBe(false)
+      expect(yield* permitted("fs:read", `${root}/.smithers/claude-mirror-subscriptions.json`)).toBe(false)
+      // The sibling that is source, not state, stays readable and writable.
+      expect(yield* permitted("fs:read", `${root}/.smithers/workflows/review.tsx`)).toBe(true)
+      expect(yield* permitted("fs:write", `${root}/.smithers/workflows/review.tsx`)).toBe(true)
+      expect(yield* permitted("fs:read", `${root}/.smithers`)).toBe(true)
     }))
 
   it.effect("refuses a write outside the project entirely", () =>

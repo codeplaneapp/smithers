@@ -31,7 +31,11 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "sideEffects": [],
+  "sideEffects": [
+    "./src/flow/bin.ts",
+    "./dist/esm/flow/bin.js",
+    "./dist/cjs/flow/bin.js"
+  ],
   "bin": {
     "smithers-migrate": "./dist/esm/flow/bin.js"
   },
@@ -40,6 +44,7 @@
     ".": "./src/index.ts",
     "./*": "./src/*.ts",
     "./internal/*": null,
+    "./flow/internal/*": null,
     "./*/index": null
   },
   "files": [
@@ -70,6 +75,7 @@
         "require": "./dist/cjs/*.js"
       },
       "./internal/*": null,
+      "./flow/internal/*": null,
       "./*/index": null
     }
   },

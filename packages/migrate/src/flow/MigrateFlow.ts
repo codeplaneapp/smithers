@@ -33,8 +33,12 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { createHash } from "node:crypto"
 import * as Checks from "../Checks.ts"
 import * as Detect from "../Detect.ts"
+import * as Canonical from "../internal/Canonical.ts"
+import * as Fs from "../internal/Fs.ts"
 import * as Ts from "../internal/Ts.ts"
 import { io, make, MigrateError } from "../MigrateError.ts"
 import * as Report from "../Report.ts"
@@ -73,6 +77,7 @@ export type UnitRequires =
 export type Requires =
   | Action.Requirement<"smithers/migrate-v1/Scan">
   | Action.Requirement<"smithers/migrate-v1/Gate">
+  | Action.Requirement<"smithers/migrate-v1/Seal">
   | Action.Requirement<"smithers/migrate-v1/WriteReport">
 
 /**
@@ -92,6 +97,10 @@ export const tag = "smithers/migrate-v1"
 export const unitTag = "smithers/migrate-v1/unit"
 
 const scanOptions = (options: Options.MigrateOptions): Scan.Options => ({
+  // The tool's own directory is never project source: it holds the archive
+  // of what a previous run replaced, and a second run must not plan to
+  // migrate the archive.
+  ignore: [Options.reportDir(options)],
   flowsDir: Options.flowsDir(options),
   ...(options.units === undefined ? {} : { units: options.units }),
   ...(options.commands === undefined ? {} : {
@@ -105,7 +114,43 @@ const scanOptions = (options: Options.MigrateOptions): Scan.Options => ({
 })
 
 /**
+ * Why the report directory or the flows directory collides with what the
+ * scan found, or `undefined` when neither does.
+ *
+ * The text checks in {@link module:Options.layoutIssue} and the filesystem
+ * checks in {@link module:Options.validateLayout} run before anything is read.
+ * This one needs the scan: a flows directory or a report directory under a
+ * 0.x run-state root, or holding one, would write where the tool has promised
+ * never to write.
+ *
+ * @category checks
+ * @since 0.1.0
+ */
+export const layoutConflict = (
+  result: Scan.ScanResult,
+  options: Options.MigrateOptions
+): string | undefined => {
+  const report = Options.reportDir(options)
+  const flows = Options.flowsDir(options)
+  const under = (inner: string, outer: string): boolean => inner === outer || inner.startsWith(`${outer}/`)
+  const guarded = [...new Set([...RunState.roots(result.runState), ...Transform.runStatePaths(result)])].sort()
+  for (const [label, directory] of [["reportDir", report], ["layout.flowsDir", flows]] as const) {
+    for (const root of guarded) {
+      if (under(directory, root) || under(root, directory)) {
+        return `${label} "${directory}" overlaps the 0.x run-state path "${root}"`
+      }
+    }
+  }
+  return undefined
+}
+
+/**
  * Scans the project and renders the plan report.
+ *
+ * The layout is validated first, before a byte is read, and again against
+ * what the scan found, before a byte is written: the report directory and the
+ * flows directory have to name places inside the project that hold nothing
+ * the migration reads or protects.
  *
  * @category execution
  * @since 0.1.0
@@ -113,7 +158,13 @@ const scanOptions = (options: Options.MigrateOptions): Scan.Options => ({
 export const scan = (
   options: Options.MigrateOptions
 ): Effect.Effect<Scan.ScanResult, MigrateError, FileSystem.FileSystem | Path.Path> =>
-  Scan.scan(options.root, scanOptions(options))
+  Effect.gen(function*() {
+    yield* Options.validateLayout(options)
+    const result = yield* Scan.scan(options.root, scanOptions(options))
+    const conflict = layoutConflict(result, options)
+    if (conflict !== undefined) return yield* Effect.fail(make("invalid-layout", conflict))
+    return result
+  })
 
 /**
  * The scan step. Deterministic and read only, so a replay reuses what the
@@ -197,6 +248,177 @@ export const gateLayer = gateAction.toLayer(({ options, report, unitIds }) =>
 )
 
 /**
+ * The checkpoint-time state of one path a plan covers.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const SealedFile = Schema.Struct({
+  path: Schema.String,
+  state: Schema.Literals(["absent", "file"]),
+  digest: Schema.optional(Schema.String)
+})
+
+/**
+ * A plan, sealed: a digest over everything the plan says about the project,
+ * and the per-path record the digest was taken from.
+ *
+ * A unit id is a name, and a name survives every edit to what it names. The
+ * seal covers the rest: every outline field, the run-state roots, the layout,
+ * and a digest of every source and target path. `files` travels beside the
+ * digest so a refusal can name what changed rather than say that something
+ * did.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const PlanSeal = Schema.Struct({
+  digest: Schema.String,
+  files: Schema.Array(SealedFile)
+})
+
+/**
+ * A plan, sealed.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type PlanSeal = typeof PlanSeal.Type
+
+const sha256 = (text: string | Uint8Array): string => createHash("sha256").update(text).digest("hex")
+
+/**
+ * Seals a plan: reads every source and target the outlines name and digests
+ * them together with the outlines, the run-state roots, and the layout.
+ *
+ * Read only, and deterministic for a given tree: two seals of the same
+ * project agree byte for byte, and one changed byte in one source changes the
+ * digest.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const planSeal = (
+  result: Scan.ScanResult,
+  options: Options.MigrateOptions
+): Effect.Effect<PlanSeal, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const units = outlines(result, options)
+    const paths = [...new Set(units.flatMap((unit) => [...unit.sources, ...unit.targets]))].sort()
+    const files: Array<typeof SealedFile.Type> = []
+    for (const relative of paths) {
+      const bytes = yield* Fs.optionalNotFound(fs.readFile(path.join(result.root, ...relative.split("/")))).pipe(
+        Effect.mapError(io(`could not read "${relative}" to seal the plan`))
+      )
+      files.push(
+        bytes._tag === "None"
+          ? { path: relative, state: "absent" }
+          : { path: relative, state: "file", digest: sha256(bytes.value) }
+      )
+    }
+    const digest = sha256(Canonical.stringify({
+      version: 1,
+      layout: { reportDir: Options.reportDir(options), flowsDir: Options.flowsDir(options) },
+      runStateRoots: runStateRoots(result),
+      outlines: units,
+      files
+    }))
+    return { digest, files }
+  })
+
+/**
+ * Every path whose sealed state differs between two seals, and every unit
+ * that exists in one and not the other.
+ *
+ * @category combinators
+ * @since 0.1.0
+ */
+export const sealDifferences = (planned: PlanSeal, current: PlanSeal): ReadonlyArray<string> => {
+  const before = new Map(planned.files.map((file) => [file.path, file] as const))
+  const after = new Map(current.files.map((file) => [file.path, file] as const))
+  const lines: Array<string> = []
+  for (const file of planned.files) {
+    const now = after.get(file.path)
+    if (now === undefined) lines.push(`${file.path}: no longer part of the plan`)
+    else if (now.state !== file.state) lines.push(`${file.path}: was ${file.state}, is now ${now.state}`)
+    else if (now.digest !== file.digest) lines.push(`${file.path}: content changed`)
+  }
+  for (const file of current.files) {
+    if (!before.has(file.path)) lines.push(`${file.path}: newly part of the plan`)
+  }
+  return lines
+}
+
+/**
+ * The seal step: read the project once more, immediately before the first
+ * checkpoint, and refuse when it is no longer the project the plan describes.
+ *
+ * `irreversible`, so a durable host runs it in every execution rather than
+ * replaying a recorded answer: an approved plan that is run a day later is
+ * exactly the case this step exists for. It also clears the unit artifacts of
+ * any earlier run, so every artifact the report step reads back was written
+ * by this run.
+ *
+ * @category actions
+ * @since 0.1.0
+ */
+export const sealAction = Action.make("smithers/migrate-v1/Seal", {
+  payload: {
+    options: Options.MigrateOptions,
+    seal: PlanSeal
+  },
+  success: Schema.Struct({ root: Schema.String, digest: Schema.String }),
+  error: MigrateError,
+  tier: "irreversible"
+})
+
+/**
+ * Checks the sealed plan against a fresh read of the project.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const seal = (payload: {
+  readonly options: Options.MigrateOptions
+  readonly seal: PlanSeal
+}): Effect.Effect<
+  { readonly root: string; readonly digest: string },
+  MigrateError,
+  FileSystem.FileSystem | Path.Path
+> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const result = yield* scan(payload.options)
+    const current = yield* planSeal(result, payload.options)
+    if (current.digest !== payload.seal.digest) {
+      const changed = sealDifferences(payload.seal, current)
+      return yield* Effect.fail(make(
+        "stale-plan",
+        "The project has changed since this migration was planned, so the plan no longer describes it. Rerun the plan and apply that.",
+        changed.length === 0
+          ? "a unit outline, the run-state roots, or the layout changed"
+          : changed.join("\n")
+      ))
+    }
+    const artifacts = path.join(payload.options.root, ...Options.reportDir(payload.options).split("/"), "units")
+    yield* fs.remove(artifacts, { recursive: true, force: true }).pipe(
+      Effect.mapError(io(`could not clear the unit artifacts under "${artifacts}"`))
+    )
+    return { root: payload.options.root, digest: current.digest }
+  })
+
+/**
+ * The seal step's implementation.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const sealLayer = sealAction.toLayer(seal)
+
+/**
  * What one unit's execution settles on.
  *
  * @category models
@@ -222,11 +444,18 @@ export type UnitOutcome = typeof UnitOutcome.Type
  * it settles is also what a crashed run wants: the units that finished are on
  * disk, in the directory the operator was told to commit.
  *
+ * The name is the id made readable, then a digest of the id itself. The
+ * readable half is lossy on purpose (`workflow:a/b` and `workflow:a-b` both
+ * read `workflow-a-b`); the digest is what keeps two ids from sharing a file,
+ * on a case-insensitive filesystem included, and the artifact carries the id
+ * inside so the reader can check it was written for the unit it was asked
+ * for.
+ *
  * @category combinators
  * @since 0.1.0
  */
 export const unitArtifact = (options: Options.MigrateOptions, id: string): string =>
-  `${Options.reportDir(options)}/units/${id.replace(/[^A-Za-z0-9._-]+/g, "-")}.json`
+  `${Options.reportDir(options)}/units/${id.replace(/[^A-Za-z0-9._-]+/g, "-")}-${sha256(id).slice(0, 16)}.json`
 
 /**
  * The step that decides what a unit's rewrite was worth: it runs the
@@ -287,7 +516,8 @@ const unitPlanFor = (
     format: outline.commands.format,
     typecheck: outline.commands.typecheck,
     test: outline.commands.test,
-    discovery: { flowsDir: Options.flowsDir(options) }
+    discovery: { flowsDir: Options.flowsDir(options) },
+    notes: []
   }
 })
 
@@ -300,6 +530,12 @@ const unitPlanFor = (
  * opposite question: whatever the unit did or did not do, is the project now in
  * the state this kind of unit exists to produce?
  *
+ * A file the check needs has to be there. A manifest, a tsconfig, an ignore
+ * file, or an integration source that is gone is a finding, not a pass: a unit
+ * may edit the files it owns and may never delete the evidence a check reads.
+ * Absence is the platform's typed `NotFound` and nothing else; any other read
+ * failure fails the step, and the checkpoint's restoring scope answers it.
+ *
  * They run after {@link module:Archive.run}, because the deterministic rewrites
  * are part of what produces that state.
  *
@@ -311,22 +547,29 @@ export const postconditions = (
   outline: Transform.UnitOutline
 ): Effect.Effect<ReadonlyArray<Checks.CheckResult>, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const read = (file: string) => fs.readFileString(path.join(root, ...file.split("/"))).pipe(Effect.option)
+    const read = (file: string) => Fs.readIfExists(path.join(root, ...file.split("/")), file)
     const results: Array<Checks.CheckResult> = []
-    const check = (
-      name: string,
-      findings: ReadonlyArray<{ file: string; line: number; message: string }>
-    ): void => {
+    type Finding = { file: string; line: number; message: string }
+    const check = (name: string, findings: ReadonlyArray<Finding>): void => {
       results.push({ name, ok: findings.length === 0, findings })
     }
+    const deleted = (file: string, what: string): Finding => ({
+      file,
+      line: 1,
+      message: `the ${what} was deleted; a unit may rewrite it and may never remove it`
+    })
+    const parseJson = (file: string, text: string, strip = false) =>
+      Effect.try({
+        try: () => JSON.parse(strip ? Archive.withoutComments(text) : text) as Record<string, unknown>,
+        catch: io(`the migrated "${file}" is not valid JSON`)
+      })
 
     if (outline.kind === "workflow") {
-      const missing: Array<{ file: string; line: number; message: string }> = []
+      const missing: Array<Finding> = []
       for (const target of outline.targets) {
         const text = yield* read(target)
-        if (text._tag === "None" || text.value.trim() === "") {
+        if (text === undefined || text.trim() === "") {
           missing.push({ file: target, line: 1, message: "the unit produced no flow at the path it was given" })
         }
       }
@@ -335,16 +578,22 @@ export const postconditions = (
 
     if (outline.kind === "dependencies" || outline.kind === "project") {
       const manifests = outline.sources.filter((file) => (file.split("/").pop() ?? file) === "package.json")
+      const present: Array<{ file: string; parsed: Record<string, unknown> }> = []
+      const gone: Array<Finding> = []
+      for (const file of manifests) {
+        const text = yield* read(file)
+        if (text === undefined) {
+          gone.push(deleted(file, "manifest"))
+          continue
+        }
+        present.push({ file, parsed: yield* parseJson(file, text) })
+      }
+      check("every manifest the unit owns still exists", gone)
+
       if (outline.kind === "project") {
-        const declared: Array<{ file: string; line: number; message: string }> = []
-        for (const file of manifests) {
-          const text = yield* read(file)
-          if (text._tag === "None") continue
-          const parsed = yield* Effect.try({
-            try: () => JSON.parse(text.value) as Record<string, unknown>,
-            catch: io(`the migrated manifest "${file}" is not valid JSON`)
-          })
-          for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+        const declared: Array<Finding> = []
+        for (const { file, parsed } of present) {
+          for (const field of Archive.dependencyFields) {
             const map = parsed[field]
             if (typeof map !== "object" || map === null) continue
             for (const [name, version] of Object.entries(map as Record<string, string>)) {
@@ -360,12 +609,9 @@ export const postconditions = (
         check("no manifest declares a 0.x package", declared)
       }
 
-      const pins: Array<{ file: string; line: number; message: string }> = []
-      for (const file of manifests) {
-        const text = yield* read(file)
-        if (text._tag === "None") continue
-        const parsed = JSON.parse(text.value) as Record<string, unknown>
-        for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+      const pins: Array<Finding> = []
+      for (const { file, parsed } of present) {
+        for (const field of Archive.dependencyFields) {
           const map = parsed[field]
           if (typeof map !== "object" || map === null) continue
           const version = (map as Record<string, string>)["effect"]
@@ -382,14 +628,14 @@ export const postconditions = (
 
     if (outline.kind === "project") {
       const tsconfigs = outline.sources.filter((file) => /^tsconfig(\..+)?\.json$/.test(file.split("/").pop() ?? file))
-      const settings: Array<{ file: string; line: number; message: string }> = []
+      const settings: Array<Finding> = []
       for (const file of tsconfigs) {
         const text = yield* read(file)
-        if (text._tag === "None") continue
-        const parsed = yield* Effect.try({
-          try: () => JSON.parse(Archive.withoutComments(text.value)) as Record<string, unknown>,
-          catch: io(`the migrated "${file}" is not valid JSON`)
-        })
+        if (text === undefined) {
+          settings.push(deleted(file, "TypeScript configuration"))
+          continue
+        }
+        const parsed = yield* parseJson(file, text, true)
         const compiler = parsed.compilerOptions
         if (typeof compiler !== "object" || compiler === null) continue
         const options = compiler as Record<string, unknown>
@@ -412,21 +658,33 @@ export const postconditions = (
       }
       check("no tsconfig configures the 0.x JSX runtime", settings)
 
+      // The root ignore file is the unit's own source or target, so the unit
+      // is answerable for it either way: absent is a finding, not a pass.
       const ignore = yield* read(".gitignore")
       check(
         "the ignore file covers the 1.0 runtime state",
-        ignore._tag === "None" || ignore.value.split("\n").some((line) => line.trim().replace(/\/$/, "") === ".flows")
+        ignore === undefined
+          ? [{
+            file: ".gitignore",
+            line: 1,
+            message: "there is no .gitignore, so `.flows/` runtime state would be committed"
+          }]
+          : ignore.split("\n").some((line) => line.trim().replace(/\/$/, "") === ".flows")
           ? []
           : [{ file: ".gitignore", line: 1, message: "`.flows/` is not ignored, so runtime state would be committed" }]
       )
     }
 
     if (outline.kind === "integration") {
-      const remaining: Array<{ file: string; line: number; message: string }> = []
+      const remaining: Array<Finding> = []
       for (const file of outline.sources) {
         const text = yield* read(file)
-        if (text._tag === "None" || !/\.(ts|tsx|js|jsx|mjs|mts|cjs|cts)$/.test(file)) continue
-        for (const record of Ts.moduleSpecifiers(Ts.parse(file, text.value))) {
+        if (text === undefined) {
+          remaining.push(deleted(file, "integration source"))
+          continue
+        }
+        if (!/\.(ts|tsx|js|jsx|mjs|mts|cjs|cts)$/.test(file)) continue
+        for (const record of Ts.moduleSpecifiers(Ts.parse(file, text))) {
           if (!Detect.isOldSpecifier(record.specifier, outline.specifiers)) continue
           remaining.push({
             file,
@@ -444,11 +702,21 @@ export const postconditions = (
 /**
  * Runs the deterministic checks and settles the unit.
  *
+ * The order is the point. The rewrite is verified once by the unit flow, then
+ * the checks run, then the archive moves the replaced sources aside and
+ * rewrites the manifests, and only then is the tree the migration leaves
+ * behind. So that final tree is what gets the last word: the postconditions,
+ * the whole verification again (install, format, every typecheck, the tests,
+ * discovery), the whole-tree confinement check, and the run-state digests all
+ * run over it, and the unit is called migrated after they pass and not
+ * before. A verification of the tree before the archive would vouch for a
+ * tree nobody ends up with.
+ *
  * Everything after the tree is read runs inside one restoring scope: an
- * exception anywhere in the checks, the archive, or the postconditions puts the
- * unit's files back before it propagates. Without it a failing archive would
- * leave a half-moved tree and no report, because the failure escapes the flow
- * and `WriteReport` never runs.
+ * exception anywhere in the checks, the archive, or the final verification
+ * puts the unit's files back before it propagates. Without it a failing
+ * archive would leave a half-moved tree and no report, because the failure
+ * escapes the flow and `WriteReport` never runs.
  *
  * The scope restores by re-reading the tree when it fires, so it covers what
  * the archive did as well as what the agent did, and it covers whatever a
@@ -462,7 +730,7 @@ export const postconditions = (
 export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.Effect<
   UnitOutcome,
   MigrateError,
-  FileSystem.FileSystem | Path.Path
+  FileSystem.FileSystem | Path.Path | ChildProcessSpawner
 > =>
   Effect.gen(function*() {
     const { checkpoint, options, outline, result, verification } = payload
@@ -524,16 +792,18 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
         })
       }
 
+      const checkpointFiles: Checks.CheckpointFiles = {
+        sources,
+        digests: new Map(checkpoint.digests.map((entry) => [entry.path, entry.digest] as const)),
+        runStateRoots: [...new Set(outline.runStatePaths.map(parentOf).filter((entry) => entry !== ""))],
+        owned
+      }
       const checks = [
         ...yield* Checks.run(
           root,
           unitPlanFor(outline, options),
           changed.map((file) => file.path),
-          {
-            sources,
-            digests: new Map(checkpoint.digests.map((entry) => [entry.path, entry.digest] as const)),
-            runStateRoots: [...new Set(outline.runStatePaths.map(parentOf).filter((entry) => entry !== ""))]
-          },
+          checkpointFiles,
           result === null ? [] : [
             ...result.unsupported.map((entry) => ({ construct: entry.construct, file: entry.file })),
             ...result.unresolved.map((entry) => ({ construct: entry.construct, file: entry.file }))
@@ -580,12 +850,61 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
         })
       }
 
+      // The final tree, verified as the final tree. This is the verification
+      // the report records: the one before the archive vouched for sources
+      // that are no longer there and manifests that have since been rewritten.
+      const final = yield* Verify.run({
+        root,
+        commands: outline.commands,
+        changedFiles: [...changed, ...archived.changed].map((file) => file.path),
+        expectFlows: outline.expectFlows
+      })
+      const finalVerification: Checks.CheckResult = {
+        name: "the final tree verifies",
+        ok: Verify.verdict(final) === "pass",
+        findings: Verify.failures(final).map((line) => ({
+          file: outline.sources[0] ?? outline.id,
+          line: 1,
+          message: line
+        }))
+      }
+      // And confined as the final tree: the archive and the final verification
+      // both ran commands, and a command writes where no rule can see.
+      const finalOutside = (yield* Checkpoint.treeDiff(root, checkpoint))
+        .filter((file) => !ownedSet.has(file.path) && !Checkpoint.generated.includes(file.path))
+      const finalConfinement: Checks.CheckResult = {
+        name: "no write outside the unit's file set after the archive",
+        ok: finalOutside.length === 0,
+        findings: finalOutside.map((file) => ({
+          file: file.path,
+          line: 1,
+          message: file.change === "added"
+            ? "a command run after the archive added a file the unit does not own; rollback deleted it after preserving a recovery copy"
+            : `a command run after the archive ${file.change} a file the unit does not own; put it back with \`${checkpoint.restore}\``
+        }))
+      }
+      const finalRunState = yield* Checks.runState(root, checkpointFiles)
+      const verified = [...settled, finalVerification, finalConfinement, finalRunState]
+      if (!Checks.ok(verified)) {
+        const rollback = yield* putBack
+        return canonical({
+          payload,
+          status: "failed",
+          changedFiles: [],
+          checks: verified,
+          rollback,
+          verification: final,
+          now: yield* Clock.currentTimeMillis
+        })
+      }
+
       return canonical({
         payload,
         status: "migrated",
-        changedFiles: [...changed, ...archived.changed],
-        checks: settled,
+        changedFiles: mergedChanges(changed, archived.changed),
+        checks: verified,
         scripts: archived.unsupportedScripts,
+        verification: final,
         now: yield* Clock.currentTimeMillis
       })
       // Any failure below the checkpoint restores it. The explicit branches
@@ -605,6 +924,20 @@ const parentOf = (file: string): string => {
   return index <= 0 ? "" : file.slice(0, index)
 }
 
+/**
+ * One entry per path: what the archive did to a path is the last word on it,
+ * because the archive ran last.
+ */
+const mergedChanges = (
+  before: ReadonlyArray<Report.ChangedFile>,
+  archived: ReadonlyArray<Report.ChangedFile>
+): ReadonlyArray<Report.ChangedFile> => {
+  const byPath = new Map<string, Report.ChangedFile>()
+  for (const file of before) byPath.set(file.path, file)
+  for (const file of archived) byPath.set(file.path, file)
+  return [...byPath.values()].sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
+}
+
 const archiveDir = (options: Options.MigrateOptions): string => `${options.root}/${Options.reportDir(options)}/archive`
 
 const backupDir = (options: Options.MigrateOptions): string => `${options.root}/${Options.reportDir(options)}/backup`
@@ -616,11 +949,14 @@ const canonical = (input: {
   readonly checks: ReadonlyArray<Checks.CheckResult>
   readonly rollback?: Checkpoint.Rollback | undefined
   readonly scripts?: ReadonlyArray<typeof Archive.UnsupportedScript.Type> | undefined
+  /** The verification the report records, when a final one ran; the payload's otherwise. */
+  readonly verification?: Report.VerificationResult | undefined
   readonly now: number
 }): UnitOutcome => {
   const { changedFiles, checks, payload, status } = input
   const result = payload.result
   const failedChecks = checks.filter((check) => !check.ok)
+  const verification = input.verification ?? payload.verification
   return {
     id: payload.outline.id,
     kind: payload.outline.kind,
@@ -677,7 +1013,7 @@ const canonical = (input: {
       }))
     ],
     unsupported: result === null ? [] : result.unsupported,
-    ...(payload.verification === null ? {} : { verification: payload.verification }),
+    ...(verification === null ? {} : { verification }),
     repairRounds: payload.repairRounds,
     // From this unit's own checkpoint, not from the run's start: a report whose
     // last unit claims every earlier unit's minutes tells a reader nothing.
@@ -713,26 +1049,73 @@ const writeUnitReport = (
     yield* fs.writeFileString(file, `${JSON.stringify(encodeUnit(outcome), null, 2)}\n`)
   }).pipe(Effect.mapError(io(`could not record the report of unit "${outcome.id}"`)))
 
-const readUnitReports = (
+/**
+ * One unit's recorded outcome, or `undefined` when none was ever written.
+ *
+ * Absent is the platform's `NotFound` and nothing else. An artifact that
+ * cannot be read, cannot be decoded, or was written for a different unit is a
+ * failure of this step, never a unit quietly left out of the report.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const readUnitReport = (
   options: Options.MigrateOptions,
-  ids: ReadonlyArray<string>
-): Effect.Effect<ReadonlyArray<UnitOutcome>, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  id: string
+): Effect.Effect<UnitOutcome | undefined, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const found: Array<UnitOutcome> = []
-    for (const id of ids) {
-      const file = path.join(options.root, ...unitArtifact(options, id).split("/"))
-      const text = yield* fs.readFileString(file).pipe(Effect.option)
-      if (text._tag === "None") continue
-      const parsed = yield* Effect.try({
-        try: () => decodeUnit(JSON.parse(text.value)),
-        catch: io(`the recorded report of unit "${id}" could not be read back`)
-      })
-      found.push(parsed)
+    const relative = unitArtifact(options, id)
+    const text = yield* Fs.readIfExists(path.join(options.root, ...relative.split("/")), relative)
+    if (text === undefined) return undefined
+    const parsed = yield* Effect.try({
+      try: () => decodeUnit(JSON.parse(text)),
+      catch: io(`the recorded report of unit "${id}" at "${relative}" could not be read back`)
+    })
+    if (parsed.id !== id) {
+      return yield* Effect.fail(make(
+        "io",
+        `the recorded report at "${relative}" belongs to unit "${parsed.id}", not to "${id}"`
+      ))
     }
-    return found
+    return parsed
   })
+
+/**
+ * The outcome the report records for a unit that never wrote one.
+ *
+ * A planned unit with no durable outcome is not a unit that was skipped: it
+ * is a unit the run cannot account for, and a report that omitted it would
+ * exit 0 over work that may have stopped halfway.
+ */
+const unaccounted = (
+  planned: Report.MigrationReport,
+  options: Options.MigrateOptions,
+  id: string
+): UnitOutcome => {
+  const unit = planned.units.find((entry) => entry.id === id)
+  return {
+    id,
+    kind: unit?.kind ?? "workflow",
+    sources: unit?.sources ?? [],
+    targets: unit?.targets ?? [],
+    status: "failed",
+    changedFiles: [],
+    decisions: [],
+    unresolved: [{
+      construct: "no recorded outcome",
+      reason: `the run recorded no outcome for unit ${id}, so it cannot say what the unit did or left behind`,
+      file: unit?.sources[0] ?? id,
+      line: 1,
+      suggestion: `read ${
+        Options.reportDir(options)
+      }/pending-unit.json if it exists, restore its checkpoint, then rerun with --unit ${id}`
+    }],
+    unsupported: [],
+    repairRounds: 0,
+    durationMs: 0
+  }
+}
 
 /**
  * The report step: fold every unit outcome into the scan's report and write
@@ -765,7 +1148,11 @@ export const writeReport = (payload: {
   readonly unitIds: ReadonlyArray<string>
 }): Effect.Effect<Report.MigrationReport, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
-    const units = yield* readUnitReports(payload.options, payload.unitIds)
+    const units: Array<UnitOutcome> = []
+    for (const id of payload.unitIds) {
+      const recorded = yield* readUnitReport(payload.options, id)
+      units.push(recorded ?? unaccounted(payload.report, payload.options, id))
+    }
     const merged = units.reduce((report, unit) => Report.withUnit(report, unit), payload.report)
     const verification = units.reduce<Report.VerificationResult | undefined>(
       (last, unit) => unit.verification ?? last,
@@ -827,7 +1214,10 @@ export const unit = Flow.make(unitTag, {
       Checkpoint.action.call({
         root: options.root,
         unit: outline.id,
-        files: outline.sources,
+        // Existing targets are user data too. Recording the union makes an
+        // absent target an explicit manifest fact and preserves exact bytes
+        // when a migration overwrites a target that was already present.
+        files: [...new Set([...outline.sources, ...outline.targets])].sort(),
         backupDir: backupDir(options),
         allowNoVcs: options.allowNoVcs === true,
         runStateRoots,
@@ -932,11 +1322,13 @@ export const flow = Flow.make(tag, {
     options: Options.MigrateOptions,
     units: Schema.Array(Transform.UnitOutline),
     runStateRoots: Schema.Array(Schema.String),
-    generatedAt: Schema.String
+    generatedAt: Schema.String,
+    /** What the survey sealed; the seal step refuses a tree that no longer matches it. */
+    seal: PlanSeal
   },
   success: Report.MigrationReport,
   error: MigrateError,
-  body: ({ generatedAt, options, runStateRoots, units }) =>
+  body: ({ generatedAt, options, runStateRoots, seal, units }) =>
     Node.andThen(
       scanAction.call({ options, generatedAt }),
       (report) =>
@@ -965,9 +1357,13 @@ export const flow = Flow.make(tag, {
                 (settled) => step(index + 1, settled.id)
               )
             }
-            // The first unit runs after the gate, and says so with the root the
-            // gate approved. Every later unit runs after the one before it.
-            return step(0, approved.root)
+            // The seal runs after the gate and reads the tree once more; the
+            // first unit runs after the seal, and says so with the root the
+            // seal approved. Every later unit runs after the one before it.
+            return Node.andThen(
+              sealAction.call({ options: approved, seal }),
+              (sealed) => step(0, sealed.root)
+            )
           }
         )
     )
@@ -996,6 +1392,7 @@ export const layer = Layer.mergeAll(
   finishLayer,
   scanLayer,
   gateLayer,
+  sealLayer,
   writeReportLayer,
   Interpreter.layer(unit),
   Interpreter.layer(flow)

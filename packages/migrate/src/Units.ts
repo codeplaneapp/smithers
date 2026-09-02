@@ -15,8 +15,10 @@
  *
  * @since 0.1.0
  */
+import * as Schema from "effect/Schema"
 import type { Detection, SpecifierContext } from "./Detect.ts"
 import { localPackageName } from "./Detect.ts"
+import * as CommandLine from "./internal/CommandLine.ts"
 import * as Sort from "./internal/Sort.ts"
 import type { InventoryEntry } from "./Inventory.ts"
 import * as Mapping from "./Mapping.ts"
@@ -32,17 +34,81 @@ import type { ZodHint } from "./ZodSchemaHints.ts"
 export type UnitKind = "dependencies" | "workflow" | "integration" | "project"
 
 /**
+ * A repository-derived command: an executable and its literal arguments,
+ * spawned with no shell in between.
+ *
+ * A path the scanner found on disk is an argument here, never a fragment of
+ * a command line. `tsconfig; rm -rf .json` is a legal file name, and as an
+ * argv element it is exactly that name and nothing more.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const ArgvCommand = Schema.Struct({
+  _tag: Schema.Literal("argv"),
+  executable: Schema.String,
+  args: Schema.Array(Schema.String)
+})
+
+/**
+ * A repository-derived command whose arguments never pass through a shell.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ArgvCommand = typeof ArgvCommand.Type
+
+/**
+ * One verification command.
+ *
+ * A structured command is derived from repository metadata and executes as a
+ * literal argv. A bare string is reserved for an explicit operator override
+ * (`--verify-*`) and deliberately keeps shell semantics: the operator typed
+ * the line and is the one person allowed to.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const VerificationCommand = Schema.Union([Schema.String, ArgvCommand])
+
+/**
+ * One structured or explicitly shell-backed verification command.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type VerificationCommand = typeof VerificationCommand.Type
+
+/**
+ * Builds a structured command.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const argv = (executable: string, ...args: ReadonlyArray<string>): ArgvCommand => ({
+  _tag: "argv",
+  executable,
+  args
+})
+
+/**
  * The commands that verify one unit.
  *
  * @category models
  * @since 0.1.0
  */
 export interface VerifyCommands {
-  readonly install: string | undefined
-  readonly format: string | undefined
-  readonly typecheck: ReadonlyArray<string>
-  readonly test: string | undefined
+  readonly install: VerificationCommand | undefined
+  readonly format: VerificationCommand | undefined
+  readonly typecheck: ReadonlyArray<VerificationCommand>
+  readonly test: VerificationCommand | undefined
   readonly discovery: { readonly flowsDir: string }
+  /**
+   * What the derivation could not honor, so the report says which command
+   * really ran. A `smithers.config.ts` test line that needs a shell is not run
+   * as written: the tool runs no repository-authored shell syntax.
+   */
+  readonly notes: ReadonlyArray<UnitNote>
 }
 
 /**
@@ -124,27 +190,44 @@ export interface Options {
   readonly units?: ReadonlyArray<string> | undefined
 }
 
-const installByManager: ReadonlyArray<[string, string]> = [
-  ["bun", "bun install"],
-  ["pnpm", "pnpm install"],
-  ["yarn", "yarn install"],
-  ["npm", "npm install"]
+const installByManager: ReadonlyArray<[string, VerificationCommand]> = [
+  ["bun", argv("bun", "install")],
+  ["pnpm", argv("pnpm", "install")],
+  ["yarn", argv("yarn", "install")],
+  ["npm", argv("npm", "install")]
 ]
 
-const installByLockfile: ReadonlyArray<[string, string]> = [
-  ["bun.lock", "bun install"],
-  ["bun.lockb", "bun install"],
-  ["pnpm-lock.yaml", "pnpm install"],
-  ["yarn.lock", "yarn install"],
-  ["package-lock.json", "npm install"]
+const installByLockfile: ReadonlyArray<[string, VerificationCommand]> = [
+  ["bun.lock", argv("bun", "install")],
+  ["bun.lockb", argv("bun", "install")],
+  ["pnpm-lock.yaml", argv("pnpm", "install")],
+  ["yarn.lock", argv("yarn", "install")],
+  ["package-lock.json", argv("npm", "install")]
 ]
 
-const runner = (install: string | undefined): string => {
-  if (install === undefined) return "npm run"
-  if (install.startsWith("bun")) return "bun run"
-  if (install.startsWith("pnpm")) return "pnpm run"
-  if (install.startsWith("yarn")) return "yarn"
-  return "npm run"
+const runner = (manager: string | undefined): readonly [string, ReadonlyArray<string>] => {
+  if (manager === "bun" || manager === "pnpm") return [manager, ["run"]]
+  if (manager === "yarn") return [manager, []]
+  return ["npm", ["run"]]
+}
+
+/**
+ * A repository-authored command line as an argv, when it is one.
+ *
+ * Only a line made of plain words qualifies: no quotes, no `$`, `;`, `|`,
+ * `&`, redirections, globs, or newlines, and an executable that is not a
+ * flag. Anything else would need a shell to mean what it says, and the tool
+ * gives repository text no shell. The caller records what it did instead.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const simpleCommand = (line: string): ArgvCommand | undefined => {
+  if (!/^[A-Za-z0-9_@%+=:,./ -]+$/.test(line) || /[\r\n\0]/.test(line)) return undefined
+  const [executable, ...args] = line.trim().split(/ +/)
+  return executable === undefined || executable === "" || executable.startsWith("-")
+    ? undefined
+    : argv(executable, ...args)
 }
 
 /**
@@ -153,8 +236,16 @@ const runner = (install: string | undefined): string => {
  * typecheck once per `tsconfig.json`, and test from `smithers.config.ts`
  * `repoCommands.test` or the root `package.json` test script.
  *
+ * Every derived command is an {@link ArgvCommand}: the executable and its
+ * arguments are spawned as they are, so a file name the scanner read off the
+ * disk can never become shell syntax. The formatter runs in check mode
+ * (`dprint check`, `prettier --check .`) because a verification is a
+ * question, and a formatter that rewrites the whole repository answers it by
+ * editing files the unit does not own.
+ *
  * Every one of them is overridable, because the tool must never invent a
- * command that runs the operator's code.
+ * command that runs the operator's code. An override is the operator's own
+ * line and keeps its shell semantics.
  *
  * @category combinators
  * @since 0.1.0
@@ -171,28 +262,52 @@ export const verifyCommands = (
     ? undefined
     : installByManager.find(([name]) => declared.startsWith(name))?.[1]
   const install = overrides.install ?? byManager ?? byLock
+  const manager = declared === undefined
+    ? installByLockfile.find(([name]) => lockfiles.has(name))?.[1]
+    : installByManager.find(([name]) => declared.startsWith(name))?.[1]
+  const managerName = typeof manager === "object" ? manager.executable : undefined
 
   const hasDprint = detection.files.some((file) => file.endsWith("dprint.json"))
   const hasPrettier = detection.files.some((file) => /(^|\/)\.?prettierrc([^/]*)$/.test(file)) ||
     detection.manifests.some((manifest) => manifest.path === "package.json" && manifest.name === "prettier")
-  const format = overrides.format ?? (hasDprint ? "dprint fmt" : hasPrettier ? "prettier --write ." : undefined)
+  const format = overrides.format ?? (hasDprint
+    ? argv("dprint", "check")
+    : hasPrettier
+    ? argv("prettier", "--check", ".")
+    : undefined)
 
   const typecheck = overrides.typecheck ??
     detection.tsconfigs
       .map((entry) => entry.path)
       .filter((path) => !path.includes("tsconfig.test.json"))
       .sort(Sort.byText)
-      .map((path) => `tsc --noEmit -p ${path}`)
+      .map((path) => argv("tsc", "--noEmit", "-p", path))
 
   const scriptTest = detection.manifests.find((manifest) => manifest.kind === "root")?.scripts.find((script) =>
     script.name === "test"
   )
-  const test = overrides.test ??
-    detection.config.smithersConfig?.repoCommands.get("test") ??
-    (scriptTest === undefined ? undefined : `${runner(install)} test`)
+  const configuredTest = detection.config.smithersConfig?.repoCommands.get("test")
+  const configured = configuredTest === undefined ? undefined : simpleCommand(configuredTest)
+  const [testRunner, testPrefix] = runner(managerName)
+  const scripted = scriptTest === undefined ? undefined : argv(testRunner, ...testPrefix, "test")
+  const test = overrides.test ?? configured ?? scripted
+  const notes: Array<UnitNote> = []
+  if (overrides.test === undefined && configuredTest !== undefined && configured === undefined) {
+    notes.push({
+      construct: "smithers.config.ts repoCommands.test",
+      reason: `\`${configuredTest}\` needs a shell to run, and the tool runs no repository-authored shell syntax; ${
+        scripted === undefined ? "no test command ran" : `\`${renderArgv(scripted)}\` ran instead`
+      }`,
+      file: detection.config.smithersConfig?.path ?? "smithers.config.ts",
+      line: 1,
+      suggestion: `pass --verify-test ${JSON.stringify(configuredTest)} to run the line as written`
+    })
+  }
 
-  return { install, format, typecheck, test, discovery: { flowsDir } }
+  return { install, format, typecheck, test, discovery: { flowsDir }, notes }
 }
+
+const renderArgv = (command: ArgvCommand): string => CommandLine.renderArgv(command.executable, command.args)
 
 /**
  * The flow name a workflow file becomes, in registry path naming.
@@ -334,7 +449,9 @@ export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<Uni
     mapping: [Mapping.byConstruct("package.json")!],
     hints: { zod: [], prompt: [] },
     unsafe: [],
-    notes: [],
+    // What the command derivation could not honor is reported once, on the
+    // first unit, because every unit verifies with the same commands.
+    notes: verification.notes,
     specifiers,
     verification
   })
@@ -431,6 +548,10 @@ export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<Uni
     })
   }
 
+  // The root ignore file is the project unit's to rewrite: `.flows/` is
+  // runtime state a migrated project writes on its first run. A project
+  // without one gets it as a target, so creating it is inside the unit's set.
+  const rootGitignore = input.detection.config.gitignore.includes(".gitignore")
   const projectSources = [
     ...input.detection.manifests.map((manifest) => manifest.path),
     ...input.detection.tsconfigs.map((entry) => entry.path),
@@ -440,13 +561,14 @@ export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<Uni
     ...input.detection.config.agents,
     ...(input.detection.config.smithersConfig === undefined ? [] : [input.detection.config.smithersConfig.path]),
     ...input.detection.config.assetTypes,
-    ...new Set(input.detection.scripts.map((hit) => hit.file))
+    ...new Set(input.detection.scripts.map((hit) => hit.file)),
+    ...(rootGitignore ? [".gitignore"] : [])
   ]
   units.push({
     id: "project",
     kind: "project",
     sources: [...new Set(projectSources)].sort(Sort.byText),
-    targets: [`${flowsDir}/seats.ts`],
+    targets: [...(rootGitignore ? [] : [".gitignore"]), `${flowsDir}/seats.ts`],
     constructs: [],
     mapping: [
       Mapping.byConstruct("package.json")!,

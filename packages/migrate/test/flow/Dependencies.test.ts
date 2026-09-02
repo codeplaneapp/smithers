@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { readdirSync, readFileSync, statSync } from "node:fs"
+import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import ts from "typescript"
@@ -52,6 +53,9 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
   dependencies: Record<string, string>
   optionalDependencies: Record<string, string>
   devDependencies: Record<string, string>
+  exports: Record<string, unknown>
+  publishConfig: { exports: Record<string, unknown> }
+  sideEffects: ReadonlyArray<string>
 }
 
 /** Every module the root entry point reaches by following relative imports. */
@@ -114,6 +118,30 @@ describe("the flow surface's dependency boundary", () => {
     }
 
     expect([...undeclared]).toEqual([])
+  })
+
+  it("keeps every internal module, nested ones included, out of the export map", () => {
+    // `./*` matches nested paths, so a null for `./internal/*` alone left
+    // `@smthrs/migrate/flow/internal/Exec` importable: the process runner was
+    // public API by accident. Node's own resolver is the authority here.
+    const require = createRequire(import.meta.url)
+    expect(require.resolve("@smthrs/migrate/flow/Verify")).toContain(join("src", "flow", "Verify.ts"))
+    for (const internal of ["@smthrs/migrate/internal/Fs", "@smthrs/migrate/flow/internal/Exec"]) {
+      expect(() => require.resolve(internal)).toThrow(/not defined by "exports"|ERR_PACKAGE_PATH_NOT_EXPORTED/)
+    }
+    const exportsMap = manifest.exports
+    const published = manifest.publishConfig.exports
+    for (const map of [exportsMap, published]) {
+      expect(map["./internal/*"]).toBeNull()
+      expect(map["./flow/internal/*"]).toBeNull()
+    }
+  })
+
+  it("declares the executable as the side effect it is", () => {
+    // `bin.ts` runs `NodeRuntime.runMain` when it is evaluated. A manifest
+    // that calls the whole package side-effect free entitles a bundler to
+    // drop it.
+    expect(manifest.sideEffects).toEqual(["./src/flow/bin.ts", "./dist/esm/flow/bin.js", "./dist/cjs/flow/bin.js"])
   })
 
   it("reaches capability values through @smthrs/kernel, which declares them", () => {

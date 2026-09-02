@@ -33,6 +33,7 @@ import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import * as Fs from "../internal/Fs.ts"
 import type * as Inventory from "../Inventory.ts"
 import * as Mapping from "../Mapping.ts"
 import { io, MigrateError } from "../MigrateError.ts"
@@ -143,6 +144,9 @@ export type UnitOutline = typeof UnitOutline.Type
  */
 export const approvedPackages: ReadonlyArray<string> = [
   "@smthrs/agent",
+  // The discovery descriptor every flow module exports is a `@smthrs/core`
+  // `Flow.make`; a list without it forbids the one import the layout needs.
+  "@smthrs/core",
   "@smthrs/engine",
   "@smthrs/flow",
   "@smthrs/flows",
@@ -316,12 +320,17 @@ export const capture = (
     // again and describe a failure the agent cannot see the cause of.
     const recorded = yield* Checkpoint.sources(checkpoint)
     const sources: Array<typeof Contract.SourceFile.Type> = []
+    // A file that is gone is shown from the checkpoint; a file that cannot be
+    // read is a failure, because a prompt built from stale text would ask for
+    // a rewrite of a file the agent is not looking at.
+    const fromDisk = (file: string) =>
+      Fs.readIfExists(path.join(outlined.root, ...file.split("/")), file).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs)
+      )
     for (const file of outlined.sources) {
-      const onDisk = current
-        ? yield* fs.readFileString(path.join(outlined.root, ...file.split("/"))).pipe(Effect.option)
-        : { _tag: "None" as const }
-      if (onDisk._tag === "Some") {
-        sources.push({ path: file, text: onDisk.value })
+      const onDisk = current ? yield* fromDisk(file) : undefined
+      if (onDisk !== undefined) {
+        sources.push({ path: file, text: onDisk })
         continue
       }
       const captured = recorded.get(file)
@@ -329,8 +338,8 @@ export const capture = (
         sources.push({ path: file, text: captured })
         continue
       }
-      const text = yield* fs.readFileString(path.join(outlined.root, ...file.split("/"))).pipe(Effect.option)
-      if (text._tag === "Some") sources.push({ path: file, text: text.value })
+      const text = yield* fromDisk(file)
+      if (text !== undefined) sources.push({ path: file, text })
     }
     return { ...outlined, sources }
   }).pipe(Effect.mapError(io(`could not capture the sources of unit "${outlined.id}"`)))

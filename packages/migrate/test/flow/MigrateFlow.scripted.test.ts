@@ -20,7 +20,7 @@ import * as MigrateFlow from "@smthrs/migrate/flow/MigrateFlow"
 import * as Transform from "@smthrs/migrate/flow/Transform"
 import * as Effect from "effect/Effect"
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { copyFixture, fixture, hashTree } from "../fixtures/helpers.ts"
@@ -282,6 +282,34 @@ describe("apply over a single-file JSX project", () => {
       expect(deleted?.reason).toContain("recovery copy")
       expect(deleted?.suggestion).toContain("Copy")
       expect(existsSync(join(root, "scratch", "operator-note.md"))).toBe(false)
+    }))
+
+  it.effect("leaves a target that existed before the migration byte for byte when the unit fails", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      // The operator already has a file at the path the unit is going to
+      // write. It is user data, and a failed unit owes it back exactly.
+      const theirs = "// the operator's own flow, written before the migration\n"
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), theirs)
+      committed(root)
+      const before = hashTree(root)
+
+      const { report } = yield* apply(
+        root,
+        { maxRepairRounds: 0, commands: { typecheck: [], test: "node -e \"process.exit(1)\"" } }
+      )
+
+      const workflow = report.units.find((unit) => unit.id === "workflow:simple-workflow")
+      expect(workflow?.status).toBe("failed")
+      expect(readFileSync(join(root, "flows", "simple-workflow", "flow.ts"), "utf8")).toBe(theirs)
+      expect(hashTree(root).get("flows/simple-workflow/flow.ts")).toBe(before.get("flows/simple-workflow/flow.ts"))
+      expect(hashTree(root).get("simple-workflow.jsx")).toBe(before.get("simple-workflow.jsx"))
+      // A restored target is a restore, not a deletion with a recovery copy.
+      expect(workflow?.unresolved.some((entry) => entry.construct === "rollback deleted a post-checkpoint file"))
+        .toBe(false)
+      expect(workflow?.unresolved.some((entry) => entry.construct === "rollback could not restore a file"))
+        .toBe(false)
     }))
 
   it.effect("fails the unit that smuggles a write into a path named like a lockfile", () =>
@@ -579,6 +607,61 @@ describe("apply over a project that still holds run state", () => {
       expect(answered.error?.message).toContain(".smithers/smithers.db")
       // The unit still migrated: a refused call is an answer, and the rewrite
       // it went on to make is inside its own file set.
+      expect(workflow?.status).toBe("migrated")
+      expect(hashTree(root).get(".smithers/smithers.db")).toBe(before.get(".smithers/smithers.db"))
+    }))
+
+  it.effect("refuses the agent's own read of the database and its listing of the execution logs", () =>
+    Effect.gen(function*() {
+      const { before, root } = yield* withRunState
+
+      // Reading is copying: a database read into a model call has left the
+      // machine. The kernel answers before the bytes move, on the exact path
+      // and on everything under a run-state root, and the cell carries each
+      // answer out in its report so the refusal is the assertion.
+      const meddling = (_root: string, written: Array<string>): Layers.Script => (asked) => {
+        const unit = unitOf(asked)
+        if (unit !== "workflow:simple-workflow") return emptyAnswer(unit)
+        written.push(unit)
+        return [
+          `const read = await ctx.call("read", { path: ".smithers/smithers.db" })`,
+          `const listed = await ctx.call("ls", { path: ".smithers/executions" })`,
+          `const log = await ctx.call("read", { path: ".smithers/executions/run-1783757199651/stdout.log" })`,
+          `const source = await ctx.call("read", { path: "simple-workflow.jsx" })`,
+          `await ctx.call("write", { path: "flows/simple-workflow/flow.ts", content: ${JSON.stringify(golden)} })`,
+          `ctx.done(JSON.stringify({`,
+          `  unit: ${JSON.stringify("workflow:simple-workflow")},`,
+          `  changedFiles: ["flows/simple-workflow/flow.ts"],`,
+          `  decisions: [],`,
+          `  unresolved: [`,
+          `    { construct: "read database", reason: JSON.stringify(read), file: "simple-workflow.jsx", line: 1, suggestion: "none" },`,
+          `    { construct: "list executions", reason: JSON.stringify(listed), file: "simple-workflow.jsx", line: 1, suggestion: "none" },`,
+          `    { construct: "read log", reason: JSON.stringify(log), file: "simple-workflow.jsx", line: 1, suggestion: "none" },`,
+          `    { construct: "read source", reason: JSON.stringify(source), file: "simple-workflow.jsx", line: 1, suggestion: "none" }`,
+          `  ],`,
+          `  unsupported: [],`,
+          `  notes: "scripted"`,
+          `}))`
+        ].join("\n")
+      }
+
+      const { report } = yield* apply(root, { acknowledgeRunState: true }, meddling)
+
+      const workflow = report.units.find((unit) => unit.id === "workflow:simple-workflow")
+      const answer = (construct: string) =>
+        JSON.parse(workflow?.unresolved.find((entry) => entry.construct === construct)?.reason ?? "{}") as {
+          ok: boolean
+          error?: { message: string }
+        }
+      expect(answer("read database").ok).toBe(false)
+      expect(answer("read database").error?.message).toContain(".smithers/smithers.db")
+      expect(answer("list executions").ok).toBe(false)
+      expect(answer("read log").ok).toBe(false)
+      // A source that merely shares the directory is still the agent's to read:
+      // the answer is the file, not a refusal.
+      const source = workflow?.unresolved.find((entry) => entry.construct === "read source")?.reason ?? ""
+      expect(source).toContain("Workflow")
+      expect(source).not.toContain("\"ok\":false")
       expect(workflow?.status).toBe("migrated")
       expect(hashTree(root).get(".smithers/smithers.db")).toBe(before.get(".smithers/smithers.db"))
     }))

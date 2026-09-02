@@ -12,7 +12,8 @@ import * as Checkpoint from "@smthrs/migrate/flow/Checkpoint"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import { execFileSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { userInfo } from "node:os"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -79,7 +80,7 @@ describe("Checkpoint.take on git", () => {
     Effect.gen(function*() {
       const root = gitProject("pending")
 
-      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx"]))
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx", "flows/demo/flow.ts"]))
       write(root, "workflow.jsx", "half migrated\n")
 
       const marker = join(root, ".smithers-migrate", "pending-unit.json")
@@ -102,7 +103,7 @@ describe("Checkpoint.take on git", () => {
       write(root, "unrelated.txt", "the operator's own edit\n")
       write(root, "README.md", "edited readme\n")
 
-      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx"]))
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx", "flows/demo/flow.ts"]))
 
       expect(ref.vcs).toBe("git")
       expect(ref.ref).toMatch(/^refs\/smithers-migrate\/workflow-demo\/\d+$/)
@@ -121,7 +122,7 @@ describe("Checkpoint.take on git", () => {
     Effect.gen(function*() {
       const root = gitProject("diff")
       write(root, "unrelated.txt", "operator work\n")
-      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx"]))
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx", "flows/demo/flow.ts"]))
 
       write(root, "workflow.jsx", "migrated workflow\n")
       write(root, "flows/demo/flow.ts", "export default 1\n")
@@ -139,6 +140,132 @@ describe("Checkpoint.take on git", () => {
       expect(() => readFileSync(join(root, "flows/demo/flow.ts"), "utf8")).toThrow()
       // The dirty file the unit never claimed is untouched by the restore.
       expect(readFileSync(join(root, "unrelated.txt"), "utf8")).toBe("operator work, edited again\n")
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("restores exact bytes for a target that existed before migration", () =>
+    Effect.gen(function*() {
+      const root = gitProject("existing-target")
+      write(root, "flows/demo/flow.ts", "user target before migration\n")
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx", "flows/demo/flow.ts"]))
+
+      write(root, "flows/demo/flow.ts", "generated replacement\n")
+      yield* Checkpoint.restore(root, ref, ["flows/demo/flow.ts"])
+
+      expect(readFileSync(join(root, "flows/demo/flow.ts"), "utf8")).toBe("user target before migration\n")
+      expect(ref.entries).toContainEqual({
+        path: "flows/demo/flow.ts",
+        state: "file",
+        digest: expect.stringMatching(/^[a-f0-9]{64}$/)
+      })
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("refuses a corrupted backup before overwriting the current target", () =>
+    Effect.gen(function*() {
+      const root = gitProject("corrupt-backup")
+      write(root, "flows/demo/flow.ts", "original target\n")
+      const ref = yield* Checkpoint.take(payload(root, ["flows/demo/flow.ts"]))
+      write(root, "flows/demo/flow.ts", "current target\n")
+      writeFileSync(join(ref.backup, "flows/demo/flow.ts"), "corrupted backup\n")
+
+      const failure = yield* Effect.flip(Checkpoint.restore(root, ref, ["flows/demo/flow.ts"]))
+
+      expect(failure.code).toBe("checkpoint-failed")
+      expect(readFileSync(join(root, "flows/demo/flow.ts"), "utf8")).toBe("current target\n")
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("records an absent target as an explicit manifest fact and a present one with its digest", () =>
+    Effect.gen(function*() {
+      const root = gitProject("manifest")
+
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx", "flows/demo/flow.ts", "workflow.jsx"]))
+
+      // Deduplicated, sorted, and explicit about what was not there.
+      expect(ref.entries).toEqual([
+        { path: "flows/demo/flow.ts", state: "absent" },
+        { path: "workflow.jsx", state: "file", digest: expect.stringMatching(/^[a-f0-9]{64}$/) }
+      ])
+      expect(ref.files).toEqual(["workflow.jsx"])
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("refuses a declared path that is a directory rather than guessing what to copy", () =>
+    Effect.gen(function*() {
+      const root = gitProject("directory")
+      mkdirSync(join(root, "flows", "demo"), { recursive: true })
+
+      const failure = yield* Effect.flip(Checkpoint.take(payload(root, ["workflow.jsx", "flows/demo"])))
+
+      expect(failure.code).toBe("checkpoint-failed")
+      expect(failure.message).toContain("flows/demo")
+      expect(failure.message).toContain("not a regular file")
+    }).pipe(Effect.provide(platform)))
+
+  it.effect.skipIf(userInfo().uid === 0)(
+    "reports an unreadable source as an I/O failure, never as an absent file",
+    () =>
+      Effect.gen(function*() {
+        // Root reads everything, so this case has nothing to prove when the
+        // suite runs as root. Everywhere else, a file the tool cannot read is
+        // a file it must not describe as missing: that description is what a
+        // later restore would act on by deleting the path.
+        const root = gitProject("unreadable")
+        chmodSync(join(root, "workflow.jsx"), 0o000)
+        try {
+          const failure = yield* Effect.flip(Checkpoint.take(payload(root, ["workflow.jsx"])))
+
+          expect(failure.code).toBe("io")
+          expect(failure.message).toContain("workflow.jsx")
+          expect(failure.message).not.toContain("absent")
+        } finally {
+          chmodSync(join(root, "workflow.jsx"), 0o644)
+        }
+      }).pipe(Effect.provide(platform))
+  )
+
+  it.effect("refuses to diff, restore, or roll back a path the manifest never declared", () =>
+    Effect.gen(function*() {
+      const root = gitProject("undeclared")
+      const ref = yield* Checkpoint.take({ ...payload(root, ["workflow.jsx"]), treeExclude: [".smithers-migrate"] })
+      write(root, "README.md", "edited\n")
+
+      // A path outside the manifest has no recorded state to compare against
+      // or put back, and deleting it on a guess is the defect this refuses.
+      const diffed = yield* Effect.flip(Checkpoint.diff(root, ref, ["README.md"]))
+      expect(diffed.code).toBe("checkpoint-failed")
+      const restored = yield* Effect.flip(Checkpoint.restore(root, ref, ["README.md"]))
+      expect(restored.code).toBe("checkpoint-failed")
+      const rolled = yield* Effect.flip(Checkpoint.rollback(root, ref, { paths: ["README.md"] }))
+      expect(rolled.code).toBe("checkpoint-failed")
+      expect(readFileSync(join(root, "README.md"), "utf8")).toBe("edited\n")
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("rolls a pre-existing target back byte for byte, and deletes only what was absent", () =>
+    Effect.gen(function*() {
+      const root = gitProject("rollback-target")
+      write(root, "flows/demo/flow.ts", "the operator's own flow\n")
+      const ref = yield* Checkpoint.take({
+        ...payload(root, ["workflow.jsx", "flows/demo/flow.ts", "flows/seats.ts"]),
+        treeExclude: [".smithers-migrate"]
+      })
+
+      write(root, "flows/demo/flow.ts", "overwritten by the migration\n")
+      write(root, "flows/seats.ts", "export const seats = {}\n")
+      write(root, "workflow.jsx", "half migrated\n")
+      write(root, "scratch/notes.md", "undeclared\n")
+
+      const rollback = yield* Checkpoint.rollback(root, ref, {
+        paths: ["workflow.jsx", "flows/demo/flow.ts", "flows/seats.ts"]
+      })
+
+      expect(readFileSync(join(root, "flows/demo/flow.ts"), "utf8")).toBe("the operator's own flow\n")
+      expect(readFileSync(join(root, "workflow.jsx"), "utf8")).toBe("old workflow\n")
+      expect(() => readFileSync(join(root, "flows/seats.ts"))).toThrow()
+      expect(() => readFileSync(join(root, "scratch/notes.md"))).toThrow()
+      expect([...rollback.restored].sort()).toEqual(["flows/demo/flow.ts", "flows/seats.ts", "workflow.jsx"])
+      expect(rollback.unrestored).toEqual([])
+      // Every path that was absent at the checkpoint got a recovery copy
+      // before it went, the unit's own new target included; the target that
+      // was present was restored, so it is not a deletion and is not listed.
+      expect(rollback.deletedAdds.map((entry) => entry.path).sort()).toEqual(["flows/seats.ts", "scratch/notes.md"])
     }).pipe(Effect.provide(platform)))
 
   it.effect("reports a deleted file and hands the checks the recorded sources", () =>

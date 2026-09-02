@@ -37,12 +37,16 @@ const options = (root: string, overrides: Partial<Options.MigrateOptions> = {}):
   ...overrides
 })
 
-/** The real plan-time outlines of a real fixture, one per unit. */
+/**
+ * The real plan-time outlines of a real fixture, one per unit, over the same
+ * scan the survey makes: the operator's command overrides reach the outline,
+ * so the final verification `finish` runs uses them and not the manifest's.
+ */
 const outlines = (
   root: string,
   chosen: Options.MigrateOptions
 ): Effect.Effect<ReadonlyArray<Transform.UnitOutline>, never, never> =>
-  Scan.scan(root, { flowsDir: "flows" }).pipe(
+  MigrateFlow.scan(chosen).pipe(
     Effect.map((scanned) => MigrateFlow.outlines(scanned, chosen)),
     Effect.orDie,
     Effect.provide(platform)
@@ -54,6 +58,14 @@ const outlineOf = (
   id: string
 ): Effect.Effect<Transform.UnitOutline, never, never> =>
   Effect.map(outlines(root, chosen), (all) => all.find((outline) => outline.id === id)!)
+
+/** The checkpoint's file set: every source and every target, as the unit flow declares it. */
+const owned = (outline: Transform.UnitOutline): ReadonlyArray<string> =>
+  [...new Set([...outline.sources, ...outline.targets])].sort()
+
+/** Everything outside the tool's own directory, which is where the backup lives. */
+const project = (hashes: ReadonlyMap<string, string>): ReadonlyMap<string, string> =>
+  new Map([...hashes].filter(([path]) => !path.startsWith(".smithers-migrate/")))
 
 /** A verification every command of which passed, so `finish` reaches its checks. */
 const passing: Report.VerificationResult = {
@@ -156,7 +168,7 @@ describe("MigrateFlow.finish", () => {
       const checkpoint = yield* Checkpoint.take({
         root,
         unit: outline.id,
-        files: outline.sources,
+        files: owned(outline),
         backupDir: join(root, ".smithers-migrate", "backup"),
         allowNoVcs: true,
         treeExclude: [".smithers-migrate"]
@@ -199,7 +211,7 @@ describe("MigrateFlow.finish", () => {
       const checkpoint = yield* Checkpoint.take({
         root,
         unit: outline.id,
-        files: outline.sources,
+        files: owned(outline),
         backupDir: join(root, ".smithers-migrate", "backup"),
         allowNoVcs: true,
         treeExclude: [".smithers-migrate"]
@@ -242,7 +254,7 @@ describe("MigrateFlow.finish", () => {
       const checkpoint = yield* Checkpoint.take({
         root,
         unit: outline.id,
-        files: outline.sources,
+        files: owned(outline),
         backupDir: join(root, ".smithers-migrate", "backup"),
         allowNoVcs: true,
         treeExclude: [".smithers-migrate"]
@@ -267,11 +279,157 @@ describe("MigrateFlow.finish", () => {
     }))
 })
 
-describe("MigrateFlow.finish, after the archive has moved the tree", () => {
-  /** Everything outside the tool's own directory, which is where the backup lives. */
-  const project = (hashes: ReadonlyMap<string, string>): ReadonlyMap<string, string> =>
-    new Map([...hashes].filter(([path]) => !path.startsWith(".smithers-migrate/")))
+describe("MigrateFlow.finish verifies the tree it leaves behind", () => {
+  const checkpointed = (root: string, outline: Transform.UnitOutline, runStateRoots: ReadonlyArray<string> = []) =>
+    Checkpoint.take({
+      root,
+      unit: outline.id,
+      files: owned(outline),
+      backupDir: join(root, ".smithers-migrate", "backup"),
+      allowNoVcs: true,
+      runStateRoots,
+      treeExclude: [".smithers-migrate", ".flows"]
+    }).pipe(Effect.provide(platform))
 
+  it.effect("fails a unit whose tests pass before the archive and fail after it, and restores it", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      // A test that passes only while the old source is still there: exactly
+      // the tree the pre-archive verification vouched for and nobody keeps.
+      const chosen = options(root, {
+        commands: {
+          typecheck: [],
+          test: "node -e \"process.exit(require('node:fs').existsSync('simple-workflow.jsx') ? 0 : 1)\""
+        }
+      })
+      const outline = yield* outlineOf(root, chosen, "workflow:simple-workflow")
+      const checkpoint = yield* checkpointed(root, outline)
+      const before = hashTree(root)
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), golden)
+
+      const outcome = yield* MigrateFlow.finish({
+        options: chosen,
+        outline,
+        checkpoint,
+        result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
+        verification: passing,
+        repairRounds: 0
+      }).pipe(Effect.provide(platform))
+
+      expect(outcome.status).toBe("failed")
+      // The report carries the final verification, the one that failed.
+      expect(outcome.verification?.tests?.exitCode).toBe(1)
+      expect(outcome.unresolved.map((entry) => entry.construct)).toContain("the final tree verifies")
+      // And the tree is back: every source, no flow, no archive.
+      expect(project(hashTree(root))).toEqual(project(before))
+      expect(existsSync(join(root, ".smithers-migrate", "archive", "simple-workflow.jsx"))).toBe(false)
+    }))
+
+  it.effect("records the verification of the final tree on a unit it calls migrated", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const chosen = options(root, {
+        commands: {
+          typecheck: [],
+          test:
+            "node -e \"process.stdout.write(require('node:fs').existsSync('simple-workflow.jsx') ? 'before' : 'after')\""
+        }
+      })
+      const outline = yield* outlineOf(root, chosen, "workflow:simple-workflow")
+      const checkpoint = yield* checkpointed(root, outline)
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), golden)
+
+      const outcome = yield* MigrateFlow.finish({
+        options: chosen,
+        outline,
+        checkpoint,
+        result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
+        verification: {
+          ...passing,
+          tests: { command: "stale", exitCode: 0, durationMs: 0, stdoutTail: "before", stderrTail: "" }
+        },
+        repairRounds: 0
+      }).pipe(Effect.provide(platform))
+
+      expect(outcome.status).toBe("migrated")
+      expect(outcome.verification?.tests?.stdoutTail).toBe("after")
+      expect(outcome.verification?.discovery?.exitCode).toBe(0)
+      expect(existsSync(join(root, "simple-workflow.jsx"))).toBe(false)
+      // One entry per path: the archived source appears once, as archived.
+      expect(outcome.changedFiles.filter((file) => file.path === "simple-workflow.jsx").map((file) => file.change))
+        .toEqual(["archived"])
+    }))
+
+  it.effect("fails a unit whose final verification writes outside its file set, and removes the write", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const chosen = options(root, {
+        commands: {
+          typecheck: [],
+          test:
+            "node -e \"require('node:fs').mkdirSync('scratch', { recursive: true }); require('node:fs').writeFileSync('scratch/after.txt', 'x')\""
+        }
+      })
+      const outline = yield* outlineOf(root, chosen, "workflow:simple-workflow")
+      const checkpoint = yield* checkpointed(root, outline)
+      const before = hashTree(root)
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), golden)
+
+      const outcome = yield* MigrateFlow.finish({
+        options: chosen,
+        outline,
+        checkpoint,
+        result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
+        verification: passing,
+        repairRounds: 0
+      }).pipe(Effect.provide(platform))
+
+      expect(outcome.status).toBe("failed")
+      const outside = outcome.unresolved.find((entry) =>
+        entry.construct === "no write outside the unit's file set after the archive"
+      )
+      expect(outside?.file).toBe("scratch/after.txt")
+      expect(existsSync(join(root, "scratch", "after.txt"))).toBe(false)
+      expect(project(hashTree(root))).toEqual(project(before))
+    }))
+
+  it.effect("fails a unit whose final verification writes into 0.x run state", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      const chosen = options(root, {
+        acknowledgeRunState: true,
+        commands: {
+          typecheck: [],
+          test: "node -e \"require('node:fs').writeFileSync('.smithers/executions/after.log', 'resumed')\""
+        }
+      })
+      const scanned = yield* MigrateFlow.scan(chosen).pipe(Effect.provide(platform))
+      const outline = MigrateFlow.outlines(scanned, chosen).find((entry) => entry.id === "workflow:simple-workflow")!
+      const checkpoint = yield* checkpointed(root, outline, MigrateFlow.runStateRoots(scanned))
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), golden)
+
+      const outcome = yield* MigrateFlow.finish({
+        options: chosen,
+        outline,
+        checkpoint,
+        result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
+        verification: passing,
+        repairRounds: 0
+      }).pipe(Effect.provide(platform))
+
+      expect(outcome.status).toBe("failed")
+      const added = outcome.unresolved.find((entry) => entry.file === ".smithers/executions/after.log")
+      expect(added?.construct).toBe("run state is byte-identical")
+      expect(added?.reason).toContain("run state was added")
+      expect(existsSync(join(root, "simple-workflow.jsx"))).toBe(true)
+    }))
+})
+
+describe("MigrateFlow.finish, after the archive has moved the tree", () => {
   it.effect("puts every archived source back when a postcondition fails after the archive", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")
@@ -280,7 +438,7 @@ describe("MigrateFlow.finish, after the archive has moved the tree", () => {
       const checkpoint = yield* Checkpoint.take({
         root,
         unit: outline.id,
-        files: outline.sources,
+        files: owned(outline),
         backupDir: join(root, ".smithers-migrate", "backup"),
         allowNoVcs: true,
         treeExclude: [".smithers-migrate"]
@@ -345,10 +503,14 @@ describe("MigrateFlow.finish, after the archive has moved the tree", () => {
       const chosen = options(root)
       const outline = yield* outlineOf(root, chosen, "project")
       expect(outline.specifiers.localFacade).toBe(true)
+      // The project unit verifies the final tree, discovery included, so the
+      // flow the workflow unit would have written is already there.
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), golden)
       const checkpoint = yield* Checkpoint.take({
         root,
         unit: outline.id,
-        files: outline.sources,
+        files: owned(outline),
         backupDir: join(root, ".smithers-migrate", "backup"),
         allowNoVcs: true,
         treeExclude: [".smithers-migrate"]

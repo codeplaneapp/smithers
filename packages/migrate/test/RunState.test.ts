@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import * as Detect from "../src/Detect.ts"
@@ -31,6 +31,32 @@ describe("RunState.scan", () => {
       expect(result.verdict).toBe("clean")
       expect(result.databases).toEqual([])
       expect(result.instructions).toEqual([])
+    }))
+
+  it.effect("reports history-only for a database with tables and no rows, and for an empty database file", () =>
+    Effect.gen(function*() {
+      // A 0.x database is an archive-only file whatever it holds: a 1.0
+      // runtime cannot read it, so the operator decides its fate even when
+      // every table is empty. A zero-byte file at the conventional path is
+      // the same decision.
+      const empty = copyFixture("jsx-single")
+      mkdirSync(join(empty, ".smithers"), { recursive: true })
+      writeFileSync(join(empty, ".smithers", "smithers.db"), "")
+      const zeroBytes = yield* report(empty)
+      expect(zeroBytes.verdict).toBe("history-only")
+      expect(zeroBytes.databases.map((database) => database.readable)).toEqual([true])
+      expect(zeroBytes.instructions).toEqual([RunState.instructionText.archive])
+
+      const schemaOnly = copyFixture("jsx-single")
+      mkdirSync(join(schemaOnly, ".smithers"), { recursive: true })
+      const { DatabaseSync } = yield* Effect.promise(() => import("node:sqlite"))
+      const database = new DatabaseSync(join(schemaOnly, ".smithers", "smithers.db"))
+      database.exec(readFileSync(join(fixture("persisted-db"), "old-schema.sql"), "utf8"))
+      database.close()
+      const noRows = yield* report(schemaOnly)
+      expect(noRows.databases[0]?.runsByStatus).toEqual([])
+      expect(noRows.databases[0]?.tables).toContain("_smithers_runs")
+      expect(noRows.verdict).toBe("history-only")
     }))
 
   it.effect("reports history-only for execution logs with no database", () =>

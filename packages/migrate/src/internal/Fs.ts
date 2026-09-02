@@ -8,7 +8,9 @@
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 import { io, type MigrateError } from "../MigrateError.ts"
 
 /**
@@ -169,6 +171,45 @@ export const walkAll = (
     if (info._tag === "None" || info.value.type !== "Directory") return []
     yield* visit(root, 0)
     return found.sort()
+  })
+
+/**
+ * Turns the platform's typed `NotFound` into `None` and leaves every other
+ * failure alone.
+ *
+ * Absence is the one filesystem answer a caller may act on without a person:
+ * a file that is not there was not there. A permission error, a disk error,
+ * or a path that is a directory is not absence, and treating it as absence is
+ * how a rollback deletes a file it was supposed to restore.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export const optionalNotFound = <A, R>(
+  effect: Effect.Effect<A, PlatformError.PlatformError, R>
+): Effect.Effect<Option.Option<A>, PlatformError.PlatformError, R> =>
+  effect.pipe(
+    Effect.map(Option.some),
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(Option.none()))
+  )
+
+/**
+ * Reads a UTF-8 file, or `undefined` when it does not exist. Any other
+ * failure is an `io` error naming the file.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export const readIfExists = (
+  file: string,
+  description: string = file
+): Effect.Effect<string | undefined, MigrateError, FileSystem.FileSystem> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const text = yield* optionalNotFound(fs.readFileString(file)).pipe(
+      Effect.mapError(io(`could not read "${description}"`))
+    )
+    return Option.isSome(text) ? text.value : undefined
   })
 
 /**

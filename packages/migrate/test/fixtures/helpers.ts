@@ -44,15 +44,30 @@ process.on("exit", () => {
   for (const target of temporaries) rmSync(target, { recursive: true, force: true })
 })
 
-/** The sha256 of every file under `root`, keyed by its relative path. */
+/**
+ * The sha256 of every file under `root`, keyed by its relative path.
+ *
+ * A listing is a snapshot and the entries are read afterwards, so a name can
+ * be gone by the time it is reached. The fixtures carry a real `.git`, and
+ * git's background maintenance creates and removes `.git/objects/maintenance.lock`
+ * on its own schedule, which made two of these tests fail on CI and pass on a
+ * developer's machine for no reason either could see. A vanished name is
+ * treated as absent, which is what it is: the walk runs after the migration
+ * has finished, so nothing it wrote can disappear underneath it, and every
+ * path that stays put is compared exactly as before.
+ */
 export const hashTree = (root: string): ReadonlyMap<string, string> => {
   const hashes = new Map<string, string>()
   const visit = (directory: string, prefix: string): void => {
     for (const entry of readdirSync(directory).sort()) {
       const absolute = join(directory, entry)
       const key = prefix === "" ? entry : `${prefix}/${entry}`
-      if (statSync(absolute).isDirectory()) visit(absolute, key)
-      else hashes.set(key, createHash("sha256").update(readFileSync(absolute)).digest("hex"))
+      try {
+        if (statSync(absolute).isDirectory()) visit(absolute, key)
+        else hashes.set(key, createHash("sha256").update(readFileSync(absolute)).digest("hex"))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+      }
     }
   }
   visit(root, "")

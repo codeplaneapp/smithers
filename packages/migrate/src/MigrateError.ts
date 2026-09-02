@@ -15,6 +15,11 @@ import * as Schema from "effect/Schema"
  * exit 3 ("parked") rather than 1: the project is intact and the operator has
  * a decision to make.
  *
+ * `invalid-layout` refuses a root, report directory, or flows directory that
+ * could escape or overlap the project. `stale-plan` refuses an apply whose
+ * plan no longer describes the tree it is about to edit. Both leave the
+ * project untouched and exit 1.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -26,7 +31,9 @@ export const MigrateErrorCode = Schema.Literals([
   "verify-failed",
   "agent-failed",
   "io",
-  "unsupported-project"
+  "unsupported-project",
+  "invalid-layout",
+  "stale-plan"
 ])
 
 /**

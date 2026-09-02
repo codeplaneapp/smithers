@@ -14,7 +14,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Cell from "@smthrs/harness/Cell"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import * as Checkpoint from "@smthrs/migrate/flow/Checkpoint"
-import type * as Contract from "@smthrs/migrate/flow/Contract"
+import * as Contract from "@smthrs/migrate/flow/Contract"
 import * as MigrateFlow from "@smthrs/migrate/flow/MigrateFlow"
 import type * as Options from "@smthrs/migrate/flow/Options"
 import * as Transform from "@smthrs/migrate/flow/Transform"
@@ -105,6 +105,19 @@ describe("Transform.bindings: migrate/mapping", () => {
       expect((result.value as { rule: string }).rule).toBe("no mapping row")
       expect((result.value as { class: string }).class).toBe("unsafe")
     }))
+})
+
+describe("Transform.approvedPackages", () => {
+  it("approves every package the target model tells the agent to import", () => {
+    // The prompt names each module a migrated unit reaches for. Every one of
+    // them has to be installable, or the contract forbids the import it
+    // requires: `@smthrs/core` is the descriptor every flow module exports.
+    const named = [...new Set(Contract.targetModel.match(/@smthrs\/[a-z-]+/g) ?? [])].sort()
+    expect(named.length).toBeGreaterThan(0)
+    for (const name of named) expect(Transform.approvedPackages).toContain(name)
+    expect(Transform.approvedPackages).toContain("@smthrs/core")
+    expect(Transform.approvedPackages).toContain("effect")
+  })
 })
 
 describe("Transform.capture", () => {

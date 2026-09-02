@@ -58,9 +58,12 @@ describe("Units.plan over jsx-single", () => {
       const commands = result.units[0]!.verification
 
       expect(commands.install).toBeUndefined()
-      expect(commands.typecheck).toEqual(["tsc --noEmit -p tsconfig.json"])
-      expect(commands.test).toBe("npm run test")
+      // Derived commands are argv, never a line: the tsconfig path the scanner
+      // read off the disk is one argument, whatever characters it carries.
+      expect(commands.typecheck).toEqual([Units.argv("tsc", "--noEmit", "-p", "tsconfig.json")])
+      expect(commands.test).toEqual(Units.argv("npm", "run", "test"))
       expect(commands.discovery).toEqual({ flowsDir: "flows" })
+      expect(commands.notes).toEqual([])
     }))
 
   it.effect("prefers an override over everything it derived", () =>
@@ -85,8 +88,8 @@ describe("Units.plan over jsx-single", () => {
       writeFileSync(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
       const result = yield* scan(root)
 
-      expect(result.units[0]!.verification.install).toBe("bun install")
-      expect(result.units[0]!.verification.test).toBe("bun run test")
+      expect(result.units[0]!.verification.install).toEqual(Units.argv("bun", "install"))
+      expect(result.units[0]!.verification.test).toEqual(Units.argv("bun", "run", "test"))
     }))
 
   it.effect("reads the install command from the lockfile the project has", () =>
@@ -95,8 +98,8 @@ describe("Units.plan over jsx-single", () => {
       writeFileSync(join(root, "bun.lock"), "{}\n")
       const result = yield* scan(root)
 
-      expect(result.units[0]!.verification.install).toBe("bun install")
-      expect(result.units[0]!.verification.test).toBe("bun run test")
+      expect(result.units[0]!.verification.install).toEqual(Units.argv("bun", "install"))
+      expect(result.units[0]!.verification.test).toEqual(Units.argv("bun", "run", "test"))
     }))
 })
 
@@ -213,7 +216,37 @@ describe("Units.plan over plue-pack", () => {
     Effect.gen(function*() {
       const result = yield* scan(copyFixture("persisted-db"))
 
-      expect(result.units[0]!.verification.test).toBe("bun test tests")
+      expect(result.units[0]!.verification.test).toEqual(Units.argv("bun", "test", "tests"))
+      expect(result.units[0]!.notes).toEqual([])
+    }))
+
+  it.effect("refuses to run a smithers.config.ts test line that needs a shell, and says what ran instead", () =>
+    Effect.gen(function*() {
+      // Repository text gets no shell. A configured line that only means
+      // something to one is not run as written; the derivation falls back to
+      // the package script and the plan says so, with the override that runs
+      // the line the operator meant.
+      const root = copyFixture("persisted-db")
+      writeFileSync(
+        join(root, ".smithers", "smithers.config.ts"),
+        [
+          "export const backend = \"sqlite\";",
+          "export const repoCommands = { test: \"bun test tests && rm -rf $HOME\" } as const;",
+          "export default { backend, repoCommands };",
+          ""
+        ].join("\n")
+      )
+      const result = yield* scan(root)
+      const dependencies = result.units[0]!
+
+      expect(dependencies.verification.test).toEqual(Units.argv("npm", "run", "test"))
+      expect(dependencies.notes).toHaveLength(1)
+      expect(dependencies.notes[0]?.construct).toBe("smithers.config.ts repoCommands.test")
+      expect(dependencies.notes[0]?.reason).toContain("needs a shell")
+      expect(dependencies.notes[0]?.reason).toContain("`npm run test` ran instead")
+      expect(dependencies.notes[0]?.suggestion).toContain("--verify-test")
+      // The note is reported once, on the first unit, not on every unit.
+      expect(result.units.slice(1).flatMap((unit) => unit.notes)).toEqual([])
     }))
 
   it.effect("gives the batch-issues pack one workflow unit holding its whole pack", () =>

@@ -27,7 +27,14 @@ const unit = (flowsDir = "flows", specifiers: Detect.SpecifierContext = { localF
   unsafe: [],
   notes: [],
   specifiers,
-  verification: { install: undefined, format: undefined, typecheck: [], test: undefined, discovery: { flowsDir } }
+  verification: {
+    install: undefined,
+    format: undefined,
+    typecheck: [],
+    test: undefined,
+    discovery: { flowsDir },
+    notes: []
+  }
 })
 
 const run = (
