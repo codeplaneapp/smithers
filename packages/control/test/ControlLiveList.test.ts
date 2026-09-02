@@ -35,6 +35,7 @@ const run = <A, E>(
 const start = (flowId: string, suffix: string) =>
   Effect.gen(function*() {
     const control = yield* Control
+    const runtime = yield* ControlRuntime
     const card = yield* control.plan({ flowId, input: { suite: suffix } })
     yield* control.approve({ ...card.approval, idempotencyKey: `approve:${suffix}` })
     const receipt = yield* control.run({
@@ -45,6 +46,7 @@ const start = (flowId: string, suffix: string) =>
       idempotencyKey: `run:${suffix}`
     })
     if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a started run")
+    yield* runtime.resume(receipt.runId)
     return { card, runId: receipt.runId }
   })
 
@@ -57,8 +59,10 @@ describe("ControlLive listings", () => {
       const control = yield* Control
       return {
         all: yield* control.list({ _tag: "flows" }),
-        invalidLimits: yield* Effect.forEach([0, -1, 2.7, Number.NaN, Number.POSITIVE_INFINITY], (limit) =>
-          control.list({ _tag: "flows", limit }).pipe(Effect.flip)),
+        invalidLimits: yield* Effect.forEach(
+          [0, -1, 2.7, Number.NaN, Number.POSITIVE_INFINITY],
+          (limit) => control.list({ _tag: "flows", limit }).pipe(Effect.flip)
+        ),
         exact: yield* control.list({ _tag: "flows", limit: 3 }),
         tail: yield* control.list({ _tag: "flows", cursor: "2" }),
         beyond: yield* control.list({ _tag: "flows", cursor: "9" }),
@@ -145,6 +149,27 @@ describe("ControlLive listings", () => {
     })
     expect(observed.first).toMatchObject({ nextCursor: "1" })
     expect(items(observed.first)).toEqual(["review/pull-request"])
+  })
+
+  it("carries registry discovery warnings beside every flow page", async () => {
+    const warning = {
+      code: "invalid_metadata" as const,
+      path: "/project/flows/review/flow.ts",
+      name: "review",
+      message: "Could not statically read the flow declaration"
+    }
+    const listed = await run(
+      Effect.flatMap(Control, (control) => control.list({ _tag: "flows", limit: 1 })),
+      live({
+        runtime: memoryRuntime({ flows }),
+        registry: Registry.layerNoop({
+          list: () => Effect.succeed([descriptor("review", "Review")]),
+          warnings: () => Effect.succeed([warning])
+        })
+      })
+    )
+
+    expect(listed).toMatchObject({ _tag: "flows", warnings: [warning] })
   })
 
   it("filters runs by identifier, flow, and status, and combines them with paging", async () => {

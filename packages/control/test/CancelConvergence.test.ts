@@ -19,13 +19,10 @@
  * assert the engine row and the control projection in one read — and why it
  * proves the convergence rather than the impossibility of divergence.
  *
- * The fence between two local processes is soft for a second reason worth
- * stating: `SqlControlRuntime`'s default identity is `{hostId: "local",
- * pid: 0}` and `sameProcess` compares host and pid only, so every local CLI
- * process is "the same process" to the store. That is why a cancel from a
- * second process can answer `Terminal` rather than `Accepted`, and why the run
- * process that parked a run can still write its terminal status after another
- * process claimed the row.
+ * Separately constructed SQL runtimes mint distinct default identities, so a
+ * second runtime cannot write through the first runtime's fence. The shipped
+ * CLI supplies its real host and pid identity as well, which also enables
+ * same-host liveness probes.
  *
  * The `Flow.execute` fiber's own settlement after a cross-driver cancel is a
  * separate defect (triage N-09, `RunDriver.ts`, the cancel-durability lane), so

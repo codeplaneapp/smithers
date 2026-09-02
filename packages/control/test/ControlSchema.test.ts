@@ -139,9 +139,8 @@ describe("ControlSchema", () => {
       input: { pullRequest: 17 },
       idempotencyKey: "plan-17"
     })
-    expect(() =>
-      Schema.decodeUnknownSync(ControlSchema.PlanInputSchema)({ flowId: "review", input: new Date(0) })
-    ).toThrow()
+    expect(() => Schema.decodeUnknownSync(ControlSchema.PlanInputSchema)({ flowId: "review", input: new Date(0) }))
+      .toThrow()
   })
 
   it("round-trips and rejects run request payloads", () => {
@@ -211,9 +210,8 @@ describe("ControlSchema", () => {
       runId: "run-17",
       idempotencyKey: "mutation-17"
     })
-    expect(() =>
-      Schema.decodeUnknownSync(ControlSchema.RunMutationInputSchema)({ idempotencyKey: "mutation-17" })
-    ).toThrow()
+    expect(() => Schema.decodeUnknownSync(ControlSchema.RunMutationInputSchema)({ idempotencyKey: "mutation-17" }))
+      .toThrow()
   })
 
   it("round-trips and rejects reasoned run mutation request payloads", () => {
@@ -264,7 +262,9 @@ describe("ControlSchema", () => {
         expect(() => Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit })).toThrow()
       }
       expect(Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit: 1 })).toMatchObject({ limit: 1 })
-      expect(Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit: 500 })).toMatchObject({ limit: 500 })
+      expect(Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit: 500 })).toMatchObject({
+        limit: 500
+      })
     }
   })
 })

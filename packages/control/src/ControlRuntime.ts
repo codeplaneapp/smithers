@@ -75,6 +75,8 @@ export interface ApprovalToken {
   readonly tokenId: string
   readonly target: ApprovalTarget
   readonly resolved: boolean
+  /** The authenticated principal that made the terminal decision. */
+  readonly decisionPrincipal?: Principal | undefined
 }
 
 /**
@@ -330,6 +332,18 @@ export interface Service {
     options?: { readonly scope?: "launched" | "any" | undefined } | undefined
   ) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
   readonly claimFence: (runId: RunId) => Effect.Effect<string, RunNotFound | ClaimLost | PersistenceError>
+  /**
+   * Releases a launch the configured executor declined without changing its
+   * public `accepted` status.
+   *
+   * The run remains available to an external executor, but the launching
+   * process no longer appears to drive it. The presented fence is spent by
+   * the release and cannot authorize a later write.
+   */
+  readonly releasePending: (
+    runId: RunId,
+    fence: string
+  ) => Effect.Effect<RunSummary, RunNotFound | ClaimLost | PersistenceError>
   readonly writeStatus: (
     runId: RunId,
     fence: string,
@@ -378,6 +392,7 @@ interface MutableToken {
   readonly tokenId: string
   readonly target: ApprovalTarget
   resolved: boolean
+  decisionPrincipal?: Principal | undefined
 }
 
 interface MutableRun {
@@ -393,10 +408,34 @@ interface MutableRun {
   pendingResumeAtMs?: number | undefined
 }
 
+// SQL persistence breaks caller reference identity through serialization. The
+// memory adapter must copy at the same boundaries or its test results diverge
+// from the durable implementation when a caller mutates an input or result.
+const snapshot = <A>(value: A): A => structuredClone(value)
+
 const asStored = (plan: MutablePlan): StoredPlan => ({
-  card: plan.card,
-  decodedInput: plan.decodedInput,
+  card: snapshot(plan.card),
+  decodedInput: snapshot(plan.decodedInput),
   decision: plan.decision
+})
+
+// JSON tuple encoding keeps caller-chosen ids in separate fields, so a node's
+// request id cannot alias another run's request or a plan id.
+const approvalKey = (target: ApprovalTarget): string =>
+  target._tag === "Plan"
+    ? JSON.stringify([target._tag, target.planId])
+    : JSON.stringify([target._tag, target.runId, target.requestId])
+
+const sameApprovalIdentity = (left: ApprovalTarget, right: ApprovalTarget): boolean =>
+  left._tag === "Plan"
+    ? right._tag === "Plan" && left.planId === right.planId
+    : right._tag === "Node" && left.runId === right.runId && left.requestId === right.requestId
+
+const approvalToken = (token: MutableToken): ApprovalToken => ({
+  tokenId: token.tokenId,
+  target: snapshot(token.target),
+  resolved: token.resolved,
+  ...(token.decisionPrincipal === undefined ? {} : { decisionPrincipal: snapshot(token.decisionPrincipal) })
 })
 
 /**
@@ -420,7 +459,12 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         deployClass: entry.deployClass,
         envelope: emptyEnvelope
       }))
-      const flows = new Map(configuredFlows.map((flow) => [flow.flowId, flow] as const))
+      const flows = new Map(configuredFlows.map((flow) =>
+        [
+          flow.flowId,
+          { ...flow, envelope: snapshot(flow.envelope) }
+        ] as const
+      ))
       const plans = new Map<string, MutablePlan>()
       const planKeys = new Map<IdempotencyKey, {
         readonly fingerprint: string
@@ -430,6 +474,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
       const runs = new Map<RunId, MutableRun>()
       const mutations = new Map<IdempotencyKey, MutationRecord>()
       const installedGrants: Array<BulkGrant> = []
+      const installedGrantKeys = new Set<string>()
       let planSequence = 0
       let runSequence = 0
       let fenceSequence = 0
@@ -439,8 +484,8 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         Effect.fromOption(Option.fromNullishOr(runs.get(runId)), () => new RunNotFound({ runId }))
 
       const updateSummary = (run: MutableRun, fields: Partial<RunSummary>): RunSummary => {
-        run.summary = { ...run.summary, ...fields, updatedAt: now() }
-        return run.summary
+        run.summary = snapshot({ ...run.summary, ...fields, updatedAt: now() })
+        return snapshot(run.summary)
       }
 
       const checkFence = (runId: RunId, run: MutableRun, fence: string): Effect.Effect<void, ClaimLost> =>
@@ -453,48 +498,61 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           const flow = flows.get(input.flowId)
           if (flow === undefined) return yield* new FlowNotFound({ flowId: input.flowId })
           const planFingerprint = yield* Effect.try({
+            // Validate before cloning. Canonicalization reports a throwing
+            // getter at its stable path, while `structuredClone` would invoke
+            // the getter first and erase that safe diagnostic.
             try: () => canonical({ flowId: input.flowId, input: input.input }),
             catch: (cause) => new InvalidInput({ issue: canonicalIssue(cause) })
           })
-          if (input.idempotencyKey !== undefined) {
-            const prior = planKeys.get(input.idempotencyKey)
+          const submitted = yield* Effect.try({
+            try: () => snapshot(input),
+            catch: (cause) => new InvalidInput({ issue: canonicalIssue(cause) })
+          })
+          if (submitted.idempotencyKey !== undefined) {
+            const prior = planKeys.get(submitted.idempotencyKey)
             if (prior !== undefined) {
               if (prior.fingerprint !== planFingerprint) {
                 return yield* new InvalidInput({
-                  issue: `idempotency key ${input.idempotencyKey} was used for another plan`
+                  issue: `idempotency key ${submitted.idempotencyKey} was used for another plan`
                 })
               }
               const stored = plans.get(prior.planId)
-              if (stored !== undefined) return { card: stored.card, created: false }
+              if (stored !== undefined) return { card: snapshot(stored.card), created: false }
             }
           }
-          const decoded = yield* (flow.decode?.(input.input) ?? Effect.try({
+          const decoded = yield* (flow.decode?.(submitted.input) ?? Effect.try({
             try: () => {
-              canonical(input.input)
-              return input.input
+              canonical(submitted.input)
+              return submitted.input
             },
             catch: (cause) => new InvalidInput({ issue: canonicalIssue(cause) })
           }))
           const planId = `plan-${++planSequence}`
           const handoff = flow.plan === undefined ? undefined : yield* flow.plan(decoded, planId)
-          const card = yield* planCard({
-            planId,
-            flowId: input.flowId,
-            decodedInput: decoded,
-            envelope: flow.envelope,
-            deployClass: flow.deployClass,
-            handoff,
-            idempotencyKey: input.idempotencyKey
-          }).pipe(Effect.provideService(Crypto.Crypto, crypto))
-          plans.set(planId, { card, decodedInput: decoded, decision: "pending" })
-          tokens.set(planId, { tokenId: planId, target: card.approval.target, resolved: false })
-          if (input.idempotencyKey !== undefined) {
-            planKeys.set(input.idempotencyKey, {
+          const card = snapshot(
+            yield* planCard({
+              planId,
+              flowId: submitted.flowId,
+              decodedInput: decoded,
+              envelope: flow.envelope,
+              deployClass: flow.deployClass,
+              handoff,
+              idempotencyKey: submitted.idempotencyKey
+            }).pipe(Effect.provideService(Crypto.Crypto, crypto))
+          )
+          plans.set(planId, { card, decodedInput: snapshot(decoded), decision: "pending" })
+          tokens.set(approvalKey(card.approval.target), {
+            tokenId: planId,
+            target: snapshot(card.approval.target),
+            resolved: false
+          })
+          if (submitted.idempotencyKey !== undefined) {
+            planKeys.set(submitted.idempotencyKey, {
               fingerprint: planFingerprint,
               planId
             })
           }
-          return { card, created: true }
+          return { card: snapshot(card), created: true }
         }),
         getPlan: Effect.fn("ControlRuntime.getPlan")((planId) =>
           Effect.fromOption(Option.fromNullishOr(plans.get(planId)), () => new PlanNotFound({ planId })).pipe(
@@ -503,72 +561,99 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         ),
         listPlanIds: Effect.fn("ControlRuntime.listPlanIds")(() => Effect.sync(() => Array.from(plans.keys())))(),
         lookupApproval: Effect.fn("ControlRuntime.lookupApproval")(function*(target) {
-          const tokenId = target._tag === "Plan" ? target.planId : target.requestId
+          const requested = snapshot(target)
+          const tokenId = requested._tag === "Plan" ? requested.planId : requested.requestId
           const token = yield* Effect.fromOption(
-            Option.fromNullishOr(tokens.get(tokenId)),
-            () => target._tag === "Node"
-              ? new RunNotFound({ runId: target.runId })
-              : new PlanNotFound({ planId: target.planId })
+            Option.fromNullishOr(tokens.get(approvalKey(requested))),
+            () =>
+              requested._tag === "Node"
+                ? new RunNotFound({ runId: requested.runId })
+                : new PlanNotFound({ planId: requested.planId })
           )
-          if (token.target.digest !== target.digest) {
+          // A stored target that disagrees with its composite key is corrupted;
+          // accepting only its digest and envelope would recreate the alias the
+          // composite identity closes.
+          if (!sameApprovalIdentity(token.target, requested)) {
+            return yield* new PersistenceError({
+              operation: "validate an approval token",
+              message: "The stored approval target does not match its identity"
+            })
+          }
+          if (token.target.digest !== requested.digest) {
             return yield* new PlanDigestMismatch({
               planId: tokenId,
               expected: token.target.digest,
-              actual: target.digest
+              actual: requested.digest
             })
           }
-          if (!sameEnvelope(token.target.envelope, target.envelope)) {
+          if (!sameEnvelope(token.target.envelope, requested.envelope)) {
             return yield* new EnvelopeMismatch({
               planId: tokenId,
               expected: canonical(token.target.envelope),
-              actual: canonical(target.envelope)
+              actual: canonical(requested.envelope)
             })
           }
           if (token.resolved) return yield* new AlreadyResolved({ requestId: tokenId })
-          return { tokenId, target: token.target, resolved: false }
+          return approvalToken(token)
         }),
         registerApproval: Effect.fn("ControlRuntime.registerApproval")(function*(target) {
-          yield* requireRun(target.runId)
-          const existing = tokens.get(target.requestId)
+          const requested = snapshot(target)
+          yield* requireRun(requested.runId)
+          const key = approvalKey(requested)
+          const existing = tokens.get(key)
           if (existing === undefined) {
-            tokens.set(target.requestId, { tokenId: target.requestId, target, resolved: false })
-            return { tokenId: target.requestId, target, resolved: false }
+            const stored = { tokenId: requested.requestId, target: requested, resolved: false }
+            tokens.set(key, stored)
+            return approvalToken(stored)
           }
-          if (existing.target.digest !== target.digest) {
+          if (!sameApprovalIdentity(existing.target, requested)) {
+            return yield* new PersistenceError({
+              operation: "validate an approval token",
+              message: "The stored approval target does not match its identity"
+            })
+          }
+          if (existing.target.digest !== requested.digest) {
             return yield* new PlanDigestMismatch({
-              planId: target.requestId,
+              planId: requested.requestId,
               expected: existing.target.digest,
-              actual: target.digest
+              actual: requested.digest
             })
           }
-          if (!sameEnvelope(existing.target.envelope, target.envelope)) {
+          if (!sameEnvelope(existing.target.envelope, requested.envelope)) {
             return yield* new EnvelopeMismatch({
-              planId: target.requestId,
+              planId: requested.requestId,
               expected: canonical(existing.target.envelope),
-              actual: canonical(target.envelope)
+              actual: canonical(requested.envelope)
             })
           }
-          return { tokenId: existing.tokenId, target: existing.target, resolved: existing.resolved }
+          return approvalToken(existing)
         }),
         installBulkGrant: Effect.fn("ControlRuntime.installBulkGrant")((token, envelope, scope) =>
           Effect.sync(() => {
-            if (installedGrants.some((grant) => grant.tokenId === token.tokenId)) return
+            const storedToken = snapshot(token)
+            const key = approvalKey(storedToken.target)
+            if (installedGrantKeys.has(key)) return
+            installedGrantKeys.add(key)
             installedGrants.push({
-              tokenId: token.tokenId,
-              envelope,
+              tokenId: storedToken.tokenId,
+              envelope: snapshot(envelope),
               scope,
               installedAt: now()
             })
           })
         ),
-        resolveApproval: Effect.fn("ControlRuntime.resolveApproval")(function*(token, decision) {
-          const mutable = tokens.get(token.tokenId)
+        resolveApproval: Effect.fn("ControlRuntime.resolveApproval")(function*(token, decision, principal) {
+          const requested = snapshot(token)
+          const mutable = tokens.get(approvalKey(requested.target))
           if (mutable === undefined || mutable.resolved) {
-            return yield* new AlreadyResolved({ requestId: token.tokenId })
+            return yield* new AlreadyResolved({ requestId: requested.tokenId })
           }
           mutable.resolved = true
-          const plan = plans.get(token.tokenId)
-          if (plan !== undefined) plan.decision = decision
+          mutable.decisionPrincipal = snapshot(principal)
+          if (requested.target._tag === "Plan") {
+            const plan = plans.get(requested.target.planId)
+            if (plan !== undefined) plan.decision = decision
+          }
         }),
         launch: Effect.fn("ControlRuntime.launch")(function*(planId, requestedDigest, envelope) {
           const plan = yield* Effect.fromOption(
@@ -617,7 +702,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             updatedAt: timestamp
           }
           runs.set(runId, {
-            summary,
+            summary: snapshot(summary),
             fence,
             localFence: fence,
             steering: [],
@@ -626,12 +711,14 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           return {
             _tag: "Started",
             receipt: accepted(`launch:${planId}:${runId}`, runId),
-            run: summary
+            run: snapshot(summary)
           }
         }),
-        getRun: Effect.fn("ControlRuntime.getRun")((runId) => Effect.map(requireRun(runId), (run) => run.summary)),
+        getRun: Effect.fn("ControlRuntime.getRun")((runId) =>
+          Effect.map(requireRun(runId), (run) => snapshot(run.summary))
+        ),
         listRuns: Effect.fn("ControlRuntime.listRuns")(() =>
-          Effect.sync(() => Array.from(runs.values(), (run) => run.summary))
+          Effect.sync(() => Array.from(runs.values(), (run) => snapshot(run.summary)))
         )(),
         listFlows: Effect.fn("ControlRuntime.listFlows")(() =>
           Effect.sync(() =>
@@ -642,19 +729,19 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           )
         )(),
         enqueueSteer: Effect.fn("ControlRuntime.enqueueSteer")((runId, message) =>
-          Effect.tap(requireRun(runId), (run) => Effect.sync(() => void run.steering.push(message)))
+          Effect.tap(requireRun(runId), (run) => Effect.sync(() => void run.steering.push(snapshot(message))))
         ),
         drainSteering: Effect.fn("ControlRuntime.drainSteering")(function*(runId) {
           const queue = (yield* requireRun(runId)).steering
-          const drained = queue.slice()
+          const drained = snapshot(queue)
           queue.length = 0
           return drained
         }),
         deliverSignal: Effect.fn("ControlRuntime.deliverSignal")((runId, signal) =>
-          Effect.tap(requireRun(runId), (run) => Effect.sync(() => void run.signals.push(signal)))
+          Effect.tap(requireRun(runId), (run) => Effect.sync(() => void run.signals.push(snapshot(signal))))
         ),
         deliveredSignals: Effect.fn("ControlRuntime.deliveredSignals")((runId) =>
-          Effect.map(requireRun(runId), (run) => run.signals.slice())
+          Effect.map(requireRun(runId), (run) => snapshot(run.signals))
         ),
         requestResume: Effect.fn("ControlRuntime.requestResume")(function*(runId) {
           const run = yield* requireRun(runId)
@@ -696,7 +783,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             run.summary.status === "cancelled" ||
             run.summary.status === "completed" ||
             run.summary.status === "failed"
-          ) return run.summary
+          ) return snapshot(run.summary)
           if (run.localFence === undefined) return yield* new ClaimLost({ runId })
           yield* checkFence(runId, run, run.localFence)
           if (run.fiber !== undefined) yield* Fiber.interrupt(run.fiber)
@@ -710,13 +797,13 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             if (run.localFence === undefined || run.fence !== run.localFence) {
               return yield* new ClaimLost({ runId })
             }
-            return run.summary
+            return snapshot(run.summary)
           }
           if (
             run.summary.status === "cancelled" ||
             run.summary.status === "completed" ||
             run.summary.status === "failed"
-          ) return run.summary
+          ) return snapshot(run.summary)
           const fence = `fence-${++fenceSequence}`
           run.fence = fence
           run.localFence = fence
@@ -727,6 +814,17 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           const run = yield* requireRun(runId)
           if (run.localFence === undefined) return yield* new ClaimLost({ runId })
           return run.localFence
+        }),
+        releasePending: Effect.fn("ControlRuntime.releasePending")(function*(runId, fence) {
+          const run = yield* requireRun(runId)
+          yield* checkFence(runId, run, fence)
+          run.fence = undefined
+          run.localFence = undefined
+          return updateSummary(run, {
+            status: "accepted",
+            ownerId: undefined,
+            parkedBy: undefined
+          })
         }),
         writeStatus: Effect.fn("ControlRuntime.writeStatus")(function*(runId, fence, status) {
           const run = yield* requireRun(runId)
@@ -779,10 +877,10 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
                 })
               )
             }
-            mutations.set(key, { fingerprint, receipt })
+            mutations.set(key, { fingerprint, receipt: snapshot(receipt) })
           })
         ),
-        grants: Effect.fn("ControlRuntime.grants")(() => Effect.sync(() => installedGrants.slice()))()
+        grants: Effect.fn("ControlRuntime.grants")(() => Effect.sync(() => snapshot(installedGrants)))()
       })
       return service
     })

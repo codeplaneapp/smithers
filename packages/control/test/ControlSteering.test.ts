@@ -30,6 +30,7 @@ const run = <A, E>(
 const start = (suffix: string) =>
   Effect.gen(function*() {
     const control = yield* Control
+    const runtime = yield* ControlRuntime
     const card = yield* control.plan({ flowId: "system/test", input: { suite: suffix } })
     yield* control.approve({ ...card.approval, idempotencyKey: `approve:${suffix}` })
     const receipt = yield* control.run({
@@ -40,6 +41,7 @@ const start = (suffix: string) =>
       idempotencyKey: `run:${suffix}`
     })
     if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a started run")
+    yield* runtime.resume(receipt.runId)
     return receipt.runId
   })
 

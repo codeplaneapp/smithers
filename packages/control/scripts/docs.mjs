@@ -95,14 +95,26 @@ for (const module of modules) {
   const documented = exportedDocs(read(join(packageRoot, "src", `${module.path}.ts`)))
   if (documented.length === 0) throw new Error(`control docs: ${module.path}.ts documents no exports`)
   for (const entry of documented) {
-    rows.push(
-      `| \`${module.namespace}\` | \`${entry.name}\` (${entry.declaration}) | ${entry.category} | ${entry.summary} |`
-    )
+    rows.push([
+      `\`${module.namespace}\``,
+      `\`${entry.name}\` (${entry.declaration})`,
+      entry.category,
+      entry.summary
+    ])
   }
 }
 if (rows.length === 0) throw new Error("control docs: no documented exports found")
 
-const table = ["| Module | Export | Kind | Summary |", "| --- | --- | --- | --- |", ...rows].join("\n")
+const headings = ["Module", "Export", "Kind", "Summary"]
+const widths = headings.map((heading, index) =>
+  Math.max(heading.length, ...rows.map((row) => row[index].length))
+)
+const tableRow = (cells) => `| ${cells.map((cell, index) => cell.padEnd(widths[index])).join(" | ")} |`
+const table = [
+  tableRow(headings),
+  tableRow(widths.map((width) => "-".repeat(width))),
+  ...rows.map(tableRow)
+].join("\n")
 
 const apiPage = `---
 description: "${manifest.description}."

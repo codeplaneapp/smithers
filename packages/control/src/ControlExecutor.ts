@@ -1,7 +1,7 @@
 /**
  * Acceptance port from the control plane into a real run executor.
  *
- * Governing contract: `docs/specs/Concepts/Control API.md`.
+ * Governing contract: `docs/pages/control/index.md`.
  *
  * @since 0.1.0
  */

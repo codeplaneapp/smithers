@@ -5,8 +5,6 @@
  * port, so the interesting assertions belong to neither. They live here and are
  * run against both — an adapter that only satisfies its own tests is how a
  * port silently forks into two behaviours.
- *
- * Contract source: `.smithers/tickets/control-runtime-engine-integration.md`.
  */
 import { Journal } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
@@ -59,6 +57,7 @@ const approval = (
 
 const start = Effect.gen(function*() {
   const control = yield* Control
+  const runtime = yield* ControlRuntime
   const card = yield* control.plan({
     flowId: "system/test",
     input: { suite: "control" }
@@ -74,6 +73,10 @@ const start = Effect.gen(function*() {
   if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
     return yield* Effect.die("expected an accepted run")
   }
+  // The default contract executor declines, so Control.run releases the
+  // launch fence. Most contract cases exercise an owning runtime; reclaim the
+  // accepted run here and leave the release itself to its dedicated case.
+  yield* runtime.resume(receipt.runId)
   return { card, runId: receipt.runId }
 })
 
@@ -108,6 +111,28 @@ export const contract = (name: string, harness: Harness): void => {
           _tag: "runs",
           items: [{ runId, planId: card.planId, planDigest: card.digest, status: "accepted" }]
         })
+      }))
+
+    test("copies mutable inputs and returned summaries at the persistence boundary", () =>
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const input = { nested: { value: "stored" } }
+        const { card } = yield* runtime.plan({ flowId: "system/test", input })
+        input.nested.value = "mutated after plan"
+
+        const token = yield* runtime.lookupApproval(card.approval.target)
+        yield* runtime.resolveApproval(token, "approved", { id: "operator", kind: "test", stampedAt: 1 })
+        const launched = yield* runtime.launch(card.planId, card.digest, card.envelope)
+        if (launched._tag !== "Started") return yield* Effect.die("expected a started run")
+        ;(launched.run as unknown as { status: string }).status = "failed"
+        const firstRead = yield* runtime.getRun(launched.run.runId)
+        ;(firstRead as unknown as { status: string }).status = "cancelled"
+
+        const storedPlan = yield* runtime.getPlan(card.planId)
+        const secondRead = yield* runtime.getRun(launched.run.runId)
+        expect(storedPlan.decodedInput).toEqual({ nested: { value: "stored" } })
+        expect(firstRead.status).toBe("cancelled")
+        expect(secondRead.status).toBe("accepted")
       }))
 
     test("filters run listings to a matching run identifier", () =>
@@ -507,6 +532,54 @@ export const contract = (name: string, harness: Harness): void => {
         expect(parkedWrite).toBeInstanceOf(ClaimLost)
         expect(resumed._tag).toBe("Accepted")
         expect(resumedWrite).toBeInstanceOf(ClaimLost)
+      }))
+
+    test("releases an executor-declined launch while preserving its accepted status", () =>
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const { card } = yield* runtime.plan({ flowId: "system/test", input: { pending: true } })
+        const token = yield* runtime.lookupApproval(card.approval.target)
+        yield* runtime.resolveApproval(token, "approved", { id: "operator", kind: "test", stampedAt: 1 })
+        const launched = yield* runtime.launch(card.planId, card.digest, card.envelope)
+        if (launched._tag !== "Started") return yield* Effect.die("expected a started run")
+        const fence = yield* runtime.claimFence(launched.run.runId)
+        const malformed = yield* runtime.releasePending(launched.run.runId, "not-a-fence").pipe(Effect.flip)
+        const released = yield* runtime.releasePending(launched.run.runId, fence)
+        const stale = yield* runtime.writeStatus(launched.run.runId, fence, "running").pipe(Effect.flip)
+        const resumed = yield* runtime.resume(launched.run.runId)
+
+        expect(malformed).toBeInstanceOf(ClaimLost)
+        expect(released.status).toBe("accepted")
+        expect(released.ownerId).toBeUndefined()
+        expect(stale).toBeInstanceOf(ClaimLost)
+        expect(resumed).toMatchObject({ status: "accepted", ownerId: expect.any(String) })
+      }))
+
+    test("lets another process cancel a run after the executor declines it", () =>
+      Effect.gen(function*() {
+        const control = yield* Control
+        const runtime = yield* ControlRuntime
+        const card = yield* control.plan({ flowId: "system/test", input: { declined: true } })
+        yield* control.approve(approval(card, "approve:declined"))
+        const receipt = yield* control.run({
+          _tag: "Plan",
+          planId: card.planId,
+          digest: card.digest,
+          envelope: card.envelope,
+          idempotencyKey: "run:declined"
+        })
+        if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
+          return yield* Effect.die("expected an accepted run")
+        }
+
+        const released = yield* runtime.getRun(receipt.runId)
+        const fence = yield* runtime.claimFence(receipt.runId).pipe(Effect.flip)
+        const cancelled = yield* control.cancel({ runId: receipt.runId, idempotencyKey: "cancel:declined" })
+
+        expect(released.status).toBe("accepted")
+        expect(released.ownerId).toBeUndefined()
+        expect(fence).toBeInstanceOf(ClaimLost)
+        expect(cancelled).toEqual({ _tag: "Terminal", runId: receipt.runId, status: "cancelled" })
       }))
 
     test("accepts the fence it is currently holding", () =>

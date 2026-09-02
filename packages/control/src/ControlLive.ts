@@ -52,7 +52,6 @@ import * as Steering from "./Steering.ts"
 
 const sourceId = JournalEvent.SourceId.make("/control")
 
-const watchDeduplicationWindow = 1024
 const snapshotPageSize = 1024
 const snapshotPartitionConcurrency = 8
 
@@ -613,7 +612,7 @@ export const layer: Layer.Layer<
       Effect.gen(function*() {
         const bounds = yield* pageBounds(request.cursor, request.limit)
         if (request._tag === "flows") {
-          const registered = yield* registry.list()
+          const [registered, warnings] = yield* Effect.all([registry.list(), registry.warnings()])
           const available = registered.length > 0
             ? registered.map((descriptor) => ({
               flowId: descriptor.name,
@@ -621,9 +620,10 @@ export const layer: Layer.Layer<
             }))
             : yield* runtime.listFlows
           const result = page(available, bounds)
+          const diagnostics = warnings.length === 0 ? {} : { warnings }
           return result.nextCursor === undefined
-            ? { _tag: "flows", items: result.items }
-            : { _tag: "flows", items: result.items, nextCursor: result.nextCursor }
+            ? { _tag: "flows", items: result.items, ...diagnostics }
+            : { _tag: "flows", items: result.items, ...diagnostics, nextCursor: result.nextCursor }
         }
 
         if (request.filters?.principalId !== undefined) {
@@ -695,8 +695,9 @@ export const layer: Layer.Layer<
           let lower = initial.seq as number
           let step = 1
           let upper = lower
-          while (lower < Number.MAX_SAFE_INTEGER) {
-            const probe = Math.min(Number.MAX_SAFE_INTEGER - 1, lower + step - 1)
+          const maximumSequence = Number.MAX_SAFE_INTEGER - 1
+          while (lower < maximumSequence) {
+            const probe = Math.min(maximumSequence, lower + step - 1)
             const next = yield* journal.entries({
               runId,
               after: JournalEvent.Seq.make(probe),
@@ -708,8 +709,8 @@ export const layer: Layer.Layer<
               break
             }
             lower = entry.seq
-            if (lower === Number.MAX_SAFE_INTEGER) return entry.seq
-            step = Math.min(Number.MAX_SAFE_INTEGER - lower, step * 2)
+            if (lower === maximumSequence) return entry.seq
+            step = Math.min(maximumSequence - lower, step * 2)
           }
 
           while (lower < upper) {
@@ -730,38 +731,46 @@ export const layer: Layer.Layer<
         })
       ).pipe(Effect.mapError(() => unavailable("watch")))
 
-    const snapshotForRun = (
+    const snapshotForRunAt = (
       runId: RunId,
-      filter: WatchFilter
+      filter: WatchFilter,
+      highWater: JournalEvent.Seq | undefined
     ): Stream.Stream<ControlEvent, ControlError> => {
       const journalRunId = JournalEvent.RunId.make(runId)
       const initialAfter = filter.afterSequence === undefined
         ? undefined
         : JournalEvent.Seq.make(filter.afterSequence)
-      return Stream.unwrap(
-        Effect.map(snapshotHighWater(journalRunId), (highWater) => {
-          if (highWater === undefined || (initialAfter !== undefined && initialAfter >= highWater)) {
-            return Stream.empty
-          }
-          return Stream.paginate(initialAfter, (after) =>
-            journal.entries({
-              runId: journalRunId,
-              ...(after === undefined ? {} : { after }),
-              limit: snapshotPageSize
-            }).pipe(
-              Effect.map((page) => {
-                const entries = page.entries.filter((entry) => entry.seq <= highWater)
-                const last = entries.at(-1)
-                const next = last === undefined || last.seq >= highWater || !page.hasMore
-                  ? Option.none<JournalEvent.Seq | undefined>()
-                  : Option.some<JournalEvent.Seq | undefined>(last.seq)
-                return [entries, next] as const
-              }),
-              Effect.mapError(() => unavailable("watch"))
-            )).pipe(Stream.map(eventFromEntry))
-        })
-      )
+      if (highWater === undefined || (initialAfter !== undefined && initialAfter >= highWater)) {
+        return Stream.empty
+      }
+      return Stream.paginate(initialAfter, (after) =>
+        journal.entries({
+          runId: journalRunId,
+          ...(after === undefined ? {} : { after }),
+          limit: snapshotPageSize
+        }).pipe(
+          Effect.map((page) => {
+            const entries = page.entries.filter((entry) => entry.seq <= highWater)
+            const last = entries.at(-1)
+            const next = last === undefined || last.seq >= highWater || !page.hasMore
+              ? Option.none<JournalEvent.Seq | undefined>()
+              : Option.some<JournalEvent.Seq | undefined>(last.seq)
+            return [entries, next] as const
+          }),
+          Effect.mapError(() => unavailable("watch"))
+        )).pipe(Stream.map(eventFromEntry))
     }
+
+    const snapshotForRun = (
+      runId: RunId,
+      filter: WatchFilter
+    ): Stream.Stream<ControlEvent, ControlError> =>
+      Stream.unwrap(
+        Effect.map(
+          snapshotHighWater(JournalEvent.RunId.make(runId)),
+          (highWater) => snapshotForRunAt(runId, filter, highWater)
+        )
+      )
 
     const journalPartitions = Effect.gen(function*() {
       const [planIds, runs] = yield* Effect.all([runtime.listPlanIds, runtime.listRuns])
@@ -791,28 +800,35 @@ export const layer: Layer.Layer<
           Effect.gen(function*() {
             const subscription = yield* journal.changes
             const partitions = yield* journalPartitions
+            // Subscribe first, then pin each known partition's cutoff. A row
+            // committed before its cutoff is read from the finite snapshot;
+            // one committed after it is read from the buffered tail. This is
+            // a handoff, not a bounded duplicate cache, so an arbitrarily long
+            // history cannot make an old overlap reappear.
+            const cutoffs = yield* Effect.forEach(
+              partitions,
+              (partition) =>
+                Effect.map(
+                  snapshotHighWater(JournalEvent.RunId.make(partition)),
+                  (highWater) => [partition, highWater] as const
+                ),
+              { concurrency: snapshotPartitionConcurrency }
+            )
+            const highWaterByPartition = new Map(cutoffs)
             const tail = Stream.fromSubscription(subscription).pipe(
-              Stream.filter((entry) => filter.afterSequence === undefined || entry.seq > filter.afterSequence),
+              Stream.filter((entry) => {
+                if (entry.runId === undefined) return true
+                const highWater = highWaterByPartition.get(String(entry.runId))
+                return highWater === undefined || entry.seq > highWater
+              }),
               Stream.map(eventFromEntry)
             )
             return Stream.mergeAll(
-              [...partitions.map((partition) => streamForRun(partition, filter)), tail],
+              [
+                ...cutoffs.map(([partition, highWater]) => snapshotForRunAt(partition, filter, highWater)),
+                tail
+              ],
               { concurrency: "unbounded" }
-            ).pipe(
-              Stream.mapAccum(
-                () => [] as ReadonlyArray<string>,
-                (seen, event) => {
-                  const key = `${event.runId ?? ""}:${event.sequence}`
-                  if (seen.includes(key)) return [seen, []] as const
-                  const next = [...seen, key]
-                  return [
-                    next.length > watchDeduplicationWindow
-                      ? next.slice(next.length - watchDeduplicationWindow)
-                      : next,
-                    [event]
-                  ] as const
-                }
-              )
             )
           })
         )
@@ -820,9 +836,8 @@ export const layer: Layer.Layer<
     /**
      * Journal entries plus the ancestry deltas they disclose.
      *
-     * The expansion runs after the follow branch's deduplication, so a derived
-     * event never competes for the `(runId, sequence)` key its own entry was
-     * deduplicated on.
+     * The expansion runs after the follow branch's snapshot-to-tail handoff,
+     * so a derived event is emitted exactly once beside its source row.
      *
      * An `afterSequence` without a `runId` is refused. Journal sequences are
      * partition-local, so one scalar cursor applied to every partition skipped
@@ -913,9 +928,11 @@ export const layer: Layer.Layer<
                   status: running.status
                 })
               } else {
+                const fence = yield* runtime.claimFence(launched.run.runId)
+                const pending = yield* runtime.releasePending(launched.run.runId, fence)
                 yield* emit(launched.run.runId, "control.run.pending", {
                   runId: launched.run.runId,
-                  status: launched.run.status
+                  status: pending.status
                 })
               }
               return {
@@ -1116,7 +1133,7 @@ export const layer: Layer.Layer<
                 // that process will act on it, so the honest receipt is
                 // `Accepted` — the cancel was taken — rather than `ClaimLost`,
                 // which reads as a refusal.
-                live(current.status)
+                live(current.status) && current.ownerId !== undefined
                   ? Effect.succeed(undefined)
                   // A PARKED run has no owner: that is what a park is. Nothing
                   // is going to read the request and finish the run, so the

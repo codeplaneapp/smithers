@@ -46,29 +46,162 @@ export interface SystemFlowEntry {
  * @slop
  */
 export const catalog = [
-  { verb: "plan", flowId: "system/plan", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "run", flowId: "system/run", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "release", flowId: "system/release", projection: "systemFlow", deployClass: true, planBearing: true, plannable: true },
-  { verb: "serve", flowId: "system/serve", projection: "systemFlow", deployClass: true, planBearing: true, plannable: true },
+  {
+    verb: "plan",
+    flowId: "system/plan",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "run",
+    flowId: "system/run",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "release",
+    flowId: "system/release",
+    projection: "systemFlow",
+    deployClass: true,
+    planBearing: true,
+    plannable: true
+  },
+  {
+    verb: "serve",
+    flowId: "system/serve",
+    projection: "systemFlow",
+    deployClass: true,
+    planBearing: true,
+    plannable: true
+  },
   { verb: "up", flowId: "system/up", projection: "systemFlow", deployClass: true, planBearing: true, plannable: true },
   { verb: "ls", flowId: "system/ls", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
   { verb: "ps", flowId: "system/ps", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "logs", flowId: "system/logs", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "status", flowId: "system/status", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "cancel", flowId: "system/cancel", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "approve", flowId: "system/approve", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "deny", flowId: "system/deny", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "signal", flowId: "system/signal", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
+  {
+    verb: "logs",
+    flowId: "system/logs",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "status",
+    flowId: "system/status",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "cancel",
+    flowId: "system/cancel",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "approve",
+    flowId: "system/approve",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "deny",
+    flowId: "system/deny",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "signal",
+    flowId: "system/signal",
+    projection: "procedure",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
   { verb: "gc", flowId: "system/gc", projection: "procedure", deployClass: false, planBearing: false, plannable: true },
-  { verb: "replay", flowId: "system/replay", projection: "systemFlow", deployClass: false, planBearing: false, plannable: false },
-  { verb: "add", flowId: "system/add", projection: "systemFlow", deployClass: false, planBearing: true, plannable: true },
-  { verb: "remove", flowId: "system/remove", projection: "systemFlow", deployClass: false, planBearing: true, plannable: true },
-  { verb: "eject", flowId: "system/eject", projection: "systemFlow", deployClass: false, planBearing: true, plannable: true },
-  { verb: "test", flowId: "system/test", projection: "systemFlow", deployClass: false, planBearing: false, plannable: true },
-  { verb: "init", flowId: "system/init", projection: "systemFlow", deployClass: false, planBearing: true, plannable: true },
-  { verb: "doctor", flowId: "system/doctor", projection: "systemFlow", deployClass: false, planBearing: false, plannable: true },
-  { verb: "migrate", flowId: "system/migrate", projection: "systemFlow", deployClass: false, planBearing: true, plannable: true },
-  { verb: "docs", flowId: "system/docs", projection: "systemFlow", deployClass: false, planBearing: false, plannable: true }
+  {
+    verb: "replay",
+    flowId: "system/replay",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: false,
+    plannable: false
+  },
+  {
+    verb: "add",
+    flowId: "system/add",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: true,
+    plannable: true
+  },
+  {
+    verb: "remove",
+    flowId: "system/remove",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: true,
+    plannable: true
+  },
+  {
+    verb: "eject",
+    flowId: "system/eject",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: true,
+    plannable: true
+  },
+  {
+    verb: "test",
+    flowId: "system/test",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "init",
+    flowId: "system/init",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: true,
+    plannable: true
+  },
+  {
+    verb: "doctor",
+    flowId: "system/doctor",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  },
+  {
+    verb: "migrate",
+    flowId: "system/migrate",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: true,
+    plannable: true
+  },
+  {
+    verb: "docs",
+    flowId: "system/docs",
+    projection: "systemFlow",
+    deployClass: false,
+    planBearing: false,
+    plannable: true
+  }
 ] as const satisfies ReadonlyArray<SystemFlowEntry>
 
 /**

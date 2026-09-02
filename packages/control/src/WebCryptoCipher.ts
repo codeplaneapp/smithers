@@ -5,8 +5,8 @@
  * is the browser's own API and has been Node's since v19, so this module
  * imports nothing from `node:*` and still runs unmodified on the server. A host
  * without Web Crypto — an old runtime, a locked-down worker — fails with the
- * typed `Unavailable`, never a defect
- * (`docs/specs/Concepts/Tickets Not Exceptions.md`).
+ * typed `Unavailable`, never a defect. The error model is documented in
+ * `docs/pages/concepts/effect-integration.md`.
  *
  * The key is host-managed and supplied at layer construction. It is held as a
  * non-extractable `CryptoKey`, so it cannot be read back out of the cipher, and
@@ -14,12 +14,14 @@
  *
  * @since 0.1.0
  */
+import { canonicalize } from "@smthrs/canonical"
 import { Effect, Layer, Redacted } from "effect"
 import type { Unavailable } from "./ControlError.ts"
 import * as CredentialCipher from "./CredentialCipher.ts"
 
 const algorithm = "AES-GCM"
 const nonceBytes = 12
+const contextFormatVersion = 1
 
 const toBase64 = (bytes: Uint8Array): string => {
   let binary = ""
@@ -48,6 +50,23 @@ const randomNonce = (): Effect.Effect<Uint8Array, Unavailable> =>
     return available?.getRandomValues === undefined
       ? Effect.fail(CredentialCipher.unavailable())
       : Effect.succeed(available.getRandomValues(new Uint8Array(nonceBytes)))
+  })
+
+const encodeContext = (context: CredentialCipher.Context): Effect.Effect<Uint8Array, Unavailable> =>
+  Effect.try({
+    try: () => {
+      // Canonical JSON names and escapes each field, so embedded delimiters
+      // cannot make two metadata tuples authenticate as the same bytes. The
+      // explicit format version makes a future byte contract distinguishable.
+      const document = canonicalize({
+        formatVersion: contextFormatVersion,
+        id: context.id,
+        name: context.name,
+        version: context.version
+      })
+      return new TextEncoder().encode(document)
+    },
+    catch: CredentialCipher.unavailable
   })
 
 /**
@@ -85,12 +104,13 @@ export const make = (options: Options): Effect.Effect<CredentialCipher.Service, 
     })
 
     return CredentialCipher.make({
-      seal: Effect.fn("WebCryptoCipher.seal")(function*(plaintext) {
+      seal: Effect.fn("WebCryptoCipher.seal")(function*(plaintext, context) {
+        const additionalData = yield* encodeContext(context)
         const nonce = yield* randomNonce()
         const ciphertext = yield* Effect.tryPromise({
           try: () =>
             crypto.encrypt(
-              { name: algorithm, iv: nonce as BufferSource },
+              { name: algorithm, iv: nonce as BufferSource, additionalData: additionalData as BufferSource },
               key,
               new TextEncoder().encode(Redacted.value(plaintext)) as BufferSource
             ),
@@ -98,11 +118,16 @@ export const make = (options: Options): Effect.Effect<CredentialCipher.Service, 
         })
         return { ciphertext: toBase64(new Uint8Array(ciphertext)), nonce: toBase64(nonce) }
       }),
-      open: Effect.fn("WebCryptoCipher.open")(function*(sealed) {
+      open: Effect.fn("WebCryptoCipher.open")(function*(sealed, context) {
+        const additionalData = yield* encodeContext(context)
         const plaintext = yield* Effect.tryPromise({
           try: () =>
             crypto.decrypt(
-              { name: algorithm, iv: fromBase64(sealed.nonce) as BufferSource },
+              {
+                name: algorithm,
+                iv: fromBase64(sealed.nonce) as BufferSource,
+                additionalData: additionalData as BufferSource
+              },
               key,
               fromBase64(sealed.ciphertext) as BufferSource
             ),

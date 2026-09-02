@@ -163,3 +163,9 @@ export * as WebCryptoCipher from "./WebCryptoCipher.ts"
  * @slop
  */
 export * as SqlControlRuntime from "./SqlControlRuntime.ts"
+
+/**
+ * @category migrations
+ * @since 0.1.0
+ */
+export * as Migrations from "./Migrations.ts"

@@ -82,10 +82,12 @@ describe("SqlControlRuntime persisted JSON decoding", () => {
       const runtime = yield* ControlRuntime
       const sql = yield* SqlClient.SqlClient
       const { run: summary } = yield* start(runtime)
-      yield* sql`UPDATE flows_runs SET state_json = ${JSON.stringify({
-        ...summary,
-        status: raw
-      })} WHERE run_id = ${summary.runId}`.pipe(Effect.orDie)
+      yield* sql`UPDATE flows_runs SET state_json = ${
+        JSON.stringify({
+          ...summary,
+          status: raw
+        })
+      } WHERE run_id = ${summary.runId}`.pipe(Effect.orDie)
       return yield* Effect.flip(runtime.getRun(summary.runId))
     }))
 
@@ -115,12 +117,14 @@ describe("SqlControlRuntime persisted JSON decoding", () => {
       const runtime = yield* ControlRuntime
       const sql = yield* SqlClient.SqlClient
       const { card } = yield* plan(runtime)
-      yield* sql`UPDATE control_tokens SET target_json = ${JSON.stringify({
-        _tag: "Plan",
-        planId: card.planId,
-        digest: raw,
-        envelope: { capabilities: raw, flows: [], budget: {} }
-      })} WHERE token_id = ${card.planId}`.pipe(Effect.orDie)
+      yield* sql`UPDATE control_tokens SET target_json = ${
+        JSON.stringify({
+          _tag: "Plan",
+          planId: card.planId,
+          digest: raw,
+          envelope: { capabilities: raw, flows: [], budget: {} }
+        })
+      } WHERE token_id = ${card.planId}`.pipe(Effect.orDie)
       return yield* Effect.flip(runtime.lookupApproval(card.approval.target))
     }))
 
@@ -134,13 +138,15 @@ describe("SqlControlRuntime persisted JSON decoding", () => {
       const { run: summary } = yield* start(runtime)
       yield* sql`
         INSERT INTO control_run_messages (run_id, kind, payload_json)
-        VALUES (${summary.runId}, 'steer', ${JSON.stringify({
+        VALUES (${summary.runId}, 'steer', ${
+        JSON.stringify({
           messageId: "message-corrupt",
           runId: summary.runId,
           body: "continue",
           principal: raw,
           createdAt: 1
-        })})
+        })
+      })
       `.pipe(Effect.orDie)
       return yield* Effect.flip(runtime.drainSteering(summary.runId))
     }))
@@ -220,8 +226,13 @@ describe("SqlControlRuntime persisted JSON decoding", () => {
       const runtime = yield* ControlRuntime
       const sql = yield* SqlClient.SqlClient
       yield* sql`
-        INSERT INTO control_grants (token_id, envelope_json, scope, installed_at_ms)
-        VALUES ('grant-corrupt', ${JSON.stringify({ capabilities: raw, flows: [], budget: {} })}, 'run', 1)
+        INSERT INTO control_grants (
+          target_tag, run_id, target_id, token_id, envelope_json, scope, installed_at_ms
+        )
+        VALUES (
+          'Node', 'run-corrupt', 'grant-corrupt', 'grant-corrupt',
+          ${JSON.stringify({ capabilities: raw, flows: [], budget: {} })}, 'run', 1
+        )
       `.pipe(Effect.orDie)
       return yield* Effect.flip(runtime.grants)
     }))

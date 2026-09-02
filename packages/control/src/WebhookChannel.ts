@@ -36,6 +36,7 @@ export interface Config<A> {
   readonly name: string
   readonly schema: Schema.Schema<A>
   readonly credential: Redacted.Redacted<CredentialRef>
+  readonly fingerprintHeaders?: Channel<A>["fingerprintHeaders"]
   readonly verify: SignatureVerifier
   readonly map: (payload: A) => Effect.Effect<InboundResult, InvalidInput>
   readonly project: Channel<A>["project"]
@@ -56,6 +57,7 @@ export const make = <A>(config: Config<A>): Channel<A> => {
   return {
     name: config.name,
     schema: config.schema,
+    ...(config.fingerprintHeaders === undefined ? {} : { fingerprintHeaders: config.fingerprintHeaders }),
     verify: Effect.fn("WebhookChannel.verify")((raw) => config.verify(raw, config.credential)),
     decode: Effect.fn("WebhookChannel.decode")((raw) =>
       Effect.try({

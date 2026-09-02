@@ -19,7 +19,6 @@ import {
   PlanDigestMismatch,
   PlanNotFound,
   RunNotFound,
-  TransportError,
   Unauthorized,
   Unavailable
 } from "./ControlError.ts"

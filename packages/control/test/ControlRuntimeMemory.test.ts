@@ -12,6 +12,7 @@ import {
   FlowNotFound,
   InvalidInput,
   PlanDenied,
+  PlanDigestMismatch,
   PlanNotFound,
   RunNotFound
 } from "../src/ControlError.ts"
@@ -145,6 +146,92 @@ describe("ControlRuntime.layerMemory", () => {
 
     expect(error).toBeInstanceOf(EnvelopeMismatch)
     expect((error as EnvelopeMismatch).planId).toBe("ask-1")
+  })
+
+  it("scopes one request id to each run and records who resolved it", async () => {
+    const observed = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        const firstRun = (yield* start(runtime)).run
+        const secondRun = (yield* start(runtime)).run
+        const firstTarget = {
+          _tag: "Node" as const,
+          runId: firstRun.runId,
+          requestId: "ask-shared",
+          digest: "ask-digest",
+          envelope
+        }
+        const secondTarget = { ...firstTarget, runId: secondRun.runId }
+        const first = yield* runtime.registerApproval(firstTarget)
+        const second = yield* runtime.registerApproval(secondTarget)
+
+        yield* runtime.resolveApproval(first, "approved", principal)
+
+        return {
+          first,
+          second,
+          firstRunId: firstRun.runId,
+          secondRunId: secondRun.runId,
+          firstAfter: yield* runtime.registerApproval(firstTarget),
+          secondAfter: yield* runtime.registerApproval(secondTarget)
+        }
+      })
+    )
+
+    expect(observed.first.target).toMatchObject({ _tag: "Node", runId: observed.firstRunId })
+    expect(observed.firstAfter.target).toMatchObject({ _tag: "Node", runId: observed.firstRunId })
+    expect(observed.second.target).toMatchObject({ _tag: "Node", runId: observed.secondRunId })
+    expect(observed.secondAfter.target).toMatchObject({ _tag: "Node", runId: observed.secondRunId })
+    expect(observed.firstRunId).not.toBe(observed.secondRunId)
+    expect(observed.firstAfter).toMatchObject({ resolved: true, decisionPrincipal: principal })
+    expect(observed.secondAfter).toMatchObject({ resolved: false })
+    expect(observed.secondAfter.decisionPrincipal).toBeUndefined()
+  })
+
+  it("keeps colliding plan and node token strings as distinct approvals", async () => {
+    const observed = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        const { card } = yield* runtime.plan({ flowId: "system/test", input: { collision: true } })
+        const { run } = yield* start(runtime)
+        const nodeTarget = {
+          _tag: "Node" as const,
+          runId: run.runId,
+          requestId: card.planId,
+          digest: card.digest,
+          envelope: card.envelope
+        }
+        const node = yield* runtime.registerApproval(nodeTarget)
+        yield* runtime.resolveApproval(node, "approved", principal)
+
+        return {
+          plan: yield* runtime.lookupApproval(card.approval.target),
+          storedPlan: yield* runtime.getPlan(card.planId),
+          node: yield* runtime.registerApproval(nodeTarget)
+        }
+      })
+    )
+
+    expect(observed.plan).toMatchObject({ resolved: false, target: { _tag: "Plan" } })
+    expect(observed.storedPlan.decision).toBe("pending")
+    expect(observed.node).toMatchObject({ resolved: true, target: { _tag: "Node" } })
+  })
+
+  it("still refuses a changed digest for one node approval identity", async () => {
+    const error = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        const { run } = yield* start(runtime)
+        const target = {
+          _tag: "Node" as const,
+          runId: run.runId,
+          requestId: "ask-digest",
+          digest: "first",
+          envelope
+        }
+        yield* runtime.registerApproval(target)
+        return yield* Effect.flip(runtime.registerApproval({ ...target, digest: "second" }))
+      })
+    )
+
+    expect(error).toBeInstanceOf(PlanDigestMismatch)
   })
 
   it("installs one grant per token however often the same token is presented", async () => {

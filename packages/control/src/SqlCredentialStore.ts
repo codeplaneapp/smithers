@@ -19,6 +19,7 @@ import { Effect, Layer, Option } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { CredentialConflict, Unavailable } from "./ControlError.ts"
 import * as CredentialStore from "./CredentialStore.ts"
+import initial from "./migrations/0001_control_tables.ts"
 
 interface Row {
   readonly id: string
@@ -51,19 +52,9 @@ const unavailable = (operation: string) => (): Unavailable =>
  * @since 0.1.0
  * @slop
  */
-export const migrate: Effect.Effect<void, Unavailable, SqlClient.SqlClient> = Effect.gen(function*() {
-  const sql = yield* Effect.service(SqlClient.SqlClient)
-  yield* sql`
-    CREATE TABLE IF NOT EXISTS control_credentials (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      ciphertext TEXT NOT NULL,
-      nonce TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      updated_at_ms INTEGER NOT NULL
-    )
-  `.pipe(Effect.mapError(unavailable("migrate")))
-})
+export const migrate: Effect.Effect<void, Unavailable, SqlClient.SqlClient> = initial.pipe(
+  Effect.mapError(unavailable("migrate"))
+)
 
 /**
  * Constructs a durable credential store over the ambient database.

@@ -13,7 +13,7 @@ const maximumIssueLength = 512
  * Joins a stable location and reason without allowing an RPC error to grow
  * without bound.
  *
- * @internal
+ * @private
  * @since 0.1.0
  */
 export const cappedIssue = (path: string, reason: string): string => {
@@ -25,7 +25,7 @@ export const cappedIssue = (path: string, reason: string): string => {
  * Renders canonical's stable located failure without copying its rejected
  * value or a nested cause message into an RPC error.
  *
- * @internal
+ * @private
  * @since 0.1.0
  */
 export const canonicalIssue = (cause: unknown): string =>
@@ -43,7 +43,7 @@ const renderPath = (segments: ReadonlyArray<PropertyKey>): string =>
  * Finds the first rejected field in an Effect schema error without rendering
  * the value stored at that field.
  *
- * @internal
+ * @private
  * @since 0.1.0
  */
 export const schemaIssuePath = (error: Schema.SchemaError): string => {

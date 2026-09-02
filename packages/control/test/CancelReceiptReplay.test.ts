@@ -46,6 +46,7 @@ describe("a cancel that did not finish the run", () => {
         launcher,
         Effect.gen(function*() {
           const control = yield* Control
+          const runtime = yield* ControlRuntime
           const card = yield* control.plan({ flowId: "system/test", input: { cancel: "replay" } })
           yield* control.approve(card.approval)
           const receipt = yield* control.run({
@@ -58,6 +59,7 @@ describe("a cancel that did not finish the run", () => {
           if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
             return yield* Effect.die("expected an accepted run")
           }
+          yield* runtime.resume(receipt.runId)
           return receipt.runId
         })
       )

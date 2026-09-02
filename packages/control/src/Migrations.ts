@@ -1,0 +1,43 @@
+/**
+ * Control-plane and credential schema migrations.
+ *
+ * This package reserves the migration block immediately after time travel.
+ * Hosts compose this set with the journal and run-store sets before opening a
+ * shared control database.
+ *
+ * @since 0.1.0
+ */
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
+import * as Layer from "effect/Layer"
+import initial from "./migrations/0001_control_tables.ts"
+
+/**
+ * The control package's namespaced migration set.
+ *
+ * @category migrations
+ * @since 0.1.0
+ */
+export const set: DatabaseMigrations.MigrationSet = {
+  namespace: "control",
+  idOffset: DatabaseMigrations.idBlock * 6,
+  migrations: {
+    "0001_control_tables": initial
+  }
+}
+
+/**
+ * Creates every durable control-plane and credential table.
+ *
+ * @category migrations
+ * @since 0.1.0
+ */
+export const run = DatabaseMigrations.run([set])
+
+/**
+ * Layer that runs control migrations before exposing the database to control
+ * services.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layer = Layer.effectDiscard(run)

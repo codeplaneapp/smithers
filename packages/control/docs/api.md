@@ -21,16 +21,16 @@ Every mutation answers a `Receipt`; `plan` returns a `PlanCard` instead. The
 typed error identifies the failed resource, so a plan that never became a run
 does not report a run failure.
 
-| Verb | Receipts | Typed failures |
-| --- | --- | --- |
-| `plan` | returns a `PlanCard`, not a receipt | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable` |
-| `run` (`Plan`) | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked` | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
-| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable` |
-| `approve`, `deny` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable` |
-| `steer` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable` |
-| `signal` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable` |
-| `cancel` | `Accepted`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable` |
-| `list`, `watch` | a page or a stream | every member of `ControlError` |
+| Verb                       | Receipts                                             | Typed failures                                                                                                                         |
+| -------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                      |
+| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
+| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
+| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `PersistenceError`, `Unavailable`          |
+| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                       |
+| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `PersistenceError`, `Unavailable`                                                                     |
+| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `PersistenceError`, `Unavailable`                                                                          |
+| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                         |
 
 `PlanNotFound` carries `code: "plan_not_found"`; `PlanDenied` carries
 `code: "plan_denied"`. Their `planId` identifies the plan the operator must
@@ -50,12 +50,12 @@ every run.
 A run's ancestry is recorded by whoever created it. `RunSummary` reports all of
 it under one vocabulary:
 
-| Field | Source | Meaning |
-| --- | --- | --- |
-| `parentRunId` | `flows_runs.parent_run_id`, else the `flows_run_parents` spawn edge | The run this one branched from: its spawner, the run it was forked off, or the previous trampoline round. |
-| `lineageId` | `flows_runs.lineage_id` | The trampoline lineage this run is a round of. |
-| `roundOrdinal` | `flows_runs.round_ordinal` | Which round. Absent means a lineage of one, read as round 0 of itself. |
-| `origin` | derived | `child`, `fork`, or `continuation`. |
+| Field          | Source                                                              | Meaning                                                                                                   |
+| -------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `parentRunId`  | `flows_runs.parent_run_id`, else the `flows_run_parents` spawn edge | The run this one branched from: its spawner, the run it was forked off, or the previous trampoline round. |
+| `lineageId`    | `flows_runs.lineage_id`                                             | The trampoline lineage this run is a round of.                                                            |
+| `roundOrdinal` | `flows_runs.round_ordinal`                                          | Which round. Absent means a lineage of one, read as round 0 of itself.                                    |
+| `origin`       | derived                                                             | `child`, `fork`, or `continuation`.                                                                       |
 
 The engine records the two relationships in two places, so the projection reads
 both. `parent_run_id` is the trampoline chain: the round before this one. A run
@@ -75,12 +75,12 @@ run, not a reason a run exists.
 `list` selects on the same fields:
 
 ```ts
-const children = yield* control.list({
+const children = yield * control.list({
   _tag: "runs",
   filters: { parentRunId: "run-17" }
 })
 
-const rounds = yield* control.list({
+const rounds = yield * control.list({
   _tag: "runs",
   filters: { lineageId: "run-17" }
 })
@@ -108,11 +108,11 @@ plus one spawn-edge read per nesting level.
 `watch` streams committed journal entries as `ControlEvent` values, and expands
 three of them into an extra `control.run.lineage` delta:
 
-| Entry | Producer | Delta |
-| --- | --- | --- |
-| `flows.engine.run-decision` with `decision: "created"` at round 0 or with no round | `@smthrs/engine-store` | `{ runId, parentRunId, origin: "child" }` |
-| `flows.engine.run-decision` with `decision: "handed-off"` | `@smthrs/engine-store` | `{ runId, parentRunId, lineageId, roundOrdinal, origin: "continuation" }` |
-| `flows.time-travel.fork-created` | `@smthrs/time-travel` | `{ runId, parentRunId, origin: "fork" }` |
+| Entry                                                                              | Producer               | Delta                                                                     |
+| ---------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------- |
+| `flows.engine.run-decision` with `decision: "created"` at round 0 or with no round | `@smthrs/engine-store` | `{ runId, parentRunId, origin: "child" }`                                 |
+| `flows.engine.run-decision` with `decision: "handed-off"`                          | `@smthrs/engine-store` | `{ runId, parentRunId, lineageId, roundOrdinal, origin: "continuation" }` |
+| `flows.time-travel.fork-created`                                                   | `@smthrs/time-travel`  | `{ runId, parentRunId, origin: "fork" }`                                  |
 
 The handoff is what carries a trampoline, and a continuation round's own
 `created` decision is skipped. The engine journals both in one transaction: it
@@ -146,12 +146,12 @@ that reads the journal directly reaches the same conclusions the server does.
 enqueue beside it. `SteerMessage` is a union, because an operator steers a run
 for four different reasons and only one of them is something to tell the model:
 
-| Variant | Payload | What the next turn does |
-| --- | --- | --- |
-| `Message` (the default, and what a `body` alone decodes as) | `body` | Inserts the body into the transcript. |
-| `Seat` | `seat` | Runs the turn on that model seat. |
-| `Thinking` | `thinking` | Runs the turn at that thinking level. |
-| `Tools` | `toolNames` | Adds those tools to the active set. |
+| Variant                                                     | Payload     | What the next turn does               |
+| ----------------------------------------------------------- | ----------- | ------------------------------------- |
+| `Message` (the default, and what a `body` alone decodes as) | `body`      | Inserts the body into the transcript. |
+| `Seat`                                                      | `seat`      | Runs the turn on that model seat.     |
+| `Thinking`                                                  | `thinking`  | Runs the turn at that thinking level. |
+| `Tools`                                                     | `toolNames` | Adds those tools to the active set.   |
 
 `ControlSchema.steerItem` strips the control envelope: who asked, when, for
 which run, and returns the `@smthrs/notifications` `SteerPayload` the harness
@@ -161,9 +161,9 @@ spending a turn announcing it.
 
 A steer has two durable moments and two writers:
 
-| Event | Writer | Payload |
-| --- | --- | --- |
-| `control.steer.enqueued` | `Control.steer` | `{ runId, messageId, kind }` |
+| Event                     | Writer                                                                             | Payload                          |
+| ------------------------- | ---------------------------------------------------------------------------------- | -------------------------------- |
+| `control.steer.enqueued`  | `Control.steer`                                                                    | `{ runId, messageId, kind }`     |
 | `control.steer.delivered` | derived by `Steering.derive` from the queue's `flows/notifications/Promoted` entry | `{ runId, messageId, boundary }` |
 
 Delivery is derived rather than recorded, because the boundary that delivered
@@ -181,12 +181,12 @@ both halves. A queue that cannot answer leaves the field absent.
 
 A steer to a parked run resumes it when the park is one a message can end:
 
-| `waitingReason` | Steered |
-| --- | --- |
-| `event` | Resumed. The run is waiting for something to arrive, and a steer is something arriving. |
-| `released` | Resumed. A sweep took the run away from a dead owner, and nothing is coming to claim it. |
-| `approval`, `timer`, `quota` | Left parked. The run is waiting for a decision, a clock, or a budget that a message does not supply. |
-| absent | Left parked. A park with no reason is an operator's own park, and a message queued behind it is queued for when the operator resumes it. |
+| `waitingReason`              | Steered                                                                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `event`                      | Resumed. The run is waiting for something to arrive, and a steer is something arriving.                                                  |
+| `released`                   | Resumed. A sweep took the run away from a dead owner, and nothing is coming to claim it.                                                 |
+| `approval`, `timer`, `quota` | Left parked. The run is waiting for a decision, a clock, or a budget that a message does not supply.                                     |
+| absent                       | Left parked. A park with no reason is an operator's own park, and a message queued behind it is queued for when the operator resumes it. |
 
 `RunSummary.waitingReason` is the run row's `waiting_reason`, which the engine
 writes when it parks a run and clears on the wake. The control plane reads it
@@ -211,18 +211,18 @@ A durable cancellation is anonymous on its own: `flows_runs.cancel_requested_at_
 records that somebody asked and when, and nothing else. `RunSummary.cancellation`
 is the attribution the journal adds back.
 
-| Field | Meaning |
-| --- | --- |
-| `requestedAt` | When the cancellation was asked for. |
-| `source` | `control`, `cascade`, or `engine`. |
-| `principal` | Who asked. Present on a `control` source and on the `cascade` it started. |
-| `reason` | Why, as the operator stated it. |
-| `cascadedFrom` | The cancelled ancestor this run was swept up with. |
+| Field          | Meaning                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `requestedAt`  | When the cancellation was asked for.                                      |
+| `source`       | `control`, `cascade`, or `engine`.                                        |
+| `principal`    | Who asked. Present on a `control` source and on the `cascade` it started. |
+| `reason`       | Why, as the operator stated it.                                           |
+| `cascadedFrom` | The cancelled ancestor this run was swept up with.                        |
 
 `cancel` takes the reason and the principal:
 
 ```ts
-yield* control.cancel({
+yield * control.cancel({
   runId: "run-17",
   reason: "budget",
   idempotencyKey: "cancel:run-17"
@@ -273,17 +273,17 @@ record.
 right, and if not, what now. `classify` is pure, so the vocabulary an operator
 reads on a dashboard is the one a heal loop branches on:
 
-| Condition | Health | Because |
-| --- | --- | --- |
-| No summary | `unknown` | Nothing to say, and nothing to do. |
-| `failed` | `failing` | The run itself reported the failure. |
-| `completed`, `cancelled` | `healthy` | A finished run needs nothing. |
-| `waiting-approval`, or parked on `approval` | `awaiting-human` | A human owes it an answer. |
-| `roundOrdinal` at or past `roundBound` | `runaway-loop` | The lineage loops without converging. |
-| The last settled attempt failed | `failing` | The run is alive and its work is not landing. |
-| No progress for `stallBeats`, an attempt open | `wedged-node` | One attempt started and never settled. |
-| No progress for `stallBeats` | `stalled` | Nothing is happening and nothing is in flight. |
-| Anything else | `healthy` | Entries are still arriving. |
+| Condition                                     | Health           | Because                                        |
+| --------------------------------------------- | ---------------- | ---------------------------------------------- |
+| No summary                                    | `unknown`        | Nothing to say, and nothing to do.             |
+| `failed`                                      | `failing`        | The run itself reported the failure.           |
+| `completed`, `cancelled`                      | `healthy`        | A finished run needs nothing.                  |
+| `waiting-approval`, or parked on `approval`   | `awaiting-human` | A human owes it an answer.                     |
+| `roundOrdinal` at or past `roundBound`        | `runaway-loop`   | The lineage loops without converging.          |
+| The last settled attempt failed               | `failing`        | The run is alive and its work is not landing.  |
+| No progress for `stallBeats`, an attempt open | `wedged-node`    | One attempt started and never settled.         |
+| No progress for `stallBeats`                  | `stalled`        | Nothing is happening and nothing is in flight. |
+| Anything else                                 | `healthy`        | Entries are still arriving.                    |
 
 `awaiting-human` outranks `failing` on purpose. A run parked for approval after
 a failed attempt is waiting for a person, and resuming or cancelling it would
@@ -298,7 +298,7 @@ run in another process.
 `Monitor.run` beats over `Control`:
 
 ```ts
-const report = yield* Monitor.run({
+const report = yield * Monitor.run({
   runId: "run-17",
   monitorId: "oncall-supervisor",
   intervalMs: 5_000,

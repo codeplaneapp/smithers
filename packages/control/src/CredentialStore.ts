@@ -11,8 +11,6 @@
  * refused with {@link ControlError.CredentialConflict} rather than silently
  * overwriting the winner.
  *
- * See `.smithers/tickets/control-credential-storage.md`.
- *
  * @since 0.1.0
  */
 import { Context, Effect, Layer, Option } from "effect"
@@ -117,9 +115,15 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Credent
  */
 export const makeMemory = (): Service => {
   const records = new Map<string, SealedRecord>()
+  // SQL adapters serialize each row on both sides of storage. Copying here
+  // keeps the in-memory double from granting callers mutable access to state a
+  // durable store would have isolated.
+  const copy = (record: SealedRecord): SealedRecord => structuredClone(record)
   return make({
-    list: Effect.fn("CredentialStore.list")(() => Effect.sync(() => Array.from(records.values()))),
-    read: Effect.fn("CredentialStore.read")((id) => Effect.sync(() => Option.fromNullishOr(records.get(id)))),
+    list: Effect.fn("CredentialStore.list")(() => Effect.sync(() => Array.from(records.values(), copy))),
+    read: Effect.fn("CredentialStore.read")((id) =>
+      Effect.sync(() => Option.map(Option.fromNullishOr(records.get(id)), copy))
+    ),
     write: Effect.fn("CredentialStore.write")((record) =>
       Effect.suspend(() => {
         const current = records.get(record.id)
@@ -133,7 +137,7 @@ export const makeMemory = (): Service => {
             })
           )
         }
-        records.set(record.id, record)
+        records.set(record.id, copy(record))
         return Effect.void
       })
     ),

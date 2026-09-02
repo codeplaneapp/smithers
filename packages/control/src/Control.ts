@@ -24,7 +24,6 @@ import { Unavailable as UnavailableError } from "./ControlError.ts"
 import type {
   ApprovalPayload,
   ControlEvent,
-  Envelope,
   FlowId,
   IdempotencyKey,
   ListRequest,
@@ -35,9 +34,7 @@ import type {
   RunId,
   RunInputSchema,
   SignalInputSchema,
-  SignalPayload,
   SteerInputSchema,
-  SteerMessage,
   WatchFilter
 } from "./ControlSchema.ts"
 

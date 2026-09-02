@@ -6,11 +6,9 @@
  * through {@link CredentialStore}, so a stolen store is ciphertext and nothing
  * else.
  *
- * See `.smithers/tickets/control-credential-storage.md`.
- *
  * @since 0.1.0
  */
-import { Context, Effect, Layer, type Redacted } from "effect"
+import { Context as EffectContext, Effect, Layer, type Redacted } from "effect"
 import { Unavailable } from "./ControlError.ts"
 
 /**
@@ -26,6 +24,21 @@ export interface Sealed {
 }
 
 /**
+ * Credential metadata authenticated with one sealed secret.
+ *
+ * Every field is immutable because the same values must be written beside the
+ * ciphertext and supplied again when it is opened.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Context {
+  readonly id: string
+  readonly name: string
+  readonly version: number
+}
+
+/**
  * Authenticated encryption over credential plaintext.
  *
  * @category services
@@ -33,8 +46,8 @@ export interface Sealed {
  * @slop
  */
 export interface Service {
-  readonly seal: (plaintext: Redacted.Redacted<string>) => Effect.Effect<Sealed, Unavailable>
-  readonly open: (sealed: Sealed) => Effect.Effect<Redacted.Redacted<string>, Unavailable>
+  readonly seal: (plaintext: Redacted.Redacted<string>, context: Context) => Effect.Effect<Sealed, Unavailable>
+  readonly open: (sealed: Sealed, context: Context) => Effect.Effect<Redacted.Redacted<string>, Unavailable>
 }
 
 /**
@@ -44,7 +57,7 @@ export interface Service {
  * @since 0.1.0
  * @slop
  */
-export class CredentialCipher extends Context.Service<CredentialCipher, Service>()(
+export class CredentialCipher extends EffectContext.Service<CredentialCipher, Service>()(
   "/control/CredentialCipher"
 ) {}
 

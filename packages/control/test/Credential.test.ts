@@ -1,10 +1,8 @@
 /**
  * The credential contract: create, resolve, rotate, revoke, unauthorized
  * access, redaction, and encrypted persistence.
- *
- * Contract source: `.smithers/tickets/control-credential-storage.md`.
  */
-import { Cause, Effect, Exit, Layer, Option, Redacted } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Redacted } from "effect"
 import { describe, expect, it } from "vitest"
 import { Unauthorized } from "../src/ControlError.ts"
 import * as Credential from "../src/Credential.ts"
@@ -108,6 +106,34 @@ describe("Credential", () => {
     expect(stored.nonce.length).toBeGreaterThan(0)
   })
 
+  it("refuses a sealed blob moved onto another credential record", async () => {
+    expectUnavailable(
+      await failureOf(Effect.gen(function*() {
+        const { credentials, store } = yield* boundary()
+        const approved = yield* credentials.create({
+          id: "credential-a",
+          name: "Credential A",
+          secret: Redacted.make("secret-a")
+        })
+        yield* credentials.create({
+          id: "credential-b",
+          name: "Credential B",
+          secret: Redacted.make("secret-b")
+        })
+        const first = Option.getOrThrow(yield* store.read("credential-a"))
+        const second = Option.getOrThrow(yield* store.read("credential-b"))
+        yield* store.write({
+          ...first,
+          ciphertext: second.ciphertext,
+          nonce: second.nonce,
+          version: first.version + 1
+        })
+        return yield* credentials.resolve(approved)
+      })),
+      "credential encryption"
+    )
+  })
+
   it("keeps the resolved secret out of logs and serialized values", async () => {
     const secret = await Effect.runPromise(Effect.gen(function*() {
       const { credentials } = yield* boundary()
@@ -196,6 +222,165 @@ describe("Credential", () => {
 
     expect(seen).toEqual(["create", "resolve"])
     expectUnauthorized(error, "resolve is denied")
+  })
+
+  it("resolves the reference snapshot authorized before a caller mutation", async () => {
+    const resolved = await Effect.runPromise(Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { credentials } = yield* boundary({
+        authorize: (operation) =>
+          operation === "resolve"
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void
+      })
+      const approved = yield* credentials.create({
+        id: "credential-a",
+        name: "Credential A",
+        secret: Redacted.make("secret-a")
+      })
+      yield* credentials.create({
+        id: "credential-b",
+        name: "Credential B",
+        secret: Redacted.make("secret-b")
+      })
+      const reference = { ...approved }
+      const running = yield* credentials.resolve(reference).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      reference.id = "credential-b"
+      reference.name = "Credential B"
+      yield* Deferred.succeed(release, undefined)
+      return Redacted.value(yield* Fiber.join(running))
+    }))
+
+    expect(resolved).toBe("secret-a")
+  })
+
+  it("rotates the reference snapshot authorized before a caller mutation", async () => {
+    const resolved = await Effect.runPromise(Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { credentials } = yield* boundary({
+        authorize: (operation) =>
+          operation === "rotate"
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void
+      })
+      const approved = yield* credentials.create({
+        id: "credential-a",
+        name: "Credential A",
+        secret: Redacted.make("secret-a")
+      })
+      const other = yield* credentials.create({
+        id: "credential-b",
+        name: "Credential B",
+        secret: Redacted.make("secret-b")
+      })
+      const reference = { ...approved }
+      const running = yield* credentials.rotate(reference, Redacted.make("rotated-a")).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(entered)
+      reference.id = "credential-b"
+      reference.name = "Credential B"
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(running)
+      return {
+        approved: Redacted.value(yield* credentials.resolve(approved)),
+        other: Redacted.value(yield* credentials.resolve(other))
+      }
+    }))
+
+    expect(resolved).toEqual({ approved: "rotated-a", other: "secret-b" })
+  })
+
+  it("revokes the reference snapshot authorized before a caller mutation", async () => {
+    const records = await Effect.runPromise(Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { credentials, store } = yield* boundary({
+        authorize: (operation) =>
+          operation === "revoke"
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void
+      })
+      const approved = yield* credentials.create({
+        id: "credential-a",
+        name: "Credential A",
+        secret: Redacted.make("secret-a")
+      })
+      yield* credentials.create({
+        id: "credential-b",
+        name: "Credential B",
+        secret: Redacted.make("secret-b")
+      })
+      const reference = { ...approved }
+      const running = yield* credentials.revoke(reference).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      reference.id = "credential-b"
+      reference.name = "Credential B"
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(running)
+      return {
+        approved: yield* store.read("credential-a"),
+        other: yield* store.read("credential-b")
+      }
+    }))
+
+    expect(Option.isNone(records.approved)).toBe(true)
+    expect(Option.isSome(records.other)).toBe(true)
+  })
+
+  it("creates from the input snapshot authorized before a caller mutation", async () => {
+    const stored = await Effect.runPromise(Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { credentials, store } = yield* boundary({
+        authorize: (operation) =>
+          operation === "create"
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void
+      })
+      const input = { id: "approved-id", name: "Approved name", secret: Redacted.make("approved-secret") }
+      const running = yield* credentials.create(input).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      input.id = "mutated-id"
+      input.name = "Mutated name"
+      input.secret = Redacted.make("mutated-secret")
+      yield* Deferred.succeed(release, undefined)
+      const reference = yield* Fiber.join(running)
+      return { reference, record: yield* store.read("approved-id") }
+    }))
+
+    expect(stored.reference).toEqual({ id: "approved-id", name: "Approved name" })
+    expect(Option.getOrThrow(stored.record)).toMatchObject({ id: "approved-id", name: "Approved name" })
+  })
+
+  it("authorizes get against the stored reference without leaking missing ids", async () => {
+    const observed = await Effect.runPromise(Effect.gen(function*() {
+      const { credentials } = yield* boundary({
+        authorize: (operation, reference) => {
+          if (operation !== "get" || Option.isNone(reference) || reference.value.id !== "denied-id") {
+            return Effect.void
+          }
+          return Effect.fail(
+            new Unauthorized({ message: "Credential denied-id is not available to this caller" })
+          )
+        }
+      })
+      yield* credentials.create({ id: "denied-id", name: "Denied", secret: Redacted.make("denied") })
+      yield* credentials.create({ id: "allowed-id", name: "Allowed", secret: Redacted.make("allowed") })
+      const denied = yield* Effect.flip(credentials.get("denied-id"))
+      const allowed = yield* credentials.get("allowed-id")
+      const missing = yield* Effect.flip(credentials.get("missing-id"))
+      return { denied, allowed, missing }
+    }))
+
+    expectUnauthorized(observed.denied as unknown as Record<string, unknown>)
+    expect(observed.allowed).toEqual({ id: "allowed-id", name: "Allowed" })
+    expectUnauthorized(observed.missing as unknown as Record<string, unknown>)
+    expect(observed.denied.message.replace("denied-id", "<id>"))
+      .toBe(observed.missing.message.replace("missing-id", "<id>"))
   })
 
   it("still reports unavailable storage from the noop boundary", async () => {
@@ -291,7 +476,7 @@ describe("CredentialStore.layerNoop", () => {
         Effect.gen(function*() {
           const store = yield* CredentialStore.CredentialStore
           const cipher = yield* CredentialCipher.CredentialCipher
-          yield* cipher.seal(Redacted.make("x"))
+          yield* cipher.seal(Redacted.make("x"), { id: "x", name: "x", version: 1 })
           return yield* store.list()
         }).pipe(Effect.provide([CredentialStore.layerNoop(), CredentialCipher.layerNoop()]))
       ),
@@ -301,12 +486,44 @@ describe("CredentialStore.layerNoop", () => {
 
   it("opens nothing from the noop cipher", async () => {
     expectUnavailable(
-      await failureOf(CredentialCipher.makeNoop().open({ ciphertext: "", nonce: "" })),
+      await failureOf(
+        CredentialCipher.makeNoop().open(
+          { ciphertext: "", nonce: "" },
+          { id: "x", name: "x", version: 1 }
+        )
+      ),
       "credential encryption"
     )
   })
 
   it("removes an unknown id from the memory store without failing", async () => {
     await Effect.runPromise(CredentialStore.makeMemory().remove("absent"))
+  })
+
+  it("copies records into and out of the memory store", async () => {
+    const observed = await Effect.runPromise(Effect.gen(function*() {
+      const store = CredentialStore.makeMemory()
+      const input = {
+        id: "copy",
+        name: "Stored name",
+        ciphertext: "stored-ciphertext",
+        nonce: "stored-nonce",
+        version: 1,
+        updatedAtMs: 1
+      }
+      yield* store.write(input)
+      input.name = "mutated input"
+      input.ciphertext = "mutated input ciphertext"
+
+      const first = Option.getOrThrow(yield* store.read("copy"))
+      ;(first as { name: string }).name = "mutated output"
+      ;(first as { ciphertext: string }).ciphertext = "mutated output ciphertext"
+      return Option.getOrThrow(yield* store.read("copy"))
+    }))
+
+    expect(observed).toMatchObject({
+      name: "Stored name",
+      ciphertext: "stored-ciphertext"
+    })
   })
 })

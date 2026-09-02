@@ -11,6 +11,7 @@ import * as WebCryptoCipher from "../src/WebCryptoCipher.ts"
 
 const key = Redacted.make(btoa("0123456789abcdef0123456789abcdef"))
 const other = Redacted.make(btoa("fedcba9876543210fedcba9876543210"))
+const context = { id: "credential-a", name: "Credential A", version: 1 }
 
 /** The typed error an effect failed with, asserted field by field. */
 const failureOf = async <A, E>(effect: Effect.Effect<A, E>): Promise<Record<string, unknown>> => {
@@ -30,8 +31,8 @@ describe("WebCryptoCipher", () => {
     const result = await Effect.runPromise(
       Effect.gen(function*() {
         const cipher = yield* WebCryptoCipher.make({ key })
-        const sealed = yield* cipher.seal(Redacted.make("sk-live-42"))
-        const opened = yield* cipher.open(sealed)
+        const sealed = yield* cipher.seal(Redacted.make("sk-live-42"), context)
+        const opened = yield* cipher.open(sealed, context)
         return { sealed, opened: Redacted.value(opened) }
       }).pipe(Effect.orDie)
     )
@@ -44,8 +45,8 @@ describe("WebCryptoCipher", () => {
     const nonces = await Effect.runPromise(
       Effect.gen(function*() {
         const cipher = yield* WebCryptoCipher.make({ key })
-        const first = yield* cipher.seal(Redacted.make("same"))
-        const second = yield* cipher.seal(Redacted.make("same"))
+        const first = yield* cipher.seal(Redacted.make("same"), context)
+        const second = yield* cipher.seal(Redacted.make("same"), context)
         return [first, second]
       }).pipe(Effect.orDie)
     )
@@ -59,7 +60,50 @@ describe("WebCryptoCipher", () => {
       await failureOf(Effect.gen(function*() {
         const mine = yield* WebCryptoCipher.make({ key })
         const theirs = yield* WebCryptoCipher.make({ key: other })
-        return yield* theirs.open(yield* mine.seal(Redacted.make("sk-live-42")))
+        return yield* theirs.open(yield* mine.seal(Redacted.make("sk-live-42"), context), context)
+      }))
+    )
+  })
+
+  it("refuses a blob opened under another credential id", async () => {
+    expectUnavailable(
+      await failureOf(Effect.gen(function*() {
+        const cipher = yield* WebCryptoCipher.make({ key })
+        const sealed = yield* cipher.seal(Redacted.make("secret-a"), context)
+        return yield* cipher.open(sealed, { ...context, id: "credential-b" })
+      }))
+    )
+  })
+
+  it("refuses a blob opened under a renamed credential", async () => {
+    expectUnavailable(
+      await failureOf(Effect.gen(function*() {
+        const cipher = yield* WebCryptoCipher.make({ key })
+        const sealed = yield* cipher.seal(Redacted.make("secret-a"), context)
+        return yield* cipher.open(sealed, { ...context, name: "Renamed credential" })
+      }))
+    )
+  })
+
+  it("refuses a blob opened under another credential version", async () => {
+    expectUnavailable(
+      await failureOf(Effect.gen(function*() {
+        const cipher = yield* WebCryptoCipher.make({ key })
+        const sealed = yield* cipher.seal(Redacted.make("secret-a"), context)
+        return yield* cipher.open(sealed, { ...context, version: 2 })
+      }))
+    )
+  })
+
+  it("keeps delimiter-bearing contexts unambiguous", async () => {
+    expectUnavailable(
+      await failureOf(Effect.gen(function*() {
+        const cipher = yield* WebCryptoCipher.make({ key })
+        const sealed = yield* cipher.seal(
+          Redacted.make("secret-a"),
+          { id: "a|b", name: "c", version: 1 }
+        )
+        return yield* cipher.open(sealed, { id: "a", name: "b|c", version: 1 })
       }))
     )
   })
@@ -68,8 +112,8 @@ describe("WebCryptoCipher", () => {
     expectUnavailable(
       await failureOf(Effect.gen(function*() {
         const cipher = yield* WebCryptoCipher.make({ key })
-        const sealed = yield* cipher.seal(Redacted.make("sk-live-42"))
-        return yield* cipher.open({ ...sealed, ciphertext: btoa("tampered payload bytes") })
+        const sealed = yield* cipher.seal(Redacted.make("sk-live-42"), context)
+        return yield* cipher.open({ ...sealed, ciphertext: btoa("tampered payload bytes") }, context)
       }))
     )
   })
@@ -100,7 +144,7 @@ describe("WebCryptoCipher", () => {
         value: { subtle: present.subtle },
         configurable: true
       })
-      expectUnavailable(await failureOf(cipher.seal(Redacted.make("x"))))
+      expectUnavailable(await failureOf(cipher.seal(Redacted.make("x"), context)))
     } finally {
       Object.defineProperty(globalThis, "crypto", { value: present, configurable: true })
     }
@@ -110,8 +154,8 @@ describe("WebCryptoCipher", () => {
     const opened = await Effect.runPromise(
       Effect.gen(function*() {
         const cipher = yield* CredentialCipher.CredentialCipher
-        const sealed = yield* cipher.seal(Redacted.make("layered"))
-        return Redacted.value(yield* cipher.open(sealed))
+        const sealed = yield* cipher.seal(Redacted.make("layered"), context)
+        return Redacted.value(yield* cipher.open(sealed, context))
       }).pipe(Effect.provide(WebCryptoCipher.layer({ key })), Effect.orDie)
     )
 

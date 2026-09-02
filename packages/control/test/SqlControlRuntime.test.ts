@@ -2,8 +2,6 @@
  * The durable `ControlRuntime`: the shared `ControlLive` contract, plus what
  * only a durable adapter can be asked — surviving a restart, refusing a stale
  * process's writes, and losing a claim race to a live peer.
- *
- * Contract source: `.smithers/tickets/control-runtime-engine-integration.md`.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
@@ -17,7 +15,7 @@ import { type Crypto, Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import { Control, type Service as ControlService } from "../src/Control.ts"
-import { ClaimLost, PersistenceError, RunNotFound } from "../src/ControlError.ts"
+import { ClaimLost, PersistenceError, PlanDigestMismatch, RunNotFound } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import * as ControlLive from "../src/ControlLive.ts"
 import { ControlRuntime, type Service as ControlRuntimeService } from "../src/ControlRuntime.ts"
@@ -90,9 +88,7 @@ const twoOwners = <A, E>(
     Effect.gen(function*() {
       const control = yield* Control
       const first = yield* ControlRuntime
-      const second = yield* SqlControlRuntime.make({
-        owner: { hostId: "local", pid: 1, nonce: "peer" }
-      }).pipe(Effect.orDie)
+      const second = yield* SqlControlRuntime.make().pipe(Effect.orDie)
       return yield* use(first, second, control)
     }).pipe(
       Effect.provide(durable({ database: shared })),
@@ -120,6 +116,9 @@ const started = Effect.gen(function*() {
   if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
     return yield* Effect.die("expected an accepted run")
   }
+  // The default executor declines and Control.run releases the launch. These
+  // SQL-runtime cases exercise an owning process, so reclaim it first.
+  yield* control.resume({ runId: receipt.runId, idempotencyKey: `resume:${receipt.runId}` })
   return { card, runId: receipt.runId }
 })
 
@@ -158,6 +157,112 @@ describe("SqlControlRuntime", () => {
     // A replay lookup under a different fingerprint is a conflict, not a hit.
     expect(observed.replay?._tag).toBe("Conflict")
     expect(observed.resumed.status).toBe("accepted")
+  })
+
+  it("scopes one request id to each run and persists who resolved it", async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const firstRun = yield* started
+        const secondRun = yield* started
+        const approvalEnvelope = { capabilities: [], flows: ["ask"], budget: {} }
+        const firstTarget = {
+          _tag: "Node" as const,
+          runId: firstRun.runId,
+          requestId: "ask-shared",
+          digest: "ask-digest",
+          envelope: approvalEnvelope
+        }
+        const secondTarget = { ...firstTarget, runId: secondRun.runId }
+        const first = yield* runtime.registerApproval(firstTarget)
+        const second = yield* runtime.registerApproval(secondTarget)
+        const decisionPrincipal = { id: "reviewer", kind: "test", stampedAt: 7 }
+
+        yield* runtime.resolveApproval(first, "approved", decisionPrincipal)
+
+        const sql = yield* SqlClient.SqlClient
+        const rows = yield* sql<{ readonly decisionPrincipalJson: string | null }>`
+          SELECT decision_principal_json AS "decisionPrincipalJson"
+          FROM control_tokens
+          WHERE target_tag = 'Node'
+            AND run_id = ${firstTarget.runId}
+            AND target_id = ${firstTarget.requestId}
+        `
+        return {
+          first,
+          second,
+          firstRunId: firstRun.runId,
+          secondRunId: secondRun.runId,
+          firstAfter: yield* runtime.registerApproval(firstTarget),
+          secondAfter: yield* runtime.registerApproval(secondTarget),
+          persistedPrincipal: rows[0]?.decisionPrincipalJson
+        }
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.first.target).toMatchObject({ _tag: "Node", runId: observed.firstRunId })
+    expect(observed.second.target).toMatchObject({ _tag: "Node", runId: observed.secondRunId })
+    expect(observed.firstRunId).not.toBe(observed.secondRunId)
+    expect(observed.firstAfter).toMatchObject({
+      resolved: true,
+      decisionPrincipal: { id: "reviewer", kind: "test", stampedAt: 7 }
+    })
+    expect(observed.secondAfter).toMatchObject({ resolved: false })
+    expect(observed.persistedPrincipal).not.toBeNull()
+    expect(JSON.parse(observed.persistedPrincipal ?? "null")).toEqual({
+      id: "reviewer",
+      kind: "test",
+      stampedAt: 7
+    })
+  })
+
+  it("keeps colliding plan and node token strings as distinct approvals", async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const { card } = yield* runtime.plan({ flowId: "system/test", input: { collision: true } })
+        const { runId } = yield* started
+        const nodeTarget = {
+          _tag: "Node" as const,
+          runId,
+          requestId: card.planId,
+          digest: card.digest,
+          envelope: card.envelope
+        }
+        const node = yield* runtime.registerApproval(nodeTarget)
+        yield* runtime.resolveApproval(node, "approved", { id: "reviewer", kind: "test", stampedAt: 7 })
+
+        return {
+          plan: yield* runtime.lookupApproval(card.approval.target),
+          storedPlan: yield* runtime.getPlan(card.planId),
+          node: yield* runtime.registerApproval(nodeTarget)
+        }
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.plan).toMatchObject({ resolved: false, target: { _tag: "Plan" } })
+    expect(observed.storedPlan.decision).toBe("pending")
+    expect(observed.node).toMatchObject({ resolved: true, target: { _tag: "Node" } })
+  })
+
+  it("still refuses a changed digest for one node approval identity", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const { runId } = yield* started
+        const target = {
+          _tag: "Node" as const,
+          runId,
+          requestId: "ask-digest",
+          digest: "first",
+          envelope: { capabilities: [], flows: ["ask"], budget: {} }
+        }
+        yield* runtime.registerApproval(target)
+        return yield* Effect.flip(runtime.registerApproval({ ...target, digest: "second" }))
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+
+    expect(error).toBeInstanceOf(PlanDigestMismatch)
   })
 
   it("refuses a stale process's fenced write after a peer claims the run", async () => {

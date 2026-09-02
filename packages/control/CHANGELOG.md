@@ -33,6 +33,8 @@
   `ControlError` union, and added `CredentialConflict` to it.
 - Added `SystemFlows.plannable` and a `plannable` marker on every catalog entry,
   so a verb the release contract removed cannot be planned as a flow.
+- Added the namespaced `Migrations` module for every control and credential
+  table, while standalone adapters reuse the same idempotent schema source.
 
 ### Changed
 
@@ -59,6 +61,9 @@
 - `Control.watch` refuses `afterSequence` without `runId`. Journal sequences are
   partition-local, so one scalar cursor applied to every partition skipped
   unseen entries in all of them but its own.
+- Unscoped follow mode now subscribes before pinning one high-water mark per
+  partition, then joins the finite snapshot to the buffered tail at those
+  marks. The former 1,024-key cache could re-emit old overlap after eviction.
 - A cancel that learns the engine row already settled reconciles the control row
   onto the engine's own status instead of leaving it non-terminal forever.
 - Idempotency fingerprints are canonical bytes with the two server-stamped
@@ -69,8 +74,24 @@
   stall evidence for a remedy that was refused.
 - `SqlControlRuntime.listRuns` omits a row deleted between reading the id index
   and reading the row, instead of collapsing the whole listing to `[]`.
+- Separately constructed `SqlControlRuntime` instances now mint distinct valid
+  default owner identities, so one runtime cannot write through another's
+  process fence when a host omits an explicit owner.
+- Channel ingestion snapshots caller-owned bytes and headers before
+  verification, and adapters declare the non-secret semantic headers included
+  in durable idempotency fingerprints.
 - `SqlControlRuntime.make` is the only exported constructor; the duplicate
   `make_` and the re-exported `FlowId` are gone.
+- Approval tokens and bulk grants use the complete plan or node identity in
+  memory and SQL. The SQL storage format now records target kind, run, target
+  id, and the authenticated principal that resolved each token.
+- Credential ciphertext authenticates a versioned canonical encoding of its
+  stored id, name, and credential version, so blob moves, renames, and version
+  rollbacks fail closed.
+- The memory control runtime and credential store copy values at their storage
+  boundaries, matching SQL serialization when callers mutate inputs or results.
+- Public control JSDoc points only to documentation paths present in this
+  repository.
 
 ### Removed
 

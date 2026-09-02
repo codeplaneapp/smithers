@@ -10,7 +10,7 @@
 import * as Sha256 from "@smthrs/crypto/Sha256"
 import { Context, Effect, Layer, Ref, type Schema, Semaphore } from "effect"
 import { Control } from "./Control.ts"
-import { type ControlError, type InvalidInput, type Unauthorized, Unavailable } from "./ControlError.ts"
+import { type ControlError, InvalidInput, type Unauthorized, Unavailable } from "./ControlError.ts"
 import { ControlRuntime } from "./ControlRuntime.ts"
 import type { FlowId, IdempotencyKey, Receipt, RunId, RunSummary, SignalPayload } from "./ControlSchema.ts"
 import { alreadyApplied } from "./internal/planning.ts"
@@ -80,6 +80,12 @@ export interface DeliveryProjection {
 export interface Channel<A = unknown> {
   readonly name: string
   readonly schema: Schema.Schema<A>
+  /**
+   * Non-secret HTTP header names whose values change the decoded command.
+   * Names are matched case-insensitively and folded into durable idempotency;
+   * signature, authorization, and credential headers must not be declared.
+   */
+  readonly fingerprintHeaders?: ReadonlyArray<string> | undefined
   readonly verify: (raw: RawInbound) => Effect.Effect<void, Unauthorized>
   /** Deterministic, side-effect-free decoding; retries may evaluate it again. */
   readonly decode: (raw: RawInbound) => Effect.Effect<A, InvalidInput>
@@ -151,8 +157,122 @@ const scopedKey = (channel: string, key: IdempotencyKey): IdempotencyKey =>
 const mutationKey = (channel: string, key: IdempotencyKey): IdempotencyKey =>
   `channel.ingest:${scopedKey(channel, key)}`
 
-/** The body digest is durable comparison data; headers may contain secrets. */
-const fingerprint = (body: Uint8Array): string => `channel-ingress:v1:${Sha256.digestSync(body)}`
+const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object
+const typedArrayBuffer = Object.getOwnPropertyDescriptor(typedArrayPrototype, "buffer")?.get
+const typedArrayByteOffset = Object.getOwnPropertyDescriptor(typedArrayPrototype, "byteOffset")?.get
+const typedArrayByteLength = Object.getOwnPropertyDescriptor(typedArrayPrototype, "byteLength")?.get
+
+class InboundBoundaryError extends TypeError {
+  readonly issue: string
+  constructor(issue: string) {
+    super(issue)
+    this.issue = issue
+  }
+}
+
+const boundary = (issue: string): never => {
+  throw new InboundBoundaryError(issue)
+}
+
+const plainRecord = (input: unknown, path: string): Record<PropertyKey, unknown> => {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return boundary(`${path}: must be a plain record`)
+  }
+  const prototype = Object.getPrototypeOf(input)
+  if (prototype !== Object.prototype && prototype !== null) {
+    return boundary(`${path}: must have a plain prototype`)
+  }
+  return input as Record<PropertyKey, unknown>
+}
+
+const ownData = (input: Record<PropertyKey, unknown>, key: PropertyKey, path: string): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(input, key)
+  if (descriptor === undefined || !("value" in descriptor)) return boundary(`${path}: must be an own data property`)
+  return descriptor.value
+}
+
+const copyBody = (input: unknown): Uint8Array => {
+  if (
+    typedArrayBuffer === undefined || typedArrayByteOffset === undefined ||
+    typedArrayByteLength === undefined
+  ) return boundary("raw.body: this host cannot inspect typed arrays")
+  try {
+    const buffer = Reflect.apply(typedArrayBuffer, input, []) as ArrayBufferLike
+    const byteOffset = Reflect.apply(typedArrayByteOffset, input, []) as number
+    const byteLength = Reflect.apply(typedArrayByteLength, input, []) as number
+    const source = new Uint8Array(buffer, byteOffset, byteLength)
+    const snapshot = new Uint8Array(byteLength)
+    snapshot.set(source)
+    return snapshot
+  } catch {
+    return boundary("raw.body: must be a Uint8Array")
+  }
+}
+
+const snapshotHeaders = (input: unknown): Readonly<Record<string, string | undefined>> => {
+  const record = plainRecord(input, "raw.headers")
+  const snapshot = Object.create(null) as Record<string, string | undefined>
+  for (const key of Reflect.ownKeys(record)) {
+    if (typeof key !== "string") return boundary("raw.headers: symbol keys are not supported")
+    const descriptor = Object.getOwnPropertyDescriptor(record, key)
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+      return boundary(`raw.headers.${key}: must be an enumerable data property`)
+    }
+    if (descriptor.value !== undefined && typeof descriptor.value !== "string") {
+      return boundary(`raw.headers.${key}: must be a string or undefined`)
+    }
+    const normalized = key.toLowerCase()
+    if (Object.hasOwn(snapshot, normalized)) {
+      return boundary(`raw.headers.${normalized}: duplicate case-insensitive name`)
+    }
+    snapshot[normalized] = descriptor.value as string | undefined
+  }
+  return Object.freeze(snapshot)
+}
+
+const snapshotRequest = (
+  input: IngestRequest
+): Effect.Effect<{ readonly channel: string; readonly raw: RawInbound }, InvalidInput> =>
+  Effect.try({
+    try: () => {
+      const request = plainRecord(input, "request")
+      const channel = ownData(request, "channel", "request.channel")
+      const candidate = plainRecord(ownData(request, "raw", "request.raw"), "request.raw")
+      const idempotencyKey = ownData(candidate, "idempotencyKey", "raw.idempotencyKey")
+      if (typeof channel !== "string" || channel.length === 0) return boundary("request.channel: must be non-empty")
+      if (typeof idempotencyKey !== "string" || idempotencyKey.length === 0) {
+        return boundary("raw.idempotencyKey: must be non-empty")
+      }
+      return Object.freeze({
+        channel,
+        raw: Object.freeze({
+          body: copyBody(ownData(candidate, "body", "raw.body")),
+          headers: snapshotHeaders(ownData(candidate, "headers", "raw.headers")),
+          idempotencyKey
+        })
+      })
+    },
+    catch: (cause) =>
+      new InvalidInput({
+        issue: cause instanceof InboundBoundaryError ? cause.issue : "channel request could not be inspected safely"
+      })
+  })
+
+const normalizedFingerprintHeaders = (channel: Channel): ReadonlyArray<string> =>
+  Array.from(new Set((channel.fingerprintHeaders ?? []).map((name) => name.toLowerCase()))).sort()
+
+/** Digests the body plus only the adapter-declared, non-secret semantic headers. */
+const fingerprint = (
+  body: Uint8Array,
+  headers: Readonly<Record<string, string | undefined>>,
+  names: ReadonlyArray<string>
+): string => {
+  const document = JSON.stringify([
+    Sha256.digestSync(body),
+    names.map((name) => [name, headers[name] ?? null])
+  ])
+  return `channel-ingress:v2:${Sha256.digestSync(new TextEncoder().encode(document))}`
+}
 
 const externalReceipt = (receipt: Receipt, key: IdempotencyKey): Receipt => {
   switch (receipt._tag) {
@@ -212,46 +332,50 @@ const makeWith = (runtime: InboundReceiptStore) =>
       ),
       lookup,
       ingest: Effect.fn("Channels.ingest")((request) =>
-        ingestion.withPermits(1)(Effect.gen(function*() {
-          const channel = yield* lookup(request.channel)
-          // This ordering is intentional: signature verification is the
-          // amplification guard and must happen before decode or Control access.
-          yield* channel.verify(request.raw)
-          const externalKey = request.raw.idempotencyKey
-          const durableKey = mutationKey(request.channel, externalKey)
-          const bodyFingerprint = fingerprint(request.raw.body)
-          const prior = yield* runtime.lookupMutation(durableKey, bodyFingerprint)
-          if (prior !== undefined) return externalReceipt(prior, externalKey)
+        Effect.flatMap(snapshotRequest(request), (snapshot) =>
+          ingestion.withPermits(1)(Effect.gen(function*() {
+            const channel = yield* lookup(snapshot.channel)
+            const fingerprintHeaders = normalizedFingerprintHeaders(channel)
+            const bodyFingerprint = fingerprint(snapshot.raw.body, snapshot.raw.headers, fingerprintHeaders)
+            // This ordering is intentional: signature verification is the
+            // amplification guard and must happen before decode or Control access.
+            // The verifier receives its own body copy, so even a verifier that
+            // edits bytes cannot change what the decoder sees after approval.
+            yield* channel.verify({ ...snapshot.raw, body: copyBody(snapshot.raw.body) })
+            const externalKey = snapshot.raw.idempotencyKey
+            const durableKey = mutationKey(snapshot.channel, externalKey)
+            const prior = yield* runtime.lookupMutation(durableKey, bodyFingerprint)
+            if (prior !== undefined) return externalReceipt(prior, externalKey)
 
-          const payload = yield* channel.decode(request.raw)
-          const mapped = yield* channel.map(payload)
-          const key = scopedKey(request.channel, externalKey)
-          let receipt: Receipt
-          if (mapped._tag === "Signal") {
-            receipt = yield* control.signal({
-              runId: mapped.runId,
-              signal: mapped.signal,
-              idempotencyKey: key
-            })
-          } else {
-            const plan = yield* control.plan({
-              flowId: mapped.flowId,
-              input: mapped.input,
-              idempotencyKey: key
-            })
-            receipt = yield* control.run({
-              _tag: "Plan",
-              planId: plan.planId,
-              digest: plan.digest,
-              envelope: plan.envelope,
-              idempotencyKey: key
-            })
-          }
-          if (receipt._tag !== "Conflict") {
-            yield* runtime.recordMutation(durableKey, bodyFingerprint, receipt)
-          }
-          return externalReceipt(receipt, externalKey)
-        }))
+            const payload = yield* channel.decode(snapshot.raw)
+            const mapped = yield* channel.map(payload)
+            const key = scopedKey(snapshot.channel, externalKey)
+            let receipt: Receipt
+            if (mapped._tag === "Signal") {
+              receipt = yield* control.signal({
+                runId: mapped.runId,
+                signal: mapped.signal,
+                idempotencyKey: key
+              })
+            } else {
+              const plan = yield* control.plan({
+                flowId: mapped.flowId,
+                input: mapped.input,
+                idempotencyKey: key
+              })
+              receipt = yield* control.run({
+                _tag: "Plan",
+                planId: plan.planId,
+                digest: plan.digest,
+                envelope: plan.envelope,
+                idempotencyKey: key
+              })
+            }
+            if (receipt._tag !== "Conflict") {
+              yield* runtime.recordMutation(durableKey, bodyFingerprint, receipt)
+            }
+            return externalReceipt(receipt, externalKey)
+          })))
       ),
       project: Effect.fn("Channels.project")(function*(request) {
         const channel = yield* lookup(request.channel)

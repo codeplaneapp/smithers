@@ -166,8 +166,16 @@ export class Unavailable extends Schema.TaggedError<Unavailable>()("/control/Una
 }) {}
 
 /**
- * The request did not reach the control plane, or its reply did not come
- * back. `retryable` states whether resending is safe.
+ * The request failed before a declared control response reached the caller.
+ *
+ * `retryable` classifies only the transport phase. Connection failures and
+ * HTTP 5xx responses are retryable; local encode failures, response decode
+ * failures, and HTTP 4xx responses are not. A caller may resend a retryable
+ * mutation only when its idempotency key makes replay safe. A keyless request
+ * can have reached the server even when its response was lost.
+ *
+ * `message` is a fixed operator-facing sentence. `cause` retains the original
+ * client failure for diagnostics without copying its raw text into output.
  *
  * @category errors
  * @since 0.1.0
@@ -176,7 +184,8 @@ export class Unavailable extends Schema.TaggedError<Unavailable>()("/control/Una
 export class TransportError extends Schema.TaggedError<TransportError>()("/control/TransportError", {
   code: constantCode("transport_error"),
   message: Schema.String,
-  retryable: Schema.Boolean
+  retryable: Schema.Boolean,
+  cause: Schema.optional(Schema.Defect())
 }) {}
 
 /**

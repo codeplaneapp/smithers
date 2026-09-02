@@ -5,6 +5,7 @@
  */
 import * as SteerPayload from "@smthrs/notifications/SteerPayload"
 import * as PersistedPlan from "@smthrs/plan/Plan"
+import { DiscoveryWarning } from "@smthrs/registry/Descriptor"
 import { Schema } from "effect"
 import { Origin } from "./Lineage.ts"
 
@@ -187,9 +188,8 @@ export type ApprovalPayload = typeof ApprovalPayload.Type
  *
  * The two dispositions fall out of step keys for free — a key either hits the
  * step cache or it does not — which is why they are reported here rather than
- * discovered during execution (`docs/specs/Concepts/Reconciliation.md`). The
- * third column that note describes, `release`, belongs to orphan
- * reconciliation and is deliberately not part of a plan card.
+ * discovered during execution. The third disposition, `release`, belongs to
+ * orphan reconciliation and is deliberately not part of a plan card.
  *
  * @since 0.1.0
  * @category models
@@ -839,6 +839,7 @@ export type ListRequest = typeof ListRequest.Type
 export const ListResponse = Schema.Union([
   Schema.TaggedStruct("flows", {
     items: Schema.Array(Schema.Struct({ flowId: FlowId, description: Schema.String })),
+    warnings: Schema.optional(Schema.Array(DiscoveryWarning)),
     nextCursor: Schema.optional(Schema.String)
   }),
   Schema.TaggedStruct("runs", {

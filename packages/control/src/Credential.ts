@@ -16,11 +16,10 @@
  *   secure key material fails with the typed `Unavailable`.
  *
  * Authorization is a host decision, injected as {@link Options.authorize}. A
- * reference is also authenticated on every operation: a caller cannot present
- * a forged or stale `CredentialRef` and have it resolve, because the name on
- * the reference must still match the stored record.
- *
- * See `.smithers/tickets/control-credential-storage.md`.
+ * reference is also authenticated on every operation: caller-owned fields are
+ * snapshotted before policy effects run, and a caller cannot present a forged
+ * or stale `CredentialRef` because the snapshotted name must still match the
+ * stored record.
  *
  * @since 0.1.0
  */
@@ -134,10 +133,20 @@ export interface Options {
     | undefined
 }
 
-const referenceOf = (record: CredentialStore.SealedRecord): CredentialRef => ({
-  id: record.id,
-  name: record.name
-})
+const referenceOf = (value: { readonly id: string; readonly name: string }): CredentialRef =>
+  Object.freeze({
+    id: value.id,
+    name: value.name
+  })
+
+const cipherContextOf = (
+  value: { readonly id: string; readonly name: string; readonly version: number }
+): CredentialCipher.Context =>
+  Object.freeze({
+    id: value.id,
+    name: value.name,
+    version: value.version
+  })
 
 const missing = (id: string): Unauthorized =>
   // Deliberately indistinguishable from a denied reference: telling an
@@ -162,10 +171,11 @@ export const make = (options: Options): Credential => {
     reference: CredentialRef
   ): Effect.Effect<CredentialStore.SealedRecord, Unavailable | Unauthorized> =>
     Effect.gen(function*() {
-      yield* authorize(operation, Option.some(reference))
-      const record = yield* store.read(reference.id)
-      if (Option.isNone(record)) return yield* Effect.fail(missing(reference.id))
-      if (record.value.name !== reference.name) return yield* Effect.fail(missing(reference.id))
+      const snapshot = referenceOf(reference)
+      yield* authorize(operation, Option.some(snapshot))
+      const record = yield* store.read(snapshot.id)
+      if (Option.isNone(record)) return yield* Effect.fail(missing(snapshot.id))
+      if (record.value.name !== snapshot.name) return yield* Effect.fail(missing(snapshot.id))
       return record.value
     })
 
@@ -174,7 +184,10 @@ export const make = (options: Options): Credential => {
     secret: Redacted.Redacted<string>
   ): Effect.Effect<CredentialRef, Unavailable | CredentialConflict> =>
     Effect.gen(function*() {
-      const sealed = yield* cipher.seal(secret)
+      // The metadata written beside this blob is also its authenticated data;
+      // moving the blob to another id, name, or version must make it unreadable.
+      const context = cipherContextOf(record)
+      const sealed = yield* cipher.seal(secret, context)
       const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
       yield* store.write({ ...record, ...sealed, updatedAtMs: now })
       return referenceOf(record)
@@ -187,21 +200,36 @@ export const make = (options: Options): Credential => {
       return records.map(referenceOf)
     }),
     get: Effect.fn("Credential.get")(function*(id) {
-      yield* authorize("get", Option.none())
       const record = yield* store.read(id)
       if (Option.isNone(record)) return yield* Effect.fail(missing(id))
-      return referenceOf(record.value)
+      const reference = referenceOf(record.value)
+      yield* authorize("get", Option.some(reference))
+      return reference
     }),
     create: Effect.fn("Credential.create")(function*(input) {
-      yield* authorize("create", Option.some({ id: input.id, name: input.name }))
+      const snapshot = Object.freeze({
+        reference: referenceOf(input),
+        secret: input.secret
+      })
+      yield* authorize("create", Option.some(snapshot.reference))
       return yield* put(
-        { id: input.id, name: input.name, ciphertext: "", nonce: "", version: 1, updatedAtMs: 0 },
-        input.secret
+        {
+          id: snapshot.reference.id,
+          name: snapshot.reference.name,
+          ciphertext: "",
+          nonce: "",
+          version: 1,
+          updatedAtMs: 0
+        },
+        snapshot.secret
       )
     }),
     resolve: Effect.fn("Credential.resolve")(function*(reference) {
       const record = yield* authenticate("resolve", reference)
-      return yield* cipher.open({ ciphertext: record.ciphertext, nonce: record.nonce })
+      return yield* cipher.open(
+        { ciphertext: record.ciphertext, nonce: record.nonce },
+        cipherContextOf(record)
+      )
     }),
     rotate: Effect.fn("Credential.rotate")(function*(reference, secret) {
       const record = yield* authenticate("rotate", reference)

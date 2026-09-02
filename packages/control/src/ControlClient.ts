@@ -3,12 +3,23 @@
  *
  * @since 0.1.0
  */
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Cause, Effect, Layer, Result, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { RpcClient } from "effect/unstable/rpc"
+import { RpcClient, RpcClientError } from "effect/unstable/rpc"
 import { Control, make, type Service } from "./Control.ts"
 import { type ControlError, ControlErrorSchema, TransportError } from "./ControlError.ts"
 import { ControlRpcs } from "./ControlRpcs.ts"
+import {
+  ApprovalInputSchema,
+  CancelInputSchema,
+  ListRequest,
+  PlanInputSchema,
+  ReasonedMutationInputSchema,
+  RunInputSchema,
+  SignalInputSchema,
+  SteerInputSchema,
+  WatchFilter
+} from "./ControlSchema.ts"
 
 /**
  * Whether a value is one of the control plane's declared failures, as opposed
@@ -23,14 +34,167 @@ import { ControlRpcs } from "./ControlRpcs.ts"
  */
 export const isControlError = Schema.is(ControlErrorSchema)
 
-const transportError = (error: unknown): TransportError =>
+interface TransportClassification {
+  readonly message: string
+  readonly retryable: boolean
+}
+
+const requestEncoding: TransportClassification = {
+  message: "The control request could not be encoded.",
+  retryable: false
+}
+
+const responseDecoding: TransportClassification = {
+  message: "The control response could not be decoded.",
+  retryable: false
+}
+
+const connectionFailure: TransportClassification = {
+  message: "The control server could not be reached.",
+  retryable: true
+}
+
+const clientHttpFailure: TransportClassification = {
+  message: "The control server rejected the HTTP request.",
+  retryable: false
+}
+
+const serverHttpFailure: TransportClassification = {
+  message: "The control server failed while handling the HTTP request.",
+  retryable: true
+}
+
+const invalidClientUrl: TransportClassification = {
+  message: "The control server URL is invalid.",
+  retryable: false
+}
+
+const unknownClientFailure: TransportClassification = {
+  message: "The control RPC client failed.",
+  retryable: false
+}
+
+const transportError = (cause: unknown, classification: TransportClassification): TransportError =>
   new TransportError({
-    message: error instanceof Error ? error.message : "Control RPC transport failed",
-    retryable: true
+    ...classification,
+    cause
   })
 
+const statusFrom = (cause: unknown): number | undefined => {
+  if (typeof cause !== "object" || cause === null || !("response" in cause)) return undefined
+  const response = cause.response
+  if (typeof response !== "object" || response === null || !("status" in response)) return undefined
+  return typeof response.status === "number" ? response.status : undefined
+}
+
+const classifyRpcClientError = (error: RpcClientError.RpcClientError): TransportClassification => {
+  const reason = error.reason
+  switch (reason._tag) {
+    case "HttpError": {
+      switch (reason.kind) {
+        case "TransportError":
+          return connectionFailure
+        case "EncodeError":
+          return requestEncoding
+        case "InvalidUrlError":
+          return invalidClientUrl
+        case "DecodeError":
+        case "EmptyBodyError":
+          return responseDecoding
+        case "StatusCodeError": {
+          // Effect's serializable HttpError keeps the concrete
+          // StatusCodeError in `cause`. The wrapper has no separate status
+          // field, so a hand-built wrapper without that cause cannot safely be
+          // classified as retryable and falls back to the client class.
+          const status = statusFrom(reason.cause)
+          return status !== undefined && status >= 500 && status <= 599
+            ? serverHttpFailure
+            : clientHttpFailure
+        }
+      }
+    }
+    case "RpcClientDefect":
+      return responseDecoding
+    case "SocketReadError":
+    case "SocketWriteError":
+    case "SocketOpenError":
+    case "SocketCloseError":
+      return connectionFailure
+    case "WorkerSpawnError":
+    case "WorkerSendError":
+    case "WorkerReceiveError":
+    case "WorkerUnknownError":
+      return unknownClientFailure
+  }
+}
+
+const isRpcClientError = Schema.is(RpcClientError.RpcClientError)
+
+const classify = (error: unknown): TransportClassification => {
+  if (Schema.isSchemaError(error)) return responseDecoding
+  if (isRpcClientError(error)) return classifyRpcClientError(error)
+  return unknownClientFailure
+}
+
+const normalizedFailure = (cause: Cause.Cause<unknown>): Effect.Effect<never, ControlError> => {
+  const failure = Cause.findError(cause)
+  if (Result.isSuccess(failure)) {
+    return Effect.fail(
+      isControlError(failure.success)
+        ? failure.success
+        : transportError(failure.success, classify(failure.success))
+    )
+  }
+  const defect = Cause.findDefect(cause)
+  return Result.isSuccess(defect)
+    ? Effect.fail(transportError(defect.success, classify(defect.success)))
+    : Effect.failCause(cause as Cause.Cause<ControlError>)
+}
+
 const normalize = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ControlError, R> =>
-  Effect.mapError(effect, (error) => isControlError(error) ? error : transportError(error))
+  Effect.catchCause(effect, normalizedFailure)
+
+type RequestEncoder = (input: unknown) => Effect.Effect<unknown, Schema.SchemaError>
+
+const encoder = (schema: Schema.Top): RequestEncoder =>
+  // Every request schema in this module is service-free. `Schema.Top` erases
+  // that fact to `unknown`, so restore it at this one construction boundary.
+  Schema.encodeUnknownEffect(Schema.toCodecJson(schema)) as RequestEncoder
+
+const planEncoder = encoder(PlanInputSchema)
+const runEncoder = encoder(RunInputSchema)
+const approvalEncoder = encoder(ApprovalInputSchema)
+const steerEncoder = encoder(SteerInputSchema)
+const signalEncoder = encoder(SignalInputSchema)
+const cancelEncoder = encoder(CancelInputSchema)
+const resumeEncoder = encoder(ReasonedMutationInputSchema)
+const listEncoder = encoder(ListRequest)
+const watchEncoder = encoder(WatchFilter)
+
+const normalizeRequest = <A, E, R>(
+  encode: RequestEncoder,
+  input: unknown,
+  request: () => Effect.Effect<A, E, R>
+): Effect.Effect<A, ControlError, R> =>
+  encode(input).pipe(
+    Effect.mapError((cause) => transportError(cause, requestEncoding)),
+    Effect.andThen(Effect.suspend(() => normalize(request())))
+  )
+
+const normalizeStream = <A, E, R>(stream: Stream.Stream<A, E, R>): Stream.Stream<A, ControlError, R> =>
+  Stream.catchCause(stream, (cause) => Stream.fromEffect(normalizedFailure(cause)))
+
+const normalizeStreamRequest = <A, E, R>(
+  encode: RequestEncoder,
+  input: unknown,
+  request: () => Stream.Stream<A, E, R>
+): Stream.Stream<A, ControlError, R> =>
+  Stream.unwrap(
+    encode(input).pipe(
+      Effect.mapError((cause) => transportError(cause, requestEncoding)),
+      Effect.map(() => normalizeStream(request()))
+    )
+  )
 
 /**
  * Client transport configuration. Unary procedures use HTTP at this URL;
@@ -54,14 +218,18 @@ export interface ClientConfig {
  * @slop
  */
 export const layer = (config: ClientConfig) => {
-  const http = RpcClient.layerProtocolHttp(
-    config.credential === undefined
-      ? { url: config.url }
-      : {
-        url: config.url,
-        transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(config.credential))
-      }
-  )
+  const http = RpcClient.layerProtocolHttp({
+    url: config.url,
+    transformClient: (client) => {
+      // The RPC protocol already admits HttpClientError, but transformClient's
+      // generic signature cannot express that filtering adds the same error
+      // its input client already carries.
+      const checked = HttpClient.filterStatusOk(client) as typeof client
+      return config.credential === undefined
+        ? checked
+        : HttpClient.mapRequest(checked, HttpClientRequest.bearerToken(config.credential))
+    }
+  })
   const websocket = RpcClient.layerProtocolSocket()
   return Layer.effect(
     Control,
@@ -73,17 +241,24 @@ export const layer = (config: ClientConfig) => {
       const unary = yield* RpcClient.make(ControlRpcs).pipe(Effect.provide(httpServices))
       const streaming = yield* RpcClient.make(ControlRpcs).pipe(Effect.provide(websocketServices))
       return make({
-        plan: Effect.fn("Control.plan")((input) => normalize(unary.Plan(input))),
-        run: Effect.fn("Control.run")((input) => normalize(unary.Run(input))),
-        approve: Effect.fn("Control.approve")((input) => normalize(unary.Approve(input))),
-        deny: Effect.fn("Control.deny")((input) => normalize(unary.Deny(input))),
-        steer: Effect.fn("Control.steer")((input) => normalize(unary.Steer(input))),
-        signal: Effect.fn("Control.signal")((input) => normalize(unary.Signal(input))),
-        cancel: Effect.fn("Control.cancel")((input) => normalize(unary.Cancel(input))),
-        resume: Effect.fn("Control.resume")((input) => normalize(unary.Resume(input))),
-        list: Effect.fn("Control.list")((input) => normalize(unary.List(input))),
-        watch: (input) =>
-          Stream.mapError(streaming.Watch(input), (error) => isControlError(error) ? error : transportError(error))
+        plan: Effect.fn("Control.plan")((input) => normalizeRequest(planEncoder, input, () => unary.Plan(input))),
+        run: Effect.fn("Control.run")((input) => normalizeRequest(runEncoder, input, () => unary.Run(input))),
+        approve: Effect.fn("Control.approve")((input) =>
+          normalizeRequest(approvalEncoder, input, () => unary.Approve(input))
+        ),
+        deny: Effect.fn("Control.deny")((input) => normalizeRequest(approvalEncoder, input, () => unary.Deny(input))),
+        steer: Effect.fn("Control.steer")((input) => normalizeRequest(steerEncoder, input, () => unary.Steer(input))),
+        signal: Effect.fn("Control.signal")((input) =>
+          normalizeRequest(signalEncoder, input, () => unary.Signal(input))
+        ),
+        cancel: Effect.fn("Control.cancel")((input) =>
+          normalizeRequest(cancelEncoder, input, () => unary.Cancel(input))
+        ),
+        resume: Effect.fn("Control.resume")((input) =>
+          normalizeRequest(resumeEncoder, input, () => unary.Resume(input))
+        ),
+        list: Effect.fn("Control.list")((input) => normalizeRequest(listEncoder, input, () => unary.List(input))),
+        watch: (input) => normalizeStreamRequest(watchEncoder, input, () => streaming.Watch(input))
       } as Service)
     })
   )

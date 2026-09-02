@@ -104,6 +104,7 @@ const parkedOnAsk = (suffix: string) =>
     })
     if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a started run")
     const runId = receipt.runId
+    yield* runtime.resume(runId)
     const target: ApprovalTarget = {
       _tag: "Node",
       runId,

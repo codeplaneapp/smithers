@@ -1,6 +1,6 @@
 /**
  * `ControlLive.watch`: the finite snapshot, the followed tail, and the
- * deduplication that joins them.
+ * high-water handoff that joins them.
  *
  * The snapshot pins its own high-water mark with indexed probes, so the
  * interesting cases are the ones a real journal reaches rarely — an empty
@@ -243,39 +243,56 @@ describe("ControlLive.watch following", () => {
     })
   })
 
-  it("forgets the oldest key once the deduplication window is full", async () => {
+  it("joins more than 1024 overlapping history rows and tail notices exactly once", async () => {
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
         const subscribed = Deferred.makeUnsafe<void>()
+        const historyReady = Deferred.makeUnsafe<void>()
         const published = yield* PubSub.unbounded<JournalEvent.Entry>()
+        const history = Array.from({ length: 1025 }, (_, index) => index + 1)
         const scripted = Layer.succeed(
           Journal.Journal,
           Journal.makeNoop({
             changes: PubSub.subscribe(published).pipe(
               Effect.tap(() => Deferred.succeed(subscribed, undefined))
             ),
-            stream: () => Stream.empty
+            stream: (options) =>
+              Stream.fromIterable(history.map((seq) => entry(seq, String(options.runId)))).pipe(
+                Stream.ensuring(Deferred.succeed(historyReady, undefined))
+              ),
+            entries: (options) => {
+              const after = options.after === undefined ? -1 : options.after
+              const remaining = history.filter((seq) => seq > after)
+              const selected = remaining.slice(0, options.limit)
+              return Effect.succeed({
+                entries: selected.map((seq) => entry(seq, String(options.runId))),
+                hasMore: remaining.length > selected.length
+              }).pipe(
+                Effect.tap(() =>
+                  options.limit === 1024 && selected.at(-1) === 1025
+                    ? Deferred.succeed(historyReady, undefined)
+                    : Effect.void
+                )
+              )
+            }
           })
         )
 
         return yield* Effect.gen(function*() {
           const control = yield* Control
           const runtime = yield* ControlRuntime
-          // One plan, so the merge really does span a partition and the tail.
-          yield* runtime.plan({ flowId: "system/test", input: { suite: "window" } })
+          const { card } = yield* runtime.plan({ flowId: "system/test", input: { suite: "handoff" } })
+          const partition = `plan:${card.planId}`
           const collected = yield* control.watch({}).pipe(
-            Stream.take(1026),
             Stream.runCollect,
             Effect.forkChild({ startImmediately: true })
           )
           yield* Deferred.await(subscribed)
-          for (let seq = 1; seq <= 1025; seq++) {
-            yield* PubSub.publish(published, entry(seq))
+          yield* Deferred.await(historyReady)
+          for (let seq = 1; seq <= 1026; seq++) {
+            yield* PubSub.publish(published, entry(seq, partition))
           }
-          // Still inside the window: refused as a repeat.
-          yield* PubSub.publish(published, entry(1025))
-          // Evicted by the 1025th key: admitted again.
-          yield* PubSub.publish(published, entry(1))
+          yield* PubSub.shutdown(published)
           return yield* Fiber.join(collected).pipe(Effect.timeout("20 seconds"))
         }).pipe(
           Effect.provide(live({
@@ -288,11 +305,9 @@ describe("ControlLive.watch following", () => {
     )
 
     expect(observed).toHaveLength(1026)
-    expect(sequences(observed).slice(0, 3)).toEqual([1, 2, 3])
-    expect(sequences(observed).slice(1023, 1025)).toEqual([1024, 1025])
-    expect(observed.at(-1)?.sequence).toBe(1)
-    // An entry with no run identifier still keys into the window.
-    expect(observed.every((event) => event.runId === undefined)).toBe(true)
+    expect(new Set(sequences(observed)).size).toBe(1026)
+    expect(sequences(observed)).toContain(1)
+    expect(sequences(observed)).toContain(1026)
   })
 
   it("drops tail entries at or below the cursor the reader supplied", async () => {
@@ -303,10 +318,20 @@ describe("ControlLive.watch following", () => {
         const scripted = Layer.succeed(
           Journal.Journal,
           Journal.makeNoop({
-            changes: PubSub.subscribe(published).pipe(
-              Effect.tap(() => Deferred.succeed(subscribed, undefined))
-            ),
-            stream: () => Stream.empty
+            stream: (options) =>
+              Stream.unwrap(
+                PubSub.subscribe(published).pipe(
+                  Effect.tap(() => Deferred.succeed(subscribed, undefined)),
+                  Effect.map((subscription) =>
+                    Stream.fromSubscription(subscription).pipe(
+                      Stream.filter((entry) =>
+                        entry.runId === options.runId &&
+                        (options.afterSequence === undefined || entry.seq > options.afterSequence)
+                      )
+                    )
+                  )
+                )
+              )
           })
         )
 

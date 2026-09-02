@@ -1,10 +1,10 @@
 import * as Sha256 from "@smthrs/crypto/Sha256"
-import { Effect, Layer, Redacted, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Redacted, Schema, Stream } from "effect"
 import * as Crypto from "effect/Crypto"
 import { describe, expect, it } from "vitest"
 import * as Channels from "../src/Channels.ts"
 import * as Control from "../src/Control.ts"
-import { PersistenceError, Unauthorized } from "../src/ControlError.ts"
+import { InvalidInput, PersistenceError, Unauthorized } from "../src/ControlError.ts"
 import * as ControlRuntime from "../src/ControlRuntime.ts"
 import * as WebhookChannel from "../src/WebhookChannel.ts"
 
@@ -284,6 +284,171 @@ describe("Channels", () => {
     expect(receipt._tag).toBe("Conflict")
     expect(calls).toEqual(["plan", "run"])
     expect(decoded).toBe(1)
+  })
+
+  it("binds declared semantic headers into the durable inbound identity", async () => {
+    const calls: Array<string> = []
+    let decoded = 0
+    const channel: Channels.Channel = {
+      name: "semantic-headers",
+      schema: Schema.Unknown,
+      fingerprintHeaders: ["x-event-kind"],
+      verify: () => Effect.void,
+      decode: () => Effect.sync(() => ++decoded),
+      map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+      project: () => ({ cursor: "1", operation: "post", message: {} })
+    }
+    const receipt = await run(
+      Effect.gen(function*() {
+        const channels = yield* Channels.Channels
+        yield* channels.register(channel)
+        yield* channels.ingest({
+          channel: channel.name,
+          raw: { ...raw("same"), headers: { "x-event-kind": "created" } }
+        })
+        return yield* channels.ingest({
+          channel: channel.name,
+          raw: { ...raw("same"), headers: { "X-Event-Kind": "deleted" } }
+        })
+      }),
+      calls
+    )
+
+    expect(receipt._tag).toBe("Conflict")
+    expect(calls).toEqual(["plan", "run"])
+    expect(decoded).toBe(1)
+  })
+
+  it("normalizes semantic header names and excludes credential headers", async () => {
+    const calls: Array<string> = []
+    let decoded = 0
+    const channel: Channels.Channel = {
+      name: "normalized-headers",
+      schema: Schema.Unknown,
+      fingerprintHeaders: ["X-Event-Kind"],
+      verify: () => Effect.void,
+      decode: () => Effect.sync(() => ++decoded),
+      map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+      project: () => ({ cursor: "1", operation: "post", message: {} })
+    }
+    const receipt = await run(
+      Effect.gen(function*() {
+        const channels = yield* Channels.Channels
+        yield* channels.register(channel)
+        yield* channels.ingest({
+          channel: channel.name,
+          raw: {
+            ...raw("same-normalized"),
+            headers: { Authorization: "Bearer first", "X-Event-Kind": "created" }
+          }
+        })
+        return yield* channels.ingest({
+          channel: channel.name,
+          raw: {
+            ...raw("same-normalized"),
+            headers: { "x-event-kind": "created", authorization: "Bearer rotated" }
+          }
+        })
+      }),
+      calls
+    )
+
+    expect(receipt._tag).toBe("AlreadyApplied")
+    expect(calls).toEqual(["plan", "run"])
+    expect(decoded).toBe(1)
+  })
+
+  it("snapshots bytes and headers before suspended verification", async () => {
+    const calls: Array<string> = []
+    const observed: Array<{ readonly body: string; readonly event: string | undefined }> = []
+    const receipt = await run(
+      Effect.gen(function*() {
+        const verifying = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const channel: Channels.Channel = {
+          name: "snapshot",
+          schema: Schema.Unknown,
+          fingerprintHeaders: ["x-event-kind"],
+          verify: (request) =>
+            Effect.gen(function*() {
+              observed.push({
+                body: new TextDecoder().decode(request.body),
+                event: request.headers["x-event-kind"]
+              })
+              request.body.fill(1)
+              yield* Deferred.succeed(verifying, undefined)
+              yield* Deferred.await(release)
+            }),
+          decode: (request) =>
+            Effect.sync(() => {
+              observed.push({
+                body: new TextDecoder().decode(request.body),
+                event: request.headers["x-event-kind"]
+              })
+              return null
+            }),
+          map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+          project: () => ({ cursor: "1", operation: "post", message: {} })
+        }
+        const channels = yield* Channels.Channels
+        yield* channels.register(channel)
+        const body = new TextEncoder().encode("original")
+        const headers: Record<string, string | undefined> = { "x-event-kind": "created" }
+        const fiber = yield* channels.ingest({
+          channel: channel.name,
+          raw: { body, headers, idempotencyKey: "snapshot-key" }
+        }).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(verifying)
+        body.fill(0)
+        headers["x-event-kind"] = "mutated"
+        yield* Deferred.succeed(release, undefined)
+        return yield* Fiber.join(fiber)
+      }),
+      calls
+    )
+
+    expect(receipt._tag).toBe("Accepted")
+    expect(observed).toEqual([
+      { body: "original", event: "created" },
+      { body: "original", event: "created" }
+    ])
+    expect(calls).toEqual(["plan", "run"])
+  })
+
+  it("refuses accessor-backed headers before verification", async () => {
+    let reads = 0
+    let verifies = 0
+    const channel: Channels.Channel = {
+      name: "accessor-headers",
+      schema: Schema.Unknown,
+      fingerprintHeaders: ["x-event-kind"],
+      verify: () => Effect.sync(() => void verifies++),
+      decode: () => Effect.succeed(null),
+      map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+      project: () => ({ cursor: "1", operation: "post", message: {} })
+    }
+    const headers = Object.defineProperty({}, "x-event-kind", {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return "created"
+      }
+    })
+    const error = await run(
+      Effect.gen(function*() {
+        const channels = yield* Channels.Channels
+        yield* channels.register(channel)
+        return yield* Effect.flip(channels.ingest({
+          channel: channel.name,
+          raw: { ...raw(), headers }
+        }))
+      })
+    )
+
+    expect(error).toBeInstanceOf(InvalidInput)
+    expect((error as InvalidInput).issue).toBe("raw.headers.x-event-kind: must be an enumerable data property")
+    expect(reads).toBe(0)
+    expect(verifies).toBe(0)
   })
 
   it("does not poison an inbound key when Control fails", async () => {

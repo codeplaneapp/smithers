@@ -6,7 +6,8 @@ import { Control } from "../src/Control.ts"
 import { isControlError } from "../src/ControlClient.ts"
 import { PlanDigestMismatch, RunNotFound, TransportError, Unauthorized } from "../src/ControlError.ts"
 import { bearerAuthenticator, ControlRpcs, layerAuth, layerNoopAuth } from "../src/ControlRpcs.ts"
-import type { Principal, RunSummary, SteerMessage } from "../src/ControlSchema.ts"
+import { ControlRuntime } from "../src/ControlRuntime.ts"
+import type { Envelope, Principal, RunSummary, SteerMessage } from "../src/ControlSchema.ts"
 import * as ControlServer from "../src/ControlServer.ts"
 import * as TestControl from "../src/test/TestControl.ts"
 import { durable, type DurableStack } from "./DurableStack.ts"
@@ -249,6 +250,42 @@ const summaryOf = (rpc: ControlRpcClient, runId: string) =>
     rpc.List({ _tag: "runs", filters: { runId } }),
     (listed): RunSummary | undefined => listed._tag === "runs" ? listed.items[0] : undefined
   )
+
+describe("approval identity over RPC", () => {
+  it("scopes a caller-chosen request id to the run named by the node target", async () => {
+    const observed = await durably((rpc) =>
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const firstRun = yield* start(rpc, "rpc-approval-first")
+        const secondRun = yield* start(rpc, "rpc-approval-second")
+        const approvalEnvelope: Envelope = { capabilities: [], flows: ["ask"], budget: {} }
+        const firstTarget = {
+          _tag: "Node" as const,
+          runId: firstRun.runId,
+          requestId: "caller-chosen",
+          digest: "ask-digest",
+          envelope: approvalEnvelope
+        }
+        const secondTarget = { ...firstTarget, runId: secondRun.runId }
+        yield* runtime.registerApproval(firstTarget)
+        yield* runtime.registerApproval(secondTarget)
+
+        yield* rpc.Approve({ target: firstTarget, scope: "once", idempotencyKey: "approve:caller-chosen" })
+
+        return {
+          firstRunId: firstRun.runId,
+          secondRunId: secondRun.runId,
+          first: yield* runtime.registerApproval(firstTarget),
+          second: yield* runtime.registerApproval(secondTarget)
+        }
+      })
+    )
+
+    expect(observed.first).toMatchObject({ resolved: true, target: { runId: observed.firstRunId } })
+    expect(observed.second).toMatchObject({ resolved: false, target: { runId: observed.secondRunId } })
+    expect(observed.firstRunId).not.toBe(observed.secondRunId)
+  })
+})
 
 describe("the identity an authenticated control mutation is journaled under", () => {
   it("stamps the authenticated principal on an approval and on a denial", async () => {

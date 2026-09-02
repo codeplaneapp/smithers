@@ -100,8 +100,8 @@ const rawServer = (status: number, body: string): Promise<{
       }
       resolve({
         url: `http://127.0.0.1:${address.port}`,
-        close: () => new Promise<void>((closed, failed) =>
-          server.close((cause) => cause === undefined ? closed() : failed(cause)))
+        close: () =>
+          new Promise<void>((closed, failed) => server.close((cause) => cause === undefined ? closed() : failed(cause)))
       })
     })
   })
@@ -119,8 +119,11 @@ describe("ControlClient", () => {
   it("sends the bearer header and preserves an Unauthorized response", async () => {
     const result = await run(Effect.gen(function*() {
       const url = yield* baseUrl
-      const refused = yield* withClient(url, "wrong-token", (control) =>
-        control.list({ _tag: "flows" }).pipe(Effect.flip))
+      const refused = yield* withClient(
+        url,
+        "wrong-token",
+        (control) => control.list({ _tag: "flows" }).pipe(Effect.flip)
+      )
       const accepted = yield* withClient(url, token, (control) => control.list({ _tag: "flows" }))
       return { accepted, refused }
     }))
@@ -144,11 +147,63 @@ describe("ControlClient", () => {
     expect((error as RunNotFound).runId).toBe("missing-run")
   })
 
+  it("projects every unary method through its request schema", async () => {
+    const tags = await run(Effect.gen(function*() {
+      const url = yield* baseUrl
+      return yield* withClient(url, token, (control) =>
+        Effect.gen(function*() {
+          const envelope = { capabilities: [], flows: [], budget: {} }
+          const approval = {
+            target: { _tag: "Plan" as const, planId: "missing-plan", digest: "digest", envelope },
+            scope: "once" as const,
+            idempotencyKey: "approval-missing"
+          }
+          const principal = { id: "client", kind: "test", stampedAt: 0 }
+          const errors = yield* Effect.all([
+            control.approve(approval).pipe(Effect.flip),
+            control.deny({ ...approval, idempotencyKey: "deny-missing" }).pipe(Effect.flip),
+            control.steer({
+              runId: "missing-run",
+              message: {
+                messageId: "message-missing",
+                runId: "missing-run",
+                principal,
+                createdAt: 0,
+                body: "continue"
+              },
+              idempotencyKey: "steer-missing"
+            }).pipe(Effect.flip),
+            control.signal({
+              runId: "missing-run",
+              signal: { name: "continue", payload: null },
+              idempotencyKey: "signal-missing"
+            }).pipe(Effect.flip),
+            control.cancel({ runId: "missing-run", idempotencyKey: "cancel-missing", reason: "test" }).pipe(
+              Effect.flip
+            ),
+            control.resume({ runId: "missing-run", idempotencyKey: "resume-missing", reason: "test" }).pipe(
+              Effect.flip
+            )
+          ])
+          return errors.map((error) => error._tag)
+        }))
+    }))
+
+    expect(tags).toEqual([
+      "/control/PlanNotFound",
+      "/control/PlanNotFound",
+      "/control/RunNotFound",
+      "/control/RunNotFound",
+      "/control/RunNotFound",
+      "/control/RunNotFound"
+    ])
+  })
+
   it("marks a refused connection retryable without exposing the socket message", async () => {
     const port = await closedPort()
     const error = await Effect.runPromise(
-      withClient(`http://127.0.0.1:${port}`, token, (control) =>
-        control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(Effect.scoped)
+      withClient(`http://127.0.0.1:${port}`, token, (control) => control.list({ _tag: "flows" }).pipe(Effect.flip))
+        .pipe(Effect.scoped)
     )
 
     const failure = transport(error)
@@ -160,8 +215,11 @@ describe("ControlClient", () => {
   it("turns a client request encoding defect into a non-retryable failure", async () => {
     const exit = await run(Effect.gen(function*() {
       const url = yield* baseUrl
-      return yield* withClient(url, token, (control) =>
-        Effect.exit(control.plan({ flowId: "system/test", input: new Date(0) })))
+      return yield* withClient(
+        url,
+        token,
+        (control) => Effect.exit(control.plan({ flowId: "system/test", input: new Date(0) }))
+      )
     }))
 
     if (exit._tag === "Success") throw new Error("expected request encoding to fail")
@@ -175,14 +233,20 @@ describe("ControlClient", () => {
     const clientFailure = await rawServer(400, "bad request")
     const serverFailure = await rawServer(503, "unavailable")
     try {
-      const rejected = transport(await Effect.runPromise(
-        withClient(clientFailure.url, token, (control) =>
-          control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(Effect.scoped)
-      ))
-      const unavailable = transport(await Effect.runPromise(
-        withClient(serverFailure.url, token, (control) =>
-          control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(Effect.scoped)
-      ))
+      const rejected = transport(
+        await Effect.runPromise(
+          withClient(clientFailure.url, token, (control) => control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(
+            Effect.scoped
+          )
+        )
+      )
+      const unavailable = transport(
+        await Effect.runPromise(
+          withClient(serverFailure.url, token, (control) => control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(
+            Effect.scoped
+          )
+        )
+      )
 
       expect(rejected.retryable).toBe(false)
       expect(rejected.message).toBe("The control server rejected the HTTP request.")
@@ -196,10 +260,13 @@ describe("ControlClient", () => {
   it("classifies an invalid RPC response as a non-retryable decode failure", async () => {
     const malformed = await rawServer(200, "not an RPC response\n")
     try {
-      const failure = transport(await Effect.runPromise(
-        withClient(malformed.url, token, (control) =>
-          control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(Effect.scoped)
-      ))
+      const failure = transport(
+        await Effect.runPromise(
+          withClient(malformed.url, token, (control) => control.list({ _tag: "flows" }).pipe(Effect.flip)).pipe(
+            Effect.scoped
+          )
+        )
+      )
 
       expect(failure.retryable).toBe(false)
       expect(failure.message).toBe("The control response could not be decoded.")
