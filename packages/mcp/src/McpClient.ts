@@ -3,8 +3,8 @@
  * `tools/call`, over {@link StdioTransport}.
  *
  * This is deliberately not a general MCP SDK. Smithers has exactly one
- * consumer of an MCP session — {@link McpFlows}, which needs a tool catalog
- * and a way to invoke one entry from it — so the client exposes only that.
+ * consumer of an MCP session: {@link McpFlows}, which needs a tool catalog
+ * and a way to invoke one entry from it, so the client exposes only that.
  * Resources, prompts, sampling, and roots are not wired up; add them here
  * when a flow adapter needs them, not speculatively.
  *
@@ -25,7 +25,7 @@ import { McpError } from "./McpError.ts"
 export interface ToolDescription {
   readonly name: string
   readonly description: string | undefined
-  /** The tool's parameter shape, as the server's own JSON Schema document. */
+  /** The tool's parameter shape, as a JSON Schema document with `type: "object"`. */
   readonly inputSchema: Record<string, unknown>
   /** The tool's structured result shape, when the server disclosed one. */
   readonly outputSchema: Record<string, unknown> | undefined
@@ -59,7 +59,8 @@ export interface McpClient {
   readonly tools: ReadonlyArray<ToolDescription>
   /**
    * Calls one catalogued tool. An unknown name fails with `tool_not_found`
-   * before a JSON-RPC frame is written.
+   * before a JSON-RPC frame is written. Declared structured output is checked
+   * against the supported output-schema subset before it is returned.
    */
   readonly callTool: (name: string, args: Record<string, unknown>) => Effect.Effect<ToolResult, McpError>
 }
@@ -93,8 +94,8 @@ export interface ConnectOptions {
   /** Maximum tools accepted across every catalog page. See {@link defaultMaxTools}. */
   readonly maxTools?: number | undefined
   /**
-   * Maximum UTF-8 bytes in a tool name. Names also cannot contain `/`, C0
-   * control characters, or U+007F. See {@link defaultMaxToolNameBytes}.
+   * Maximum UTF-8 bytes in a tool name. Names also cannot contain `/`, C0 or
+   * C1 control characters, or U+007F. See {@link defaultMaxToolNameBytes}.
    */
   readonly maxToolNameBytes?: number | undefined
   /** Maximum pages walked while fetching the catalog. See {@link defaultMaxCatalogPages}. */
@@ -130,21 +131,28 @@ export const ConnectOptionsSchema = Schema.Struct({
 })
 
 /**
- * Identity disclosed to every MCP server during initialization.
+ * Frozen identity disclosed to every MCP server during initialization.
  *
  * @category constants
  * @since 1.0.0-rc.0
  */
-export const clientInfo = { name: "smithers", version: "1.0.0-rc.0" }
+export const clientInfo: { readonly name: string; readonly version: string } = Object.freeze({
+  name: "smithers",
+  version: "1.0.0-rc.0"
+})
 
 /**
  * MCP revisions whose `tools/list` and `tools/call` shapes this client
- * decodes. The client always proposes `2025-06-18`.
+ * decodes. The frozen list always proposes `2025-06-18` first.
  *
  * @category constants
  * @since 1.0.0-rc.0
  */
-export const supportedProtocolVersions: ReadonlyArray<string> = ["2025-06-18", "2025-03-26", "2024-11-05"]
+export const supportedProtocolVersions: ReadonlyArray<string> = Object.freeze([
+  "2025-06-18",
+  "2025-03-26",
+  "2024-11-05"
+])
 
 /**
  * Default deadline for each MCP handshake request.
@@ -279,7 +287,7 @@ const nameEncoder = new TextEncoder()
 const hasForbiddenToolNameCharacter = (name: string): boolean => {
   for (let index = 0; index < name.length; index += 1) {
     const code = name.charCodeAt(index)
-    if (name[index] === "/" || code <= 0x1f || code === 0x7f) return true
+    if (name[index] === "/" || code <= 0x1f || code === 0x7f || (code >= 0x80 && code <= 0x9f)) return true
   }
   return false
 }
@@ -333,10 +341,7 @@ const asToolPage = (
         `MCP server "${server}" returned two tools named "${record.name}"`
       ))
     }
-    if (
-      !isRecord(record.inputSchema) ||
-      (Object.hasOwn(record.inputSchema, "type") && record.inputSchema.type !== "object")
-    ) {
+    if (!isRecord(record.inputSchema) || record.inputSchema.type !== "object") {
       return Result.fail(invalidResponse(
         server,
         `MCP server "${server}" returned a tool whose inputSchema is not a JSON Schema object of type "object"`
@@ -372,21 +377,128 @@ const asToolPage = (
   return Result.succeed({ nextCursor })
 }
 
-const asToolResult = (server: string, result: unknown): Result.Result<ToolResult, McpError> => {
+type JsonSchemaType = "null" | "boolean" | "object" | "array" | "number" | "string" | "integer"
+
+const jsonSchemaTypes: ReadonlySet<string> = new Set([
+  "null",
+  "boolean",
+  "object",
+  "array",
+  "number",
+  "string",
+  "integer"
+])
+
+const matchesJsonSchemaType = (value: unknown, type: JsonSchemaType): boolean => {
+  switch (type) {
+    case "null":
+      return value === null
+    case "boolean":
+      return typeof value === "boolean"
+    case "object":
+      return isRecord(value)
+    case "array":
+      return Array.isArray(value)
+    case "number":
+      return typeof value === "number"
+    case "string":
+      return typeof value === "string"
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value)
+  }
+}
+
+const jsonValuesEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true
+  if (Array.isArray(left)) {
+    return Array.isArray(right) && left.length === right.length &&
+      left.every((value, index) => jsonValuesEqual(value, right[index]))
+  }
+  if (!isRecord(left) || !isRecord(right)) return false
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => Object.hasOwn(right, key) && jsonValuesEqual(left[key], right[key]))
+}
+
+/**
+ * Validates the MCP structured-output subset this package can implement
+ * without another schema dependency: `type`, `required`, `properties`,
+ * single-schema `items`, and `enum`. Every other keyword is ignored because a
+ * partial validator must not turn an unsupported constraint into a false
+ * rejection.
+ */
+const validateStructuredContent = (
+  value: unknown,
+  schema: Record<string, unknown>,
+  path: string
+): JsonIssue | undefined => {
+  if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => jsonValuesEqual(candidate, value))) {
+    return { path, reason: "expected a declared enum value" }
+  }
+
+  const declaredTypes = Array.isArray(schema.type) ? schema.type : [schema.type]
+  const types = declaredTypes.filter((candidate): candidate is JsonSchemaType =>
+    typeof candidate === "string" && jsonSchemaTypes.has(candidate)
+  )
+  if (types.length > 0 && !types.some((type) => matchesJsonSchemaType(value, type))) {
+    return { path, reason: `expected ${types.join(" or ")}` }
+  }
+
+  if (isRecord(value)) {
+    if (Array.isArray(schema.required)) {
+      for (const key of schema.required) {
+        if (typeof key === "string" && !Object.hasOwn(value, key)) {
+          return { path: `${path}.${key}`, reason: "required property is missing" }
+        }
+      }
+    }
+    if (isRecord(schema.properties)) {
+      for (const [key, propertySchema] of Object.entries(schema.properties)) {
+        if (!Object.hasOwn(value, key) || !isRecord(propertySchema)) continue
+        const issue = validateStructuredContent(value[key], propertySchema, `${path}.${key}`)
+        if (issue !== undefined) return issue
+      }
+    }
+  }
+
+  if (Array.isArray(value) && isRecord(schema.items)) {
+    for (const [index, item] of value.entries()) {
+      const issue = validateStructuredContent(item, schema.items, `${path}[${index}]`)
+      if (issue !== undefined) return issue
+    }
+  }
+  return undefined
+}
+
+const asToolResult = (
+  server: string,
+  result: unknown,
+  outputSchema: Record<string, unknown> | undefined
+): Result.Result<ToolResult, McpError> => {
   if (!isRecord(result)) {
     return Result.fail(invalidResponse(
       server,
       `MCP server "${server}" returned a tools/call result that is not an object`
     ))
   }
-  if (!Array.isArray(result.content)) {
+  const hasContent = Object.hasOwn(result, "content")
+  const hasStructuredContent = Object.hasOwn(result, "structuredContent")
+  if (!hasContent && !hasStructuredContent) {
+    return Result.fail(invalidResponse(
+      server,
+      `MCP server "${server}" returned a tools/call result with no content array`
+    ))
+  }
+  if (hasContent && !Array.isArray(result.content)) {
     return Result.fail(invalidResponse(
       server,
       `MCP server "${server}" returned a tools/call result with no content array`
     ))
   }
   const content: Array<Record<string, unknown>> = []
-  for (const [index, block] of result.content.entries()) {
+  const blocks = hasContent ? result.content as Array<unknown> : []
+  for (const [index, block] of blocks.entries()) {
     if (!isRecord(block)) {
       return Result.fail(invalidResponse(
         server,
@@ -402,7 +514,7 @@ const asToolResult = (server: string, result: unknown): Result.Result<ToolResult
     ))
   }
   let structuredContent: Record<string, unknown> | undefined
-  if (Object.hasOwn(result, "structuredContent")) {
+  if (hasStructuredContent) {
     if (!isRecord(result.structuredContent)) {
       return Result.fail(invalidResponse(
         server,
@@ -410,6 +522,17 @@ const asToolResult = (server: string, result: unknown): Result.Result<ToolResult
       ))
     }
     structuredContent = result.structuredContent
+    if (outputSchema !== undefined) {
+      const issue = validateStructuredContent(structuredContent, outputSchema, "structuredContent")
+      if (issue !== undefined) {
+        return Result.fail(invalidResponse(
+          server,
+          `MCP server "${server}" returned structuredContent that its own outputSchema rejects at ${
+            boundedPath(issue.path)
+          }: ${issue.reason}`
+        ))
+      }
+    }
   }
   return Result.succeed({
     content,
@@ -431,6 +554,28 @@ type JsonIssue = {
 
 const jsonFailure = (path: string, reason: string): Result.Result<JsonValue, JsonIssue> => Result.fail({ path, reason })
 
+const reflect = <A>(thunk: () => A): Result.Result<A, string> => {
+  try {
+    return Result.succeed(thunk())
+  } catch {
+    return Result.fail("a property that threw when read")
+  }
+}
+
+const ownDescriptor = (
+  object: object,
+  key: PropertyKey,
+  path: string
+): Result.Result<PropertyDescriptor | undefined, JsonIssue> => {
+  const descriptor = reflect(() => Object.getOwnPropertyDescriptor(object, key))
+  return Result.isFailure(descriptor)
+    ? Result.fail({ path, reason: descriptor.failure })
+    : Result.succeed(descriptor.success)
+}
+
+const isAccessor = (descriptor: PropertyDescriptor): boolean =>
+  Object.hasOwn(descriptor, "get") || Object.hasOwn(descriptor, "set")
+
 const snapshotJson = (
   value: unknown,
   path: string,
@@ -447,11 +592,29 @@ const snapshotJson = (
   if (typeof value === "symbol") return jsonFailure(path, "a symbol")
 
   if (ancestors.has(value)) return jsonFailure(path, "a cyclic reference")
-  if (Array.isArray(value)) {
+  const array = reflect(() => Array.isArray(value))
+  if (Result.isFailure(array)) return jsonFailure(path, array.failure)
+  if (array.success) {
+    const length = reflect(() => (value as Array<unknown>).length)
+    if (Result.isFailure(length)) return jsonFailure(path, length.failure)
+    if (!Number.isSafeInteger(length.success) || length.success < 0) {
+      return jsonFailure(path, "a property that threw when read")
+    }
     ancestors.add(value)
     const copied: Array<JsonValue> = []
-    for (const [index, member] of value.entries()) {
-      const snapshot = snapshotJson(member, `${path}[${index}]`, ancestors)
+    for (let index = 0; index < length.success; index += 1) {
+      const memberPath = `${path}[${index}]`
+      const descriptor = ownDescriptor(value, String(index), memberPath)
+      if (Result.isFailure(descriptor)) {
+        ancestors.delete(value)
+        return Result.fail(descriptor.failure)
+      }
+      if (descriptor.success !== undefined && isAccessor(descriptor.success)) {
+        ancestors.delete(value)
+        return jsonFailure(memberPath, "an accessor property")
+      }
+      const member = descriptor.success === undefined ? undefined : descriptor.success.value
+      const snapshot = snapshotJson(member, memberPath, ancestors)
       if (Result.isFailure(snapshot)) {
         ancestors.delete(value)
         return snapshot
@@ -463,19 +626,36 @@ const snapshotJson = (
   }
 
   const object = value as Record<string, unknown>
-  const prototype = Object.getPrototypeOf(object)
-  if (prototype !== Object.prototype && prototype !== null) {
+  const prototype = reflect(() => Object.getPrototypeOf(object))
+  if (Result.isFailure(prototype)) return jsonFailure(path, prototype.failure)
+  if (prototype.success !== Object.prototype && prototype.success !== null) {
     return jsonFailure(path, "an object with a non-plain prototype")
   }
-  const symbol = Object.getOwnPropertySymbols(object).find((key) =>
-    Object.prototype.propertyIsEnumerable.call(object, key)
-  )
-  if (symbol !== undefined) return jsonFailure(path, "a symbol-keyed property")
+  const symbols = reflect(() => Object.getOwnPropertySymbols(object))
+  if (Result.isFailure(symbols)) return jsonFailure(path, symbols.failure)
+  for (const key of symbols.success) {
+    const enumerable = reflect(() => Object.prototype.propertyIsEnumerable.call(object, key))
+    if (Result.isFailure(enumerable)) return jsonFailure(path, enumerable.failure)
+    if (enumerable.success) return jsonFailure(path, "a symbol-keyed property")
+  }
+  const names = reflect(() => Object.getOwnPropertyNames(object))
+  if (Result.isFailure(names)) return jsonFailure(path, names.failure)
 
   ancestors.add(object)
   const copied: JsonObject = {}
-  for (const key of Object.keys(object)) {
-    const snapshot = snapshotJson(object[key], `${path}.${key}`, ancestors)
+  for (const key of names.success) {
+    const memberPath = `${path}.${key}`
+    const descriptor = ownDescriptor(object, key, memberPath)
+    if (Result.isFailure(descriptor)) {
+      ancestors.delete(object)
+      return Result.fail(descriptor.failure)
+    }
+    if (descriptor.success === undefined || descriptor.success.enumerable !== true) continue
+    if (isAccessor(descriptor.success)) {
+      ancestors.delete(object)
+      return jsonFailure(memberPath, "an accessor property")
+    }
+    const snapshot = snapshotJson(descriptor.success.value, memberPath, ancestors)
     if (Result.isFailure(snapshot)) {
       ancestors.delete(object)
       return snapshot
@@ -516,6 +696,9 @@ const snapshotArguments = (
  * The tool catalog is a snapshot: a server that changes its tools after
  * connecting (a `notifications/tools/list_changed` push) is not re-polled.
  * {@link McpFlows} rebuilds by reconnecting to refresh.
+ * Catalog input schemas must declare `type: "object"`. A later tool result may
+ * omit `content` when it carries `structuredContent`; a declared output schema
+ * is enforced for the documented keyword subset.
  *
  * @category constructors
  * @since 1.0.0-rc.0
@@ -590,7 +773,8 @@ export const connect = (
     }
 
     const callTool = (name: string, args: Record<string, unknown>): Effect.Effect<ToolResult, McpError> => {
-      if (!toolNames.has(name)) {
+      const tool = tools.find((candidate) => candidate.name === name)
+      if (tool === undefined) {
         return Effect.fail(
           new McpError({
             code: "tool_not_found",
@@ -603,7 +787,7 @@ export const connect = (
       if (Result.isFailure(snapshot)) return Effect.fail(snapshot.failure)
       return Effect.flatMap(
         transport.request("tools/call", { name, arguments: snapshot.success }),
-        (result) => Effect.fromResult(asToolResult(options.server, result))
+        (result) => Effect.fromResult(asToolResult(options.server, result, tool.outputSchema))
       )
     }
 

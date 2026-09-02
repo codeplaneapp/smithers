@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep a timed-out request's cancellation notification best-effort, dropping
+  it when the bounded outbound queue is full instead of blocking past the
+  deadline it reports.
+- Snapshot tool arguments through guarded property descriptors. Accessors are
+  never invoked, proxy reflection failures remain typed `McpError` failures,
+  and non-enumerable properties are omitted like `JSON.stringify`.
+- Publish the Markdown files under `docs/` that the package README links.
+- Require every tool `inputSchema` to declare `type: "object"`, and reject C1
+  control characters in tool names alongside C0 controls and U+007F.
+- Drop stdout that does not claim JSON-RPC as server log noise, while closing
+  the connection when a tagged envelope has the wrong version or is missing a
+  reply id.
+- Map a server's explicit `-32601` or `-32602` unknown-tool rejection to
+  `tool_not_found` while retaining `tool_failed` for ordinary tool failures.
+- Validate `structuredContent` against the tool's declared `outputSchema` for
+  the supported `type`, `required`, `properties`, `items`, and `enum` subset,
+  and accept structured-only results with an empty `content` array.
+- Freeze the exported client identity and supported protocol revision list so
+  consumers cannot mutate later initialization frames.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

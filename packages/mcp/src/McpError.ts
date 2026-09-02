@@ -34,7 +34,7 @@ export type Code = typeof Code.Type
  *
  * Handlers keep ordinary tool outcomes (the remote tool's own `isError`
  * result) in the success channel; this error is reserved for failures of the
- * MCP session itself — the server would not exist, the pipe closed, a
+ * MCP session itself: the server would not exist, the pipe closed, a
  * response could not be parsed.
  *
  * @category errors

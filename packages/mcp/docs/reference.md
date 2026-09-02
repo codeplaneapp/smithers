@@ -49,6 +49,26 @@ sees the real parameter shape. `include`, `exclude`, and `namePrefix` narrow and
 rename that projection before any descriptor exists, which is how a host keeps a
 fifty-tool server out of the model's context window.
 
+Every catalog entry must declare an `inputSchema` object whose `type` is
+exactly `"object"`. A missing type is rejected rather than disclosed to the
+model as a valid parameter document.
+
+## Structured output
+
+When a tool declares an `outputSchema` and returns `structuredContent`, the
+client validates the value before returning it. The dependency-free validator
+supports exactly `type` (all seven JSON Schema type names, including arrays of
+names), `required`, `properties`, single-schema `items`, and `enum`. Every
+unsupported keyword is ignored. A partial validator must not reject data for a
+constraint it does not implement. A violation is an `invalid_response` with a
+bounded path such as `structuredContent.answer`; validation never mutates or
+replaces the server's value.
+
+A result containing `structuredContent` but no `content` is valid and is
+returned with `content: []`. A result containing neither still fails with
+`invalid_response`. Without an `outputSchema`, arbitrary JSON-object
+`structuredContent` passes through unchanged.
+
 ## Declared authority
 
 `McpFlows.capabilities` is derived from `Capability.Action.literals`: one exact
@@ -83,9 +103,9 @@ frames it sends, the catalog it declares, and the flow names the model sees.
 | `maxCatalogPages`       | 32      | `tools/list` pages walked while following a cursor. |
 | `maxStderrBytes`        | 2048    | Child stderr retained as a diagnostic tail.         |
 
-A tool name may not contain `/`, a C0 control character, or U+007F, because the
-name reaches the model inside a flow name and the journal inside a declaration
-digest.
+A tool name may not contain `/`, a C0 control character, U+007F, or a C1 control
+character from U+0080 through U+009F, because the name reaches the model inside
+a flow name and the journal inside a declaration digest.
 
 ## Failures
 
@@ -93,20 +113,33 @@ An ordinary tool outcome stays in the success channel: a remote tool that
 reports failure returns `isError: true` with its own content blocks, and the
 flow succeeds. `McpError` is reserved for failures of the MCP session itself.
 
-| Code                | Meaning                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `spawn_failed`      | The server process would not start.                                                     |
-| `connection_closed` | The process exited or a pipe closed while a request was outstanding.                    |
-| `timeout`           | The server did not answer within the deadline for that method.                          |
-| `protocol_error`    | Negotiation failed, an envelope was malformed, or an option was invalid.                |
-| `tool_not_found`    | The catalog has no such tool, or `include` named one the server does not offer.         |
-| `tool_failed`       | The server rejected a `tools/call` with a JSON-RPC error.                               |
-| `invalid_response`  | A well-formed reply carried a `tools/list` or `tools/call` payload this client rejects. |
+| Code                | Meaning                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------ |
+| `spawn_failed`      | The server process would not start.                                                              |
+| `connection_closed` | The process exited or a pipe closed while a request was outstanding.                             |
+| `timeout`           | The server did not answer within the deadline for that method.                                   |
+| `protocol_error`    | Negotiation failed, an envelope was malformed, or an option was invalid.                         |
+| `tool_not_found`    | The catalog lacks a tool, `include` names a missing tool, or the server rejects an unknown tool. |
+| `tool_failed`       | The server rejected a `tools/call` with a JSON-RPC error.                                        |
+| `invalid_response`  | A well-formed reply carried a `tools/list` or `tools/call` payload this client rejects.          |
 
 Every message names the server. A JSON-RPC error message carries the numeric
 code the server sent. Nothing retains the request, the arguments, or the raw
 frame: an argument that is not JSON is reported by a bounded property path, and
 a failed startup is explained by a bounded tail of the child's stderr.
+
+For a remote `tools/call`, error code `-32601` or `-32602` maps to
+`tool_not_found` only when the server's message explicitly combines the word
+`tool` with `unknown`, `unrecognized`, `no such`, or `not found`. Other tool
+errors remain `tool_failed`.
+
+Servers commonly write logs to stdout, so a blank line, invalid JSON, a JSON
+scalar, array, or `null`, and a JSON object with no own `jsonrpc` property are
+dropped as noise. An object that does claim JSON-RPC is protocol traffic: the
+version must be exactly `"2.0"`, and a non-notification envelope must be a valid
+reply with an id. A malformed tagged envelope closes the connection with
+`protocol_error` without attaching the raw frame. Server notifications and
+well-formed replies for unknown ids remain droppable.
 
 ## Scope
 
@@ -119,8 +152,9 @@ a failed startup is explained by a bounded tail of the child's stderr.
   (`notifications/tools/list_changed`) is not re-polled; reconnect to refresh.
 - A timed-out or interrupted `tools/call` sends one `notifications/cancelled`
   for its request id, because every MCP flow is declared `irreversible` and an
-  abandoned in-flight mutation is a durability problem. `initialize` is never
-  cancelled.
+  abandoned in-flight mutation is a durability problem. This notification is
+  best-effort: a full outbound queue drops it rather than delaying the deadline
+  it reports. `initialize` is never cancelled.
 - Resources, prompts, sampling, and roots are not implemented. Add them to
   `McpClient` when a flow adapter needs them, not speculatively.
 
@@ -140,7 +174,7 @@ a failed startup is explained by a bounded tail of the child's stderr.
 
 A minimal MCP client covering the `initialize` handshake, `tools/list`, and `tools/call`, over `StdioTransport`.
 
-This is deliberately not a general MCP SDK. Smithers has exactly one consumer of an MCP session — `McpFlows`, which needs a tool catalog and a way to invoke one entry from it — so the client exposes only that. Resources, prompts, sampling, and roots are not wired up; add them here when a flow adapter needs them, not speculatively.
+This is deliberately not a general MCP SDK. Smithers has exactly one consumer of an MCP session: `McpFlows`, which needs a tool catalog and a way to invoke one entry from it, so the client exposes only that. Resources, prompts, sampling, and roots are not wired up; add them here when a flow adapter needs them, not speculatively.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -149,7 +183,7 @@ This is deliberately not a general MCP SDK. Smithers has exactly one consumer of
 | `McpClient` | interface | models | A live MCP session, holding the tool catalog fetched at connect time and a way to call one of its entries. |
 | `ConnectOptions` | interface | models | Options accepted by `connect`. |
 | `ConnectOptionsSchema` | const | schemas | Authoritative decoder for a persisted MCP server entry. |
-| `clientInfo` | const | constants | Identity disclosed to every MCP server during initialization. |
+| `clientInfo` | const | constants | Frozen identity disclosed to every MCP server during initialization. |
 | `supportedProtocolVersions` | const | constants | MCP revisions whose `tools/list` and `tools/call` shapes this client decodes. |
 | `defaultHandshakeTimeoutMs` | const | constants | Default deadline for each MCP handshake request. |
 | `defaultRequestTimeoutMs` | const | constants | Default deadline for each tool request. |
@@ -179,7 +213,7 @@ The single typed error returned by the MCP client and flow adapter.
 
 Projects a connected MCP server's tools as an ordinary `Source`.
 
-This is the whole adapter: `@smthrs/harness/FlowBinding`'s own module doc already names the target directly — "a standard filesystem flow, a memory flow, an incoming MCP tool, a durable child agent" are all just a flow declaration plus the code that runs it. Nothing about the harness, the registry, or the cell loop needs to know a given flow's implementation happens to proxy a remote MCP `tools/call`; a cell that reads a file and a cell that calls an MCP tool run the identical two lines.
+This is the whole adapter: `@smthrs/harness/FlowBinding`'s own module doc already names the target directly: "a standard filesystem flow, a memory flow, an incoming MCP tool, a durable child agent" are all just a flow declaration plus the code that runs it. Nothing about the harness, the registry, or the cell loop needs to know a given flow's implementation happens to proxy a remote MCP `tools/call`; a cell that reads a file and a cell that calls an MCP tool run the identical two lines.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |

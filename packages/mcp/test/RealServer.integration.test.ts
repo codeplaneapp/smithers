@@ -9,7 +9,7 @@
  * @since 0.1.0
  */
 import { NodeServices } from "@effect/platform-node"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -56,6 +56,34 @@ const addTool = {
   description: "Adds two numbers",
   inputSchema: { type: "object", properties: { a: {}, b: {} } }
 }
+if (["structured-valid", "structured-invalid-type", "structured-missing-required", "structured-only"].includes(mode)) {
+  addTool.outputSchema = {
+    type: "object",
+    properties: { answer: { type: "number" } },
+    required: ["answer"]
+  }
+}
+if (mode === "structured-enum-invalid") {
+  addTool.outputSchema = {
+    type: "object",
+    properties: { answer: { enum: [5, 6] } },
+    required: ["answer"]
+  }
+}
+if (mode === "structured-array-invalid") {
+  addTool.outputSchema = {
+    type: "object",
+    properties: { values: { type: "array", items: { type: "number" } } },
+    required: ["values"]
+  }
+}
+if (mode === "structured-unsupported-keyword") {
+  addTool.outputSchema = {
+    type: "object",
+    properties: { answer: { type: "string", minLength: 10 } },
+    required: ["answer"]
+  }
+}
 const errorTool = {
   name: "error",
   description: 42,
@@ -80,9 +108,16 @@ reader?.on("line", (line) => {
     }
     if (mode === "malformed-frames") {
       process.stdout.write("\nnot json\n42\n")
-      send({ jsonrpc: "1.0", id: request.id, result: {} })
       send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" })
       send({ jsonrpc: "2.0", id: 999, result: {} })
+    }
+    if (mode === "wrong-jsonrpc-version") {
+      send({ jsonrpc: "1.0", id: request.id, result: {} })
+      return
+    }
+    if (mode === "reply-without-id") {
+      send({ jsonrpc: "2.0", result: {} })
+      return
     }
     if (mode === "malformed-initialize-result") {
       succeed(request, null)
@@ -222,6 +257,18 @@ reader?.on("line", (line) => {
       fail(request, -32_000, "remote exploded")
       return
     }
+    if (mode === "call-invalid-params-unknown-tool") {
+      fail(request, -32_602, "Unknown tool: add")
+      return
+    }
+    if (mode === "call-invalid-params") {
+      fail(request, -32_602, "Tool arguments are invalid")
+      return
+    }
+    if (mode === "call-method-not-found-unknown-tool") {
+      fail(request, -32_601, "Tool not found: add")
+      return
+    }
     if (mode === "call-rpc-error-string-data") {
       fail(request, -32_000, "remote exploded", "context")
       return
@@ -298,6 +345,46 @@ reader?.on("line", (line) => {
       })
       return
     }
+    if (mode === "structured-valid") {
+      succeed(request, {
+        content: [{ type: "text", text: "5" }],
+        structuredContent: { answer: 5 },
+        isError: false
+      })
+      return
+    }
+    if (mode === "structured-invalid-type") {
+      succeed(request, { content: [], structuredContent: { answer: "five" }, isError: false })
+      return
+    }
+    if (mode === "structured-missing-required") {
+      succeed(request, { content: [], structuredContent: {}, isError: false })
+      return
+    }
+    if (mode === "structured-enum-invalid") {
+      succeed(request, { content: [], structuredContent: { answer: 7 }, isError: false })
+      return
+    }
+    if (mode === "structured-array-invalid") {
+      succeed(request, { content: [], structuredContent: { values: [1, "two"] }, isError: false })
+      return
+    }
+    if (mode === "structured-unsupported-keyword") {
+      succeed(request, { content: [], structuredContent: { answer: "x" }, isError: false })
+      return
+    }
+    if (mode === "structured-no-output-schema") {
+      succeed(request, { content: [], structuredContent: { arbitrary: ["accepted"] }, isError: false })
+      return
+    }
+    if (mode === "structured-only") {
+      succeed(request, { structuredContent: { answer: 5 }, isError: false })
+      return
+    }
+    if (mode === "structured-neither") {
+      succeed(request, { isError: false })
+      return
+    }
     if (request.params.name === "error") {
       succeed(request, { content: [], isError: true })
       return
@@ -358,6 +445,25 @@ describe("McpClient against a real MCP server", () => {
     ])
   })
 
+  it("closes when a JSON-RPC-tagged reply carries the wrong version", async () => {
+    const error = await execute(Effect.scoped(Effect.flip(connectNode("wrong-jsonrpc-version"))))
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "wrong-jsonrpc-version",
+      message:
+        "MCP server \"wrong-jsonrpc-version\" sent a malformed JSON-RPC reply: a JSON-RPC message must carry jsonrpc \"2.0\""
+    })
+  })
+
+  it("closes when a JSON-RPC reply carries no id", async () => {
+    const error = await execute(Effect.scoped(Effect.flip(connectNode("reply-without-id"))))
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "reply-without-id",
+      message: "MCP server \"reply-without-id\" sent a malformed JSON-RPC reply: a reply carried no id"
+    })
+  })
+
   it("calls tools and preserves ordinary MCP isError outcomes", async () => {
     const results = await execute(Effect.scoped(Effect.gen(function*() {
       const client = yield* connectNode()
@@ -382,6 +488,32 @@ describe("McpClient against a real MCP server", () => {
       code: "tool_failed",
       message: "MCP server \"call-rpc-error\" failed tools/call (-32000): remote exploded",
       server: "call-rpc-error"
+    })
+  })
+
+  it.each([
+    ["call-invalid-params-unknown-tool", -32_602],
+    ["call-method-not-found-unknown-tool", -32_601]
+  ])("maps a remote unknown-tool rejection in %s mode to tool_not_found", async (mode, code) => {
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode(mode)
+      return yield* Effect.flip(client.callTool("add", {}))
+    })))
+    expect(error).toMatchObject({ code: "tool_not_found", server: mode })
+    if (mode === "call-invalid-params-unknown-tool") {
+      expect(error.message).toBe(`MCP server "${mode}" failed tools/call (${code}): Unknown tool: add`)
+    }
+  })
+
+  it("keeps an ordinary invalid-arguments rejection as tool_failed", async () => {
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("call-invalid-params")
+      return yield* Effect.flip(client.callTool("add", {}))
+    })))
+    expect(error).toMatchObject({
+      code: "tool_failed",
+      server: "call-invalid-params",
+      message: "MCP server \"call-invalid-params\" failed tools/call (-32602): Tool arguments are invalid"
     })
   })
 
@@ -555,6 +687,117 @@ describe("McpClient against a real MCP server", () => {
       return yield* client.callTool("add", {})
     })))
     expect(result.structuredContent).toEqual({ sum: 5 })
+  })
+
+  it("validates and preserves structured output through the McpFlows result schema", async () => {
+    const { client, result } = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-valid")
+      const result = yield* client.callTool("add", {})
+      return { client, result }
+    })))
+
+    expect(client.tools[0]?.outputSchema).toEqual({
+      type: "object",
+      properties: { answer: { type: "number" } },
+      required: ["answer"]
+    })
+    expect(Schema.decodeUnknownSync(McpFlows.Result)(result)).toEqual({
+      content: [{ type: "text", text: "5" }],
+      isError: false,
+      structuredContent: { answer: 5 }
+    })
+  })
+
+  it("rejects structured output at the exact property whose type is invalid", async () => {
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-invalid-type")
+      return yield* Effect.flip(client.callTool("add", {}))
+    })))
+
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      server: "structured-invalid-type",
+      message:
+        "MCP server \"structured-invalid-type\" returned structuredContent that its own outputSchema rejects at structuredContent.answer: expected number"
+    })
+  })
+
+  it("rejects structured output that omits a required property", async () => {
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-missing-required")
+      return yield* Effect.flip(client.callTool("add", {}))
+    })))
+
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      message:
+        "MCP server \"structured-missing-required\" returned structuredContent that its own outputSchema rejects at structuredContent.answer: required property is missing"
+    })
+  })
+
+  it("rejects structured output outside a declared enum", async () => {
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-enum-invalid")
+      return yield* Effect.flip(client.callTool("add", {}))
+    })))
+
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      message:
+        "MCP server \"structured-enum-invalid\" returned structuredContent that its own outputSchema rejects at structuredContent.answer: expected a declared enum value"
+    })
+  })
+
+  it("names the invalid array index in structured output", async () => {
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-array-invalid")
+      return yield* Effect.flip(client.callTool("add", {}))
+    })))
+
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      message:
+        "MCP server \"structured-array-invalid\" returned structuredContent that its own outputSchema rejects at structuredContent.values[1]: expected number"
+    })
+  })
+
+  it("ignores unsupported outputSchema keywords", async () => {
+    const result = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-unsupported-keyword")
+      return yield* client.callTool("add", {})
+    })))
+
+    expect(result.structuredContent).toEqual({ answer: "x" })
+  })
+
+  it("accepts arbitrary structured output when the tool declared no outputSchema", async () => {
+    const result = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-no-output-schema")
+      return yield* client.callTool("add", {})
+    })))
+
+    expect(result.structuredContent).toEqual({ arbitrary: ["accepted"] })
+  })
+
+  it("accepts a structured-only tools/call result with empty content", async () => {
+    const result = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-only")
+      return yield* client.callTool("add", {})
+    })))
+
+    expect(result).toEqual({ content: [], isError: false, structuredContent: { answer: 5 } })
+  })
+
+  it("still rejects a tools/call result with neither content nor structuredContent", async () => {
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("structured-neither")
+      return yield* Effect.flip(client.callTool("add", {}))
+    })))
+
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      message: "MCP server \"structured-neither\" returned a tools/call result with no content array"
+    })
   })
 
   it.each([

@@ -4,13 +4,13 @@
  * This module owns exactly the connection lifecycle and request/reply
  * correlation an MCP session needs: spawn once, write frames in, read frames
  * out, match replies to the request that asked for them. It knows nothing
- * about `initialize`, `tools/list`, or `tools/call` — {@link McpClient} is
+ * about `initialize`, `tools/list`, or `tools/call`. {@link McpClient} is
  * the layer that speaks MCP; this one only speaks JSON-RPC-over-lines.
  *
- * Server-initiated notifications (`isReply` false) are received and dropped.
- * A future caller that needs `notifications/*` (for example a progress
- * stream) is the reason to add a subscription surface here rather than
- * threading one more parameter through every constructor now.
+ * Server-initiated notifications are received and dropped. A future caller
+ * that needs `notifications/*` (for example a progress stream) is the reason
+ * to add a subscription surface here rather than threading one more parameter
+ * through every constructor now.
  *
  * @since 1.0.0-rc.0
  */
@@ -141,8 +141,15 @@ const replyError = (
 ): McpError => {
   const scalar = ["string", "number", "boolean"].includes(typeof reply.data) ? String(reply.data) : undefined
   const suffix = scalar !== undefined && scalar.length <= 120 ? ` [data: ${scalar}]` : ""
+  // Servers do not standardize unknown-tool prose, so this heuristic stays
+  // limited to the two MCP error codes and an explicit tool plus absence phrase.
+  const remoteUnknownTool = (reply.code === -32_601 || reply.code === -32_602) &&
+    /\btool\b/i.test(reply.message) &&
+    /\b(?:unknown|unrecognized|no such|not found)\b/i.test(reply.message)
   return new McpError({
-    code: method === "tools/call" ? "tool_failed" : "protocol_error",
+    code: method === "tools/call"
+      ? remoteUnknownTool ? "tool_not_found" : "tool_failed"
+      : "protocol_error",
     message: `MCP server "${server}" failed ${method} (${reply.code}): ${reply.message}${suffix}`,
     server
   })
@@ -189,6 +196,10 @@ const frames = (
  * forked into the calling scope, and closing that scope tears the process
  * down with it. Every request pending when the connection closes fails with
  * `connection_closed` instead of hanging forever.
+ *
+ * Stdout that does not claim JSON-RPC is ignored because servers commonly log
+ * there. Once an object carries its own `jsonrpc` property, a malformed version
+ * or reply closes the connection with `protocol_error`.
  *
  * @category constructors
  * @since 1.0.0-rc.0
@@ -295,15 +306,15 @@ export const connect = (
     )
 
     // Reader: one line of stdout is one JSON-RPC message. A validated reply
-    // resolves its pending request by id; malformed replies close the whole
-    // connection, while non-replies and unknown ids are dropped.
+    // resolves its pending request by id; malformed tagged messages close the
+    // whole connection, while stdout noise, notifications, and unknown ids drop.
     yield* frames(options.server, maxFrameBytes, handle.stdout).pipe(
       Stream.runForEach((line) =>
         Effect.gen(function*() {
           const message = Rpc.parse(line)
           if (message === undefined) return
-          if (!Rpc.isReply(message)) return
-          const reply = Rpc.replyOf(message)
+          const reply = Rpc.classify(message)
+          if (reply._tag === "Notification") return
           if (reply._tag === "Malformed") {
             return yield* Effect.fail(
               protocol(
@@ -413,7 +424,11 @@ export const connect = (
               jsonrpc: "2.0",
               method: "notifications/cancelled",
               params: { requestId: id, reason: cancellationReason }
-            }).pipe(Effect.flatMap(enqueue), Effect.ignore)
+            }).pipe(
+              // Best-effort cancellation cannot delay the deadline it reports.
+              Effect.flatMap((frame) => Effect.sync(() => Queue.offerUnsafe(outbound, frame))),
+              Effect.ignore
+            )
           })),
           Effect.timeoutOrElse({
             duration: timeoutMs,

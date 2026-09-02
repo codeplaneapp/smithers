@@ -30,40 +30,67 @@ describe("Rpc.parse", () => {
     expect(Rpc.parse("not json")).toBeUndefined()
   })
 
-  it("returns undefined for JSON that is not a 2.0 envelope", () => {
+  it("returns undefined for a JSON object that does not claim to be JSON-RPC", () => {
     expect(Rpc.parse(`{"hello":"world"}`)).toBeUndefined()
+  })
+
+  it("returns undefined for JSON that is not an object", () => {
     expect(Rpc.parse(`"a plain string"`)).toBeUndefined()
     expect(Rpc.parse(`42`)).toBeUndefined()
+    expect(Rpc.parse(`null`)).toBeUndefined()
+    expect(Rpc.parse(`[]`)).toBeUndefined()
+  })
+
+  it("preserves an object that claims the wrong JSON-RPC version for validation", () => {
+    expect(Rpc.parse(`{"jsonrpc":"1.0","id":1,"result":null}`)).toEqual({
+      jsonrpc: "1.0",
+      id: 1,
+      result: null
+    })
   })
 })
 
-describe("Rpc.isReply", () => {
-  it("is true for a message with a numeric id and no method", () => {
-    expect(Rpc.isReply({ jsonrpc: "2.0", id: 1, result: {} })).toBe(true)
+describe("Rpc.classify", () => {
+  it("rejects an object carrying the wrong JSON-RPC version", () => {
+    const message = Rpc.parse(`{"jsonrpc":"1.0","id":1,"result":null}`)!
+    expect(Rpc.classify(message)).toEqual({
+      _tag: "Malformed",
+      reason: "a JSON-RPC message must carry jsonrpc \"2.0\""
+    })
   })
 
-  it("is true for a message with a string id and no method", () => {
-    expect(Rpc.isReply({ jsonrpc: "2.0", id: "1", result: {} })).toBe(true)
+  it("drops a server-initiated notification", () => {
+    const message = Rpc.parse(`{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}`)!
+    expect(Rpc.classify(message)).toEqual({ _tag: "Notification" })
   })
 
-  it("is false for a server-initiated notification", () => {
-    expect(Rpc.isReply({ jsonrpc: "2.0", method: "notifications/tools/list_changed" })).toBe(false)
+  it("treats a method-bearing envelope as a notification even when it also has an id", () => {
+    const message = Rpc.parse(`{"jsonrpc":"2.0","id":1,"method":"notifications/progress"}`)!
+    expect(Rpc.classify(message)).toEqual({ _tag: "Notification" })
   })
 
-  it("is false for a message with neither id nor method", () => {
-    expect(Rpc.isReply({ jsonrpc: "2.0" })).toBe(false)
+  it("rejects a 2.0 envelope carrying neither an id nor a method", () => {
+    const message = Rpc.parse(`{"jsonrpc":"2.0","result":null}`)!
+    expect(Rpc.classify(message)).toEqual({
+      _tag: "Malformed",
+      reason: "a reply carried no id"
+    })
   })
 
-  it("is false for a message with an id and a method", () => {
-    expect(Rpc.isReply({ jsonrpc: "2.0", id: 1, method: "notifications/progress" })).toBe(false)
-  })
-
-  it("is false for a message whose id is neither a number nor a string", () => {
-    expect(Rpc.isReply({ jsonrpc: "2.0", id: true as unknown as number })).toBe(false)
+  it("validates a 2.0 envelope with no method as a reply", () => {
+    const message = Rpc.parse(`{"jsonrpc":"2.0","id":1,"result":"done"}`)!
+    expect(Rpc.classify(message)).toEqual({ _tag: "Result", id: 1, result: "done" })
   })
 })
 
 describe("Rpc.replyOf", () => {
+  it("rejects a reply carrying no id", () => {
+    expect(Rpc.replyOf({ jsonrpc: "2.0", result: null } as unknown as Parameters<typeof Rpc.replyOf>[0])).toEqual({
+      _tag: "Malformed",
+      reason: "a reply carried no id"
+    })
+  })
+
   it("accepts a numeric id and an explicit null result", () => {
     expect(Rpc.replyOf({ jsonrpc: "2.0", id: 1, result: null })).toEqual({
       _tag: "Result",

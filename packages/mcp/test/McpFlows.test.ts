@@ -1,22 +1,31 @@
 import * as Capability from "@smthrs/capability/Capability"
 import * as Cell from "@smthrs/harness/Cell"
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import { Deferred, Effect, Fiber, Layer, Option, Queue, Ref, Schema, Sink, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Queue, Ref, Schema, Sink, Stream } from "effect"
 import type { Scope } from "effect"
 import * as PlatformError from "effect/PlatformError"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
 import * as Rpc from "../src/internal/Rpc.ts"
 import * as StdioTransport from "../src/internal/StdioTransport.ts"
 import * as McpClient from "../src/McpClient.ts"
+import { McpError } from "../src/McpError.ts"
 import * as McpFlows from "../src/McpFlows.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
 
 const waitFor = (assertion: () => void): Effect.Effect<void> =>
   Effect.promise(() => vi.waitFor(assertion, { timeout: 1_000 }))
+
+const typedFailure = (exit: Exit.Exit<unknown, unknown>): unknown => {
+  if (!Exit.isFailure(exit)) throw new Error("expected the effect to fail")
+  expect(exit.cause.reasons.some(Cause.isDieReason)).toBe(false)
+  const failure = exit.cause.reasons.find(Cause.isFailReason)
+  if (failure === undefined) throw new Error("expected a typed failure")
+  return failure.error
+}
 
 type HandleOptions = Parameters<typeof makeHandle>[0]
 
@@ -115,6 +124,23 @@ const respondToEcho = (request: Rpc.Outbound): unknown => {
   return undefined
 }
 
+const respondWithStructured = (
+  outputSchema: Record<string, unknown>,
+  structuredContent: Record<string, unknown>
+) =>
+(request: Rpc.Outbound): unknown => {
+  if (request.method === "initialize") {
+    return { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: {} }
+  }
+  if (request.method === "tools/list") {
+    return { tools: [{ ...TOOLS[0], outputSchema }] }
+  }
+  if (request.method === "tools/call") {
+    return { content: [], structuredContent, isError: false }
+  }
+  return undefined
+}
+
 const withFakeServer = <A, E>(
   respond: (request: Rpc.Outbound) => unknown,
   effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner | Scope.Scope>,
@@ -154,6 +180,37 @@ describe("McpClient.connect", () => {
         clientInfo: { name: "smithers", version: "1.0.0-rc.0" }
       }
     })
+  })
+
+  it("freezes the exported wire identity constants", () => {
+    expect(Object.isFrozen(McpClient.clientInfo)).toBe(true)
+    expect(Object.isFrozen(McpClient.supportedProtocolVersions)).toBe(true)
+
+    expect(() => {
+      ;(McpClient.clientInfo as { name: string }).name = "mutated"
+    }).toThrow(TypeError)
+    expect(() => {
+      ;(McpClient.supportedProtocolVersions as Array<string>)[0] = "mutated"
+    }).toThrow(TypeError)
+
+    expect(McpClient.clientInfo.name).toBe("smithers")
+    expect(McpClient.supportedProtocolVersions[0]).toBe("2025-06-18")
+  })
+
+  it("publishes the documentation linked from the package README", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8")
+    ) as { readonly files: ReadonlyArray<string> }
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8")
+
+    // Asserting the manifest entry alone would pass while the README pointed at
+    // a file the tarball still dropped, so resolve each link the README makes.
+    const linked = [...readme.matchAll(/\]\(\.\/(docs\/[\w.-]+\.md)\)/g)].map(([, path]) => path!)
+    expect(linked.length).toBeGreaterThan(0)
+    for (const path of linked) {
+      expect(existsSync(new URL(`../${path}`, import.meta.url))).toBe(true)
+      expect(manifest.files.some((pattern) => pattern === path || pattern === "docs/*.md")).toBe(true)
+    }
   })
 
   it("completes the handshake and fetches the tool catalog", async () => {
@@ -264,33 +321,43 @@ describe("McpClient.connect", () => {
       message: "MCP server \"catalog\" returned a tool whose inputSchema is not a JSON Schema object of type \"object\""
     },
     {
+      label: "missing inputSchema type",
+      tool: { name: "bad", inputSchema: {} },
+      message: "MCP server \"catalog\" returned a tool whose inputSchema is not a JSON Schema object of type \"object\""
+    },
+    {
       label: "null outputSchema",
-      tool: { name: "bad", inputSchema: {}, outputSchema: null },
+      tool: { name: "bad", inputSchema: { type: "object" }, outputSchema: null },
       message: "MCP server \"catalog\" returned a tool whose outputSchema is not a JSON object"
     },
     {
       label: "array outputSchema",
-      tool: { name: "bad", inputSchema: {}, outputSchema: [] },
+      tool: { name: "bad", inputSchema: { type: "object" }, outputSchema: [] },
       message: "MCP server \"catalog\" returned a tool whose outputSchema is not a JSON object"
     },
     {
       label: "scalar outputSchema",
-      tool: { name: "bad", inputSchema: {}, outputSchema: true },
+      tool: { name: "bad", inputSchema: { type: "object" }, outputSchema: true },
       message: "MCP server \"catalog\" returned a tool whose outputSchema is not a JSON object"
     },
     {
       label: "slash in the name",
-      tool: { name: "bad/name", inputSchema: {} },
+      tool: { name: "bad/name", inputSchema: { type: "object" } },
       message: "MCP server \"catalog\" returned a tool name containing a control character or \"/\""
     },
     {
       label: "C0 control in the name",
-      tool: { name: "bad\nname", inputSchema: {} },
+      tool: { name: "bad\nname", inputSchema: { type: "object" } },
       message: "MCP server \"catalog\" returned a tool name containing a control character or \"/\""
     },
     {
       label: "DEL in the name",
-      tool: { name: "bad\u007fname", inputSchema: {} },
+      tool: { name: "bad\u007fname", inputSchema: { type: "object" } },
+      message: "MCP server \"catalog\" returned a tool name containing a control character or \"/\""
+    },
+    {
+      label: "C1 control in the name",
+      tool: { name: "bad\u0085name", inputSchema: { type: "object" } },
       message: "MCP server \"catalog\" returned a tool name containing a control character or \"/\""
     }
   ])("rejects a catalog tool with $label", async ({ message, tool }) => {
@@ -315,7 +382,12 @@ describe("McpClient.connect", () => {
           return { protocolVersion: "2025-06-18", capabilities: { tools: {} } }
         }
         if (request.method === "tools/list") {
-          return { tools: [{ name: "éé", inputSchema: {} }, { name: "okay", inputSchema: {} }] }
+          return {
+            tools: [
+              { name: "éé", inputSchema: { type: "object" } },
+              { name: "okay", inputSchema: { type: "object" } }
+            ]
+          }
         }
         return undefined
       },
@@ -335,12 +407,15 @@ describe("McpClient.connect", () => {
   it.each([
     {
       options: { maxTools: 1 },
-      tools: [{ name: "one", inputSchema: {} }, { name: "two", inputSchema: {} }],
+      tools: [
+        { name: "one", inputSchema: { type: "object" } },
+        { name: "two", inputSchema: { type: "object" } }
+      ],
       message: "MCP server \"catalog-limit\" returned more than 1 tools"
     },
     {
       options: { maxToolNameBytes: 3 },
-      tools: [{ name: "éé", inputSchema: {} }],
+      tools: [{ name: "éé", inputSchema: { type: "object" } }],
       message: "MCP server \"catalog-limit\" returned a tool name longer than 3 bytes"
     }
   ])("rejects a catalog one past $options", async ({ message, options, tools }) => {
@@ -533,6 +608,316 @@ describe("McpClient.connect", () => {
     })
   })
 
+  it("rejects an accessor argument without invoking it or writing tools/call", async () => {
+    const methods: Array<string> = []
+    let invoked = false
+    const args = Object.defineProperty({}, "lazy", {
+      enumerable: true,
+      get() {
+        invoked = true
+        return "invoked"
+      }
+    })
+    const exit = await withFakeServer(
+      (request) => {
+        methods.push(request.method)
+        return respondToEcho(request)
+      },
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.exit(client.callTool("add", args))
+      })
+    )
+
+    const error = typedFailure(exit)
+    expect(error).toBeInstanceOf(McpError)
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      message:
+        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.lazy: an accessor property"
+    })
+    expect(invoked).toBe(false)
+    expect(methods).toEqual(["initialize", "notifications/initialized", "tools/list"])
+  })
+
+  it("turns a throwing accessor into an McpError instead of a defect", async () => {
+    let invoked = false
+    const args = Object.defineProperty({}, "lazy", {
+      enumerable: true,
+      get() {
+        invoked = true
+        throw new Error("must not run")
+      }
+    })
+    const exit = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.exit(client.callTool("add", args))
+      })
+    )
+
+    expect(typedFailure(exit)).toBeInstanceOf(McpError)
+    expect(invoked).toBe(false)
+  })
+
+  it("turns a throwing proxy get trap into an McpError instead of a defect", async () => {
+    const value = new Proxy([1], {
+      get() {
+        throw new Error("get trap")
+      }
+    })
+    const exit = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.exit(client.callTool("add", { value }))
+      })
+    )
+
+    const error = typedFailure(exit)
+    expect(error).toBeInstanceOf(McpError)
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      message:
+        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value: a property that threw when read"
+    })
+  })
+
+  it("turns a throwing proxy reflection trap into an McpError instead of a defect", async () => {
+    const value = new Proxy({ okay: true }, {
+      ownKeys() {
+        throw new Error("ownKeys trap")
+      }
+    })
+    const exit = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.exit(client.callTool("add", { value }))
+      })
+    )
+
+    expect(typedFailure(exit)).toBeInstanceOf(McpError)
+  })
+
+  it("rejects a toJSON method instead of executing JSON customization", async () => {
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", { toJSON: () => ({ hidden: true }) }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      message: "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.toJSON: a function"
+    })
+  })
+
+  it("omits non-enumerable own arguments from the wire frame", async () => {
+    let sent: unknown
+    const hiddenSymbol = Symbol("hidden")
+    const target = Object.defineProperties({ visible: true }, {
+      hidden: {
+        enumerable: false,
+        value: "omit"
+      },
+      [hiddenSymbol]: {
+        enumerable: false,
+        value: "omit"
+      }
+    })
+    const args = new Proxy(target, {
+      ownKeys(value) {
+        return [...Reflect.ownKeys(value), "missing-descriptor"]
+      },
+      getOwnPropertyDescriptor(value, key) {
+        return key === "missing-descriptor" ? undefined : Reflect.getOwnPropertyDescriptor(value, key)
+      }
+    })
+    await withFakeServer(
+      (request) => {
+        if (request.method === "tools/call") {
+          sent = (request.params as { readonly arguments: unknown }).arguments
+          return { content: [], isError: false }
+        }
+        return respondToEcho(request)
+      },
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        yield* client.callTool("add", args)
+      })
+    )
+
+    expect(sent).toEqual({ visible: true })
+  })
+
+  it.each([
+    {
+      label: "revoked proxy",
+      make: () => {
+        const revocable = Proxy.revocable({}, {})
+        revocable.revoke()
+        return revocable.proxy
+      }
+    },
+    {
+      label: "throwing getPrototypeOf trap",
+      make: () =>
+        new Proxy({}, {
+          getPrototypeOf() {
+            throw new Error("getPrototypeOf trap")
+          }
+        })
+    },
+    {
+      label: "throwing propertyIsEnumerable reflection",
+      make: () => {
+        const key = Symbol("key")
+        return new Proxy({ [key]: true }, {
+          getOwnPropertyDescriptor(target, property) {
+            if (typeof property === "symbol") throw new Error("descriptor trap")
+            return Reflect.getOwnPropertyDescriptor(target, property)
+          }
+        })
+      }
+    },
+    {
+      label: "throwing getOwnPropertyNames reflection",
+      make: () => {
+        let calls = 0
+        return new Proxy({}, {
+          ownKeys() {
+            calls += 1
+            if (calls === 1) return []
+            throw new Error("second ownKeys trap")
+          }
+        })
+      }
+    },
+    {
+      label: "throwing object descriptor reflection",
+      make: () =>
+        new Proxy({ value: true }, {
+          getOwnPropertyDescriptor() {
+            throw new Error("descriptor trap")
+          }
+        })
+    },
+    {
+      label: "throwing array descriptor reflection",
+      make: () =>
+        new Proxy([1], {
+          get(target, key, receiver) {
+            return Reflect.get(target, key, receiver)
+          },
+          getOwnPropertyDescriptor() {
+            throw new Error("descriptor trap")
+          }
+        })
+    }
+  ])("turns a $label into an McpError", async ({ make }) => {
+    const exit = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.exit(client.callTool("add", { value: make() }))
+      })
+    )
+
+    const error = typedFailure(exit)
+    expect(error).toBeInstanceOf(McpError)
+    expect(error).toMatchObject({ code: "protocol_error" })
+  })
+
+  it("rejects an invalid proxied array length without iterating it", async () => {
+    const value = new Proxy([1], {
+      get(target, key, receiver) {
+        return key === "length" ? "invalid" : Reflect.get(target, key, receiver)
+      }
+    })
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", { value }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      message:
+        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value: a property that threw when read"
+    })
+  })
+
+  it("rejects an accessor array element without invoking it", async () => {
+    let invoked = false
+    const value: Array<unknown> = []
+    Object.defineProperty(value, "0", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        invoked = true
+        return "must not run"
+      }
+    })
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", { value }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      message:
+        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value[0]: an accessor property"
+    })
+    expect(invoked).toBe(false)
+  })
+
+  it("keeps sparse array holes on the typed undefined rejection path", async () => {
+    const value = new Array<unknown>(1)
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", { value }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      message: "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value[0]: undefined"
+    })
+  })
+
+  it("reports the bounded path to a nested accessor", async () => {
+    const nested = Object.defineProperty({}, "inner", {
+      enumerable: true,
+      get() {
+        return "must not run"
+      }
+    })
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", { outer: nested }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      message:
+        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.outer.inner: an accessor property"
+    })
+  })
+
   it("snapshots valid JSON arguments before the returned effect runs", async () => {
     let sent: unknown
     const arguments_: { a: number; nested: Array<unknown> } = {
@@ -562,6 +947,93 @@ describe("McpClient.connect", () => {
       a: 2,
       nested: [null, true, "text", { value: 3 }, { okay: true }]
     })
+  })
+
+  it("supports every documented outputSchema type and type arrays", async () => {
+    const structuredContent = {
+      nullValue: null,
+      booleanValue: true,
+      objectValue: {},
+      arrayValue: [1],
+      numberValue: 1.5,
+      integerValue: 2,
+      stringValue: "accepted",
+      ignoredSchema: "accepted"
+    }
+    const result = await withFakeServer(
+      respondWithStructured({
+        type: "object",
+        required: [42],
+        properties: {
+          nullValue: { type: "null" },
+          booleanValue: { type: "boolean" },
+          objectValue: { type: "object" },
+          arrayValue: { type: "array" },
+          numberValue: { type: "number" },
+          integerValue: { type: "integer" },
+          stringValue: { type: ["unsupported", 42, "null", "string"] },
+          optionalMissing: { type: "string" },
+          ignoredSchema: true
+        }
+      }, structuredContent),
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "schema-types", command: "mcp", args: [] })
+        return yield* client.callTool("add", {})
+      })
+    )
+
+    expect(result.structuredContent).toEqual(structuredContent)
+  })
+
+  it.each([1.5, "not-an-integer"])("rejects %j against the integer outputSchema type", async (value) => {
+    const error = await withFakeServer(
+      respondWithStructured({
+        type: "object",
+        properties: { value: { type: "integer" } }
+      }, { value }),
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "schema-integer", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", {}))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      message:
+        "MCP server \"schema-integer\" returned structuredContent that its own outputSchema rejects at structuredContent.value: expected integer"
+    })
+  })
+
+  it("compares structured enum values by JSON value", async () => {
+    const structuredContent = {
+      scalar: "ok",
+      array: [1, 2],
+      object: { target: { nested: [1, 2] } }
+    }
+    const result = await withFakeServer(
+      respondWithStructured({
+        type: "object",
+        properties: {
+          scalar: { enum: ["ok"] },
+          array: { enum: [[0], [1, 2]] },
+          object: {
+            enum: [
+              ["not-an-object"],
+              { extra: true, other: true },
+              { wrong: { nested: [1, 2] } },
+              { target: { nested: [1, 3] } },
+              { target: { nested: [1, 2] } }
+            ]
+          }
+        }
+      }, structuredContent),
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "schema-enum", command: "mcp", args: [] })
+        return yield* client.callTool("add", {})
+      })
+    )
+
+    expect(result.structuredContent).toEqual(structuredContent)
   })
 })
 
@@ -657,6 +1129,44 @@ describe("StdioTransport limits and terminal state", () => {
       message: "MCP notification timeout must be a positive integer"
     })
     expect(frames).toEqual([])
+  })
+
+  it("does not let a full cancellation queue delay the request deadline", async () => {
+    const outcome = await execute(Effect.scoped(Effect.gen(function*() {
+      const writerStarted = yield* Deferred.make<void>()
+      const spawner = fakeProcess({
+        pid: ProcessId(8),
+        exitCode: Effect.as(Effect.sleep("6 seconds"), ExitCode(0)),
+        stdin: Sink.forEach((_chunk: Uint8Array) =>
+          Deferred.succeed(writerStarted, undefined).pipe(Effect.andThen(Effect.never))
+        )
+      })
+      const transport = yield* provideSpawner(
+        StdioTransport.connect({
+          server: "full-cancellation-queue",
+          command: "mcp",
+          args: [],
+          queueCapacity: 1,
+          requestTimeoutMs: 300
+        }),
+        spawner
+      )
+      const started = Date.now()
+      const request = yield* Effect.forkChild(Effect.flip(transport.request("tools/call")), {
+        startImmediately: true
+      })
+      yield* Deferred.await(writerStarted)
+      yield* transport.notify("fill-outbound-queue")
+      const error = yield* Fiber.join(request)
+      return { elapsed: Date.now() - started, error }
+    })))
+
+    expect(outcome.error).toMatchObject({
+      code: "timeout",
+      server: "full-cancellation-queue",
+      message: "MCP server \"full-cancellation-queue\" did not answer tools/call within 300ms"
+    })
+    expect(outcome.elapsed).toBeLessThan(5_000)
   })
 
   it("cancels exactly once when a tools/call request times out", async () => {
@@ -1072,9 +1582,9 @@ describe("McpFlows.mcp", () => {
   const projectionClient: McpClient.McpClient = {
     server: "catalog",
     tools: [
-      { name: "first", description: undefined, inputSchema: {}, outputSchema: undefined },
-      { name: "second", description: undefined, inputSchema: {}, outputSchema: undefined },
-      { name: "third", description: undefined, inputSchema: {}, outputSchema: undefined }
+      { name: "first", description: undefined, inputSchema: { type: "object" }, outputSchema: undefined },
+      { name: "second", description: undefined, inputSchema: { type: "object" }, outputSchema: undefined },
+      { name: "third", description: undefined, inputSchema: { type: "object" }, outputSchema: undefined }
     ],
     callTool: () => Effect.succeed({ content: [], isError: false, structuredContent: undefined })
   }
@@ -1222,7 +1732,7 @@ describe("McpFlows.mcp", () => {
   it("passes structuredContent through the binding output schema", async () => {
     const source = McpFlows.mcp({
       server: "structured",
-      tools: [{ name: "run", description: undefined, inputSchema: {}, outputSchema: undefined }],
+      tools: [{ name: "run", description: undefined, inputSchema: { type: "object" }, outputSchema: undefined }],
       callTool: () =>
         Effect.succeed({
           content: [{ type: "text", text: "done" }],

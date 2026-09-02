@@ -2,7 +2,7 @@
  * Projects a connected MCP server's tools as an ordinary {@link FlowBinding.Source}.
  *
  * This is the whole adapter: `@smthrs/harness/FlowBinding`'s own module doc
- * already names the target directly — "a standard filesystem flow, a memory
+ * already names the target directly: "a standard filesystem flow, a memory
  * flow, an incoming MCP tool, a durable child agent" are all just a flow
  * declaration plus the code that runs it. Nothing about the harness, the
  * registry, or the cell loop needs to know a given flow's implementation
@@ -23,7 +23,7 @@ import { McpError } from "./McpError.ts"
 /**
  * Decoded input accepted by every MCP tool flow, which is whatever the remote
  * tool's own JSON Schema describes. The registry still discloses the real parameter
- * shape — see {@link toolBinding} — this is only the runtime decode, and it
+ * shape, as shown by {@link toolBinding}. This is only the runtime decode, and it
  * is permissive because the server, not this adapter, owns validation.
  *
  * @category schemas

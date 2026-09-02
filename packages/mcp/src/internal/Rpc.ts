@@ -23,17 +23,17 @@ export interface Outbound {
 }
 
 /**
- * A JSON-RPC message the server sends back: a reply to one of our requests
- * (carries `id`, and either `result` or `error`) or a server-initiated
- * notification (carries `method`, never `id`).
+ * A JSON object from server stdout that claims JSON-RPC by carrying its own
+ * `jsonrpc` property. Validation happens after parsing so an incorrect version
+ * cannot be mistaken for ordinary stdout noise.
  *
  * @category models
  * @since 1.0.0-rc.0
  */
 export interface Inbound {
-  readonly jsonrpc: "2.0"
-  readonly id?: number | string | undefined
-  readonly method?: string | undefined
+  readonly jsonrpc: unknown
+  readonly id?: unknown
+  readonly method?: unknown
   readonly params?: unknown
   readonly result?: unknown
   readonly error?: unknown
@@ -61,6 +61,16 @@ export type Reply = {
   readonly reason: string
 }
 
+/**
+ * The transport-relevant classification of one parsed JSON-RPC object.
+ * Notifications need no correlation; every other tagged object is either a
+ * validated reply or a malformed envelope that must close the connection.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type Classification = { readonly _tag: "Notification" } | Reply
+
 const encoder = new TextEncoder()
 
 /**
@@ -72,9 +82,11 @@ const encoder = new TextEncoder()
 export const encode = (message: Outbound): Uint8Array => encoder.encode(`${JSON.stringify(message)}\n`)
 
 /**
- * Parses one line of server output. A blank line, a line that is not JSON, or
- * a JSON value that is not a `"2.0"`-tagged object is not a protocol error —
- * `undefined` means "nothing to correlate", and the caller drops it.
+ * Parses one line of server output. A blank line, invalid JSON, a non-object,
+ * or an object with no own `jsonrpc` property returns `undefined`. MCP servers
+ * commonly log to stdout, so output that does not claim to be JSON-RPC is
+ * noise rather than a protocol violation. Tagged objects are preserved for
+ * {@link classify}, including objects that claim the wrong version.
  *
  * @category conversions
  * @since 1.0.0-rc.0
@@ -88,38 +100,31 @@ export const parse = (line: string): Inbound | undefined => {
   } catch {
     return undefined
   }
-  if (typeof value !== "object" || value === null) return undefined
-  if ((value as { readonly jsonrpc?: unknown }).jsonrpc !== "2.0") return undefined
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
+  if (!Object.hasOwn(value, "jsonrpc")) return undefined
   return value as Inbound
 }
-
-/**
- * Whether an inbound message is a reply (as opposed to a server-initiated
- * notification): it carries a numeric or string `id` and no `method`.
- *
- * @category guards
- * @since 1.0.0-rc.0
- */
-export const isReply = (message: Inbound): message is Inbound & { readonly id: number | string } =>
-  (typeof message.id === "number" || typeof message.id === "string") && message.method === undefined
 
 const malformed = (reason: string): Reply => ({ _tag: "Malformed", reason })
 
 /**
- * Validates and normalizes a parsed inbound reply.
+ * Validates and normalizes a parsed inbound object as a reply.
  *
  * Digit-string ids are accepted only in their canonical ASCII decimal form,
  * then converted back to the safe integer id used by the pending-request map.
- * Exactly one own `result` or `error` property must be present.
+ * A reply must carry an own id and exactly one own `result` or `error`
+ * property.
  *
  * @category conversions
  * @since 1.0.0-rc.0
  */
-export const replyOf = (message: Inbound & { readonly id: number | string }): Reply => {
-  const id = typeof message.id === "number"
-    ? message.id
-    : /^(0|[1-9][0-9]*)$/.test(message.id)
-    ? Number(message.id)
+export const replyOf = (message: Inbound): Reply => {
+  if (!Object.hasOwn(message, "id")) return malformed("a reply carried no id")
+  const rawId = message.id
+  const id = typeof rawId === "number"
+    ? rawId
+    : typeof rawId === "string" && /^(0|[1-9][0-9]*)$/.test(rawId)
+    ? Number(rawId)
     : Number.NaN
   if (!Number.isSafeInteger(id)) return malformed("a reply id must be a JSON-RPC integer")
 
@@ -145,4 +150,20 @@ export const replyOf = (message: Inbound & { readonly id: number | string }): Re
     message: record.message,
     data: record.data
   }
+}
+
+/**
+ * Classifies a parsed JSON-RPC object for the stdio reader. A wrong version is
+ * malformed, an own `method` property marks a server notification, and every
+ * remaining object must satisfy {@link replyOf}.
+ *
+ * @category conversions
+ * @since 1.0.0-rc.0
+ */
+export const classify = (message: Inbound): Classification => {
+  if (message.jsonrpc !== "2.0") {
+    return malformed("a JSON-RPC message must carry jsonrpc \"2.0\"")
+  }
+  if (Object.hasOwn(message, "method")) return { _tag: "Notification" }
+  return replyOf(message)
 }

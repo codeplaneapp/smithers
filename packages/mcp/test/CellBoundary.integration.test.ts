@@ -206,7 +206,7 @@ describe("a cell calling a real MCP tool", () => {
  *
  * A test that re-derives the rule passes whatever the harness does, which is
  * the one thing a boundary test must not do. These two cases run
- * `CellTurn` — the code that owns the decision — over the real catalog
+ * `CellTurn`, the code that owns the decision, over the real catalog
  * descriptor, under the two envelopes that must disagree.
  */
 describe("a cell turn reaching an MCP tool", () => {

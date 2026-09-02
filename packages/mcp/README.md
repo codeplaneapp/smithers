@@ -32,6 +32,10 @@ Each tool becomes a flow named `mcp/<server>/<tool>`. The connection's lifetime
 is the scope's lifetime, and `env` is merged into the inherited child
 environment rather than replacing it.
 
+Catalog tools must declare `inputSchema.type: "object"`. Structured-only tool
+results are accepted with `content: []`, and declared `outputSchema` documents
+are enforced for the supported keyword subset described in the reference.
+
 ## Documentation
 
 [`docs/reference.md`](./docs/reference.md) is the generated reference: the
