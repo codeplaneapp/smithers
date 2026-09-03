@@ -327,6 +327,45 @@ describe("checkGenerator", () => {
     )
   })
 
+  it.skipIf(process.platform === "win32")(
+    "reads a checked-in output that is neither a file nor a directory without opening it",
+    async () => {
+      // A FIFO with no writer blocks any reader forever. The snapshot classifies
+      // it by its lstat and never opens it, so a generator that leaves it alone
+      // passes the check and the pipe is still there afterwards.
+      await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("note.txt", "aside\\n")\n`)
+      execFileSync("mkfifo", [NodePath.join(root, "out.txt")])
+
+      await expect(check(["out.txt"])).resolves.toBeUndefined()
+      expect((await Fs.lstat(NodePath.join(root, "out.txt"))).isFIFO()).toBe(true)
+    }
+  )
+
+  it("reports a directory output whose permissions the generator changed", async () => {
+    await generator(`import { chmodSync } from "node:fs"\nchmodSync("out", 0o755)\n`)
+    await Fs.mkdir(NodePath.join(root, "out"), { mode: 0o700 })
+
+    expect((await failure(["out"])).message).toBe("out changed and the change is not readable as text")
+    expect(((await Fs.stat(NodePath.join(root, "out"))).mode & 0o7777).toString(8)).toBe("700")
+  })
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "surfaces a parent directory it cannot read instead of treating the output as absent",
+    async () => {
+      // Only ENOENT means absent. A parent the process may not search is a
+      // real failure, and a generator check that read it as "nothing there"
+      // would rewrite the output on the next lint.
+      await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("note.txt", "aside\\n")\n`)
+      await Fs.mkdir(NodePath.join(root, "locked"), { mode: 0o700 })
+      await Fs.chmod(NodePath.join(root, "locked"), 0o000)
+      try {
+        expect((await failure(["locked/out.txt"])).text).toMatch(/EACCES|permission denied/)
+      } finally {
+        await Fs.chmod(NodePath.join(root, "locked"), 0o700)
+      }
+    }
+  )
+
   it("fails and removes a declared output the checkout does not carry", async () => {
     await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "generated\\n")\n`)
 
