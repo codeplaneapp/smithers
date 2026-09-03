@@ -1,8 +1,0 @@
-{
-  "name": "@smithers/codex-plugin-tests",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "test": "bun test"
-  }
-}
