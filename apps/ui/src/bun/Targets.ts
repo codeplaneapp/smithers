@@ -36,10 +36,10 @@ export const resolveBuildCli = (
   if (explicit !== undefined && explicit !== "") return resolve(explicit)
   const packaged = resolve(fromDir, "..", "build-cli", "launcher.mjs")
   if (exists(packaged)) return packaged
-  const fallback = resolve(fromDir, "..", "..", "..", "..", "packages", "build-cli", "src", "main.js")
+  const fallback = resolve(fromDir, "..", "..", "..", "..", "packages", "smithers", "build", "build-cli", "src", "main.js")
   let dir = resolve(fromDir)
   while (true) {
-    const candidate = resolve(dir, "packages", "build-cli", "src", "main.js")
+    const candidate = resolve(dir, "packages", "smithers", "build", "build-cli", "src", "main.js")
     if (exists(candidate)) return candidate
     const parent = dirname(dir)
     if (parent === dir) return fallback

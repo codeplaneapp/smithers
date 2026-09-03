@@ -53,7 +53,7 @@ afterEach(async () => {
 
 test("a whole-graph failure answers the named label's own subgraph instead, without caching it", async () => {
   const base = { repoId: "r", repo, node, cli, sandboxHost: noSandbox }
-  await expect(queryTargetGraph(base)).rejects.toThrow(/graph_failed: declared input is not a regular file: packages\/jj\/wasm/)
+  await expect(queryTargetGraph(base)).rejects.toThrow(/graph_failed: declared input is not a regular file: packages\/smithers\/flows\/jj\/wasm/)
 
   const scoped = await queryTargetGraph({ ...base, labels: ["//src:check"], plan: true })
   expect(scoped.nodes.map((entry) => entry.label).sort()).toEqual(["//src:check", "//src:lib"])

@@ -85,6 +85,36 @@ const RESOLVES_ELSEWHERE: ReadonlyArray<Excuse> = [
     literal: "flow.ghost",
     file: "src/launch-checklist/Probes.test.ts",
     reason: "a flow name this unit test invents to exercise the unnamed-affordance rule, never sent to the app"
+  },
+  {
+    literal: "launch-",
+    file: "e2e/packaged/PackagedApp.ts",
+    reason: "the screenshot filename this harness numbers its own launches with, written under test-results, not an id the app renders"
+  },
+  {
+    literal: "launch-checklist-",
+    file: "src/launch-checklist/Rows.ts",
+    reason: "the idempotency key the checklist mints for its own billing grant, read by the billing upstream and never by a card"
+  },
+  {
+    literal: "launch-checklist-d2-",
+    file: "src/launch-checklist/Rows.ts",
+    reason: "a run id the checklist coins for its own /api/agent/turn probe; the server echoes it back and no card is ever built from it"
+  },
+  {
+    literal: "launch-checklist-d4-",
+    file: "src/launch-checklist/Rows.ts",
+    reason: "a run id the checklist coins for its own zero-balance turn probe; the server echoes it back and no card is ever built from it"
+  },
+  {
+    literal: "data-char",
+    file: "e2e/playwright/code-intel.spec.ts",
+    reason: "stamped per token by the pierre renderer inside @smthrs/ui's code view, not by app JSX, so the derivation cannot see it; src/mainview/cards/FileCards.test.tsx pins the same attribute against the real renderer"
+  },
+  {
+    literal: "data-selected-line",
+    file: "e2e/playwright/code-intel.spec.ts",
+    reason: "stamped on the anchored line by the pierre renderer inside @smthrs/ui's code view, not by app JSX; src/mainview/cards/FileCards.test.tsx pins the same attribute against the real renderer"
   }
 ]
 

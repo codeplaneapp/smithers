@@ -29,6 +29,19 @@ interface ProbeOptions {
 
 const cache = new Map<string, Promise<NativeProbeReport>>()
 
+/*
+ * What one probe may take.
+ *
+ * A probe boots the REAL local origin in a subprocess: a few seconds idle, more
+ * on a loaded machine. Under bun's 5s default that lands as a timeout — the
+ * runner kills the test, the subprocess it was waiting on keeps its port, and
+ * the report says "timed out" instead of what the scenario asserts. Every test
+ * below carries this budget instead, and `spawnProbe` kills its own child on
+ * the same deadline, so a slow machine costs one named failure and never a
+ * stray process.
+ */
+const PROBE_BUDGET_MS = 60_000
+
 const spawnProbe = async (options: ProbeOptions): Promise<NativeProbeReport> => {
   const child = Bun.spawn([process.execPath, DRIVER], {
     cwd: UI_DIR,
@@ -43,11 +56,12 @@ const spawnProbe = async (options: ProbeOptions): Promise<NativeProbeReport> => 
     stdout: "pipe",
     stderr: "pipe"
   })
+  const overdue = setTimeout(() => child.kill("SIGKILL"), PROBE_BUDGET_MS)
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
     new Response(child.stderr).text()
-  ])
+  ]).finally(() => clearTimeout(overdue))
   const line = stdout.split("\n").find((candidate) => candidate.startsWith(PROBE_MARKER))
   if (line === undefined) {
     throw new Error(
@@ -117,7 +131,7 @@ describe("the native main process starts the local origin", () => {
     expect(report.origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
     expect(report.health).toMatchObject({ ok: true, sandbox: { platform: process.platform } })
     expect(report.logs).toContain("Smithers app started!")
-  })
+  }, PROBE_BUDGET_MS)
 
   test("the window loads the local origin, never views:// and never a dev server", async () => {
     const report = await probe({})
@@ -128,7 +142,7 @@ describe("the native main process starts the local origin", () => {
     // The seams bind to the window: an unbound rpc is a window whose
     // repository picker and sign-in door are dead.
     expect(report.windows[0]?.rpcBound).toBe(true)
-  })
+  }, PROBE_BUDGET_MS)
 
   test("SMITHERS_LOCAL_HEADLESS=1 serves without a window", async () => {
     const report = await probe({ env: { SMITHERS_LOCAL_HEADLESS: "1" } })
@@ -136,7 +150,7 @@ describe("the native main process starts the local origin", () => {
     expect(report.origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
     expect(report.health).toMatchObject({ ok: true })
     expect(report.logs).toContain("SMITHERS_LOCAL_HEADLESS=1: serving without a window")
-  })
+  }, PROBE_BUDGET_MS)
 })
 
 describe("the native RPC surface", () => {
@@ -144,7 +158,7 @@ describe("the native RPC surface", () => {
     const report = await probe({})
     expect([...report.requestNames].sort()).toEqual(["openExternal", "pickLocalRepository"])
     expect(report.messageNames).toEqual([])
-  })
+  }, PROBE_BUDGET_MS)
 
   test("the repository picker asks the host for a directory, not a file", async () => {
     const report = await probe({
@@ -158,7 +172,7 @@ describe("the native RPC surface", () => {
     expect(report.dialogOptions).toEqual([
       { canChooseFiles: false, canChooseDirectory: true, allowsMultipleSelection: false }
     ])
-  })
+  }, PROBE_BUDGET_MS)
 
   test("a dismissed directory dialog answers cancelled", async () => {
     for (const dialogPaths of [[], [""], ["   "]]) {
@@ -173,7 +187,7 @@ describe("the native RPC surface", () => {
       expect(report.results.pick).toEqual({ status: "cancelled" })
       expect(report.dialogOptions).toHaveLength(1)
     }
-  })
+  }, PROBE_BUDGET_MS)
 
   test("a chosen directory is inspected for real and reports its head and branch", async () => {
     const repository = await makeRepository()
@@ -193,7 +207,7 @@ describe("the native RPC surface", () => {
     const picked = report.results.pick as { repository: { head: string; authorizationId: string } }
     expect(picked.repository.head).toMatch(/^[0-9a-f]{40}$/)
     expect(picked.repository.authorizationId).toMatch(/^[A-Za-z0-9_-]{43}$/)
-  })
+  }, PROBE_BUDGET_MS)
 
   test("openExternal refuses every scheme but http and https", async () => {
     const refused = ["file:///etc/passwd", "smithers://x", "javascript:alert(1)", "not a url", ""]
@@ -210,7 +224,7 @@ describe("the native RPC surface", () => {
       expect(report.results[`refuse-${index}`]).toEqual({ opened: false })
     }
     expect(report.openedExternally).toEqual([])
-  })
+  }, PROBE_BUDGET_MS)
 
   test("openExternal hands a web URL to the host browser and reports what it answered", async () => {
     const report = await probe({
@@ -232,7 +246,7 @@ describe("the native RPC surface", () => {
       "https://smithers.sh/sign-in?next=%2Fapp",
       "http://localhost:5173/"
     ])
-  })
+  }, PROBE_BUDGET_MS)
 
   test("openExternal reports a refusal by the host as not opened", async () => {
     const report = await probe({
@@ -244,5 +258,5 @@ describe("the native RPC surface", () => {
       }
     })
     expect(report.results.denied).toEqual({ opened: false })
-  })
+  }, PROBE_BUDGET_MS)
 })

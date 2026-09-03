@@ -76,6 +76,22 @@ const FLOW_CALLS = new Set(["runCommand", "runCommandArgs", "runFlow", "find"])
 const AFFIX_CALLS = new Set(["startsWith", "endsWith"])
 
 /**
+ * Whether an id prefix is one the app builds by composing two of its own.
+ *
+ * The DOM ids the suites select on are composed: `ChatCards.tsx` renders every
+ * card as ``data-testid={`card-${card.id}`}``, so a card whose id is built from
+ * the `file-` head reaches the DOM as `card-file-…`. The derivation reads one
+ * template head per literal, so it holds `card-` and `file-` and never their
+ * product; a suite naming `card-file-` is naming an id the app really builds.
+ * Both halves still have to be heads the app owns, so a coined prefix such as
+ * `canary-file-` is no more excused than it was.
+ */
+const composedPrefix = (value: string, prefixes: ReadonlySet<string>): boolean =>
+  [...prefixes].some((head) =>
+    value.length > head.length && value.startsWith(head) && prefixes.has(value.slice(head.length))
+  )
+
+/**
  * How many of a card's other fields an object literal must carry before its
  * `kind` is read as a card kind.
  *
@@ -182,7 +198,10 @@ export const violationsOf = (literal: ExtractedLiteral, vocabularies: Vocabulari
   const affix = (literal.leadingArgumentOf !== undefined && AFFIX_CALLS.has(literal.leadingArgumentOf))
     || (literal.form === "template-head"
       && segmentsOf(literal.value).some((segment) => vocabularies.idVocabularySegments.has(segment)))
-  if (affix && ID_PREFIX.test(literal.value) && !vocabularies.cardIdPrefixes.has(literal.value)) {
+  if (
+    affix && ID_PREFIX.test(literal.value) && !vocabularies.cardIdPrefixes.has(literal.value)
+    && !composedPrefix(literal.value, vocabularies.cardIdPrefixes)
+  ) {
     found.push({
       ...at,
       rule: "card-id-prefix",
