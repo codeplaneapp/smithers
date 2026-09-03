@@ -9,7 +9,7 @@ Status: revision 3 (2026-07-18) — rev 1 reviewed by sol (NEEDS-REWORK, all
 findings folded into rev 2); rev 2 + the landed Phase 0 implementation
 reviewed by a Fable subagent (APPROVE-WITH-CHANGES, all findings folded in
 here). Phase 0 is implemented; Phase 1 not yet started. Per-finding
-dispositions for both reviews are in the "Review response" sections at the end.
+outcomes for both reviews are in the "Review response" sections at the end.
 Owner: will@tevm.tech
 
 ## Verdict

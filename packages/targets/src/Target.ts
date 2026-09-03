@@ -932,8 +932,8 @@ const sourceSite = (): SourceSite | undefined => {
     } catch {
       continue
     }
-    // legacy declaration is the legacy authoring surface; PACKAGE.ts and WORKSPACE.ts
-    // are the routed one. The site is diagnostic context only — build-system
+    // PACKAGE.ts and WORKSPACE.ts are the routed declarations. The site is
+    // diagnostic context only — build-system
     // labels come exclusively from the package index, never from this stack.
     const basename = NodePath.basename(file)
     if (basename !== "PACKAGE.ts" && basename !== "WORKSPACE.ts") continue

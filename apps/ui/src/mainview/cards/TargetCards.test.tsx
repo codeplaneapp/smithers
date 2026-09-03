@@ -118,7 +118,7 @@ describe("trusted target cards", () => {
               kinds: ["lint"],
               private: false,
               plan: { mode: "execute", cacheable: true, key: "abcdef0123456789abcdef", argv: ["eslint", "."] },
-              source: { file: "src/BUILD.ts", line: 12 }
+              source: { file: "src/PACKAGE.ts", line: 12 }
             },
             deps: ["//src:build"],
             rdeps: []
@@ -130,7 +130,7 @@ describe("trusted target cards", () => {
     const drawer = host.querySelector('[data-testid="targets-drawer-//src:lint"]')
     expect(drawer).not.toBeNull()
     expect(host.querySelector('tr[data-target-row="//src:lint"]')?.getAttribute("data-selected")).toBe("true")
-    expect(drawer?.textContent).toContain("src/BUILD.ts:12")
+    expect(drawer?.textContent).toContain("src/PACKAGE.ts:12")
     expect(drawer?.textContent).toContain("cacheable")
     expect(drawer?.textContent).toContain("1: //src:build")
     expect(drawer?.textContent).toContain("eslint .")
@@ -151,7 +151,7 @@ describe("trusted target cards", () => {
       "target.select"
     ])
     expect(calls[0]?.[1]).toBe("force run-9")
-    expect(calls[1]?.[1]).toBe("force src/BUILD.ts:12")
+    expect(calls[1]?.[1]).toBe("force src/PACKAGE.ts:12")
     expect(calls[4]?.[1]).toBe("force")
   })
 

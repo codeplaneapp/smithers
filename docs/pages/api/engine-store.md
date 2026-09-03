@@ -523,7 +523,7 @@ shapes need:
 | `WorkspaceSandbox.Workspace` | interface + const | services | A filesystem and effect-outbox view scoped to one workspace transaction. |
 | `WorkspaceSandbox.Execution` | interface | models | The declaration and body submitted to a workspace sandbox. |
 | `WorkspaceSandbox.DeclarationViolation` | interface | models | Why observed execution contradicted its declaration. |
-| `WorkspaceSandbox.CacheDisposition` | type | models | Memo disposition of an execution. |
+| `WorkspaceSandbox.CacheOutcome` | type | models | Memo outcome of an execution. |
 | `WorkspaceSandbox.Accepted` | interface | models | An execution whose observations matched its declaration. |
 | `WorkspaceSandbox.Invalidated` | interface | models | An execution discarded because its observations contradicted its declaration. |
 | `WorkspaceSandbox.ExecutionResult` | type | models | The result of validating one speculative execution. |

@@ -67,7 +67,7 @@ export const main = async (host: Host): Promise<void> => {
     // show the supervisor's backstop an unowned signal within this very
     // delivery, which is the bug a persistent registration exists to avoid.
     // Deferring to a microtask leaves the next signal to the default
-    // disposition, so a second interrupt still stops the process at once.
+    // behavior, so a second interrupt still stops the process at once.
     queueMicrotask(() => host.removeListener(signal, listener))
   }
   const onSigint = (): void => interrupt("SIGINT", onSigint)

@@ -186,9 +186,9 @@ export type ApprovalPayload = typeof ApprovalPayload.Type
 /**
  * What `smithers plan` reports for one node before anything runs.
  *
- * The two dispositions fall out of step keys for free — a key either hits the
+ * The two outcomes fall out of step keys for free — a key either hits the
  * step cache or it does not — which is why they are reported here rather than
- * discovered during execution. The third disposition, `release`, belongs to
+ * discovered during execution. The third outcome, `release`, belongs to
  * orphan reconciliation and is deliberately not part of a plan card.
  *
  * @since 0.1.0

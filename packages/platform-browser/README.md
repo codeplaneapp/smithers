@@ -74,7 +74,7 @@ Each of these is documented on the module and covered by a test:
 | Feature                        | Behaviour                                                                                                                                                                                       |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Streaming output               | Buffered. `stdout`/`stderr` emit one chunk each after the command finishes.                                                                                                                     |
-| `all`                          | `stdout` then `stderr`, not a live interleaving, and it inherits both dispositions.                                                                                                             |
+| `all`                          | `stdout` then `stderr`, not a live interleaving, and it inherits both stream options.                                                                                                           |
 | `stdin`                        | A failing `Sink`; a command supplying a stdin `Stream` is rejected at spawn. just-bash accepts a string `stdin`; this adapter runs it once with captured output and has nowhere to stream into. |
 | Interruption, timeouts, `kill` | Abort the interpreter through its `AbortSignal`. Every observable on the handle then reports a `PlatformError` naming the abort rather than interrupting the caller's fiber.                    |
 | `killSignal`                   | Ignored: there is no process to signal in a tab.                                                                                                                                                |
@@ -91,7 +91,7 @@ Because the permit outlives the promise, an interpreter that ignores its
 abandoned with the mount half-written. `JustBashLike.exec` states that
 requirement.
 
-The `stdout`/`stderr` dispositions are _not_ in that table: `"inherit"` and
+The `stdout`/`stderr` options are _not_ in that table: `"inherit"` and
 `"ignore"` yield an empty stream and a `Sink` is transduced through, exactly as
 under `NodeChildProcessSpawner`. They are simply applied to captured text
 rather than to a live readable.

@@ -5,7 +5,7 @@
  *
  * Names outside {@link names} are not read by rc.0. In particular the 0.x
  * `SMITHERS_HOME`, `SMITHERS_TOKEN`, and `SMITHERS_WORKFLOW_*` families are
- * gone: `~/.smithers` is not a runtime input (rc-contract section 6), and
+ * gone: `~/.smithers` is not a runtime input, and
  * `SMITHERS_TOKEN` belongs to a different product's CLI.
  *
  * @since 1.0.0
@@ -39,7 +39,7 @@ export const names: ReadonlyArray<Name> = [
   entry("TEST_CONTAINER", "The container the `test` flow runs in"),
   entry("TEST_CWD", "The repository's path inside that container"),
   entry("TEST_TIMEOUT_MS", "Wall-clock budget for one `test` invocation"),
-  entry("BACKEND", "Database backend; only `sqlite` is supported (rc-contract section 2)"),
+  entry("BACKEND", "Database backend; only `sqlite` is supported"),
   entry("BUG_ENDPOINT", "Where `smithers bug` posts its report"),
   entry("JJ_PATH", "Explicit path to the jj binary"),
   entry("DETACHED_ADMISSION_TIMEOUT_MS", "How long `up -d` waits for the detached run's admission line"),
@@ -101,7 +101,7 @@ export const readInteger = (environment: Source, name: string): number | undefin
 }
 
 /**
- * The refusal sentence, verbatim from rc-contract section 2.
+ * The database-backend refusal sentence.
  *
  * The contract fixes the whole sentence, so this is a constant rather than a
  * template. An interpolated value cannot be asserted verbatim, and the two
@@ -117,7 +117,7 @@ export const unsupportedBackendMessage: string =
   "Unset SMITHERS_BACKEND or set it to sqlite. See https://smithers.sh/migration/1.0#databases"
 
 /**
- * The database-backend refusal required by rc-contract section 2.
+ * The database-backend refusal.
  *
  * `sqlite` and an unset value are the supported configuration; every other
  * value names a backend that does not ship, and saying so is the whole

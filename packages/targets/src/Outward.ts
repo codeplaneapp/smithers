@@ -71,12 +71,6 @@ export const isRefused = (value: unknown): value is Refused => value instanceof 
  * @since 0.1.0
  */
 export interface Invocation {
-  /**
-   * Never read.
-   *
-   * @deprecated Secret values are resolved only by the outbound transport.
-   */
-  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   readonly approvalGranted: boolean
 }
 

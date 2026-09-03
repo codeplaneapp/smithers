@@ -129,7 +129,7 @@ Every error carries a stable `code` drawn from a closed literal union, so consum
 
 Governing design: `packages/testing/docs/concepts.md`, "Errors are typed values, not string conventions".
 
-Two casing conventions live in `Code`. Most literals are `snake_case`; `REPLAY_HARNESS_MISMATCH`, `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, and `RALPH_MAX_REACHED` are inherited verbatim from the 0.x codes consumers already match on, and are kept shouted so a migrated matcher keeps working. A new code is `snake_case`.
+Every literal uses `snake_case`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |

@@ -3632,10 +3632,10 @@ policy exactly as before.
 finalizers so every owned run parks itself `released` rather than being left
 `running` behind a dead owner.
 
-Installing that handler also removes Node's default disposition, so the handler
+Installing that handler also removes Node's default signal behavior, so the handler
 keeps two escapes. A second signal leaves immediately, and a graceful shutdown
 that outlasts `HostOptions.shutdownTimeoutMs` (default 30 seconds) leaves
-anyway. Both exit with the status the default disposition would have produced:
+anyway. Both exit with the status the default behavior would have produced:
 `130` for `SIGINT`, `143` for `SIGTERM`. Without them a finalizer that never
 returns would turn `Ctrl-C` into a program nothing short of `SIGKILL` can stop.
 

@@ -79,7 +79,7 @@ describe("Cargo.metadataMatches own-property discipline", () => {
   })
 })
 
-describe("Cargo overload discrimination", () => {
+describe("Cargo selector validation", () => {
   it("refuses a package-only Clippy key with no crate selector", () => {
     expect(() => Cargo.Clippy({ offline: true } as never)).toThrow(
       /Cargo\.Clippy requires exactly one of workspace, package, crates/
@@ -92,18 +92,7 @@ describe("Cargo overload discrimination", () => {
     )
   })
 
-  it("still builds the BUILD-era check value from its own options", () => {
-    expect(Cargo.Clippy({ locked: false })).toEqual({
-      name: "clippy",
-      allTargets: true,
-      locked: false,
-      denyWarnings: true
-    })
-    expect(Cargo.Test({ locked: false })).toEqual({ name: "test", locked: false })
-    expect(Cargo.Clippy()).toEqual({ name: "clippy", allTargets: true, locked: true, denyWarnings: true })
-  })
-
-  it("still builds the build-system target when a selector is named", () => {
+  it("builds a target when a selector is named", () => {
     expect(Target.isTarget(Cargo.Clippy({ workspace: true, offline: true, data: [] }) as never)).toBe(true)
     expect(Target.isTarget(Cargo.Test({ package: "aomi-sdk", noRun: true, data: [] }) as never)).toBe(true)
   })

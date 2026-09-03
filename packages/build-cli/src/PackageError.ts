@@ -43,7 +43,7 @@ export type Code =
   | "workspace_export_duplicate"
   | "package_export_missing"
   | "invalid_package_export"
-  | "legacy_target_export"
+  | "naked_target_export"
   | "invalid_package_options"
   | "invalid_target_key"
   | "invalid_target_value"

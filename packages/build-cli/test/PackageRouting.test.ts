@@ -344,7 +344,7 @@ export const leaked = S.Shell.Run({ command: "echo leak" })
 export const Package = S.Package({ targets: {} })
 `
     )
-    expect(await errorCode(() => openIndex(root))).toBe("legacy_target_export")
+    expect(await errorCode(() => openIndex(root))).toBe("naked_target_export")
   })
 
   it("rejects a symlinked PACKAGE.ts outright", async () => {

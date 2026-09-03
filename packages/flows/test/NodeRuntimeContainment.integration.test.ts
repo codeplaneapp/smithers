@@ -17,7 +17,7 @@
  *  2. A `SIGTERM`-ignoring group dies inside `forceKillAfter` plus a second.
  *     `containment: { graceMs }` is the deadline `ContainedSpawner` installs
  *     on every command (`forceKillAfter ?? graceMs`), and an ignored
- *     disposition is inherited across `exec`, so nothing in the group honours
+ *     signal behavior is inherited across `exec`, so nothing in the group honours
  *     the signal and the escalation is the only thing that ends it.
  *  3. Every guarded spawn in this composition resolves through the contained
  *     spawner. The evidence is durable rather than structural: the host's

@@ -191,7 +191,7 @@ describe("Install", () => {
   })
 })
 
-describe("the checked-in root files match what BUILD.ts declares", () => {
+describe("the checked-in root files match the declarations", () => {
   // These are the drift checks `smithers-build lint` runs. Keeping them here means a
   // change to a generator, or a hand edit to a generated file, fails in this
   // package's own suite rather than only in a workspace-wide run.
@@ -206,14 +206,14 @@ describe("the checked-in root files match what BUILD.ts declares", () => {
       },
       include: [
         "known-files.d.ts",
-        "BUILD.ts",
-        "apps/*/BUILD.ts",
-        "ci/BUILD.ts",
-        "crates/*/BUILD.ts",
-        "evals/*/BUILD.ts",
-        "lint/BUILD.ts",
-        "scripts/BUILD.ts",
-        "packages/*/BUILD.ts",
+        "PACKAGE.ts",
+        "apps/*/PACKAGE.ts",
+        "ci/PACKAGE.ts",
+        "crates/*/PACKAGE.ts",
+        "evals/*/PACKAGE.ts",
+        "lint/PACKAGE.ts",
+        "scripts/PACKAGE.ts",
+        "packages/*/PACKAGE.ts",
         "packages/*/src/**/*",
         "packages/*/test/**/*",
         "packages/storage/*/src/**/*",

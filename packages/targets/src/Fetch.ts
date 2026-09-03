@@ -10,7 +10,7 @@
  *
  * The constructor validates attrs by schema and declares `out` as the
  * target's output tree. PACKAGE.ts execution is supplied by build-cli's
- * package executor; the legacy Flow implementation stays a typed
+ * package executor; the declaration-time Flow implementation stays a typed
  * {@link Target.notImplemented} refusal rather than duplicating host access
  * in a declaration constructor.
  *

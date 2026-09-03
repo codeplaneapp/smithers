@@ -294,7 +294,6 @@ Append-only is enforced in SQL rather than by convention. `0001_initial` creates
 | `Node.functionIdentity` (const) | engine | Identifies a plan-time function the AST does NOT store, a flow's `body`, exactly as the AST identifies the mapper and continuation it does store. |
 | `Node.capture` (const) | constructors | Declares the inert values a plan-time function closes over. |
 | `Node.catch` (const) | sequencing | Recovers from matching typed failures with static failure topology. |
-| `Plan.KeyDigest` (const) | schemas | Compatibility name for the storage-facing key schema owned by `@smthrs/keys`. |
 | `Plan.NodeEffects` (const) | schemas | What a node does to the world, declared. |
 | `Plan.NodeEffects` (type) | models | The value form of `NodeEffects`. |
 | `Plan.PairStrategy` (const) | schemas | The plan-time write-conflict strategies of the effect taxonomy. |

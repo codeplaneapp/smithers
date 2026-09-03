@@ -276,7 +276,7 @@ is an entry point a consumer may import.
 | --- | --- | --- |
 | `Source` (type) | models | Where a resolved `jj` command came from. |
 | `Resolved` (interface) | models | The `jj` command a host should spawn, and what is known about it. |
-| `overrideVariables` (const) | constants | The environment names this resolver reads, most specific first. |
+| `overrideVariables` (const) | constants | The environment name this resolver reads. |
 | `isExecutable` (const) | predicates | Whether the operating system can execute a candidate. |
 | `shellQuote` (const) | conversions | A path rendered as one POSIX shell word. |
 | `permissionHint` (const) | constructors | The guidance printed when a named `jj` cannot be executed. |

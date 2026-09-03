@@ -227,21 +227,17 @@ Typed immutable annotations attached to flow graph values.
 
 ### Digest
 
-Compatibility helpers for synchronous identity construction.
+Synchronous identity construction.
 
-`@smthrs/keys/Digest` was deleted at `f5f3dda`, which reduced `@smthrs/keys` to the canonical `Key` schema and moved hashing to `@smthrs/crypto`'s `Sha256` and canonicalization to `@smthrs/canonical`'s `Canonical`.
-
-The agent side computes content fingerprints inside *pure, synchronous* constructors: a prompt section's identity, a context-window segment, a cell's source digest, a plan card's digest. `@smthrs/crypto` now owns that policy and its only handwritten implementation. This module delegates to `digestSync` and retains its old `crypto`, `layer`, and `runSync` names for existing Core consumers.
+The agent side computes content fingerprints inside *pure, synchronous* constructors: a prompt section's identity, a context-window segment, a cell's source digest, a plan card's digest. `@smthrs/crypto` now owns that policy and its only handwritten implementation. This module delegates to `digestSync`.
 
 The digest is therefore the *same digest*: same canonical bytes, same hash, same hexadecimal encoding, just reached without suspending. `Digest.test.ts` pins that equivalence against the platform Crypto layer.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `canonical` (const) | serialization | Returns the RFC 8785 canonical JSON serialization of a value. |
-| `crypto` (const) | services | The package-owned synchronous, SHA-256-only `Crypto` service. |
 | `digest` (const) | hashing | Returns the full lowercase SHA-256 digest of UTF-8 string or byte input. |
-| `layer` (const) | layers | Provides `crypto` as a layer, for Effect-shaped callers that only hash. |
-| `runSync` (const) | execution | Runs a hashing effect synchronously against `crypto`. |
+| `provideSync` (const) | hashing | Provides the synchronous SHA-256 service to an Effect-shaped derivation. |
 
 ### Effects
 

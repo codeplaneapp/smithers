@@ -49,7 +49,7 @@ input-fed command's refusal instead, so the bytes are never silently dropped.
 Additional file descriptors, `stdin: "inherit"`, custom shell paths, detached
 processes, and non-default pipeline routing fail with a `BadArgument`
 `PlatformError`, because the provider contract cannot preserve their semantics.
-Output `pipe`, `ignore`, and `inherit` dispositions and output sinks are
+Output `pipe`, `ignore`, and `inherit` options and output sinks are
 honored by the adapter.
 
 The package is browser-bundleable: it adapts a provider a caller hands it and

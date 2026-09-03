@@ -49,7 +49,7 @@
  *   session and this side cannot read it, so only the `env` overrides cross the
  *   seam; `extendEnv: false` cannot clear an environment we never held.
  *
- * The `stdout`/`stderr` dispositions mean what they mean under
+ * The `stdout`/`stderr` handling means what it means under
  * `NodeChildProcessSpawner` — `"inherit"` and `"ignore"` yield an empty stream,
  * and a `Sink` is transduced through.
  *

@@ -169,20 +169,20 @@ describe("a cell call through the workspace sandbox", () => {
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
         const sandbox = yield* InMemoryWorkspaceSandbox.make()
-        const dispositions: Array<WorkspaceSandbox.CacheDisposition> = []
+        const outcomes: Array<WorkspaceSandbox.CacheOutcome> = []
         const observing = WorkspaceSandbox.make({
           execute: (execution) =>
             sandbox.service.execute(execution).pipe(
               Effect.tap((result) =>
                 Effect.sync(() => {
-                  if (result._tag === "Accepted") dispositions.push(result.cache)
+                  if (result._tag === "Accepted") outcomes.push(result.cache)
                 })
               )
             ),
           materialize: sandbox.service.materialize
         })
         yield* turn(observing, writeFlow)
-        return dispositions
+        return outcomes
       }).pipe(Effect.provide(NodeCrypto.layer))
     )
 

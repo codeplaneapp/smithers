@@ -41,7 +41,6 @@ The root entry point exports these namespaces; each is also importable from `@sm
   `ResponseFormat`, `StructuredOutput`, `Body`, `State`, `protocolWith`, `protocol`
 - **`OpenAIChatGPT`**: Route construction for OpenAI's ChatGPT-subscription Responses backend, the deployment the codex CLI speaks.
   `defaultBaseUrl`, `clientHeaders`, `make`
-  `make`
 - **`OpenAIResponses`**: OpenAI Responses request lowering and SSE event handling.
   `Body`, `ChatGPTBody`, `State`, `protocol`, `chatgptProtocol`
 - **`Protocol`**: The wire contract of a model API family, split from the deployment that serves it.
@@ -49,7 +48,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 - **`RequestExecutor`**: Executes provider requests with bounded retries, quota classification, and credential-safe diagnostics.
   `ErrorClassifier`, `ExecuteOptions`, `RequestError`, `rebuildAfter`, `Transport`, `fixed`, `RequestExecutor`, `makeWith`, `make`, `layer`
 - **`Route`**: A resolved model route: an endpoint, a protocol, a framing, and the credentials to authorize with.
-  `PreparedRequest`, `Config`, `Route`, `prepare`, `make`, `toModel`, `layer`, `anthropic`, `openai`, `openaiCompatible`, `openaiResponsesCompatible`, `openaiChatCompatible`
+  `PreparedRequest`, `Config`, `Route`, `prepare`, `make`, `toModel`, `layer`, `anthropic`, `openai`, `openaiResponsesCompatible`, `openaiChatCompatible`
 - **`ToolStream`**: Pure accumulation of fragmented provider tool-call arguments.
   `OpenToolCall`, `State`, `Completed`, `EndResult`, `FlushResult`, `initial`, `start`, `delta`, `end`, `flushAborted`
 

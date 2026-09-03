@@ -500,7 +500,7 @@ export interface HostOptions {
    * and leaves with the signal's own exit code. Default
    * {@link defaultShutdownTimeoutMs}.
    *
-   * Installing a handler removes Node's default disposition, so without a
+   * Installing a handler removes Node's default signal behavior, so without a
    * deadline a finalizer that never returns turns `Ctrl-C` into a program that
    * cannot be stopped at all. A second signal escapes immediately, whatever
    * this is set to.
@@ -661,7 +661,7 @@ const validateHost = (options: HostOptions): ValidatedHostOptions => {
  * The status a process that was ended by `signal` exits with.
  *
  * A host that installs a handler owes its supervisor the answer the default
- * disposition would have given, which is `128 + signal number`: `130` for
+ * behavior would have given, which is `128 + signal number`: `130` for
  * `SIGINT`, `143` for `SIGTERM`.
  *
  * @since 0.1.0
@@ -682,12 +682,12 @@ export const signalExitCode = (signal: NodeJS.Signals): number =>
  * anyway: a layer builds in its own fiber, not the program's, so the fiber
  * this code can reach is not the one the program runs on.
  *
- * Installing the handler also REMOVES Node's default disposition, and that has
+ * Installing the handler also REMOVES Node's default signal behavior, and that has
  * to be paid for. A finalizer that never returns would otherwise turn `Ctrl-C`
  * into a program nothing short of `SIGKILL` can stop, so the handler keeps two
  * escapes: a second signal leaves immediately, and a graceful shutdown that
  * outlasts {@link HostOptions.shutdownTimeoutMs} leaves anyway. Both exit with
- * the status the default disposition would have produced.
+ * the status the default behavior would have produced.
  */
 const onSignal = (
   signals: ReadonlyArray<NodeJS.Signals>,

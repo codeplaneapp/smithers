@@ -1,15 +1,15 @@
 /**
- * Installs the process-wide module resolvers required by BUILD.ts evaluation.
+ * Installs the process-wide module resolvers required by declaration evaluation.
  *
  * Targets, the planner, and the flow engine exchange values branded by Effect's
  * runtime symbols. A linked workspace can otherwise load another physical
  * `effect` installation—even at the same version—and hand the engine schemas
- * it cannot interpret. BUILD.ts modules therefore resolve every `effect` bare
+ * it cannot interpret. Declaration modules therefore resolve every `effect` bare
  * import from the CLI package that owns the runtime.
  *
- * The CLI also owns the BUILD.ts authoring surface. Resolving
+ * The CLI also owns the declaration surface. Resolving
  * `@smthrs/targets` from here lets a globally installed `smithers-build` bootstrap a
- * repository that has only a BUILD.ts; requiring the repository to install the
+ * repository before dependencies are installed; requiring it to install the
  * package would make generated package.json files circular to create.
  *
  * ## Hook order
@@ -30,15 +30,15 @@
  * to run AFTER tsx's loader, because both rules read what tsx resolved. It
  * stays where it was first registered and is never moved.
  *
- * ## BUILD.ts module format
+ * ## Declaration module format
  *
- * The format hook below reports `format: "module"` for every BUILD.ts, so a
+ * The format hook below reports `format: "module"` for every declaration, so a
  * workspace whose nearest `package.json` declares no `type` still evaluates
- * its BUILD.ts as an ES module — but that override reaches tsx only when
+ * its declaration as an ES module — but that override reaches tsx only when
  * these hooks were registered before tsx's loader was created. An evaluation
  * path that misses that window (a bootstrap that touches tsx first, or a
  * nested require from an already-CommonJS module) falls back to tsx's own
- * classification and evaluates BUILD.ts through the CommonJS bridge. There,
+ * classification and evaluates it through the CommonJS bridge. There,
  * an `import` of a `file:` URL compiles to `require("file://...")` — valid
  * ESM, but accepted by the CommonJS resolver only on newer Node versions.
  * The `_resolveFilename` patch below converts a `file:` URL request to its
@@ -113,7 +113,7 @@ const namespaceParameter = "tsx-namespace"
  * The directory holding the Effect installation this CLI runs on.
  *
  * A bare `effect` import is pinned by rewriting `parentURL`, but a declaration
- * module may also import one of these files by absolute URL — a BUILD.ts that
+ * module may also import one of these files by absolute URL — a declaration that
  * writes `import.meta.resolve("effect/Schema")` into a generated file does.
  * That specifier names the right file already; what it lacks is protection
  * from tsx stamping a namespace onto the result and producing a second
@@ -121,7 +121,7 @@ const namespaceParameter = "tsx-namespace"
  * the resolutions that must stay on one instance.
  *
  * This is the only rule covering that absolute-URL import, which the CLI's own
- * BUILD.ts fixtures write with `import.meta.resolve("effect/Schema")`: the
+ * fixtures write with `import.meta.resolve("effect/Schema")`: the
  * specifier is not bare, so re-parenting never sees it. Removing this rule puts
  * a second Effect instance back into such a workspace.
  *
@@ -170,12 +170,11 @@ const buildModuleBase = (url) => {
   const base = `file://${parsed.host}${filePart}`
   if (parsed.searchParams.get(buildModuleParameter) === "1") return base
   const pathname = decodeURIComponent(filePart)
-  // BUILD.ts is the legacy authoring surface; PACKAGE.ts, WORKSPACE.ts, and
-  // the .smithers/*.ts siblings WORKSPACE.ts imports are the routed one.
+  // PACKAGE.ts, WORKSPACE.ts, and the .smithers/*.ts siblings WORKSPACE.ts
+  // imports are declaration modules.
   // All are authored as ES modules regardless of the host repository's
   // package.json `type`, so their format is pinned here.
-  const declaration = pathname.endsWith("/BUILD.ts") ||
-    pathname.endsWith("/PACKAGE.ts") ||
+  const declaration = pathname.endsWith("/PACKAGE.ts") ||
     pathname.endsWith("/WORKSPACE.ts") ||
     (pathname.includes("/.smithers/") && pathname.endsWith(".ts"))
   return declaration ? base : undefined
@@ -233,8 +232,8 @@ const formatHooks = {
  * far.
  *
  * Each tsx namespace loader wraps this resolver and derives its namespace from
- * the importer it was handed, so `effect` imported from a BUILD.ts lands in
- * that BUILD.ts's namespace and `effect` imported from the CLI lands in the
+ * the importer it was handed, so `effect` imported from a declaration lands in
+ * that declaration's namespace and `effect` imported from the CLI lands in the
  * CLI's — two physical module instances whose schema internals do not
  * interoperate. Moving this resolver back to the front after each tsx
  * registration restores the single instance: tsx then reads the rewritten
@@ -338,7 +337,7 @@ export const installEffectResolution = () => {
 }
 
 /**
- * Marks one admitted BUILD.ts URL for ES-module evaluation.
+ * Marks one admitted declaration URL for ES-module evaluation.
  * @slop
  */
 export const buildModuleUrl = (url) => {

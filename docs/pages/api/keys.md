@@ -120,9 +120,8 @@ issue annotation. Invalid `StoredKey` and `KeyV1` text produce an ordinary
 | `StoredKey` (const) | schemas | Every stored-key representation this release understands. |
 | `StoredKey` (type) | models | A stored key supported by this release. |
 | `digest` (const) | accessors | Returns the validated SHA-256 payload of a stored key. |
-| `Key` (type) | models | Compatibility name for the validated key value produced by `Key`. |
 | `KeyDerivationErrorCode` (const) | schemas | Stable failure codes returned by `deriveKey`. |
 | `KeyDerivationErrorCode` (type) | models | Stable failure codes returned by `deriveKey`. |
 | `KeyDerivationError` (class) | errors | A safe, typed failure from canonicalization or injected hashing. |
 | `deriveKey` (const) | derivation | Derives the current flow-key format from structured input. |
-| `Key` (const) | transformations | Compatibility schema that derives a fresh key from its decoded input. |
+| `DerivedKey` (const) | transformations | Schema that derives a fresh key from its decoded input. |

@@ -117,7 +117,7 @@ frame boundary.
 
 ## Reference
 
-27 public modules, 337 documented exports.
+27 public modules, 336 documented exports.
 
 | Module | Public exports | Description |
 | --- | --- | --- |
@@ -131,7 +131,7 @@ frame boundary.
 | `Compaction` | `summaryInstruction`, `InvalidStep`, `Summarizer`, `CompactionStep`, `TokenAccounting`, `shouldCompact`, `selectPrefix`, `declare`, `summaryRequest`, `apply` | Declarations for sealed transcript-summary steps. |
 | `Steering` | `Delivery`, `SteerInsert`, `QueueInsert`, `Insert`, `SeatChange`, `ThinkingChange`, `ActivateTools`, `Item`, `Queue`, `Drain`, `BoundaryInput`, `DrainRecord`, `drainRecord`, `PromotionState`, `empty`, `enqueue`, `drainAtClose`, `promoteAtIdle`, `Source`, `SourceInput`, `make`, `makeNoop`, `layer`, `layerNoop` | Turn-boundary steering values and their source contract. |
 | `Notifications` | `Options`, `make`, `layer` | Adapter from the durable notification queue to harness turn boundaries. |
-| `Cell` | `Language`, `Source`, `digestOf`, `source`, `ContextEntry`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `callFailure`, `Extracted`, `extract` | The cell contract. |
+| `Cell` | `Language`, `Source`, `digestOf`, `source`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `callFailure`, `Extracted`, `extract` | The cell contract. |
 | `Sandbox` | `SandboxErrorCode`, `SandboxError`, `Invocation`, `Mint`, `Minter`, `mintUnavailable`, `Handler`, `Limits`, `Capabilities`, `defaultLimits`, `minimumSteps`, `minimumTimeMs`, `minimumMemoryBytes`, `printFrameBytes`, `printStatementFloor`, `printRetainedBytes`, `withDefaults`, `Intent`, `replTransition`, `RealmEvaluation`, `RealmFrame`, `Realm`, `RealmOptions`, `Sandbox`, `make`, `layer`, `makeNoop`, `layerNoop`, `realmUnsupported`, `callTimedOut`, `compile`, `PendingCall`, `Latch`, `latch`, `driveCell`, `raisedOutcome` | The deterministic script sandbox port. |
 | `CellTurn` | `defaultMaxFrames`, `defaultReadOnlyFrames`, `defaultModelCallMs`, `defaultRepeatFrames`, `defaultNarrowingDemands`, `defaultUnmovedDemands`, `defaultUnresolvedDemands`, `defaultRevalidations`, `defaultMaxCheckpoints`, `State`, `Input`, `make`, `teach`, `run` | The cell-first controller. |
 | `CellHistory` | `ExecutedCell`, `Service`, `CellHistory`, `make`, `makeCells`, `makeNoop`, `layer`, `layerCells`, `layerNoop` | The source of every cell the current turn executed. |
@@ -385,7 +385,7 @@ A Smithers frame is `model -> generated cell -> realm evaluation -> individually
 
 Nothing here executes anything. Execution is `Sandbox`; durability is `EngineLike.call`; the loop is `CellTurn`.
 
-A cell does not *return* its transition. The realm is a REPL that outlives the cell, so a cell states its intent by calling `ctx.done` or `ctx.park` and `Sandbox.replTransition` builds the value; there is no returned object to decode. What the cell filed by hand — durable state, a projected context, a list of keys to re-render, a list of ordinals to recall — is gone with the surface that asked for it, and the fields survive here for one purpose only: decoding the journals that were written while it existed.
+A cell does not *return* its transition. The realm is a REPL that outlives the cell, so a cell states its intent by calling `ctx.done` or `ctx.park` and `Sandbox.replTransition` builds the value; there is no returned object to decode.
 
 Governing design: `../docs/concepts.md#durable-cell-loop`, `../docs/concepts.md#repl-realm` and `../docs/concepts.md#agent-cell-context`.
 
@@ -395,7 +395,6 @@ Governing design: `../docs/concepts.md#durable-cell-loop`, `../docs/concepts.md#
 | `Source` | class | models | One unit of agent-authored source and its stable content digest. |
 | `digestOf` | const | constructors | Computes the stable digest of cell source. |
 | `source` | const | constructors | Constructs cell source with its computed digest. |
-| `ContextEntry` | class | models | One projected message a filing cell placed in the next model context. |
 | `Continue` | class | models | The cell's turn ended without settling the run. |
 | `Complete` | class | models | The cell declares the task finished and supplies its final output. |
 | `Park` | class | models | The cell asks the controller to park the run durably. |

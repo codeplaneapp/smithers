@@ -1110,8 +1110,8 @@ describe("the Node host composition", () => {
     }
 
     expect(asked).toEqual([NodeRuntime.signalExitCode("SIGTERM"), NodeRuntime.signalExitCode("SIGTERM")])
-    // `128 + signal number` is the status the default disposition would have
-    // produced, and an unrecognized name has no disposition to read, so it
+    // `128 + signal number` is the status the default behavior would have
+    // produced, and an unrecognized name has no behavior to read, so it
     // answers `SIGTERM`'s.
     expect(NodeRuntime.signalExitCode("SIGTERM")).toBe(143)
     expect(NodeRuntime.signalExitCode("SIGINT")).toBe(130)

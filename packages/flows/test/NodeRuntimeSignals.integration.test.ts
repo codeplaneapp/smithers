@@ -93,7 +93,7 @@ describe("a signalled host", () => {
     // release below cannot be a run that never started.
     expect(result.announced).toBe("running")
     // The handler shuts the runtime down; it does not let the default
-    // disposition kill the process, which would leave the row `running`.
+    // behavior kill the process, which would leave the row `running`.
     expect(result.signal).toBeNull()
     expect(
       readBack(
@@ -106,7 +106,7 @@ describe("a signalled host", () => {
   }, 120_000)
 
   it("leaves on a second signal when the graceful shutdown will not finish", async () => {
-    // Installing a handler removes Node's default disposition. Without an
+    // Installing a handler removes Node's default signal behavior. Without an
     // escape, a finalizer that never returns turns Ctrl-C into a program that
     // cannot be stopped by anything short of `SIGKILL`.
     const filename = join(directory, "second", "runtime.sqlite")
@@ -119,7 +119,7 @@ describe("a signalled host", () => {
     })
 
     expect(result.announced).toBe("running")
-    // The status the default disposition would have produced: 128 + SIGTERM.
+    // The status the default behavior would have produced: 128 + SIGTERM.
     expect(result.code).toBe(143)
     expect(result.signal).toBeNull()
   }, 120_000)

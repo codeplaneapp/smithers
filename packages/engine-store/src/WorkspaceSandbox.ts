@@ -226,7 +226,7 @@ export interface DeclarationViolation {
 }
 
 /**
- * Memo disposition of an execution.
+ * Memo outcome of an execution.
  *
  * The memo is a **run-local accelerator**, not the cross-run cache: the engine
  * owns that through `CacheStore` and the step key. `disabled` is what a caller
@@ -242,7 +242,7 @@ export interface DeclarationViolation {
  * @category models
  * @since 0.1.0
  */
-export type CacheDisposition =
+export type CacheOutcome =
   | { readonly status: "disabled" }
   | { readonly status: "miss"; readonly key: string }
   | { readonly status: "hit"; readonly key: string }
@@ -259,7 +259,7 @@ export type CacheDisposition =
 export interface Accepted<out Output = unknown> {
   readonly _tag: "Accepted"
   readonly result: WorkflowResult<Output>
-  readonly cache: CacheDisposition
+  readonly cache: CacheOutcome
   /**
    * Deviations the declaration did not predict. Empty in hard mode — that
    * execution is {@link Invalidated} instead — and, in expected mode, the

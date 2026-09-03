@@ -4,10 +4,7 @@
  *
  * The flags that make a check a gate live in the target, not at the call site,
  * so the assertions here are about argv: what each declaration renders, in
- * which order, and which selector it renders it for. The BUILD-era check
- * constructors share the three names `Fmt`, `Clippy`, and `Test`, so the
- * dispatch between them is asserted too — a legacy call must keep returning a
- * check value, not a target.
+ * which order, and which selector it renders it for.
  */
 import { describe, expect, it } from "vitest"
 import * as Cargo from "../src/Cargo.ts"
@@ -207,15 +204,6 @@ describe("Cargo.Test", () => {
       { _tag: "Manifest", path: "apps/jupiter/Cargo.toml" }
     )).toEqual(["test", "--manifest-path", "apps/jupiter/Cargo.toml", "--no-run", "--locked", "--offline"])
   })
-
-  it("keeps the BUILD-era check constructor under the same name", () => {
-    // No crate selector means the BUILD-era `cargo test` check, which is a
-    // plain value the legacy CargoTest target takes as an attr.
-    expect(Cargo.Test()).toEqual({ name: "test", locked: true })
-    expect(Cargo.Test({ locked: false })).toEqual({ name: "test", locked: false })
-    expect(Target.isTarget(Cargo.Test() as never)).toBe(false)
-    expect(Target.isTarget(Cargo.Test({ package: "a", data: [] }) as never)).toBe(true)
-  })
 })
 
 describe("Cargo.Nextest and Cargo.Deny", () => {
@@ -260,13 +248,6 @@ describe("Cargo.Clippy", () => {
     expect(args(Cargo.Clippy({ package: "aomi-ext", allFeatures: true, locked: true, data: [] })))
       .toEqual(["clippy", "-p", "aomi-ext", "--all-features", "--locked"])
   })
-
-  it("keeps the BUILD-era check constructor under the same name", () => {
-    expect(Cargo.Clippy()).toEqual({ name: "clippy", allTargets: true, locked: true, denyWarnings: true })
-    expect(Cargo.Clippy({ allTargets: false, locked: false, denyWarnings: false }))
-      .toEqual({ name: "clippy", allTargets: false, locked: false, denyWarnings: false })
-    expect(Target.isTarget(Cargo.Clippy() as never)).toBe(false)
-  })
 })
 
 describe("Cargo.Fmt", () => {
@@ -296,11 +277,6 @@ describe("Cargo.Fmt", () => {
     })
     expect(args(crateFmt, { _tag: "Manifest", path: "apps/jupiter/Cargo.toml" }, "check"))
       .toEqual(["fmt", "--manifest-path", "apps/jupiter/Cargo.toml", "--all", "--", "--check"])
-  })
-
-  it("keeps the BUILD-era check constructor under the same name", () => {
-    expect(Cargo.Fmt()).toEqual({ name: "fmt" })
-    expect(Target.isTarget(Cargo.Fmt() as never)).toBe(false)
   })
 })
 

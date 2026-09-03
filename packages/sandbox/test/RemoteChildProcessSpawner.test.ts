@@ -437,7 +437,7 @@ describe("RemoteChildProcessSpawner", () => {
       expect(error.message).toContain("cannot inherit this process's standard input")
       expect(provider.state.commands).toEqual([])
 
-      // The same disposition inside a config, and inside a pipeline's leftmost
+      // The same option inside a config, and inside a pipeline's leftmost
       // stage, are the same refusal.
       const inConfig = yield* Effect.flip(
         Effect.flatMap(
@@ -461,7 +461,7 @@ describe("RemoteChildProcessSpawner", () => {
         )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(piped)))
       expect(output).toBe("1")
 
-      // And the other three dispositions still run.
+      // And the other three options still run.
       for (const stream of ["pipe", "ignore", "overlapped"] as const) {
         yield* Effect.flatMap(
           ChildProcessSpawner,
@@ -488,7 +488,7 @@ describe("RemoteChildProcessSpawner", () => {
       expect(output).toBe("echoed")
       expect(Array.from(provider.state.inputs[0]!)).toEqual([1, 2, 3])
       // A command without input hands the provider none, and so does a
-      // config whose stream is an OS disposition rather than data.
+      // config whose stream is an OS option rather than data.
       yield* Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(ChildProcess.make("cat"))).pipe(
         Effect.provide(RemoteChildProcessSpawner.layer(provider))
       )
@@ -719,7 +719,7 @@ describe("RemoteChildProcessSpawner", () => {
       expect(provider.state.commands).toEqual([])
     }))
 
-  it.effect("honors output dispositions and sinks", () =>
+  it.effect("honors output options and sinks", () =>
     Effect.gen(function*() {
       const provider = RemoteChildProcessSpawner.TestRemote.make({
         scripts: { noisy: { stdout: "out", stderr: "err" } }
@@ -755,7 +755,7 @@ describe("RemoteChildProcessSpawner", () => {
     ["overlapped", "out"],
     ["ignore", ""],
     ["inherit", ""]
-  ])("honors the %s stdout disposition", ([stdout, expected]) =>
+  ])("honors the %s stdout option", ([stdout, expected]) =>
     Effect.gen(function*() {
       const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { noisy: { stdout: "out" } } })
 

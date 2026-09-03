@@ -54,7 +54,7 @@ export const validateWorkspaceModule = (
     }
     if (Target.isTarget(value)) {
       throw new PackageError(
-        "legacy_target_export",
+        "naked_target_export",
         `WORKSPACE.ts exports a naked target ${
           JSON.stringify(name)
         }; targets are addressable only through a Package map`,

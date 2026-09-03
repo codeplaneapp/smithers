@@ -311,14 +311,6 @@ Route construction for OpenAI's ChatGPT-subscription Responses backend, the depl
 | `clientHeaders` | constants | The client identity headers the backend was confirmed against. |
 | `make` | constructors | Builds the ChatGPT-subscription Responses route. |
 
-### `OpenAICompatible`
-
-Route construction for providers that serve the OpenAI Responses API without its native extensions.
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `make` | constructors | Builds an OpenAI Responses-compatible route without enabling OpenAI-native deferred-tool extensions. |
-
 ### `OpenAIResponses`
 
 OpenAI Responses request lowering and SSE event handling.
@@ -375,7 +367,6 @@ A resolved model route: an endpoint, a protocol, a framing, and the credentials 
 | `layer` | layers | Provides a configured route as the `Model` service. |
 | `anthropic` | constructors | Creates Anthropic's Messages deployment configuration. |
 | `openai` | constructors | Creates OpenAI's Responses deployment configuration. |
-| `openaiCompatible` | constructors | Creates a route for any endpoint that speaks the OpenAI Chat Completions wire shape: Ollama, Gemini's OpenAI-compatibility layer, and most other self-hosted or third-party "OpenAI-compatible" servers, none of which implement api.openai.com's newer Responses API that `openai` targets. |
 | `openaiResponsesCompatible` | constructors | Creates a route for a provider that serves the OpenAI **Responses** API without OpenAI's native deferred-tool extensions. |
 | `openaiChatCompatible` | constructors | Creates a route for a provider that serves the OpenAI **Chat Completions** API: Ollama, Gemini's OpenAI-compatibility layer, Cerebras, and most other self-hosted or third-party "OpenAI-compatible" servers. |
 

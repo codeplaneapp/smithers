@@ -3649,10 +3649,10 @@ policy exactly as before.
 finalizers so every owned run parks itself `released` rather than being left
 `running` behind a dead owner.
 
-Installing that handler also removes Node's default disposition, so the handler
+Installing that handler also removes Node's default signal behavior, so the handler
 keeps two escapes. A second signal leaves immediately, and a graceful shutdown
 that outlasts `HostOptions.shutdownTimeoutMs` (default 30 seconds) leaves
-anyway. Both exit with the status the default disposition would have produced:
+anyway. Both exit with the status the default behavior would have produced:
 `130` for `SIGINT`, `143` for `SIGTERM`. Without them a finalizer that never
 returns would turn `Ctrl-C` into a program nothing short of `SIGKILL` can stop.
 
@@ -6402,11 +6402,11 @@ surface used to compose or embed that executable.
 | `Doctor.inspect` (const) | constructors | Runs every check and returns the report. |
 | `Doctor.render` (const) | conversions | The human rendering: one line per check. |
 | `Doctor.failed` (const) | predicates | Whether the report contains a failing check, which decides the exit status. |
-| `Environment.Name` (interface) | models | A canonical `SMITHERS_*` name, and the `FLOWS_*` alias accepted for rc.0 when the imported CLI read one. |
-| `Environment.names` (const) | constants | Every environment variable rc.0 reads, with the rc.0-only `FLOWS_*` alias for the four families that have one. |
+| `Environment.Name` (interface) | models | A canonical environment name read by the CLI. |
+| `Environment.names` (const) | constants | Every environment variable rc.0 reads. |
 | `Environment.Source` (type) | models | The environment shape this module reads. |
 | `Environment.ambientWorkingDirectory` (const) | getters | Reads the directory the process was started in by deliberate host choice. |
-| `Environment.read` (const) | getters | Reads one canonical name, falling back to its rc.0 `FLOWS_*` alias. |
+| `Environment.read` (const) | getters | Reads one canonical name. |
 | `Environment.readInteger` (const) | getters | Reads one canonical name as a positive integer, ignoring anything else. |
 | `Environment.unsupportedBackendMessage` (const) | constants | The database-backend refusal sentence. |
 | `Environment.unsupportedBackend` (const) | getters | The database-backend refusal. |
@@ -7401,21 +7401,17 @@ Typed immutable annotations attached to flow graph values.
 
 #### Digest
 
-Compatibility helpers for synchronous identity construction.
+Synchronous identity construction.
 
-`@smthrs/keys/Digest` was deleted at `f5f3dda`, which reduced `@smthrs/keys` to the canonical `Key` schema and moved hashing to `@smthrs/crypto`'s `Sha256` and canonicalization to `@smthrs/canonical`'s `Canonical`.
-
-The agent side computes content fingerprints inside *pure, synchronous* constructors: a prompt section's identity, a context-window segment, a cell's source digest, a plan card's digest. `@smthrs/crypto` now owns that policy and its only handwritten implementation. This module delegates to `digestSync` and retains its old `crypto`, `layer`, and `runSync` names for existing Core consumers.
+The agent side computes content fingerprints inside *pure, synchronous* constructors: a prompt section's identity, a context-window segment, a cell's source digest, a plan card's digest. `@smthrs/crypto` now owns that policy and its only handwritten implementation. This module delegates to `digestSync`.
 
 The digest is therefore the *same digest*: same canonical bytes, same hash, same hexadecimal encoding, just reached without suspending. `Digest.test.ts` pins that equivalence against the platform Crypto layer.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `canonical` (const) | serialization | Returns the RFC 8785 canonical JSON serialization of a value. |
-| `crypto` (const) | services | The package-owned synchronous, SHA-256-only `Crypto` service. |
 | `digest` (const) | hashing | Returns the full lowercase SHA-256 digest of UTF-8 string or byte input. |
-| `layer` (const) | layers | Provides `crypto` as a layer, for Effect-shaped callers that only hash. |
-| `runSync` (const) | execution | Runs a hashing effect synchronously against `crypto`. |
+| `provideSync` (const) | hashing | Provides the synchronous SHA-256 service to an Effect-shaped derivation. |
 
 #### Effects
 
@@ -8553,7 +8549,7 @@ shapes need:
 | `WorkspaceSandbox.Workspace` | interface + const | services | A filesystem and effect-outbox view scoped to one workspace transaction. |
 | `WorkspaceSandbox.Execution` | interface | models | The declaration and body submitted to a workspace sandbox. |
 | `WorkspaceSandbox.DeclarationViolation` | interface | models | Why observed execution contradicted its declaration. |
-| `WorkspaceSandbox.CacheDisposition` | type | models | Memo disposition of an execution. |
+| `WorkspaceSandbox.CacheOutcome` | type | models | Memo outcome of an execution. |
 | `WorkspaceSandbox.Accepted` | interface | models | An execution whose observations matched its declaration. |
 | `WorkspaceSandbox.Invalidated` | interface | models | An execution discarded because its observations contradicted its declaration. |
 | `WorkspaceSandbox.ExecutionResult` | type | models | The result of validating one speculative execution. |
@@ -9896,7 +9892,7 @@ is an entry point a consumer may import.
 | --- | --- | --- |
 | `Source` (type) | models | Where a resolved `jj` command came from. |
 | `Resolved` (interface) | models | The `jj` command a host should spawn, and what is known about it. |
-| `overrideVariables` (const) | constants | The environment names this resolver reads, most specific first. |
+| `overrideVariables` (const) | constants | The environment name this resolver reads. |
 | `isExecutable` (const) | predicates | Whether the operating system can execute a candidate. |
 | `shellQuote` (const) | conversions | A path rendered as one POSIX shell word. |
 | `permissionHint` (const) | constructors | The guidance printed when a named `jj` cannot be executed. |
@@ -10933,12 +10929,11 @@ issue annotation. Invalid `StoredKey` and `KeyV1` text produce an ordinary
 | `StoredKey` (const) | schemas | Every stored-key representation this release understands. |
 | `StoredKey` (type) | models | A stored key supported by this release. |
 | `digest` (const) | accessors | Returns the validated SHA-256 payload of a stored key. |
-| `Key` (type) | models | Compatibility name for the validated key value produced by `Key`. |
 | `KeyDerivationErrorCode` (const) | schemas | Stable failure codes returned by `deriveKey`. |
 | `KeyDerivationErrorCode` (type) | models | Stable failure codes returned by `deriveKey`. |
 | `KeyDerivationError` (class) | errors | A safe, typed failure from canonicalization or injected hashing. |
 | `deriveKey` (const) | derivation | Derives the current flow-key format from structured input. |
-| `Key` (const) | transformations | Compatibility schema that derives a fresh key from its decoded input. |
+| `DerivedKey` (const) | transformations | Schema that derives a fresh key from its decoded input. |
 
 ---
 
@@ -11530,14 +11525,6 @@ Route construction for OpenAI's ChatGPT-subscription Responses backend, the depl
 | `clientHeaders` | constants | The client identity headers the backend was confirmed against. |
 | `make` | constructors | Builds the ChatGPT-subscription Responses route. |
 
-#### `OpenAICompatible`
-
-Route construction for providers that serve the OpenAI Responses API without its native extensions.
-
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `make` | constructors | Builds an OpenAI Responses-compatible route without enabling OpenAI-native deferred-tool extensions. |
-
 #### `OpenAIResponses`
 
 OpenAI Responses request lowering and SSE event handling.
@@ -11594,7 +11581,6 @@ A resolved model route: an endpoint, a protocol, a framing, and the credentials 
 | `layer` | layers | Provides a configured route as the `Model` service. |
 | `anthropic` | constructors | Creates Anthropic's Messages deployment configuration. |
 | `openai` | constructors | Creates OpenAI's Responses deployment configuration. |
-| `openaiCompatible` | constructors | Creates a route for any endpoint that speaks the OpenAI Chat Completions wire shape: Ollama, Gemini's OpenAI-compatibility layer, and most other self-hosted or third-party "OpenAI-compatible" servers, none of which implement api.openai.com's newer Responses API that `openai` targets. |
 | `openaiResponsesCompatible` | constructors | Creates a route for a provider that serves the OpenAI **Responses** API without OpenAI's native deferred-tool extensions. |
 | `openaiChatCompatible` | constructors | Creates a route for a provider that serves the OpenAI **Chat Completions** API: Ollama, Gemini's OpenAI-compatibility layer, Cerebras, and most other self-hosted or third-party "OpenAI-compatible" servers. |
 
@@ -13702,7 +13688,6 @@ Append-only is enforced in SQL rather than by convention. `0001_initial` creates
 | `Node.functionIdentity` (const) | engine | Identifies a plan-time function the AST does NOT store, a flow's `body`, exactly as the AST identifies the mapper and continuation it does store. |
 | `Node.capture` (const) | constructors | Declares the inert values a plan-time function closes over. |
 | `Node.catch` (const) | sequencing | Recovers from matching typed failures with static failure topology. |
-| `Plan.KeyDigest` (const) | schemas | Compatibility name for the storage-facing key schema owned by `@smthrs/keys`. |
 | `Plan.NodeEffects` (const) | schemas | What a node does to the world, declared. |
 | `Plan.NodeEffects` (type) | models | The value form of `NodeEffects`. |
 | `Plan.PairStrategy` (const) | schemas | The plan-time write-conflict strategies of the effect taxonomy. |
@@ -13934,7 +13919,7 @@ module and covered by a test:
 | Feature                        | Behaviour                                                                                                                                                                                                             |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Streaming output               | buffered; `stdout` and `stderr` each emit at most one chunk after the command finishes                                                                                                                                |
-| `all`                          | `stdout` followed by `stderr`, not a live interleaving, and it inherits both dispositions, so an ignored `stdout` leaves `all` carrying `stderr` alone                                                                |
+| `all`                          | `stdout` followed by `stderr`, not a live interleaving, and it inherits both stream options, so an ignored `stdout` leaves `all` carrying `stderr` alone                                                              |
 | `isRunning`                    | `true` while the run is queued or executing, `false` once it has settled                                                                                                                                              |
 | `stdin`                        | a failing `Sink`; a command supplying a stdin `Stream` is rejected at spawn time. just-bash itself accepts a string `stdin`, so the limit is this adapter's run-to-completion capture, not the interpreter            |
 | Interruption, timeouts, `kill` | abort the interpreter through just-bash's `AbortSignal`; every observable on the handle then reports a `PlatformError` naming the abort rather than replaying the interrupt into the caller's fiber                   |
@@ -13945,7 +13930,7 @@ module and covered by a test:
 | Process pipelines              | a `PipedCommand` is rejected; express the pipeline as one command line                                                                                                                                                |
 | `additionalFds`                | `Sink.drain` and `Stream.empty`, the answer `NodeChildProcessSpawner` gives for an unconfigured descriptor                                                                                                            |
 | `extendEnv`                    | honoured as a request to the interpreter: just-bash merges `env` into its own environment unless asked for `replaceEnv`, so the adapter asks for replacement whenever `env` is supplied and `extendEnv` is not `true` |
-| `stdout`/`stderr` dispositions | kept at their Node meaning: `"inherit"` and `"ignore"` yield an empty stream, a `Sink` is transduced through, even though the interpreter captured the text either way                                                |
+| `stdout`/`stderr` options      | kept at their Node meaning: `"inherit"` and `"ignore"` yield an empty stream, a `Sink` is transduced through, even though the interpreter captured the text either way                                                |
 
 Because the permit outlives the promise, an interpreter that ignores its
 `AbortSignal` and never settles blocks every later run rather than being
@@ -15590,7 +15575,7 @@ Unsupported semantics are declared rather than dropped. Each of these fails with
 | non-default pipeline routing (`from`, `to`)                       | the rendered line reaches the remote shell, not this adapter                                               |
 | `kill` on a provider that declares none                           | no signal can be delivered                                                                                 |
 
-`stdin: "pipe"`, `"ignore"`, and `"overlapped"` are accepted and all three mean the command reads no input, which is what they mean locally. A provider that declares `stdin: true` receives the command's input as one complete byte blob in `RemoteOptions.stdin`, never as a live pipe: collection is bounded at 16 MiB and the count runs as the bytes arrive, so an endless producer is refused at the bound rather than after it finishes. The handle's own `stdin` sink always fails, because there is no interactive channel either way. Output `pipe`, `ignore`, and `inherit` dispositions and output sinks are applied by the adapter.
+`stdin: "pipe"`, `"ignore"`, and `"overlapped"` are accepted and all three mean the command reads no input, which is what they mean locally. A provider that declares `stdin: true` receives the command's input as one complete byte blob in `RemoteOptions.stdin`, never as a live pipe: collection is bounded at 16 MiB and the count runs as the bytes arrive, so an endless producer is refused at the bound rather than after it finishes. The handle's own `stdin` sink always fails, because there is no interactive channel either way. Output `pipe`, `ignore`, and `inherit` options and output sinks are applied by the adapter.
 
 :::warning[Two divergences the error channel cannot report]
 `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam and `extendEnv: false` cannot clear an environment this side never held. `isRunning` answers from what this side has observed, so it turns `false` when a caller observes `exitCode` rather than when the remote process actually ends. Both are stated in the module header.
@@ -17071,7 +17056,7 @@ Every error carries a stable `code` drawn from a closed literal union, so consum
 
 Governing design: `packages/testing/docs/concepts.md`, "Errors are typed values, not string conventions".
 
-Two casing conventions live in `Code`. Most literals are `snake_case`; `REPLAY_HARNESS_MISMATCH`, `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, and `RALPH_MAX_REACHED` are inherited verbatim from the 0.x codes consumers already match on, and are kept shouted so a migrated matcher keeps working. A new code is `snake_case`.
+Every literal uses `snake_case`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |

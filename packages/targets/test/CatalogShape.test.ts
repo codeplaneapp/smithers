@@ -139,14 +139,11 @@ describe("every catalog rule exports one shape", () => {
     expect(Smithers.ImportClosure.id).toBe("ImportClosure")
   })
 
-  it("keeps the two-form cargo rules answering both forms", () => {
-    expect(Smithers.Cargo.Fmt().name).toBe("fmt")
+  it("constructs each cargo gate as a target", () => {
     expect(Target.metadata(Smithers.Cargo.Fmt({ workspace: true, data: [], changes: [] })).target)
       .toBe("Cargo.Fmt")
-    expect(Smithers.Cargo.Clippy({ locked: true }).name).toBe("clippy")
     expect(Target.metadata(Smithers.Cargo.Clippy({ workspace: true, data: [] })).target)
       .toBe("Cargo.Clippy")
-    expect(Smithers.Cargo.Test({ locked: true }).name).toBe("test")
     expect(Target.metadata(Smithers.Cargo.Test({ workspace: true, data: [] })).target)
       .toBe("Cargo.Test")
   })

@@ -169,7 +169,7 @@ module and covered by a test:
 | Feature                        | Behaviour                                                                                                                                                                                                             |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Streaming output               | buffered; `stdout` and `stderr` each emit at most one chunk after the command finishes                                                                                                                                |
-| `all`                          | `stdout` followed by `stderr`, not a live interleaving, and it inherits both dispositions, so an ignored `stdout` leaves `all` carrying `stderr` alone                                                                |
+| `all`                          | `stdout` followed by `stderr`, not a live interleaving, and it inherits both stream options, so an ignored `stdout` leaves `all` carrying `stderr` alone                                                              |
 | `isRunning`                    | `true` while the run is queued or executing, `false` once it has settled                                                                                                                                              |
 | `stdin`                        | a failing `Sink`; a command supplying a stdin `Stream` is rejected at spawn time. just-bash itself accepts a string `stdin`, so the limit is this adapter's run-to-completion capture, not the interpreter            |
 | Interruption, timeouts, `kill` | abort the interpreter through just-bash's `AbortSignal`; every observable on the handle then reports a `PlatformError` naming the abort rather than replaying the interrupt into the caller's fiber                   |
@@ -180,7 +180,7 @@ module and covered by a test:
 | Process pipelines              | a `PipedCommand` is rejected; express the pipeline as one command line                                                                                                                                                |
 | `additionalFds`                | `Sink.drain` and `Stream.empty`, the answer `NodeChildProcessSpawner` gives for an unconfigured descriptor                                                                                                            |
 | `extendEnv`                    | honoured as a request to the interpreter: just-bash merges `env` into its own environment unless asked for `replaceEnv`, so the adapter asks for replacement whenever `env` is supplied and `extendEnv` is not `true` |
-| `stdout`/`stderr` dispositions | kept at their Node meaning: `"inherit"` and `"ignore"` yield an empty stream, a `Sink` is transduced through, even though the interpreter captured the text either way                                                |
+| `stdout`/`stderr` options      | kept at their Node meaning: `"inherit"` and `"ignore"` yield an empty stream, a `Sink` is transduced through, even though the interpreter captured the text either way                                                |
 
 Because the permit outlives the promise, an interpreter that ignores its
 `AbortSignal` and never settles blocks every later run rather than being

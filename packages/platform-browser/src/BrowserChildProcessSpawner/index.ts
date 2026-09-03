@@ -13,7 +13,7 @@
  * - **No incremental output.** The returned handle replays captured output
  *   after completion: `stdout` and `stderr` each emit at most one chunk, and
  *   `all` is `stdout` followed by `stderr` rather than a live interleaving.
- *   The `stdout`/`stderr` dispositions still
+ *   The `stdout`/`stderr` handling still
  *   mean what they mean under `NodeChildProcessSpawner` — `"inherit"` and
  *   `"ignore"` yield an empty stream, and a `Sink` is transduced through —
  *   they are just applied to captured text rather than to a live readable.

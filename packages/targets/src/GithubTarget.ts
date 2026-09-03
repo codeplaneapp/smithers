@@ -546,8 +546,6 @@ export const isPrRefused = (value: unknown): value is PrRefused => value instanc
 /**
  * The facts one `Github.Pr` invocation presents to the refusal gate.
  *
- * `environment` is retained for source compatibility but is never read:
- * secret values resolve only when the HTTP transport sends its request.
  * `approvalGranted` reports whether a durable approval satisfied
  * `approval: "required"`.
  *
@@ -555,8 +553,6 @@ export const isPrRefused = (value: unknown): value is PrRefused => value instanc
  * @since 0.1.0
  */
 export interface PrInvocation {
-  /** @deprecated Secret values are resolved only by the outbound transport. */
-  readonly environment: Readonly<Record<string, string | undefined>>
   readonly approvalGranted: boolean
 }
 

@@ -1,5 +1,5 @@
 /**
- * Replay of captured interpreter output under the caller's disposition.
+ * Replay of captured interpreter output under the caller's stream handling.
  *
  * @since 0.1.0
  */
@@ -17,9 +17,9 @@ const encoder = new TextEncoder()
 
 /**
  * Captured output as a stream of at most one chunk, with the caller's
- * disposition for that stream applied.
+ * handling for that stream applied.
  *
- * The dispositions mean here what they mean under `NodeChildProcessSpawner`.
+ * The options mean here what they mean under `NodeChildProcessSpawner`.
  * Node only hands back a readable for `"pipe"`; `"inherit"` and `"ignore"`
  * leave `childProcess.stdout` null, which that implementation turns into
  * `Stream.empty` — so they do the same here, even though the interpreter has
@@ -34,13 +34,13 @@ export const captured = (
   text: string,
   option: ChildProcess.CommandOutput | { readonly stream?: ChildProcess.CommandOutput | undefined } | undefined
 ): Stream.Stream<Uint8Array, PlatformError.PlatformError> => {
-  const disposition = option === undefined || typeof option === "string" || Sink.isSink(option)
+  const handling = option === undefined || typeof option === "string" || Sink.isSink(option)
     ? option
     : option.stream
   const stream: Stream.Stream<Uint8Array, PlatformError.PlatformError> = Stream.fromArray(
     text === "" ? [] : [encoder.encode(text)]
   )
-  if (disposition === undefined || disposition === "pipe" || disposition === "overlapped") return stream
-  if (Sink.isSink(disposition)) return Stream.transduce(stream, disposition)
+  if (handling === undefined || handling === "pipe" || handling === "overlapped") return stream
+  if (Sink.isSink(handling)) return Stream.transduce(stream, handling)
   return Stream.empty
 }

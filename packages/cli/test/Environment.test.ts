@@ -76,7 +76,7 @@ describe("the database-backend refusal", () => {
     expect(Environment.unsupportedBackend("sqlite")).toBeUndefined()
   })
 
-  it("uses rc-contract section 2's sentence verbatim for every other value", () => {
+  it("uses the database contract's sentence verbatim for every other value", () => {
     // The contract prints one exact sentence, and an operator's script greps
     // for it. Paraphrasing it — this module said "pglite is not supported in
     // 1.0.0-rc.0" and never named the fix — is a contract change. The literal

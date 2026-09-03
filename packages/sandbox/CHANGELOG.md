@@ -138,7 +138,7 @@
   bytes and a provider that declares `kill` is asked to deliver the signal,
   while a provider that declares neither still gets the honest refusal rather
   than a silent drop.
-- `RemoteChildProcessSpawner.layer` now applies output dispositions and sinks,
+- `RemoteChildProcessSpawner.layer` now applies output options and sinks,
   and rejects additional file descriptors, `stdin: "inherit"`, custom shell
   paths, detached processes, and non-default pipeline routing with
   `BadArgument` instead of changing or dropping their semantics. Command

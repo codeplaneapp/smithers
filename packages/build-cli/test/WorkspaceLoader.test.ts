@@ -51,7 +51,7 @@ describe("WorkspaceLoader.validateWorkspaceModule", () => {
   })
 
   it("refuses a naked target export", () => {
-    expect(thrownCode({ Workspace: workspace, check })).toBe("legacy_target_export")
+    expect(thrownCode({ Workspace: workspace, check })).toBe("naked_target_export")
   })
 
   it("refuses a Package export", () => {

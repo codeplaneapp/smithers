@@ -12,9 +12,7 @@
  * `//crates/flows-jj` under the test verb would pull it into both.
  */
 import { Smithers } from "@smthrs/targets"
-import { runtime, rustToolchain } from "../../PACKAGE.ts"
-
-const cwd = "."
+import { runtime } from "../../PACKAGE.ts"
 
 /**
  * The crate sources, the vendored jj submodule's manifests, and the lockfile.
@@ -36,12 +34,10 @@ const sources = [
  * @since 0.1.0
  * @category lint
  */
-const cargoFmt = Smithers.CargoLint({
-  toolchain: rustToolchain,
-  check: Smithers.Cargo.Fmt(),
-  srcs: sources,
-  deps: [],
-  cwd
+const cargoFmt = Smithers.Cargo.Fmt({
+  workspace: true,
+  data: sources,
+  changes: ["crates/flows-jj/**/*.rs"]
 })
 
 /**
@@ -50,12 +46,12 @@ const cargoFmt = Smithers.CargoLint({
  * @since 0.1.0
  * @category lint
  */
-const cargoClippy = Smithers.CargoLint({
-  toolchain: rustToolchain,
-  check: Smithers.Cargo.Clippy(),
-  srcs: sources,
-  deps: [],
-  cwd
+const cargoClippy = Smithers.Cargo.Clippy({
+  workspace: true,
+  allTargets: true,
+  locked: true,
+  denyWarnings: true,
+  data: sources
 })
 
 /**
@@ -64,12 +60,10 @@ const cargoClippy = Smithers.CargoLint({
  * @since 0.1.0
  * @category test
  */
-const cargoTest = Smithers.CargoTest({
-  toolchain: rustToolchain,
-  check: Smithers.Cargo.Test(),
-  srcs: sources,
-  deps: [],
-  cwd
+const cargoTest = Smithers.Cargo.Test({
+  workspace: true,
+  locked: true,
+  data: sources
 })
 
 /**
@@ -108,7 +102,7 @@ const wasmReproducibility = Smithers.NodeTest({
   srcs: [...sources, Smithers.file("//packages/jj/wasm/flows_jj.wasm")],
   deps: [],
   env: { CARGO_TARGET_DIR: "target/wasm-reproducibility" },
-  cwd
+  cwd: "."
 })
 
 export const Package = Smithers.Package({

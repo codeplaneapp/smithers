@@ -158,8 +158,8 @@ const collectStdin = (
     ).pipe(Effect.map(() => joined(chunks, length)))
   })
 
-/** The literal disposition a command names for its standard input, if it names one. */
-const stdinDisposition = (
+/** The literal handling a command names for its standard input, if it names one. */
+const stdinHandling = (
   options: ChildProcess.CommandOptions
 ): ChildProcess.CommandInput | undefined => {
   const stdin = options.stdin
@@ -190,13 +190,13 @@ const validateCommand = (
       validateCommand(command.right, acceptsStdin, false)
     )
   }
-  // `"inherit"` is the one input disposition the seam can neither honor nor
+  // `"inherit"` is the one input option the seam can neither honor nor
   // report through the handle. `"pipe"` and `"ignore"` are honest here — the
   // handle's `stdin` sink fails, and ignore genuinely means EOF — but a local
   // spawner hands an inheriting child this process's own standard input, and
   // a remote command would silently read EOF instead. The module's rule is
   // that a divergence it cannot preserve is refused, not hidden.
-  if (stdinDisposition(command.options) === "inherit" && leftmost) {
+  if (stdinHandling(command.options) === "inherit" && leftmost) {
     return Effect.fail(rejected("a remote session cannot inherit this process's standard input"))
   }
   if (stdinStream(command.options) !== undefined && !(acceptsStdin && leftmost)) {
@@ -224,11 +224,11 @@ const outputStream = (
   stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
   option: ChildProcess.CommandOutput | { readonly stream?: ChildProcess.CommandOutput | undefined } | undefined
 ): Stream.Stream<Uint8Array, PlatformError.PlatformError> => {
-  const disposition = option === undefined || typeof option === "string" || Sink.isSink(option)
+  const handling = option === undefined || typeof option === "string" || Sink.isSink(option)
     ? option
     : option.stream
-  if (disposition === undefined || disposition === "pipe" || disposition === "overlapped") return stream
-  if (Sink.isSink(disposition)) return Stream.transduce(stream, disposition)
+  if (handling === undefined || handling === "pipe" || handling === "overlapped") return stream
+  if (Sink.isSink(handling)) return Stream.transduce(stream, handling)
   return Stream.empty
 }
 

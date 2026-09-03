@@ -435,7 +435,7 @@ const validatePackageModule = (namespace: unknown, file: string): Package.Packag
     }
     if (Target.isTarget(exported)) {
       throw new PackageError(
-        "legacy_target_export",
+        "naked_target_export",
         `PACKAGE.ts exports a naked target ${
           JSON.stringify(name)
         }; a target is addressable only through the Package map`,

@@ -4835,7 +4835,7 @@ export const execute = async (
               approval: attrMember(Target.metadata(node.declaration).attrs, "approval") === "required"
                 ? "required"
                 : undefined
-            }, { environment, approvalGranted: false })
+            }, { approvalGranted: false })
           } catch (cause) {
             return fail(Diagnostic.describe(cause))
           }
@@ -5216,7 +5216,7 @@ export const execute = async (
           // HTTP transport exists. Past the gate, opening the pull request is
           // NotImplemented and says so.
           try {
-            GithubTarget.openPr(node.declaration, { environment, approvalGranted: false })
+            GithubTarget.openPr(node.declaration, { approvalGranted: false })
           } catch (cause) {
             return fail(GithubTarget.isPrRefused(cause) ? `refused: ${cause.message}` : Diagnostic.describe(cause))
           }

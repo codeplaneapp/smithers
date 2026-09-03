@@ -30,7 +30,7 @@ const cwd = "packages/ui-styleguide"
  * @since 1.0.0-rc.0
  * @category build
  */
-export const check = Smithers.Typecheck({
+const check = Smithers.Typecheck({
   packageManager,
   srcs: [
     Smithers.glob("//packages/ui-styleguide/src/**/*.ts"),
@@ -65,7 +65,7 @@ export const check = Smithers.Typecheck({
  * @since 0.1.0
  * @category test
  */
-export const unitTests = Smithers.NodeTest({
+const unitTests = Smithers.NodeTest({
   runtime: bunRuntime,
   runner: Smithers.testSuite(["tests"]),
   srcs: [
@@ -79,4 +79,8 @@ export const unitTests = Smithers.NodeTest({
   ],
   deps: [],
   cwd
+})
+
+export const Package = Smithers.Package({
+  targets: { check, unitTests }
 })

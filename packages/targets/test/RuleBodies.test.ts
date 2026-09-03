@@ -348,25 +348,6 @@ describe("SortPackageJson", () => {
   })
 })
 
-describe("Cargo BUILD-era gates", () => {
-  const toolchain = RustToolchain.Pinned({})
-  const srcs = [Input.glob("src/**/*.rs")]
-
-  it("plans the declared clippy gate under the pinned toolchain", () => {
-    expect(plannedArgv(Cargo.CargoLint({
-      toolchain,
-      check: Cargo.Clippy({ allTargets: true, locked: true, denyWarnings: true }),
-      srcs,
-      deps: []
-    }))).toEqual(["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"])
-  })
-
-  it("plans the declared test gate under the pinned toolchain", () => {
-    expect(plannedArgv(Cargo.CargoTest({ toolchain, check: Cargo.Test({ locked: true }), srcs, deps: [] })))
-      .toEqual(["cargo", "test", "--locked"])
-  })
-})
-
 describe("generated-file rules", () => {
   it("Tsconfig writes under a nested cwd through one joined path", () => {
     const call = plannedCalls(Tsconfig.Tsconfig({

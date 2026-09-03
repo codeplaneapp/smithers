@@ -16,7 +16,7 @@
  *     the action has to take the background process with it rather than
  *     reparenting it to init.
  *  2. `trap "" TERM; <sleeper> & wait`. `SIGTERM` is ignored, and an ignored
- *     disposition is inherited across `exec`, so the whole group survives the
+ *     signal behavior is inherited across `exec`, so the whole group survives the
  *     signal. Only the escalation `ContainedSpawner` installs
  *     (`forceKillAfter ?? graceMs`) ends it, and the last case here proves the
  *     escalation is load-bearing: without it the interrupt never returns.

@@ -15,23 +15,20 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Agent.Pr`               | AgentTarget       | run                | no        | no               | flow body        |
 | `Alias`                  | Compose           | mirrors its target | no        | no               | package executor |
 | `Anvil.Fork`             | Anvil             | run                | no        | no               | package executor |
-| `Api.Compat`             | NodeArtifact      | test               | yes       | no               | package executor |
+| `Api.Compat`             | NodeArtifact      | test               | yes       | no               | flow body        |
 | `BiomeCheck`             | BiomeCheck        | lint               | no        | no               | flow body        |
 | `Bundler.Rspack.build`   | BundlerTarget     | build              | yes       | yes              | flow body        |
 | `Bundler.Rspack.resolve` | BundlerTarget     | build              | yes       | no               | flow body        |
-| `Cargo.AppSet`           | Cargo             | none               | no        | no               | package executor |
+| `Cargo.AppSet`           | Cargo             | none               | no        | no               | flow body        |
 | `Cargo.Build`            | Cargo             | build              | no        | no               | package executor |
 | `Cargo.Clippy`           | Cargo             | lint               | no        | no               | package executor |
 | `Cargo.Deny`             | Cargo             | lint               | no        | no               | package executor |
-| `Cargo.Doc`              | Cargo             | build, docs        | no        | no               | package executor |
+| `Cargo.Doc`              | Cargo             | build, docs        | no        | no               | flow body        |
 | `Cargo.Fetch`            | Cargo             | build              | no        | no               | package executor |
 | `Cargo.Fmt`              | Cargo             | lint               | no        | no               | package executor |
 | `Cargo.Nextest`          | Cargo             | test               | no        | no               | package executor |
 | `Cargo.Test`             | Cargo             | test               | no        | no               | package executor |
-| `CargoLint`              | Cargo             | lint               | no        | no               | flow body        |
-| `CargoTest`              | Cargo             | test               | no        | no               | flow body        |
-| `Changesets`             | Changesets        | run                | no        | no               | flow body        |
-| `Changesets.Publish`     | ChangesetsTarget  | run                | no        | no               | package executor |
+| `Changesets.Publish`     | ChangesetsTarget  | run                | no        | no               | flow body        |
 | `Changesets.Version`     | ChangesetsTarget  | run, lint          | by attrs  | no               | package executor |
 | `Clean`                  | Compose           | run                | no        | no               | package executor |
 | `Copy`                   | NodeArtifact      | build              | yes       | no               | package executor |
@@ -56,7 +53,7 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Git.Commit`             | GitTarget         | run                | no        | no               | package executor |
 | `Git.Pr`                 | GitTarget         | run                | no        | no               | package executor |
 | `Git.Submodule`          | GitTarget         | build              | yes       | no               | package executor |
-| `Git.Submodules`         | GitTarget         | build              | yes       | no               | package executor |
+| `Git.Submodules`         | GitTarget         | build              | yes       | no               | flow body        |
 | `Github.Ci`              | GithubTarget      | run, lint          | no        | no               | package executor |
 | `Github.CiGen`           | GithubTarget      | run, lint          | no        | no               | package executor |
 | `Github.Pages`           | GithubTarget      | run                | no        | no               | package executor |
@@ -67,7 +64,7 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `GithubCiGen`            | GithubCiGen       | build, lint        | by attrs  | no               | flow body        |
 | `Go.Binary`              | Go                | build              | no        | no               | package executor |
 | `Go.Fuzz`                | Go                | test               | no        | no               | package executor |
-| `Go.Generate`            | Go                | lint, run          | no        | no               | package executor |
+| `Go.Generate`            | Go                | lint, run          | no        | no               | flow body        |
 | `Go.Lint`                | Go                | lint               | no        | no               | package executor |
 | `Go.ModDownload`         | Go                | build              | no        | no               | package executor |
 | `Go.Packages`            | Go                | build              | no        | no               | package executor |
@@ -115,4 +112,4 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `VitestCoverage`         | VitestCoverage    | test               | no        | yes              | flow body        |
 | `VitestWatch`            | VitestWatch       | run                | no        | no               | flow body        |
 
-104 rules.
+101 rules.

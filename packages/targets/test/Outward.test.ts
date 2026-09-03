@@ -66,10 +66,8 @@ describe("refuse", () => {
     expect(refusal?.code).toBe("missing_secret")
   })
 
-  it("reads only declarations: an unset environment is not this gate's refusal", () => {
-    expect(Outward.refuse(requirements(), { approvalGranted: true, environment: {} })).toBeUndefined()
-    expect(Outward.refuse(requirements(), { approvalGranted: true, environment: { NPM_TOKEN: undefined } }))
-      .toBeUndefined()
+  it("passes satisfied declaration requirements", () => {
+    expect(Outward.refuse(requirements(), { approvalGranted: true })).toBeUndefined()
   })
 })
 

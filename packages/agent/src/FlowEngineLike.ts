@@ -257,7 +257,7 @@ export const callMaterial = (
  * key material go in, the sandbox executes the runner against an isolated copy
  * of the workspace, and what comes back is a functional result — the files the
  * call would change, the provenance of what it actually read and wrote, and a
- * cache disposition keyed by `@smthrs/plan`'s compiler.
+ * cache outcome keyed by `@smthrs/plan`'s compiler.
  *
  * Two properties are the point:
  *

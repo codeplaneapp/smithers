@@ -153,11 +153,11 @@ surface used to compose or embed that executable.
 | `Doctor.inspect` (const) | constructors | Runs every check and returns the report. |
 | `Doctor.render` (const) | conversions | The human rendering: one line per check. |
 | `Doctor.failed` (const) | predicates | Whether the report contains a failing check, which decides the exit status. |
-| `Environment.Name` (interface) | models | A canonical `SMITHERS_*` name, and the `FLOWS_*` alias accepted for rc.0 when the imported CLI read one. |
-| `Environment.names` (const) | constants | Every environment variable rc.0 reads, with the rc.0-only `FLOWS_*` alias for the four families that have one. |
+| `Environment.Name` (interface) | models | A canonical environment name read by the CLI. |
+| `Environment.names` (const) | constants | Every environment variable rc.0 reads. |
 | `Environment.Source` (type) | models | The environment shape this module reads. |
 | `Environment.ambientWorkingDirectory` (const) | getters | Reads the directory the process was started in by deliberate host choice. |
-| `Environment.read` (const) | getters | Reads one canonical name, falling back to its rc.0 `FLOWS_*` alias. |
+| `Environment.read` (const) | getters | Reads one canonical name. |
 | `Environment.readInteger` (const) | getters | Reads one canonical name as a positive integer, ignoring anything else. |
 | `Environment.unsupportedBackendMessage` (const) | constants | The database-backend refusal sentence. |
 | `Environment.unsupportedBackend` (const) | getters | The database-backend refusal. |

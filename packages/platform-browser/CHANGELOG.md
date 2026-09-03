@@ -30,7 +30,7 @@
   against), and every capability just-bash lacks is reported as a
   `PlatformError` rather than as silence: process pipelines, additional file
   descriptors, a custom shell path, a detached process, and a streaming stdin
-  are all refused at spawn time. The `stdout`/`stderr` dispositions keep their
+  are all refused at spawn time. The `stdout`/`stderr` options keep their
   Node meaning, applied to captured text.
 - `BrowserServices`: the aggregate layer mirroring `NodeServices`, providing
   `ChildProcessSpawner`, `FileSystem`, and `Path` from one call.

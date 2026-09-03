@@ -192,7 +192,7 @@ describe("BrowserChildProcessSpawner", () => {
     }))
 
   /**
-   * The interpreter captures the text either way, so the dispositions have to
+   * The interpreter captures the text either way, so the stream options have to
    * be applied by the adapter — Node gets them for free by never opening a
    * readable for anything but `"pipe"`.
    */
@@ -201,7 +201,7 @@ describe("BrowserChildProcessSpawner", () => {
     ["inherit", ""],
     ["pipe", "out"],
     ["overlapped", "out"]
-  ])("honours the `%s` stdout disposition", ([disposition, expected]) =>
+  ])("honours the `%s` stdout option", ([handling, expected]) =>
     Effect.gen(function*() {
       const { bash } = stub(ok("out", "err"))
 
@@ -209,7 +209,7 @@ describe("BrowserChildProcessSpawner", () => {
         bash,
         Effect.scoped(Effect.gen(function*() {
           const spawner = yield* ChildProcessSpawner
-          const handle = yield* spawner.spawn(ChildProcess.make("thing", [], { stdout: disposition }))
+          const handle = yield* spawner.spawn(ChildProcess.make("thing", [], { stdout: handling }))
           return yield* Stream.mkString(Stream.decodeText(handle.stdout))
         }))
       )
@@ -217,7 +217,7 @@ describe("BrowserChildProcessSpawner", () => {
       expect(observed).toBe(expected)
     }))
 
-  it.effect("honours a disposition nested in a stdout config, and an undefined one inside it", () =>
+  it.effect("honours an option nested in a stdout config, and an undefined one inside it", () =>
     Effect.gen(function*() {
       const { bash } = stub(ok("out", "err"))
 
@@ -237,7 +237,7 @@ describe("BrowserChildProcessSpawner", () => {
       expect(observed).toEqual({ ignored: "", piped: "err" })
     }))
 
-  it.effect("transduces captured output through a `Sink` given as a disposition", () =>
+  it.effect("transduces captured output through a `Sink` given as an option", () =>
     Effect.gen(function*() {
       const { bash } = stub(ok("out"))
       const upper = Sink.map(
@@ -476,7 +476,7 @@ describe("BrowserChildProcessSpawner rejected inputs", () => {
       expect(error.reason._tag).toBe("BadArgument")
     }))
 
-  it.effect("accepts the string stdin dispositions, which name a pipe rather than supply one", () =>
+  it.effect("accepts the string stdin options, which name a pipe rather than supply one", () =>
     Effect.gen(function*() {
       const { bash, calls } = stub(ok())
 
@@ -491,7 +491,7 @@ describe("BrowserChildProcessSpawner rejected inputs", () => {
       expect(calls).toHaveLength(1)
     }))
 
-  it.effect("accepts a stdin config that names a disposition instead of a stream", () =>
+  it.effect("accepts a stdin config that names an option instead of a stream", () =>
     Effect.gen(function*() {
       const { bash, calls } = stub(ok())
 
@@ -851,11 +851,11 @@ describe("BrowserChildProcessSpawner boundary", () => {
 
   /**
    * `handle.stdout` and `handle.all` both wrap the same captured text, so a
-   * disposition `Sink` has to be transduced once per consumption rather than
-   * shared between them; and `all` inherits `stdout`'s disposition, so an
+   * configured `Sink` has to be transduced once per consumption rather than
+   * shared between them; and `all` inherits `stdout`'s handling, so an
    * ignored stdout leaves `all` carrying stderr alone.
    */
-  it.effect("applies a stdout disposition to `all` as well as to `stdout`", () =>
+  it.effect("applies a stdout option to `all` as well as to `stdout`", () =>
     Effect.gen(function*() {
       const { bash } = stub(ok("out", "err"))
       let transductions = 0

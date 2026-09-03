@@ -84,7 +84,7 @@ const planned = (
   )
 
 describe("the persisted plan handoff", () => {
-  it("carries the exact compiled plan and reports each node's cache disposition", async () => {
+  it("carries the exact compiled plan and reports each node's cache outcome", async () => {
     const card = await planned(graph(), {
       "root.all.read": "cached",
       "root.all.review": "run"
