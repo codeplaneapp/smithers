@@ -107,27 +107,27 @@ jobs:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Review app and workers
-        run: pnpm exec smithers-build ci '//apps/review'
+        run: pnpm exec smithers-build ci '//apps/review/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Bug worker
-        run: pnpm exec smithers-build ci '//apps/bug-worker'
+        run: pnpm exec smithers-build ci '//apps/bug-worker/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Status site
-        run: pnpm exec smithers-build ci '//apps/status-site'
+        run: pnpm exec smithers-build ci '//apps/status-site/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Site
-        run: pnpm exec smithers-build ci '//apps/site'
+        run: pnpm exec smithers-build ci '//apps/site/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: "Review eval suite (offline, baseline-gated)"
-        run: pnpm exec smithers-build test '//evals/review-seeded-bugs'
+        run: pnpm exec smithers-build test '//evals/review-seeded-bugs/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -165,7 +165,7 @@ jobs:
           fi
           '/usr/bin/google-chrome' --version
       - name: UI end-to-end suites
-        run: pnpm exec smithers-build test '//apps/ui'
+        run: pnpm exec smithers-build test '//apps/ui/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -195,7 +195,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Cargo lint gates
-        run: pnpm exec smithers-build lint '//crates/flows-jj'
+        run: pnpm exec smithers-build lint '//crates/flows-jj/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
