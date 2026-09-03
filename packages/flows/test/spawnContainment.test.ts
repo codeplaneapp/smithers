@@ -104,8 +104,7 @@ describe("child-process containment conformance", () => {
       "NixExec.ts",
       "PackageTree.ts",
       "RepoResolution.ts",
-      "ServiceSupervisor.ts",
-      "Workspace.ts"
+      "ServiceSupervisor.ts"
     ].map((file): [string, string] => [
       `build-cli/src/${file}`,
       "Repository tooling. `@smthrs/build-cli` is private and runs no flow, so it hosts nothing "

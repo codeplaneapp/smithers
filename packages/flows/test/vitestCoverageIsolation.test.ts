@@ -965,8 +965,8 @@ describe("vitest coverage isolation conformance", () => {
 })
 
 /**
- * `known-files.d.ts` is generated, and it is one TypeScript union with 4,681
- * members across 11,458 lines. A syntax-aware merge driver walks that file's
+ * `known-files.d.ts` is generated, and it is one TypeScript union with 15,168
+ * members across 15,180 lines. A syntax-aware merge driver walks that file's
  * whole AST recursively, and mergiraf 0.16.1 overflows its stack on it:
  *
  * ```
