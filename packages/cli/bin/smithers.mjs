@@ -21,6 +21,27 @@ import { danglingWorkspaceLinkHint } from "./dangling-workspace-links.mjs"
 const built = new URL("../dist/esm/bin.js", import.meta.url)
 
 /**
+ * The refusal a removed 0.x verb earns, answered here, before the entry point
+ * and its module graph load.
+ *
+ * `bin.ts` refuses the same vectors through `Unsupported.refusal` before its
+ * runtime boots, but by then the process has imported the platform, the
+ * database driver, and the command tree, which is most of a second on an idle
+ * machine and many seconds on a loaded one. A refusal is one sentence and
+ * exit 1; it needs the removal table and nothing else, and the table's module
+ * imports only the error type. The sentence is a constant of the table, so it
+ * carries nothing the redacting reporter would have to hide.
+ */
+const refusal = async () => {
+  const builtTable = new URL("../dist/esm/Unsupported.js", import.meta.url)
+  const table = existsSync(fileURLToPath(builtTable))
+    ? builtTable.href
+    : new URL("../src/Unsupported.ts", import.meta.url).href
+  const Unsupported = await import(table)
+  return Unsupported.refusal(process.argv.slice(2))
+}
+
+/**
  * Imports the entry, and explains the one failure whose message names the
  * wrong problem: a checkout whose workspace links point into a git worktree
  * that has since been removed fails with `ERR_MODULE_NOT_FOUND` for a package
@@ -39,17 +60,20 @@ const start = async (entry) => {
   }
 }
 
-if (existsSync(fileURLToPath(built))) {
-  await start(built.href)
-} else {
-  // Type stripping is experimental on Node 22, and its warning would prepend a
-  // paragraph of noise to every development invocation. Only that one warning
-  // is dropped; everything else still reaches stderr.
-  const emitWarning = process.emitWarning.bind(process)
-  process.emitWarning = (warning, ...rest) => {
-    const type = typeof rest[0] === "string" ? rest[0] : rest[0]?.type
-    if (type === "ExperimentalWarning" && String(warning).includes("Type Stripping")) return
-    emitWarning(warning, ...rest)
-  }
-  await start(new URL("../src/bin.ts", import.meta.url).href)
+// Type stripping is experimental on Node 22, and its warning would prepend a
+// paragraph of noise to every development invocation. Only that one warning
+// is dropped; everything else still reaches stderr.
+const emitWarning = process.emitWarning.bind(process)
+process.emitWarning = (warning, ...rest) => {
+  const type = typeof rest[0] === "string" ? rest[0] : rest[0]?.type
+  if (type === "ExperimentalWarning" && String(warning).includes("Type Stripping")) return
+  emitWarning(warning, ...rest)
 }
+
+const refused = await refusal()
+if (refused !== undefined) {
+  process.stderr.write(`${refused.message}\n`)
+  process.exit(1)
+}
+
+await start(existsSync(fileURLToPath(built)) ? built.href : new URL("../src/bin.ts", import.meta.url).href)

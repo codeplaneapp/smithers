@@ -363,6 +363,47 @@ describe("a removed verb refuses before the control plane boots", processBudget,
     })
   })
 
+  it("is answered by the launcher before the entry point is ever resolved", () => {
+    // The sentence needs the removal table and nothing else. The launcher reads
+    // that table and answers before it imports `bin.ts` or `dist/esm/bin.js`,
+    // whose module graph is most of a second on an idle machine and many
+    // seconds on a loaded one; `scripts/docs-removals.test.mjs` spawns 75 of
+    // these eight at a time against a fifteen-second bound. The proof forbids
+    // the entry module outright: a resolver hook throws if either spelling of
+    // it is ever resolved, so the refusal can only come from the launcher.
+    const ui = Unsupported.removedVerbs.find((verb) => verb.name === "ui")!
+
+    inEmptyDirectory((cwd) => {
+      writeFileSync(
+        join(cwd, "hooks.mjs"),
+        [
+          "export async function resolve(specifier, context, next) {",
+          "  const resolved = await next(specifier, context)",
+          "  if (/\\/(src\\/bin\\.ts|dist\\/esm\\/bin\\.js)$/.test(resolved.url)) {",
+          "    throw new Error(`entry point resolved: ${resolved.url}`)",
+          "  }",
+          "  return resolved",
+          "}",
+          ""
+        ].join("\n")
+      )
+      writeFileSync(
+        join(cwd, "register.mjs"),
+        "import { register } from \"node:module\"\nregister(new URL(\"./hooks.mjs\", import.meta.url))\n"
+      )
+      const result = spawnSync(
+        process.execPath,
+        ["--no-warnings", "--import", join(cwd, "register.mjs"), shim, "ui"],
+        { cwd, encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } }
+      )
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe(Unsupported.message("ui", ui.reason, "ui"))
+      expect(readdirSync(cwd).sort()).toEqual(["hooks.mjs", "register.mjs"])
+    })
+  })
+
   it("still boots the control plane for a surviving verb", () => {
     // The guard is scoped to the removal table. `ls` is a real verb, so it
     // still resolves a project and opens its databases, and a guard that
