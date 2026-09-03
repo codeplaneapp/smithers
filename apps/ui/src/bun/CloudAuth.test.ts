@@ -30,7 +30,9 @@ const CREDENTIALS = {
  * credentials to the callback port (the GitHub CLI flow's half), and it
  * answers the scope probe. `probeStatus`/`probeBody` shape the probe answer.
  */
-const fakeUpstream = (options: { readonly probeStatus?: number; readonly probeBody?: string } = {}) => {
+const fakeUpstream = (
+  options: { readonly probeStatus?: number; readonly probeBody?: string; readonly probeDelayMs?: number } = {}
+) => {
   const requests: Array<{ readonly path: string; readonly authorization: string | null }> = []
   const server: Server<undefined> = Bun.serve({
     hostname: "127.0.0.1",
@@ -50,6 +52,7 @@ const fakeUpstream = (options: { readonly probeStatus?: number; readonly probeBo
         return new Response("<html>login</html>", { headers: { "content-type": "text/html" } })
       }
       if (url.pathname === "/api/user/workspaces") {
+        if (options.probeDelayMs !== undefined) await Bun.sleep(options.probeDelayMs)
         return new Response(options.probeBody ?? "[]", { status: options.probeStatus ?? 200 })
       }
       return new Response("not found", { status: 404 })
@@ -164,6 +167,27 @@ describe("cloud sign-in", () => {
       expiresAt: CREDENTIALS.expiresAt,
       scopes: "degraded"
     })
+  })
+
+  test("the session reports signed-in only once the scope probe has answered", async () => {
+    // A slow probe used to let a reader see signed-in with no scope verdict
+    // and then watch it degrade; the first signed-in observation carries it.
+    const fake = fakeUpstream({
+      probeStatus: 403,
+      probeBody: JSON.stringify({ error: "insufficient token scope" }),
+      probeDelayMs: 300
+    })
+    upstream = fake.server
+    auth = await createCloudAuth({ api: fake.origin, keychain: memoryKeychain(), waitTimeoutMs: 5000 })
+    const started = await auth.start()
+    if ("error" in started) throw new Error(started.error)
+    await fetch(started.url)
+    const deadline = Date.now() + 5000
+    while (auth.session().state !== "signed-in") {
+      if (Date.now() > deadline) throw new Error("the callback never signed the session in")
+      await Bun.sleep(10)
+    }
+    expect(auth.session().scopes).toBe("degraded")
   })
 
   test("a 403 that does not name scope does not degrade", async () => {

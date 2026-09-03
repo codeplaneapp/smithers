@@ -1130,6 +1130,37 @@ describe("system packages", () => {
     expect(rendered).not.toContain("if: ")
   })
 
+  it("turns the containerd image store on for a job that declares it, under bash, with no if key", () => {
+    const rendered = render({
+      ...goldenAttrs,
+      jobs: [{
+        id: "test",
+        name: "test",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({ runtimes: [node], docker: CiToolchain.Docker({ imageStore: "containerd" }) }),
+        steps: [{ name: "Targets", verb: Verb.Test, pattern: "//packages/..." }]
+      }],
+      gates: []
+    })
+    expect(rendered).toContain("- name: Enable the containerd image store")
+    expect(rendered).toContain("shell: bash")
+    expect(rendered).toContain("containerd-snapshotter")
+    expect(rendered).toContain("sudo systemctl restart docker")
+    expect(rendered).not.toContain("if: ")
+    const without = render({
+      ...goldenAttrs,
+      jobs: [{
+        id: "test",
+        name: "test",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({ runtimes: [node] }),
+        steps: [{ name: "Targets", verb: Verb.Test, pattern: "//packages/..." }]
+      }],
+      gates: []
+    })
+    expect(without).not.toContain("containerd image store")
+  })
+
   it("refuses a package name apt would not accept", () => {
     expect(() => CiToolchain.Apt({ packages: ["bubble wrap"] })).toThrow()
     expect(() => CiToolchain.Apt({ packages: [] })).toThrow()

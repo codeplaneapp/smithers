@@ -91,6 +91,7 @@ const bubblewrap = Smithers.CiToolchain.Apt({ packages: ["bubblewrap"] })
 // Foundry v1.8.1 installed cleanly on every runner when it was last declared.
 const go = Smithers.CiToolchain.Go({ release: "1.26.0" })
 const foundry = Smithers.CiToolchain.Foundry({ release: "v1.8.1" })
+const dockerImageStore = Smithers.CiToolchain.Docker({ imageStore: "containerd" })
 
 const ci = Smithers.GithubCiGen({
   packageManager,
@@ -115,6 +116,7 @@ const ci = Smithers.GithubCiGen({
         apt: bubblewrap,
         go,
         foundry,
+        docker: dockerImageStore,
         workflowLint: Smithers.CiToolchain.Actionlint({
           release: "1.7.11",
           workflows: [
@@ -306,7 +308,15 @@ const ci = Smithers.GithubCiGen({
         { os: "windows-latest", advisory: true }
       ],
       timeoutMinutes: 60,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep, apt: bubblewrap, go, foundry }),
+      toolchain: Smithers.CiToolchain.Needs({
+        runtimes: [node, bun],
+        jj,
+        ripgrep,
+        apt: bubblewrap,
+        go,
+        foundry,
+        docker: dockerImageStore
+      }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
     }
   ]

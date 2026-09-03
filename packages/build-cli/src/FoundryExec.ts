@@ -14,7 +14,6 @@
 import type * as Foundry from "@smthrs/targets/Foundry"
 import * as Input from "@smthrs/targets/Input"
 import type * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
-import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import * as PackageTree from "./PackageTree.ts"
@@ -249,16 +248,9 @@ const effectiveConfig = async (
   environment: Readonly<Record<string, string | undefined>>
 ): Promise<{ readonly out: string; readonly cachePath: string; readonly cache: boolean } | string> => {
   const args = ["config", "--json", ...(configPath === undefined ? [] : ["--config-path", configPath])]
-  const raw = await new Promise<string>((resolve, reject) => {
-    NodeChildProcess.execFile(forge, args, { cwd, env: environment, maxBuffer: 16 * 1024 * 1024 }, (
-      error,
-      stdout,
-      stderr
-    ) => {
-      if (error !== null) reject(new Error(stderr.trim() || error.message))
-      else resolve(stdout)
-    })
-  }).catch((cause: unknown) => cause instanceof Error ? cause : new Error(String(cause)))
+  const raw = await PackageTree.runCommand(forge, args, { cwd, environment }).catch((cause: unknown) =>
+    cause instanceof Error ? cause : new Error(String(cause))
+  )
   if (raw instanceof Error) return `forge config failed: ${raw.message}`
   let parsed: unknown
   try {

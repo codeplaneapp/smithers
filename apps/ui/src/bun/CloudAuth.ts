@@ -14,8 +14,10 @@
  *
  * Scopes degrade honestly (ADR 0001): today the CLI login mints the legacy
  * set and workspace/agent/approval calls 403 "insufficient token scope", so
- * after sign-in the probe (GET /api/user/workspaces) runs once; a 403 whose
- * body says insufficient scope marks the session `scopes: "degraded"`.
+ * the probe (GET /api/user/workspaces) runs once, before the session reports
+ * signed-in; a 403 whose body says insufficient scope marks the session
+ * `scopes: "degraded"`. The session never reports signed-in without its scope
+ * verdict, so a reader that polls for the state gets one consistent answer.
  */
 import type { Server } from "bun"
 import type { CloudSession } from "smithers-shared/LocalApp"
@@ -163,16 +165,17 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
    * legacy token set — workspace/agent/approval acts degrade to "sign in
    * again to enable" instead of failing silently.
    */
-  const probeScopes = async (bearer: string): Promise<void> => {
+  const probeScopes = async (bearer: string): Promise<boolean> => {
     try {
       const response = await fetchImpl(`${api}/api/user/workspaces`, {
         headers: { authorization: `Bearer ${bearer}` }
       })
-      if (response.status !== 403) return
+      if (response.status !== 403) return false
       const text = await response.text().catch(() => "")
-      if (/insufficient/i.test(text) && /scope/i.test(text)) degraded = true
+      return /insufficient/i.test(text) && /scope/i.test(text)
     } catch {
       // A failed probe says nothing about scope; the session stays undegraded.
+      return false
     }
   }
 
@@ -186,14 +189,19 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
   const accept = async (value: unknown): Promise<void> => {
     const parsed = parseCloudCredentials(value)
     if (parsed === null) return
+    // The probe answers before the credentials are published: `session()`
+    // reads signed-in off the stored credentials, so publishing first would
+    // let a reader see signed-in with no scope verdict and then watch it
+    // degrade a moment later.
+    const scopesDegraded = await probeScopes(parsed.token)
     credentials = parsed
+    degraded = scopesDegraded
     try {
       await keychain.write(CLOUD_KEYCHAIN_SERVICE, account, JSON.stringify(parsed))
     } catch {
       // Best-effort persistence; memory still holds the session.
     }
     log(`cloud-auth: signed in as ${parsed.username}`)
-    await probeScopes(parsed.token)
   }
 
   return {

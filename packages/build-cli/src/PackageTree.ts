@@ -225,6 +225,40 @@ export const runGit = (root: string, args: ReadonlyArray<string>): Promise<strin
     )
   })
 
+/**
+ * Runs a resolved tool once at plan time and returns its stdout, throwing on
+ * a non-zero exit with what the tool wrote to stderr. The same bounded shape
+ * as {@link runGit}, for a tool that is not git: a planner asking `forge` or
+ * `go` what it would do.
+ *
+ * @category planning
+ * @since 0.1.0
+ */
+export const runCommand = (
+  path: string,
+  args: ReadonlyArray<string>,
+  options: {
+    readonly cwd: string
+    readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  }
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    NodeChildProcess.execFile(
+      path,
+      [...args],
+      {
+        cwd: options.cwd,
+        timeout: 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        ...(options.environment === undefined ? {} : { env: { ...options.environment } })
+      },
+      (error, stdout, stderr) => {
+        if (error !== null) reject(new Error(stderr.trim() || error.message))
+        else resolve(stdout)
+      }
+    )
+  })
+
 /** One `git status --porcelain -z` row. */
 interface StatusEntry {
   readonly status: string

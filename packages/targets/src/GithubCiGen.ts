@@ -793,6 +793,32 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       with: { version: needs.foundry.release }
     })
   }
+  if (needs.docker !== undefined) {
+    // The generator emits no `if:` key, so the step decides for itself: a
+    // runner with no docker daemon, or one whose daemon already reports the
+    // containerd snapshotter (`docker info` names the storage driver
+    // `overlayfs` then, `overlay2` otherwise), runs nothing. The existing
+    // daemon.json is merged rather than replaced, because the hosted image
+    // configures the daemon there and dropping that would change every other
+    // docker invocation in the job.
+    steps.push({
+      name: "Enable the containerd image store",
+      shell: "bash",
+      run: [
+        "if command -v docker >/dev/null 2>&1 && [ \"$(uname -s)\" = Linux ] \\",
+        "  && [ \"$(docker info --format '{{.Driver}}' 2>/dev/null)\" != overlayfs ]; then",
+        "  if [ -f /etc/docker/daemon.json ]; then",
+        "    merged=\"$(jq '.features[\"containerd-snapshotter\"] = true' /etc/docker/daemon.json)\"",
+        "  else",
+        "    merged='{ \"features\": { \"containerd-snapshotter\": true } }'",
+        "  fi",
+        "  printf '%s\\n' \"$merged\" | sudo tee /etc/docker/daemon.json >/dev/null",
+        "  sudo systemctl restart docker",
+        "  docker info --format 'docker storage driver: {{.Driver}}'",
+        "fi"
+      ].join("\n")
+    })
+  }
   if (needs.nix !== undefined) {
     // The environment supplies the package manager and the interpreters, so
     // no setup action runs; the install itself runs inside the dev shell.

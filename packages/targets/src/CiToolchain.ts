@@ -327,6 +327,30 @@ export const FoundrySetup = Schema.Struct({ release: FoundryRelease })
 export type FoundrySetup = typeof FoundrySetup.Type
 
 /**
+ * Schema for the docker daemon configuration a job needs.
+ *
+ * Hosted runners ship a docker daemon whose default `docker` build driver
+ * cannot export an OCI archive (`--output type=oci`), which is what
+ * `Docker.Build` and `Docker.Bake` produce: buildx answers "OCI exporter is
+ * not supported for the docker driver. Switch to a different driver, or turn
+ * on the containerd image store". The image store is the daemon-side fix and
+ * the only one that leaves every other docker invocation unchanged, so a job
+ * that runs those rules declares it here and the generated step turns it on.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const DockerSetup = Schema.Struct({ imageStore: Schema.Literal("containerd") })
+
+/**
+ * One declared docker daemon configuration.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type DockerSetup = typeof DockerSetup.Type
+
+/**
  * Schema for a declared jj installation.
  *
  * `colocate` asks the generator for the `jj git init --colocate` step: a GitHub
@@ -383,6 +407,16 @@ export const Go = (options: { readonly release: GoRelease }): GoSetup => GoSetup
  */
 export const Foundry = (options: { readonly release: FoundryRelease }): FoundrySetup =>
   FoundrySetup.make({ release: options.release })
+
+/**
+ * Declares that a job's docker daemon uses the containerd image store, so
+ * buildx can export OCI archives.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const Docker = (options: { readonly imageStore: "containerd" }): DockerSetup =>
+  DockerSetup.make({ imageStore: options.imageStore })
 
 /**
  * Declares that a job installs the jj CLI.
@@ -755,6 +789,8 @@ export const Toolchain = Schema.Struct({
   apt: Schema.optional(AptSetup),
   go: Schema.optional(GoSetup),
   foundry: Schema.optional(FoundrySetup),
+  /** Configure the runner's docker daemon; a no-op where there is none. */
+  docker: Schema.optional(DockerSetup),
   /** Install Nix and run every step inside the declared environment. */
   nix: Schema.optional(NixSetup),
   browser: Schema.optional(SystemBrowser),
@@ -804,6 +840,7 @@ export const Needs = (options: {
   readonly apt?: AptSetup | undefined
   readonly go?: GoSetup | undefined
   readonly foundry?: FoundrySetup | undefined
+  readonly docker?: DockerSetup | undefined
   readonly nix?: NixSetup | undefined
   readonly browser?: SystemBrowser | undefined
   readonly workflowLint?: WorkflowLint | undefined
@@ -833,6 +870,7 @@ export const Needs = (options: {
     ...(options.apt === undefined ? {} : { apt: options.apt }),
     ...(options.go === undefined ? {} : { go: options.go }),
     ...(options.foundry === undefined ? {} : { foundry: options.foundry }),
+    ...(options.docker === undefined ? {} : { docker: options.docker }),
     ...(options.nix === undefined ? {} : { nix: options.nix }),
     ...(options.browser === undefined ? {} : { browser: options.browser }),
     ...(options.workflowLint === undefined ? {} : { workflowLint: options.workflowLint }),
