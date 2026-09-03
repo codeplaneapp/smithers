@@ -162,7 +162,7 @@ red run:
 - **One composition.** Every case runs with an empty registry, an empty
   capability envelope, and at most one host flow. Plugin ordering, memory
   injection, steering, compaction, and durable park-and-resume are covered by
-  `packages/agent/test`, not here.
+  `packages/smithers/agent/test`, not here.
 - **Failures are matched by tag, not by content.** A case that expects
   `/harness/HarnessError` would still pass if the harness raised that tag for a
   different reason. The tag is the stable half of the contract; the message is

@@ -34,9 +34,9 @@ import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { fileURLToPath } from "node:url"
-import type { ControlSchema } from "../../packages/control/src/index.ts"
-import type * as AgentEvent from "../../packages/harness/src/AgentEvent.ts"
-import * as Forensics from "../../packages/cli/src/Forensics.ts"
+import type { ControlSchema } from "../../packages/smithers/control/src/index.ts"
+import type * as AgentEvent from "../../packages/smithers/agent/harness/src/AgentEvent.ts"
+import * as Forensics from "../../packages/smithers/src/Forensics.ts"
 import { usd } from "./prices.ts"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -412,7 +412,7 @@ const aggregate = {
  *
  * `agreement` is the part that matters most. Every instance stamps the pinned
  * subject into its timings record when it starts, so a wave in which a sibling
- * lane edited `packages/harness/src` between the first instance and the last
+ * lane edited `packages/smithers/agent/harness/src` between the first instance and the last
  * reports two stamps here instead of one, and cannot be written up as a single
  * measurement.
  */
@@ -475,10 +475,10 @@ const markdown = [
   `| subject | \`${subject.stamp ?? "unpinned"}\` |`,
   `| agreement | ${subject.agreement} |`,
   `| git HEAD | ${subject.head ?? "—"} ${subject.headSubject ?? ""} |`,
-  `| \`packages/harness/src/CellTurn.ts\` | \`${subject.marker?.hash ?? "—"}\` |`,
+  `| \`packages/smithers/agent/harness/src/CellTurn.ts\` | \`${subject.marker?.hash ?? "—"}\` |`,
   `| loaded from | ${subject.marker?.resolvedBy ?? "—"} |`,
-  `| \`packages/cli/dist/esm\` | \`${subject.cliDist?.hash ?? "—"}\` (${subject.cliDist?.files ?? 0} modules) |`,
-  `| \`packages/cli/src\` | \`${subject.cliSrc?.hash ?? "—"}\` (${subject.cliSrc?.files ?? 0} files, built above) |`,
+  `| \`packages/smithers/dist/esm\` | \`${subject.cliDist?.hash ?? "—"}\` (${subject.cliDist?.files ?? 0} modules) |`,
+  `| \`packages/smithers/src\` | \`${subject.cliSrc?.hash ?? "—"}\` (${subject.cliSrc?.files ?? 0} files, built above) |`,
   `| node | ${subject.node ?? "—"} ${subject.platform ?? ""} |`,
   "",
   ...(subject.refusals === undefined || subject.refusals.length === 0 ? [] : [
@@ -489,7 +489,7 @@ const markdown = [
   ]),
   "Every `@smthrs/*` package except `@smthrs/cli` is loaded from its `src`"
   + " directory, because that is where its workspace `exports` map points; the"
-  + " harness under test is the working tree, not a build. `packages/harness/dist`"
+  + " harness under test is the working tree, not a build. `packages/smithers/agent/harness/dist`"
   + " is not in the loaded graph and its state means nothing here.",
   "",
   "## Quality",

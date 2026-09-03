@@ -41,6 +41,6 @@ node --test flows/pack.test.mjs      # registry, capabilities, detector, real CL
 smithers-build test //flows/...      # the same suite as a build target
 ```
 
-`packages/cli/dist` must not exist while these run: `packages/cli/bin/smithers.mjs`
+`packages/smithers/dist` must not exist while these run: `packages/smithers/bin/smithers.mjs`
 prefers a build over `src/`, and the real-CLI checks here assert what the source
 does.

@@ -16,22 +16,22 @@
  *
  * Three fixtures are committed, and none of them is regenerable:
  *
- * - `packages/harness/test/fixtures/narrowingJournals.json` — wave 8, the
+ * - `packages/smithers/agent/harness/test/fixtures/narrowingJournals.json` — wave 8, the
  *   evidence `NarrowedCheck` was designed against. Wave 9 replaced wave 8's
  *   workspaces, so this file is the last copy of those journals. It predates the
  *   exit-status and mutation fields and is not to be rewritten.
- * - `packages/harness/test/fixtures/completionJournals.json` — wave 9, the
+ * - `packages/smithers/agent/harness/test/fixtures/completionJournals.json` — wave 9, the
  *   evidence `UnmovedTree` and `UnresolvedFailure` were designed against.
- * - `packages/harness/test/fixtures/wave10Journals.json` — wave 10, the first
+ * - `packages/smithers/agent/harness/test/fixtures/wave10Journals.json` — wave 10, the first
  *   wave run with all three demands armed, and the evidence
  *   `NarrowedCheck.findOnly` was designed against: its pytest instance ran a
  *   filtered reading of the right file, ran nothing else, and completed, which
  *   is the shape broad-then-narrow cannot see.
- * - `packages/harness/test/fixtures/vacuousJournals.json` — the r92 full-bench
+ * - `packages/smithers/agent/harness/test/fixtures/vacuousJournals.json` — the r92 full-bench
  *   wave, and the evidence `VacuousVerification` was designed against:
  *   `django__django-14351` stored one verification script as its proof after
  *   having watched that same script exit 0 on the tree it was handed.
- * - `packages/harness/test/fixtures/r97Journals.json` — the r97 full-bench
+ * - `packages/smithers/agent/harness/test/fixtures/r97Journals.json` — the r97 full-bench
  *   wave, written by lib/r97-narrow-only-journals.mjs (a sibling of this
  *   script that also records demand events, the task text, and per-call
  *   checkpoint marks): the evidence the narrow-only demand's taught-terms
@@ -59,7 +59,7 @@ import { fileURLToPath } from "node:url"
 const here = dirname(fileURLToPath(import.meta.url))
 const work = resolve(process.argv[2] ?? join(here, "..", "work"))
 const out = resolve(
-  process.argv[3] ?? join(here, "..", "..", "..", "packages", "harness", "test", "fixtures", "narrowingJournals.json")
+  process.argv[3] ?? join(here, "..", "..", "..", "packages", "smithers", "agent", "harness", "test", "fixtures", "narrowingJournals.json")
 )
 
 /** Flows whose calls change the workspace, so they are never checks. */

@@ -26,17 +26,21 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
-import * as Capability from "../packages/capability/src/Capability.ts";
-import * as Discovery from "../packages/registry/src/Discovery.ts";
-import * as MarkdownFlow from "../packages/registry/src/MarkdownFlow.ts";
-import * as Detect from "../packages/migrate/src/Detect.ts";
+import * as Capability from "../packages/smithers/flows/capability/src/Capability.ts";
+import * as Discovery from "../packages/smithers/agent/registry/src/Discovery.ts";
+import * as MarkdownFlow from "../packages/smithers/agent/registry/src/MarkdownFlow.ts";
+import * as Detect from "../packages/smithers/migrate/src/Detect.ts";
 
 const flowsRoot = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(flowsRoot);
 const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer);
 const run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(platform)));
 
-/** The ten prompt bodies this lane stages, by their path-derived flow name. */
+/**
+ * The prompt bodies under `flows/`, by their path-derived flow name: the ten
+ * authoring bodies the migration composes, and the three repository flows
+ * (`lint`, `release-notes`, `review`) the smithers.sh tape runs.
+ */
 const EXPECTED_FLOWS = [
   "create-flow/clarify",
   "create-flow/design",
@@ -48,6 +52,9 @@ const EXPECTED_FLOWS = [
   "create-skill/design",
   "create-skill/document",
   "create-skill/scaffold",
+  "lint",
+  "release-notes",
+  "review",
 ];
 
 const FIXTURE = "migrate-smithers-v1/test/fixtures/smithers-0x-hello";
@@ -70,7 +77,7 @@ function markdownFlows(directory = flowsRoot) {
 describe("the staged prompt bodies", () => {
   const files = markdownFlows();
 
-  it("are the ten create-flow and create-skill bodies", () => {
+  it("are the authoring bodies and the repository flows", () => {
     assert.deepEqual(
       files.map((file) => relative(flowsRoot, dirname(file)).split("\\").join("/")).sort(),
       EXPECTED_FLOWS,
@@ -127,7 +134,6 @@ describe("the staged prompt bodies", () => {
         "gateway-react",
         "gateway-ui",
         "bunx smthrs",
-        "docs-full",
         "ask-human",
         "smithers ui ",
         "props.schema",
@@ -142,7 +148,7 @@ describe("the capabilities the staged prompt bodies declare", () => {
   const files = markdownFlows();
 
   /** A command line each `proc:spawn` grant has to permit to be worth anything. */
-  const COMMANDS = ["pnpm test", "git push origin main", "node scripts/check-docs.mjs"];
+  const COMMANDS = ["pnpm test", "git push origin main", "node scripts/check-legacy-absent.mjs"];
 
   for (const file of files) {
     const name = relative(flowsRoot, dirname(file)).split("\\").join("/");
@@ -187,21 +193,35 @@ describe("the capabilities the staged prompt bodies declare", () => {
       const spawns = declared.filter((literal) => literal.startsWith("proc:spawn"));
       if (spawns.length === 0) return;
 
-      for (const command of COMMANDS) {
-        const request = Capability.make("proc:spawn", command);
+      const permits = (literal, command) => {
+        const parsed = Capability.parse(literal);
+        return Option.isSome(parsed) &&
+          Capability.matches(
+            new Capability.CapabilityPattern({
+              action: parsed.value.action,
+              resource: parsed.value.resource,
+            }),
+            Capability.make("proc:spawn", command),
+          );
+      };
+
+      for (const literal of spawns) {
+        const resource = literal.slice("proc:spawn:".length);
+        if (resource === "*") {
+          // The open grant: the command lines a real body asks for.
+          for (const command of COMMANDS) {
+            assert.ok(permits(literal, command), `${name} declares ${literal} but it does not permit \`${command}\``);
+          }
+          continue;
+        }
+        // A named grant. `proc:spawn:git` matches only the bare word `git`, so a
+        // body that runs `git diff` is refused at its first call; the grant has
+        // to read `proc:spawn:git *`. Check that the program it names runs with
+        // an argument.
+        const program = resource.replace(/\s*\*+$/, "");
         assert.ok(
-          spawns.some((literal) => {
-            const parsed = Capability.parse(literal);
-            return Option.isSome(parsed) &&
-              Capability.matches(
-                new Capability.CapabilityPattern({
-                  action: parsed.value.action,
-                  resource: parsed.value.resource,
-                }),
-                request,
-              );
-          }),
-          `${name} declares ${JSON.stringify(spawns)} but none of them permits \`${command}\``,
+          permits(literal, `${program} --version`),
+          `${name} declares ${literal}, which permits only the bare \`${program}\`; write \`proc:spawn:${program} *\``,
         );
       }
     });
@@ -210,17 +230,17 @@ describe("the capabilities the staged prompt bodies declare", () => {
 
 describe("the binary this lane's suites spawn", () => {
   it("is this working tree's source, not a build sitting beside it", () => {
-    // `packages/cli/bin/smithers.mjs` prefers `dist/esm/bin.js` and falls back
+    // `packages/smithers/bin/smithers.mjs` prefers `dist/esm/bin.js` and falls back
     // to `src/bin.ts`, which is right for a published install and wrong for a
     // suite that asks what the source does. A stale `dist/` from an earlier
     // commit answered last build's behaviour to every real-CLI assertion in
     // this lane: the skills install, the hook spawns, and the fixture notices
     // were all green over code the tree no longer had.
-    const built = join(repoRoot, "packages/cli/dist/esm/bin.js");
+    const built = join(repoRoot, "packages/smithers/dist/esm/bin.js");
     assert.ok(
       !existsSync(built),
       `${relative(repoRoot, built)} exists, so every spawn in this lane runs that build instead of ` +
-        "packages/cli/src. Remove packages/cli/dist before running these suites, or rebuild it from " +
+        "packages/smithers/src. Remove packages/smithers/dist before running these suites, or rebuild it from " +
         "the current source if something else needs it.",
     );
   });
@@ -228,7 +248,7 @@ describe("the binary this lane's suites spawn", () => {
 
 describe("the CLI the staged prompt bodies teach", () => {
   const files = markdownFlows();
-  const sourceCli = join(repoRoot, "packages/cli/bin/smithers.mjs");
+  const sourceCli = join(repoRoot, "packages/smithers/bin/smithers.mjs");
 
   /**
    * `smithers <verb> --help`, once per verb path.
@@ -366,7 +386,7 @@ describe("the smithers-0x-hello fixture", () => {
   it("is committed, `.smithers/` pack included", () => {
     // The repository root ignores `.smithers/`, because that is where a 0.x
     // checkout keeps its run state. Here it is the point of the fixture, so the
-    // fixtures directory un-ignores it the way packages/migrate's does. Without
+    // fixtures directory un-ignores it the way packages/smithers/migrate's does. Without
     // that negation the pack exists on the author's disk and nowhere else, and
     // every test here passes while a fresh clone has no fixture at all.
     const tracked = spawnSync("git", ["ls-files", "--", `flows/${FIXTURE}`], {

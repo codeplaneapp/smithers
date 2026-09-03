@@ -8,7 +8,7 @@
  * r97 measurement needs:
  *
  * - `demands`: every `*-demanded` event the wave recorded, with its seq, so
- *   the replay in `packages/harness/test/CompletionDemands.test.ts` validates
+ *   the replay in `packages/smithers/agent/harness/test/CompletionDemands.test.ts` validates
  *   itself against what the wave really did rather than a memory of it. r97
  *   fired narrow-only five times; three were false positives, and the fixture
  *   is the evidence the fix was measured on.
@@ -47,7 +47,7 @@ const swebench = join(here, "..")
 const journalsDir = resolve(process.argv[2] ?? join(swebench, "fullbench", "rerun-r97", "journals"))
 const dataset = join(swebench, "swb-verified.json")
 const out = resolve(
-  process.argv[3] ?? join(swebench, "..", "..", "packages", "harness", "test", "fixtures", "r97Journals.json")
+  process.argv[3] ?? join(swebench, "..", "..", "packages", "smithers", "agent", "harness", "test", "fixtures", "r97Journals.json")
 )
 
 /** Flows whose calls change the workspace, so they are never checks. */

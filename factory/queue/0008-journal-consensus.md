@@ -61,7 +61,7 @@ engine-harness 124/124 were green before the diff. Fix all five:
    `journal.transact` via `writeOwnership` and calls `journal.emitDurable`
    (the R6 `recordTransition`) while the outer write transaction holds the
    allocation semaphore; `RunDriver.transitionAndRecord`
-   (packages/engine-store/src/internal/RunDriver.ts:333) already wraps it in
+   (packages/smithers/flows/engine-store/src/internal/RunDriver.ts:333) already wraps it in
    `journal.transact`, so the composed driver parks forever at
    `SqlJournal.ts:1131`. Five engine-harness `HarnessExecutor.test.ts` cases
    hang. R6 events must join the enclosing transaction (the SqlJournal
@@ -82,7 +82,7 @@ engine-harness 124/124 were green before the diff. Fix all five:
    lease-less running run with valid liveness evidence.
 4. MIGRATION COUPLING: `RunStore.layer` now hard-requires the journal's
    `flows_consensus_leases`. Declare it: compose or document the journal
-   `MigrationSet` prerequisite in `packages/run-store/src/Migrations.ts` and
+   `MigrationSet` prerequisite in `packages/smithers/flows/run-store/src/Migrations.ts` and
    the README (its `Migrations` row still claims the set covers only
    `flows_runs` and `flows_attempts`).
 5. README parity: document `recover`/`Recovered`/`RecoverOutcome`; there is

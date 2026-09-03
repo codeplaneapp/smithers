@@ -19,9 +19,9 @@ Write:
   reach for it.
 - `skillPath`: the primary `SKILL.md` path from the files written above, or null
   when none was written.
-- `install`: the one command the operator runs to put the skill in front of their
-  agents, `smithers skills add`, and a note that it writes into every agent
-  skills directory it detects, and that `--agent <id>` narrows it to one.
+- `install`: the directory the skill was written into, and a note that the
+  operator puts it in front of an agent by copying that directory into the
+  agent's own skills directory.
 - `nextAction`: the single next thing the operator should do.
 
 Keep it to a few lines. The operator reads this to decide whether the skill is

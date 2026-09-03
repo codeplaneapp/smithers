@@ -208,7 +208,7 @@ esac
 # It was pinned to the literal `medium` from 2026-08-19 to 2026-08-23, under a
 # comment saying medium "matches what our harness got as the API default". That
 # premise was false. The flows arm has never taken an API default: `effortFor`
-# in `packages/agent/src/AgentSession.ts` returns `high` whenever a flow
+# in `packages/smithers/agent/src/AgentSession.ts` returns `high` whenever a flow
 # declares no `effort:` frontmatter, `lib/write-flow.mjs` declares none, and
 # both have been that way since before wave 1. So every flows wave ran at high
 # while every codex lane ran at medium — 45 of 45 transcripts in both

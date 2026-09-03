@@ -70,16 +70,16 @@ transient and gitignored.
 
 **A wave measures the working tree, not a commit.** Every `@smthrs/*` package's
 workspace `exports` map points at `./src/*.ts`, so
-`packages/cli/dist/esm/bin.js` resolves `@smthrs/harness/CellTurn` to
-`packages/harness/src/CellTurn.ts` and Node strips its types on load. The
+`packages/smithers/dist/esm/bin.js` resolves `@smthrs/harness/CellTurn` to
+`packages/smithers/agent/harness/src/CellTurn.ts` and Node strips its types on load. The
 harness under test is therefore whatever is on disk at the instant each CLI
-process starts. `packages/harness/dist` is not in the loaded graph at all and
-its state means nothing. `packages/cli` is the one package whose build is
+process starts. `packages/smithers/agent/harness/dist` is not in the loaded graph at all and
+its state means nothing. `packages/smithers` is the one package whose build is
 loaded, through the `bin.js` entry point.
 
 Two consequences, both of which have already cost a wave:
 
-- A sibling lane editing `packages/harness/src` while a wave is in flight
+- A sibling lane editing `packages/smithers/agent/harness/src` while a wave is in flight
   changes the subject between instances, with nothing in the artifacts saying
   so.
 - Building a filter closure — `pnpm --filter "@smthrs/cli..." build --no-bail` —
@@ -97,11 +97,11 @@ non-zero exit is fatal), derives a content fingerprint with `lib/subject.mjs`,
 and writes `.subject.json`. The fingerprint records, for every package in the
 CLI's `@smthrs/*` dependency closure, where its entry point resolves and a
 content hash of the directory that answer selects — plus the hash of
-`packages/harness/src/CellTurn.ts` as the marker a report cites, the hashes of
-`packages/cli/dist/esm` and `packages/cli/src`, the git HEAD, and the node
+`packages/smithers/agent/harness/src/CellTurn.ts` as the marker a report cites, the hashes of
+`packages/smithers/dist/esm` and `packages/smithers/src`, the git HEAD, and the node
 version.
 
-`packages/cli/src` is in the stamp even though no process loads it. It is the
+`packages/smithers/src` is in the stamp even though no process loads it. It is the
 only package where what is on disk and what runs are two different things, so
 it is the only one whose build can go stale under a wave: an edit to any other
 package changes bytes the CLI loads and stops the wave at the next `flows.sh`
@@ -116,7 +116,7 @@ pinned pair only ever comes from a full rebuild.
 
 | Refusal | What it catches |
 | --- | --- |
-| `no-cli-build` | `packages/cli/dist/esm/bin.js` does not exist |
+| `no-cli-build` | `packages/smithers/dist/esm/bin.js` does not exist |
 | `partial-cli-build` | a `src/X.ts` has no `dist/esm/X.js` — a build that stopped early |
 | `unresolvable` | a package cannot resolve a dependency the way the process will |
 | `foreign-subject` | a package resolves outside this checkout |
@@ -479,7 +479,7 @@ off the artifact and never inferred. The accepted values are `minimal`, `low`,
 pulled.
 
 The flows arm has no equivalent knob in the rig because it has no equivalent
-choice: `effortFor` in `packages/agent/src/AgentSession.ts` returns the flow's
+choice: `effortFor` in `packages/smithers/agent/src/AgentSession.ts` returns the flow's
 `effort:` frontmatter, then the host's option, then `high`, and
 `lib/write-flow.mjs` writes no `effort:` line. Every flows wave has therefore run
 at high.
@@ -1053,7 +1053,7 @@ frames instead of reading their fields.
 
 `fixtures/check-selector.mjs` pins that too, because every case it runs is a
 rehydrated distillation and a distillation proves the ranking, not the shape:
-rename an event or a payload field in `packages/agent/src/AgentSession.ts` and
+rename an event or a payload field in `packages/smithers/agent/src/AgentSession.ts` and
 the fixture would stay green while every predicate silently read `false` on a
 real run. It asserts that every event `lib/journal-facts.mjs` reads is one
 `AgentEvent` declares, that the six it reads *fields* off are mapped by hand
@@ -1062,7 +1062,7 @@ the names `AgentSession` writes.
 
 `fixtures/check-selector.mjs`, in `verify.sh`, replays the selector over two real
 waves. Wave 10 and wave 11 ran the same five instances and both distillations
-survive (`packages/harness/test/fixtures/wave10Journals.json` and
+survive (`packages/smithers/agent/harness/test/fixtures/wave10Journals.json` and
 `fixtures/wave11-journals.json`), so `fixtures/rehydrate-journals.mjs` turns them
 back into the databases the selector reads and the two-candidate case is two real
 runs of one instance. It pins wave 11's four predicates per instance, the choice
@@ -1367,7 +1367,7 @@ sums the four token counters off `control.agent.model-settled` and prices them
 with the committed table in `prices.ts`. It deliberately does **not** go through
 `lib/journal-facts.mjs`: that module imports the harness's own modules to rebuild
 the controller's decisions, and a benchmark running for days beside lanes that
-edit `packages/harness` must not have its cost column stop working because
+edit `packages/smithers/agent/harness` must not have its cost column stop working because
 another lane is mid-edit.
 
 ### Where the artifacts go
@@ -2285,7 +2285,7 @@ journals under `work/`, the stamps under `timings/`, and the patches under
 
 `scorecard.json` and `scorecard.md` open with the wave's **preconditions** —
 the subject stamp, the git HEAD, the `CellTurn.ts` hash, the path it was loaded
-from, the `packages/cli/dist/esm` hash, the node version, any refusal the
+from, the `packages/smithers/dist/esm` hash, the node version, any refusal the
 preflight recorded, and an `agreement` line stating whether every instance ran
 the same pinned subject. Copy that block into the wave report; do not retype it.
 An `agreement` line reading `MISMATCH` means the wave is two measurements and
@@ -2445,7 +2445,7 @@ That is an offline check of the tooling — no tokens, no docker, no dataset. It
 also replays the repository-specific verification guidance, the patch capture
 (`fixtures/check-capture.mjs`), the subject fingerprint
 (`fixtures/check-subject.mjs`, which needs a built CLI: run `./preflight.sh`
-first if `packages/cli/dist` is absent), and the whole best-of-n half: the
+first if `packages/smithers/dist` is absent), and the whole best-of-n half: the
 per-run naming rule (`fixtures/check-run-paths.mjs`), the matrix scheduler over
 a stub harness command (`fixtures/check-matrix.mjs`), the journal-only selector
 over two real waves (`fixtures/check-selector.mjs`), and the report generator
@@ -2458,7 +2458,7 @@ after touching `scorecard.ts`, `prices.ts`, the journal's event shapes,
 
 The run scripts drive the CLI from an extracted testbed, which is an arbitrary
 directory outside this repository. `flows.sh` resolves
-`packages/cli/bin/smithers.mjs` — the executable `@smthrs/cli` declares as its
+`packages/smithers/bin/smithers.mjs` — the executable `@smthrs/cli` declares as its
 bin — out of the checkout and execs it in place, so the CLI reads its project
 flows from the workspace (`flows/fix/flow.mdx`) and keeps its control database
 in the workspace's `.flows/`.
@@ -2467,7 +2467,7 @@ That shim runs `dist/esm/bin.js` when a build is there and falls back to
 `src/bin.ts` under Node's type stripping when it is not. The fallback is what
 makes `pnpm exec smithers` work in a source checkout, and it is exactly wrong
 for a wave: the pinned subject is the build. So the wrapper refuses when
-`packages/cli/dist/esm/bin.js` is absent rather than measuring bytes no
+`packages/smithers/dist/esm/bin.js` is absent rather than measuring bytes no
 fingerprint covers. `fixtures/check-cli-path.mjs` holds both halves.
 
 The wrapper does not build. `./preflight.sh` builds and pins, once per wave, and

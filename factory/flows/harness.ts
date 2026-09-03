@@ -21,8 +21,8 @@ import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { FlowEngine } from "../../packages/engine/src/index.ts"
-import { Action, Flow, Interpreter } from "../../packages/flow/src/index.ts"
+import { FlowEngine } from "../../packages/smithers/flows/engine/src/index.ts"
+import { Action, Flow, Interpreter } from "../../packages/smithers/flows/flow/src/index.ts"
 
 export const REPO_ROOT = path.resolve(import.meta.dirname, "../..")
 export const REPORTS_DIR = path.join(REPO_ROOT, "factory/reports")

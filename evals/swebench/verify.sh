@@ -80,7 +80,7 @@
 # lib/program-evidence.mjs, lib/surgery-evidence.mjs, lib/round3-evidence.mjs,
 # lib/repl-evidence.mjs, lib/excluded.mjs or
 # anything under lib/fullbench-*. The subject check needs a built CLI: run ./preflight.sh first
-# if `packages/cli/dist` is absent.
+# if `packages/smithers/dist` is absent.
 set -eu
 S="$(cd "$(dirname "$0")" && pwd)"
 

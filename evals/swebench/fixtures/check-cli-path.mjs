@@ -4,8 +4,8 @@
  *   node fixtures/check-cli-path.mjs
  *
  * The rig arrived from a checkout whose CLI was entered at
- * `packages/cli/dist/esm/bin.js` directly. Here the shipped executable is
- * `packages/cli/bin/smithers.mjs`, the file `@smthrs/cli` declares as its bin,
+ * `packages/smithers/dist/esm/bin.js` directly. Here the shipped executable is
+ * `packages/smithers/bin/smithers.mjs`, the file `@smthrs/cli` declares as its bin,
  * and it prefers that build but falls back to `src/bin.ts` when there is none.
  *
  * Both halves are checked, because each one alone is a trap:
@@ -41,11 +41,11 @@ assert.match(
   "flows.sh execs the executable @smthrs/cli declares as its bin"
 )
 assert.ok(
-  existsSync(join(root, "packages/cli/bin/smithers.mjs")),
+  existsSync(join(root, "packages/smithers/bin/smithers.mjs")),
   "the executable flows.sh names is in the tree"
 )
 assert.equal(
-  JSON.parse(readFileSync(join(root, "packages/cli/package.json"), "utf8")).bin.smithers,
+  JSON.parse(readFileSync(join(root, "packages/smithers/package.json"), "utf8")).bin.smithers,
   "./bin/smithers.mjs",
   "the executable flows.sh names is the one the package publishes"
 )
@@ -53,9 +53,9 @@ assert.equal(
 // The refusal, against a tree shaped like a source checkout with no build.
 const temporary = mkdtempSync(join(tmpdir(), "swebench-cli-path-"))
 try {
-  mkdirSync(join(temporary, "packages/cli/bin"), { recursive: true })
+  mkdirSync(join(temporary, "packages/smithers/bin"), { recursive: true })
   mkdirSync(join(temporary, "evals/swebench"), { recursive: true })
-  writeFileSync(join(temporary, "packages/cli/bin/smithers.mjs"), "process.exit(0)\n")
+  writeFileSync(join(temporary, "packages/smithers/bin/smithers.mjs"), "process.exit(0)\n")
   writeFileSync(join(temporary, "evals/swebench/flows.sh"), wrapper, { mode: 0o755 })
 
   const unbuilt = spawnSync("bash", [join(temporary, "evals/swebench/flows.sh"), "--help"], {
@@ -65,9 +65,9 @@ try {
   assert.equal(unbuilt.status, 1, "a checkout with no CLI build is refused, not run against source")
   assert.match(unbuilt.stderr, /would fall back to src\/bin\.ts/)
 
-  writeFileSync(join(temporary, "packages/cli/bin/smithers.mjs"), "console.log('shim ran')\n")
-  mkdirSync(join(temporary, "packages/cli/dist/esm"), { recursive: true })
-  writeFileSync(join(temporary, "packages/cli/dist/esm/bin.js"), "\n")
+  writeFileSync(join(temporary, "packages/smithers/bin/smithers.mjs"), "console.log('shim ran')\n")
+  mkdirSync(join(temporary, "packages/smithers/dist/esm"), { recursive: true })
+  writeFileSync(join(temporary, "packages/smithers/dist/esm/bin.js"), "\n")
   const built = spawnSync("bash", [join(temporary, "evals/swebench/flows.sh"), "--help"], {
     encoding: "utf8",
     env: { ...process.env, SWB_SUBJECT_UNPINNED: "1" }

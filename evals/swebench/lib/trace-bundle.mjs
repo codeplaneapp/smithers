@@ -109,7 +109,7 @@ const number = (value) => (typeof value === "number" ? value.toLocaleString("en-
 // Read with `node:sqlite` and nothing else, for the reason `lib/run-cost.mjs`
 // gives: importing the harness's own modules to rebuild the controller's
 // decisions makes this stop working whenever a sibling lane is mid-edit in
-// `packages/harness`, and an analysis pipeline that breaks on someone else's
+// `packages/smithers/agent/harness`, and an analysis pipeline that breaks on someone else's
 // refactor is not one anybody will run.
 // ---------------------------------------------------------------------------
 

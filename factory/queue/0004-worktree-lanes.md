@@ -6,9 +6,9 @@ priority: p1
 
 # Worktree lanes and the merge queue in the Jj service
 
-Implement the lane lifecycle from the "Worktree Lanes" spec in `packages/jj`
+Implement the lane lifecycle from the "Worktree Lanes" spec in `packages/smithers/flows/jj`
 (and the engine seams it names): the note is currently all
-"Proposed" and `packages/jj` ships no lane operations.
+"Proposed" and `packages/smithers/flows/jj` ships no lane operations.
 
 - `Jj.createLane(descriptor)` with the identity/ownership checks the note
   specifies; creation serialized per repository.

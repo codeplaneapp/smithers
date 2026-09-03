@@ -7,7 +7,6 @@
  * This gate runs both through their production entry points.
  */
 import { Smithers } from "@smthrs/targets"
-import { runtime } from "../PACKAGE.ts"
 
 /**
  * The prompt bodies load through `@smthrs/registry` with no warnings, discovery
@@ -17,7 +16,6 @@ import { runtime } from "../PACKAGE.ts"
  * @category test
  */
 const pack = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//flows/pack.test.mjs")]),
   srcs: [Smithers.glob("//flows/**/flow.mdx")],
   deps: []

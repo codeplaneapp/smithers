@@ -3,12 +3,19 @@
  *
  * The suite is a program whose exit code is the verdict — it scores the agent
  * against `baseline.json` and fails on drift — so it is a test target, and its
- * own typecheck is a build target. Both run through the declared toolchain:
- * the suite under the declared Bun runtime, the typecheck through the declared
- * package manager, so neither `bun` nor `npx` is spelled anywhere.
+ * own typecheck is a build target. Both run from this directory, which is a
+ * workspace member (`@smthrs/eval-agent`): `tsc` resolves through the declared
+ * package manager against the `typescript` and `@types/node` this package pins,
+ * and the suite names the Bun runtime, so neither `bun` nor `npx` is spelled
+ * anywhere.
+ *
+ * There is no `lint` or `fmt` target, and adding one would break the suite
+ * rather than tidy it. `baseline.json` is the canonical JSON `Baseline.write`
+ * emits byte for byte, and the repository's dprint configuration reformats it,
+ * so a formatting gate here would permanently disagree with the program that
+ * writes the artifact.
  */
 import { Smithers } from "@smthrs/targets"
-import { bunRuntime, packageManager } from "../../PACKAGE.ts"
 
 const cwd = "evals/agent"
 
@@ -25,11 +32,12 @@ const sources = [Smithers.glob("//evals/agent/*.ts"), Smithers.file("//evals/age
  * @since 0.1.0
  * @category test
  */
-const suite = Smithers.NodeTest({
-  runtime: bunRuntime,
+const test = Smithers.NodeTest({
+  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
   runner: Smithers.entrypoint(Smithers.file("//evals/agent/run.ts")),
   srcs: sources,
-  deps: []
+  deps: [],
+  cwd
 })
 
 /**
@@ -38,8 +46,7 @@ const suite = Smithers.NodeTest({
  * @since 0.1.0
  * @category build
  */
-const types = Smithers.Typecheck({
-  packageManager,
+const check = Smithers.Typecheck({
   srcs: sources,
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
@@ -49,5 +56,5 @@ const types = Smithers.Typecheck({
 })
 
 export const Package = Smithers.Package({
-  targets: { suite, types }
+  targets: { check, test }
 })

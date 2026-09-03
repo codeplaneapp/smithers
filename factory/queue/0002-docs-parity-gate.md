@@ -15,15 +15,15 @@ and doc drift is a cache miss.
   convention; `eslint.jsdoc.js` is the existing lint half).
 - Declare each package's README as an input to its check targets via the
   Bazel-style `file()` declarations that landed in commit `04b9367`.
-- Prior art to read first: the Smithers 0.x DDD pack's `checkDocs.ts` and
-  `docsManifest.ts` under `.smithers/lib/ddd/`, which the 1.0 migration removed.
+- Prior art to read first: the documentation checks from the Smithers 0.x DDD
+  pack under `.smithers/lib/ddd/`, which the 1.0 migration removed.
 - Resolve the open question in the Colocated Docs note (which export kinds
   require JSDoc; whether a change may declare "no doc impact") in the note,
   with how it was decided, before merging the rule.
 
 ## Landed
 
-Shipped as `packages/targets/src/DocsParity.ts` and emitted by
+Shipped as `packages/smithers/build/targets/src/DocsParity.ts` and emitted by
 `StandardPackage` as a fourth target beside `lib`, `test`, and `lint`.
 
 - The rule owns README presence and quality only: the file exists, carries a
@@ -42,11 +42,11 @@ Shipped as `packages/targets/src/DocsParity.ts` and emitted by
 Failing parity at landing time, from the rule's own policy over
 `packages/*`:
 
-- `packages/crypto` — 53 prose characters, below the 120 floor
-- `packages/keys` — 64 prose characters, below the 120 floor
+- `packages/smithers/flows/crypto` — 53 prose characters, below the 120 floor
+- `packages/smithers/flows/keys` — 64 prose characters, below the 120 floor
 
-Every other package passes. `packages/engine`, `packages/flow`, and
-`packages/plan` have explicit `PACKAGE.ts` files that destructure
+Every other package passes. `packages/smithers/flows/engine`, `packages/smithers/flows/flow`, and
+`packages/smithers/flows/plan` have explicit `PACKAGE.ts` files that destructure
 `{ lib, test, lint }`, so they gain a `docs` target only once those three
 lines also destructure `docs`; all three already pass the policy.
 

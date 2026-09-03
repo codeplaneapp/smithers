@@ -9,8 +9,11 @@
     "declaration": false,
     "declarationMap": false,
     "inlineSources": false,
-    "sourceMap": false
+    "sourceMap": false,
+    // `score.test.ts` and `deterministicReviewer.test.ts` are `bun:test`
+    // suites, so the checked set needs Bun's globals as well as Node's.
+    "types": ["bun-types", "node"]
   },
   "include": ["*.ts"],
-  "exclude": ["PACKAGE.ts", "*.test.ts"]
+  "exclude": ["PACKAGE.ts"]
 }

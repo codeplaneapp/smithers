@@ -1,5 +1,5 @@
 /**
- * A live smoke test of `packages/model` itself: `Route` → `Model.stream`,
+ * A live smoke test of `packages/smithers/agent/model` itself: `Route` → `Model.stream`,
  * with no `AgentAction`/`Interpreter` cell-REPL convention layered on top.
  *
  * `12`-`14` proved this same routing/protocol code is correct by driving it
@@ -8,7 +8,7 @@
  * (GPT-4/Claude/Gemini-class). That convention is real production code,
  * working as designed — it is simply the wrong bar for a model small enough
  * to run for free on a nearly-full local disk. What this session actually
- * built and fixed lives in `packages/model` (the Chat Completions protocol,
+ * built and fixed lives in `packages/smithers/agent/model` (the Chat Completions protocol,
  * the route constructors, the harness's cause-field serialization), and
  * that is exactly what this file proves, directly, with nothing else in
  * the way.
@@ -39,7 +39,7 @@ export const executorLayer = RequestExecutor.layer.pipe(
 
 /**
  * Sends one prompt to a real `openaiChatCompatible` endpoint and returns the
- * concatenated text of the response, with nothing but `packages/model`
+ * concatenated text of the response, with nothing but `packages/smithers/agent/model`
  * between the caller and the wire.
  *
  * @category constructors

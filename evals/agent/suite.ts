@@ -21,9 +21,9 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { Flow as CoreFlow } from "../../packages/core/src/index.ts"
-import { CaseExecutor, EvalError, type Runner as EvalRunner, type Suite } from "../../packages/evals/src/index.ts"
-import { Binding, Runner as ScorerRunner, Scorer } from "../../packages/scorers/src/index.ts"
+import { Flow as CoreFlow } from "../../packages/smithers/flows/core/src/index.ts"
+import { CaseExecutor, EvalError, type Runner as EvalRunner, type Suite } from "../../packages/smithers/agent/evals/src/index.ts"
+import { Binding, Runner as ScorerRunner, Scorer } from "../../packages/smithers/agent/scorers/src/index.ts"
 import * as Subject from "./subject.ts"
 
 /**
@@ -380,7 +380,7 @@ const scenarios: Readonly<Record<string, Scenario>> = {
         // served from its durable boundary instead of run, which is the
         // property `read-only-cap-stops-a-reading-run` pins. Rule 7's
         // identical-command discipline is proved against a real unhermetic
-        // command in `packages/harness/test/ReplTurn.test.ts`; what this case
+        // command in `packages/smithers/agent/harness/test/ReplTurn.test.ts`; what this case
         // proves is the guard.
         respond: () =>
           `const before = await ctx.call("check", { command: "verify a/b.py" })

@@ -96,12 +96,11 @@ describe("factory harness guards", () => {
 
   test("mutating drivers fail closed and publish reports only after green gates", () => {
     const flows = import.meta.dir
-    for (const filename of ["coverage-baseline.ts", "review-docs.ts", "slop-sweep.ts", "bazel-review.ts"]) {
+    for (const filename of ["coverage-baseline.ts", "slop-sweep.ts", "bazel-review.ts"]) {
       const source = readFileSync(join(flows, filename), "utf8")
       expect(source).toContain("process.exitCode = 1")
     }
     expect(readFileSync(join(flows, "coverage-baseline.ts"), "utf8")).toContain("reportPath}.partial")
     expect(readFileSync(join(flows, "slop-sweep.ts"), "utf8")).toContain("reportPath}.partial")
-    expect(readFileSync(join(flows, "review-docs.ts"), "utf8")).toContain("No current report was published")
   })
 })

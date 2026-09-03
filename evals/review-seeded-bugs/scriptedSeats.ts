@@ -7,13 +7,13 @@
  *
  * @since 1.0.0
  */
-import type * as FlowEngineLike from "../../packages/agent/src/FlowEngineLike.ts";
-import * as Seat from "../../packages/agent/src/Seat.ts";
-import * as SeatResolver from "../../packages/agent/src/SeatResolver.ts";
-import * as Model from "../../packages/model/src/Model.ts";
-import * as ModelError from "../../packages/model/src/ModelError.ts";
-import * as ModelEvent from "../../packages/model/src/ModelEvent.ts";
-import type * as Route from "../../packages/model/src/Route.ts";
+import type * as FlowEngineLike from "../../packages/smithers/agent/src/FlowEngineLike.ts";
+import * as Seat from "../../packages/smithers/agent/src/Seat.ts";
+import * as SeatResolver from "../../packages/smithers/agent/src/SeatResolver.ts";
+import * as Model from "../../packages/smithers/agent/model/src/Model.ts";
+import * as ModelError from "../../packages/smithers/agent/model/src/ModelError.ts";
+import * as ModelEvent from "../../packages/smithers/agent/model/src/ModelEvent.ts";
+import type * as Route from "../../packages/smithers/agent/model/src/Route.ts";
 import { Effect, Layer, Stream } from "effect";
 
 const prepared: Route.PreparedRequest = {

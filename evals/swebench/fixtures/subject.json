@@ -6,9 +6,9 @@
   "node": "v24.0.0",
   "platform": "fixture",
   "marker": {
-    "path": "packages/harness/src/CellTurn.ts",
+    "path": "packages/smithers/agent/harness/src/CellTurn.ts",
     "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-    "resolvedBy": "packages/harness/src/CellTurn.ts"
+    "resolvedBy": "packages/smithers/agent/harness/src/CellTurn.ts"
   },
   "cliDist": {
     "hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",

@@ -10,13 +10,13 @@ Bring the two packages failing the DocsParity gate up to the colocated-docs
 contract (the "Colocated Docs" spec), then enable the `docs` kind in CI.
 
 - At landing time of item 0002, `smthrs docs //...` fails exactly two
-  packages: `packages/crypto` (53 prose characters) and `packages/keys`
+  packages: `packages/smithers/flows/crypto` (53 prose characters) and `packages/smithers/flows/keys`
   (64), both below the 120-character prose floor. Every other package
   passes.
 - Write each README as the package's contract: what it is, its invariants,
   its design rationale, how it relates to its neighbors. Standalone
   markdown, relative links only, no wikilinks.
-- `packages/engine`, `packages/flow`, and `packages/plan` have explicit
+- `packages/smithers/flows/engine`, `packages/smithers/flows/flow`, and `packages/smithers/flows/plan` have explicit
   `PACKAGE.ts` files destructuring `{ lib, test, lint }` from
   `StandardPackage`; add `docs` to those destructurings so they gain the
   target.

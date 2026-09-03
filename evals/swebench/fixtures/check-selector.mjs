@@ -9,7 +9,7 @@
  *
  * The candidates are not synthesised. Wave 10 and wave 11 ran the same five
  * instances, both waves' journals were distilled at the time
- * (`packages/harness/test/fixtures/wave10Journals.json` and
+ * (`packages/smithers/agent/harness/test/fixtures/wave10Journals.json` and
  * `fixtures/wave11-journals.json`), and `fixtures/rehydrate-journals.mjs` turns
  * a distillation back into the database the selector reads. So the
  * two-candidate case below is two real runs of one instance, and the numbers
@@ -115,7 +115,7 @@ try {
   // Two candidates: wave 10 as r2 beside wave 11 as r1, and the choice each
   // instance's two real runs produce.
   // -----------------------------------------------------------------------
-  rehydrate(join(root, "../../packages/harness/test/fixtures/wave10Journals.json"), journals, "r2", patches)
+  rehydrate(join(root, "../../packages/smithers/agent/harness/test/fixtures/wave10Journals.json"), journals, "r2", patches)
 
   /**
    * What the two waves choose, and which key decides it.
@@ -303,13 +303,13 @@ try {
   //
   // Every case above runs over a rehydrated distillation, so it proves the
   // ranking and not the shape: rename an event or a payload field in
-  // `packages/agent/src/AgentSession.ts` and the fixture would keep passing
+  // `packages/smithers/agent/src/AgentSession.ts` and the fixture would keep passing
   // while every predicate silently read `false` on a real run. The event names
   // and the payload fields `lib/journal-facts.mjs` reads are therefore checked
   // against the one module that writes them.
   // -----------------------------------------------------------------------
-  const session = readFileSync(resolve(root, "../../packages/agent/src/AgentSession.ts"), "utf8")
-  const events = readFileSync(resolve(root, "../../packages/harness/src/AgentEvent.ts"), "utf8")
+  const session = readFileSync(resolve(root, "../../packages/smithers/agent/src/AgentSession.ts"), "utf8")
+  const events = readFileSync(resolve(root, "../../packages/smithers/agent/harness/src/AgentEvent.ts"), "utf8")
   // Every event the harness declares, by the tag the journal names it under.
   const declared = new Set(
     [...events.matchAll(/\)\("([a-z][a-z-]+)",\s*\{/gu)].map((match) => `control.agent.${match[1]}`)

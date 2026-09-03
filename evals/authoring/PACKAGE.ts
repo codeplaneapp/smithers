@@ -1,18 +1,24 @@
 /**
  * Targets for the Smithers authoring fine-tune.
  *
- * The deterministic work is graph-owned and cache-eligible: `datasetValidate`
- * gates the SFT dataset on a program whose exit code is the verdict, and
- * `types` typechecks the validator. The Fireworks operations are irreversible
- * side effects with no file output, so they are `ToolRun` targets: never cached,
- * gated to the `run` verb, and never pulled into a `ci` graph. Each reads its
- * credential from the `FIREWORKS_API_KEY` secret, never from a literal, so no
- * key enters the plan. Run one explicitly, for example:
+ * The deterministic work is graph-owned and cache-eligible: `test` gates the
+ * SFT dataset on a program whose exit code is the verdict, and `check`
+ * typechecks the validator. Both run from this directory, which is a workspace
+ * member (`@smthrs/eval-authoring`), so `bun` and `tsc` read the toolchain the
+ * manifest pins.
+ *
+ * The Fireworks operations are irreversible side effects with no file output,
+ * so they are `ToolRun` targets: never cached, gated to the `run` verb, and
+ * never pulled into a `ci` graph. Each reads its credential from the
+ * `FIREWORKS_API_KEY` secret, never from a literal, so no key enters the plan.
+ * Run one explicitly, for example:
  *
  *   pnpm exec smithers-build run '//evals/authoring:sftLaunch'
+ *
+ * There is no `lint` or `fmt` target: `data/pilot-sft.jsonl` is the training
+ * corpus, one JSON object per line, and a formatter would rewrite it.
  */
 import { Smithers } from "@smthrs/targets"
-import { bunRuntime, packageManager } from "../../PACKAGE.ts"
 
 const cwd = "evals/authoring"
 
@@ -32,11 +38,12 @@ const dataset = Smithers.file("//evals/authoring/data/pilot-sft.jsonl")
  * @since 0.1.0
  * @category test
  */
-const datasetValidate = Smithers.NodeTest({
-  runtime: bunRuntime,
+const test = Smithers.NodeTest({
+  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
   runner: Smithers.entrypoint(validator),
   srcs: [validator, dataset],
-  deps: []
+  deps: [],
+  cwd
 })
 
 /**
@@ -45,8 +52,7 @@ const datasetValidate = Smithers.NodeTest({
  * @since 0.1.0
  * @category build
  */
-const types = Smithers.Typecheck({
-  packageManager,
+const check = Smithers.Typecheck({
   srcs: [validator],
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
@@ -58,7 +64,7 @@ const types = Smithers.Typecheck({
 /**
  * Uploads the SFT dataset to Fireworks. Irreversible: a second run fails
  * because the dataset name already exists, so it is gated to the `run` verb and
- * never cached. It depends on {@link datasetValidate}, so a malformed dataset
+ * never cached. It depends on {@link test}, so a malformed dataset
  * never reaches the account.
  *
  * @since 0.1.0
@@ -68,7 +74,7 @@ const datasetUpload = Smithers.ToolRun({
   command: "firectl",
   args: ["dataset", "create", "pilot-sft-v0", "data/pilot-sft.jsonl"],
   inputs: [dataset],
-  deps: [datasetValidate],
+  deps: [test],
   secrets: [fireworksCredential],
   cwd
 })
@@ -140,5 +146,5 @@ const sftLaunchPilot = Smithers.ToolRun({
 })
 
 export const Package = Smithers.Package({
-  targets: { datasetUpload, datasetValidate, sftLaunch, sftLaunchPilot, types }
+  targets: { check, datasetUpload, sftLaunch, sftLaunchPilot, test }
 })

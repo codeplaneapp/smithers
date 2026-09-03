@@ -21,7 +21,7 @@
  * The fourth is that the record is machine-independent: no absolute path, so a
  * committed wave record describes bytes rather than somebody's home directory.
  *
- * The fifth is that the stamp covers `packages/cli/src`. That package is the
+ * The fifth is that the stamp covers `packages/smithers/src`. That package is the
  * only one whose loaded bytes are a build, so it is the only one whose source
  * can drift away from what runs; leaving it out of the stamp is what let a
  * mid-wave CLI edit pass the pin when the same edit to any other package would
@@ -70,13 +70,13 @@ try {
   assert.equal(absolute, null, `the record names a machine's home directory: ${absolute?.[0]}`)
   assert.equal(
     fingerprint.marker.resolvedBy,
-    "packages/harness/src/CellTurn.ts",
-    "the built CLI resolves the harness cell loop to source, not to packages/harness/dist"
+    "packages/smithers/agent/harness/src/CellTurn.ts",
+    "the built CLI resolves the harness cell loop to source, not to packages/smithers/agent/harness/dist"
   )
   assert.equal(fingerprint.packages["@smthrs/cli"].loadsFrom, "dist", "the CLI is entered through its build")
   assert.equal(
     fingerprint.packages["@smthrs/cli"].resolvedEntry,
-    "packages/cli/dist/esm/bin.js",
+    "packages/smithers/dist/esm/bin.js",
     "the CLI's entry point is the binary flows.sh execs"
   )
   for (const [name, value] of Object.entries(fingerprint.packages)) {
@@ -93,7 +93,7 @@ try {
     "every package in the closure resolves the way the running process resolves it"
   )
 
-  // The CLI's source, and the stamp's dependence on it. `packages/cli` is the
+  // The CLI's source, and the stamp's dependence on it. `packages/smithers` is the
   // one package where "what is on disk" and "what runs" are two different
   // things, so a pin that only hashed the build could not tell a wave that the
   // build had gone stale under it.
@@ -103,7 +103,7 @@ try {
   assert.notEqual(
     stampOf({ ...fingerprint, cliSrc: { ...fingerprint.cliSrc, hash: "sha256:built-from-something-else" } }),
     fingerprint.stamp,
-    "an edit to packages/cli/src moves the stamp, so a wave stops until preflight rebuilds"
+    "an edit to packages/smithers/src moves the stamp, so a wave stops until preflight rebuilds"
   )
   assert.notEqual(
     stampOf({ ...fingerprint, cliDist: { ...fingerprint.cliDist, hash: "sha256:another-build" } }),
@@ -138,7 +138,7 @@ try {
   assert.equal(absent.status, 3, "an unpinned subject is refused")
 
   // The HEAD comparison agrees with git, whichever way the tree happens to be.
-  for (const [name, directory] of [["@smthrs/harness", "packages/harness/src"], ["@smthrs/cli", "packages/cli/src"]]) {
+  for (const [name, directory] of [["@smthrs/harness", "packages/smithers/agent/harness/src"], ["@smthrs/cli", "packages/smithers/src"]]) {
     const diff = spawnSync("git", ["diff", "--name-only", "HEAD", "--", directory], { cwd: root, encoding: "utf8" })
     const untracked = spawnSync("git", ["ls-files", "--others", "--exclude-standard", "--", directory], {
       cwd: root,

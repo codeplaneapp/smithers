@@ -9,7 +9,7 @@
 # control database in `<cwd>/.flows`, so the wrapper changes no directory: it
 # only resolves the executable out of the checkout and execs it in place.
 #
-# `packages/cli/bin/smithers.mjs` is the shipped executable — the file
+# `packages/smithers/bin/smithers.mjs` is the shipped executable — the file
 # `@smthrs/cli` declares as its `smithers` bin. It runs `dist/esm/bin.js` when a
 # build is there and falls back to `src/bin.ts` under Node's type stripping when
 # it is not, so a source checkout has a working CLI with no build step.
@@ -32,8 +32,8 @@
 set -u
 S="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$S/../.." && pwd)"
-BIN="$ROOT/packages/cli/bin/smithers.mjs"
-BUILT="$ROOT/packages/cli/dist/esm/bin.js"
+BIN="$ROOT/packages/smithers/bin/smithers.mjs"
+BUILT="$ROOT/packages/smithers/dist/esm/bin.js"
 
 if [ "${SWB_SUBJECT_UNPINNED:-0}" != "1" ]; then
   if [ ! -f "$S/.subject.json" ]; then

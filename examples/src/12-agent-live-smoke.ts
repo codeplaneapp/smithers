@@ -4,7 +4,7 @@
  * against a real model over the network with a real API key.
  *
  * Every example before this one scripts its model deliberately, so CI runs
- * with no credentials and no cost. `packages/agent/test/Agent.test.ts` says
+ * with no credentials and no cost. `packages/smithers/agent/test/Agent.test.ts` says
  * why this one exists anyway: "a smoke test that calls a provider is not a
  * smoke test" if it doesn't. This is that smoke test, for the example
  * composition rather than the harness's own hand-wired one.
@@ -49,7 +49,7 @@ export const executorLayer = RequestExecutor.layer.pipe(
 /**
  * A real `SeatResolver`: any `openai:<modelId>` seat resolves to a live
  * OpenAI Chat Completions route, credentialed from `OPENAI_API_KEY`. Mirrors
- * `packages/cli/src/NodeControl.ts`'s `seatOf`, narrowed to one provider.
+ * `packages/smithers/src/NodeControl.ts`'s `seatOf`, narrowed to one provider.
  *
  * @category layers
  * @since 0.1.0

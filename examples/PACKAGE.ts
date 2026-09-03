@@ -8,10 +8,10 @@
  *
  * The suite stays on the Node lane: Bun's `node:sqlite` binds the host SQLite,
  * built without extension loading, which the sqlite layer the examples run on
- * requires (the same exclusion `ci/PACKAGE.ts` records for the storage packages).
+ * requires (the same exclusion `Smithers.BunSuite` records for the storage
+ * packages).
  */
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../PACKAGE.ts"
 
 const cwd = "examples"
 
@@ -35,7 +35,6 @@ const fixtures = Smithers.glob("//examples/src/**/*.mdx")
  * @category build
  */
 const check = Smithers.Typecheck({
-  packageManager,
   srcs: [sources, tests],
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
@@ -51,7 +50,6 @@ const check = Smithers.Typecheck({
  * @category test
  */
 const suite = Smithers.Vitest({
-  packageManager,
   tests: [tests],
   sources: [sources, fixtures],
   deps: [],

@@ -11,8 +11,8 @@ import * as Schema from "effect/Schema"
 import { execSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { Flow } from "../../packages/flow/src/index.ts"
-import { Node } from "../../packages/plan/src/index.ts"
+import { Flow } from "../../packages/smithers/flows/flow/src/index.ts"
+import { Node } from "../../packages/smithers/flows/plan/src/index.ts"
 import { AgentTask, chunk, listPackages, REPO_ROOT, REPORTS_DIR, runFlow, type TaskResult } from "./harness.ts"
 
 const WAVE_SIZE = 8

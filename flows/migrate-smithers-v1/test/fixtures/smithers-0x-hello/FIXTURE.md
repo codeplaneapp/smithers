@@ -42,6 +42,6 @@ Authored, because the old repository held them one level up:
   that make the JSX resolve without a per-file pragma.
 
 The fixture is deliberately outside the pnpm workspace globs
-(`packages/*`, `packages/build/infra`, `examples`, `apps/*`), so its
+(`packages/*`, `packages/smithers/build/infra`, `examples`, `apps/*`), so its
 `package.json` is never installed and its 0.x dependencies are never resolved.
 It is data, not a project that builds.

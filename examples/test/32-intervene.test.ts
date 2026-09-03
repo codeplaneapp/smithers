@@ -21,7 +21,7 @@ const approvals = (graph: Graph.Graph): ReadonlyArray<Graph.GraphNode> =>
  * composes the step flows without restating their capabilities, so the composed
  * plan grants nothing and every step that names one is reported. That is the
  * intended reading of the new code, pinned the same way in
- * `packages/patterns/test/Sidecar.test.ts`, so these tests now pin which steps
+ * `packages/smithers/flows/patterns/test/Sidecar.test.ts`, so these tests now pin which steps
  * are reported instead of denying that any are, and still assert that nothing
  * fatal reaches the plan.
  */

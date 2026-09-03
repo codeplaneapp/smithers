@@ -36,9 +36,9 @@
  * @since 0.1.0
  */
 import { DatabaseSync } from "node:sqlite"
-import * as NarrowedCheck from "../../../packages/harness/src/NarrowedCheck.ts"
-import * as Sufficiency from "../../../packages/harness/src/Sufficiency.ts"
-import * as UnresolvedFailure from "../../../packages/harness/src/UnresolvedFailure.ts"
+import * as NarrowedCheck from "../../../packages/smithers/agent/harness/src/NarrowedCheck.ts"
+import * as Sufficiency from "../../../packages/smithers/agent/harness/src/Sufficiency.ts"
+import * as UnresolvedFailure from "../../../packages/smithers/agent/harness/src/UnresolvedFailure.ts"
 
 /** Flows whose calls change the workspace, so they are never checks. */
 const editing = new Set(["write", "edit", "apply_patch"])

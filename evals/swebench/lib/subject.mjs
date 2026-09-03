@@ -8,13 +8,13 @@
  * nothing in the rig established it. Two things make it non-obvious:
  *
  *   1. The workspace `exports` map of every `@smthrs/*` package points at
- *      `./src/*.ts`, not at `./dist`. `packages/cli/dist/esm/bin.js` therefore
+ *      `./src/*.ts`, not at `./dist`. `packages/smithers/dist/esm/bin.js` therefore
  *      resolves `@smthrs/harness/CellTurn` to
- *      `packages/harness/src/CellTurn.ts` and Node strips its types on load.
+ *      `packages/smithers/agent/harness/src/CellTurn.ts` and Node strips its types on load.
  *      The harness under test is the WORKING TREE, at the instant each CLI
- *      process starts. `packages/harness/dist` is not in the loaded graph at
+ *      process starts. `packages/smithers/agent/harness/dist` is not in the loaded graph at
  *      all, so its mtime proves nothing either way.
- *   2. `packages/cli` is the one package whose compiled output IS loaded, via
+ *   2. `packages/smithers` is the one package whose compiled output IS loaded, via
  *      the `bin.js` entry point. That dist can be older than its own source.
  *
  * Every path in the record is repository-relative. The absolute directory the
@@ -33,7 +33,7 @@
  * The CLI's source is in the stamp even though the process never loads it,
  * because point 2 above is the one place the loaded bytes and the source can
  * disagree. Every other package moves the stamp the moment a sibling lane edits
- * it, which is what stops a wave mid-flight; `packages/cli/src` used to move
+ * it, which is what stops a wave mid-flight; `packages/smithers/src` used to move
  * nothing, so the one package whose build can go stale was the one package the
  * pin could not notice going stale. With both hashes in the stamp, a pinned pair
  * asserts that one `preflight.sh` run produced them together, and a CLI source
@@ -46,7 +46,7 @@
  *
  * The refusals, and what each one caught:
  *
- *   no-cli-build      `packages/cli/dist/esm/bin.js` is missing.
+ *   no-cli-build      `packages/smithers/dist/esm/bin.js` is missing.
  *   partial-cli-build a `src/X.ts` has no `dist/esm/X.js`. `--no-bail` and a
  *                     `...` filter closure both produce this silently.
  *   foreign-subject   a package resolves outside this checkout's `packages/`.
@@ -67,7 +67,7 @@ import { join, relative, resolve, sep } from "node:path"
 
 const here = import.meta.dirname
 const root = resolve(here, "../../..")
-const binary = join(root, "packages/cli/dist/esm/bin.js")
+const binary = join(root, "packages/smithers/dist/esm/bin.js")
 
 /** Every file under a directory, as repository-relative paths, sorted. */
 const filesUnder = (directory) => {
@@ -123,25 +123,33 @@ const differsFromHead = (prefix) => {
 }
 
 /**
- * Walks the `@smthrs/*` dependency closure of `packages/cli`, resolving each
+ * Walks the `@smthrs/*` dependency closure of `packages/smithers`, resolving each
  * package the way the running process will.
  *
  * Resolution is anchored at the importer, not at the entry point: pnpm links
- * `@smthrs/core` into `packages/harness/node_modules`, not into
- * `packages/cli/node_modules`, so asking `bin.js` for it answers "no such
+ * `@smthrs/core` into `packages/smithers/agent/harness/node_modules`, not into
+ * `packages/smithers/node_modules`, so asking `bin.js` for it answers "no such
  * module" while the harness loads it fine. Every edge is therefore resolved
  * from the directory of the package that declares the dependency, which is
  * what Node does.
  */
 const closure = (refusals) => {
   const byName = new Map()
-  for (const entry of readdirSync(join(root, "packages"), { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const manifest = join(root, "packages", entry.name, "package.json")
-    if (!existsSync(manifest)) continue
-    const parsed = JSON.parse(readFileSync(manifest, "utf8"))
-    byName.set(parsed.name, { directory: `packages/${entry.name}`, manifest: parsed })
+  // The walk descends: packages nest, and a package that reads one directory
+  // level would miss most of the closure and answer with a smaller graph than
+  // the binary actually loads.
+  const collect = (parent) => {
+    for (const entry of readdirSync(join(root, parent), { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name === "node_modules") continue
+      const directory = `${parent}/${entry.name}`
+      const manifest = join(root, directory, "package.json")
+      if (!existsSync(manifest)) continue
+      const parsed = JSON.parse(readFileSync(manifest, "utf8"))
+      byName.set(parsed.name, { directory, manifest: parsed })
+      collect(directory)
+    }
   }
+  collect("packages")
   const cli = byName.get("@smthrs/cli")
   // The process enters at the built binary, which is the one compiled artifact
   // in the graph. Everything below it is source, and this walk proves it.
@@ -266,10 +274,10 @@ export const fingerprint = ({ compareToHead = true } = {}) => {
   // that stopped early, which is exactly what `--no-bail` over a filter
   // closure produces: a dist that exists, imports fine, and is a prefix of the
   // program the report claims to have run.
-  const sources = filesUnder(join(root, "packages/cli/src")).filter((path) => path.endsWith(".ts"))
-  const emitted = new Set(filesUnder(join(root, "packages/cli/dist/esm")).filter((path) => path.endsWith(".js")))
+  const sources = filesUnder(join(root, "packages/smithers/src")).filter((path) => path.endsWith(".ts"))
+  const emitted = new Set(filesUnder(join(root, "packages/smithers/dist/esm")).filter((path) => path.endsWith(".js")))
   const missing = sources
-    .map((path) => path.replace("packages/cli/src/", "packages/cli/dist/esm/").replace(/\.ts$/, ".js"))
+    .map((path) => path.replace("packages/smithers/src/", "packages/smithers/dist/esm/").replace(/\.ts$/, ".js"))
     .filter((path) => !emitted.has(path))
   if (missing.length > 0) {
     refusals.push({
@@ -278,19 +286,19 @@ export const fingerprint = ({ compareToHead = true } = {}) => {
     })
   }
   const cliDist = {
-    directory: "packages/cli/dist/esm",
+    directory: "packages/smithers/dist/esm",
     files: emitted.size,
     hash: hashFiles([...emitted].sort()),
     missing
   }
   // The CLI's own source, which is NOT what the process loads — the build is.
-  // It is fingerprinted anyway, and folded into the stamp, because `packages/cli`
+  // It is fingerprinted anyway, and folded into the stamp, because `packages/smithers`
   // is the only package where the loaded bytes and the source can drift apart,
   // and nothing else in the rig can see that drift:
   //
   //   - Every other package is loaded from `src`, so a mid-wave edit to it
   //     moves its hash, moves the stamp, and stops the wave at the next
-  //     `flows.sh` call. Editing `packages/cli/src` moved nothing, because only
+  //     `flows.sh` call. Editing `packages/smithers/src` moved nothing, because only
   //     `dist/esm` was hashed. The one package whose build can go stale was the
   //     one package the pin could not notice going stale.
   //   - `dirty-subject` only asks whether `src` differs from `HEAD`, and
@@ -301,9 +309,9 @@ export const fingerprint = ({ compareToHead = true } = {}) => {
   // the only way to restart is `./preflight.sh`, which rebuilds `dist` from that
   // source and re-pins both hashes together. A pinned pair therefore states that
   // one preflight produced them, which is the claim a stale build breaks.
-  const cliSources = filesUnder(join(root, "packages/cli/src"))
+  const cliSources = filesUnder(join(root, "packages/smithers/src"))
   const cliSrc = {
-    directory: "packages/cli/src",
+    directory: "packages/smithers/src",
     files: cliSources.length,
     hash: hashFiles(cliSources)
   }
@@ -311,8 +319,8 @@ export const fingerprint = ({ compareToHead = true } = {}) => {
   // the park refusal and the mutation accounting live, so it is the single
   // file that answers "which controls could this wave possibly have run".
   const marker = {
-    path: "packages/harness/src/CellTurn.ts",
-    hash: hashFile("packages/harness/src/CellTurn.ts"),
+    path: "packages/smithers/agent/harness/src/CellTurn.ts",
+    hash: hashFile("packages/smithers/agent/harness/src/CellTurn.ts"),
     resolvedBy: (() => {
       try {
         return relative(root, require.resolve("@smthrs/harness/CellTurn"))

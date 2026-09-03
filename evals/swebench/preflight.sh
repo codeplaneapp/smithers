@@ -9,7 +9,7 @@
 # harness and finishes on another stops instead of being reported as one
 # measurement.
 #
-# The build is one package. `packages/cli` is the only package in the loaded
+# The build is one package. `packages/smithers` is the only package in the loaded
 # graph whose compiled output is loaded at all: every `@smthrs/*` package's
 # workspace `exports` map points at `./src/*.ts`, so the CLI's dependencies are
 # loaded from the working tree and stripped of their types by Node. See

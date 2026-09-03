@@ -1,17 +1,24 @@
 /**
  * Targets for the review seeded-bug suite.
  *
- * Two targets, because the suite has two halves that fail for different
- * reasons. `scorer` is the corpus-integrity and scoring-math suite: pure, fast,
+ * Two test targets, because the suite has two halves that fail for different
+ * reasons. `test` is the corpus-integrity and scoring-math suite: pure, fast,
  * and independent of the review app. `suite` runs the real review flow over all
  * sixteen fixtures and gates the result on `baseline.json`; it is offline
  * because its reviewing seat is `deterministicReviewer.ts` rather than a model,
- * so it spends nothing and answers the same way twice.
+ * so it spends nothing and answers the same way twice. Both run from this
+ * directory, which is a workspace member (`@smthrs/eval-review-seeded-bugs`),
+ * so `bun` and `tsc` read the toolchain the manifest pins.
+ *
+ * There is no `lint` or `fmt` target. `corpus/` is the eval's input: thirty
+ * base/head source files whose exact text — and therefore whose exact line
+ * numbers — is what the reviewer anchors findings to and what `score.ts`
+ * matches them against. A formatter would rewrite the corpus and silently move
+ * the thing being measured.
  *
  * @since 1.0.0
  */
 import { Smithers } from "@smthrs/targets"
-import { bunRuntime, packageManager } from "../../PACKAGE.ts"
 
 const cwd = "evals/review-seeded-bugs"
 
@@ -33,10 +40,11 @@ const sources = [
  * @category test
  */
 const suite = Smithers.NodeTest({
-  runtime: bunRuntime,
+  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
   runner: Smithers.entrypoint(Smithers.file("//evals/review-seeded-bugs/run.ts")),
   srcs: sources,
-  deps: []
+  deps: [],
+  cwd
 })
 
 /**
@@ -45,8 +53,8 @@ const suite = Smithers.NodeTest({
  * @since 1.0.0
  * @category test
  */
-const scorer = Smithers.NodeTest({
-  runtime: bunRuntime,
+const test = Smithers.NodeTest({
+  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
   runner: Smithers.testSuite(["score.test.ts", "deterministicReviewer.test.ts"]),
   srcs: sources,
   deps: [],
@@ -54,13 +62,13 @@ const scorer = Smithers.NodeTest({
 })
 
 /**
- * Checks the suite's own sources against its tsconfig.
+ * Checks the suite's own sources, including its two `bun:test` files, against
+ * its tsconfig.
  *
  * @since 1.0.0
  * @category build
  */
-const types = Smithers.Typecheck({
-  packageManager,
+const check = Smithers.Typecheck({
   srcs: sources,
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
@@ -70,5 +78,5 @@ const types = Smithers.Typecheck({
 })
 
 export const Package = Smithers.Package({
-  targets: { scorer, suite, types }
+  targets: { check, suite, test }
 })

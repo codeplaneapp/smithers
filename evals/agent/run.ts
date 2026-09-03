@@ -38,7 +38,7 @@ import {
   Report,
   Runner,
   Suite
-} from "../../packages/evals/src/index.ts"
+} from "../../packages/smithers/agent/evals/src/index.ts"
 import * as AgentSuite from "./suite.ts"
 
 const baselinePath = new URL("./baseline.json", import.meta.url)

@@ -17,18 +17,18 @@ first-class build-system targets, so none of them is a copy-paste shell command.
 
 Deterministic, cache-eligible, and part of `ci`:
 
-- `//evals/authoring:datasetValidate` — proves every dataset row is a
-  well-formed chat example. Run it with `pnpm exec smithers-build test
-  '//evals/authoring:datasetValidate'`.
-- `//evals/authoring:types` — typechecks the validator.
+- `//evals/authoring:test` — proves every dataset row is a well-formed chat
+  example. Run it with `pnpm exec smithers-build test
+  '//evals/authoring:test'`.
+- `//evals/authoring:check` — typechecks the validator.
 
 Irreversible Fireworks operations. Each is a
-[`ToolRun`](../../packages/build/docs/reference/targets/tool-run.md): never
+[`ToolRun`](../../packages/smithers/build/docs/reference/targets/tool-run.md): never
 cached, gated to the `run` verb so it can never enter a `ci` graph, and backed
 by the `FIREWORKS_API_KEY` secret rather than a literal credential.
 
 - `//evals/authoring:datasetUpload` — `firectl dataset create`. Depends on
-  `datasetValidate`, so a malformed dataset never reaches the account. Uploading
+  `test`, so a malformed dataset never reaches the account. Uploading
   a name that already exists fails, by design.
 - `//evals/authoring:sftLaunch` — `firectl supervised-fine-tuning-job create`
   on `kimi-k3`. Every run starts a new billed job.

@@ -46,15 +46,15 @@ import {
   QuotaPolicy,
   Seat,
   SeatResolver
-} from "../../packages/agent/src/index.ts"
-import { Flow as CoreFlow } from "../../packages/core/src/index.ts"
-import { FlowEngine } from "../../packages/engine/src/index.ts"
-import { Action, Flow, FlowRuntime, Interpreter } from "../../packages/flow/src/index.ts"
-import type { AgentEvent } from "../../packages/harness/src/index.ts"
-import { FlowBinding } from "../../packages/harness/src/index.ts"
-import { Model, ModelEvent, type ModelRequest, type Route } from "../../packages/model/src/index.ts"
-import { Node } from "../../packages/plan/src/index.ts"
-import { Registry } from "../../packages/registry/src/index.ts"
+} from "../../packages/smithers/agent/src/index.ts"
+import { Flow as CoreFlow } from "../../packages/smithers/flows/core/src/index.ts"
+import { FlowEngine } from "../../packages/smithers/flows/engine/src/index.ts"
+import { Action, Flow, FlowRuntime, Interpreter } from "../../packages/smithers/flows/flow/src/index.ts"
+import type { AgentEvent } from "../../packages/smithers/agent/harness/src/index.ts"
+import { FlowBinding } from "../../packages/smithers/agent/harness/src/index.ts"
+import { Model, ModelEvent, type ModelRequest, type Route } from "../../packages/smithers/agent/model/src/index.ts"
+import { Node } from "../../packages/smithers/flows/plan/src/index.ts"
+import { Registry } from "../../packages/smithers/agent/registry/src/index.ts"
 
 const hostCrypto = Layer.succeed(
   Crypto.Crypto,

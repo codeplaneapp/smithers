@@ -10,7 +10,7 @@
  * This reads the journal with `node:sqlite` and nothing else. It deliberately
  * does **not** go through `lib/journal-facts.mjs`, which imports the harness's
  * own modules to rebuild the controller's per-frame decisions: the full
- * benchmark runs for days beside sibling lanes that edit `packages/harness`,
+ * benchmark runs for days beside sibling lanes that edit `packages/smithers/agent/harness`,
  * and a cost column that stops working because another lane is mid-edit would
  * stop the benchmark. Cost needs four counters off one event type, so it takes
  * them off one event type.
