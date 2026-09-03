@@ -21,9 +21,9 @@ test("leaves a version-pinned 0.x invocation alone", () => {
 test("leaves the 1.0 spellings alone", () => {
   for (const line of [
     "smithers ps",
-    "npx @smthrs/cli@rc smithers ls",
-    "bun x --package @smthrs/cli@rc smithers serve",
-    "pnpm add @smthrs/flow@rc"
+    "npx @smthrs/cli@next smithers ls",
+    "bun x --package @smthrs/cli@next smithers serve",
+    "pnpm add @smthrs/flow@next"
   ]) {
     assert.equal(normalizeCommand(line), line)
   }

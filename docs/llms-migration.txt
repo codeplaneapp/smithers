@@ -64,7 +64,7 @@ npx smithers migrate
 ```
 
 `smthrs@0.35.0` keeps the `latest` dist-tag until 1.0.0 is final, so
-`npm install smthrs` still installs 0.x. Only `smthrs@rc` reaches the notice.
+`npm install smthrs` still installs 0.x. Only `smthrs@next` reaches the notice.
 
 {/* generated:smthrs-notice end */}
 
@@ -823,7 +823,7 @@ the control plane.
 ### Release lines
 
 A release candidate carries no support promise beyond the candidate itself.
-Candidates publish to the `rc` dist-tag; `latest` still resolves the Smithers
+Candidates publish to the `next` dist-tag; `latest` still resolves the Smithers
 0.x line until 1.0.0 is final. A published candidate is never mutated: a fix
 ships as the next candidate.
 

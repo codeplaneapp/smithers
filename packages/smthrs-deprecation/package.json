@@ -47,7 +47,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
-    "tag": "rc",
+    "tag": "next",
     "exports": {
       ".": {
         "types": "./dist/esm/index.d.ts",

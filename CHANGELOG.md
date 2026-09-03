@@ -47,7 +47,7 @@ release notes, the README, and the migration guide.
 
 ### Packages
 
-- 40 packages publish at `1.0.0-rc.0` under the `rc` dist-tag, in the
+- 40 packages publish at `1.0.0-rc.0` under the `next` dist-tag, in the
   dependency order `node scripts/pack-release.mjs --names` prints.
   `@smthrs/flows` is the curated aggregate and `@smthrs/cli` owns the
   `smithers` binary.

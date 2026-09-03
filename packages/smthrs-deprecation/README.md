@@ -67,4 +67,4 @@ Smithers 1.0.0-rc.0 does not migrate live or in-flight 0.x runs. Finish,
 archive, or discard them before upgrading.
 
 `smthrs@0.35.0` stays on the `latest` dist-tag until Smithers 1.0.0 is final.
-Release candidates publish under the `rc` dist-tag.
+Release candidates publish under the `next` dist-tag.

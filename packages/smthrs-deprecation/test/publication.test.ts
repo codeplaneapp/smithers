@@ -40,9 +40,9 @@ describe("the published manifest", () => {
     expect(manifest.exports).toEqual({ ".": "./src/index.ts" })
   })
 
-  it("publishes publicly under the rc dist-tag, so it never becomes an accidental install", () => {
+  it("publishes publicly under the next dist-tag, so it never becomes an accidental install", () => {
     expect(manifest.publishConfig?.access).toBe("public")
-    expect(manifest.publishConfig?.tag).toBe("rc")
+    expect(manifest.publishConfig?.tag).toBe("next")
   })
 
   it("declares the repository Node floor the contract says every package declares", () => {

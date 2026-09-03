@@ -286,7 +286,7 @@
    "key": "packages/smthrs-deprecation",
    "kind": "new package (decision D6)",
    "disposition": "migrate",
-   "newHome": "packages/smthrs-deprecation: package.json (name smthrs, version 1.0.0-rc.0, smthrs.group agent, no bin, exports . only, publishConfig.tag rc), one module that throws the rc-contract.md §3.3 notice on import, README with the same text and the removed-API list. The directory is named smthrs-deprecation rather than smthrs so the path does not read as @smthrs/smthrs; the published name is unchanged.",
+   "newHome": "packages/smthrs-deprecation: package.json (name smthrs, version 1.0.0-rc.0, smthrs.group agent, no bin, exports . only, publishConfig.tag next), one module that throws the rc-contract.md §3.3 notice on import, README with the same text and the removed-API list. The directory is named smthrs-deprecation rather than smthrs so the path does not read as @smthrs/smthrs; the published name is unchanged.",
    "phase": "3",
    "tree": "old",
    "rationale": "Decision D6: publish a deprecation/migration notice only. The old facade is deleted (row above); the notice is new Phase 3 work, recorded as its own row so the packages/smithers delete row keeps the PLAN meaning of delete (nothing survives) and the stub has a phase.",

@@ -126,7 +126,7 @@ test("the packed set is exactly the 40 names the RC contract publishes", () => {
   assert.ok(publishedPackages.includes("smthrs"), "the unscoped deprecation notice publishes with the RC")
 })
 
-test("every packed manifest carries the RC version and the rc dist-tag", () => {
+test("every packed manifest carries the RC version and the next dist-tag", () => {
   // A prerelease published to `latest` would upgrade every `smthrs`-adjacent
   // install that tracks the tag, so the tag is pinned per manifest as well as
   // on the publish command (docs/internal/release-runbook.md).
@@ -134,7 +134,7 @@ test("every packed manifest carries the RC version and the rc dist-tag", () => {
   for (const directory of workspaces) {
     const manifest = manifests.get(directory)
     assert.equal(manifest.version, "1.0.0-rc.0", `${manifest.name} version`)
-    assert.equal(manifest.publishConfig.tag, "rc", `${manifest.name} publishConfig.tag`)
+    assert.equal(manifest.publishConfig.tag, "next", `${manifest.name} publishConfig.tag`)
     assert.equal(manifest.publishConfig.access, "public", `${manifest.name} publishConfig.access`)
     assert.equal(manifest.publishConfig.provenance, true, `${manifest.name} publishConfig.provenance`)
   }

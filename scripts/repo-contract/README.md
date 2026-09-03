@@ -20,7 +20,7 @@ pnpm exec smithers-build test '//scripts/repo-contract/...'
 
 | Suite | What it guards |
 | --- | --- |
-| `package-contract.test.mjs` | One version across the release line, a declared publishable surface, the `rc` dist-tag, the scripts every gate invokes, and no published dependency on a private package. |
+| `package-contract.test.mjs` | One version across the release line, a declared publishable surface, the `next` dist-tag, the scripts every gate invokes, and no published dependency on a private package. |
 | `barrels.test.mjs` | `@smthrs/flows` re-exports exactly the namespaces it lists, declares every package it re-exports, and every published root export points at a file that exists. |
 | `test-script-wiring.test.mjs` | Every workspace member with tests has a `test` script, and the pnpm workspace and the root manifest name the same members. |
 | `fault-skips.test.mjs` | No focused, parked, or inverted test in `e2e/`, every conditional skip declared with its reason, and every required gate still in the matrix — including the ones that are red. |

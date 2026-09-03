@@ -6,7 +6,7 @@ without flattening neighboring service constructors; `namespaces` lists those
 runtime namespace names.
 
 ```sh
-pnpm add @smthrs/flows@rc
+pnpm add @smthrs/flows@next
 ```
 
 ```ts

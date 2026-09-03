@@ -34,7 +34,7 @@ const offReleaseLine = new Map([
     "The Phase 6 migration tool for upgrading 0.x projects. It is versioned "
     + "independently of the runtime it migrates to, so it does not move with the "
     + "RC line. Revisit before the first publish: if it ships with the RC it "
-    + "needs the RC version and the `rc` dist-tag."
+    + "needs the RC version and the `next` dist-tag."
   ]
 ])
 
@@ -110,7 +110,7 @@ describe("the workspace package contract", () => {
       if (offReleaseLine.has(entry.manifest.name)) continue
       assert.equal(
         entry.manifest.publishConfig?.tag,
-        "rc",
+        "next",
         `packages/${entry.directory} would publish to the default dist-tag, which is how a release candidate `
           + "becomes somebody's `npm install` by accident"
       )

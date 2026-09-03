@@ -9,7 +9,7 @@ together with the engine. `tooling` packages are private and are never packed.
 
 Worked example below: `v1.0.0-rc.0`, the first release candidate.
 
-**Prerelease dist-tag rule.** A version containing `-` publishes to the `rc`
+**Prerelease dist-tag rule.** A version containing `-` publishes to the `next`
 dist-tag, never `latest`. `latest` still resolves `smthrs@0.35.0` and the 0.x
 `@smthrs/*` packages until 1.0.0 is final, so an existing project that runs
 `npm install smthrs` does not get pulled onto the release candidate. The rule is
@@ -107,10 +107,10 @@ registry, so a failed run can be resumed by deleting and re-pushing the same tag
 ## 4. Verify the published set
 
 ```sh
-# Every name published at the released version, on the rc dist-tag. `latest`
+# Every name published at the released version, on the next dist-tag. `latest`
 # must still point at the 0.x line for every name that has one.
 for name in $(node scripts/pack-release.mjs --names); do
-  echo "$name $(npm view "$name@1.0.0-rc.0" version) rc=$(npm view "$name" dist-tags.rc) latest=$(npm view "$name" dist-tags.latest)"
+  echo "$name $(npm view "$name@1.0.0-rc.0" version) next=$(npm view "$name" dist-tags.next) latest=$(npm view "$name" dist-tags.latest)"
 done
 
 # Provenance attestation is attached.

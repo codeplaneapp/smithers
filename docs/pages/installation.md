@@ -23,27 +23,27 @@ Windows is unsupported. macOS and Linux x64 are supported.
 
 ## Install the libraries
 
-Release candidates publish to the `rc` dist-tag. The `@rc` suffix is required:
+Release candidates publish to the `next` dist-tag. The `@next` suffix is required:
 `latest` still resolves the Smithers 0.x line.
 
 :::code-group
 
 ```bash [pnpm]
-pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+pnpm add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 ```bash [npm]
-npm install @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+npm install @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 ```bash [bun]
-bun add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+bun add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 :::
 
 `@smthrs/flow` carries the authoring model and `@smthrs/engine` runs it in
-memory. Add `@smthrs/flows@rc` when you want the curated aggregate and the
+memory. Add `@smthrs/flows@next` when you want the curated aggregate and the
 `NodeRuntime` production composition instead of assembling layers by hand.
 [Package selection](/package-structure) lists what each package is for.
 
@@ -104,7 +104,7 @@ first install, or delete `node_modules` and the lockfile (`package-lock.json` or
 ## Install the command
 
 ```bash
-npm install --global @smthrs/cli@rc
+npm install --global @smthrs/cli@next
 ```
 
 The package installs one binary, `smithers`. Its shim starts with
@@ -116,11 +116,11 @@ Run it without installing:
 :::code-group
 
 ```bash [npx]
-npx @smthrs/cli@rc smithers ls
+npx @smthrs/cli@next smithers ls
 ```
 
 ```bash [bun]
-bun x --package @smthrs/cli@rc smithers ls
+bun x --package @smthrs/cli@next smithers ls
 ```
 
 :::

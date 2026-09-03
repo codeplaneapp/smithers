@@ -35,7 +35,7 @@ Twenty-three pnpm workspaces make up the engine group under `packages/`, one clo
 | `@smthrs/observability` | `packages/observability` | yes | no tables; the default OTLP exporter layer over Effect's own observability modules |
 | `@smthrs/examples` | `examples` | no | the runnable example suite |
 
-Every published manifest is `1.0.0-rc.0`, every internal production range naming another published package is an exact `1.0.0-rc.0`, and `effect` is pinned to exact `4.0.0-rc.108`. A range naming a private workspace package uses `workspace:*`, because a private package keeps its own version. Release candidates publish to the `rc` dist-tag, never `latest`.
+Every published manifest is `1.0.0-rc.0`, every internal production range naming another published package is an exact `1.0.0-rc.0`, and `effect` is pinned to exact `4.0.0-rc.108`. A range naming a private workspace package uses `workspace:*`, because a private package keeps its own version. Release candidates publish to the `next` dist-tag, never `latest`.
 
 ## Who owns which data
 

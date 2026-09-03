@@ -864,7 +864,7 @@ names are flat, and `TimeTravel` is a flat service key; infrastructure packages
 remain namespaces.
 
 ```sh
-pnpm add @smthrs/flows@rc
+pnpm add @smthrs/flows@next
 ```
 
 ```ts

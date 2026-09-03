@@ -36,12 +36,12 @@ policy.
 You need Node.js 22.19.0 or later. The durable engine runs on Node only.
 
 ```sh
-pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+pnpm add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
-Release candidates publish to the `rc` dist-tag, so the `@rc` suffix is
+Release candidates publish to the `next` dist-tag, so the `@next` suffix is
 required. `latest` still resolves the Smithers 0.x line. Install
-`@smthrs/cli@rc` for the `smithers` command. Pin Effect to exactly
+`@smthrs/cli@next` for the `smithers` command. Pin Effect to exactly
 `4.0.0-rc.108`: a project with two Effect instances is unsupported, because
 schema internals are not interoperable between them.
 

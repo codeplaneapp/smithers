@@ -5,7 +5,7 @@
  * Smithers 1.0 ships one binary, `smithers`, from `@smthrs/cli`. The rule in
  * `docs/pages/installation.md` is that a documented invocation is either the
  * installed binary (`smithers <verb>`) or an explicit one-off runner naming the
- * scoped package (`npx @smthrs/cli@rc smithers <verb>`).
+ * scoped package (`npx @smthrs/cli@next smithers <verb>`).
  *
  * Smithers 0.x documented `bunx smthrs <verb>`, and that spelling is now wrong
  * in a way a reader cannot see: `smthrs@1.0.0-rc.0` is a migration notice whose
@@ -118,7 +118,7 @@ if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === imp
     if (offenders.length > 0) {
       console.error(`✗ ${offenders.length} page(s) invoke the CLI through a Smithers 0.x package name:`)
       for (const offender of offenders) console.error(`    ${offender}`)
-      console.error("\nUse `smithers <verb>`, or `npx @smthrs/cli@rc smithers <verb>` for a one-off run.")
+      console.error("\nUse `smithers <verb>`, or `npx @smthrs/cli@next smithers <verb>` for a one-off run.")
       console.error("Run `node scripts/normalize-bunx.ts` to fix.")
       process.exit(1)
     }

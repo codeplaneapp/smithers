@@ -64,7 +64,7 @@ The current request and receipt shapes are generated from the schemas in
 ## Release lines
 
 A release candidate carries no support promise beyond the candidate itself.
-Candidates publish to the `rc` dist-tag; `latest` still resolves the Smithers
+Candidates publish to the `next` dist-tag; `latest` still resolves the Smithers
 0.x line until 1.0.0 is final. A published candidate is never mutated: a fix
 ships as the next candidate.
 

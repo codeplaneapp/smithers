@@ -11,7 +11,7 @@ at Node 24.18.0, Bun 1.4.0, pnpm 11.21.0. Commands are repository-root relative.
 | Published packages | 40 | `scripts/pack-release.mjs` `publishedPackages`, checked against the workspace on every read |
 | Version | `1.0.0-rc.0`, one synchronized version | `node scripts/set-release-version.mjs --check 1.0.0-rc.0` |
 | Release train | `smthrs.group` in `{engine, agent}`, `private !== true` | `scripts/pack-release.mjs` `releaseGroups`, `.github/workflows/release.yml` |
-| Dist-tag | `rc` for any version containing `-`, never `latest` | `publishConfig.tag` in every public manifest, `publish_tag` in `release.yml`, `scripts/pack-release.test.mjs` |
+| Dist-tag | `next` for any version containing `-`, never `latest` | `publishConfig.tag` in every public manifest, `publish_tag` in `release.yml`, `scripts/pack-release.test.mjs` |
 | User-facing binary | `smithers`, from `@smthrs/cli` | `packages/cli/package.json` `bin`, `packages/cli/test/Bin.test.ts` |
 | Build binary | `smithers-build`, from the private `@smthrs/build-cli` | `packages/build-cli/package.json` `bin`, generated `.github/workflows/ci.yml` |
 | Unscoped `smthrs` | Migration notice that throws on import | `packages/smthrs-deprecation`, `scripts/smoke-release.mjs` |
@@ -383,7 +383,7 @@ dry-run and the real path. `rc-contract.md` section 3.3 records the ruling
 
 | Item | Contract said | This change did | Why |
 | --- | --- | --- | --- |
-| Prerelease dist-tag | `next` (sections 3.3, 9) | `rc` | The orchestrator's Phase 3 brief specifies `rc`. `rc` names what the version already says and leaves `next` free for a later track. Recorded in the contract as ruling R-40 and in the release runbook. |
+| Prerelease dist-tag | `next` (sections 3.3, 9) | `rc` | The orchestrator's Phase 3 brief specifies `rc`. `rc` names what the version already says and leaves `next` free for a later track. Recorded in the contract as ruling R-40 and in the release runbook. Reversed by R-41 on 2026-09-02: the tag is `next` again, and every site R-40 touched now reads `next`. |
 | Notice package directory | `packages/smthrs` (section 3.3, ledger) | `packages/smthrs-deprecation` | The Phase 3 brief names this directory. A `packages/smthrs` path reads as `@smthrs/smthrs`. The published name, group, exports, and behavior are unchanged. Contract and both ledger halves updated. |
 | `@smthrs/create-app` | absent from sections 3.1 and 3.2 | `private: true` | The package arrived after the contract was frozen. Rule (d) applies: its only consumer is the private build CLI. Contract section 3.2 now lists it. |
 | `smthrs-routes` bin | not mentioned | renamed `smithers-routes` | Decision D7 requires resolving `smthrs` bin names before packing; leaving one behind contradicts the notice package's own message. The package is private, so nothing publishes either name. |

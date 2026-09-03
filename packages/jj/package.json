@@ -58,7 +58,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
-    "tag": "rc",
+    "tag": "next",
     "exports": {
       "./package.json": "./package.json",
       ".": {

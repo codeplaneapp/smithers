@@ -133,27 +133,27 @@ Windows is unsupported. macOS and Linux x64 are supported.
 
 ### Install the libraries
 
-Release candidates publish to the `rc` dist-tag. The `@rc` suffix is required:
+Release candidates publish to the `next` dist-tag. The `@next` suffix is required:
 `latest` still resolves the Smithers 0.x line.
 
 :::code-group
 
 ```bash [pnpm]
-pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+pnpm add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 ```bash [npm]
-npm install @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+npm install @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 ```bash [bun]
-bun add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+bun add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 :::
 
 `@smthrs/flow` carries the authoring model and `@smthrs/engine` runs it in
-memory. Add `@smthrs/flows@rc` when you want the curated aggregate and the
+memory. Add `@smthrs/flows@next` when you want the curated aggregate and the
 `NodeRuntime` production composition instead of assembling layers by hand.
 Package selection lists what each package is for.
 
@@ -214,7 +214,7 @@ first install, or delete `node_modules` and the lockfile (`package-lock.json` or
 ### Install the command
 
 ```bash
-npm install --global @smthrs/cli@rc
+npm install --global @smthrs/cli@next
 ```
 
 The package installs one binary, `smithers`. Its shim starts with
@@ -226,11 +226,11 @@ Run it without installing:
 :::code-group
 
 ```bash [npx]
-npx @smthrs/cli@rc smithers ls
+npx @smthrs/cli@next smithers ls
 ```
 
 ```bash [bun]
-bun x --package @smthrs/cli@rc smithers ls
+bun x --package @smthrs/cli@next smithers ls
 ```
 
 :::
@@ -3973,7 +3973,7 @@ Twenty-three pnpm workspaces make up the engine group under `packages/`, one clo
 | `@smthrs/observability` | `packages/observability` | yes | no tables; the default OTLP exporter layer over Effect's own observability modules |
 | `@smthrs/examples` | `examples` | no | the runnable example suite |
 
-Every published manifest is `1.0.0-rc.0`, every internal production range naming another published package is an exact `1.0.0-rc.0`, and `effect` is pinned to exact `4.0.0-rc.108`. A range naming a private workspace package uses `workspace:*`, because a private package keeps its own version. Release candidates publish to the `rc` dist-tag, never `latest`.
+Every published manifest is `1.0.0-rc.0`, every internal production range naming another published package is an exact `1.0.0-rc.0`, and `effect` is pinned to exact `4.0.0-rc.108`. A range naming a private workspace package uses `workspace:*`, because a private package keeps its own version. Release candidates publish to the `next` dist-tag, never `latest`.
 
 ### Who owns which data
 
@@ -5054,7 +5054,7 @@ names are flat, and `TimeTravel` is a flat service key; infrastructure packages
 remain namespaces.
 
 ```sh
-pnpm add @smthrs/flows@rc
+pnpm add @smthrs/flows@next
 ```
 
 ```ts
@@ -20303,7 +20303,7 @@ npx smithers migrate
 ```
 
 `smthrs@0.35.0` keeps the `latest` dist-tag until 1.0.0 is final, so
-`npm install smthrs` still installs 0.x. Only `smthrs@rc` reaches the notice.
+`npm install smthrs` still installs 0.x. Only `smthrs@next` reaches the notice.
 
 {/* generated:smthrs-notice end */}
 
@@ -21062,7 +21062,7 @@ the control plane.
 ### Release lines
 
 A release candidate carries no support promise beyond the candidate itself.
-Candidates publish to the `rc` dist-tag; `latest` still resolves the Smithers
+Candidates publish to the `next` dist-tag; `latest` still resolves the Smithers
 0.x line until 1.0.0 is final. A published candidate is never mutated: a fix
 ships as the next candidate.
 

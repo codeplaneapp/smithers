@@ -203,11 +203,11 @@ overridden. The workflow re-runs every gate, rebuilds from clean artifacts,
 packs, smoke-tests, then publishes each tarball with
 
 ```sh
-pnpm publish "$PACK_DIR/$tarball" --provenance --access public --tag rc
+pnpm publish "$PACK_DIR/$tarball" --provenance --access public --tag next
 ```
 
-**The dist-tag is `rc`, never `latest`.** A version containing `-` resolves to
-`rc` in three places that must agree: `publishConfig.tag` in every public
+**The dist-tag is `next`, never `latest`.** A version containing `-` resolves to
+`next` in three places that must agree: `publishConfig.tag` in every public
 manifest, the `publish_tag` case in `.github/workflows/release.yml`, and the
 `--tag` on the publish line. `latest` keeps resolving `smthrs@0.35.0` and the
 0.x `@smthrs/*` packages until 1.0.0 is final, so an existing project running
@@ -270,16 +270,16 @@ reads it from the pack manifest rather than a hand-kept list. Reproduce it with
 | 39 | `@smthrs/flows` |
 | 40 | `@smthrs/cli` |
 
-All 40 carry version `1.0.0-rc.0`, `publishConfig.tag: "rc"`, and
+All 40 carry version `1.0.0-rc.0`, `publishConfig.tag: "next"`, and
 `publishConfig.exports` pointing at `dist/esm` and `dist/cjs`.
 
 ## 7. Verify what was published
 
 ```sh
-# Every name at the released version, on the rc dist-tag, with latest
+# Every name at the released version, on the next dist-tag, with latest
 # untouched for every name that has a 0.x line.
 for name in $(node scripts/pack-release.mjs --names); do
-  echo "$name $(npm view "$name@1.0.0-rc.0" version) rc=$(npm view "$name" dist-tags.rc) latest=$(npm view "$name" dist-tags.latest)"
+  echo "$name $(npm view "$name@1.0.0-rc.0" version) next=$(npm view "$name" dist-tags.next) latest=$(npm view "$name" dist-tags.latest)"
 done
 
 # Provenance is attached.

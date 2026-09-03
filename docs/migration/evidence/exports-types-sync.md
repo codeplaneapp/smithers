@@ -78,7 +78,7 @@ Timestamps and load readings for every step are in `run5/timeline.txt`.
 6. Every declared `bin` file exists (including `@smthrs/migrate`'s `dist/esm/flow/bin.js`).
 7. Require-condition resolution: every public subpath resolves via Node self-reference to exactly the file the exports map names (realpath equality), and every `null` subpath throws `ERR_PACKAGE_PATH_NOT_EXPORTED`.
 
-Steps 11 and 12 rerun the same 581 public and 155 blocked subpaths under the Node import condition (`import.meta.resolve` with a parent URL inside each package) and under Bun (`Bun.resolveSync`) with identical results. The repo-contract suite (step 6) adds the manifest contract (one release version, publishable surface for every published package, `rc` dist-tag, exact sibling pins, no published-to-private edges) and the `@smthrs/flows` barrel runtime check.
+Steps 11 and 12 rerun the same 581 public and 155 blocked subpaths under the Node import condition (`import.meta.resolve` with a parent URL inside each package) and under Bun (`Bun.resolveSync`) with identical results. The repo-contract suite (step 6) adds the manifest contract (one release version, publishable surface for every published package, `next` dist-tag, exact sibling pins, no published-to-private edges) and the `@smthrs/flows` barrel runtime check.
 
 `known-files.d.ts` is proven current three ways at this HEAD: the CI drift target (steps 1 and 14), a read-only render through `discoverKnownFiles` and `renderKnownFileDeclaration` from `packages/targets/src/KnownFile.ts` (step 2), and the real generator writing in place with no resulting diff (step 5). All three ran with `vendor/jj` initialized and produced zero `vendor/jj` entries.
 
