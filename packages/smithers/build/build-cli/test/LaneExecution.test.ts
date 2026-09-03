@@ -12,11 +12,14 @@
  *   its verdict, and fails closed on a dynamic import.
  * - bundler: resolve and build through the workspace's own rsbuild, the
  *   build keyed on the resolved graph digest (a universe edit that leaves
- *   the graph unchanged replays the build).
+ *   the graph unchanged replays the build). The dispatched workspace links
+ *   in this package's own `@rsbuild/core` devDependency, so the lane runs
+ *   on a clean checkout.
  */
 import * as NodeChildProcess from "node:child_process"
 import { existsSync } from "node:fs"
 import * as Fs from "node:fs/promises"
+import { createRequire } from "node:module"
 import * as NodeNet from "node:net"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -440,20 +443,29 @@ describe("bundler build key template", () => {
 })
 
 /**
- * A node_modules tree that provides @rsbuild/core; the e2e snapshot of the
- * force workspace by default. Without one the bundler dispatch cases skip
- * loudly rather than faking green.
+ * The node_modules tree the bundler fixture links in so the dispatched
+ * workspace provides its own `@rsbuild/core`.
+ *
+ * The default is this package's own resolved copy of the devDependency, so
+ * the cases run on a clean checkout; `SMTHRS_RSBUILD_MODULES` names another
+ * workspace's node_modules instead. Failing to resolve either one means a
+ * broken install, not a reason to skip.
  */
-const modulesSource = process.env["SMTHRS_RSBUILD_MODULES"] ?? "/Users/williamcory/artsy-e2e/force/node_modules"
-const rsbuildAvailable = existsSync(NodePath.join(modulesSource, "@rsbuild", "core"))
-if (!rsbuildAvailable) {
-  console.warn(
-    `bundler dispatch tests SKIPPED: no @rsbuild/core under ${modulesSource}; ` +
-      "set SMTHRS_RSBUILD_MODULES to a node_modules directory that has it"
-  )
+const resolveModulesSource = (): string => {
+  const override = process.env["SMTHRS_RSBUILD_MODULES"]
+  if (override !== undefined && override !== "") {
+    if (!existsSync(NodePath.join(override, "@rsbuild", "core"))) {
+      throw new Error(`SMTHRS_RSBUILD_MODULES=${override} provides no @rsbuild/core`)
+    }
+    return override
+  }
+  // <modules>/@rsbuild/core/package.json -> <modules>
+  return NodePath.resolve(createRequire(import.meta.url).resolve("@rsbuild/core/package.json"), "../../..")
 }
 
-describe.runIf(rsbuildAvailable)("bundler dispatch", () => {
+const modulesSource = resolveModulesSource()
+
+describe("bundler dispatch", () => {
   it("resolves and builds through the workspace bundler, keyed on the graph digest", async () => {
     const root = await temporaryWorkspace()
     await Fs.cp(rsbuildFixture, root, { recursive: true })

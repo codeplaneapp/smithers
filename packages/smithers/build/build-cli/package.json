@@ -60,6 +60,7 @@
   "devDependencies": {
     "@effect/language-service": "0.87.1",
     "@eslint/js": "9.39.1",
+    "@rsbuild/core": "1.2.3",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",

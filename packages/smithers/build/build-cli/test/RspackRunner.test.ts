@@ -2,17 +2,20 @@
  * The bundler runner's process side.
  *
  * The refusal cases run everywhere: they need only the host `node`. The
- * end-to-end cases run the real rsbuild/rspack of an existing installed
- * node_modules tree against the `rsbuild-mini` fixture, because this package
- * deliberately ships no bundler of its own — `S.Bundler.Rspack` runs the
- * *workspace's* bundler. Point `SMTHRS_RSBUILD_MODULES` at any node_modules
- * directory containing `@rsbuild/core` to enable them; without one they skip
- * with a warning rather than faking green.
+ * end-to-end cases run a real rsbuild/rspack against the `rsbuild-mini`
+ * fixture. `S.Bundler.Rspack` runs the *workspace's* own bundler, never one
+ * this package imports, so the fixture workspace needs a `node_modules` tree
+ * that provides `@rsbuild/core`: this package declares it as a devDependency
+ * and the fixture links that resolved tree in. Every case therefore runs on a
+ * clean checkout. `SMTHRS_RSBUILD_MODULES` overrides the tree with another
+ * workspace's node_modules; a missing one is a broken install and refuses
+ * loudly rather than skipping.
  */
 import * as BundlerTarget from "@smthrs/targets/BundlerTarget"
 import * as Effect from "effect/Effect"
 import { existsSync } from "node:fs"
 import * as Fs from "node:fs/promises"
+import { createRequire } from "node:module"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -21,18 +24,29 @@ import { resolveGraph, runBuild } from "../src/RspackRunner.ts"
 const fixture = NodePath.join(import.meta.dirname, "fixtures", "rsbuild-mini")
 
 /**
- * A node_modules tree that provides @rsbuild/core. The default is the force
- * reference checkout used by the routing-spine proofs; any workspace with
- * rsbuild installed works.
+ * The node_modules tree the fixture workspace links in so it provides its own
+ * `@rsbuild/core`.
+ *
+ * The default is this package's own resolved copy of the devDependency, which
+ * exists on any clean checkout; under pnpm that is the bundler's virtual-store
+ * directory, which carries `@rspack/core` and the rest of its own dependency
+ * closure beside it. `SMTHRS_RSBUILD_MODULES` names another workspace's
+ * node_modules instead. Failing to resolve either one means a broken install,
+ * not a reason to skip.
  */
-const modulesSource = process.env["SMTHRS_RSBUILD_MODULES"] ?? "/Users/williamcory/artsy/force/node_modules"
-const rsbuildAvailable = existsSync(NodePath.join(modulesSource, "@rsbuild", "core"))
-if (!rsbuildAvailable) {
-  console.warn(
-    `RspackRunner end-to-end tests SKIPPED: no @rsbuild/core under ${modulesSource}; ` +
-      "set SMTHRS_RSBUILD_MODULES to a node_modules directory that has it"
-  )
+const resolveModulesSource = (): string => {
+  const override = process.env["SMTHRS_RSBUILD_MODULES"]
+  if (override !== undefined && override !== "") {
+    if (!existsSync(NodePath.join(override, "@rsbuild", "core"))) {
+      throw new Error(`SMTHRS_RSBUILD_MODULES=${override} provides no @rsbuild/core`)
+    }
+    return override
+  }
+  // <modules>/@rsbuild/core/package.json -> <modules>
+  return NodePath.resolve(createRequire(import.meta.url).resolve("@rsbuild/core/package.json"), "../../..")
 }
+
+const modulesSource = resolveModulesSource()
 
 const flipped = <A>(effect: Effect.Effect<A, { readonly stderr: string }>) => Effect.runPromise(Effect.flip(effect))
 
@@ -78,7 +92,7 @@ describe("refusals", () => {
   })
 })
 
-describe.runIf(rsbuildAvailable)("rsbuild-mini end to end", () => {
+describe("rsbuild-mini end to end", () => {
   let workspace: string
   let scratch: string
 
