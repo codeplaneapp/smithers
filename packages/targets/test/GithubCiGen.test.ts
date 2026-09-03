@@ -1124,6 +1124,7 @@ describe("system packages", () => {
       gates: []
     })
     expect(rendered).toContain("- name: Install system packages")
+    expect(rendered).toContain("shell: bash")
     expect(rendered).toContain("if command -v apt-get >/dev/null 2>&1; then")
     expect(rendered).toContain("sudo apt-get install -y -qq --no-install-recommends 'bubblewrap' 'iproute2'")
     expect(rendered).not.toContain("if: ")

@@ -51,6 +51,7 @@ jobs:
               sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
             fi
           fi
+        shell: bash
       - name: Workspace targets
         run: pnpm exec smithers-build ci '//packages/...' --jobs 2
         env:
@@ -320,6 +321,7 @@ jobs:
               sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
             fi
           fi
+        shell: bash
       - name: Package test targets
         run: pnpm exec smithers-build test '//packages/...'
         env:

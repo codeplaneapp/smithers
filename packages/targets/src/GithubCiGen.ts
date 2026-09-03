@@ -547,6 +547,8 @@ interface RenderedStep {
   readonly name?: string
   readonly uses?: string
   readonly run?: string
+  /** The shell that runs `run`. Unset, GitHub picks bash on Linux and macOS and pwsh on Windows. */
+  readonly shell?: string
   readonly with?: Readonly<Record<string, string>>
   readonly env?: Readonly<Record<string, string>>
 }
@@ -559,6 +561,7 @@ const renderStep = (step: RenderedStep, indent: string): ReadonlyArray<string> =
   if (step.run !== undefined) {
     fields.push(step.run.includes("\n") ? "run: |" : `run: ${scalar(step.run)}`)
   }
+  if (step.shell !== undefined) fields.push(`shell: ${scalar(step.shell)}`)
   if (fields.length === 0) {
     throw new Error("a CI step must declare uses or run")
   }
@@ -830,6 +833,10 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
   if (needs.apt !== undefined) {
     // The generator emits no `if:` key, so the step decides for itself: a
     // runner without apt-get (macOS, Windows) runs nothing and stays green.
+    // That needs the script to reach a POSIX shell: GitHub runs `run:` under
+    // pwsh on Windows, which rejects `if command -v` as a parse error before
+    // the guard can decide anything, so the step names bash, which every
+    // hosted image ships.
     //
     // Installing bubblewrap is not enough to make it work. `bwrap` unshares a
     // network namespace and then brings up loopback, which needs CAP_NET_ADMIN
@@ -850,6 +857,7 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       : []
     steps.push({
       name: "Install system packages",
+      shell: "bash",
       run: [
         "if command -v apt-get >/dev/null 2>&1; then",
         `  sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ${
