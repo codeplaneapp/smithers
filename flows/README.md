@@ -1,7 +1,7 @@
 # flows
 
-This repository's own project flow directory, and the inputs the Phase 6
-migration flow reads.
+This repository's own project flow directory and the inputs its migration and
+initialization flows read.
 
 `smithers ls` discovers flows by walking `<project>/flows/**` for `flow.ts`,
 `flow.mdx`, or `SKILL.md`, parsing frontmatter and module metadata without
@@ -14,9 +14,8 @@ named by its path, so `flows/create-flow/scaffold/flow.mdx` is the flow
 `create-flow/{clarify,design,scaffold,provision,fix,document}` and
 `create-skill/{clarify,design,scaffold,document}` are ten Markdown flows: the
 prompt is the body, and the frontmatter declares the description and the
-capabilities the permission kernel grants. They are the inputs the Phase 6
-`migrate-smithers-v1` flow and the init pack compose; the flow bodies that
-sequence them are Phase 6 work and are not here.
+capabilities the permission kernel grants. They are inputs to the
+`migrate-smithers-v1` flow and the init pack.
 
 Capability literals are load-bearing. `proc:spawn:*` grants a command;
 `proc:spawn: *`, with a leading space, grants only a command that starts with a

@@ -65,7 +65,7 @@ const report = (error: unknown): void => {
     // A refused database open is a defect by design: `NodeDatabase.layer` keeps
     // the `never` error channel eleven packages compose against, so the refusal
     // arrives here rather than as a typed failure. Render it by its contract
-    // code, which is what rc-contract section 2 promises an operator and what a
+    // code, which is what the release policy promises an operator and what a
     // script greps for; the tagged-error name is an implementation detail of
     // how the value travelled.
     : NodeDatabase.isUnsupportedDatabase(error)
@@ -75,7 +75,7 @@ const report = (error: unknown): void => {
     : String(error)
   // A failure sentence is written here rather than logged, so it misses the
   // redacting logger below. It is still a line an operator reads and a
-  // collector keeps, so it takes the same rules (rc-contract section 5.2).
+  // collector keeps, so it takes the same rules (the release policy).
   process.stderr.write(`${String(Redaction.redact(message))}\n`)
 }
 
@@ -121,7 +121,7 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
  *
  * `--version` and `--help` are documents. They need the command tree and
  * nothing else, so they must not resolve a project, scan its flows, or open a
- * database — work that took more than ten minutes in the Phase 7 smoke when
+ * database — work that took more than ten minutes in the release validation when
  * the invocation directory held no project marker, the root walk climbed to
  * `$HOME`, and discovery scanned the operator's whole home tree.
  *
@@ -195,7 +195,7 @@ const main = Effect.gen(function*() {
  * logger, which calls `console.log`. Under `--json` that put forty lines of
  * warning inside the one document an attached launch prints, so a pipeline
  * step parsing `smithers up <flow> --json` read a syntax error instead of the
- * receipt it was promised (rc-contract section 4, the `up` row). `LogToStderr`
+ * receipt it was promised (the release policy, the `up` row). `LogToStderr`
  * is the reference Effect provides for exactly this: keep stdout for protocol
  * output and send every built-in logger to `console.error`.
  *
@@ -203,7 +203,7 @@ const main = Effect.gen(function*() {
  * `@smthrs/journal` applies on the write path, so a credential an action hands
  * to `Effect.logInfo` no longer reaches the operator's terminal, the
  * `--json` stderr stream, or `.flows/logs/<runId>.log` under a detached
- * launch (rc-contract section 5.2). The durable engine installs the same layer
+ * launch (the release policy). The durable engine installs the same layer
  * beneath itself, and wrapping is idempotent, so a detached `smithers run`
  * pays the rules once.
  */

@@ -2,7 +2,7 @@
 /**
  * The documentation gate.
  *
- * Fourteen checks over the vocs page tree, each one a claim the documentation
+ * Checks over the vocs page tree, each one a claim the documentation
  * makes that can be verified against something else in the repository:
  *
  *   1. house style: no em-dash anywhere in the prose
@@ -11,20 +11,14 @@
  *   4. every documented import resolves to a package this workspace publishes
  *   5. nothing shipped is still described as coming soon
  *   6. the CLI catalog matches what the binary's `--help` prints
- *   7. no page outside the migration guide names a removed verb, a JSX API, or
+ *   7. no page outside the upgrade guide names a removed verb, a JSX API, or
  *      a Smithers 0.x package
  *   8. the generated pages are current
- *   9. every asset the ledger keeps has a place in the route plan
- *  10. every page is reachable from the sidebar, and every sidebar link resolves
- *  11. the compatibility promise is quoted verbatim wherever section 11 says
- *  12. every document that states the size of the published set agrees with
- *      the count section 3.1 spells
- *  13. no page sits in a tree vocs stopped publishing, and every route linked
- *      before its page exists is still waiting for it
- *  14. every anchor a removal message sends an operator to has a heading in
- *      the migration guide
- *  15. the browser-support tables and every stated browser entry-point count
- *      match the contract `pnpm run browser` executes
+ *   9. every page is reachable from the sidebar, and every sidebar link resolves
+ *  10. every stated package count agrees with the live publication roster
+ *  11. every anchor a removal message sends an operator to has a heading in
+ *      the upgrade guide
+ *  12. browser-support prose matches the list `pnpm run browser` executes
  *
  * The normalizers and every package-owned docs generator run in `--check`
  * mode, so their rules stay one implementation rather than a detector and a
@@ -36,25 +30,23 @@ import { spawnSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
-  availableCommands,
   citedPackageCounts,
-  compatibilityPromise,
+  codeSpans,
   countCitingDocuments,
-  promiseHolders,
-  publishedPackageCount,
   namedRemovedSurfaces,
-  removedCommands,
   removedJsxSurfaces,
   removedZeroXPackages,
-  repoRoot
-} from "./docs-contract.mjs"
+  repoRoot,
+  tableUnder
+} from "./docs-shared.mjs"
 import { anchorsLinkedTo, deadLinks, missingAnchors } from "./docs-links.mjs"
 import { assets, isHistorical, pages } from "./docs-pages.mjs"
 import { sidebarRoutes } from "./docs-sidebar.mjs"
-import { deferredRouteProblems, deferredRoutes, movedTreeProblems, movedTrees, routePlan } from "./docs-routes.mjs"
 import { cliCatalog } from "./docs-help.mjs"
-import { codeSpans, tableUnder } from "./docs-contract.mjs"
 import { browserEntryNames, citedBrowserCounts, nodeEntryNames } from "./browser-contract.mjs"
+import { publishedPackages } from "./pack-release.mjs"
+
+const Unsupported = await import("../packages/cli/src/Unsupported.ts")
 
 let failed = false
 
@@ -69,9 +61,6 @@ const pass = (title) => console.log(`✓ ${title}`)
 const allPages = pages()
 const routes = new Set(allPages.map((page) => page.route))
 const servedAssets = new Set(assets())
-// One route is linked before the page answering it exists, because another body
-// of work owns that page. Check 13 keeps the allowance from outliving the gap.
-const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 
 
 // -----------------------------------------------------------------------------
@@ -126,7 +115,7 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 // -----------------------------------------------------------------------------
 
 {
-  const { checked, dead } = deadLinks(allPages, { assets: servedAssets, deferred, routes })
+  const { checked, dead } = deadLinks(allPages, { assets: servedAssets, deferred: new Set(), routes })
   if (dead.length > 0) fail("internal links must resolve to a page or a served asset", dead)
   else pass(`all ${checked} internal links resolve`)
 }
@@ -164,8 +153,7 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 
 {
   // A feature the release ships must not be described as pending. The list is
-  // the set of claims Phase 5 made true; each one was "planned" in an imported
-  // page at some point.
+  // These claims have all shipped and must not regress to tentative wording.
   const shipped = [
     /durable cancel/i,
     /signal delivery/i,
@@ -192,7 +180,7 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 
 {
   const catalog = cliCatalog()
-  const removed = removedCommands()
+  const removed = new Map(Unsupported.removedVerbs.map((entry) => [entry.name, entry]))
   const documented = new Set(
     allPages
       .filter((page) => page.route.startsWith("/cli/") && page.route !== "/cli")
@@ -208,7 +196,7 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
     if (removed.has(name) && anchors.has(name)) continue
     offenders.push(
       removed.has(name)
-        ? `${name} is removed by the contract but has no anchor in the migration guide`
+        ? `${name} is removed but has no anchor in the upgrade guide`
         : `${name} is offered by the binary and documented nowhere`
     )
   }
@@ -231,23 +219,24 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 // -----------------------------------------------------------------------------
 
 {
-  const removed = removedCommands()
-  const available = availableCommands()
+  const removed = new Map(Unsupported.removedVerbs.map((entry) => [entry.name, entry]))
+  const available = new Set([
+    ...allPages.filter((page) => page.route.startsWith("/cli/")).map((page) => page.route.slice(5)),
+    "events",
+    "gateway",
+    "inspect",
+    "resume",
+    "why",
+    "workflow"
+  ])
   const surfaces = {
-    jsx: removedJsxSurfaces(),
+    jsx: removedJsxSurfaces,
     packages: removedZeroXPackages,
     commands: [...removed.keys()].filter((name) => !available.has(name))
   }
   const offenders = []
   for (const page of allPages) {
-    // Four exemptions, and each names a removed surface in order to say it is
-    // gone: the 0.x changelogs are the record of the releases that shipped it,
-    // the migration guide maps every construct to its replacement, the
-    // compatibility policy quotes the promise that lists them, and the
-    // known-limitations table quotes contract section 7, which names the
-    // commands and packages the release excludes. Every other page is held to
-    // never mentioning one, which is what makes those four readable as the
-    // places to look.
+    // These exemptions name removed surfaces in order to explain them.
     if (isHistorical(page.route)) continue
     if (page.route.startsWith("/migration")) continue
     if (page.route === "/changelogs/compatibility-policy") continue
@@ -264,7 +253,7 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 }
 
 // -----------------------------------------------------------------------------
-// 8 and 9. Generated pages, normalizers, and the route plan
+// 8. Generated pages and normalizers
 // -----------------------------------------------------------------------------
 
 const packageDocGenerators = readdirSync(join(repoRoot, "packages"))
@@ -288,14 +277,8 @@ for (const [title, argv] of [
   }
 }
 
-{
-  const plan = routePlan()
-  if (plan.problems.length > 0) fail("the route plan must cover every kept asset", plan.problems)
-  else pass(`the route plan covers ${plan.entries.length} kept assets and ${plan.deletions.length} deletion rules`)
-}
-
 // -----------------------------------------------------------------------------
-// 10. Sidebar reachability
+// 9. Sidebar reachability
 // -----------------------------------------------------------------------------
 
 {
@@ -310,7 +293,7 @@ for (const [title, argv] of [
     offenders.push(`${page.path} is published and the sidebar does not list it`)
   }
   for (const link of links) {
-    if (link.startsWith("http") || routes.has(link) || deferred.has(link)) continue
+    if (link.startsWith("http") || routes.has(link)) continue
     offenders.push(`the sidebar links ${link} and no page answers it`)
   }
   if (offenders.length > 0) fail("the sidebar must reach every page", offenders)
@@ -318,63 +301,23 @@ for (const [title, argv] of [
 }
 
 // -----------------------------------------------------------------------------
-// 11. The compatibility promise
+// 10. The size of the published set
 // -----------------------------------------------------------------------------
 
 {
-  // Section 11 froze one paragraph and named the three places it belongs. A
-  // rewrapped or reworded copy is a different promise, and this repository has
-  // already had one silently rewritten by a rename pass.
-  const promise = compatibilityPromise()
-  const offenders = promiseHolders.filter((path) => !readFileSync(join(repoRoot, path), "utf8").includes(promise))
-  if (offenders.length > 0) {
-    fail("the compatibility promise must be quoted verbatim", offenders.map((path) => `${path}: not verbatim`))
-  } else {
-    pass(`the compatibility promise is verbatim in ${promiseHolders.length} places`)
-  }
-}
-
-// -----------------------------------------------------------------------------
-// 12. The size of the published set
-// -----------------------------------------------------------------------------
-
-{
-  // Two documents state how many packages the release publishes, in prose a
-  // maintainer reads before running the publish. The number is written by hand
-  // and goes stale the moment a package joins the release, which is exactly
-  // what happened when the migration tool became the fortieth name.
-  const declared = publishedPackageCount()
+  const declared = publishedPackages.length
   const offenders = []
   for (const path of countCitingDocuments()) {
     for (const cited of citedPackageCounts(readFileSync(join(repoRoot, path), "utf8"))) {
-      if (cited !== declared) offenders.push(`${path}: states ${cited}, the contract freezes ${declared}`)
+      if (cited !== declared) offenders.push(`${path}: states ${cited}, the publication roster has ${declared}`)
     }
   }
   if (offenders.length > 0) fail("a document states the wrong number of published packages", offenders)
-  else pass(`every stated package count matches the ${declared} names in contract section 3.1`)
+  else pass(`every stated package count matches the ${declared} published packages`)
 }
 
 // -----------------------------------------------------------------------------
-// 13. Moved trees and deferred routes
-// -----------------------------------------------------------------------------
-
-{
-  // vocs publishes `docs/pages` and nothing else. A page written to one of the
-  // Mintlify page roots builds no route and raises no error, so it leaves the
-  // site, the sidebar and the llms bundles at once and nobody finds out. Other
-  // work still holds patches against those paths, which is what makes this a
-  // gate rather than a note.
-  const offenders = [...movedTreeProblems(), ...deferredRouteProblems(routes)]
-  if (offenders.length > 0) fail("a page must live where vocs publishes it", offenders)
-  else {
-    pass(
-      `no page sits in one of the ${movedTrees.length} moved trees, and ${deferredRoutes.length} deferred route is still waiting for its page`
-    )
-  }
-}
-
-// -----------------------------------------------------------------------------
-// 14. Migration guide anchors
+// 11. Upgrade-guide anchors
 // -----------------------------------------------------------------------------
 
 {
@@ -383,13 +326,12 @@ for (const [title, argv] of [
   // the reader lands at the top, and the sentence that was supposed to explain
   // the removal is not there. The anchors are read out of the sentences
   // themselves, so the guide is checked against what an operator is holding.
-  const unsupported = await import("../packages/cli/src/Unsupported.ts")
   const sentences = [
-    ...unsupported.removedVerbs.map((verb) => unsupported.verbError(verb).message),
-    ...unsupported.removedFlags.map((flag) => unsupported.flagMessage(flag)),
-    unsupported.reservedFlowError("run", "system/plan").message
+    ...Unsupported.removedVerbs.map((verb) => Unsupported.verbError(verb).message),
+    ...Unsupported.removedFlags.map((flag) => Unsupported.flagMessage(flag)),
+    Unsupported.reservedFlowError("run", "system/plan").message
   ]
-  const anchors = anchorsLinkedTo(unsupported.migrationUrl, sentences)
+  const anchors = anchorsLinkedTo(Unsupported.migrationUrl, sentences)
   const guide = allPages.find((page) => page.route === "/migration/1.0")
   const missing = guide === undefined
     ? ["docs/pages/migration/1.0.md: the migration guide is not published"]
@@ -399,7 +341,7 @@ for (const [title, argv] of [
 }
 
 // -----------------------------------------------------------------------------
-// 15. The browser contract's prose
+// 12. Browser-support prose
 // -----------------------------------------------------------------------------
 
 {
@@ -432,7 +374,7 @@ for (const [title, argv] of [
       }
     }
   }
-  if (offenders.length > 0) fail("the browser prose disagrees with the contract the gate executes", offenders)
+  if (offenders.length > 0) fail("the browser prose disagrees with the list the gate executes", offenders)
   else pass(`the browser tables and counts match the ${browser.length} entry points the gate bundles`)
 }
 

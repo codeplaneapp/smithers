@@ -124,7 +124,7 @@ and `--backend` with any value but `sqlite` exit 1 with `unsupported_database`
 The file check exists because 1.0.0-rc.0 does not load 0.x run state. Without
 it, pointing the runtime at a 0.x `smithers.db` would add `flows_*` tables
 beside the `_smithers_*` ones and silently mix two schemas. See
-[the rc.0 contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md)
+[the rc.0 contract](https://github.com/smithersai/smithers/blob/main/docs/releases/1.0.0-rc.0.md)
 sections 2 and 6 and
 [known limitations](https://smithers.sh/release/known-limitations).
 

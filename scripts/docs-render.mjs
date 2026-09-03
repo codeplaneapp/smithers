@@ -1,13 +1,11 @@
 /**
  * The rendering helpers the page generator uses.
  *
- * They are pure: Markdown escaping, contract prose, frontmatter, the generated
- * region markers, and the Effect Schema AST reader that turns a request
+ * They are pure: Markdown escaping, frontmatter, generated region markers,
+ * and the Effect Schema AST reader that turns a request
  * definition into a table. Keeping them here is what lets a test exercise them
  * without spawning the CLI the generator reads.
  */
-import { readFileSync } from "node:fs"
-import { contractPath } from "./docs-contract.mjs"
 
 /** Markers around the block this generator owns inside a hand-written page. */
 export const regionStart = (name) => `{/* generated:${name} start */}`
@@ -44,50 +42,6 @@ export const mdxText = (text) =>
 
 /** Escapes a cell so a pipe inside it cannot end the Markdown column. */
 export const cell = (text) => mdxText(text).replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ").trim()
-
-/** Clauses that address the migration's own record rather than a reader. */
-const internalReference = /import reference|ledger |Phase [1-9]|triage|flows-cli|`Command\.ts|at HEAD|rule \(/
-
-/**
- * A parenthesis, including one level of nesting, so `(PLAN Phase 6, rule (e))`
- * is one group rather than a truncated one.
- */
-const parenthesis = /\s*\((?:[^()]|\([^()]*\))*\)/g
-
-/**
- * Removes the parentheses that cite the contract, keeping the sentence.
- *
- * A contract row is often one sentence that ends in a phase or rule citation.
- * Judging the whole sentence by that citation deleted the only description the
- * package had, so the citation is removed first and the sentence is judged on
- * what is left.
- */
-const withoutInternalParentheses = (sentence) =>
-  sentence.replace(parenthesis, (group) => (internalReference.test(group) ? "" : group))
-
-/**
- * Turns contract prose into page prose.
- *
- * A behavior cell explains itself to the migration as well as to a reader, so
- * it can end with the file and line a Phase 4 lane must change. Those
- * sentences are dropped here: a command page says what the command does, and
- * the contract stays the place that records why.
- */
-export const contractProse = (text) => {
-  const expanded = text.replace(/\\\|/g, "|").replace(/§\s*/g, "section ")
-  const sentences = expanded.split(/(?<=\.)\s+(?=[A-Z`(])/)
-  const kept = sentences.filter((sentence) => !internalReference.test(sentence)).join(" ").trim()
-  if (kept !== "") return kept
-  // Every sentence addressed the migration's record. A blank table cell tells
-  // a reader less than the contract's own wording does, so the citations come
-  // out of the parentheses that carry them and what is left is the cell.
-  const salvaged = sentences
-    .map(withoutInternalParentheses)
-    .filter((sentence) => !internalReference.test(sentence))
-    .join(" ")
-    .trim()
-  return salvaged === "" ? withoutInternalParentheses(expanded).trim() : salvaged
-}
 
 /** A page's YAML frontmatter. One key, always quoted, never multi-line. */
 export const frontmatter = (description) => `---\ndescription: ${JSON.stringify(description)}\n---\n`
@@ -170,21 +124,5 @@ export const errorTags = (ast) => {
       return { tag: String(tag ?? identifier).replace(/^\/control\//, ""), code: code === undefined ? "" : String(code) }
     })
     .filter((entry) => entry !== undefined)
-}
-
-/** The exit-code sentence in contract section 4, parsed into rows. */
-export const exitCodes = (source = readFileSync(contractPath, "utf8")) => {
-  const sentence = /^Exit codes \([^)]*\): (.+)$/m.exec(source)
-  if (sentence === null) throw new Error("generate-docs-pages: the exit-code sentence is missing")
-  const rows = []
-  for (const part of sentence[1].split("; ")) {
-    const match = /^(\d+) ([^.]+)/.exec(part.trim())
-    // The sentence ends with prose about the 0.x codes; stop at the first
-    // fragment that does not open with a code.
-    if (match === null) break
-    rows.push({ code: match[1], meaning: match[2].trim() })
-  }
-  if (rows.length === 0) throw new Error("generate-docs-pages: the exit-code sentence has no codes")
-  return rows
 }
 

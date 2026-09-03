@@ -452,7 +452,7 @@ validate by content hash. 3 (flagship example circular/undefined
 identifier) — ACCEPTED; example fixed, "sources are pure functions of ctx"
 rule added. 4 (migration paragraph didn't match landed contract; sniffing
 hazard) — ACCEPTED; explicit opt-in contract specified, landed sniffing
-implementation queued for correction. 5 (legacy/absent provenance silently
+implementation queued for correction. 5 (old or absent provenance silently
 dropped; symbol seq lost on driver-storage round-trip) — ACCEPTED; spec
 requires data-carried seq + surfaced warnings; correction backlog item 2.
 6 (Phase 0 internal inconsistency) — ACCEPTED; decision moved into item 1

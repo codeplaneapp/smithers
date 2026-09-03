@@ -843,7 +843,7 @@ describe("RunDriver cancellation paths", () => {
    * indication that its request had been reinterpreted. rc.0 refuses it
    * instead, so the feature cannot appear to half-work.
    *
-   * The code AND the reason are contract text: rc-contract §7 "Durable
+   * The code AND the reason are contract text: the release policy "Durable
    * interruptUnsafe" is the release note an operator reads, and the failure a
    * caller catches has to say the same thing in the same words. Asserted
    * exactly, not by substring, so a reworded refusal is a test failure rather

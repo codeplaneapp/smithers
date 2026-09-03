@@ -24,14 +24,13 @@ const packageGroups = new Set(["engine", "agent", "tooling"])
  *
  * 0.x shipped the engine group alone and left the agent layer for a second
  * train. Smithers 1.0 gives every public first-party package one synchronized
- * version (PLAN.md "Versioning model"), so both groups release together.
- * `tooling` stays out: the build graph, its CLI, and the hosted cache are
- * private (rc-contract.md section 3.2).
+ * version, so both groups release together. `tooling` stays out: the build
+ * graph, its CLI, and the hosted cache are private.
  */
 export const releaseGroups = new Set(["engine", "agent"])
 
 /**
- * The package names published at 1.0.0-rc.0, from rc-contract.md section 3.1.
+ * The package names published at 1.0.0-rc.0.
  *
  * Group membership alone would let a new or newly public package join the
  * release by declaring a group, and it would let a package leave by flipping
@@ -109,7 +108,7 @@ export const readWorkspaceManifests = (root = packagesRoot) => {
   const unexpected = declared.filter((name) => !expected.includes(name))
   if (missing.length > 0 || unexpected.length > 0) {
     throw new Error(
-      "the publishable workspace set does not match rc-contract.md section 3.1" +
+      "the publishable workspace set does not match publishedPackages" +
         (missing.length > 0 ? `\n  missing: ${missing.join(", ")}` : "") +
         (unexpected.length > 0 ? `\n  unexpected: ${unexpected.join(", ")}` : "") +
         "\nEither restore the manifest's `private` flag and group or update publishedPackages in this file."

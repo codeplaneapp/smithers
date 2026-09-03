@@ -214,7 +214,7 @@ const composition = <
   const execution = Layer.merge(stepBoundary, workspaceSandbox).pipe(
     Layer.provideMerge(storage(validated.filename, validated.workspaceRoot)),
     // Credential redaction covers the operator's terminal as well as the
-    // journal (rc-contract section 5.2). It sits UNDER the engine so the
+    // journal (the release policy). It sits UNDER the engine so the
     // context the engine captures for an action body carries it: a line an
     // action, the harness, or an agent session writes leaves through the same
     // rules `@smthrs/journal` applies on the write path.

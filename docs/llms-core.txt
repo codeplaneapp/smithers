@@ -1234,11 +1234,11 @@ against a remote `smithers serve` with `--remote`.
 | Code | Meaning |
 | --- | --- |
 | 0 | success |
-| 1 | unsupported or generic error |
-| 2 | usage |
-| 3 | parked (`waiting-approval`) |
-| 130 | SIGINT |
-| 143 | SIGTERM |
+| 1 | runtime or command failure |
+| 2 | usage error |
+| 3 | migration refused before changing the project |
+| 130 | interrupted by SIGINT |
+| 143 | interrupted by SIGTERM |
 
 ### Removed commands
 
@@ -1612,7 +1612,7 @@ These flags existed in Smithers 0.x. `smithers migrate` declares each one so it 
 
 | Flag | Reason |
 | --- | --- |
-| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
+| `--to` | SQLite only; the 0.x database move is removed |
 
 ---
 
@@ -1881,9 +1881,11 @@ These flags existed in Smithers 0.x. `smithers up` declares each one so it fails
 | `--report` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
 | `--force` | the run driver's heartbeat sweep owns recovery |
 | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
-| `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
-| `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
+| `--resume-claim-owner` | the run driver's heartbeat sweep owns recovery |
+| `--resume-claim-heartbeat` | the run driver's heartbeat sweep owns recovery |
+| `--resume-restore-owner` | the run driver's heartbeat sweep owns recovery |
+| `--resume-restore-heartbeat` | the run driver's heartbeat sweep owns recovery |
+| `--max-concurrency` | parallelism is declared by the flow and bounded by plan admission |
 
 ---
 

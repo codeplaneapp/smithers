@@ -6,24 +6,6 @@ the next process reads the journal and continues where the record stops.
 
 `AGENTS.md` is a symlink to this file; edit this file.
 
-## Migration in progress
-
-This tree is mid-migration to `1.0.0-rc.0`. Read these before changing
-anything structural:
-
-- `PLAN.md` — the seven phases and their exit criteria.
-- `docs/migration/rc-contract.md` — the frozen release contract. Section 9 is
-  the tooling baseline; the imported Flows tooling wins unless section 9 names
-  an exception.
-- `docs/migration/disposition-ledger.md` (and `.json`) — one recorded
-  disposition per old path.
-- `docs/migration/phase2-baseline.md` — the post-import gate baseline.
-
-`legacy/` holds 0.x sources that later phases port from. It is excluded from
-the workspace, `tsconfig.json`, eslint, vitest, and every BUILD.ts inventory,
-and live code must never import it. `pnpm run check:legacy-absent` is the
-Phase 7 gate that fails while the directory exists.
-
 ## Find things
 
 Engine and durability:
@@ -106,7 +88,6 @@ needs no build step.
   mocked behavior.
 - Use `jj st` / `jj diff` for working-copy truth where a jj workspace exists.
   Preserve unrelated concurrent changes; never blanket-stage.
-- `legacy/` is never imported by live code and never enters a tooling inventory.
 
 ## Replies
 

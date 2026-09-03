@@ -5,7 +5,7 @@
  * `ask` parks the run as `waiting-approval` and publishes the exact payload an
  * operator replays through `smithers approve`. Answering it installed the grant
  * and resolved the token — and stopped there, so the run sat in
- * `waiting-approval` until somebody made a SECOND call, which rc-contract §5.1
+ * `waiting-approval` until somebody made a SECOND call, which the release policy
  * and §10 promise a gateway client does not have to make (triage B-15).
  *
  * The first repair claimed the row and journaled `control.run.resumed`, and
@@ -266,7 +266,7 @@ describe("deciding an in-run approval on a run that has already settled", () => 
       const runtime = yield* ControlRuntime
       const { runId, target } = yield* parkedOnAsk("cancelled-before-decision")
       // The operator cancelled the parked run before answering its ask. This
-      // is the Phase 7 smoke's own sequence: `cancel run-4`, then `approve`
+      // is the release validation's own sequence: `cancel run-4`, then `approve`
       // with the ask payload, which hung for 120 s and printed nothing.
       yield* control.cancel({ runId, idempotencyKey: `cli:cancel:${runId}` })
 

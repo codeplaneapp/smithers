@@ -31,8 +31,7 @@ export const docsPages = Smithers.Generate({
     Smithers.file("//packages/errors/scripts/docs-lib.ts"),
     Smithers.glob("//packages/errors/src/**/*.ts"),
     Smithers.glob("//packages/errors/docs/*.md"),
-    Smithers.file("//packages/errors/package.json"),
-    Smithers.file("//docs/pages/routes.md")
+    Smithers.file("//packages/errors/package.json")
   ],
   changes: ["docs/pages/reference/errors.md", "packages/errors/README.md"]
 })

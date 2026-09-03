@@ -1,7 +1,7 @@
 /**
  * The matrix is only a gate while a gate can run it.
  *
- * Phase 7 blocker B6: `pnpm exec smithers-build test '//e2e:faults'` failed in
+ * release gate B6: `pnpm exec smithers-build test '//e2e:faults'` failed in
  * 262 ms with `[ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL] Command "vitest" not
  * found`, because `e2e` was not a member of `pnpm-workspace.yaml` and so never
  * received a `node_modules` of its own, and `.github/workflows/ci.yml` never

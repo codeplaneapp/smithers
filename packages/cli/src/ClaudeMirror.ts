@@ -9,9 +9,9 @@
  *
  * Two 0.x fields are gone in contract 2. `humanRequests` had no rc.0
  * counterpart — there is no question or answer RPC, and an approval parks the
- * run instead (rc-contract section 4.1) — and `continuedAs` described the
+ * run instead (the release policy) — and `continuedAs` described the
  * `continued` terminal status, which rc.0 does not have: a handoff round
- * settles `completed` with a lineage id (rc-contract section 5.2).
+ * settles `completed` with a lineage id (the release policy).
  *
  * Subscriptions exist because the mirror follows the runs *this* Claude
  * session started, not every run in the project. The registry never throws: a

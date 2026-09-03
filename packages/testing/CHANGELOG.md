@@ -27,7 +27,7 @@
   `execution_conflict`, `fixture_not_encodable`, and `effect_kind_mismatch`
   codes.
 - Added `RestartableEngine.restartAndResume` beside `killAndResume`.
-- Added 100% coverage thresholds, the workspace norm the release contract's
+- Added 100% coverage thresholds, the workspace norm the release policy's
   tooling baseline states. The floors this package carried were below it, and
   what they excused was the poison layer, the reference engines' cancellation
   paths, and the error construction that decides whether an assertion is sound.

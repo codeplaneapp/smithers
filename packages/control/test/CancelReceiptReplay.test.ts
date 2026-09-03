@@ -6,7 +6,7 @@
  * right for a cancel that finished the run and wrong for one that did not: a
  * cancel against a run a live peer owns answers `Accepted` and leaves the run
  * running, and every later `smithers cancel` and `smithers down` then replayed
- * that `Accepted` as `AlreadyApplied` instead of asking again. The Phase 7
+ * that `Accepted` as `AlreadyApplied` instead of asking again. The release validation
  * smoke left two runs permanently non-terminal that way — `gc` skips them, and
  * no CLI command could reach them.
  *

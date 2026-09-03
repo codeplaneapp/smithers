@@ -16,7 +16,7 @@
  * - `serve.startup-recovery`: a gateway whose read path is unavailable still
  *   comes up and still answers `/health`.
  *
- * The keepalive suite pins rc-contract §10 item 4 on the socket rather than in
+ * The keepalive suite pins the release policy item 4 on the socket rather than in
  * the service: a `Watch` a client follows over `/rpc/ws` carries a frame while
  * the run it watches is silent.
  */
@@ -63,7 +63,7 @@ const approvalOf = (card: PlanCard): ApprovalPayload => ({
   idempotencyKey: `approve:${card.planId}`
 })
 
-/** The rc.0 run-status vocabulary a client may render (rc-contract §10). */
+/** The rc.0 run-status vocabulary a client may render (the release policy). */
 const SEVEN_STATUSES = [
   "accepted",
   "running",
@@ -422,7 +422,7 @@ describe("the assembled gateway over a real loopback bind", () => {
 
   /**
    * A malformed request is the caller's mistake, and the status code is how a
-   * caller learns that. In the Phase 7 smoke `POST /rpc` with body `{}`
+   * caller learns that. In the release validation `POST /rpc` with body `{}`
    * answered 500 with an empty body, which tells an operator the gateway
    * broke and tells a client to retry a request that can never succeed.
    */

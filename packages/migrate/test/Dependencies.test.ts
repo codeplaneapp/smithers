@@ -100,7 +100,7 @@ describe("the scan surface's dependency boundary", () => {
     // `@effect/platform-node-shared` is not a fourth dependency: it is the
     // half `@effect/platform-node` already installs, pinned at the same exact
     // version so an npm consumer does not resolve its caret range to a newer
-    // release that carries a second Effect (rc-contract section 9).
+    // release that carries a second Effect (the release policy).
     expect(Object.keys(manifest.dependencies).sort()).toEqual([
       "@effect/platform-node",
       "@effect/platform-node-shared",

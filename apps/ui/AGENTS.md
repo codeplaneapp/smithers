@@ -38,7 +38,7 @@ Nothing user-visible may be added unless the current brief or the canon (`DESIGN
 ## New Smithers only
 
 - Product code under `src/` uses the new Flows, Harness, Journal, Kernel, and related `@smthrs/*` implementations owned by this repository's `packages/` tree.
-- Treat the legacy React Smithers implementation and legacy runtime packages under `legacy/` as reference code only. Do not import or depend on them from the product.
+- Do not import retired runtime packages into the product.
 - The `smithersai/ui` repository is interaction reference code, not a dependency authority; its remaining `@smthrs/*` imports do not authorize those imports here.
 - Enforce this boundary with dependency and forbidden-import tests so a legacy package cannot return transitively unnoticed.
 - Smithers workflow dashboards under `.smithers/ui/` are control-plane tooling, not shipped product code, and may use the workflow runtime's own Gateway UI components.

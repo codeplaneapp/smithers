@@ -137,9 +137,7 @@ describe("checkMirroredResolvers", () => {
     assert.match(problems[0], /is missing/);
   });
 
-  it("passes when no copy exists, because the plugin lane has not landed", () => {
-    // The Phase 4 plugin lane restores both copies. A tree with neither is the
-    // recorded mid-migration state, not drift.
+  it("passes when no plugin resolver copy exists", () => {
     assert.deepEqual(checkMirroredResolvers(makeTmp()), []);
   });
 
@@ -155,7 +153,6 @@ describe("the repo itself", () => {
     assert.ok(scanned.includes("scripts/check-local-smithers.mjs"));
     assert.ok(scanned.some((path) => path.startsWith("ci/")));
     assert.ok(!scanned.some((path) => path.includes("node_modules")));
-    assert.ok(!scanned.some((path) => path.startsWith("legacy/")));
   });
 
   it("names a working-tree entry that exists", () => {

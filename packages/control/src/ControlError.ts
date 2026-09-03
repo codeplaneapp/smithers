@@ -229,7 +229,7 @@ export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("/control/L
  * tree reads: `smithers signal run-3 '{"name":"go"}'` against a timer-parked
  * run printed `go: ` to stderr and exited 1, because `bin.ts` reports
  * `${error.name}: ${error.message}` and this class had overwritten one and
- * defined neither (Phase 7 smoke, defect D3).
+ * defined neither (release validation, defect D3).
  *
  * @category errors
  * @since 0.1.0

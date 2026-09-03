@@ -3,7 +3,7 @@
  *
  * Governing persistence design: `docs/pages/api/database.md`.
  *
- * Ported from the 0.x `withSqliteWriteRetryEffect`, deleted in Phase 1: retry
+ * Retry
  * only structured transient failures, bound exponential delay, and use Effect
  * scheduling so interruption and `TestClock` remain native.
  *

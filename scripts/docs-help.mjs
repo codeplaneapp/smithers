@@ -8,7 +8,7 @@
  */
 import { execFile, spawnSync } from "node:child_process"
 import { join } from "node:path"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 
 /** The working-tree CLI entry point. Never a published copy. */
 export const cliEntry = join(repoRoot, "packages", "cli", "bin", "smithers.mjs")

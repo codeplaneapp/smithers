@@ -141,7 +141,7 @@ describe("NodeControl.makeConfig", () => {
     })
   })
 
-  it("reads SMITHERS_API_KEY as the --credential fallback, new in Phase 4", () => {
+  it("reads SMITHERS_API_KEY as the --credential fallback", () => {
     expect(configuration([], { SMITHERS_API_KEY: "from-environment" }).credential).toBe("from-environment")
     expect(configuration(["--credential=from-argv"], { SMITHERS_API_KEY: "from-environment" }).credential)
       .toBe("from-argv")

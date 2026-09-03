@@ -36,7 +36,7 @@
  * A delegate the host never registered is refused HERE, with an
  * {@link ExecutableError} naming it, rather than at dispatch: an unresolved
  * call inside the engine dies with an empty `AnyOf` issue that names nothing
- * (`docs/migration` Phase 5 finding 1), and a missing flow is a wiring mistake
+ * during dispatch, and a missing flow is a wiring mistake
  * an operator can fix only if the message says which flow is missing.
  *
  * @since 1.0.0-rc.0

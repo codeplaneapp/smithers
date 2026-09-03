@@ -4,14 +4,19 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import test from "node:test"
-import { partitionRemovals, removalMessage, repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 import { runCli } from "./docs-help.mjs"
 
 const Unsupported = await import(pathToFileURL(join(repoRoot, "packages", "cli", "src", "Unsupported.ts")).href)
 const guide = readFileSync(join(repoRoot, "docs", "pages", "migration", "1.0.md"), "utf8")
 
-/** The three shapes of removal row, read once: bare verbs, surviving parents, contradictions. */
-const { bare, contradictions, parentSurvives } = partitionRemovals(Unsupported.removedVerbs)
+/** The stable removal-message shape exposed by the CLI. */
+const removalMessage = (name, reason) =>
+  `smithers ${name} was removed in 1.0.0-rc.0: ${reason}. See https://smithers.sh/migration/1.0#${name}`
+
+/** Bare verbs and the two parent commands that keep other forms. */
+const parentSurvives = Unsupported.removedVerbs.filter((verb) => verb.name === "gateway" || verb.name === "workflow")
+const bare = Unsupported.removedVerbs.filter((verb) => !parentSurvives.includes(verb))
 
 /** The fenced block under each `### <verb>` heading of the removed-command section. */
 const documentedMessages = () => {
@@ -22,8 +27,25 @@ const documentedMessages = () => {
 }
 
 /** Every sentence the guide publishes inside a code fence, however the block is introduced. */
-const publishedSentences = () =>
-  new Set([...guide.matchAll(/^```\n([\s\S]*?)\n```$/gm)].flatMap((match) => match[1].split("\n")))
+const publishedSentences = () => {
+  const sentences = new Set()
+  let fenced = false
+  let capture = false
+  for (const line of guide.split("\n")) {
+    if (line.startsWith("```")) {
+      if (fenced) {
+        fenced = false
+        capture = false
+      } else {
+        fenced = true
+        capture = line === "```"
+      }
+      continue
+    }
+    if (fenced && capture) sentences.add(line)
+  }
+  return sentences
+}
 
 /** The `### <name>` headings a `#<name>` link in a refusal resolves to. */
 const guideAnchors = () => new Set([...guide.matchAll(/^###\s+(\S+)\s*$/gm)].map((match) => match[1]))
@@ -35,29 +57,15 @@ const sourceLine = (relative, name) => {
   return index < 0 ? relative : `${relative}:${index + 1}`
 }
 
-test("no removal row removes a name the contract ships outright", () => {
-  // The cause the spawns below cannot report. A name that section 4.1 ships and
-  // section 4.2 removes has two meanings, the command tree binds one of them,
-  // and running it proves whichever it happened to bind: a removed verb bound
-  // to a server answers a proof with a fifteen-second kill rather than with the
-  // contradiction. A row that qualifies itself with subcommands is not this
-  // shape; it is `parentSurvives`, proved by form below. Fixing one of these is
-  // a choice between the alias and the removal, and the choice belongs to
-  // whoever owns the CLI source, so the failure names both files.
-  assert.deepEqual(
-    contradictions.map((verb) =>
-      `${verb.name}: rc-contract section 4.1 ships it (${sourceLine("packages/cli/src/Verb.ts", verb.name)})` +
-      ` and the removal table removes it with no subcommands (${sourceLine("packages/cli/src/Unsupported.ts", verb.name)})`
-    ),
-    []
-  )
+test("the surviving parent rows name subcommands", () => {
+  for (const verb of parentSurvives) {
+    assert.ok(verb.subcommands?.length > 0, `${sourceLine("packages/cli/src/Unsupported.ts", verb.name)} needs forms`)
+  }
 })
 
 test("the guide prints the sentence the binary prints, for every removed verb", () => {
-  // `Unsupported.ts` and `rc-contract.md` are two hand-maintained copies of the
-  // same table. Nothing but this makes them agree, and an operator who pastes
-  // the message from their terminal into search has to land on the anchor it
-  // names.
+  // An operator who pastes the message from their terminal into search has to
+  // land on the anchor it names.
   const documented = documentedMessages()
   const offenders = []
   for (const verb of bare) {
@@ -115,8 +123,8 @@ test("every removed verb really prints its documented sentence", { concurrency: 
 
 test("a surviving parent's removed forms are documented and refuse", { concurrency: 8, timeout: 120_000 }, async (t) => {
   // `gateway` and `workflow` reach this proof, and the bare proof above never
-  // does: section 4.1 keeps `smithers gateway` and `smithers workflow list`, so
-  // the removed unit is the form. Spawning the parent would start a server and
+  // does: their aliases remain available, so the removed unit is the form.
+  // Spawning the parent would start a server and
   // wait it out; spawning the form is the assertion that matters, because a
   // subcommand registered under a parent that runs is exactly the registration
   // an argument parser drops back to the root help.
@@ -182,7 +190,7 @@ test("a verb that never exits is reported, not waited out", { timeout: 10_000 },
   }
 })
 
-test("every refusal obeys the sentence shape section 4.2 mandates", () => {
+test("every refusal obeys the sentence shape the removed-command contract mandates", () => {
   // The contract fixes the template; `Unsupported.ts` fills it in. Comparing
   // the rendered halves keeps the binary from inventing its own phrasing while
   // leaving it free to word the reason.

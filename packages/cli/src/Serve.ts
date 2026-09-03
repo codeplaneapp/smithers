@@ -9,7 +9,7 @@
  * whether the requested bind is allowed at all, and what it says it is
  * serving.
  *
- * The bind rule is the rc contract's (section 4.1): loopback needs nothing,
+ * The bind rule is strict: loopback needs nothing,
  * anything else needs both an explicit `--listen` and a bearer token. It is
  * spelled out here, as data, because the failure mode it prevents,
  * an unauthenticated control plane on a laptop's LAN address, able to launch

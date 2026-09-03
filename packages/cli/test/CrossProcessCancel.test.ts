@@ -9,7 +9,7 @@
  * The composition-level proof is `packages/control/test/CancelConvergence.test.ts`,
  * where one database carries both halves. This is the shipped shape instead:
  * `.flows/control.db` and `.flows/engine.db` are two files with two
- * `flows_runs` tables (rc-contract §2), and the two rows for one run converge
+ * `flows_runs` tables (the release policy), and the two rows for one run converge
  * only because the cancel is recorded durably on the engine's row and the
  * owning driver acts on it at its next tick.
  */

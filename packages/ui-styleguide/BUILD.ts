@@ -1,10 +1,9 @@
 /**
- * Targets for the retained Smithers 0.x theme tokens.
+ * Targets for the private Smithers theme tokens.
  *
- * `@smthrs/ui` and `apps/review` import this package, so Phase 1 kept it
- * (`docs/migration/disposition-ledger.md`, row `packages/ui-styleguide`,
- * disposition `keep`). See `packages/ui/BUILD.ts` for why a retained 0.x
- * package declares its own targets: the root `packageDefaults` would otherwise
+ * `@smthrs/ui` and `apps/review` import this package. See
+ * `packages/ui/BUILD.ts` for why this package declares its own targets: the
+ * root `packageDefaults` would otherwise
  * synthesize a `StandardPackage` library build and vitest suite for it, and
  * this package ships as source with a Bun suite instead.
  *

@@ -30,7 +30,7 @@ export class UsageError extends Schema.TaggedError<UsageError>()("/cli/UsageErro
  * operation asked of a `--remote` composition.
  *
  * Raise this when retyping the command cannot help and the operator needs to
- * be told what replaced the thing they asked for. rc-contract section 4.2
+ * be told what replaced the thing they asked for. the release policy
  * fixes the wording of the removal messages, so prefer the constructors in
  * `Unsupported` over a hand-written sentence.
  *

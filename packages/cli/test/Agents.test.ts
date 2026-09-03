@@ -207,7 +207,7 @@ describe("registering the MCP server", () => {
 
 describe("the curated smithers skill", () => {
   it("prefers the packaged copy, and falls back to the curated source in a checkout", () => {
-    // rc-contract ruling F2: `skills add` writes the one curated skill. A
+    // release policy: `skills add` writes the one curated skill. A
     // published install reads the copy the docs generator wrote into this
     // package; a checkout that has not run `pnpm docs:llms` reads the source
     // that generator copies from.

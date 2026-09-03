@@ -1130,7 +1130,7 @@ export const make = (
      * carries no wake time and no token, so a run that suspended on a
      * 150-second clock came back as a run whose owner merely went away, and
      * the sweeper had to re-drive it blind instead of waking it when its
-     * deadline fell due (Phase 7 smoke, section 2b).
+     * deadline fell due (release rehearsal).
      *
      * A flow that has NOT asked to suspend is a genuine shutdown or heartbeat
      * self-interrupt, and `released` is exactly what it is (issue #39).
@@ -1174,8 +1174,7 @@ export const make = (
         // without one was invisible to every resumer: `AgentSession`'s
         // `awaitParked` polls `poll` and answers `unknown` for anything but a
         // published `Suspended`, so `smithers approve` and `smithers run
-        // --resume` accepted the request and then drove nothing (Phase 7
-        // smoke, section 3).
+        // --resume` accepted the request and then drove nothing in the release rehearsal.
         const suspension = round !== undefined && waiting.reason !== "released"
           ? (yield* encodeResult(
             round.flow,
@@ -1238,7 +1237,7 @@ export const make = (
      * settlement the flow's own codec rejects fatal for the drain rather than
      * terminal for the run. `agent/run` declares both channels
      * `Schema.Unknown`, so every `Data.TaggedError` an agent body fails with
-     * is such a settlement, and the Phase 7 Plue cutover watched the whole
+     * is such a settlement, and the release validation watched the whole
      * chain: the drain died with `SchemaError: Expected JSON value at
      * ["exit"]["cause"][0]["error"]`, `engine.db` kept the run `running`
      * under a pid that had exited while `control.db` said `failed`, and the
@@ -1821,7 +1820,7 @@ export const make = (
             // A settlement the flow's codec rejected is written `failed`
             // whatever it claimed to be: the row must reach a terminal status
             // in this process, because the alternative — the `running` row the
-            // Phase 7 cutover found — is re-executed by the next one.
+            // release validation found — is re-executed by the next one.
             const status: RunStore.RunStatus = encodedResult.note !== undefined
               ? "failed"
               : result._tag === "Suspended"
@@ -2410,7 +2409,7 @@ export const make = (
       execute,
       poll,
       interrupt,
-      // The durable engine has ONE cancellation path (rc-contract §7). The
+      // The durable engine has ONE cancellation path (the release policy). The
       // port promises forced cancellation without cleanup; nothing here can
       // deliver that — a durable run is closed by a fenced transition whose
       // finalizers, cascade, and interruption record are the point — and
@@ -2420,7 +2419,7 @@ export const make = (
       // is still available to the same caller. The memory engine, which does
       // have two behaviors, is unchanged.
       //
-      // The reason is rc-contract §7 "Durable interruptUnsafe" verbatim, not a
+      // The reason is the release policy "Durable interruptUnsafe" verbatim, not a
       // paraphrase of it: the release note and the failure a caller catches
       // are the same statement, so an operator who reads one and a developer
       // who logs the other are reading the same sentence.

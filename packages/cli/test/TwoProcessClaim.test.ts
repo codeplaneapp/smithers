@@ -126,7 +126,7 @@ describe("a second smithers process over one project root", { timeout: 240_000 }
 
     const resumed = smithers(root, ["resume", "peer-owned-run"])
 
-    // rc-contract section 4: a refusal is exit 1 with a sentence on stderr,
+    // the release policy: a refusal is exit 1 with a sentence on stderr,
     // and stdout stays empty so a `--json` reader never sees a diagnostic. The
     // line names the run, because `ClaimLost: ` on its own told an operator
     // holding two terminals nothing about which run they lost.

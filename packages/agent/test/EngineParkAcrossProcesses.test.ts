@@ -4,7 +4,7 @@
  * A park is not a cancellation. `DurableEngineState` says so in its waiting
  * vocabulary: `timer`, `approval`, and `event` are runs waiting to be woken,
  * `released` is a run whose owner went away without settling it, and only an
- * operator cancel is terminal. The Phase 7 smoke found every one of those
+ * operator cancel is terminal. The release validation found every one of those
  * collapsed into `cancelled`: `AgentSession`'s driver wrapped `engine.execute`
  * in an `Effect.onInterrupt` that called `engine.interrupt` — the DURABLE
  * cancel — for every interruption of the driver fiber, and a park and a
@@ -429,7 +429,7 @@ describe("a run still executing when its process shuts down", () => {
 
     const row = await settledEngineRow(root, runId)
 
-    // rc-contract section 7: one cancellation path, and shutdown is not it.
+    // the release policy: one cancellation path, and shutdown is not it.
     expect(row?.status).not.toBe("cancelled")
     expect(row?.cancel_requested_at_ms).toBeNull()
     expect(row?.waiting_reason).toBe("released")
@@ -576,7 +576,7 @@ describe("a run parked on an in-run ask that a later process cancels", () => {
         // fifteen seconds and six commands later, which is what let `gc` skip
         // the run in `engine.db` while collecting it in `control.db`.
         const engineRow = readEngineRun(root, parked.runId)
-        // The operator answers the ask afterwards, which is the Phase 7
+        // The operator answers the ask afterwards, which is the release
         // smoke's own sequence. It hung for 120 s and printed nothing.
         const decided = yield* control.approve(parked.approval).pipe(Effect.timeout("15 seconds"))
         const events = yield* Stream.runCollect(control.watch({ runId: parked.runId, follow: false }))
@@ -594,7 +594,7 @@ describe("a run parked on an in-run ask that a later process cancels", () => {
       )
     )
 
-    // rc-contract 5.1: a cancel reaches a terminal state, and both
+    // release policy 5.1: a cancel reaches a terminal state, and both
     // `flows_runs` tables agree about which one.
     expect(observed.cancelled).toEqual({ _tag: "Terminal", runId: parked.runId, status: "cancelled" })
     expect(observed.summary.status).toBe("cancelled")

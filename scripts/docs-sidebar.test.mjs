@@ -1,7 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { isHistorical, pages } from "./docs-pages.mjs"
-import { deferredRoutes } from "./docs-routes.mjs"
 import { linksOf, sidebarRoutes } from "./docs-sidebar.mjs"
 
 test("collects links from a nested sidebar and ignores a group with none", () => {
@@ -26,18 +25,10 @@ test("every page the site publishes is reachable from the sidebar", async () => 
   assert.deepEqual(unlisted, [], `unlisted pages: ${unlisted.join(", ")}`)
 })
 
-test("every sidebar link resolves to a page, or to a route recorded as deferred", async () => {
-  // The site links one route whose page another body of work writes. The
-  // sidebar keeps the entry so the section reads in order once the page lands,
-  // and the exemption is the recorded list rather than a free pass.
+test("every sidebar link resolves to a page", async () => {
   const routes = new Set(pages().map((page) => page.route))
-  const deferred = new Set(deferredRoutes.map((entry) => entry.route))
-  const dangling = [...(await sidebarRoutes())].filter(
-    (link) => !link.startsWith("http") && !routes.has(link) && !deferred.has(link)
-  )
+  const dangling = [...(await sidebarRoutes())].filter((link) => !link.startsWith("http") && !routes.has(link))
   assert.deepEqual(dangling, [], `dangling links: ${dangling.join(", ")}`)
-  const landed = [...deferred].filter((route) => routes.has(route))
-  assert.deepEqual(landed, [], `no longer deferred, drop from scripts/docs-routes.mjs: ${landed.join(", ")}`)
 })
 
 test("the historical changelogs are the only exemption", async () => {

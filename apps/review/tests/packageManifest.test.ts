@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 /**
  * What `apps/review/package.json` is allowed to promise.
  *
- * rc-contract.md section 3 fixes the published set at rc.0 and closes it with
+ * The release policy fixes the published set at rc.0 and closes it with
  * rule (d), "nothing else". `@smthrs/review` is in neither the section 3.1
  * roster nor the section 3.2 private list, and `scripts/pack-release.mjs`
  * reads `packages/` alone, so no release path can ever pack an app. A
@@ -48,7 +48,7 @@ function manifestsUnder(directory: string): Map<string, Manifest> {
   return found;
 }
 
-describe("apps/review promises only what the release contract can deliver", () => {
+describe("apps/review promises only what the release policy can deliver", () => {
   test("no app is publishable, so every manifest under apps/ declares private", () => {
     // pack-release.mjs walks `packages/` and refuses any name outside the
     // section 3.1 roster. An app is unreachable from that walk by construction,

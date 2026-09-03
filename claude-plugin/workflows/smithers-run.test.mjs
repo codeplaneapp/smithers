@@ -202,7 +202,7 @@ describe("the CLI in this tree serves those commands", () => {
       if (!hasClaudeVerb()) {
         t.skip(
           "the `claude` mirror verbs are not in this CLI yet. They are the cli-ops lane's " +
-            "(rc-contract.md section 4.1, claudeMirrorContract 2) and this suite is their consumer.",
+            "(claudeMirrorContract 2) and this suite is their consumer.",
         );
         return;
       }
@@ -322,7 +322,7 @@ describe("what it tells the operator", () => {
   });
 
   it("names no removed verb", () => {
-    // rc-contract section 4.2 keeps `inspect`, `why`, `events`, `resume`,
+    // The CLI keeps `inspect`, `why`, `events`, `resume`,
     // `gateway`, and `workflow list` as aliases; naming one is correct.
     for (const removed of [
       "smithers ui ",

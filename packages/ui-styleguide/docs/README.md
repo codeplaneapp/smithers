@@ -3,8 +3,7 @@
 This directory and the JSDoc in `src/` own every published sentence about
 `@smthrs/ui-styleguide`.
 
-`@smthrs/ui-styleguide` is private at `1.0.0-rc.0`
-(`docs/migration/rc-contract.md` section 3.2), so it has no page under
+`@smthrs/ui-styleguide` is private at `1.0.0-rc.0`, so it has no page under
 `docs/pages` and no `Package.ts`/`scripts/docs.mjs` pair to generate one. The
 files here are the source a page would be generated from the day it becomes
 public, following the `packages/crypto` recipe.

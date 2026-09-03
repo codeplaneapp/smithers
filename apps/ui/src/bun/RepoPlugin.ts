@@ -14,7 +14,7 @@ import type { RepoPlugin } from "smithers-shared/LocalApp"
 export const PLUGIN_MANIFEST = "smithers-ui.json"
 
 /*
- * The pre-rc.0 location. rc.0 treats `.smithers/` as 0.x state (rc-contract §6),
+ * The pre-rc.0 location. rc.0 treats `.smithers/` as 0.x state (the release policy),
  * so a manifest there is never read; the repo gets a warning naming the move.
  */
 export const LEGACY_PLUGIN_MANIFEST = join(".smithers", "UI.json")

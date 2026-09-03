@@ -3,9 +3,9 @@
  *
  * At the import reference this module projected `SystemFlows.catalog`
  * directly, so eleven verbs existed only as bodiless reserved flows that
- * planned and exited 0. rc-contract section 4 forbids that partial
- * appearance: a verb either ships with a handler (section 4.1, {@link shipped})
- * or is removed and says so (section 4.2, `Unsupported.removedVerbs`).
+ * planned and exited 0. The CLI contract forbids that partial
+ * appearance: a verb either ships with a handler (the shipped-command contract, {@link shipped})
+ * or is removed and says so (the removed-command contract, `Unsupported.removedVerbs`).
  *
  * This table is therefore the authority, and `test/Verb.test.ts` pins it. The
  * reserved flow ids that survive are still named here so a catalog change
@@ -48,7 +48,7 @@ const verb = (name: string, help: string, aliases: ReadonlyArray<string> = []): 
 }
 
 /**
- * Every command that ships in rc.0, in rc-contract section 4.1 order.
+ * Every command that ships in rc.0.
  *
  * @category constants
  * @since 1.0.0
@@ -75,7 +75,7 @@ export const shipped: ReadonlyArray<Verb> = [
   verb("migrate", "Convert a Smithers 0.x project to the 1.0 authoring model"),
   // No compaction: `Journal.compact` refuses a run the fence still owns, and
   // a terminal run's fence is exactly what retention deletes, so the two run
-  // in the wrong order to be one pass. The contract's section 4.1 wording is
+  // in the wrong order to be one pass. The contract's the shipped-command contract wording is
   // the thing that has to change; this verb says what it does.
   verb("gc", "Delete terminal runs older than a threshold, with the rows they own"),
   verb("memory", "Read and write namespaced facts in the control database"),

@@ -18,6 +18,5 @@ The first command writes drifted output, and `--check` reports drift without
 writing. `scripts/check-docs.mjs` discovers this generator and runs the
 `--check` form automatically.
 
-The golden notice also lives in `src/index.ts`, `README.md`, and
-`docs/migration/rc-contract.md` section 3.3. `test/notice.test.ts` pins every
-copy to one string.
+The golden notice also lives in `src/index.ts` and `README.md`.
+`test/notice.test.ts` pins every copy to one string.

@@ -41,7 +41,7 @@
 - Added `ControlError.ControlErrorSchema` as the single membership list for the
   `ControlError` union, and added `CredentialConflict` to it.
 - Added `SystemFlows.plannable` and a `plannable` marker on every catalog entry,
-  so a verb the release contract removed cannot be planned as a flow.
+  so a verb the release policy removed cannot be planned as a flow.
 - Added the namespaced `Migrations` module for every control and credential
   table, while standalone adapters reuse the same idempotent schema source.
 

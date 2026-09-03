@@ -1,8 +1,8 @@
 /**
  * The rc.0 command surface, pinned.
  *
- * rc-contract section 4 is a closed list in both directions: section 4.1 names
- * every verb that ships and section 4.2 names every verb that was removed. A
+ * The command registry is a closed list in both directions: it names every
+ * verb that ships and every verb that was removed. A
  * verb that appears in neither, or in both, is a contract change, and this
  * suite is where it has to be made deliberately.
  */
@@ -17,7 +17,7 @@ const listed = cli.subcommands.flatMap((group) =>
 )
 
 describe("the shipped surface", () => {
-  it("is exactly rc-contract section 4.1", () => {
+  it("is exactly the release policy", () => {
     expect(Verb.shipped.map((verb) => verb.name)).toEqual([
       "plan",
       "run",
@@ -58,7 +58,7 @@ describe("the shipped surface", () => {
     for (const verb of Verb.subcommands) expect(subcommandNames).toContain(verb.name)
   })
 
-  it("shows only section 4.1 verbs in --help", () => {
+  it("shows only the shipped-command contract verbs in --help", () => {
     // Aliases and every removed verb are registered but unlisted, so the help
     // surface is the contract's list and nothing else.
     expect(listed.slice().sort()).toEqual(Verb.subcommands.map((verb) => verb.name).slice().sort())
@@ -80,16 +80,16 @@ describe("the shipped surface", () => {
     expect(Verb.find("serve")?.flowId).toBe("system/serve")
     // `gc` reserves one too: the catalog projects it as a procedure and the
     // CLI ships the handler (`Gc.sweep`), so it is a verb with a body rather
-    // than the bodiless plan rc-contract section 4 forbids.
+    // than the bodiless plan the release policy forbids.
     expect(Verb.find("gc")?.flowId).toBe("system/gc")
-    // `memory` is the Phase 4 verb with no reserved flow at all.
+    // `memory` is a shipped verb with no reserved flow at all.
     expect(Verb.find("memory")?.flowId).toBeUndefined()
     expect(Verb.find("nonexistent")).toBeUndefined()
   })
 })
 
 describe("the removed surface", () => {
-  it("is exactly rc-contract section 4.2", () => {
+  it("is exactly the release policy", () => {
     expect(Unsupported.removedVerbs.map((verb) => verb.name)).toEqual([
       "replay",
       "rewind",
@@ -166,7 +166,7 @@ describe("the removed surface", () => {
   it("registers every removed verb, hidden, and never as a shipped one", () => {
     const shipped = new Set(Verb.shipped.map((verb) => verb.name))
     for (const verb of Unsupported.removedVerbs) {
-      // Under its own spelling, with no substitution. Section 4.2 names the
+      // Under its own spelling, with no substitution. The removed-command contract names the
       // 0.x did-you-mean key `workflows`, so that is the word an operator
       // migrating a script types, and it is the word that has to answer.
       expect(subcommandNames).toContain(verb.name)
@@ -183,7 +183,7 @@ describe("the removed surface", () => {
   })
 
   it("keeps `gateway` as a hidden group whose bare form is the `serve` alias", () => {
-    // Section 4.2: bare `gateway` stays an alias of `serve` and only
+    // The removed-command contract: bare `gateway` stays an alias of `serve` and only
     // `gateway status|stop` are removed. An `alias` cannot carry
     // subcommands, so the two refusals need a group of their own.
     const gateway = Unsupported.removedVerbs.find((verb) => verb.name === "gateway")!

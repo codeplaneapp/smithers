@@ -56,7 +56,7 @@ const Gated = Flow.make("engine-waits/gated", {
 /**
  * Two wait points in one run, so a second signal has something to land on.
  *
- * rc-contract 5.1 words the acceptance as "two different signals to ONE run
+ * release policy 5.1 words the acceptance as "two different signals to ONE run
  * are two mutations". Two runs each parked once prove the idempotency key is
  * per payload; they do not prove a run that has already taken one signal can
  * take another, which is the part a shared `cli:signal:<runId>` key broke.
@@ -306,7 +306,7 @@ describe("signalling a run parked on a wait point", () => {
    * How that refusal reads to the operator who caused it.
    *
    * `smithers signal run-3 '{"name":"go", ...}'` against a timer-parked run
-   * exited 1 with `go: ` on stderr and nothing else (Phase 7 smoke, defect
+   * exited 1 with `go: ` on stderr and nothing else (release validation, defect
    * D3). The class declared a `name` field, which shadows
    * `Error.prototype.name`, and declared no message, and `bin.ts` `report`
    * prints `${name}: ${message}`. The operator was handed back the word they

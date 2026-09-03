@@ -396,7 +396,7 @@ export const windowsSystemWith = (options?: SystemOptions): System => {
  * production. It is kept — and reachable through {@link reap} rather than only
  * by calling it directly — because a reaper that silently retired every win32
  * record would be the "excluded feature that appears to work partially" the
- * release contract forbids. Treat it as unsupported best-effort.
+ * release policy forbids. Treat it as unsupported best-effort.
  *
  * Windows has no `lstart` and no process groups, so two of the guards above
  * cannot be answered here: the identity check falls back to the boot-time

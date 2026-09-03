@@ -2,7 +2,7 @@ import { opaqueHandlerBody } from "./fixtures/OpaqueHandlerBody.ts"
 /**
  * What the driver writes for a settlement the flow's own codec rejects.
  *
- * Phase 7's Plue cutover found the terminal transition guarded by
+ * release validation found the terminal transition guarded by
  * `Effect.orDie` around that encode: `engine-store: coordinated drain failed
  * for run-1 SchemaError: Expected JSON value at ["exit"]["cause"][0]["error"]`,
  * with the run row left `running` under an owner that had exited. A flow
@@ -11,7 +11,7 @@ import { opaqueHandlerBody } from "./fixtures/OpaqueHandlerBody.ts"
  * `Schema.Json`, and `Schema.Json` rejects every class instance, so every
  * tagged error an agent body fails with lands here.
  *
- * rc-contract section 7 allows one terminal write per run. These pin that the
+ * The release policy allows one terminal write per run. These pin that the
  * write happens.
  */
 import { describe, expect, it } from "@effect/vitest"

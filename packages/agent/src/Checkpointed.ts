@@ -34,7 +34,7 @@
  * independently.
  *
  * Governing design: the "Checkpoints and worktree lanes" row of
- * `docs/migration/rc-contract.md` section 5.2, which defines an rc.0 checkpoint
+ * The release policy, which defines an rc.0 checkpoint
  * as a pinned git tree per cell call, and the `@smthrs/std` `Checkpoints`
  * module that mints and stores those trees.
  *

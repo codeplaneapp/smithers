@@ -716,8 +716,7 @@ describe("ControlLive executor acceptance", () => {
     // The run row survives the refusal, because the acceptance decision is
     // separate from the record of the run having been accepted — but it
     // survives settled. Left `accepted`, it was a run nothing would ever drive
-    // and nothing but `smithers cancel` could end (Phase 7 verdict
-    // cd14388ed7).
+    // and nothing but `smithers cancel` could end (release rehearsal).
     expect(observed.listed).toMatchObject({ items: [{ status: "failed" }] })
   })
 

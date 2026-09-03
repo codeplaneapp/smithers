@@ -1,7 +1,7 @@
 /**
  * An approval decided by a composition that does not host the run.
  *
- * rc-contract 5.1 promises that `Approve` on a `Node` target resumes the run
+ * release policy 5.1 promises that `Approve` on a `Node` target resumes the run
  * server-side, so a gateway client does not have to call `Resume` afterwards.
  * `ControlLive.decide` kept that promise by claiming the control row and
  * journaling `control.run.resumed` — and the only consumer of that entry was a

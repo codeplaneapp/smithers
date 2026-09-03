@@ -15,7 +15,7 @@
  * `{ ok: false, error: { code: "unsupported" } }`. Removing them would make an
  * agent's call fail as "unknown tool", which reads as a client bug; answering
  * with a reason tells the agent that time travel, checkpoints, and human
- * questions are features this release does not have (rc-contract section 4.1).
+ * questions are features this release does not have (the release policy).
  *
  * Every result is the 0.x `{ ok, data?, error? }` envelope, serialized into the
  * text content block and repeated as `structuredContent`.

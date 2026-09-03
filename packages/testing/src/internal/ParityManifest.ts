@@ -8,9 +8,7 @@
  * is null-mapped in the export map and carries no compatibility promise, so it
  * is no longer published as part of the assertion vocabulary.
  *
- * The parity notes it accounts for are recorded in `docs/migration/` rather
- * than in this package; the rows carry their own `reason` text for every claim
- * that is not `pinned`.
+ * The rows carry their own `reason` text for every claim that is not `pinned`.
  *
  * @since 0.0.0
  */

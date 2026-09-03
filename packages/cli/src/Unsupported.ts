@@ -1,5 +1,5 @@
 /**
- * The removal surface of rc-contract section 4.2.
+ * The removal surface for 0.x commands and flags.
  *
  * A verb that 0.x had and rc.0 does not must fail with a sentence that names
  * the replacement, not with a usage error. `effect/unstable/cli` answers an
@@ -66,7 +66,7 @@ const removedGroup = (
 ): RemovedVerb => ({ name, group, reason, subcommands })
 
 /**
- * Every verb removed in 1.0.0-rc.0, in rc-contract section 4.2 order.
+ * Every verb removed in 1.0.0-rc.0.
  *
  * @category constants
  * @since 1.0.0
@@ -133,7 +133,7 @@ export const removedVerbs: ReadonlyArray<RemovedVerb> = [
     "upgrade"
   ]),
   removedGroup("Packs and scaffolding", packs, "packs", ["list", "update"]),
-  // The singular `workflow` is section 4.2's packs row, not the `workflows`
+  // The singular `workflow` is the removed-command contract's packs row, not the `workflows`
   // did-you-mean key: what an operator lost with `workflow path` is pack
   // tooling, not a listing. `workflow list` survives as the `ls` alias and is
   // registered as a real subcommand of the group.
@@ -174,7 +174,7 @@ export interface RemovedFlag {
 }
 
 /**
- * Every flag removed in 1.0.0-rc.0, in rc-contract section 4.2 order.
+ * Every flag removed in 1.0.0-rc.0.
  *
  * `--backend` is the one entry that is not a plain refusal: `--backend sqlite`
  * names the supported backend and is accepted as a no-op, and only another
@@ -332,7 +332,7 @@ export const isReservedFlow = (flowId: string): boolean => flowId.startsWith("sy
  *
  * A bodiless flow plans and launches perfectly well: the run row is durable,
  * the receipt says `Accepted`, and then nothing ever happens, because there is
- * no graph to execute. That is the partial appearance rc-contract section 4
+ * no graph to execute. That partial appearance
  * forbids, so the verbs that take a flow id refuse the reserved ones outright.
  *
  * @category constructors

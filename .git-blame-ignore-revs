@@ -10,8 +10,7 @@
 # style: format the repo with oxfmt (adopting oxfmt as the formatter)
 39b59f5fb406b10c5a76d77c2846f8c38f992849
 
-# phase1: remove the superseded JSX/reconciler execution architecture and move
-# retained sources to legacy/
+# remove the superseded JSX/reconciler execution architecture
 2716e98558559a46c24212906837a7450246a12d
 
 # phase2: import the Smithers Flows workspace wholesale from

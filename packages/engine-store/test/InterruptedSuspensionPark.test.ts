@@ -5,7 +5,7 @@ import { opaqueHandlerBody } from "./fixtures/OpaqueHandlerBody.ts"
  *
  * `InterruptReleaseReclaim.test.ts` covers the other half: a round that had
  * not asked for anything is a shutdown, and `released` is what it is (issue
- * #39). This file covers the park, which the Phase 7 smoke found by watching a
+ * #39). This file covers the park, which the release validation found by watching a
  * `smithers up -d` process park a run and exit. The round's own settlement
  * derives the same three answers a few statements later, so losing the race to
  * a shutdown must not lose the classification with it: a `released` row
@@ -151,7 +151,7 @@ describe("a shutdown that interrupts a suspended round parks it, and says what f
       // The park carries the suspension itself. `poll` publishes a state with
       // no result as "not settled yet", so a park recorded without one is
       // invisible to every resumer: `smithers approve` accepted the request
-      // and then drove nothing (Phase 7 smoke, section 3).
+      // and then drove nothing (release rehearsal).
       expect(recordedResult(result.row.stateJson)?._tag).toBe("Suspended")
     }))
 

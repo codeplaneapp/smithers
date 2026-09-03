@@ -42,12 +42,9 @@ const scan = (name: string) =>
     return { detection, hits }
   }).pipe(Effect.provide(nodeLayer))
 
-// The old halves of the verified pairs in docs/migration/feature-parity-audit.md. Each is
-// copied from the audit so the mapping is checked against real 0.x source, not
-// against source written to match the mapping. `via` says how the tool is
-// expected to reach the audit's new API: `snippet` when it writes the code out
-// of this source, `rule` when the translation needs a human decision and the
-// mapping row names the target instead.
+// Old halves of the verified teaching pairs. `via` says how the tool reaches
+// the new API: `snippet` when it writes the code from this source, `rule` when
+// the translation needs a human decision and the mapping row names the target.
 const auditPairs: ReadonlyArray<{
   readonly title: string
   readonly old: string
@@ -579,8 +576,8 @@ const contextDoctor = [
 ].join("\n")
 
 // The one shape the Workflow rewrite covers: a workflow whose own children are
-// named steps, over a factory that declares an `input` schema. Taken from the
-// docs/migration/feature-parity-audit.md pair the `auditPairs` table above already uses.
+// named steps, over a factory that declares an `input` schema. It matches the
+// teaching pair the `auditPairs` table above already uses.
 const greeting = [
   "/** @jsxImportSource smthrs */",
   "import { createSmithers } from \"smthrs\";",

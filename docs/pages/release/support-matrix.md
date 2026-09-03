@@ -1,5 +1,5 @@
 ---
-description: "What Smithers 1.0.0-rc.0 supports: runtimes, databases, published packages, commands, and run control, straight from the release contract."
+description: "What Smithers 1.0.0-rc.0 supports: runtimes, databases, published packages, commands, and run control."
 ---
 
 # rc.0 support matrix
@@ -7,11 +7,8 @@ description: "What Smithers 1.0.0-rc.0 supports: runtimes, databases, published 
 This page states what Smithers 1.0.0-rc.0 supports. Everything it does not
 support is in [known limitations](/release/known-limitations).
 
-The tables below are generated from
-[the release contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md),
-which is frozen for this candidate. A row here and a row there are the same row.
-
-{/* generated:support-matrix start */}
+The tables below describe the candidate as shipped and are checked against the
+live CLI, publication roster, and browser entry-point list.
 
 ## Runtimes
 
@@ -21,7 +18,7 @@ which is frozen for this candidate. A row here and a row there are the same row.
 | Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (`BUILD.ts:15`); CI pins `1.3.14`. |
 | Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
 | Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
-| macOS | Supported for development and the Phase 7 manual smoke; the `packages` CI matrix runs the package suites on `macos-latest` as an advisory row. | arm64 and x64. |
+| macOS | Supported for development; the `packages` CI matrix runs the package suites on `macos-latest` as an advisory row. | arm64 and x64. |
 | Windows | Unsupported. The `packages` CI matrix runs the package suites on `windows-latest` as an advisory row. | none |
 
 ## Databases
@@ -33,14 +30,14 @@ SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see
 
 | Command | Behavior |
 | --- | --- |
-| [`smithers approve`](/cli/approve) | Plan-level and node-level (`ask`) approvals; principal stamped server-side. A node-level decision restarts the run in the deciding call (section 5.1), and the exit code follows that run's terminal status. |
+| [`smithers approve`](/cli/approve) | Plan-level and node-level (`ask`) approvals; principal stamped server-side. A node-level decision restarts the run in the deciding call, and the exit code follows that run's terminal status. |
 | [`smithers bug`](/cli/bug) | Posts a report with `Control.list` and a `Control.watch` digest to `bug.smithers.sh` (`SMITHERS_BUG_ENDPOINT`). |
-| [`smithers cancel`](/cli/cancel) | Durable, cross-process (section 5). |
+| [`smithers cancel`](/cli/cancel) | Durable and cross-process. |
 | [`smithers claude`](/cli/claude) | Claude Code plugin mirror protocol, `claudeMirrorContract` 2; run status vocabulary is the rc.0 `RunStatus`. |
 | `smithers completions` | Standard. |
 | [`smithers deny`](/cli/deny) | Denies; a denied plan can never launch. A node-level denial restarts the run in the deciding call, and the exit code follows that run's terminal status. |
-| [`smithers docs`](/cli/docs) | Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/pages` tree (section 9 exception 2, R-25). |
-| [`smithers doctor`](/cli/doctor) | Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected (section 6). |
+| [`smithers docs`](/cli/docs) | Prints the bundled `llms.txt` or `llms-full.txt` generated from the vocs `docs/pages` tree. |
+| [`smithers doctor`](/cli/doctor) | Reports registry discovery warnings, database paths and ladder state, Node version, `jj` on `PATH`, provider keys present, and 0.x state detected. |
 | [`smithers down`](/cli/down) | Cancels every non-terminal run (`Control.list` then `cancel`). |
 | [`smithers gc`](/cli/gc) | Deletes terminal runs older than the threshold with their attempts, clock, deferred, and waiting rows and time-travel archive entries, then `Journal.compact`. Automatic retention stays off by default. |
 | [`smithers init`](/cli/init) | Scaffolds `flows/<name>/flow.mdx` and adds `.flows/` to `.gitignore`. `--global` is not supported (seats resolve from environment keys); it exits 1. |
@@ -54,8 +51,8 @@ SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see
 | [`smithers ps`](/cli/ps) | Run listing; `--status` validated against `accepted\|running\|parked\|waiting-approval\|cancelled\|completed\|failed`. A run left `accepted` because no executor took its launch is labelled `waitingReason: executor`. |
 | `smithers resume` | Alias of `run --resume`. |
 | [`smithers run`](/cli/run) | Launches an approved plan; blocks until settlement when the local process owns the executor. |
-| [`smithers serve`](/cli/serve) | Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `/projections/ws`, `GET /health`. Loopback default; non-loopback requires `--listen` and a bearer token. `gateway` is an alias for rc.0 only. |
-| [`smithers signal`](/cli/signal) | Delivers a named signal to a flow parked on `WaitFor` (section 5). |
+| [`smithers serve`](/cli/serve) | Hosts the control server at `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `/projections/ws`, and `GET /health`. Loopback default; non-loopback requires `--listen` and a bearer token. `gateway` is an alias for rc.0 only. |
+| [`smithers signal`](/cli/signal) | Delivers a named signal to a flow parked on `WaitFor`. |
 | [`smithers skills`](/cli/skills) | Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands. |
 | [`smithers status`](/cli/status) | Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. A run no executor took reads a `pending` verdict saying nothing is driving it, and carries `smithers cancel RUN_ID` as its unblock line. |
 | [`smithers steer`](/cli/steer) | Durable, attributed steer through the notification queue; drained at the agent's turn close. |
@@ -70,12 +67,12 @@ SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see
 | Signals | `smithers signal RUN_ID {name, payload}` persists the `control_run_messages` row, journals `control.signal.delivered`, and completes the matching `WaitFor` deferred (`DurableEngineState.completeDeferred`) keyed by signal name; a run parked on `WaitFor` wakes within one heartbeat tick. |
 | Approvals | Plan-level approval for `deployClass` flows and node-level approval (`ask`) park the run as `waiting-approval`; `approve`/`deny` take the serialized `ApprovalPayload`, scope `once\|run\|remembered`, principal stamped by the server; `control.approval.requested` carries the exact approve argument. `Approve` on a `Node` target resumes the run server-side so a gateway client does not need a second call. |
 | Steer | `Control.steer` and the `steer` verb; provenance `sourceActor = <principal.kind>:<principal.id>`. |
-| Retry bounds | An action's `RetryPolicy` `maxAttempts` and `expirationMs` survive park, resume, and process death: the durable driver persists the attempt sequence and the first attempt's start time, and the engine resumes the counter and the wall-clock origin from them (`packages/engine/src/FlowEngine/make.ts:354-392`, `actionRetryOrigin` and `actionLatestAttempt`). `maxAttempts` bounds provider retries per correction session. A structured-output correction opens a new session per attempt with its own sealed keys (agent-runtime A27), so `RetryPolicy.maxAttempts` does not bound the correction ladder; that ladder carries its own bound in the agent action (`Host.defaultCorrections`, per-action override). The suspended-flow polling budget (`suspendedRetryPolicy`) is per caller by design (`make.ts:194-201`). A pruned attempt row restarts the `expirationMs` budget from the current clock with a logged warning (`make.ts:366-378`); that is a documented limit. |
-| Resume and ownership | `run --resume` is join-or-claim; a live peer's run returns `ClaimLost`. Heartbeat 1 s, stale after 30 s with 10 s skew; steal requires `LivenessEvidence`; `RunDriver` sweeps stale-running rows (64 per tick) and released rows every tick. Liveness is answered in two layers. The Node host's default `isAlive` is `Ownership.sameHostPidProbe` (`packages/run-store/src/Ownership.ts:221`, `phase5/cancel-durability`): it asks this machine's process table whether the recorded pid still exists, reads `EPERM` as alive so one user's engine cannot declare another's dead, and answers `false` for an owner recorded on a different host rather than claiming knowledge it does not have. The lease is verified beneath it, not replaced by it: the engine consults the check only for a run whose lease has already expired, and `RunStore.steal` re-verifies the lease itself, so the probe can refuse a takeover but never grant one on its own. Every other host stays lease-governed: `RunDriver` applies `Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)` whenever a composition supplies none (`packages/run-store/src/Ownership.ts:150`, `packages/engine-store/src/internal/RunDriver.ts:80,220-221`), so an owner is alive while its persisted heartbeat is younger than the stale window, and a browser or embedded composition, which has no process table to ask, keeps that timeout. Two terminals over one project are two engine processes over one `.flows/engine.db`, so the probe is what keeps them apart; a lease-only answer let each steal the other's running rows 30 seconds after any heartbeat stall. Two same-host implementations now exist, `Ownership.sameHostPidProbe` and `@smthrs/platform-node` `HostLiveness.isAlive`, and they differ only in the answer they give about another host's owner. Settling them into one is open integration work (Table A, B-09). |
+| Retry bounds | An action's `RetryPolicy` `maxAttempts` and `expirationMs` survive park, resume, and process death because the durable driver persists the attempt sequence and first start time. `maxAttempts` bounds provider retries per correction session; structured-output correction has its own bound in the agent action. The suspended-flow polling budget is per caller. A pruned attempt row restarts the expiration budget from the current clock with a logged warning. |
+| Resume and ownership | `run --resume` is join-or-claim; a live peer's run returns `ClaimLost`. Heartbeat is 1 s, stale after 30 s with 10 s skew, and stealing requires `LivenessEvidence`. The Node host checks the recorded process id before reclaiming an expired lease; other hosts use lease liveness alone. `RunStore.steal` verifies the lease, so a process probe can refuse a takeover but cannot grant one by itself. |
 | Time travel | Library API only: `TimeTravel.inspect`, `replay`, `fork` (refuses when an ancestor is live; provisions the jj workspace before committing), `rewind` (compensation, jj restore, archive, suspend). |
-| Retention | `smithers gc` (section 4.1). Journal compaction stays opt-in. |
+| Retention | `smithers gc`. Journal compaction stays opt-in. |
 | Sync bounds | Workspace subscriptions use a configurable concurrency bound and bounded `PubSub`s; `SyncClient` uses a real credit window. Server stays loopback-only by default. |
-| Process containment | Cooperative cancellation of a run kills the process group of every child the kernel spawner started, including a child that ignores `SIGTERM`; no `PPID 1` orphan survives a cancel. A hard-killed engine process is covered by the next incarnation of the same host (section 5.2, X-17). |
+| Process containment | Cooperative cancellation of a run kills the process group of every child the kernel spawner started, including a child that ignores `SIGTERM`; no `PPID 1` orphan survives a cancel. The next incarnation of the same host reaps processes abandoned by a hard-killed engine. |
 
 ## Published packages
 
@@ -98,7 +95,7 @@ execution claim.
 | [`@smthrs/engine-store`](/api/engine-store) | Durable `FlowEngine`: journal, run, cache, artifact stores; `RunDriver` sweep; `DisasterRecovery`. | gated yes |
 | [`@smthrs/flow`](/api/flow) | Authoring model: `Flow`, `Action`, `Interpreter`, durable deferred/clock/queue, `RetryPolicy`. | gated yes |
 | [`@smthrs/flows`](/api/flows) | Curated aggregate barrel, `./NodeRuntime` production composition, and `./SandboxedFlow` sandboxed child flows. | gated yes (root); `NodeRuntime` and `SandboxedFlow` gated Node-only |
-| [`@smthrs/gateway`](/api/gateway) | Gateway wire schemas, projections, session tokens, `SuperviseRuntime` port; the Phase 4 projection server. | no claim |
+| [`@smthrs/gateway`](/api/gateway) | Gateway wire schemas, projections, session tokens, and the `SuperviseRuntime` port. | no claim |
 | `@smthrs/harness` | Built-in agent harness: dynamic nodes, sealed model steps, QuickJS cell runtime. | no claim |
 | [`@smthrs/jj`](/api/jj) | Jujutsu host service; ships `wasm/flows_jj.wasm`. | gated yes (root, `browser/BrowserJj`); `node/NodeJj`, `bun/BunJj` gated Node-only |
 | [`@smthrs/journal`](/api/journal) | Immutable event history, projections, redaction, owner fence. | gated yes |
@@ -123,10 +120,9 @@ execution claim.
 | [`@smthrs/step-cache`](/api/step-cache) | Sealed step results by step-key digest. | gated yes |
 | [`@smthrs/sync`](/api/sync) | Read-only journal replication RPC, `RunCatalog`, branch collaboration. | gated yes |
 | [`@smthrs/testing`](/api/testing) | Engine and model doubles, conformance suites, restart/parity harnesses, vitest adapters. | no claim |
-| [`@smthrs/time-travel`](/api/time-travel) | Replay, fork, rewind, compensation, `SqlTimeTravelStore` (library API only in rc.0; see section 5). | gated yes |
-| `smthrs` | Deprecation/migration notice only (section 3.3). | not applicable |
+| [`@smthrs/time-travel`](/api/time-travel) | Replay, fork, rewind, compensation, `SqlTimeTravelStore` (library API only in rc.0). | gated yes |
+| `smthrs` | Deprecation/migration notice only. | not applicable |
 
-{/* generated:support-matrix end */}
 
 ## What runs where
 

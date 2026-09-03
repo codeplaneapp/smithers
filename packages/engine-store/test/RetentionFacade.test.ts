@@ -8,7 +8,7 @@
  * below stays over BOTH lineage relations, a table this database does not have
  * is skipped, and a dry run reports without writing.
  *
- * The requirement is rc-contract section 5.1, Retention.
+ * The requirement is the release policy, Retention.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"

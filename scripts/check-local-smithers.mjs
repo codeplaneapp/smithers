@@ -29,8 +29,8 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /**
  * The working-tree entry an internal script must name.
  *
- * The user-facing binary is `packages/cli/bin/smithers.mjs` (rc-contract.md
- * section 3.4). The shim runs `dist/esm/bin.js` when a published install has
+ * The user-facing binary is `packages/cli/bin/smithers.mjs`. The shim runs
+ * `dist/esm/bin.js` when a published install has
  * one and `src/bin.ts` otherwise, so naming it here covers both. Both plugin
  * `lib/resolve-smithers-cli.mjs` copies change with it.
  */
@@ -41,7 +41,7 @@ export const SOURCE_ENTRY = "packages/cli/bin/smithers.mjs";
  *
  * `flows/` holds this repository's own 1.0 flows; the 0.x `.smithers/*`
  * directories it replaces are gone. A path that does not exist yet is skipped,
- * so the roster can name a directory a later phase creates.
+ * so the roster can name an optional directory.
  */
 export const SCANNED_PATHS = [
   "package.json",
@@ -64,8 +64,6 @@ const SKIPPED_DIRECTORIES = new Set([
   "dist",
   "coverage",
   "target",
-  // The Smithers 0.x tree later phases port from; its scripts are not run.
-  "legacy",
   ".git",
   ".jj",
 ]);
@@ -87,9 +85,8 @@ export const ALLOWLIST = {
  * Resolver copies that must stay byte-identical across the plugin trees.
  *
  * Each plugin ships standalone (Codex sparse-checkouts a plugin directory
- * alone), so the resolver is copied verbatim rather than imported. The Phase 4
- * plugin lane restores both copies; until then neither exists, and a tree with
- * none of them is not a drift failure.
+ * alone), so the resolver is copied verbatim rather than imported. A tree may
+ * contain neither plugin without creating a drift failure.
  */
 export const MIRRORED_RESOLVERS = [
   "claude-plugin/lib/resolve-smithers-cli.mjs",
@@ -238,8 +235,7 @@ export function checkMirroredResolvers(root = REPO_ROOT) {
       return null;
     }
   });
-  // No copy at all means the plugin lane has not landed yet, which the ledger
-  // records as Phase 4 work. One copy present and another absent is drift.
+  // No copy at all is valid. One copy present and another absent is drift.
   if (contents.every((content) => content === null)) return [];
   const problems = [];
   for (let index = 0; index < MIRRORED_RESOLVERS.length; index++) {

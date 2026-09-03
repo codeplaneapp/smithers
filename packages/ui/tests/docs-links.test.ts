@@ -6,7 +6,7 @@ import { dirname, join, relative, resolve } from "node:path";
  * Two lines this package's prose keeps crossing, and nothing was left to hold
  * them. `scripts/check-ui-architecture.mjs` was the only checker of the
  * package's own documentation claims, and the 1.0 migration deleted it
- * (`docs/migration/disposition-ledger.md`, disposition `delete`). The docs
+ * (since deleted). The docs
  * colocation that followed shipped `README.md`, `docs/README.md` and
  * `docs/architecture.md` all linking to a `docs/contracts.md` that was never
  * written, and no gate noticed.
@@ -21,7 +21,7 @@ import { dirname, join, relative, resolve } from "node:path";
  *    barrel nor a subpath under it. At 1.0.0-rc.0 the unscoped `smthrs`
  *    package publishes only a deprecation notice whose module throws on
  *    import, so that specifier is a broken import for any reader who copies
- *    it, and it is one of the strings the Phase 7 release scan fails on. The
+ *    it, and it is one of the strings the release scan fails on. The
  *    scoped `@smthrs/ui` is the only correct form.
  *
  * Both scans are pure functions of a single line, and the third `describe`

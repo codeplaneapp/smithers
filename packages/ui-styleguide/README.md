@@ -7,9 +7,7 @@ custom properties plus the base element and component rules that consume them.
 `@smthrs/ui` builds its shadcn-anatomy components on these tokens; `apps/ui` and
 `apps/review` embed the sheets directly.
 
-Private at `1.0.0-rc.0` (`docs/migration/rc-contract.md` section 3.2): no
-registry consumer survives the 1.0 cutover, so the package ships only inside the
-workspace.
+Private at `1.0.0-rc.0`: the package ships only inside the workspace.
 
 ```ts
 import { standaloneThemeCss, themeCss, themeRegistry, workflowUiStyles } from "@smthrs/ui-styleguide";

@@ -47,7 +47,7 @@ const npmInstallArgs = [
 
 // The one dependency that must resolve to exactly one copy. Two Effect
 // instances do not share schema internals, so a duplicate is a runtime defect,
-// not a size problem (rc-contract.md section 9, Effect row).
+// not a size problem.
 export const SINGLETONS = ["effect"];
 
 // Optional peers must not appear in a default install at all. The list is

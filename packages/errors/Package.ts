@@ -21,5 +21,5 @@ export const Package = {
       target: "README.md"
     }
   ],
-  references: ["docs/pages/routes.md"]
+  references: []
 } as const

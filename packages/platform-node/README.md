@@ -86,7 +86,7 @@ because `uptime` is second-granular. A group spawned inside that window is
 retired unsignalled and never reaped, which is the deliberate price of refusing
 to kill on an instant the host can only place to the nearest second.
 
-Windows reaping is unsupported best-effort: the release contract lists Windows
+Windows reaping is unsupported best-effort: the release policy lists Windows
 as unsupported and `AtomicFileSystem` fails every operation closed there, but
 `systemFor("win32")` still reaches `taskkill /T /F` through the sweep rather than
 retiring every record unsignalled.

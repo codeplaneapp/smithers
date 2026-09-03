@@ -111,7 +111,7 @@ rather than the path under test.
 `workspaces`, which is what gives it a `node_modules` and therefore a `vitest`
 binary. Until that landed, `pnpm exec smithers-build test '//e2e:faults'` failed
 in 262 ms with `Command "vitest" not found` and every case below had never run
-under any gate (Phase 7 blocker B6). `ci/matrixIsWired.test.ts` pins the
+under any gate (release gate B6). `ci/matrixIsWired.test.ts` pins the
 membership and both CI steps.
 
 Two steps in `.github/workflows/ci.yml`, generated from the root `BUILD.ts`:
@@ -124,7 +124,7 @@ Two steps in `.github/workflows/ci.yml`, generated from the root `BUILD.ts`:
 - `smithers-build test '//e2e:faults'`, in the required `e2e-faults` job. It
   was advisory while case 22 below was required to be red at rc.0: a required
   job would have been red on every commit for a defect no commit introduced.
-  The section 5.2 redaction deliverable landed the redacting logger, case 22
+  The redaction deliverable landed the redacting logger, case 22
   went green with no edit to the test, and the matrix is 67 of 67, so the root
   `BUILD.ts` drops `continueOnError` and lists `e2e-faults` in `requiredJobs`.
   The graceful park this directory cannot reach is still broken in the product
@@ -150,14 +150,14 @@ None. Every case in this matrix is expected to pass, which is what lets
 
 One was red by design until recently, and the shape is worth keeping because the
 next requirement the product does not meet yet is enforced the same way.
-rc-contract R-12 makes case 22 a required parity test over the journal *and* the
+release requirements makes case 22 a required parity test over the journal *and* the
 logs. rc.0 shipped no redacting logger, so an action that logged a credential
 put it on the operator's terminal, and the requirement was enforced by keeping
 `case22 ... redacts the credential out of the operator's terminal` in the matrix
 as a plain failure with its owner named in the case file and in `fault-gaps.md`.
 Marking it `.fails`, skipping it, or deleting it would have reported a green
 matrix over a live credential leak, so `scripts/repo-contract/fault-skips.test.mjs`
-refused all three. The section 5.2 redaction deliverable landed
+refused all three. The redaction deliverable landed
 `@smthrs/journal` `RedactedLogger` and the test went green with no edit to this
 suite, which is exactly what a plain failing test is for.
 

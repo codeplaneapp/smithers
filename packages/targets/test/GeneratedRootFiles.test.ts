@@ -220,12 +220,7 @@ describe("the checked-in root files match what BUILD.ts declares", () => {
         "packages/storage/*/test/**/*",
         "packages/coding-agent/examples/**/*"
       ],
-      // `legacy/**` is the Smithers 0.x source tree the 1.0 Phase 4 lanes port
-      // from. It is outside the pnpm workspace and no live module imports it,
-      // so it must not enter the root TypeScript program. Root `BUILD.ts`
-      // declares it; this literal is the drift check on that declaration and
-      // moves with it.
-      exclude: ["**/dist/**", "legacy/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+      exclude: ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
     }))
     const actual = await Fs.readFile(NodePath.join(workspaceRoot, "tsconfig.json"), "utf8")
     expect(declared).toBe(actual)

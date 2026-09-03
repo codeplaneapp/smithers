@@ -17,11 +17,10 @@ here has to resolve, and nothing in the package may name the unscoped
 `smthrs` specifier.
 
 There is no page for this package under `docs/pages`, and there is no docs
-generator target in `BUILD.ts`. `@smthrs/ui` is `private: true` at
-`1.0.0-rc.0` (`docs/migration/disposition-ledger.md`, row `packages/ui`,
-disposition `keep`): it has no registry consumer, so publishing an API page for
-it on the documentation site would describe a package nobody can install. When
-the Phase 4 UI port makes this package public, add the generator following the
+generator target in `BUILD.ts`. `@smthrs/ui` is `private: true` and has no
+registry consumer, so publishing an API page for it on the documentation site
+would describe a package nobody can install. If the package becomes public,
+add the generator following the
 `packages/crypto` recipe (`Package.ts` + `scripts/docs.mjs` + a
 `Smithers.Generate` target; `scripts/check-docs.mjs` discovers the generator on
 disk and needs no line of its own) and this note goes away.

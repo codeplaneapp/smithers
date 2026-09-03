@@ -418,7 +418,7 @@ describe("lifecycle verbs", () => {
     // Retargeted: the key is derived from the run id alone, so a repeated
     // cancel used to replay the first one's receipt as `AlreadyApplied`. That
     // is the right answer only while the receipt is still true, and a cancel
-    // that finished nothing leaves a non-terminal run behind. The Phase 7
+    // that finished nothing leaves a non-terminal run behind. The release validation
     // smoke's `cancel` and `down` both replayed against two runs no command
     // could reach. `cancel` reads the run first now, so a settled run answers
     // `Terminal` every time and a live one is asked again.
@@ -447,7 +447,7 @@ describe("lifecycle verbs", () => {
 
     // The key is `cli:resume:<runId>` when no park was ever committed, so the
     // second call reuses the first one's receipt. Replaying it answered
-    // `AlreadyApplied` for a run that had since been cancelled: the Phase 7
+    // `AlreadyApplied` for a run that had since been cancelled: the release validation
     // smoke got that answer for `run --resume` against a completed run and for
     // `approve` against another, and neither says anything about the run.
     expect(result.first).toMatchObject({ _tag: "Accepted" })
@@ -521,7 +521,7 @@ describe("up", () => {
 
     // One command, one receipt: the plan and its approval are internal to the
     // verb, and the caller reads the run id off the receipt because rc.0 has
-    // no operator-supplied run id (rc-contract section 4.1).
+    // no operator-supplied run id (the release policy).
     expect(receipt).toMatchObject({ _tag: "Accepted" })
     expect(typeof (receipt as { readonly runId: string }).runId).toBe("string")
   })
@@ -999,7 +999,7 @@ describe("deciding an in-run approval from the CLI", () => {
       )
     )
 
-    // rc-contract §5.1: the decision resumes the run, so one call settles it.
+    // the release policy: the decision resumes the run, so one call settles it.
     expect(receipt).toMatchObject({ _tag: "Accepted", runId: "run-1" })
     expect(state.status).toBe("completed")
     // And it settles through the decision, not through a second verb.
@@ -1052,7 +1052,7 @@ describe("signal idempotency", () => {
       recordingSignals(keys)
     )
 
-    // rc-contract §5.1: two different signals to one run are two mutations. A
+    // the release policy: two different signals to one run are two mutations. A
     // key that named the run alone replayed the first receipt for the second
     // signal, and the second signal was never delivered.
     expect(new Set(keys).size).toBe(2)

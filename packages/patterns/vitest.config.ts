@@ -17,7 +17,7 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-patterns-coverage-${process.pid}`),
       include: ["src/**"],
-      // Frozen rc contract: deferred declaration callbacks are executed by the
+      // Frozen 1.0 command contract: deferred declaration callbacks are executed by the
       // pure core test runtime, so the same 100% gate covers both topology and
       // value behavior.
       thresholds: {

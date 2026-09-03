@@ -4,8 +4,8 @@
  *
  * Smithers 0.x wrote one `llms-v<version>.txt` per release and refused to
  * overwrite a published one. Smithers 1.0 drops the versioned filenames
- * (rc-contract.md ruling R-25), so the artifact that must not move after a
- * release is the committed bundle itself: `docs/llms.txt`, `docs/llms-full.txt`,
+ * so the artifact that must not move after a release is the committed bundle
+ * itself: `docs/llms.txt`, `docs/llms-full.txt`,
  * their topic fragments, and the two package mirrors, each stamped with the
  * `@smthrs/cli` version they were built from.
  *
@@ -16,7 +16,7 @@
 import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 
 /** The package whose version stamps the bundles and whose release freezes them. */
 export const PUBLISHED_PACKAGE_NAME = "@smthrs/cli"

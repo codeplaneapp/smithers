@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 import { checkedPaths } from "./optimize-llms-full.ts"
 
 /**

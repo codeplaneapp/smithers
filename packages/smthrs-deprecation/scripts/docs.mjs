@@ -21,26 +21,12 @@ const notice = noticeLines.join("\n")
 
 const firstFence = (markdown) => (/^```[^\n]*\n([\s\S]*?)^```/m.exec(markdown)?.[1] ?? "").trimEnd()
 
-const section = (markdown, heading) => {
-  const start = markdown.indexOf(heading)
-  if (start < 0) return ""
-  const level = (/^#+/.exec(heading)?.[0] ?? "#").length
-  const rest = markdown.slice(start + heading.length)
-  const next = new RegExp(`^#{1,${level}} `, "m").exec(rest)
-  return rest.slice(0, next?.index ?? rest.length)
-}
-
 const fragment = read(join(packageRoot, "docs", "notice.md"))
 const readme = read(join(packageRoot, "README.md"))
-const contract = read(join(repoRoot, "docs", "migration", "rc-contract.md"))
-const contractSection = section(contract, "### 3.3 The unscoped `smthrs` package")
 
 const failures = []
 if (firstFence(fragment) !== notice) failures.push("docs/notice.md: first fenced block differs from src/index.ts")
 if (firstFence(readme) !== notice) failures.push("README.md: first fenced block differs from src/index.ts")
-if (firstFence(contractSection) !== notice) {
-  failures.push("docs/migration/rc-contract.md section 3.3: first fenced block differs from src/index.ts")
-}
 
 const regionStart = (name) => `{/* generated:${name} start */}`
 const regionEnd = (name) => `{/* generated:${name} end */}`
@@ -61,7 +47,7 @@ for (const path of Package.references) {
   if (!read(join(repoRoot, path)).includes("smthrs")) failures.push(`${path}: must reference smthrs`)
 }
 // The em-dash rule covers what this package writes, not the whole page it
-// writes into: the rest of the migration guide belongs to other owners.
+// writes into: the rest of the upgrade guide is maintained separately.
 for (const snippet of Package.snippets) {
   if (read(join(packageRoot, snippet.source)).includes("—")) {
     failures.push(`${snippet.source}: package-owned content contains an em-dash`)

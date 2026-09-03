@@ -193,7 +193,7 @@ describe("the seat the scaffold writes", () => {
   it("skips a provider doctor lists and this host cannot route", () => {
     // `Doctor` names CEREBRAS_API_KEY a provider key and
     // `NodeControl.seatResolver` has no route for the provider, so a scaffold
-    // that chose it would write a flow that cannot launch (Phase 7 S3).
+    // that chose it would write a flow that cannot launch (release rehearsal).
     expect(Init.defaultSeat({ CEREBRAS_API_KEY: "k" }).seat).toBe("anthropic:claude-sonnet-4-5")
     expect(Init.defaultSeat({ CEREBRAS_API_KEY: "k" }).resolved).toBe(false)
   })

@@ -23,10 +23,9 @@ your project's `overrides` (in `pnpm-workspace.yaml` for pnpm 11); the registry
 serves `4.0.0-rc.112` for the declared range and `npm ls` exits 1 without the
 pin, although the install runs on a single Effect copy either way.
 
-Read `docs/releases/1.0.0-rc.0.md` before upgrading, and
-`docs/migration/removed-apis.md` for the complete inventory of what is gone
-and what replaces it. The compatibility promise is quoted verbatim in the
-release notes, the README, and the migration guide.
+Read `docs/releases/1.0.0-rc.0.md` before upgrading and the
+[migration guide](docs/pages/migration/1.0.md) for what is gone and what
+replaces it.
 
 ### The new architecture
 
@@ -73,7 +72,7 @@ release notes, the README, and the migration guide.
 
 - 28 commands ship. Six 0.x names survive as aliases: `inspect`, `why`,
   `events`, `resume`, `gateway`, and `workflow list`.
-- 67 verbs are removed, and every 0.x flag release contract section 4.2 lists
+- 67 verbs are removed, and every 0.x flag the release policy lists
   is declared hidden on the command that used to carry it. Each exits 1 with
   `smithers <verb> was removed in 1.0.0-rc.0: <reason>. See
   https://smithers.sh/migration/1.0#<verb>`, so a stale script gets the
@@ -94,11 +93,9 @@ release notes, the README, and the migration guide.
 
 ### Validation
 
-- Phase 7 ran seventeen gates from a clean checkout at `cd14388ed7` with real
-  backends and real persisted data. Sixteen pass. The verdicts, the commands,
-  and the evidence are in `docs/migration/verification-evidence.md`, with each
-  gate's file copied under `docs/migration/evidence/`.
-- The manual smoke ran all eight items end to end and the Plue cutover gate
+- Release validation ran seventeen gates from a clean checkout with real
+  backends and real persisted data. Sixteen passed.
+- The manual smoke ran all eight items end to end and the consumer validation gate
   passes every item that runs without the published registry. The recursive
   test fan-out is `2 fails, 61 passes` over 63 projects and 14,649 tests; the
   five failing tests all need live external state.
@@ -112,8 +109,7 @@ release notes, the README, and the migration guide.
 
 ### Known limitations
 
-The paragraphs below are the release contract's own wording
-(`docs/migration/rc-contract.md` section 7), quoted verbatim.
+The paragraphs below describe the candidate's enforced limits.
 
 > **Databases.** Smithers 1.0.0-rc.0 stores run state in local SQLite only (`@effect/sql-sqlite-node` over Node.js `node:sqlite`). PostgreSQL and PGlite are not supported: no client layer or migration ladder ships, `SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with `unsupported_database`, and the 0.x `smithers migrate --to` database move is removed. Projects that ran 0.x on PGlite or PostgreSQL must finish or discard their runs on 0.x; there is no import path.
 
@@ -155,10 +151,10 @@ The paragraphs below are the release contract's own wording
 
 > **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.108`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
 
-> **Source migration.** See §11 for the compatibility promise paragraph.
+> **Source migration.** See the compatibility promise below.
 
-Release contract section 11 is the compatibility promise. It is quoted in full
-in `docs/releases/1.0.0-rc.0.md`, the README, and the migration guide.
+The compatibility promise is quoted in full in
+`docs/releases/1.0.0-rc.0.md`, the README, and the migration guide.
 
 ## 0.34.0 (2026-08-12)
 

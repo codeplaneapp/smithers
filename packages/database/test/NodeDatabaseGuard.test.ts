@@ -216,7 +216,7 @@ describe("NodeDatabase guard: 0.x database files (X-13)", () => {
       // Released only after the probe has already been refused its read, so
       // the guard has to outwait the lock rather than never meeting it. The
       // open ladder outwaits a lock this short, so a guard that gave up here
-      // would open the very file section 2 refuses.
+      // would open the very 0.x database the guard refuses.
       const timer = setTimeout(() => lock.release(), 300)
 
       try {

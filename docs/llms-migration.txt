@@ -293,13 +293,14 @@ CLI reference lists the commands that ship.
 | `up` | `--report` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
 | `up` | `--force` | the run driver's heartbeat sweep owns recovery |
 | `up` | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
-| `up` | `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
-| `up` | `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `up` | `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
-| `migrate` | `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
-| `global` | `--backend pglite\|postgres` | SQLite only (`--backend sqlite` is accepted as a no-op) |
-| `global` | `--backend sqlite` | SQLite only (`--backend sqlite` is accepted as a no-op) |
+| `up` | `--resume-claim-owner` | the run driver's heartbeat sweep owns recovery |
+| `up` | `--resume-claim-heartbeat` | the run driver's heartbeat sweep owns recovery |
+| `up` | `--resume-restore-owner` | the run driver's heartbeat sweep owns recovery |
+| `up` | `--resume-restore-heartbeat` | the run driver's heartbeat sweep owns recovery |
+| `up` | `--max-concurrency` | parallelism is declared by the flow and bounded by plan admission |
+| `migrate` | `--to` | SQLite only; the 0.x database move is removed |
 | `init` | `--global` | rc.0 has no global pack; seats resolve from environment keys |
+| `global` | `--backend` | SQLite only (`--backend sqlite` is accepted as a no-op) |
 
 ##### init
 
@@ -325,7 +326,7 @@ smithers add was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migr
 smithers agents was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#agents
 ```
 
-Removed forms: `agents add|list|reauth|remove|test|capabilities|doctor`.
+Removed forms: `agents add`, `agents list`, `agents reauth`, `agents remove`, `agents test`, `agents capabilities`, `agents doctor`.
 
 #### alerts
 
@@ -369,7 +370,7 @@ smithers claude-shell was removed in 1.0.0-rc.0: moved to the plugins repository
 smithers cron was removed in 1.0.0-rc.0: moved to the plugins repository or deferred (cron returns on @smthrs/triggers). See https://smithers.sh/migration/1.0#cron
 ```
 
-Removed forms: `cron start|add|list|rm`.
+Removed forms: `cron start`, `cron add`, `cron list`, `cron rm`.
 
 #### diff
 
@@ -409,7 +410,7 @@ smithers fork was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/t
 
 #### gateway
 
-Section 4.1 keeps `smithers gateway`. These forms are removed, and each prints its own sentence:
+`smithers gateway` remains available. These forms are removed, and each prints its own sentence:
 
 ```
 smithers gateway status was removed in 1.0.0-rc.0: replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted. See https://smithers.sh/migration/1.0#gateway
@@ -440,7 +441,7 @@ smithers help was removed in 1.0.0-rc.0: use `--help`. See https://smithers.sh/m
 smithers herdr was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#herdr
 ```
 
-Removed forms: `herdr status|attach|open|clean`.
+Removed forms: `herdr status`, `herdr attach`, `herdr open`, `herdr clean`.
 
 #### hermes
 
@@ -460,7 +461,7 @@ smithers hijack was removed in 1.0.0-rc.0: not available; use `steer`, `signal`,
 smithers human was removed in 1.0.0-rc.0: approvals park the run; use `ps --status waiting-approval`, `approve`, and `deny`. See https://smithers.sh/migration/1.0#human
 ```
 
-Removed forms: `human list|resolve`.
+Removed forms: `human list`, `human resolve`.
 
 #### kill
 
@@ -522,7 +523,7 @@ smithers observability was removed in 1.0.0-rc.0: moved to the plugins repositor
 smithers openapi was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#openapi
 ```
 
-Removed forms: `openapi list|generate`.
+Removed forms: `openapi list`, `openapi generate`.
 
 #### optimize
 
@@ -536,7 +537,7 @@ smithers optimize was removed in 1.0.0-rc.0: not part of the engine release. See
 smithers packs was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#packs
 ```
 
-Removed forms: `packs list|update`.
+Removed forms: `packs list`, `packs update`.
 
 #### pause
 
@@ -688,7 +689,7 @@ smithers timetravel was removed in 1.0.0-rc.0: time travel is a library API (@sm
 smithers token was removed in 1.0.0-rc.0: moved to the plugins repository or deferred. See https://smithers.sh/migration/1.0#token
 ```
 
-Removed forms: `token issue|exec|revoke`.
+Removed forms: `token issue`, `token exec`, `token revoke`.
 
 #### top
 
@@ -728,7 +729,7 @@ smithers what was removed in 1.0.0-rc.0: removed with the JSX inline workflow. S
 
 #### workflow
 
-Section 4.1 keeps `smithers workflow list`. These forms are removed, and each prints its own sentence:
+`smithers workflow list` remains available. These forms are removed, and each prints its own sentence:
 
 ```
 smithers workflow run was removed in 1.0.0-rc.0: JSX pack tooling is gone; `smithers migrate` replaces `upgrade`. See https://smithers.sh/migration/1.0#workflow
@@ -751,7 +752,7 @@ smithers workflows was removed in 1.0.0-rc.0: use `ls`. See https://smithers.sh/
 smithers worktrees was removed in 1.0.0-rc.0: time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. See https://smithers.sh/migration/1.0#worktrees
 ```
 
-Removed forms: `worktrees list|prune`.
+Removed forms: `worktrees list`, `worktrees prune`.
 
 {/* generated:removed-commands end */}
 
@@ -1787,7 +1788,7 @@ a reason when that directory is not on the machine.
 | `prohibitions`  | `ReadonlyArray<string>`       | The rules the migration may not break, in the order the prompt states them.                                                                                                                                                                                                                    |
 | `role`          | `string`                      | What the agent is for, in two sentences.                                                                                                                                                                                                                                                       |
 | `targetModel`   | `string`                      | The 1.0 authoring model in one page.                                                                                                                                                                                                                                                           |
-| `examples`      | `ReadonlyArray<Example>`      | Old and new pairs, copied verbatim from `docs/migration/feature-parity-audit.md`.                                                                                                                                                                                                              |
+| `examples`      | `ReadonlyArray<Example>`      | Old and new pairs, copied verbatim from the verified migration examples.                                                                                                                                                                                                                       |
 | `text`          | `string`                      | Role, rules, target model, worked pairs, and how to fill the result.                                                                                                                                                                                                                           |
 | `UnitBrief`     | `Schema`                      | One unit as the agent receives it: captured sources, construct rows, mapping rows with rewrite snippets, hints, scanner warnings about its own sources, unsafe list, operator decisions, run-state paths, approved packages, commands, and whether a flow is expected by the time it verifies. |
 | `unitPrompt`    | `(unit, failures?) => string` | The task, with sources numbered and every later section referring to them by line.                                                                                                                                                                                                             |
@@ -2035,8 +2036,8 @@ modules are reached by subpath only, so importing the package never loads the
 | `Contract.prohibitions`              | const        | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | The prohibitions, one sentence each, in the order they appear in `text`.                                                                                                                                                                                                     |
 | `Contract.role`                      | const        | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | The agent's role, in one paragraph.                                                                                                                                                                                                                                          |
 | `Contract.targetModel`               | const        | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | The target model, in one page: every API a migrated unit is allowed to reach for, with the module it comes from.                                                                                                                                                             |
-| `Contract.Example`                   | interface    | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | One verified old-to-new pair, copied from `docs/migration/feature-parity-audit.md`.                                                                                                                                                                                          |
-| `Contract.examples`                  | const        | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | The worked pairs the prompt carries, verbatim from the parity audit.                                                                                                                                                                                                         |
+| `Contract.Example`                   | interface    | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | One verified old-to-new pair used to teach the transform agent.                                                                                                                                                                                                              |
+| `Contract.examples`                  | const        | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | The worked pairs the prompt carries.                                                                                                                                                                                                                                         |
 | `Contract.fenced`                    | const        | conversions  | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | A fenced block the content cannot close.                                                                                                                                                                                                                                     |
 | `Contract.inline`                    | const        | conversions  | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | A code span the content cannot end: one backtick longer than the longest run inside, padded when the text itself starts or ends with one.                                                                                                                                    |
 | `Contract.ConstructRow`              | const        | models       | `@smthrs/migrate` or `@smthrs/migrate/flow/Contract` | One inventory row as the prompt carries it: where the construct is, what props it had, and what class the scanner gave it.                                                                                                                                                   |

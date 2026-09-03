@@ -34,9 +34,8 @@ const SKILLS = readdirSync(skillsRoot, { withFileTypes: true })
   .sort();
 
 /**
- * Every alias rc-contract section 4.2 keeps. Naming one of these is correct,
- * not a defect: `inspect`, `why`, `events`, `resume`, `gateway`, and
- * `workflow list` all still resolve.
+ * Every alias the CLI keeps. Naming one is correct: `inspect`, `why`,
+ * `events`, `resume`, `gateway`, and `workflow list` all still resolve.
  */
 const ALIASES = Verb.shipped.flatMap((entry) => entry.aliases);
 
@@ -56,8 +55,7 @@ const REMOVED_VERBS = Unsupported.removedVerbs.flatMap((entry) =>
 );
 
 /**
- * The 0.x flags, JSX APIs, and pack paths 1.0 removed. These have no CLI table
- * to read: PLAN.md Phase 1 deleted them from the tree.
+ * The 0.x flags, JSX APIs, and pack paths 1.0 removed.
  */
 const REMOVED_APIS = [
   "ask-human",
@@ -168,8 +166,8 @@ describe("the smithers on-ramp", () => {
     .join("\n");
 
   it("treats no surviving alias as a removed verb", () => {
-    // rc-contract section 4.2 keeps six aliases. A removed-verb list that
-    // swept one up would fail every skill that documents it correctly.
+    // A removed-verb list that swept up an alias would fail every skill that
+    // documents it correctly.
     for (const alias of ALIASES) {
       assert.ok(
         !REMOVED_VERBS.includes(`smithers ${alias}`),
@@ -223,8 +221,8 @@ describe("the smithers on-ramp", () => {
   });
 
   it("does not promise that the companion skills install themselves", () => {
-    // rc-contract.md ruling F2: `skills add` writes the single curated
-    // `smithers` skill. The README said the other four were "installed the
+    // `skills add` writes the single curated `smithers` skill. The README said
+    // the other four were "installed the
     // same way", which sends a reader to a command that never writes them.
     const readme = readFileSync(join(skillsRoot, "smithers/README.md"), "utf8");
     const companions = readme.split("## The companion skills")[1];
@@ -269,9 +267,8 @@ describe("installing the curated skill", () => {
   it("writes the curated skill into a detected agent directory", (t) => {
     if (!hasSkillsVerb()) {
       t.skip(
-        "`smithers skills add` is not in this CLI yet. It is the cli-ops lane's verb " +
-          "(rc-contract.md section 4.1) and it installs this lane's skills/ tree. " +
-          "The install contract this test asserts is pinned by the source-side checks above.",
+        "`smithers skills add` is not in this CLI. The install behavior this test asserts " +
+          "is pinned by the source-side checks above.",
       );
       return;
     }
@@ -318,11 +315,8 @@ describe("installing the curated skill", () => {
     // other installed content is a failure.
     if (typeof Agents.skillMissing !== "function") {
       t.skip(
-        "`packages/cli/src/Agents.ts` has no `skillMissing`, so this tree is below cli-ops " +
-          "3db3a1b3bf, which adopted deferred hunk records 4 and 6 " +
-          "(migration/phase4/pack-skills-plugins-deferred-hunks.patch). rc-contract.md ruling F2 " +
-          "is met at that commit and later, and this case then holds the install to the curated " +
-          "file byte for byte.",
+        "`packages/cli/src/Agents.ts` has no `skillMissing`; this case requires that API and " +
+          "then holds the installed skill to the curated file byte for byte.",
       );
       return;
     }

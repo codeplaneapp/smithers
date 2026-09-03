@@ -4,7 +4,7 @@
  *
  * The shebang pins Node for every installation path — `npm install -g`, `npx`,
  * and `bun x --package @smthrs/cli smithers` — because the durable engine is
- * unsupported on Bun (rc-contract.md section 1). Bun honours the shebang unless
+ * unsupported on Bun (the release policy). Bun honours the shebang unless
  * `--bun` is passed, and `--bun` execution of this CLI is unsupported.
  *
  * A published install ships `dist/esm/bin.js`, so the shim runs the built

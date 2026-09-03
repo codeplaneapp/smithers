@@ -17,17 +17,15 @@ const appsDir = fileURLToPath(new URL("../../../", import.meta.url));
 
 const readWorkflow = <T>(name: string): T => parse(readFileSync(`${workflowsDir}${name}`, "utf8")) as T;
 
-describe("canary.yml stays inert until the cutover", () => {
+describe("canary.yml stays inert until deployment ownership moves", () => {
   test("the repository guard names smithersai/flows, so the schedule never fires here", () => {
-    // rc-contract R-27 and the disposition-ledger row for this file: the
-    // deployed Worker at canary.smithers.sh and its hourly job are not an rc.0
-    // validation surface, and `apps/server`'s deploy path is broken until the
-    // Plue cutover (a Phase 7 gate). The guard is what keeps the job from
+    // The deployed Worker at canary.smithers.sh and its hourly job are not an
+    // rc.0 validation surface. The guard is what keeps the job from
     // starting: flipped to this repository it would run hourly against a
     // deployment this repository does not yet own, and its alert step files a
     // GitHub issue on every failure.
     //
-    // Re-enabling the canary is a deliberate act after the cutover: change this
+    // Re-enabling the canary is a deliberate act after ownership moves: change this
     // line, and this test with it.
     const canary = readWorkflow<{ jobs: Record<string, { if?: string }> }>("canary.yml");
     expect(canary.jobs.probe.if).toBe("github.repository == 'smithersai/flows'");

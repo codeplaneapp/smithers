@@ -160,7 +160,7 @@ describe("Smithers 0.x detection", () => {
     expect(Project.legacyState(nested)).toEqual([join(root, "smithers.db")])
   })
 
-  it("writes the notice rc-contract section 6 specifies", () => {
+  it("writes the notice the release policy specifies", () => {
     const notice = Project.legacyNotice("/work/smithers.db")
 
     expect(notice).toContain("Found Smithers 0.x state at /work/smithers.db")

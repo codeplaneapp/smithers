@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { pathToFileURL } from "node:url"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 import { isHistorical, pages } from "./docs-pages.mjs"
 
 /** The hyphenated placeholders and the token each becomes. */

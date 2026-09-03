@@ -278,7 +278,7 @@ const makeWithEngineJj = (
       interrupt: driver.interrupt,
       // The driver's refusal, forwarded rather than re-implemented: the
       // durable engine has one cancellation path, so `interruptUnsafe` fails
-      // with `unsafe_interrupt_unsupported` here too (rc-contract §7).
+      // with `unsafe_interrupt_unsupported` here too (the release policy).
       interruptUnsafe: driver.interruptUnsafe,
       resume: driver.resume,
       actionExecute,

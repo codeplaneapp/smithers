@@ -355,7 +355,7 @@ describe("resuming a run another process owns", () => {
     }))
 
     expect(observed.held.status).toBe("accepted")
-    // rc-contract 5.1: a live peer's run answers ClaimLost. Answering
+    // release policy 5.1: a live peer's run answers ClaimLost. Answering
     // `Accepted` here reported a restart that never happened and hid the peer.
     expect(observed.failure).toBeInstanceOf(ClaimLost)
     expect(observed.after.status).toBe("accepted")
@@ -405,12 +405,11 @@ describe("cancelling a run nobody is driving", () => {
 
     // A parked run has no owner, so no owner is ever going to act on the
     // durable request: the cancelling process is the only one that can finish
-    // it. Answering `Accepted` and leaving the row parked is what left the
-    // Phase 7 smoke two runs that `cancel`, `down`, and `gc` could none of
-    // them reach (smoke section 3, "the parked rows cannot be terminated").
+    // it. Answering `Accepted` and leaving the row parked left two runs that
+    // `cancel`, `down`, and `gc` could not reach during the release rehearsal.
     expect(observed.receipt).toEqual({ _tag: "Terminal", runId: observed.runId, status: "cancelled" })
     expect(observed.summary.status).toBe("cancelled")
-    // Both halves, as rc-contract 5.1 requires: the engine row carries the
+    // Both halves: the engine row carries the
     // request the engine settles on, and the control row is terminal now.
     expect(observed.row.cancelRequestedAtMs).not.toBeNull()
     expect(observed.kinds).toContain(Cancellation.requestedEventType)
@@ -443,7 +442,7 @@ describe("a cancel repeated against a run it cannot finish", () => {
     expect(observed.third._tag).toBe("Accepted")
     // One operator, one cancellation, one attribution record. `cancel` runs
     // with `replay: false`, so every repeat re-executes the whole effect, and
-    // the Phase 7 smoke's three `cancel` calls plus one `down` left four
+    // the release validation's three `cancel` calls plus one `down` left four
     // `control.run.cancel-requested` events for one cancellation.
     expect(observed.kinds.filter((kind) => kind === Cancellation.requestedEventType)).toHaveLength(1)
     // The engine row is asked every time — first-writer-wins keeps the
@@ -478,7 +477,7 @@ describe("resuming a run that has already settled", () => {
     // Terminality is read BEFORE the replay, as `cancel` reads it. Replaying
     // the recorded receipt answered `AlreadyApplied` for a run that had since
     // finished, which tells the operator a restart happened and says nothing
-    // about the run they asked about (Phase 7 smoke, spec item 3).
+    // about the run they asked about (release validation, spec item 3).
     expect(observed.again).toEqual({ _tag: "Terminal", runId: observed.runId, status: "completed" })
   })
 })

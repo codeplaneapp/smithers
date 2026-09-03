@@ -157,7 +157,7 @@ describe("smithers entrypoint", () => {
       // Effect makes that whole path the error's `name`. The operator wants
       // the class out of it, not the namespace it lives in.
       status(entrypoint, failure(Object.assign(new Error("no wait matched"), { _tag: "/control/NoMatchingWait" })))
-      // rc-contract section 2 promises a refused database open renders by its
+      // the release policy promises a refused database open renders by its
       // stable code, which is what a script greps for. The refusal arrives as
       // a defect rather than a typed failure because `NodeDatabase.layer`
       // keeps the `never` error channel eleven packages compose against.

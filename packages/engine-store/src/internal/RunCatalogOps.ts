@@ -140,7 +140,7 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient> =>
     // a declared column and SQLite documents that a rebuild may reassign it.
     // The order the rebuild leaves is what this read depends on, not the
     // numbers, and `VACUUM INTO` — the hot backup this release ships, and the
-    // only rebuild in the supported path (rc-contract section 2) — preserves
+    // only rebuild in the supported path (the release policy) — preserves
     // it. `RunCatalogCatchUp.test.ts` pins that across a real backup and
     // reopen, including after retention has deleted rows out of the middle
     // and the end.

@@ -252,7 +252,7 @@ const raceStep = (
  *
  * `interrupt` uses the engine's cooperative `FlowRuntime.interrupt`, which
  * delivers the interruption to the live body fiber. It is the durable engine's
- * only cancellation path: `docs/migration/rc-contract.md` section 7 requires
+ * only cancellation path: the release policy requires
  * `interruptUnsafe` to fail there with `unsafe_interrupt_unsupported`, so an
  * adapter built on it could not run a single interrupt pin against the engine
  * that ships.

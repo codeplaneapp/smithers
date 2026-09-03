@@ -1,8 +1,7 @@
 # Release runbook: publishing the Smithers release train
 
-Scope: the 40 packages `node scripts/pack-release.mjs --names` prints — every
-non-private manifest whose `smthrs.group` is `engine` or `agent`, which is the
-public set frozen in `docs/migration/rc-contract.md` section 3.1. Smithers 1.0
+Scope: the 40 packages `node scripts/pack-release.mjs --names` prints: every
+non-private manifest whose `smthrs.group` is `engine` or `agent`. Smithers 1.0
 gives them one synchronized version, so `@smthrs/cli`, `@smthrs/control`, the
 rest of the agent layer, and the unscoped `smthrs` migration notice publish
 together with the engine. `tooling` packages are private and are never packed.
@@ -34,8 +33,8 @@ These are decisions and account state, not code. Do them once.
         | xargs -n1 -I{} sh -c 'npm view {} name >/dev/null 2>&1 && echo "taken: {}" || echo "free:  {}"'
       ```
 - [x] The `LICENSE` copyright holder is confirmed by the owner (2026-08-17):
-      MIT, `Copyright (c) 2026 William Cory and the Smithers Flows contributors`,
-      accepted as final and frozen by `rc-contract.md` ruling R-26. Every tarball
+      MIT, `Copyright (c) 2026 William Cory and the Smithers Flows contributors`.
+      Every tarball
       ships this file, and a published version is immutable, so changing the
       holder later requires a new version and a superseding maintainer ruling.
 - [ ] The GitHub environment `npm-publish` exists on this repository and carries
@@ -132,8 +131,8 @@ done
 `@smthrs/platform-bun` declares `@effect/platform-bun` as an optional peer.
 Install it in the verification project too, or that one import fails by design.
 
-`smthrs` is the migration notice, and importing it throws by design
-(`rc-contract.md` section 3.3). Both loops above report it as a failure; that
+`smthrs` is the migration notice, and importing it throws by design. Both
+loops above report it as a failure; that
 is the pass. `scripts/smoke-release.mjs` encodes the same expectation, so the
 release workflow gets it right without a human reading the output.
 

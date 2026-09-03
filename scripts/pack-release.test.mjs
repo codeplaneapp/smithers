@@ -108,14 +108,14 @@ test("workspaces covers every non-private engine and agent package under package
   assert.deepEqual([...workspaces].sort(), published.sort())
   // Every tooling package is private. The build graph, its CLI, the typed
   // BUILD.ts rules, and the hosted cache deployment are workspace machinery,
-  // not a supported install (rc-contract.md section 3.2).
+  // not a supported install.
   const tooling = manifests.filter(([, manifest]) => manifest.smthrs?.group === "tooling")
   assert.ok(tooling.length > 0)
   assert.deepEqual(tooling.filter(([, manifest]) => manifest.private !== true).map(([name]) => name), [])
 })
 
 test("the packed set is exactly the 40 names the RC contract publishes", () => {
-  // rc-contract.md section 3.1 is the release decision; group membership is
+  // `publishedPackages` is the release decision; group membership is
   // only how it is enforced. Restating the roster here means a package that
   // joins or leaves the release has to change both files in one diff.
   const manifests = readWorkspaceManifests()
@@ -462,7 +462,7 @@ test("no published source module default-imports a sibling or exports a default"
   // it out is named exports only, and this walk is what holds the convention.
   //
   // The walk covers exactly the packages the RC contract publishes, and only
-  // their `src`: legacy/, private workspaces, tests, and docs are never read.
+  // their `src`: private workspaces, tests, and docs are never read.
   const manifests = readWorkspaceManifests()
   assert.equal(manifests.size, publishedPackages.length)
   const sites = []

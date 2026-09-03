@@ -50,5 +50,5 @@ reported by the fields it does carry, contract code first:
 ## Command documentation
 
 The [`smithers` command pages](/cli) are generated from the real Effect CLI
-parser and the frozen release contract. This API page documents the library
+parser and the frozen release policy. This API page documents the library
 surface used to compose or embed that executable.

@@ -130,7 +130,7 @@ defect with `isUnsupportedDatabase` when a command needs to report it.
 | `database_locked`           | a peer held the file for the whole ladder, so it was never read | `<path> could not be inspected because another process holds it`                     |
 
 The runtime check runs first, so a Bun process learns it is the wrong runtime
-rather than something about the file it named (exclusion X-18). The file check
+rather than something about the file it named. The file check
 reads `sqlite_master` through a read-only connection, including for a SQLite
 `file:` URI filename, which `node:sqlite` accepts and which would otherwise slip
 past a filesystem probe. A URI is probed by its path alone: its query says how
@@ -139,7 +139,7 @@ to open the file, never which tables the file holds, and a read-only open of
 wave a 0.x database through. It says nothing when the file cannot be inspected
 at all: a path that does not exist, a directory, an in-memory name, or a file
 SQLite refuses to read. None of those is a 0.x database, so the driver's own
-open decides what happens next (exclusion X-13).
+open decides what happens next.
 
 A file a peer holds locked is not one of those cases. The probe retries on the
 same ladder the open uses, so a 0.x `smithers.db` is refused whether or not a

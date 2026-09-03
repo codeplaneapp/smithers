@@ -32,7 +32,7 @@ describe("the environment contract", () => {
   })
 
   it("gives a `FLOWS_*` alias to the four families the contract renames, and to nothing else", () => {
-    // rc-contract section 4: `FLOWS_REMOTE`, `FLOWS_MCP_CONFIG`,
+    // the release policy: `FLOWS_REMOTE`, `FLOWS_MCP_CONFIG`,
     // `FLOWS_OPENAI_AUTH`, and `FLOWS_TEST_*` are the names the imported CLI
     // read, so they are the names that keep working through rc.0. Aliasing
     // every entry invented four spellings — `FLOWS_BACKEND`, `FLOWS_JJ_PATH`,
@@ -102,7 +102,7 @@ describe("the database-backend refusal", () => {
     expect(Environment.unsupportedBackend("sqlite")).toBeUndefined()
   })
 
-  it("uses rc-contract section 2's sentence verbatim for every other value", () => {
+  it("uses the release policy's sentence verbatim for every other value", () => {
     // The contract prints one exact sentence, and an operator's script greps
     // for it. Paraphrasing it — this module said "pglite is not supported in
     // 1.0.0-rc.0" and never named the fix — is a contract change. The literal

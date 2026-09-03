@@ -1,7 +1,7 @@
 /**
  * Reading a Smithers 0.x database without adopting it.
  *
- * rc-contract section 6: rc.0 never loads, resumes, or migrates 0.x run state.
+ * The release policy: rc.0 never loads, resumes, or migrates 0.x run state.
  * The one read it performs is this listing, and it must be read-only: the
  * refusal exists so an operator does not lose a run they could still finish on
  * 0.x.
