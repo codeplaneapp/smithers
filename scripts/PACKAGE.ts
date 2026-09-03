@@ -45,6 +45,40 @@ const packManifest = Smithers.NodeTest({
 })
 
 /**
+ * Checks the changelog generator: the commit-subject parse, the grouping, the
+ * rendering, and that a second run over one range writes the same bytes.
+ *
+ * The cases drive real temporary repositories. The generator's whole input is
+ * `git log`, `git describe`, and `git tag --points-at`, so a recorded log would
+ * only prove that the recording agrees with itself.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const changelog = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/generate-changelog.test.mjs")]),
+  srcs: sources,
+  deps: []
+})
+
+/**
+ * Checks that a cut writes the version and the changelog, verifies both, and
+ * tags without pushing.
+ *
+ * The fixture is a temporary repository holding copies of the three scripts a
+ * cut spawns, so a case cannot reach this checkout's manifests: every one of
+ * them resolves its repository root from its own location.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const releaseCut = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/cut-release.test.mjs")]),
+  srcs: sources,
+  deps: []
+})
+
+/**
  * Checks that the dry-run path of `release.yml` skips publication and that a tag
  * push does not.
  *
@@ -311,6 +345,7 @@ const localSmithersUnit = Smithers.NodeTest({
 export const Package = Smithers.Package({
   targets: {
     browserContract,
+    changelog,
     dependencyBoundaries,
     effectVersion,
     localSmithers,
@@ -319,6 +354,7 @@ export const Package = Smithers.Package({
     npmDedupe,
     npmDedupeUnit,
     packManifest,
+    releaseCut,
     releasePack,
     releaseRehearsal,
     releaseSmoke,

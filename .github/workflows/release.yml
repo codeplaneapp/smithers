@@ -40,7 +40,12 @@ jobs:
       # publishes: `inputs.dryRun` is absent there, so this resolves to false.
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dryRun }}
     steps:
+      # Full history and tags. The changelog gate below reads the commit range
+      # from the previous v* tag to the tag being released, and the default
+      # shallow checkout carries neither the tags nor the commits.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # actionlint models GitHub's per-key expression-context rules, including
       # the fact that `runner` is available to steps but not a job-level env.
       - name: Validate GitHub Actions workflows
@@ -99,6 +104,13 @@ jobs:
               exit 1
             fi
           done
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
+      # The changelog is generated from the commit range, so a release whose
+      # section is missing or stale is a release nobody wrote up. Failing here
+      # costs a re-tag; failing after the publish step costs an immutable npm
+      # version whose changelog says nothing about it.
+      - name: Release changelog section
+        run: node scripts/generate-changelog.mjs --check --version "$RELEASE_VERSION"
       - name: Typecheck all workspaces
         run: pnpm run check
       - name: Test all workspaces

@@ -8,6 +8,15 @@ export const rootTsconfig = Smithers.file("//tsconfig.base.json")
 export const workspaceTsconfig = Smithers.file("//tsconfig.json")
 export const rootJSDocConfig = Smithers.file("//eslint.jsdoc.js")
 export const rootInvariantsConfig = Smithers.file("//eslint.invariants.js")
+
+// --- reference docs pipeline (apps/site/prompts/*.md) ---------------------
+// The agent that writes generated reference pages. Declared inline because
+// this workspace has no `.smithers/agents.ts`; `S.Agents.<name>` would fail
+// at index time. Pages are committed, so the model only runs under
+// `smithers-build target <pkg>:referenceDocs --write`, never under `ci`.
+export const docsWriter = Smithers.Agent.ClaudeCode({ model: "opus" })
+export const referenceStyle = Smithers.file("//apps/site/prompts/reference-style.md")
+// --- end reference docs pipeline ------------------------------------------
 const workspace = Smithers.pnpmWorkspace("//pnpm-workspace.yaml")
 
 const tsconfig = Smithers.Tsconfig({
@@ -425,6 +434,39 @@ const jsdocRules = Smithers.NodeTest({
   deps: []
 })
 
+/**
+ * The commit-level `CHANGELOG.md` section for the version the manifests carry.
+ *
+ * `Generate`'s kinds are `run` and `lint`, not `build` and `lint`, so writing
+ * is `smithers-build run '//:changelog'` and drift-checking is
+ * `smithers-build lint '//:changelog'`. The rule is uncacheable by
+ * construction, which is what a generator reading git history needs: no cache
+ * entry can outlive the commit that invalidates it.
+ *
+ * The declared inputs are the three files the generator reads. Its fourth
+ * input is the commit range, and there is no input declaration for one. The
+ * consequence is visible under `lint`: a check runs the generator against a
+ * scratch copy of the tree that deliberately carries no `.git`, so the check
+ * proves the block is the canonical rendering of the commits it names, not
+ * that it still matches history. The gate that proves it against history is
+ * the `Release changelog section` step in `.github/workflows/release.yml`,
+ * which runs in a full checkout at the tag.
+ *
+ * @since 1.0.0
+ * @category build
+ */
+const changelog = Smithers.Generate({
+  summary: "Regenerate and drift-check the CHANGELOG.md commit section for the current version.",
+  featured: true,
+  script: Smithers.file("//scripts/generate-changelog.mjs"),
+  data: [
+    Smithers.file("//CHANGELOG.md"),
+    Smithers.file("//package.json"),
+    Smithers.file("//packages/smithers/package.json")
+  ],
+  changes: ["CHANGELOG.md"]
+})
+
 // Every nesting depth, in one brace pattern, because a declaration takes one
 // glob and the marker rule already decides the rest: a directory synthesizes
 // the standard targets only when it has a `package.json` and no `PACKAGE.ts`.
@@ -436,5 +478,5 @@ export const packageDefaults = Smithers.PackageDefaults({
 })
 
 export const Package = Smithers.Package({
-  targets: { ci, docsReferenceSync, jsdocRules, jsdocTruthfulness, lockfile, nodeModules, tsconfig }
+  targets: { changelog, ci, docsReferenceSync, jsdocRules, jsdocTruthfulness, lockfile, nodeModules, tsconfig }
 })

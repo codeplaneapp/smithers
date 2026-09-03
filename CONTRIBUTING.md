@@ -37,6 +37,7 @@ The cost is that one edit lands in several places. If you change:
 | root `package.json` scripts                   | `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` (the aggregator roster)                                                                                                          |
 | root `PACKAGE.ts` CI jobs, steps, or triggers | the generated `.github/workflows/ci.yml` (`pnpm exec smithers-build build '//:ci'` with `mode: "write"`), and `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` (source-text pins) |
 | `.github/workflows/release.yml`               | the same suite, plus `scripts/release-rehearsal.test.mjs`                                                                                                                              |
+| `CHANGELOG.md` release sections               | nothing by hand inside a `<!-- commits:… -->` block — `pnpm exec smithers-build run '//:changelog'` writes it and `lint '//:changelog'` drift-checks it. See “Cutting a release”         |
 
 Miss one and CI reports a generated file as a hand edit, which is exactly
 what it should do — it cannot tell your deliberate change from a stray one.
@@ -260,6 +261,118 @@ To move `packages/<child>` under `packages/<parent>`:
 ## Working with the pinned jj fork
 
 The Rust crates under `crates/` build against `jj-lib` from the pinned jj fork, which `crates/flows-jj/Cargo.toml` declares as a git dependency; cargo fetches it, so a plain `git clone` needs no extra step.
+
+## Cutting a release
+
+A release is one commit and one tag. The commit carries the version bump and
+the changelog section; the tag is what publishes. Pushing a `v*` tag starts
+`.github/workflows/release.yml`, which validates the tag, runs every gate,
+packs the 40-name publish set, smoke-tests the tarballs, and publishes to npm.
+npm versions are immutable, so everything that can be proved before the push
+is proved before the push.
+
+The order is bump → changelog → commit → tag → push the tag → `release.yml`
+publishes.
+
+### 1. Rehearse
+
+Dispatch the workflow at the version you are about to cut, with the dry run
+left on. It runs every gate, packs, and smoke-tests, and publishes nothing:
+
+```sh
+gh workflow run release.yml -f releaseTag=v<version> -f dryRun=true
+```
+
+`node scripts/release-rehearsal.mjs --tag v<version>` runs the same workflow's
+`run:` bodies locally, against the tree you have. `--only` and `--skip` select
+steps by name; `--skip Pack --skip Build` is the fast pass over the validation
+half.
+
+### 2. Cut
+
+```sh
+node scripts/cut-release.mjs <version>
+```
+
+That sets every workspace manifest, every internal `@smthrs/*` range, and the
+three sources that repeat the version as a literal
+(`scripts/set-release-version.mjs`), writes the commit section into
+`CHANGELOG.md` (`scripts/generate-changelog.mjs`), and then verifies both with
+the same `--check` invocations `release.yml` runs. It prints the two commands
+to run next and touches git not at all.
+
+`--commit` records and tags the cut for you. It refuses a dirty working copy,
+because `git commit -am` would sweep someone else's edit into the release:
+
+```sh
+node scripts/cut-release.mjs <version> --commit
+```
+
+Neither form pushes. Nothing in this repository pushes a tag.
+
+### 3. Push
+
+```sh
+jj commit -m "🔖 release: <version>"       # or the --commit above
+git tag v<version> && git push origin main v<version>
+```
+
+### What the changelog generator owns
+
+`CHANGELOG.md` is the complete, commit-level changelog. A section has two
+halves, and only one of them is generated:
+
+```md
+## 1.0.0 (2026-09-03)
+
+The narrative — written by a person, never touched by the generator.
+
+<!-- commits:1.0.0 -->
+
+1230 commits since [v0.35.0](…).
+
+### 🐛 Bug fixes
+
+- **engine:** … ([369a03babf](…))
+
+<!-- /commits:1.0.0 -->
+```
+
+Everything between the markers is generated from `git log` over the range from
+the last `v*` tag to `HEAD`, grouped by conventional-commit type, labelled with
+each commit's scope, and linked to the commit. Commits of type `release` are
+skipped, so the release commit a cut writes does not make the section it just
+generated stale. Nothing outside the markers is rewritten, so regenerating can
+never eat the narrative.
+
+Two targets cover it:
+
+| Target                | Verb          | What it does                                                          |
+| --------------------- | ------------- | --------------------------------------------------------------------- |
+| `//:changelog`        | `run`         | writes the block for the version `packages/smithers/package.json` carries |
+| `//:changelog`        | `lint`        | drift-checks it                                                        |
+
+`run`, not `build`: `Generate` declares the kinds `run` and `lint`
+(`packages/smithers/build/targets/src/Compose.ts:729`), so `smithers-build
+build '//:changelog'` selects nothing.
+
+The `lint` verb runs the generator inside a scratch copy of the tree, and that
+copy carries no `.git`
+(`packages/smithers/build/build-cli/src/PackageTree.ts:1266`). With
+no history to read, the generator re-renders the block from its own contents,
+so the lint proves the block is canonically grouped, ordered, labelled, linked,
+and counted — the drift a hand edit introduces — and not that it still matches
+history. The gate that proves it against history is the `Release changelog
+section` step in `release.yml`, which runs `--check` in a full checkout at the
+tag and fails the release before anything is packed.
+
+There is no `//:cutRelease` target, because a cut takes the version as an
+argument and no `run`-verb rule in the target library accepts a per-invocation
+argument: `ToolRun`'s `args` are fixed strings
+(`packages/smithers/build/targets/src/ToolRun.ts:30`), and the `Shell.*` rules
+take strings or `S.Flags` references, which resolve to fixed text the workspace
+declares (`packages/smithers/build/targets/src/WorkspaceDeclaration.ts:201`).
+The cut is an operator command, and `//scripts:releaseCut` is its gate.
 
 ## JSDoc convention
 
