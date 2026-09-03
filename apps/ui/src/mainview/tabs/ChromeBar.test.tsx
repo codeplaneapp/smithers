@@ -529,7 +529,7 @@ describe("the sidebar's file tree", () => {
       ".git": () => json(200, { kind: "dir", path: ".git", entries: [{ name: "HEAD", kind: "file" }], truncated: true }),
       "boom": () => json(500, { error: { code: "read_failed", message: "Could not list boom." } }),
       "packages": () => json(200, { kind: "dir", path: "packages", entries: [{ name: "ui", kind: "dir" }, { name: "PACKAGE.ts", kind: "file" }] }),
-      "packages/smithers/ui": () => json(200, { kind: "dir", path: "packages/smithers/ui", entries: [] }),
+      "packages/ui": () => json(200, { kind: "dir", path: "packages/ui", entries: [] }),
       "README.md": () => json(200, { kind: "file", path: "README.md", size: 14, content: "# Local — hi\n", truncated: false, binary: false })
     }
     const services: AppServices = {
@@ -583,8 +583,8 @@ describe("the sidebar's file tree", () => {
     expect(requests[1]).toEqual({ repoId: "repo-smithers", path: "packages" })
     expect(names(tree, ".sui-file-tree-dir-name")).toEqual([".git", "boom", "packages", "ui"])
     expect(names(tree, "[data-slot=file-tree-file]")).toEqual(["PACKAGE.ts", "README.md", "zeta.txt"])
-    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${COPY}#packages/smithers/ui"]`)?.click())
-    expect(host.querySelector(`[data-testid="repo-tree-state-${COPY}#packages/smithers/ui"]`)?.textContent).toBe("empty")
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${COPY}#packages/ui"]`)?.click())
+    expect(host.querySelector(`[data-testid="repo-tree-state-${COPY}#packages/ui"]`)?.textContent).toBe("empty")
 
     // The capped listing shows the existing truncated line; a failure shows the route's message verbatim, in place.
     await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${COPY}#.git"]`)?.click())
