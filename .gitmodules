@@ -1,4 +1,0 @@
-[submodule "vendor/jj"]
-	path = vendor/jj
-	url = https://github.com/smithersai/jj.git
-	branch = flows-wasm

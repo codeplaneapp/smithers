@@ -12,14 +12,13 @@
  * `//crates/flows-jj` under the test verb would pull it into both.
  */
 import { Smithers } from "@smthrs/targets"
-import { runtime } from "../../PACKAGE.ts"
 
 /**
- * The crate sources, the vendored jj submodule's manifests, and the lockfile.
+ * The crate sources, the workspace manifest, and the lockfile.
  *
- * `vendor/jj` is a git submodule the crate builds against; a checkout without it
- * fails on a missing manifest, which is why the CI jobs that use these targets
- * declare `submodules`.
+ * The jj fork the crate builds against is a cargo git dependency pinned to one
+ * rev, so the lockfile is the whole of its declaration here and a fresh checkout
+ * needs nothing beyond `cargo fetch`.
  */
 const sources = [
   Smithers.glob("//crates/flows-jj/**/*.rs"),
@@ -55,7 +54,7 @@ const cargoClippy = Smithers.Cargo.Clippy({
 })
 
 /**
- * Runs the crate's native test suite against the vendored jj-lib.
+ * Runs the crate's native test suite against the pinned jj-lib.
  *
  * @since 0.1.0
  * @category test
@@ -74,7 +73,6 @@ const cargoTest = Smithers.Cargo.Test({
  * @category test
  */
 const buildScript = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//crates/flows-jj/build-wasm.test.mjs")]),
   srcs: [Smithers.file("//crates/flows-jj/build-wasm.mjs")],
   deps: []
@@ -97,9 +95,8 @@ const buildScript = Smithers.NodeTest({
  * @category test
  */
 const wasmReproducibility = Smithers.NodeTest({
-  runtime,
   runner: Smithers.entrypoint(Smithers.file("//crates/flows-jj/build-wasm.mjs"), ["--verify"]),
-  srcs: [...sources, Smithers.file("//packages/jj/wasm/flows_jj.wasm")],
+  srcs: [...sources, Smithers.file("//packages/smithers/flows/jj/wasm/flows_jj.wasm")],
   deps: [],
   env: { CARGO_TARGET_DIR: "target/wasm-reproducibility" },
   cwd: "."

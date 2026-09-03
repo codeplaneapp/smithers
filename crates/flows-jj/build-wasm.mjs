@@ -1,11 +1,12 @@
 /**
  * Builds `flows_jj.wasm` — the wasm32-wasip1 reactor module behind
- * `BrowserJj` — and copies it to `packages/jj/wasm/flows_jj.wasm`.
+ * `BrowserJj` — and copies it to `packages/smithers/flows/jj/wasm/flows_jj.wasm`.
  *
  * The Rust side lives in this crate (`crates/flows-jj`), which depends on the
- * patched jj fork at `vendor/jj`. The build runs through the repo-root Cargo
- * workspace so native tests and the wasm artifact share one lockfile, and it
- * builds `--locked` so the artifact always reflects the committed Cargo.lock.
+ * patched jj fork as a git dependency pinned to one rev. The build runs through
+ * the repo-root Cargo workspace so native tests and the wasm artifact share one
+ * lockfile, and it builds `--locked` so the artifact always reflects the
+ * committed Cargo.lock.
  *
  * The committed artifact is a reproducibility contract: CI rebuilds it with
  * the toolchain pinned in `rust-toolchain.toml` and fails on any byte drift.
@@ -152,7 +153,7 @@ export const buildEnvironment = (env, flags) => {
  */
 export const reproductionFailure = (committed, rebuilt) =>
   committed.equals(rebuilt) ? undefined : [
-    "error: packages/jj/wasm/flows_jj.wasm does not reproduce from source.",
+    "error: packages/smithers/flows/jj/wasm/flows_jj.wasm does not reproduce from source.",
     `  committed ${committed.length} bytes, rebuilt ${rebuilt.length} bytes`,
     `  Rebuild it with the pinned toolchain on ${canonicalHost} and commit the result:`,
     "    node crates/flows-jj/build-wasm.mjs",
@@ -164,7 +165,7 @@ const isMain = process.argv[1] !== undefined &&
 
 if (isMain) {
   const artifact = join(targetDir(process.env, repoRoot), "wasm32-wasip1", "release", "flows_jj.wasm")
-  const destinationDir = join(repoRoot, "packages", "jj", "wasm")
+  const destinationDir = join(repoRoot, "packages", "smithers", "flows", "jj", "wasm")
   const destination = join(destinationDir, "flows_jj.wasm")
 
   const rustc = (args) => {

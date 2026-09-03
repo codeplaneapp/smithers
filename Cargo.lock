@@ -562,6 +562,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jj-lib"
 version = "0.44.0"
+source = "git+https://github.com/smithersai/jj.git?rev=47589ada70c12b3e829b5c98ab32503abad49eac#47589ada70c12b3e829b5c98ab32503abad49eac"
 dependencies = [
  "async-trait",
  "blake2",
@@ -607,6 +608,7 @@ dependencies = [
 [[package]]
 name = "jj-lib-proc-macros"
 version = "0.44.0"
+source = "git+https://github.com/smithersai/jj.git?rev=47589ada70c12b3e829b5c98ab32503abad49eac#47589ada70c12b3e829b5c98ab32503abad49eac"
 dependencies = [
  "proc-macro2",
  "quote",

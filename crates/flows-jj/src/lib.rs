@@ -17,7 +17,7 @@
 //!   `flows_jj_call` export.
 //!
 //! Repos use jj's `SimpleBackend` (git interop is out of scope); the on-disk
-//! format compatibility is pinned by the jj submodule at `vendor/jj`.
+//! format compatibility is pinned by the jj fork's rev in `Cargo.toml`.
 
 pub mod abi;
 pub mod diff_render;

@@ -1,12 +1,11 @@
 # Cargo workspace for the Rust side of flows.
 #
-# `vendor/jj` is its own workspace (the pinned jj fork); it is excluded here so
-# `cargo` invoked at the repo root only builds flows crates.
+# The pinned jj fork is a git dependency of `crates/flows-jj`, so cargo fetches
+# and builds it out of its own checkout; nothing about it lives in this tree.
 
 [workspace]
 resolver = "3"
 members = ["crates/flows-jj"]
-exclude = ["vendor/jj"]
 
 # No debuginfo in dev builds: jj-lib's debuginfo multiplies the target dir
 # several times over, and this workspace is exercised through tests, not
