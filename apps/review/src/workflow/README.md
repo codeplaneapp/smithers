@@ -37,8 +37,9 @@ not exist until the verifying round has settled.
 - `reviewSeatResolver.ts` — the only file that reads a credential. It turns a
   logical seat into a live provider route, and honours `ANTHROPIC_BASE_URL` so
   the metered proxy the GitHub Action runs behind still works.
-- `reviewLayer.ts` — two compositions, one seam apart: `layerMemory` for tests
-  and the eval, `layerNode` for a real run over a SQLite file.
+- `reviewLayer.ts` — the shared declarations and `layerMemory` for tests and
+  the eval; `reviewLayerNode.ts` — `layerNode` for a real run over a SQLite
+  file, apart because importing the Node runtime opens `node:sqlite`.
 - `reviewSchemas.ts` — what each round hands the next. A later round reads only
   what it was handed: re-running `git diff` in the last round would read a
   working tree that may have moved under the run.

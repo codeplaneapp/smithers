@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { Review } from "../../../src/workflow/reviewFlow.ts";
-import { layerNode } from "../../../src/workflow/reviewLayer.ts";
+import { layerNode } from "../../../src/workflow/reviewLayerNode.ts";
 import { reviewSeatResolver } from "../../../src/workflow/reviewSeatResolver.ts";
 import { resolveReviewSeats } from "../../../src/workflow/reviewSeats.ts";
 

@@ -25,6 +25,7 @@ const surface = [
   "../src/diffs/renderPierreFileDiff.ts",
   "../src/workflow/reviewFlow.ts",
   "../src/workflow/reviewLayer.ts",
+  "../src/workflow/reviewLayerNode.ts",
   "../src/workflow/openCodeReview.ts",
 ] as const;
 

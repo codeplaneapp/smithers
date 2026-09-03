@@ -20,7 +20,7 @@ import { ghBin } from "../github/runGh.ts";
 import { supersedePriorReviews } from "../github/supersedePriorReviews.ts";
 import { fenceFor } from "../text/fenceFor.ts";
 import { Review } from "../workflow/reviewFlow.ts";
-import { layerNode } from "../workflow/reviewLayer.ts";
+import { layerNode } from "../workflow/reviewLayerNode.ts";
 import { missingSeatCredential, reviewSeatResolver } from "../workflow/reviewSeatResolver.ts";
 import { resolveReviewSeats } from "../workflow/reviewSeats.ts";
 import type { ReviewResult } from "../workflow/reviewSchemas.ts";

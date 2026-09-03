@@ -6,6 +6,12 @@
  * changes is where the run's state lives (a SQLite file or the process) and
  * what a declared seat resolves to (a live provider route or a scripted model).
  *
+ * This module holds the shared declarations and the in-process root. The
+ * durable root lives in `reviewLayerNode.ts`, because building it imports
+ * `@smthrs/flows/NodeRuntime`, which opens `node:sqlite` at import time; a
+ * test that only wants the in-process root has to be loadable on a runtime
+ * without that module.
+ *
  * @since 1.0.0
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -16,7 +22,6 @@ import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Interpreter } from "@smthrs/flow"
-import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import * as Registry from "@smthrs/registry/Registry"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -30,7 +35,7 @@ import {
 } from "./reviewActions.ts"
 import { NarrateChanges, QuizChanges, ReviewFile, VerifyFindings } from "./reviewAgentActions.ts"
 import { NarrateReview, Review, ReviewFiles, VerifyReview } from "./reviewFlow.ts"
-import { modelCallEnvelope, modelCallRules } from "./reviewSeatResolver.ts"
+import { modelCallEnvelope } from "./reviewSeatResolver.ts"
 
 /**
  * Every action implementation and flow registration the review workflow needs,
@@ -90,7 +95,13 @@ export const agentHost = (environment: Readonly<Record<string, string | undefine
  * here would be one no reviewer selected.
  */
 // eslint-disable-next-line no-restricted-syntax -- no approved envelope exists, see above
-const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
+/**
+ * The quota and budget policy both roots run under.
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
 
 /**
  * Builds the review workflow over a caller-supplied seat resolver and the
@@ -116,46 +127,6 @@ export const layerMemory = (
     Layer.provideMerge(NodeCrypto.layer)
   )
 
-/**
- * Builds the review workflow over the durable Node runtime.
- *
- * The run's state lives in `filename`, so a review that dies mid-fan-out
- * resumes into the batches it had already settled instead of re-asking their
- * seats.
- *
- * `rules` is what makes the run able to call a model at all. The durable host
- * guards its HTTP client with the capability kernel, which asks `model:call`
- * on `<host>/<model id>` for every model request; a host built without a rule
- * for it parks the first request on a permission and, with `attended: false`,
- * nobody ever answers. `layerMemory` never meets the check because a scripted
- * seat builds no request, which is why this grant has to be tested through a
- * real route.
- *
- * @since 1.0.0
- * @category layers
- */
-export const layerNode = (options: {
-  readonly filename: string
-  readonly seats: Layer.Layer<SeatResolver.SeatResolver>
-  /** The environment the reachable model hosts are read from. */
-  readonly environment?: Readonly<Record<string, string | undefined>>
-}) => {
-  const environment = options.environment ?? process.env
-  return NodeRuntime.layerHost(
-    {
-      filename: options.filename,
-      owner: { hostId: "smithers-review" },
-      rules: modelCallRules(environment)
-    },
-    declarations.pipe(
-      Layer.provideMerge(Layer.mergeAll(agentHost(environment), options.seats, Agent.layer)),
-      Layer.provideMerge(agentPolicy),
-      Layer.provideMerge(Agent.layerDefaults),
-      Layer.provideMerge(Action.layerImplementations)
-    )
-  )
-}
-
 /** Refuses a composition root that still owes a service. */
 type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
   : false
@@ -164,12 +135,12 @@ type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] 
 type Expect<T extends true> = T
 
 /**
- * Both review runtimes supply every service the workflow can require.
+ * The in-process review runtime supplies every service the workflow can
+ * require; `reviewLayerNode.ts` makes the same promise for the durable one.
  *
  * @category models
  * @since 1.0.0
  */
 export type CompositionRootsAreComplete = [
-  Expect<Complete<ReturnType<typeof layerMemory>>>,
-  Expect<Complete<ReturnType<typeof layerNode>>>
+  Expect<Complete<ReturnType<typeof layerMemory>>>
 ]
