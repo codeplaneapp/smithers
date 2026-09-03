@@ -118,7 +118,7 @@ export interface RuntimeConfig {
   readonly cacheToken?: string | undefined
   readonly signal?: AbortSignal | undefined
   /**
-   * The environment package-mode execution reads for agent-fake selection
+   * The environment PACKAGE.ts execution reads for agent-fake selection
    * (`SMTHRS_AGENT_FAKE`), backend PATH lookups, and outward preconditions.
    * Defaults to `process.env`; tests inject a hermetic record.
    */
@@ -234,8 +234,8 @@ const present = <A>(
 /**
  * Binds a resolved remote cache to the readers that fetch its credentials.
  *
- * Shared by both modes. BUILD mode reaches it through {@link prepare}; package
- * mode builds the same access from the `WORKSPACE.ts` declaration, which used
+ * Shared by both declaration loaders. BUILD.ts reaches it through
+ * {@link prepare}; WORKSPACE.ts builds the same access directly, which used
  * to be schema-validated and then dropped, so a workspace declaring a remote
  * cache ran local-only with no warning and no line in the plan.
  */
@@ -342,10 +342,10 @@ const openWorkspace = async (
 }
 
 /**
- * Opens the PACKAGE.ts index when the resolved workspace is in package mode:
+ * Opens the PACKAGE.ts index when the resolved workspace uses WORKSPACE.ts:
  * the nearest ancestor of the workspace flag holding `.smithers/WORKSPACE.ts`
  * or a root `WORKSPACE.ts` decides. A BUILD.ts workspace has neither and
- * returns undefined, so BUILD mode is untouched.
+ * returns undefined, so BUILD.ts loading is untouched.
  */
 const openPackageIndex = async (
   flags: WorkspaceFlags,
@@ -372,7 +372,7 @@ const openPackageIndex = async (
   return PackageIndex.PackageIndex.make(loaded, process.cwd())
 }
 
-/** Package-mode `query`: the same listing shape BUILD mode prints. */
+/** PACKAGE.ts `query`: the same listing shape BUILD.ts prints. */
 const packageQuery = async (
   index: PackageIndex.PackageIndex,
   expression: string
@@ -444,7 +444,7 @@ const packageQuery = async (
   }
 }
 
-/** Package-mode `graph`: labeled nodes plus classified local and repository edges. */
+/** PACKAGE.ts `graph`: labeled nodes plus classified local and repository edges. */
 const packageGraph = async (
   index: PackageIndex.PackageIndex,
   pattern: string,
@@ -504,22 +504,24 @@ interface CiPlan extends Executor.MergedPlan {
   readonly pattern: string
 }
 
-/**
- * Refuses execution verbs in package mode that stay out of the W2 feature
- * set (`ci`, `docs`, `install`). Failing here is the no-fake-green rule at
- * the CLI boundary.
- */
-const refusePackageMode = async (flags: WorkspaceFlags, verb: string): Promise<void> => {
-  const root = await PackageDiscovery.findWorkspaceRoot(NodePath.resolve(flags.workspace))
-  if (root !== undefined) {
-    throw new Error(
-      `NotImplemented: ${verb} does not execute PACKAGE.ts targets yet; ` +
-        "query, graph, build, test, lint, run, and the bare-label form are the package-mode surface"
-    )
-  }
-}
+/** Removes executor-private fields from the stable plan envelope. */
+const plannedTarget = (target: Planner.PlannedTarget): Planner.PlannedTarget => ({
+  label: target.label,
+  target: target.target,
+  kinds: target.kinds,
+  attrs: target.attrs,
+  dependencies: target.dependencies,
+  declaredInputs: target.declaredInputs,
+  declaredOutputs: target.declaredOutputs,
+  cacheable: target.cacheable,
+  cacheLookup: target.cacheLookup,
+  wouldRun: target.wouldRun,
+  keyMaterial: target.keyMaterial,
+  keyPreview: target.keyPreview,
+  ...(target.nixEnvironment === undefined ? {} : { nixEnvironment: target.nixEnvironment })
+})
 
-/** The mode and invocation flags the package-mode execution surface accepts. */
+/** The mode and invocation flags the PACKAGE.ts execution surface accepts. */
 interface ModeFlags {
   readonly write?: boolean | undefined
   readonly fix?: boolean | undefined
@@ -543,9 +545,9 @@ const parseInputs = (entries: ReadonlyArray<string> | undefined): Readonly<Recor
 }
 
 /**
- * Runs one execution verb through the package-mode executor when the
+ * Runs one execution verb through the PACKAGE.ts executor when the
  * resolved workspace is a PACKAGE.ts workspace, or returns undefined so the
- * caller falls through to BUILD mode.
+ * caller falls through to BUILD.ts loading.
  */
 const runPackageVerb = async (
   verb: PackageExec.PackageVerb,
@@ -559,8 +561,8 @@ const runPackageVerb = async (
   const cacheDirectory = flags.cacheDir === undefined
     ? index.workspace.cache.directory
     : Config.normalizeCacheDirectory(flags.cacheDir)
-  // The WORKSPACE.ts declaration and SMITHERS_CACHE_URL both reach package
-  // mode here, under the same precedence BUILD mode applies.
+  // The WORKSPACE.ts declaration and SMITHERS_CACHE_URL both reach execution
+  // here, under the same precedence BUILD.ts applies.
   const remoteCache = remoteCacheAccess(
     remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
     config
@@ -581,7 +583,8 @@ const runPackageVerb = async (
     message: flags.message,
     sweep: flags.sweep,
     inputs: parseInputs(flags.input),
-    environment: config.environment
+    environment: config.environment,
+    packageName: "name" in flags && typeof flags.name === "string" ? flags.name : undefined
   })
 }
 
@@ -619,12 +622,8 @@ const runVerb = async (
   config: RuntimeConfig,
   reporter: Reporter.Reporter
 ): Promise<Planner.Plan | Executor.Summary | PackageExec.PlanReport> => {
-  if (verb === "docs") {
-    await refusePackageMode(flags, verb)
-  } else {
-    const packaged = await runPackageVerb(verb, pattern, flags, config, reporter)
-    if (packaged !== undefined) return packaged
-  }
+  const packaged = await runPackageVerb(verb, pattern, flags, config, reporter)
+  if (packaged !== undefined) return packaged
   const { remoteCache, workspace } = await openWorkspace(flags, config, !flags.plan)
   const plan = await Planner.make(workspace, verb, pattern)
   if (flags.plan) return plan
@@ -663,7 +662,73 @@ const runCi = async (
   config: RuntimeConfig,
   reporter: Reporter.Reporter
 ): Promise<CiPlan | Executor.Summary> => {
-  await refusePackageMode(flags, "ci")
+  const index = await openPackageIndex(flags, config)
+  if (index !== undefined) {
+    const cacheDirectory = flags.cacheDir === undefined
+      ? index.workspace.cache.directory
+      : Config.normalizeCacheDirectory(flags.cacheDir)
+    const remoteCache = remoteCacheAccess(
+      remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
+      config
+    )
+    const packagePlans: Array<{ readonly kind: (typeof ciKinds)[number]; readonly plan: PackageExec.PackagePlan }> = []
+    const refusals: Array<unknown> = []
+    for (const kind of ciKinds) {
+      try {
+        packagePlans.push({
+          kind,
+          plan: await PackageExec.plan({
+            index,
+            cacheDirectory,
+            ...(remoteCache === undefined ? {} : { remoteCache }),
+            verb: kind,
+            pattern,
+            plan: flags.plan,
+            jobs: flags.jobs,
+            readCache: flags.cache,
+            signal: config.signal,
+            reporter,
+            environment: config.environment
+          })
+        })
+      } catch (cause) {
+        if (cause instanceof Planner.UnsupportedVerbError && cause.verb === kind) refusals.push(cause)
+        else throw cause
+      }
+    }
+    if (packagePlans.length === 0) throw refusals[0] ?? new Error(`no targets selected by ${pattern}`)
+    const merged = Executor.mergePlans(packagePlans.map(({ kind, plan }) => ({
+      verb: kind,
+      pattern,
+      roots: plan.roots,
+      targets: plan.workList,
+      edges: plan.workList.flatMap((node) => node.dependencies.map((from) => ({ from, to: node.label }))),
+      warnings: []
+    })))
+    if (flags.plan) return { verb: "ci", pattern, ...merged, targets: merged.targets.map(plannedTarget) }
+    const nodes = new Map(merged.targets.map((target) => [target.label, target as PackageExec.PackageNode]))
+    const closures = new Map(packagePlans.flatMap(({ plan }) => [...plan.closures]))
+    return PackageExec.execute(
+      {
+        roots: merged.roots,
+        workList: merged.targets as ReadonlyArray<PackageExec.PackageNode>,
+        nodes,
+        closures
+      },
+      {
+        index,
+        cacheDirectory,
+        ...(remoteCache === undefined ? {} : { remoteCache }),
+        verb: "ci",
+        pattern,
+        jobs: flags.jobs,
+        readCache: flags.cache,
+        signal: config.signal,
+        reporter,
+        environment: config.environment
+      }
+    )
+  }
   const { remoteCache, workspace } = await openWorkspace(flags, config, !flags.plan)
   const plans: Array<Planner.Plan> = []
   const refusals: Array<unknown> = []
@@ -770,7 +835,7 @@ const executeCommand = async <A extends Outcome>(
  */
 export const makeCli = (config: RuntimeConfig = {}) =>
   Cli.create("smithers-build", {
-    description: "Execute BUILD.ts and PACKAGE.ts targets and install the workspace with flows",
+    description: "Execute declared targets and install the workspace with flows",
     version: "0.1.0",
     globals: globalOptions
   })
@@ -780,7 +845,37 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       alias: { workspace: "w" },
       async run(context) {
         try {
-          await refusePackageMode(context.options, "install")
+          const index = await openPackageIndex(context.options, config)
+          if (index !== undefined) {
+            const installs = index.targets().filter((row) =>
+              row.packagePath === "" && Target.metadata(row.target).target === "Install"
+            )
+            if (installs.length !== 1) {
+              throw new Error(
+                installs.length === 0
+                  ? "the root PACKAGE.ts declares no Install target"
+                  : "the root PACKAGE.ts declares more than one Install target"
+              )
+            }
+            const cacheDirectory = context.options.cacheDir === undefined
+              ? index.workspace.cache.directory
+              : Config.normalizeCacheDirectory(context.options.cacheDir)
+            const remoteCache = remoteCacheAccess(
+              remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
+              config
+            )
+            const summary = await PackageExec.run({
+              index,
+              cacheDirectory,
+              ...(remoteCache === undefined ? {} : { remoteCache }),
+              verb: "run",
+              pattern: installs[0]!.label,
+              environment: config.environment,
+              signal: config.signal
+            })
+            if ("ok" in summary && !summary.ok) throw new Error(failureMessage(summary))
+            return summary
+          }
           const prepared = await prepare(context.options, config)
           return await runInstall(prepared.root, {
             cacheDirectory: prepared.cacheDirectory,
@@ -896,7 +991,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
         )
     })
     .command("target", {
-      description: "Execute one package-mode label with its flavor-implied verb (the bare-label form)",
+      description: "Execute one PACKAGE.ts label with its flavor-implied verb (the bare-label form)",
       args: patternArgument,
       options: executionOptions.extend({
         write: z.boolean().default(false).describe("Apply Diff/Generate/CiGen targets instead of checking drift"),

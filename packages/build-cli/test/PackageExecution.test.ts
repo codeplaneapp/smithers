@@ -94,7 +94,7 @@ describe("package execution format", () => {
   it("pins the package cache format number", () => {
     // The number is part of every cache address. Bumping it declares a format
     // change, so this assertion forces that bump to be intentional.
-    expect(PACKAGE_EXECUTION_FORMAT).toBe(1)
+    expect(PACKAGE_EXECUTION_FORMAT).toBe(2)
   })
 })
 
@@ -1348,6 +1348,85 @@ export const Package = S.Package({ targets: { gen } })
     expect(await Fs.readFile(NodePath.join(root, "out.gen.txt"), "utf8")).toBe("generated\n")
     expect((await serve(root, ["//:gen"])).exitCode).toBe(0)
   })
+})
+
+describe("target body execution", () => {
+  it("runs the repository target families and aggregate verbs from PACKAGE.ts", async () => {
+    const fixture = NodePath.join(import.meta.dirname, "fixtures/target-body")
+    const root = await temporaryWorkspace()
+    await Fs.cp(fixture, root, { recursive: true })
+    const generated = [
+      ".flows",
+      ".git",
+      ".github",
+      "dist",
+      "generated-tsconfig.json",
+      "generated.txt",
+      "node_modules"
+    ]
+    try {
+      commitAll(root)
+      await Fs.symlink(
+        NodePath.resolve(import.meta.dirname, "../node_modules"),
+        NodePath.join(root, "node_modules"),
+        "dir"
+      )
+      for (
+        const args of [
+          ["test", "//:nodeTest"],
+          ["test", "//:vitest"],
+          ["build", "//:typecheck"],
+          ["lint", "//:eslint"],
+          ["lint", "//:dprint"],
+          ["build", "//:tsconfig"],
+          ["build", "//:build"],
+          ["run", "//:generate"],
+          ["build", "//:lockfile"],
+          ["//:ci", "--write"],
+          ["docs", "//:docs"],
+          ["ci", "//:docs"],
+          ["ci", "//:nodeTest"]
+        ]
+      ) {
+        const result = await serve(root, args)
+        expect(result.exitCode, `${args.join(" ")}\n${result.output}\n${result.logs}`).toBe(0)
+        expect(result.output + result.logs).not.toContain("NotImplemented")
+      }
+      const cached = await serve(root, ["docs", "//:docs"])
+      expect(cached.exitCode, `${cached.output}\n${cached.logs}`).toBe(0)
+      expect(cached.output).toContain("hit: 1")
+      await Fs.unlink(NodePath.join(root, "node_modules"))
+      await write(
+        root,
+        "package.json",
+        `${
+          JSON.stringify(
+            {
+              name: "target-body-fixture",
+              private: true,
+              type: "module",
+              packageManager: "pnpm@11.21.0",
+              dependencies: { "fixture-dep": "link:dep" }
+            },
+            undefined,
+            2
+          )
+        }\n`
+      )
+      await write(
+        root,
+        "pnpm-lock.yaml",
+        "lockfileVersion: '9.0'\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\nimporters:\n  .:\n    dependencies:\n      fixture-dep:\n        specifier: link:dep\n        version: link:dep\n"
+      )
+      const installed = await serve(root, ["install"])
+      expect(installed.exitCode, `${installed.output}\n${installed.logs}`).toBe(0)
+      await expect(Fs.readFile(NodePath.join(root, "generated.txt"), "utf8")).resolves.toBe("generated\n")
+      await expect(Fs.stat(NodePath.join(root, "dist/esm/value.js"))).resolves.toBeDefined()
+      await expect(Fs.stat(NodePath.join(root, ".github/workflows/ci.yml"))).resolves.toBeDefined()
+    } finally {
+      await Promise.all(generated.map((path) => Fs.rm(NodePath.join(root, path), { recursive: true, force: true })))
+    }
+  }, 120_000)
 })
 
 describe("declaration modules", () => {

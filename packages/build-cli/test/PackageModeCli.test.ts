@@ -34,7 +34,10 @@ export const Workspace = S.Workspace("fixture", {
 `
 
 const packageModule = `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo hi" }) } })
+const runtime = S.Runtime.Node({ version: ">=22.19.0" })
+const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
+const install = S.Install({ packageManager })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo hi" }), install } })
 `
 
 const temporaryWorkspace = async (): Promise<string> =>
@@ -58,7 +61,7 @@ const serve = async (
   return { exitCode, output }
 }
 
-describe("package-mode CLI", () => {
+describe("PACKAGE.ts CLI", () => {
   // The vitest process cwd is the build-cli package, which is outside every
   // temporary workspace, so each query here also proves the outside-cwd
   // path: absolute patterns never need a current package.
@@ -71,14 +74,39 @@ describe("package-mode CLI", () => {
     expect(output).toContain("//:run")
   })
 
-  it("refuses install in package mode with the NotImplemented message", async () => {
+  it("runs the root Install target", async () => {
     const root = await temporaryWorkspace()
     await write(root, "WORKSPACE.ts", workspaceModule(".flows"))
     await write(root, "PACKAGE.ts", packageModule)
+    await write(
+      root,
+      "package.json",
+      `${
+        JSON.stringify(
+          {
+            name: "fixture",
+            private: true,
+            packageManager: "pnpm@11.21.0",
+            dependencies: { "fixture-dep": "link:dep" }
+          },
+          undefined,
+          2
+        )
+      }\n`
+    )
+    await write(
+      root,
+      "dep/package.json",
+      `${JSON.stringify({ name: "fixture-dep", version: "1.0.0" }, undefined, 2)}\n`
+    )
+    await write(
+      root,
+      "pnpm-lock.yaml",
+      "lockfileVersion: '9.0'\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\nimporters:\n  .:\n    dependencies:\n      fixture-dep:\n        specifier: link:dep\n        version: link:dep\n"
+    )
     const { exitCode, output } = await serve(root, ["install"])
-    expect(exitCode).toBe(1)
-    expect(output).toContain("NotImplemented")
-    expect(output).toContain("install")
+    expect(exitCode).toBe(0)
+    expect(output).toContain("ok: true")
   })
 
   it("prunes the WORKSPACE-declared cache directory from discovery", async () => {

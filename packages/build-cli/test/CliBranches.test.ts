@@ -1,8 +1,8 @@
 /**
  * The command surface's remaining branches, driven through the real CLI:
- * package-mode `deps()` and `--input` parsing, `--cache-dir`, `--plan` and
+ * PACKAGE.ts `deps()` and `--input` parsing, `--cache-dir`, `--plan` and
  * `--mermaid` under a human renderer, a red run without an exit hook, and
- * the BUILD-mode paths (`docs`, `ci`, the bare-label refusal, `gitHooks`,
+ * the BUILD.ts paths (`docs`, `ci`, the bare-label refusal, `gitHooks`,
  * and the human tree and table).
  */
 import * as NodeChildProcess from "node:child_process"
@@ -33,7 +33,7 @@ const temporary = async (prefix: string): Promise<string> => {
   return root
 }
 
-/** A committed package-mode workspace: two tests and a suite that reaches one of them twice. */
+/** A committed PACKAGE.ts workspace: two tests and a suite that reaches one of them twice. */
 const packageFixture = async (): Promise<string> => {
   const root = await temporary("smthrs-cli-branches-pkg-")
   await write(
@@ -58,11 +58,13 @@ const good = S.Shell.Test({ command: "true" })
 const bad = S.Shell.Test({ command: "false" })
 const pair = S.Suite({ tests: [good, bad] })
 const all = S.Suite({ tests: [pair, good] })
-export const Package = S.Package({ targets: { good, bad, pair, all } })
+const docs = S.DocsParity({ readme: S.file("README.md"), deps: [], minimumProseCharacters: 20 })
+export const Package = S.Package({ targets: { good, bad, pair, all, docs } })
 `
   )
   await write(root, "package.json", `${JSON.stringify({ name: "fixture", private: true }, undefined, 2)}\n`)
   await write(root, "yarn.lock", "# yarn lockfile v1\n")
+  await write(root, "README.md", "# Fixture\n\nThis fixture has enough explanatory prose for the documentation gate.\n")
   git(root, "init", "-q")
   git(root, "add", "-A")
   git(root, "-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-qm", "init")
@@ -149,7 +151,7 @@ afterEach(() => {
   else Object.defineProperty(process.stdout, "isTTY", stdoutTTY)
 })
 
-describe("package-mode branches", () => {
+describe("PACKAGE.ts branches", () => {
   it("answers deps() with the closure, visiting a shared member once, and refuses a pattern", async () => {
     const root = await packageFixture()
     pretendTTY(true)
@@ -189,7 +191,7 @@ describe("package-mode branches", () => {
     const graph = await serve(root, ["graph", "//:all", "--mermaid", "--ui", "tty"], true)
     expect(graph.exitCode).toBe(0)
     expect(graph.stdout).toBe("")
-    // Package mode used to accept --mermaid and render the text tree anyway,
+    // PACKAGE.ts execution used to accept --mermaid and render the text tree anyway,
     // labelling the envelope `format: text`. The flag now renders a flowchart
     // in both modes, and the envelope says which one it carries.
     expect(graph.envelope).toContain("format: mermaid")
@@ -206,17 +208,22 @@ describe("package-mode branches", () => {
     expect(served.stderr).toContain("✗ 1 of 1 targets failed: //:bad")
   })
 
-  it("refuses ci and docs in package mode", async () => {
+  it("runs ci and docs through the PACKAGE.ts index", async () => {
     const root = await packageFixture()
     for (const verb of ["ci", "docs"]) {
-      const served = await serve(root, [verb, "//..."], false)
-      expect(served.exitCode).toBe(1)
-      expect(served.envelope).toContain("NotImplemented")
+      const served = await serve(root, [verb, "//:docs"], false)
+      expect(served.exitCode).toBe(0)
+      expect(served.envelope).toContain("ok: true")
     }
+    const planned = await serve(root, ["ci", "//:docs", "--plan"], false)
+    expect(planned.exitCode).toBe(0)
+    expect(planned.envelope).toContain("verb: ci")
+    expect(planned.envelope).toContain("label: \"//:docs\"")
+    expect(planned.envelope).not.toContain("rule:")
   })
 })
 
-describe("BUILD-mode branches", () => {
+describe("BUILD.ts branches", () => {
   it("refuses the bare-label form and gitHooks without a WORKSPACE.ts", async () => {
     const root = await buildFixture()
     const bare = await serve(root, ["//:build"], false)

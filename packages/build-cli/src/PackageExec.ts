@@ -1,5 +1,5 @@
 /**
- * Package-mode planning and execution: the W2 execution core.
+ * Planning and execution for PACKAGE.ts workspaces.
  *
  * Planning resolves every tool reference against the workspace (the
  * resolutions are key material), expands declared inputs, and computes each
@@ -8,14 +8,9 @@
  * (`Executor.schedule`), the shared exec implementation (`Exec.run`), and
  * the workspace cache (`Cache.openCache`).
  *
- * W2 implements Shell.Build, Shell.Test, Shell.Run, Shell.Diff, Generate,
- * Materialize, Clean, Suite, and Alias. The W3 lanes add Shell.Serve and the
- * services edge, ImportClosure and Test, Bundler.Rspack.resolve/build, the
- * agent targets (Agent.Lint/Diff/Pr over `AgentSession` with the scripted
- * fake selected by `SMTHRS_AGENT_FAKE`), Git.Commit, Github.CiGen and its
- * declarations, the Github.Pr refusal gate, and Memory.Retain. Every other
- * rule keeps a loud typed refusal: it plans (so its key is visible) and
- * fails at execution.
+ * Rules with specialized execution keep their native lanes. Every other rule
+ * executes the target declaration's own Effect body through the shared target
+ * runtime.
  *
  * @since 0.1.0
  */
@@ -40,6 +35,7 @@ import * as RustToolchain from "@smthrs/targets/RustToolchain"
 import * as Secret from "@smthrs/targets/Secret"
 import * as Shell from "@smthrs/targets/Shell"
 import * as Target from "@smthrs/targets/Target"
+import { verifyOutputs } from "@smthrs/targets/ToolBuild"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -56,6 +52,7 @@ import * as AnvilExec from "./AnvilExec.ts"
 import { type CacheStore, openCache } from "./Cache.ts"
 import * as Diagnostic from "./Diagnostic.ts"
 import * as DockerExec from "./DockerExec.ts"
+import { declaredToolchain, runInstall } from "./engine.ts"
 import * as Executor from "./Executor.ts"
 import * as FetchExec from "./FetchExec.ts"
 import * as FoundryExec from "./FoundryExec.ts"
@@ -66,6 +63,7 @@ import * as GoExec from "./GoExec.ts"
 import { collectTargets } from "./internal/Attrs.ts"
 import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex } from "./internal/Text.ts"
+import * as Label from "./Label.ts"
 import * as MemoryBackend from "./MemoryBackend.ts"
 import * as NixExec from "./NixExec.ts"
 import * as OverlayExec from "./OverlayExec.ts"
@@ -79,15 +77,16 @@ import * as Resolver from "./Resolver.ts"
 import * as RspackRunner from "./RspackRunner.ts"
 import * as ServiceSupervisor from "./ServiceSupervisor.ts"
 import * as StampExec from "./StampExec.ts"
+import { runTarget } from "./TargetExecution.ts"
 import * as Workspace from "./Workspace.ts"
 
 /**
- * Cache-key salt for package-mode execution semantics.
+ * Cache-key salt for PACKAGE.ts execution semantics.
  *
  * @category keys
  * @since 0.1.0
  */
-export const PACKAGE_EXECUTION_FORMAT = 1
+export const PACKAGE_EXECUTION_FORMAT = 2
 
 /**
  * The mode one node executes under: `execute` for plain tool runs and
@@ -106,7 +105,7 @@ export type Mode = "execute" | "check" | "write"
  * @category models
  * @since 0.1.0
  */
-export type PackageVerb = "build" | "test" | "lint" | "run" | "auto"
+export type PackageVerb = Target.Kind | "auto"
 
 /**
  * The rules whose execution mounts a consumer-scoped overlay scratch tree.
@@ -119,81 +118,6 @@ const overlayScratchRules: ReadonlySet<string> = new Set([
   "Shell.Build",
   "Shell.Run",
   "Shell.Test"
-])
-
-/** The rules the package executor implements (W2 core plus the W3 lanes). */
-const implementedRules: ReadonlySet<string> = new Set([
-  "Shell.Build",
-  "Shell.Test",
-  "Shell.Run",
-  "Shell.Serve",
-  "Shell.Diff",
-  "Generate",
-  "Owners.Codeowners",
-  "Owners.Tree",
-  "Materialize",
-  "Clean",
-  "Suite",
-  "Alias",
-  "Filegroup",
-  "ImportClosure",
-  "Test",
-  "Bundler.Rspack.resolve",
-  "Bundler.Rspack.build",
-  "Agent.Lint",
-  "Agent.Diff",
-  "Agent.Pr",
-  "Git.Commit",
-  "Github.Setup",
-  "Github.Workflow",
-  "Github.CiGen",
-  "Github.Pr",
-  "Memory.Retain",
-  "Repo.Target",
-  "Foundry.Build",
-  "Foundry.Test",
-  "Foundry.Fmt",
-  "Anvil.Fork",
-  "Docker.Serve",
-  "Docker.Service",
-  "Docker.Build",
-  "Docker.Push",
-  "Docker.Bake",
-  "Npm.Pack",
-  "Npm.Publish",
-  "Npm.Published",
-  "Npm.Downstream",
-  "Changesets.Version",
-  "Changesets.Publish",
-  "Github.Release",
-  "Github.Pages",
-  "Git.Pr",
-  "Git.Submodules",
-  "Git.Submodule",
-  "Cron",
-  "Copy",
-  "Literal",
-  "Overlay",
-  "Markdown.CodeBlocks",
-  "Api.Compat",
-  "Size.Budgets",
-  "Fetch",
-  "Go.Packages",
-  "Go.Test",
-  "Go.Binary",
-  "Go.ModDownload",
-  "Go.Lint",
-  "Go.Generate",
-  "Go.Fuzz",
-  "Cargo.Fetch",
-  "Cargo.Build",
-  "Cargo.Test",
-  "Cargo.Nextest",
-  "Cargo.Clippy",
-  "Cargo.Fmt",
-  "Cargo.Doc",
-  "Cargo.AppSet",
-  "Cargo.Deny"
 ])
 
 /** Rules whose default mode is the non-mutating check. */
@@ -252,11 +176,6 @@ const keyOnlyDependencyRules: ReadonlySet<string> = new Set([
 
 /** Wall-clock cap on one `smithers memory` backend invocation. */
 const memoryBackendTimeoutMs = 60_000
-
-const refusalFor = (rule: string): string =>
-  `NotImplemented: ${rule} has no package-mode execution; ` +
-  "the implemented set is Shell.*, Generate, Materialize, Clean, Suite, Alias, ImportClosure, Test, " +
-  "Bundler.Rspack.*, Agent.*, Git.Commit, Github.*, Memory.Retain, Cargo.*, Go.*, Foundry.*, Docker.*, and Npm.*"
 
 const serviceRules: ReadonlySet<string> = new Set([
   "Shell.Serve",
@@ -391,7 +310,7 @@ export type LaneData =
   }
 
 /**
- * One planned package-mode node. Structurally a {@link Planner.PlannedTarget}
+ * One planned PACKAGE.ts node. Structurally a {@link Planner.PlannedTarget}
  * so the existing scheduler accepts the work list unchanged.
  *
  * @category models
@@ -479,7 +398,7 @@ export interface PackageNode extends Planner.PlannedTarget {
 }
 
 /**
- * The inert plan report `--plan` prints in package mode.
+ * The inert plan report `--plan` prints for PACKAGE.ts workspaces.
  *
  * @category models
  * @since 0.1.0
@@ -529,7 +448,7 @@ export interface RunOptions {
    * `SMITHERS_CACHE_URL`; both were schema-validated and then dropped, so a
    * workspace that declared a shared cache ran local-only with no warning and
    * no line in the plan. The CLI resolves it once and hands it here, exactly
-   * as it does for BUILD mode's executor.
+   * as it does for BUILD.ts execution.
    */
   readonly remoteCache?: Workspace.RemoteCacheAccess | undefined
   readonly verb: PackageVerb
@@ -564,6 +483,18 @@ export interface RunOptions {
    * read. Defaults to `process.env`; tests inject a hermetic record.
    */
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  /** Package name supplied to scaffold targets. */
+  readonly packageName?: string | undefined
+}
+
+/**
+ * Options accepted by an already-merged execution, including the aggregate CI verb.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ExecuteOptions extends Omit<RunOptions, "verb"> {
+  readonly verb: PackageVerb | "ci"
 }
 
 /** Collects tagged records of one tag inside an attr value. */
@@ -702,6 +633,8 @@ interface PlanContext {
   readonly childPlan: boolean
   /** Whether the parent invocation selected write mode. */
   readonly write: boolean
+  /** The verb-effective target view, absent only for the bare-label form. */
+  readonly kind: Target.Kind | undefined
 }
 
 /** Opens (once) the cache store the planner uses for closure rows and graph digests. */
@@ -1452,7 +1385,21 @@ const visit = async (
   const metadata = Target.metadata(target)
   const rule = metadata.target
   const packagePath = packagePathOf(context, target)
-  const attrs = metadata.attrs
+  if (context.kind !== undefined && metadata.verbGate !== undefined && !metadata.verbGate.includes(context.kind)) {
+    const allowed = metadata.verbGate.length === 0 ? "no verbs" : metadata.verbGate.join(", ")
+    throw new Error(`target ${label} is gated to ${allowed} and cannot be included in the ${context.kind} verb`)
+  }
+  const view: Target.KindView = context.kind === undefined
+    ? {
+      attrs: metadata.attrs,
+      dependencies: metadata.dependencies,
+      dependencySelectors: metadata.dependencySelectors,
+      inputs: metadata.inputs,
+      cacheable: metadata.cacheable,
+      outputs: metadata.outputs
+    }
+    : metadata.forKind(context.kind)
+  const attrs = view.attrs
   const plannedMode = context.rootModes.get(label) ?? options.mode
 
   // Dependencies: always visited for key material; the execution edges are a
@@ -1461,7 +1408,15 @@ const visit = async (
   const dependencyRows: Array<{ readonly label: string; readonly key: string }> = []
   const depLabels = new Map<Target.AnyTarget, string>()
   let graphResolveNode: PackageNode | undefined
-  for (const dependency of metadata.dependencies) {
+  const directDependencies: Array<Target.AnyTarget> = [...view.dependencies]
+  for (const selector of view.dependencySelectors) {
+    const matches = context.index.resolve(selector.pattern).filter((row) => row.key === selector.target)
+    if (matches.length === 0) {
+      throw new Error(`target ${label} dependency selector ${selector.pattern}:${selector.target} matched no targets`)
+    }
+    directDependencies.push(...matches.map((row) => row.target))
+  }
+  for (const dependency of [...new Set(directDependencies)]) {
     const depMetadata = Target.metadata(dependency)
     const depRule = depMetadata.target
     const depMode: Mode = checkModeRules.has(depRule) ? "check" : "execute"
@@ -1505,19 +1460,16 @@ const visit = async (
     dependencyRows.push({ label: planned.label, key: depKey })
   }
 
-  const declaredInputs = await expandInputs(context, packagePath, metadata.inputs)
+  const declaredInputs = await expandInputs(context, packagePath, view.inputs)
   const inputDigests = new Map<Input.Declared, string>()
   for (const expanded of declaredInputs) inputDigests.set(expanded.declaration, expanded.digest)
 
-  // Tool resolution. Everything resolved here is key material; a refusal is
-  // recorded on the node and fails the target at execution, typed and loud.
+  // Tool resolution. Everything resolved here is key material; an invalid
+  // declaration is recorded on the node and fails execution with its reason.
   const toolchain: Array<unknown> = []
   let refusal: string | undefined
   const noteRefusal = (message: string): void => {
     refusal ??= message
-  }
-  if (!implementedRules.has(rule)) {
-    noteRefusal(refusalFor(rule))
   }
   let repositoryResolution: RepoResolution.Resolution | undefined
   let repositoryState: RepoResolution.GitState | undefined
@@ -1704,7 +1656,7 @@ const visit = async (
   let cargoHome: string | undefined
   if (rule === "Cargo.Fetch") cargoHome = fetchCargoHome(context, target)
   else {
-    for (const dependency of metadata.dependencies) {
+    for (const dependency of directDependencies) {
       if (Target.metadata(dependency).target !== "Cargo.Fetch") continue
       cargoHome = fetchCargoHome(context, dependency)
       if (cargoHome !== undefined) break
@@ -2500,7 +2452,7 @@ const visit = async (
 
   // Invoker preconditions settle at plan time, before any session, probe, or
   // gate runs: a missing or undeclared payload input is a typed needs-input
-  // refusal; `approval: "required"` refuses because package mode has no
+  // refusal; `approval: "required"` refuses because local build execution has no
   // durable approval store yet and an autonomous invocation is never
   // consent; and a gate that is itself an outward or Run target refuses the
   // consumer, since scheduling such a gate would execute its side effect in
@@ -2549,7 +2501,7 @@ const visit = async (
   if (attrMember(attrs, "approval") === "required") {
     noteRefusal(
       `approval required: ${label} declares approval: "required" and no approval was granted; ` +
-        "package mode has no durable approval store, so the invocation refuses before any effect"
+        "the build system has no durable approval store, so the invocation refuses before any effect"
     )
   }
   for (const gate of attrTargets(attrs, "gates")) {
@@ -2641,7 +2593,7 @@ const visit = async (
     return serviceMetadata.target === "Anvil.Fork" &&
       attrMember(serviceMetadata.attrs, "forkBlockNumber") === "latest"
   })
-  const cacheable = refusal === undefined && !movingService && (
+  const cacheable = refusal === undefined && !movingService && (view.cacheable ||
     // A cargo check replays: its key carries the crate set, the sources, the
     // lockfile slice, and the toolchain, and its product is a verdict.
     // `Cargo.Build` and `Cargo.Doc` do not: their product is a `target/` tree
@@ -2678,8 +2630,7 @@ const visit = async (
     (rule === "Changesets.Version" && mode === "check") ||
     rule === "Go.Test" || rule === "Go.Fuzz" || rule === "Go.Binary" || rule === "Go.ModDownload" ||
     (rule === "Go.Lint" && mode === "check") || (rule === "Go.Generate" && mode === "check") ||
-    (rule === "Repo.Target" && repositoryState?.dirty === false)
-  )
+    (rule === "Repo.Target" && repositoryState?.dirty === false))
 
   const keyMaterial: Planner.KeyMaterial = {
     body: {
@@ -2757,7 +2708,7 @@ const visit = async (
     attrs,
     dependencies: executionDeps,
     declaredInputs,
-    declaredOutputs: undefined,
+    declaredOutputs: view.outputs,
     cacheable,
     cacheLookup: "not-wired",
     wouldRun: true,
@@ -2901,7 +2852,7 @@ const managerBinaryOf = (workspace: PackageIndexModule.PackageIndex["workspace"]
 }
 
 /**
- * One planned package-mode execution: the keyed nodes plus the scheduled
+ * One planned PACKAGE.ts execution: the keyed nodes plus the scheduled
  * work list.
  *
  * @category models
@@ -2919,7 +2870,7 @@ export interface PackagePlan {
 }
 
 /**
- * Plans one package-mode invocation: resolves roots, walks the graph,
+ * Plans one PACKAGE.ts invocation: resolves roots, walks the graph,
  * resolves tools, and keys every node.
  *
  * @category planning
@@ -2930,6 +2881,7 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
   const log = Reporter.of(options).note
   const rows = index.resolve(options.pattern)
   const verb = options.verb
+  const parsedPattern = Label.parse(options.pattern, index.currentPackage ?? "")
   const repoResolutions: RepoResolution.ResolutionCache = new Map()
   const selected = verb === "auto"
     ? rows
@@ -2937,10 +2889,12 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
       row,
       kinds: await RepoResolution.effectiveKinds(index, row.target, repoResolutions, options.signal)
     })))).filter((entry) => entry.kinds.includes(verb)).map((entry) => entry.row)
-  if (verb !== "auto" && rows.length === 1 && selected.length === 0) {
-    throw new Error(`target selected by ${options.pattern} does not support the ${verb} verb`)
+  if (verb !== "auto" && parsedPattern._tag === "Exact" && selected.length === 0) {
+    throw new Planner.UnsupportedVerbError(options.pattern, verb)
   }
-  if (selected.length === 0) throw new Error(`no targets selected by ${options.pattern} for the ${verb} verb`)
+  if (verb === "auto" && selected.length === 0) {
+    throw new Error(`no targets selected by ${options.pattern} for the ${verb} verb`)
+  }
   // The mode each selected root is planned under. Computed before the walk so a
   // target reached first as a dependency still adopts its root mode. A label
   // appears at most once in `selected`, so this maps each root to one mode.
@@ -3009,7 +2963,8 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     graphDigests: new Map(),
     repoResolutions,
     childPlan: options.plan === true,
-    write: options.write === true
+    write: options.write === true,
+    kind: verb === "auto" ? undefined : verb
   }
   const roots: Array<string> = []
   try {
@@ -3100,6 +3055,11 @@ const sandboxRequest = (
   reads.add(`${cacheDirectory}/tmp`)
   reads.add(`${cacheDirectory}/store`)
   const writes = new Set<string>([cacheDirectory, ...node.outDirs, ...node.cleanOutDirs])
+  if (node.declaredOutputs !== undefined) {
+    for (const path of node.declaredOutputs.paths) {
+      writes.add(Input.resolvePath(node.declaredOutputs.cwd, path))
+    }
+  }
   for (const path of node.outFiles) writes.add(NodePath.posix.dirname(path))
   for (const path of node.cleanPaths) writes.add(NodePath.posix.dirname(path))
   for (const pattern of node.writeSet) writes.add(staticPrefixOf(pattern) || ".")
@@ -3171,14 +3131,14 @@ interface ExecOutcome {
 }
 
 /**
- * Executes one planned package-mode work list with keep-going scheduling.
+ * Executes one planned PACKAGE.ts work list with keep-going scheduling.
  *
  * @category execution
  * @since 0.1.0
  */
 export const execute = async (
   planned: PackagePlan,
-  options: RunOptions
+  options: ExecuteOptions
 ): Promise<Executor.Summary> => {
   const index = options.index
   const root = index.root
@@ -3198,8 +3158,8 @@ export const execute = async (
     warn: reporter.warn
   })
   // The environment names that carry this workspace's remote-cache tokens.
-  // BUILD mode withholds them from every target subprocess (Executor.ts);
-  // package mode resolved the same credentials and then handed children a
+  // BUILD.ts execution withholds them from every target subprocess (Executor.ts);
+  // PACKAGE.ts execution resolved the same credentials and then handed children a
   // clone of `process.env`, so a declared `MY_CACHE_TOKEN` stayed readable by
   // every tool and agent the graph spawned.
   const credentialNames = options.remoteCache === undefined
@@ -3418,6 +3378,27 @@ export const execute = async (
     }, { shared: sandboxEnforced(node) }).catch((cause: unknown) => {
       log(`smthrs: could not store ${node.label} in the cache: ${Diagnostic.describe(cause)}`)
     })
+  }
+
+  /** Validates a target body's declared products, including void generated-file targets. */
+  const verifyTargetOutputs = async (
+    node: PackageNode,
+    value: unknown,
+    signal: AbortSignal | undefined
+  ): Promise<string | undefined> => {
+    if (node.declaredOutputs === undefined) return undefined
+    if (value !== undefined) {
+      return verifyOutputs(root, node.declaredOutputs, value, { cacheDirectory, signal })
+    }
+    for (const path of node.declaredOutputs.paths) {
+      const resolved = Input.resolvePath(node.declaredOutputs.cwd, path)
+      try {
+        await Fs.stat(NodePath.join(root, ...resolved.split("/")))
+      } catch {
+        return `the target did not produce its declared output: ${resolved}`
+      }
+    }
+    return undefined
   }
 
   /**
@@ -3695,7 +3676,7 @@ export const execute = async (
    * against `writeSet`; out-of-set changes are reverted and fail the body,
    * and a failed body reverts everything it touched. Shared by tool runs
    * (`runWriteEnforced`), agent candidate application, and CI-file
-   * publishing, so every write path in package mode is confined the same
+   * publishing, so every PACKAGE.ts write path is confined the same
    * way.
    */
   const enforceWriteSet = async (
@@ -4072,7 +4053,7 @@ export const execute = async (
     text.length <= AgentTarget.maximumGateDetail ? text : `${text.slice(0, AgentTarget.maximumGateDetail - 3)}...`
 
   /**
-   * Judges one planned gate against a candidate tree: real package-mode
+   * Judges one planned gate against a candidate tree: real PACKAGE.ts
    * execution of the gate target with the tree root swapped for the
    * candidate copy. Suites and aliases recurse; outward/Run targets refuse;
    * a rule this build cannot execute against a foreign tree refuses loudly
@@ -5246,8 +5227,57 @@ export const execute = async (
             throw cause
           }
         }
-        default:
-          return fail(refusalFor(node.rule))
+        case "Install": {
+          const installed = await runInstall(root, {
+            cacheDirectory,
+            sensitiveEnvironment: credentialNames,
+            signal,
+            toolchain: declaredToolchain(node.attrs)
+          })
+          Target.metadata(node.declaration).decodeSuccess(installed.result)
+          return green("ran")
+        }
+        default: {
+          const cached = await cacheGet(node)
+          if (cached !== undefined) {
+            const decoded = Executor.decodeCacheOutput(cached.output)
+            if ("value" in decoded) {
+              try {
+                const value = Target.metadata(node.declaration).decodeSuccess(decoded.value)
+                const problem = await verifyTargetOutputs(node, value, signal)
+                if (problem === undefined) return green("hit")
+              } catch {
+                // A malformed or stale entry is a miss; the real body runs below.
+              }
+            }
+          }
+          const exit = await runTarget(
+            root,
+            cacheDirectory,
+            node.declaration,
+            node.attrs,
+            `smithers-build-target-${node.keyPreview.slice(0, 24)}`,
+            credentialNames,
+            options.packageName,
+            signal,
+            node.nixEnvironment,
+            sandboxRequest(node, planned.nodes, index.workspace, cacheDirectory)
+          )
+          if (Exit.isFailure(exit)) return fail(Executor.describeFailure(Cause.squash(exit.cause)))
+          const produced = await verifyTargetOutputs(node, exit.value, signal)
+          if (produced !== undefined) return fail(produced)
+          if (node.cacheable) {
+            try {
+              const value = Target.metadata(node.declaration).decodeSuccess(exit.value)
+              const encoded = Executor.encodeCacheOutput(value)
+              if ("output" in encoded) await cachePut(node, encoded.output)
+              else log(`smthrs: skipped the cache store for ${node.label}: ${encoded.reason}`)
+            } catch (cause) {
+              return fail(`the success schema rejected the target result: ${Diagnostic.describe(cause)}`)
+            }
+          }
+          return green("ran")
+        }
       }
     } catch (cause) {
       return fail(Diagnostic.describe(cause, "target failed"))
@@ -5410,7 +5440,7 @@ export const execute = async (
 
 /**
  * Plans and, unless `--plan` asked for the inert report, executes one
- * package-mode invocation.
+ * PACKAGE.ts invocation.
  *
  * @category execution
  * @since 0.1.0

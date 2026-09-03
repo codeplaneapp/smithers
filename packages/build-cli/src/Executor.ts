@@ -13,36 +13,24 @@
  *
  * @since 0.1.0
  */
-import { FlowEngine } from "@smthrs/engine"
-import { Action, type Flow, Interpreter } from "@smthrs/flow"
-import { ExecIrreversibleLive } from "@smthrs/targets/Changesets"
-import { GenerateCheckLive } from "@smthrs/targets/Compose"
-import { CheckDocsLive } from "@smthrs/targets/DocsParity"
-import { ExecLive, type ToolEnvironment } from "@smthrs/targets/Exec"
 import * as ExecSandbox from "@smthrs/targets/ExecSandbox"
-import { ExpandFilegroupLive, isFilegroup } from "@smthrs/targets/Filegroup"
-import { CheckFileLive, resolveOutputPath, WriteFileLive } from "@smthrs/targets/GeneratedFile"
-import { LlmReviewLive } from "@smthrs/targets/LlmLint"
-import { ScaffoldPackageLive } from "@smthrs/targets/NewPackage"
-import { PackageJsonWrite, SyncPackageJsonLive } from "@smthrs/targets/PackageJson"
+import { isFilegroup } from "@smthrs/targets/Filegroup"
+import { resolveOutputPath } from "@smthrs/targets/GeneratedFile"
+import { PackageJsonWrite } from "@smthrs/targets/PackageJson"
 import * as Target from "@smthrs/targets/Target"
-import { CaptureOutputsLive, verifyOutputs } from "@smthrs/targets/ToolBuild"
+import { verifyOutputs } from "@smthrs/targets/ToolBuild"
 import * as Cause from "effect/Cause"
-import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Layer from "effect/Layer"
-import type * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as Os from "node:os"
-import * as NodePath from "node:path"
 import { performance } from "node:perf_hooks"
 import * as NodeUtil from "node:util/types"
 import { entryLimit, openCache } from "./Cache.ts"
 import * as Diagnostic from "./Diagnostic.ts"
-import { declaredToolchain, layerInstall, layerNonInteractiveNodeServices, layerPackageManager } from "./engine.ts"
 import { byCodeUnit } from "./internal/Text.ts"
 import type * as Planner from "./Planner.ts"
 import * as Reporter from "./Reporter.ts"
+import { runTarget } from "./TargetExecution.ts"
 import { credentialEnvNames, type ExpandedInput, type RemoteCacheAccess, type Workspace } from "./Workspace.ts"
 
 /**
@@ -211,23 +199,6 @@ export const mergePlans = (plans: ReadonlyArray<Planner.Plan>): MergedPlan => {
   return { roots, targets, edges, warnings }
 }
 
-/**
- * The type-level stance the executor takes on a target Flow.
- *
- * A target's real payload schema is its attrs schema and the planner metadata
- * carries the already-decoded attrs, so the executor erases the payload to an
- * empty struct and both result channels to unknown. The runtime path still
- * validates through the target's own schemas; the erasure only keeps the
- * erased schema service channels out of the composed effect's requirements.
- */
-type Executable = Flow.Flow<
-  string,
-  Schema.Struct<{}>,
-  typeof Schema.Unknown,
-  typeof Schema.Unknown,
-  never
->
-
 /** The `node_modules` directory of every package directory from the root down to `cwd`. */
 const nodeModulesAbove = (cwd: string): ReadonlyArray<string> => {
   const found = ["node_modules"]
@@ -304,60 +275,6 @@ const sandboxRequestFor = (
  * `attrs` are the planned verb-effective attrs, so a generator target runs
  * its write form under `build` and its drift-check form under `lint`.
  */
-const runTarget = (
-  workspaceRoot: string,
-  cacheDirectory: string,
-  target: Target.AnyTarget,
-  attrs: unknown,
-  executionId: string,
-  sensitiveEnv: ReadonlyArray<string>,
-  packageName?: string | undefined,
-  signal?: AbortSignal | undefined,
-  nixEnvironment?: Planner.PlannedEnvironment | undefined,
-  sandbox?: ExecSandbox.Request | undefined
-): Promise<Exit.Exit<unknown, unknown>> => {
-  const flow = target as unknown as Executable
-  // A planned environment replaces the host's executable lookup for every
-  // layer that spawns: the exec action, the generator check, and the package
-  // manager and runtime layers the install flow resolves through.
-  const environment: ToolEnvironment | undefined = nixEnvironment === undefined
-    ? undefined
-    : { path: nixEnvironment.path.join(NodePath.delimiter), variables: nixEnvironment.variables }
-  const hostEnvironment: Readonly<Record<string, string | undefined>> = environment === undefined
-    ? process.env
-    : { ...process.env, ...environment.variables, PATH: environment.path }
-  const runtime = Layer.mergeAll(
-    layerInstall,
-    ExecLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment, sandbox }),
-    GenerateCheckLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment }),
-    ExecIrreversibleLive({ workspaceRoot }),
-    CaptureOutputsLive({ workspaceRoot, cacheDirectory }),
-    ExpandFilegroupLive({ workspaceRoot, cacheDirectory }),
-    WriteFileLive({ workspaceRoot }),
-    CheckFileLive({ workspaceRoot }),
-    CheckDocsLive({ workspaceRoot }),
-    LlmReviewLive({ workspaceRoot, sensitiveEnv }),
-    SyncPackageJsonLive({ workspaceRoot, cacheDirectory }),
-    ScaffoldPackageLive({ workspaceRoot, packageName }),
-    Target.layerNotImplemented,
-    Interpreter.layer(flow)
-  ).pipe(
-    Layer.provideMerge(Action.layerImplementations),
-    Layer.provideMerge(FlowEngine.layerMemory),
-    // The toolchain comes from this target's own attrs, so two targets in one
-    // graph can run under different managers and the layer matches whichever
-    // BUILD.ts declared.
-    Layer.provideMerge(layerPackageManager(workspaceRoot, declaredToolchain(attrs), sensitiveEnv, hostEnvironment)),
-    Layer.provideMerge(layerNonInteractiveNodeServices)
-  )
-  return Effect.runPromiseExit(
-    flow.execute(attrs as {}, { executionId }).pipe(
-      Effect.provide(runtime)
-    ),
-    { signal }
-  )
-}
-
 /**
  * Resolves every planned label back to its executable target Flow.
  *
@@ -596,8 +513,13 @@ export const schedule = (
 /** Effect's own rendering of a schema issue tree, built once. */
 const formatSchemaIssue = SchemaIssue.makeFormatterDefault()
 
-/** Renders a failure value compactly for a status line. */
-const describeFailure = (value: unknown): string => {
+/**
+ * Renders a failure value compactly for a status line.
+ *
+ * @category diagnostics
+ * @since 0.1.0
+ */
+export const describeFailure = (value: unknown): string => {
   if (typeof value === "object" && value !== null && !NodeUtil.isProxy(value)) {
     // A schema refusal reaches here as the bare issue tree as often as it
     // reaches here wrapped in a SchemaError, and the tree carries no `message`
