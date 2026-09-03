@@ -1,4 +1,0 @@
-{"type":"RunStarted","runId":"semantic-quick-background","timestampMs":1779147118463,"correlation":{"runId":"semantic-quick-background","workflowName":"quick"}}
-{"type":"FrameCommitted","runId":"semantic-quick-background","frameNo":2,"xmlHash":"4a646f11e5ba0af193231d24458fc2db8a1a96f8b78cf4b98252a59250f69ea2","timestampMs":1779147118467,"correlation":{"runId":"semantic-quick-background","workflowName":"quick"}}
-{"type":"SnapshotCaptured","runId":"semantic-quick-background","frameNo":2,"contentHash":"38d8a8866f1bc3c544deddeda69967bae9211430e296d52809b2b8ed935a1134","timestampMs":1779147118467,"correlation":{"runId":"semantic-quick-background","workflowName":"quick"}}
-{"type":"NodeStarted","runId":"semantic-quick-background","nodeId":"answer","iteration":0,"attempt":2,"timestampMs":1779147118592,"correlation":{"runId":"semantic-quick-background","workflowName":"quick","nodeId":"answer","iteration":0,"attempt":2}}

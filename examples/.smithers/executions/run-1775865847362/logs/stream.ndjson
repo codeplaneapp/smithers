@@ -1,4 +1,0 @@
-{"type":"RunStarted","runId":"run-1775865847362","timestampMs":1775865847954,"correlation":{"runId":"run-1775865847362","workflowName":"workflow"}}
-{"type":"FrameCommitted","runId":"run-1775865847362","frameNo":1,"xmlHash":"b4ac25c1159e1b969c5e16ee2b3ed84b4fae8faf596c87aff381f93772eaddbb","timestampMs":1775865847977,"correlation":{"runId":"run-1775865847362","workflowName":"fan-out-fan-in"}}
-{"type":"SnapshotCaptured","runId":"run-1775865847362","frameNo":1,"contentHash":"3bd76f7495332824d6c0cd04baf837f2b598ba996688c1b36bd2ef96d51bf16d","timestampMs":1775865847977,"correlation":{"runId":"run-1775865847362","workflowName":"fan-out-fan-in"}}
-{"type":"NodeStarted","runId":"run-1775865847362","nodeId":"split","iteration":0,"attempt":1,"timestampMs":1775865848110,"correlation":{"runId":"run-1775865847362","workflowName":"fan-out-fan-in","attempt":1,"nodeId":"split","iteration":0}}

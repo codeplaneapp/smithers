@@ -98,6 +98,8 @@ worktrees/
 **/.smithers/runs/
 **/.smithers/executions/
 **/.smithers/cache/
+# Scratch trees test lanes leave behind; never source.
+/tmp/
 smithers.db
 smithers.db-shm
 smithers.db-wal

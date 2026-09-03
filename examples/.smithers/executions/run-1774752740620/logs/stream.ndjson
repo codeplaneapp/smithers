@@ -1,8 +1,0 @@
-{"type":"RunStarted","runId":"run-1774752740620","timestampMs":1774752741075}
-{"type":"FrameCommitted","runId":"run-1774752740620","frameNo":1,"xmlHash":"931758c1b81d57dd7eef742ba7c3a2810d9e3c863342024ae2abaaaf2b96bd12","timestampMs":1774752741088}
-{"type":"NodePending","runId":"run-1774752740620","nodeId":"split","iteration":0,"timestampMs":1774752741092}
-{"type":"NodePending","runId":"run-1774752740620","nodeId":"merge","iteration":0,"timestampMs":1774752741094}
-{"type":"NodeStarted","runId":"run-1774752740620","nodeId":"split","iteration":0,"attempt":1,"timestampMs":1774752741097}
-{"type":"NodeFailed","runId":"run-1774752740620","nodeId":"split","iteration":0,"attempt":1,"error":{"name":"AI_APICallError","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.","stack":"AI_APICallError: Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\n    at <anonymous> (/Users/williamcory/smithers/node_modules/.bun/@ai-sdk+provider-utils@4.0.13+3c5d820c62823f0b/node_modules/@ai-sdk/provider-utils/dist/index.mjs:2379:18)\n    at processTicksAndRejections (native:7:39)"},"timestampMs":1774752741295}
-{"type":"FrameCommitted","runId":"run-1774752740620","frameNo":2,"xmlHash":"931758c1b81d57dd7eef742ba7c3a2810d9e3c863342024ae2abaaaf2b96bd12","timestampMs":1774752741298}
-{"type":"RunFailed","runId":"run-1774752740620","error":"Task(s) failed: split","timestampMs":1774752741301}

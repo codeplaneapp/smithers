@@ -1,6 +1,0 @@
-{"type":"RunStarted","runId":"run-1775440881428","timestampMs":1775440882013}
-{"type":"FrameCommitted","runId":"run-1775440881428","frameNo":1,"xmlHash":"834e41ac2bfdf148a8900d78b68a2f853b7922541c06fb0c7542317b8b5be56a","timestampMs":1775440882031}
-{"type":"SnapshotCaptured","runId":"run-1775440881428","frameNo":1,"contentHash":"51028df238c0b85704781efd2a661d80713138e05aaae39e65448011222aff4d","timestampMs":1775440882031}
-{"type":"NodePending","runId":"run-1775440881428","nodeId":"split","iteration":0,"timestampMs":1775440882038}
-{"type":"NodePending","runId":"run-1775440881428","nodeId":"merge","iteration":0,"timestampMs":1775440882040}
-{"type":"NodeStarted","runId":"run-1775440881428","nodeId":"split","iteration":0,"attempt":1,"timestampMs":1775440882044}

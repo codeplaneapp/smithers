@@ -1,7 +1,0 @@
-{"type":"RunStarted","runId":"run-1775190890986","timestampMs":1775190891478}
-{"type":"FrameCommitted","runId":"run-1775190890986","frameNo":1,"xmlHash":"834e41ac2bfdf148a8900d78b68a2f853b7922541c06fb0c7542317b8b5be56a","timestampMs":1775190891494}
-{"type":"SnapshotCaptured","runId":"run-1775190890986","frameNo":1,"contentHash":"4cff3d226e7046239f3f3e07869158559379a415f3678b4ab412609bfd787aef","timestampMs":1775190891497}
-{"type":"NodePending","runId":"run-1775190890986","nodeId":"split","iteration":0,"timestampMs":1775190891500}
-{"type":"NodePending","runId":"run-1775190890986","nodeId":"merge","iteration":0,"timestampMs":1775190891504}
-{"type":"NodeStarted","runId":"run-1775190890986","nodeId":"split","iteration":0,"attempt":1,"timestampMs":1775190891508}
-{"type":"AgentEvent","runId":"run-1775190890986","nodeId":"split","iteration":0,"attempt":1,"engine":"claude-code","event":{"type":"started","engine":"claude-code","title":"Claude Code","resume":"60877a55-f03f-4927-adeb-c0e8cc1c0c49","detail":{"sessionId":"60877a55-f03f-4927-adeb-c0e8cc1c0c49"}},"timestampMs":1775190891957}
