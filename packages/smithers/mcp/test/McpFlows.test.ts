@@ -1459,23 +1459,52 @@ describe("StdioTransport limits and terminal state", () => {
   })
 
   it("ignores a late reply after the process exit has closed the state", async () => {
-    const error = await execute(Effect.scoped(Effect.gen(function*() {
-      const frame = new TextEncoder().encode("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"late\"}\n")
+    const outcome = await execute(Effect.scoped(Effect.gen(function*() {
+      const replies = yield* Queue.unbounded<Uint8Array>()
+      const exit = yield* Deferred.make<ExitCode>()
+      const requestWritten = yield* Deferred.make<void>()
+      const replyHandled = yield* Deferred.make<void>()
       const spawner = fakeProcess({
         pid: ProcessId(4),
-        exitCode: Effect.succeed(ExitCode(0)),
+        exitCode: Deferred.await(exit),
         isRunning: Effect.succeed(false),
-        stdout: Stream.fromEffect(Effect.as(Effect.sleep("10 millis"), frame))
+        stdin: Sink.forEach((_chunk: Uint8Array) => Deferred.succeed(requestWritten, undefined)),
+        // One frame, then end of stdout. The reader pulls that end only after
+        // it has run the handler for the frame before it, so this finalizer is
+        // a happens-after signal for the drop rather than a sleep long enough
+        // to hope for one.
+        stdout: Stream.fromQueue(replies).pipe(
+          Stream.take(1),
+          Stream.ensuring(Deferred.succeed(replyHandled, undefined))
+        )
       })
       const transport = yield* provideSpawner(
         StdioTransport.connect({ server: "late-reply", command: "mcp", args: [] }),
         spawner
       )
-      yield* Effect.sleep("25 millis")
-      return yield* Effect.flip(transport.notify("later"))
+
+      // Registers id 1: the frame reaching stdin proves the pending entry exists.
+      const call = yield* Effect.forkChild(Effect.flip(transport.request("tools/call")), {
+        startImmediately: true
+      })
+      yield* Deferred.await(requestWritten)
+
+      // The close records `Closed` before it fails any waiter, so this request's
+      // own failure is proof that the reader now observes a closed connection.
+      yield* Deferred.succeed(exit, ExitCode(0))
+      const closedError = yield* Fiber.join(call)
+
+      // Only now does a well-formed reply for that id reach the reader.
+      yield* Queue.offer(replies, new TextEncoder().encode("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"late\"}\n"))
+      yield* Deferred.await(replyHandled)
+      const afterwards = yield* Effect.flip(transport.notify("later"))
+      return { afterwards, closedError }
     })))
 
-    expect(error).toMatchObject({ code: "connection_closed", server: "late-reply" })
+    expect(outcome.closedError).toMatchObject({ code: "connection_closed", server: "late-reply" })
+    // The dropped reply neither resolved anything nor moved the connection off
+    // the error it closed with.
+    expect(outcome.afterwards).toBe(outcome.closedError)
   })
 
   it("normalizes a host failure while reading stdout", async () => {
