@@ -155,7 +155,7 @@
       "workspace": ".",
       "label": "//scripts:dependencyBoundaries",
       "title": "Dependency boundaries",
-      "summary": "No package imports across the boundaries the contract forbids (legacy/ included)."
+      "summary": "No package imports cross declared workspace boundaries."
     },
     {
       "id": "lint-all",

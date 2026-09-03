@@ -11,7 +11,7 @@
  *    {@link anchors});
  * 3. otherwise the invocation directory itself.
  *
- * The same module answers the rc-contract section 6 question: is there
+ * The same module answers the 0.x state question: is there
  * Smithers 0.x state beside this project? rc.0 never loads it, and the
  * detector exists so the CLI can say so once instead of failing obscurely.
  *
@@ -41,7 +41,7 @@ export const legacyMarkers: ReadonlyArray<string> = [
  * Both walks stop at the repository root, inclusive. Without that bound a
  * command run in a checkout under `$HOME` would keep climbing into the home
  * directory, where 0.x's global `~/.smithers` lives — and rc.0 does not read
- * global state at all (rc-contract section 6), so reporting it would be a
+ * global state at all, so reporting it would be a
  * false alarm on every invocation.
  */
 const boundaryMarkers: ReadonlyArray<string> = [".git", ".jj"]
@@ -164,7 +164,7 @@ export const flowsDirectory = (projectRoot: string): string => join(projectRoot,
  * Every 0.x run database beside a project, newest ancestor first.
  *
  * Unlike {@link legacyState} this does not stop at a directory that holds
- * `.flows/`. rc-contract section 6 gates only the informational notice on
+ * `.flows/`. The informational notice is gated only on
  * "no `.flows/` beside it"; the refusal that `smithers migrate` and the
  * database listing that `smithers doctor` perform are not gated, and they
  * must not be: the project an operator actually migrates is one that has
@@ -219,7 +219,7 @@ export const legacyState = (
 }
 
 /**
- * The one-line notice rc-contract section 6 requires on stderr when 0.x state
+ * The one-line notice written to stderr when 0.x state
  * is found and rc.0 state is not.
  *
  * @category constructors
@@ -282,8 +282,8 @@ export const MigrationRoot: Context.Reference<string> = Context.Reference<string
  * the handler that reports it. {@link legacyState} treats a `.flows/`
  * directory as proof the project already moved on, and opening the control
  * database creates `<root>/.flows`. A handler-time sample therefore inspected
- * a directory the same invocation had just written, and the rc-contract
- * section 6 notice printed on no project it was written for. This function
+ * a directory the same invocation had just written, and the runtime
+ * the 0.x-project guard notice printed on no project it was written for. This function
  * runs while the layers are still being described, before any of them is
  * built, so the sample is of the directory as the operator left it.
  *

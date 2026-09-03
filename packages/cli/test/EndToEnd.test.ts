@@ -5,7 +5,7 @@
  * directory: a scaffolded flow, `.flows/control.db` and `.flows/engine.db` on
  * disk, and the run rows, journal events, and approval tokens those files
  * actually hold. Nothing is stubbed, and no in-process composition stands in
- * for the executable — the rc-contract section 4.1 promises are promises about
+ * for the executable — the release policy promises are promises about
  * what the binary does, and a handler-level assertion cannot keep them.
  *
  * The one in-process step is the node approval. Registering an in-run approval
@@ -66,7 +66,7 @@ const json = (...args: ReadonlyArray<string>): any => {
   return JSON.parse(result.stdout)
 }
 
-/** The seven statuses rc-contract section 4.1 pins `ps --status` to. */
+/** The seven statuses the release policy pins `ps --status` to. */
 const statuses = ["accepted", "running", "parked", "waiting-approval", "cancelled", "completed", "failed"]
 
 /**
@@ -94,7 +94,7 @@ describe("one project, from init to gc", processBudget, () => {
 
     const parked = smithers("run", approval, "--json")
 
-    // Exit 3 is the parked status in the rc-contract section 4 table, and it
+    // Exit 3 is the parked status in the release policy table, and it
     // is the one code a caller cannot learn from the payload alone: the run
     // did not fail, it is waiting for a decision.
     expect(parked.status).toBe(3)
@@ -211,7 +211,7 @@ describe("one project, from init to gc", processBudget, () => {
     // Identical payload, identical mutation: the receipt is replayed.
     expect(replay.receiptId).toBe(first.receiptId)
     // A different payload is a different mutation, and keying on the run alone
-    // silently dropped it (rc-contract section 5.1).
+    // silently dropped it (the release policy).
     expect(second.receiptId).not.toBe(first.receiptId)
   })
 

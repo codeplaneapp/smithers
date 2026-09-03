@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { servedBundles, servedDrift, servedRoot, siteIsBuilt } from "./check-llms.mjs"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 
 /**
  * Writes a repository-shaped fixture: the curated bundles under `docs/`, and

@@ -22,7 +22,7 @@ export default defineConfig({
       // the host: `jj` on PATH and provider keys exported. Deleted coverage
       // still fails the run.
       //
-      // rc-contract section 9 asks every package for 100, and this package is
+      // the release policy asks every package for 100, and this package is
       // the one that cannot reach it from inside the process being measured.
       // What a command line promises is what a PROCESS does — its exit status,
       // its stderr, the `.flows/` it leaves behind, the second `smithers` it

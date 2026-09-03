@@ -51,17 +51,13 @@ function* sourceFiles(dir: string): Generator<string> {
 }
 
 /**
- * The two Smithers 0.x UI kits this guard does not read.
+ * The two browser UI kits this guard does not read.
  *
- * `@smthrs/ui` and `@smthrs/ui-styleguide` survived the 1.0 Phase 1 deletion
- * unchanged because the imported product UI imports them
- * (`docs/migration/disposition-ledger.md`, disposition `keep`). They are 0.x
- * browser components: `WebPreview.tsx` warns through `console.warn` because a
+ * `@smthrs/ui` and `@smthrs/ui-styleguide` are browser components:
+ * `WebPreview.tsx` warns through `console.warn` because a
  * component has no Effect logger to reach. The guard's subject is engine source
  * that must log through `@smthrs/observability`, not retained browser code, so
  * the honest scope is to name them rather than to widen the pattern.
- *
- * The Phase 4 UI port rewrites both onto the 1.0 baseline and deletes this set.
  */
 const ZERO_X_UI_KITS = new Set(["ui", "ui-styleguide"])
 

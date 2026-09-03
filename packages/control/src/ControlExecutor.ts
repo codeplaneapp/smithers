@@ -69,7 +69,7 @@ export interface CancelTerminal {
  * was somebody else's. `Control.cancel` keys its attribution event on that
  * difference — the write is first-writer-wins and every repeat re-runs the
  * whole mutation, so answering `recorded` to all of them left one journaled
- * `control.run.cancel-requested` per ask for a single cancellation (Phase 7
+ * `control.run.cancel-requested` per ask for a single cancellation (release validation
  * smoke: three `cancel` calls and one `down` against one parked run left four).
  * `unknown` means this executor's engine has no row for the run at all, which
  * is the honest answer for a run another composition launched into a database
@@ -153,7 +153,7 @@ export type SignalDelivery = "delivered" | "no-match" | "unknown"
  * Without them the control plane records facts nobody reads — a cancel that
  * answers `ClaimLost` to every process but the owner, a signal a parked run
  * never sees, and a resume event published into an in-process hub no other
- * process subscribes to (rc-contract §5.1; triage B-10, B-13, B-15).
+ * process subscribes to (the release policy; triage B-10, B-13, B-15).
  *
  * @category services
  * @since 0.1.0
@@ -182,7 +182,7 @@ export interface Service {
    * driving the run and nothing reads the request {@link requestCancel} wrote.
    * The engine's parked-run sweep does, once per heartbeat, but a `smithers
    * cancel` process writes the request at the very end of its life and exits
-   * before that tick: the Phase 7 smoke watched an engine row stay
+   * before that tick: the release validation watched an engine row stay
    * `suspended` with `cancel_requested_at_ms` set through six more commands
    * and fifteen seconds, so `gc` collected the run in `control.db` and
    * skipped it in `engine.db`.

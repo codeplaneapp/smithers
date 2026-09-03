@@ -3,7 +3,7 @@
  *
  * Everything here is a real process: the help surface, the exit-code contract,
  * the `--json` stdout contract, and every removed verb and flag from
- * rc-contract section 4.2. Those refusals only mean anything at the process
+ * The release policy. Those refusals only mean anything at the process
  * boundary. The promise is "exit 1 with a migration message", not "the
  * handler returns a typed error", so they are asserted there.
  */
@@ -116,7 +116,7 @@ describe("smithers executable", processBudget, () => {
    * `--version` and `--help` are documents, not work. They resolved a project
    * root, scanned its `flows/` tree, and opened both SQLite databases before
    * `effect/unstable/cli` decided the invocation only wanted a document. In
-   * the Phase 7 smoke that cost more than ten minutes: the invocation
+   * the release validation that cost more than ten minutes: the invocation
    * directory held no project marker, the walk climbed to `$HOME`, and
    * discovery scanned the whole home tree.
    *
@@ -220,7 +220,7 @@ describe("smithers executable", processBudget, () => {
 describe("the help surface", processBudget, () => {
   const help = run(["--help"])
 
-  it("lists exactly the section 4.1 verbs", () => {
+  it("lists exactly the shipped verbs", () => {
     expect(help.status).toBe(0)
     for (const verb of Verb.subcommands) expect(help.stdout).toContain(verb.name)
   })
@@ -269,7 +269,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     expect(result.stderr).toContain("smithers steer --takeover was removed in 1.0.0-rc.0")
   })
 
-  it("refuses the plural `workflows`, which is the spelling section 4.2 lists", () => {
+  it("refuses the plural `workflows`, which is the spelling the removed-command contract lists", () => {
     // The singular is a command group only so `workflow list` stays reachable.
     // `workflows` is the 0.x did-you-mean key, so it is what a migrating
     // script says, and leaving it unregistered answered with the parser's
@@ -281,8 +281,8 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     expect(result.stderr).toContain(`${Unsupported.migrationUrl}#workflows`)
   })
 
-  it("answers `gateway status` and `gateway stop` with the section 4.2 message, not a usage error", () => {
-    // Section 4.2 keeps bare `gateway` as the `serve` alias and removes the
+  it("answers `gateway status` and `gateway stop` with the removed-command message, not a usage error", () => {
+    // The removed-command contract keeps bare `gateway` as the `serve` alias and removes the
     // two subcommands. Leaving them unregistered made the parser reject them
     // as stray positional arguments: exit 2, serve's help, and no migration
     // message, the same defect the plural `workflows` had.
@@ -297,7 +297,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
   })
 
   it("refuses `workflow run` under the packs reason and the singular spelling", () => {
-    // Section 4.2 lists `workflow run|path|create|inspect|skills|doctor` under
+    // The removed-command contract lists `workflow run|path|create|inspect|skills|doctor` under
     // "Packs and scaffolding". Reusing the `workflows` entry printed the
     // plural spelling and the "use `ls`" reason, which sends an operator
     // looking for a listing when what they lost was pack tooling.
@@ -485,7 +485,7 @@ describe("reserved system flow ids", processBudget, () => {
   // `SystemFlows.catalog` reserves 22 `system/*` ids so the control plane can
   // project a verb onto a flow row. None of them has a body in rc.0, so a
   // launch parks at `accepted` and never moves: the "partial appearance"
-  // rc-contract section 4 forbids. They are not flows an operator may name.
+  // the release policy forbids. They are not flows an operator may name.
   it("refuses to plan a reserved system flow", () => {
     const result = run(["plan", "system/replay", "--json"])
 
@@ -522,11 +522,11 @@ describe("the SQLite-only database contract", processBudget, () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
   })
 
-  it("refuses `--backend pglite` with rc-contract section 2's sentence", () => {
+  it("refuses `--backend pglite` with the release policy's sentence", () => {
     const result = run(["--backend", "pglite", "ls"])
 
     expect(result.status).toBe(1)
-    // The whole sentence, not a substring: section 2 fixes it, and a
+    // The whole sentence, not a substring: the unsupported-name contract fixes it, and a
     // paraphrase that still contains "unsupported_database" is a contract
     // change an operator's script would not see coming.
     expect(result.stderr.trim()).toBe(Environment.unsupportedBackendMessage)
@@ -545,7 +545,7 @@ describe("the SQLite-only database contract", processBudget, () => {
       SMITHERS_TEST_PG_URL: "postgres://localhost/test"
     })
 
-    // A notice, not a refusal: section 2 says these names are ignored, and an
+    // A notice, not a refusal: these names are ignored, and an
     // ignored name must not change what the command does or what it returns.
     expect(result.status).toBe(0)
     expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
@@ -706,7 +706,7 @@ describe("the smithers bin shim", processBudget, () => {
     }
 
     // The imported `flows` bin is gone and `@smthrs/cli` owns the one
-    // user-facing name (rc-contract.md section 3.4).
+    // user-facing name (the release policy).
     expect(manifest.bin).toEqual({ smithers: "./bin/smithers.mjs" })
     expect(manifest.files).toContain("bin/**/*.mjs")
     // `smithers docs` prints the bundles the docs lane generates into
@@ -779,7 +779,7 @@ describe("the smithers bin shim", processBudget, () => {
 })
 
 /**
- * Stages a Smithers 0.x project whose runs are all terminal, so the section 6
+ * Stages a Smithers 0.x project whose runs are all terminal, so the 0.x-project guard
  * refusal has nothing to hold and the verb gets as far as the migration tool.
  */
 const stageLegacyProject = (directory: string): string => {
@@ -815,7 +815,7 @@ const inProject = (cwd: string, args: ReadonlyArray<string>) =>
   })
 
 /**
- * rc-contract section 6 detection, at the process boundary.
+ * The release policy detection, at the process boundary.
  *
  * The rule is "0.x markers and no `.flows/` beside them", and the CLI creates
  * `<root>/.flows` as soon as it opens the control database. Sampling the
@@ -853,7 +853,7 @@ describe("Smithers 0.x detection", processBudget, () => {
     return cwd
   }
 
-  it("prints the section 6 notice on a first command in a 0.x project", () => {
+  it("prints the 0.x-project notice on a first command in a 0.x project", () => {
     const cwd = stage()
     try {
       const result = inProject(cwd, ["ls", "--json"])
@@ -869,7 +869,7 @@ describe("Smithers 0.x detection", processBudget, () => {
   })
 
   it("prints the notice whichever command runs first, not only `ls` and `up`", () => {
-    // Section 6 says "when a command runs in a directory", and an operator
+    // The 0.x-project guard says "when a command runs in a directory", and an operator
     // arriving at a 0.x project types `ps` or `status` at least as often as
     // `ls`. Wiring the notice into two handlers meant the notice depended on
     // which verb happened to be typed first, and the second command never
@@ -904,7 +904,7 @@ describe("Smithers 0.x detection", processBudget, () => {
     try {
       const result = inProject(cwd, ["migrate"])
 
-      // The section 6 guard, and it has to win over every later check: the
+      // The 0.x-project guard has to win over every later check: the
       // operator's next step is the 0.x CLI, not installing a flow.
       expect(result.status).toBe(1)
       expect(result.stderr).toContain("Refusing to migrate")
@@ -920,7 +920,7 @@ describe("Smithers 0.x detection", processBudget, () => {
     try {
       // The realistic order: the operator runs something in the project
       // first, which writes `.flows/`, and only then reaches for `migrate`.
-      // Section 6 gates the informational notice on `.flows/` being absent;
+      // The 0.x-project guard gates the informational notice on `.flows/` being absent;
       // it does not gate the refusal, and gating it there would retire the
       // guard for every project that ever ran an rc.0 command.
       expect(inProject(cwd, ["ls", "--json"]).status).toBe(0)
@@ -939,7 +939,7 @@ describe("Smithers 0.x detection", processBudget, () => {
   it("reaches the migration tool shipped in @smthrs/migrate, not a project-local flow file", () => {
     // A 0.x project has no `flows/` directory by definition, so demanding one
     // made the verb unreachable for every project it exists for. The flow
-    // ships inside `@smthrs/migrate` (rc-contract section 4.1, PLAN phase 6);
+    // ships inside `@smthrs/migrate` (the release policy, the release scope);
     // the verb runs that, and what it answers is the migration tool's own
     // report or the migration tool's own refusal.
     const cwd = mkdtempSync(temporaryDirectoryPrefix)
@@ -955,7 +955,7 @@ describe("Smithers 0.x detection", processBudget, () => {
            pause_requested_at_ms INTEGER, cancel_requested_at_ms INTEGER
          )`
       )
-      // Terminal only: the section 6 refusal has nothing to hold, so the verb
+      // Terminal only: the 0.x-project guard has nothing to hold, so the verb
       // gets as far as the tool.
       database.exec("INSERT INTO _smithers_runs (run_id, workflow_name, status) VALUES ('run-old-1','ship','finished')")
       database.close()
@@ -1009,7 +1009,7 @@ describe("Smithers 0.x detection", processBudget, () => {
 })
 
 /**
- * rc-contract section 4.1 `migrate`, and ruling V-4's shape for it.
+ * The `migrate` command's process-level shape.
  *
  * The verb runs the flow that ships inside `@smthrs/migrate`, which is the
  * same entry `smithers-migrate` runs. A verb that reached that entry with
@@ -1019,7 +1019,7 @@ describe("Smithers 0.x detection", processBudget, () => {
  * rejects an undeclared flag.
  */
 describe("the migrate verb's option surface", processBudget, () => {
-  /** A 0.x project whose runs are all terminal, so section 6 has nothing to hold. */
+  /** A 0.x project whose runs are all terminal, so the 0.x-project guard has nothing to hold. */
   const stageTerminal = (): string => stageLegacyProject(mkdtempSync(temporaryDirectoryPrefix))
 
   it("declares the migration tool's own flags", () => {
@@ -1146,7 +1146,7 @@ describe("the migrate verb's target", processBudget, () => {
 })
 
 /**
- * rc-contract section 4.1 `skills add`, under ruling F2.
+ * The `skills add` command's filesystem behavior.
  *
  * "Writes the curated skill only" is a promise about a file on disk, so it is
  * asserted against the file a real process wrote into a real home directory.
@@ -1246,12 +1246,12 @@ describe("smithers skills add", processBudget, () => {
 /**
  * What an attached launch reports to the shell that started it.
  *
- * rc-contract section 4's `up` row and section 10 both promise "exit code
- * follows the terminal status", and that promise only exists at the process
+ * An attached `up` launch reports an exit code that follows the terminal
+ * status, and that promise only exists at the process
  * boundary: a script, a `pipeline-*.yml` step, or a sandbox `run-workflow.sh`
- * reads `$?`, not a receipt. The Phase 7 Plue cutover measured the opposite:
+ * reads `$?`, not a receipt. The release validation measured the opposite:
  * `smithers up ci-fast --json` returned 0 in three seconds while `smithers ps`
- * reported `failed` (plue-cutover finding S1).
+ * reported `failed`.
  *
  * The run below fails for real, with no provider and no network. The flow
  * declares an `openai` seat, `SMITHERS_OPENAI_AUTH=chatgpt` routes that seat
@@ -1332,7 +1332,7 @@ describe("an attached launch's exit status", processBudget, () => {
   /**
    * One refusal is one operator line.
    *
-   * The billing refusal in the Phase 7 smoke printed two WARN stacks for one
+   * The billing refusal in the release validation printed two WARN stacks for one
    * failure (observation N1): the run's own `An agent run failed`, and
    * `engine-store: the settlement of agent/run could not be encoded through
    * its own codec`. The second is not a second failure. It fires because the
@@ -1402,7 +1402,7 @@ describe("an attached launch's exit status", processBudget, () => {
    * What the launching process leaves in `engine.db` when it exits.
    *
    * The control settlement and the engine's terminal write are two writes, and
-   * this process returns on the first. In the Phase 7 smoke it then closed its
+   * this process returns on the first. In the release validation it then closed its
    * scope and interrupted its own executor 10 to 14 ms before the second one
    * landed, leaving the row `suspended`/`released`; every later process that
    * composed an executor claimed that row and re-drove the run. The pin is at
@@ -1518,7 +1518,7 @@ describe("an attached launch's exit status", processBudget, () => {
 /**
  * The project `smithers init` scaffolds, launched exactly as it was written.
  *
- * The Phase 7 verdict at cd14388ed7 ran the two commands the scaffold's own
+ * The release rehearsal ran the two commands the scaffold's own
  * doc comment promises: `smithers init hello`, then `smithers up hello` in
  * that directory. It got exit 1 with `Run run-1 was accepted but the
  * executor did not take it`, a `control.db` row still `accepted` under
@@ -1770,7 +1770,7 @@ describe.skipIf(!chatgptSeat)("the smithers init scaffold on a funded seat", { t
  * What `smithers signal` tells an operator when the run is parked on something
  * else.
  *
- * The Phase 7 smoke ran `smithers signal run-3 '{"name":"go", ...}'` against a
+ * The release validation ran `smithers signal run-3 '{"name":"go", ...}'` against a
  * run parked on a 150 second timer. It exited 1 with `go: ` on stderr: the
  * refusal declared a `name` field, which shadows `Error.prototype.name`, and
  * declared no message, so `bin.ts` `report` printed the operator's own word

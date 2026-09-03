@@ -1,12 +1,11 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
 import test from "node:test"
-import { existsSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 import { helpBlock, helpEntry, parseHelp } from "./docs-help.mjs"
 import { pages } from "./docs-pages.mjs"
-import { regionEnd, regionStart } from "./docs-render.mjs"
 
 const help = [
   "DESCRIPTION",
@@ -83,9 +82,8 @@ test("no generated CLI page interpolates help text MDX would read as a tag", () 
 
 test("the support matrix links every published package this repository documents", () => {
   const matrix = readFileSync(join(repoRoot, "docs/pages/release/support-matrix.md"), "utf8")
-  // The migration tool joined the release as the fortieth name. It has no API
-  // page, so an unguarded generator prints it as bare text and a reader has no
-  // way to find out what it does.
+  // The migration tool has no API page, so its release-table entry points to
+  // the upgrade documentation.
   assert.match(matrix, /\| \[`@smthrs\/migrate`\]\(\/migration\/migrate-tool\) \|/)
   // The cli package owns an API page now (packages/cli/PACKAGE.ts targets
   // docs/pages/api/cli.md), so the generator links it there, as the sidebar does.
@@ -95,71 +93,33 @@ test("the support matrix links every published package this repository documents
 
 test("the removed-verb table gives the reason the binary gives", () => {
   const guide = readFileSync(join(repoRoot, "docs/pages/migration/1.0.md"), "utf8")
-  // The table and the block under it describe the same removal. Rendering the
-  // table from the contract instead of the binary put the migration's own
-  // record ("follows apps/review's Phase 4 disposition") in front of a reader
-  // whose terminal had just said "not an rc.0 verb".
+  // The table and the block under it describe the same removal using the
+  // binary's own registry.
   assert.match(guide, /\| \[`smithers review`\]\(#review\) \| not an rc\.0 verb \|/)
   assert.match(guide, /\| \[`smithers test`\]\(#test\) \| not an rc\.0 verb \|/)
 })
 
-test("no removal table cell is blank and none cites a migration phase", () => {
+test("no removal table cell is blank or cites internal planning", () => {
   const guide = readFileSync(join(repoRoot, "docs/pages/migration/1.0.md"), "utf8")
   const rows = guide.split("\n").filter((line) => /^\| (\[`smithers |`)/.test(line))
   assert.ok(rows.length > 60, `expected the removal tables, found ${rows.length} rows`)
   for (const row of rows) {
     const cells = row.split("|").slice(1, -1).map((entry) => entry.trim())
     assert.ok(cells.every((entry) => entry !== ""), `blank cell: ${row}`)
-    assert.doesNotMatch(row, /Phase [1-9]|disposition|ledger/, `internal record in a reader's table: ${row}`)
+    assert.doesNotMatch(row, /internal planning|work lane/, `internal record in a reader's table: ${row}`)
   }
 })
 
 test("a removed flag is given the reason the binary prints", () => {
   const guide = readFileSync(join(repoRoot, "docs/pages/migration/1.0.md"), "utf8")
   const page = readFileSync(join(repoRoot, "docs/pages/cli/migrate.md"), "utf8")
-  // `--to` and `--backend` both refuse with a database sentence. The contract
-  // adds its own section and error-code citation; the terminal does not.
-  assert.match(guide, /\| `global` \| `--backend pglite\\\|postgres` \| SQLite only \(`--backend sqlite` is accepted as a no-op\) \|/)
-  assert.match(page, /\| `--to &lt;backend&gt;` \| SQLite only; the 0\.x database move is removed \|/)
+  // `--to` and `--backend` both refuse with the database sentence emitted by
+  // the CLI.
+  assert.match(guide, /\| `global` \| `--backend` \| SQLite only \(`--backend sqlite` is accepted as a no-op\) \|/)
+  assert.match(page, /\| `--to` \| SQLite only; the 0\.x database move is removed \|/)
 })
 
-test("the release page is authored by its owner and this generator refreshes one region of it", () => {
-  // The known-limitations page is written by the release-enforcement work from
-  // the frozen contract's exclusion table, not by the documentation pipeline.
-  // Two sources writing one path collide, so the pipeline owns the
-  // `release-notes` region and nothing else on the page. The prose on either
-  // side of the markers is the owner's and has to survive a generation.
-  const page = readFileSync(join(repoRoot, "docs/pages/release/known-limitations.md"), "utf8")
-  assert.equal(existsSync(join(repoRoot, "docs/pages/release/known-limitations.mdx")), false)
-
-  const start = page.indexOf(regionStart("release-notes"))
-  const end = page.indexOf(regionEnd("release-notes"))
-  assert.ok(start > 0, "the page carries no release-notes region for the generator to refresh")
-  assert.ok(end > start, "the release-notes region is not closed")
-  assert.equal(page.indexOf(regionStart("release-notes"), start + 1), -1, "two release-notes regions")
-
-  const before = page.slice(0, start)
-  const after = page.slice(end)
-  assert.match(before, /^# Known limitations$/m)
-  assert.match(before, /The sections after the block are written by hand/)
-  assert.match(after, /^## Where each exclusion is enforced in the tree$/m)
-  assert.match(after, /^## What shipped, and is not a limitation$/m)
-  assert.match(page.slice(start, end), /^## Release notes$/m)
-})
-
-test("the generator runs green against the pages it does not own", () => {
-  // A generator that reads a page another body of work writes crashes the
-  // documentation gate the moment that page changes shape. `--check` exercises
-  // the same code path as a write, over the release pages the enforcement work
-  // owns and this generator only refreshes a region of.
-  //
-  // The absent-page half of the guard at `generate-docs-pages.mjs`'s
-  // `existsSync` is not spawned here. Faking the absence means renaming a
-  // tracked page out of the checkout, and `node --test` runs these files in
-  // parallel processes over one working copy: doing that failed
-  // `docs-contract.test.mjs` with ENOENT and `docs-sidebar.test.mjs` with a
-  // dangling `/release/known-limitations` in the same run. A test that breaks
-  // its neighbours proves less than the comment on the guard does.
+test("the generator runs green against its committed pages", () => {
   const result = spawnSync(process.execPath, [join(repoRoot, "scripts/generate-docs-pages.mjs"), "--check"], {
     cwd: repoRoot,
     encoding: "utf8"

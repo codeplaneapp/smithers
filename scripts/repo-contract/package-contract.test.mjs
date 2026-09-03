@@ -31,7 +31,7 @@ const releaseVersion = "1.0.0-rc.0"
 const offReleaseLine = new Map([
   [
     "@smthrs/migrate",
-    "The Phase 6 migration tool for upgrading 0.x projects. It is versioned "
+    "The migration tool for upgrading 0.x projects. It is versioned "
     + "independently of the runtime it migrates to, so it does not move with the "
     + "RC line. Revisit before the first publish: if it ships with the RC it "
     + "needs the RC version and the `next` dist-tag."

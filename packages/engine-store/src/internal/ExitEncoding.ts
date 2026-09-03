@@ -14,7 +14,7 @@
  *
  * Guarding the terminal transition with `Effect.orDie` around that encode made
  * an unencodable failure fatal for the drain instead of terminal for the run.
- * The Phase 7 Plue cutover caught the whole chain: `engine-store: coordinated
+ * The release validation caught the whole chain: `engine-store: coordinated
  * drain failed for run-1 SchemaError: Expected JSON value at
  * ["exit"]["cause"][0]["error"]`, `engine.db` `flows_runs` left at `running`
  * with a dead owner pid while `control.db` said `failed`, and 86 seconds later
@@ -27,7 +27,7 @@
  * code, message, a stack summary, and nested causes) inside a `Die` reason —
  * and the caller is told, through {@link EncodedResult.note}, that it must
  * settle the run `failed`. A settled run is never re-executed, which is the
- * durability promise rc-contract section 7 states as one terminal write.
+ * durability promise the release policy states as one terminal write.
  *
  * The projection is built as plain JSON rather than re-encoded through a
  * schema, so nothing in this module can raise. Its top-level object carries no

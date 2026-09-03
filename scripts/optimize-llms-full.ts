@@ -25,7 +25,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 
 /** Headings whose whole section is navigation rather than content. */
 export const navigationHeadings = [

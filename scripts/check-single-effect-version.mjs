@@ -3,8 +3,8 @@
  *
  * Effect's schema internals are not interoperable between instances, so a tree
  * that resolves two copies of `effect` fails at runtime in ways a type check
- * never sees. `docs/migration/rc-contract.md` section 9 therefore pins the
- * supported range to the single version below, and this gate proves the tree
+ * never sees. This gate pins the supported range to the single version below
+ * and proves the tree
  * agrees: every workspace manifest that declares `effect`, both lockfiles, and
  * whatever is actually installed must name it and nothing else.
  *
@@ -22,10 +22,10 @@ import { fileURLToPath } from "node:url"
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 /**
- * The one supported version (rc-contract.md section 9, Effect row).
+ * The one supported version.
  *
- * Changing it is a release-contract change: update the contract, every
- * manifest, and both lockfiles in the same commit.
+ * Changing it requires updating every manifest and both lockfiles in the same
+ * commit.
  */
 export const EXPECTED_EFFECT_VERSION = "4.0.0-rc.108"
 
@@ -33,7 +33,7 @@ export const EXPECTED_EFFECT_VERSION = "4.0.0-rc.108"
 const MANIFEST_ROOTS = ["packages", "apps", "evals", "packages/build"]
 
 /** Directories never walked while collecting manifests. */
-const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", "coverage", "legacy", "target", ".git", ".jj"])
+const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", "coverage", "target", ".git", ".jj"])
 
 /** @type {Map<string, string[]>} */
 const versions = new Map()
@@ -131,8 +131,7 @@ const collectInstalledVersions = () => {
   }
 
   // The CLI is the entry point a consumer runs, so resolve `effect` the way it
-  // does. Before Phase 3 moves the bin, the package root is the closest stable
-  // anchor (`packages/cli/bin/smithers.mjs` replaces it with the bin move).
+  // does. The package root is the closest stable anchor.
   try {
     const cliRequire = createRequire(join(root, "packages", "cli", "package.json"))
     readInstalledVersion(cliRequire.resolve("effect/package.json"), "packages/cli import resolution")
@@ -166,7 +165,7 @@ const [[version, sources]] = sorted
 if (version !== EXPECTED_EFFECT_VERSION) {
   console.error(
     `check-single-effect-version: the tree resolves effect@${version}, ` +
-      `but rc-contract.md section 9 pins effect@${EXPECTED_EFFECT_VERSION}.`
+      `but this release pins effect@${EXPECTED_EFFECT_VERSION}.`
   )
   for (const source of sources) console.error(`    - ${source}`)
   process.exit(1)

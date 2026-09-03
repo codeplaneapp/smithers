@@ -19,7 +19,7 @@ import { existsSync } from "node:fs"
  * 0.x run statuses that mean the run is over.
  *
  * `continued` is a 0.x terminal status with no rc.0 counterpart
- * (rc-contract section 5.2); it is terminal for the purpose of this check.
+ * (the release policy); it is terminal for the purpose of this check.
  *
  * @category constants
  * @since 1.0.0

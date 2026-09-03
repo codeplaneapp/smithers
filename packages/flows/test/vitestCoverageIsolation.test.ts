@@ -36,17 +36,9 @@ describe("vitest coverage isolation conformance", () => {
       return false
     }
   }
-  // One carve-out, named rather than derived: the two Smithers 0.x UI kits.
-  // `@smthrs/ui` and `@smthrs/ui-styleguide` survived the 1.0 Phase 1 deletion
-  // unchanged because the imported product UI imports them
-  // (docs/migration/disposition-ledger.md rows `packages/ui` and
-  // `packages/ui-styleguide`, disposition `keep`). They still carry 0.x
-  // tooling: `bun test tests`, tsup declarations, no vitest config, no
-  // `publishConfig.exports`. Both are private and unpublished at rc.0
-  // (rc-contract.md section 3.2), so no publishable surface escapes the gate
-  // while they sit here. The Phase 4 UI port retargets them onto this baseline
-  // and deletes this list; `pnpm run check:legacy-absent` and the Phase 7
-  // checklist are what keep that from being forgotten.
+  // One carve-out, named rather than derived: the two private UI kits use
+  // `bun test tests` and have no vitest config or publication exports. They
+  // remain unpublished, so no public surface escapes the gate.
   //
   // This is a smaller universe, not a smaller assertion: every other package
   // under `packages/` is still derived, so a new config-less package is still
@@ -79,8 +71,7 @@ describe("vitest coverage isolation conformance", () => {
 
   // A second named carve-out, and only from the export-shape cell below. The
   // unscoped `smthrs` package is a migration notice whose single module throws
-  // on import (rc-contract.md sections 3.3 and 3.5 pin its export map to `.`,
-  // with no wildcard). It still ships a vitest config, `scripts.test`, and the
+  // on import and exposes only `.`. It still ships a vitest config, `scripts.test`, and the
   // 100% coverage gate, so it is inside every other assertion in this suite.
   const noticeOnlyPackages = new Set(["smthrs-deprecation"])
 
@@ -112,9 +103,7 @@ describe("vitest coverage isolation conformance", () => {
       // release groups, so the build graph, its CLI, and the target library —
       // private, `smthrs.group: "tooling"`, packed by no candidate — have no
       // published surface for a `publishConfig.exports` map to describe.
-      // Commits e7a1c2cf72 and bb59fcba09 deleted the dead blocks two of them
-      // arrived with (rc-contract.md section 3.2 and R-3 rule them private at
-      // rc.0). The exemption is conditioned on the two facts that make it
+      // The exemption is conditioned on the two facts that make it
       // true, so it expires by itself: a package that drops `private`, or
       // moves into a release group, falls straight back into the assertion
       // below. Every other private package here (`chain`, `evals`, `fs`,
@@ -170,8 +159,8 @@ describe("vitest coverage isolation conformance", () => {
   // The set is explicit and self-expiring: every member must retain a real,
   // non-zero threshold in all four categories and at least one category below
   // 100. Once a package reaches full coverage it must leave this set.
-  // `integrations` joins them for the same reason: it was ported wholesale in
-  // Phase 4 from the flows tree, its floors (branches 94, functions 98, lines
+  // `integrations` joins them for the same reason: it was imported wholesale;
+  // its floors (branches 94, functions 98, lines
   // 99, statements 98) are the measured coverage of adapters that talk to
   // GitHub, Linear, and Telegram over HTTP, and its own config carries the
   // instruction to raise them as each case closes.
@@ -374,7 +363,7 @@ describe("vitest coverage isolation conformance", () => {
     // reads top-level directories only — is unaffected and no top-level
     // publishable surface escapes the gate. `sharp` and `workerd` are its
     // wrangler toolchain's postinstall builds, denied like every other.
-    // Widened a fourth time (Phase 7 blocker B6): `e2e` is the fault-injection
+    // Widened a fourth time (release gate B6): `e2e` is the fault-injection
     // matrix. It was not a member, so it had no `node_modules` and
     // `//e2e:faults` failed in 262 ms with `Command "vitest" not found` —
     // eighteen crash, restart, gateway, time-travel, provider, and safety
@@ -463,19 +452,8 @@ describe("vitest coverage isolation conformance", () => {
     // Electrobun lane. It builds a stable bundle and drives that bundle with
     // Bun; CI does not invoke it because the package graph has no macOS host.
     //
-    // Widened twice by the 1.0 migration, deliberately. Every other retained
-    // 0.x gate became a `//scripts/...` target instead of a root script
-    // (rc-contract.md section 9, exception 3); these two cannot:
-    //
-    // `check:legacy-absent` fails while `legacy/` exists, which it does from
-    // the Phase 2 import until the last Phase 4 port lands. A target under
-    // `//scripts/...` would make the required CI step red for every lane for
-    // the length of the migration, so the Phase 7 gate stays a root script
-    // that a person and the Phase 7 checklist invoke by name.
-    //
     // `check:npm-dedupe` is the operator alias for `//scripts:npmDedupe`, the
-    // same shape as `browser` and `//scripts:browserContract`. R-35 requires
-    // the gate to be a target, and Phase 7 made it one: the resolution reads
+    // same shape as `browser` and `//scripts:browserContract`. The resolution reads
     // registry metadata, so the target is uncacheable and re-runs regardless,
     // which is the only concession the network costs. The alias is pinned so
     // the roster stays exact, not because it is a second enforcement path.
@@ -485,16 +463,14 @@ describe("vitest coverage isolation conformance", () => {
     // and `scripts/generate-llms.ts` print "Run `pnpm docs:pages`" and "Run
     // `pnpm docs:llms` and commit the result" in their own output, so the
     // names have to resolve or the instruction is false. The gates that read
-    // what they write stay targets, `//scripts:docs` and `//scripts:llms`,
-    // per rc-contract.md section 9 exception 3, and `.github/workflows/
-    // docs-deploy.yml` invokes those two by path.
+    // what they write stay targets, `//scripts:docs` and `//scripts:llms`, and
+    // `.github/workflows/docs-deploy.yml` invokes those two by path.
     const root = JSON.parse(readFileSync(join(packagesDir, "..", "package.json"), "utf8")) as {
       readonly scripts?: Record<string, string>
     }
     expect(root.scripts).toEqual({
       browser: "node scripts/browser-check.mjs",
       check: "pnpm --recursive --if-present run check",
-      "check:legacy-absent": "node scripts/check-legacy-absent.mjs",
       "check:npm-dedupe": "node scripts/check-npm-dedupe.mjs",
       circular: "pnpm --recursive --if-present run circular",
       "deploy:dry": "pnpm --filter smithers-server run deploy:dry",
@@ -535,11 +511,11 @@ describe("vitest coverage isolation conformance", () => {
     // drift check runs nowhere else, so dropping this step would let a stale
     // registry ship with every other cell green.
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:knownFiles'$/m)
-    // The fault matrix. Until Phase 7 blocker B6 it ran under no gate at all:
+    // The fault matrix. Until release gate B6 it ran under no gate at all:
     // `//packages/...` does not reach `e2e/`, `e2e` was not a workspace member,
     // and `//e2e:faults` failed in 262 ms with `Command "vitest" not found`.
     // The typecheck is a required step and the matrix itself is the `e2e-faults`
-    // job, which is required now that the section 5.2 redaction deliverable
+    // job, which is required now that the redaction deliverable
     // landed: case 22's terminal-log half was the one gate red by design, the
     // redacting logger closed it, and the matrix is 67 of 67.
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build build '\/\/e2e:check'$/m)

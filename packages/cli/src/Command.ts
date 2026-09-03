@@ -1,8 +1,8 @@
 /**
  * The `smithers` command tree.
  *
- * Every verb in rc-contract section 4.1 is here with a handler, and every verb
- * and flag in section 4.2 is here as a hidden refusal. Those two facts are the
+ * Every verb in the shipped catalog is here with a handler, and every verb
+ * and flag in the removed-command contract is here as a hidden refusal. Those two facts are the
  * whole design: a release that silently accepts a removed verb, or that
  * answers a removed one with a parser error, leaves an operator guessing which
  * of their scripts still mean what they used to.
@@ -128,7 +128,7 @@ const refuseRemoved = (
  * The shared pre-handler: the globals every handler is checked against, and
  * the one notice every handler owes.
  *
- * Section 6's detection is "when a command runs in a directory", so it belongs
+ * The 0.x-project guard's detection is "when a command runs in a directory", so it belongs
  * here rather than in a verb. Wired into `ls` and `up` alone it printed only
  * when one of those two happened to be the first command an operator typed in
  * a 0.x project, because the first invocation writes `.flows/` and the sample
@@ -146,7 +146,7 @@ const guardGlobals = Effect.gen(function*() {
   // rc.0 ignores them and says so, once per invocation, because a silently
   // ignored connection string is how a project ends up running against SQLite
   // while believing it runs against PostgreSQL. A notice, not a refusal: the
-  // exit code and the command's result do not move (rc-contract section 2; the
+  // exit code and the command's result do not move (the SQLite-only runtime
   // names and the sentence are @smthrs/database's, pinned per name in
   // packages/database/test/UnsupportedBackend.test.ts).
   yield* noticeIgnoredBackends
@@ -345,7 +345,7 @@ const awaitOwnedRun = (
  * The park a decision answers, or nothing for a plan-level decision.
  *
  * `Control.approve` and `Control.deny` restart the run their `ask` parked, in
- * the deciding call (rc-contract section 5.1). The driver that picks that
+ * the deciding call. The driver that picks that
  * resume up is this process's own executor, so a command that printed its
  * receipt and returned took the driver down with it and left the run it had
  * just restarted exactly where it stood, still needing `run --resume`, which
@@ -388,8 +388,8 @@ const wasDeclined = (settlement: string | undefined): boolean => settlement === 
  * The process status one settlement reports, or nothing when the settlement
  * says nothing about how the run ended.
  *
- * rc-contract section 4's `up` row and section 10 both promise that an
- * attached launch exits with the terminal status code. Section 4's opening
+ * The `up` command promises that an
+ * attached launch exits with the terminal status code. The launch contract
  * paragraph is the vocabulary that code is spelled in: 0 success, 1 error, 2
  * usage, 3 parked, 130 SIGINT, 143 SIGTERM. A cancel reports the interrupt
  * status because a cancel is an interruption: `Control.cancel` settles the run
@@ -399,8 +399,8 @@ const wasDeclined = (settlement: string | undefined): boolean => settlement === 
  * Until this existed, `runLaunch` failed only on `control.run.pending`, so a
  * `control.run.failed` settlement rendered the launch receipt and exited 0.
  * No caller of `smithers up` could read a red run from the exit code: the
- * Phase 7 Plue cutover measured `smithers up ci-fast --json` returning 0 in
- * three seconds while `smithers ps` reported `failed` (finding S1).
+ * release validation measured `smithers up ci-fast --json` returning 0 in
+ * three seconds while `smithers ps` reported `failed`.
  */
 const settlementStatus = (settlement: string | undefined): number | undefined => {
   switch (settlement) {
@@ -463,14 +463,14 @@ const requireRun = (control: ControlService.Service, runId: string) =>
 const noticeLegacyState = Effect.gen(function*() {
   // The snapshot, not a fresh walk: this invocation's own control database
   // has created `<root>/.flows` by now, and `Project.legacyState` reads that
-  // directory as proof the project already moved on (rc-contract section 6).
+  // directory as proof the project already moved on.
   const found = yield* Project.LegacyState
   const first = found[0]
   if (first === undefined) return
   yield* Effect.sync(() => process.stderr.write(`${Project.legacyNotice(first)}\n`))
 })
 
-// == section 4.1 verbs
+// == the shipped-command contract verbs
 
 const plan = Command.make("plan", common, (config) =>
   Effect.gen(function*() {
@@ -662,7 +662,7 @@ const approve = Command.make("approve", {
     const parkSequence = yield* decisionPark(control, payload.target)
     const receipt = yield* control.approve({ ...payload, scope: config.scope })
     // A decision restarts the run it answers, in this call, on this process's
-    // own executor (rc-contract section 5.1). The decision therefore ends with
+    // own executor. The decision therefore ends with
     // a settled run, and the shell that ran `smithers approve` is entitled to
     // read that run's status from `$?` exactly as `up` and `run` promise it.
     const settlement = yield* awaitOwnedRun(control, receipt, parkSequence)
@@ -695,7 +695,7 @@ const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, (con
  * The payload digest is part of the key because two different signals to one
  * run are two mutations. At the import reference the key was `cli:signal:<id>`
  * alone, so the second signal replayed the first one's recorded receipt and
- * was never delivered (rc-contract section 5.1).
+ * was never delivered.
  *
  * @category constructors
  * @since 1.0.0
@@ -1090,7 +1090,7 @@ const docs = Command.make("docs", { full: Flag.boolean("full") }, (config) =>
  *
  * `smithers migrate` and `smithers-migrate` run the same entry, so they take
  * the same options. A verb that declared none of them could only ever plan:
- * `--apply` is what the section 4.1 row calls converting the project source,
+ * `--apply` converts the project source,
  * and an operator who cannot type it has no way to reach the transformation.
  * `--json` is not repeated here because it is already a shared global.
  */
@@ -1168,7 +1168,7 @@ const migrate = Command.make("migrate", {
     // at the ancestor instead of itself.
     const migrationRoot = yield* Project.MigrationRoot
     const target = Option.getOrElse(config.path, () => migrationRoot)
-    // `legacyDatabases`, not `legacyState`: the section 6 refusal is not
+    // `legacyDatabases`, not `legacyState`: the 0.x-project guard is not
     // gated on `.flows/` being absent, and the project being migrated has
     // one by definition.
     const databases = Project.legacyDatabases(target).map(Legacy.read)
@@ -1518,7 +1518,7 @@ const skillsAdd = Command.make(
           })
         )
       }
-      // rc-contract ruling F2: the one curated skill, or nothing. Rendering a
+      // The command installs the one curated skill, or nothing. Rendering a
       // stub from the verb table and reporting success put a document under
       // the curated skill's name that carried none of what it teaches.
       const curated = Agents.skill()
@@ -1701,7 +1701,7 @@ const gatewayCommand = Command.make("gateway", serveFlags, serveHandler).pipe(
   ))
 )
 
-// == section 4.2 refusals
+// == the removed-command contract refusals
 
 /**
  * Every removed verb, as a hidden subcommand that exits 1 with its reason.

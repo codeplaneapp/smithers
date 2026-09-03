@@ -1,7 +1,7 @@
 /**
  * What a failed agent run leaves on disk for the next process to find.
  *
- * Phase 7's Plue cutover ran the rc.0 CLI against a provider seat with no
+ * release validation ran the rc.0 CLI against a provider seat with no
  * credits. Every failure logged `engine-store: coordinated drain failed for
  * run-1 SchemaError: Expected JSON value at ["exit"]["cause"][0]["error"]`,
  * because `agent/run` declares both result channels `Schema.Unknown` and the
@@ -13,7 +13,7 @@
  * `stolen-and-activated`, `discipline-armed` and `turn-opened` for it, and
  * called the OpenAI seat again for a run the control plane had closed.
  *
- * rc-contract section 7 allows one terminal write per run, and the release
+ * The release policy allows one terminal write per run, and the release
  * promises a settled run is never re-executed. This is that pin: two
  * compositions over one pair of real SQLite files, the first composition's
  * scope CLOSING between them, a seat that counts every call, and a failure
@@ -102,7 +102,7 @@ const controlFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
 const calls: Array<string> = []
 
 /**
- * The seat the cutover actually hit: a provider that rejects the request. The
+ * A provider seat that rejects the request. The
  * failure travels up as a `HarnessError` wrapping this `ModelError`, which is
  * the class instance `Schema.Json` refuses to encode.
  */
@@ -246,9 +246,8 @@ const countTurns = (root: string, runId: string): number => {
 /**
  * Ages every engine heartbeat past `Ownership.heartbeatStaleAfter`.
  *
- * The cutover's second process booted 86 seconds after the first one exited,
- * which is what made the first owner's heartbeat stale enough to steal. This
- * is the same fact written directly, so the pin costs one sweep tick instead
+ * The second process must see the first owner's heartbeat as stale enough to
+ * steal. This writes that fact directly, so the pin costs one sweep tick instead
  * of half a minute of wall clock.
  */
 const ageHeartbeats = (root: string): void => {
@@ -329,7 +328,7 @@ describe("an agent run whose seat rejects the call", () => {
    * arrived as `flows/engine-store/UnencodableResult`, the projection
    * `engine-store` degrades a settlement into when the flow's own codec
    * rejects it — and announces in a second WARN stack beside the run's own
-   * `An agent run failed` (Phase 7 smoke observation N1). `agent/run` now
+   * `An agent run failed` (release validation observation N1). `agent/run` now
    * renders its failure to a plain JSON object before the engine persists it,
    * so the settlement encodes, the row carries the tagged refusal instead of a
    * projection or a stack string, and one refusal prints one warning. The

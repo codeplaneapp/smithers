@@ -6,10 +6,6 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Contract from "@smthrs/migrate/flow/Contract"
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-
-const auditPath = fileURLToPath(new URL("../../../../docs/migration/feature-parity-audit.md", import.meta.url))
 
 const brief: Contract.UnitBrief = {
   id: "workflow:simple-workflow",
@@ -107,7 +103,7 @@ describe("Contract.text", () => {
 })
 
 describe("Contract.examples", () => {
-  it("embeds the audit pairs the design names", () => {
+  it("embeds the verified teaching pairs", () => {
     expect(Contract.examples.map((example) => example.title)).toEqual([
       "Typed workflow execution",
       "Sequence",
@@ -122,18 +118,6 @@ describe("Contract.examples", () => {
     for (const example of Contract.examples) {
       expect(Contract.text).toContain(example.old)
       expect(Contract.text).toContain(example.new)
-    }
-  })
-
-  it("matches the feature parity audit this repository carries", () => {
-    const audit = readFileSync(auditPath, "utf8")
-    for (const example of Contract.examples.slice(0, 5)) {
-      // The audit is the source; the contract quotes fragments of it, so every
-      // embedded new-side snippet has to be findable in the audit line for line.
-      for (const line of example.new.split("\n")) {
-        if (line.trim() === "") continue
-        expect(audit, `${example.title}: ${line}`).toContain(line)
-      }
     }
   })
 })

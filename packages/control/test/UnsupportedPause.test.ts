@@ -2,11 +2,11 @@
  * `pause` is gone from the control plane, and this is the gate that keeps it
  * gone.
  *
- * rc-contract §5.2 removes attributed pause from `1.0.0-rc.0` rather than
+ * Attributed pause is absent from `1.0.0-rc.0` rather than
  * shipping it half-working: `SqlControlRuntime.pause` flipped the control row
  * to `parked` and released ownership, but it interrupted no fiber and parked no
  * engine run, so the body kept executing until its next fenced write failed.
- * PLAN.md Phase 5 forbids exactly that appearance, and the ruling was removal
+ * The release scope forbids exactly that appearance, and the ruling was removal
  * rather than an `Unavailable` stub because the consumer inventory found no
  * caller.
  *
@@ -17,7 +17,7 @@
  * re-introduction through a new file, which a type check would happily accept.
  *
  * The prose scan is the same guard one layer out. `docs/pages/api/control.md`
- * carried a `Control.pause` sentence for the whole of Phase 5 while the member
+ * once carried a `Control.pause` sentence while the member
  * was already gone, and the generated `llms` bundles copied it four more times,
  * so a reader learned a verb the binary refuses. The page is generated from
  * this package, which makes this package the right place to prove it stayed

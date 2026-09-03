@@ -3,7 +3,7 @@
  *
  * `CommandHandlers.test.ts` owns the listing and lifecycle spine and
  * `CommandProjections.test.ts` owns `output`, the claude mirror, and `bug`.
- * What was left with no case at all is the rest of section 4.1: `steer`,
+ * What was left with no case at all is the rest of the shipped command set: `steer`,
  * `down`, `init`, `docs`, the `resume`/`workflow list`/`events` aliases, the
  * `claude` follow verbs, and `mcp add`/`skills add`/`skills list`. Each has a
  * module of its own with its own unit tests; none had a case driving the

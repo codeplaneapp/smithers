@@ -1,10 +1,9 @@
 /**
- * Targets for the retained Smithers 0.x theme tokens.
+ * Targets for the private Smithers theme tokens.
  *
- * `@smthrs/ui` and `apps/review` import this package, so Phase 1 kept it
- * (`docs/migration/disposition-ledger.md`, row `packages/ui-styleguide`,
- * disposition `keep`). See `packages/ui/PACKAGE.ts` for why a retained 0.x
- * package declares its own targets: the root `packageDefaults` would otherwise
+ * `@smthrs/ui` and `apps/review` import this package. See
+ * `packages/ui/PACKAGE.ts` for why this package declares its own targets: the
+ * root `packageDefaults` would otherwise
  * synthesize a `StandardPackage` library build and vitest suite for it, and
  * this package ships as source with a Bun suite instead.
  *
@@ -31,7 +30,7 @@ const cwd = "packages/ui-styleguide"
  * @since 1.0.0-rc.0
  * @category build
  */
-const check = Smithers.Typecheck({
+export const check = Smithers.Typecheck({
   packageManager,
   srcs: [
     Smithers.glob("//packages/ui-styleguide/src/**/*.ts"),
@@ -66,7 +65,7 @@ const check = Smithers.Typecheck({
  * @since 0.1.0
  * @category test
  */
-const unitTests = Smithers.NodeTest({
+export const unitTests = Smithers.NodeTest({
   runtime: bunRuntime,
   runner: Smithers.testSuite(["tests"]),
   srcs: [
@@ -80,8 +79,4 @@ const unitTests = Smithers.NodeTest({
   ],
   deps: [],
   cwd
-})
-
-export const Package = Smithers.Package({
-  targets: { check, unitTests }
 })

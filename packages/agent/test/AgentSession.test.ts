@@ -936,7 +936,7 @@ describe("AgentSession", () => {
 
     // A flow with no seat can never run on any agent host, so the refusal
     // names the line to add rather than parking the run at `accepted` under an
-    // owner nobody is running (Phase 7 verdict cd14388ed7, D1).
+    // owner nobody is running (release rehearsal, D1).
     expect(result.refusal).toContain("agents/seatless declares no model seat")
     expect(result.refusal).toContain("model:")
     expect(result.status).toBe("failed")

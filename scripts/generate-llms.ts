@@ -20,7 +20,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 import { pages } from "./docs-pages.mjs"
 import { assertRegenerable, checkVersionRelease, packageVersion, versionStamp } from "./llms-version-guard.ts"
 import { optimize } from "./optimize-llms-full.ts"

@@ -31,11 +31,10 @@ export interface NodeDatabaseOptions {
 /**
  * The three stable codes covering the rc.0 exclusions this driver enforces.
  *
- * `unsupported_runtime` refuses the durable engine under Bun (rc-contract
- * §1 and §7 "Runtimes", exclusion X-18). `unsupported_database_file` refuses a
+ * `unsupported_runtime` refuses the durable engine under Bun. `unsupported_database_file` refuses a
  * 0.x `smithers.db`, and `database_locked` refuses a file the guard could not
  * read because a peer held it for longer than the open ladder waits
- * (rc-contract §2 and §6, exclusion X-13).
+ * after the open ladder's wait expires.
  *
  * @category models
  * @since 1.0.0
@@ -127,7 +126,7 @@ const isLockedDefect = (defect: unknown): boolean => !isUnsupportedDatabase(defe
  * `guardOpen` outwaits the lock on the same ladder the open uses. Answering
  * `undefined` there would wave the file through: the open ladder outwaits the
  * same peer, so a 0.x `smithers.db` whose 0.x writer held it for a moment
- * would be opened and migrated, which is the refusal rc-contract section 2
+ * would be opened and migrated, which is the refusal the release policy
  * states without condition.
  */
 /**
@@ -139,7 +138,7 @@ const isLockedDefect = (defect: unknown): boolean => !isUnsupportedDatabase(defe
  * `access mode not allowed: rw` before a single table is read. Reporting
  * "cannot inspect" there would wave a 0.x database straight through, because
  * the client that follows opens read-write and succeeds — the exact bypass of
- * the refusal rc-contract section 2 states without condition. Query parameters
+ * the refusal the release policy states without condition. Query parameters
  * only tell SQLite how to open the file, never which tables it holds, so the
  * probe drops them (and the fragment SQLite ignores) and asks its one question
  * about the file itself.

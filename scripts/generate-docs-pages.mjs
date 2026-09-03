@@ -4,42 +4,22 @@
  *
  *   docs/pages/cli/**        one page per command the `smithers` binary offers
  *   docs/pages/control/**    one page per control RPC, from `ControlRpcs`
- *   docs/pages/migration/1.0 the removed-command block, from contract 4.2
+ *   docs/pages/migration/1.0 the removed-command block, from the CLI registry
  *
- * Three sources, no fourth copy: the binary's own `--help`, the Effect Schema
- * definitions in `@smthrs/control` and `@smthrs/gateway`, and the frozen
- * release contract. A verb that changes in any of them changes here, and
- * `--check` fails the build when the committed pages disagree.
+ * The binary's own `--help`, its removal registry, and the Effect Schema
+ * definitions in `@smthrs/control` and `@smthrs/gateway` are the sources.
+ * `--check` fails when the committed pages disagree.
  *
  * Run: node scripts/generate-docs-pages.mjs [--check]
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, relative } from "node:path"
 import { pathToFileURL } from "node:url"
-import {
-  availableCommands,
-  contractPath,
-  removedCommands,
-  removedFlags,
-  removedRpcs,
-  removedForms,
-  partitionRemovals,
-  exclusions,
-  publishedPackages,
-  releaseNotes,
-  runtimes,
-  supportedRunControl,
-  unsupportedFeatures,
-  repoRoot,
-  shippedCommands,
-  survivingAliases
-} from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 import { cliCatalog } from "./docs-help.mjs"
 import {
   cell,
-  contractProse,
   errorTags,
-  exitCodes,
   frontmatter,
   isOptional,
   mdxText,
@@ -48,7 +28,6 @@ import {
   variantRows,
   variantTag
 } from "./docs-render.mjs"
-import { deferredRoutes, movedTrees, routePlan } from "./docs-routes.mjs"
 import { rewrite as normalizeInvocations } from "./normalize-bunx.ts"
 import { rewrite as normalizePlaceholders } from "./normalize-placeholders.ts"
 
@@ -56,41 +35,45 @@ const CHECK = process.argv.includes("--check")
 
 const kebab = (name) => name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase()
 
-const contractSource = readFileSync(contractPath, "utf8")
-const shipped = shippedCommands(contractSource)
-const removed = removedCommands(contractSource)
-const forms = removedForms(contractSource)
-const flags = removedFlags(contractSource)
-const aliases = survivingAliases(contractSource)
-const available = availableCommands(contractSource)
-const retiredRpcs = removedRpcs(contractSource)
-
 /** Imports a TypeScript source module of this workspace by repository path. */
 const importSource = async (path) => import(pathToFileURL(join(repoRoot, path)).href)
 
 /** The CLI's own removal registry: the refusals and reasons a terminal prints. */
 const Unsupported = await importSource("packages/cli/src/Unsupported.ts")
 
+const aliases = new Set(["events", "gateway", "inspect", "resume", "why", "workflow list"])
+const parentSurvives = Unsupported.removedVerbs.filter((entry) => entry.name === "gateway" || entry.name === "workflow")
+const removed = new Map(
+  Unsupported.removedVerbs
+    .filter((entry) => !parentSurvives.includes(entry))
+    .map((entry) => [entry.name, entry])
+)
+const forms = parentSurvives.map((entry) => ({
+  parent: entry.name,
+  form: `${entry.name} ${entry.subcommands.join("|")}`,
+  reason: entry.reason
+}))
+const flags = Unsupported.removedFlags.map((entry) => ({ ...entry, flag: `--${entry.flag}` }))
+const retiredRpcs = new Set()
+
 /**
- * The removal rows whose parent command section 4.1 keeps, such as the
+ * The removal rows whose parent command the shipped-command contract keeps, such as the
  * `gateway status|stop` row under the surviving `gateway` alias.
  *
  * They are not removed verbs and get no row in the verb table, but their
  * refusals link to `#<parent>`, so the guide owes each one a heading and the
  * sentences printed under it.
  */
-const survivingParents = partitionRemovals(Unsupported.removedVerbs, contractSource).parentSurvives
+const survivingParents = parentSurvives
 
 const pages = new Map()
 
 /**
  * The reason the binary prints when a removed flag is used.
  *
- * The contract spells a flag with its values (`--backend pglite|postgres`)
- * where the binary registers the name alone, and it files the global
- * `--backend` under a parent the binary leaves empty, so the lookup is by name
- * with the parent as a tiebreak. Returns `undefined` for a contract row the
- * binary does not carry, and the caller keeps the contract's wording.
+ * The registry stores a flag name without its leading dashes and files the
+ * global `--backend` under an empty parent, so the lookup is by name with the
+ * parent as a tiebreak.
  */
 const spokenFlagReason = (parent, flag) => {
   const name = flag.replace(/^--/, "").split(/[\s|]/)[0]
@@ -106,12 +89,31 @@ const spokenFlagReason = (parent, flag) => {
 
 const catalog = cliCatalog()
 
+const sectionBody = (source, heading) => {
+  const start = source.indexOf(`\n${heading}\n`)
+  if (start < 0) return ""
+  const rest = source.slice(start + heading.length + 2)
+  return rest.slice(0, /^## /m.exec(rest)?.index ?? rest.length).trim()
+}
+
+const commandPage = (name) => join(repoRoot, `docs/pages/cli/${name}.md`)
+const commandContract = (command) => {
+  const source = readFileSync(commandPage(command.name), "utf8")
+  const forms = [...sectionBody(source, "## Forms").matchAll(/^- `smithers ([^`]+)`$/gm)].map((match) => match[1])
+  return {
+    forms: forms.length === 0 ? [command.name] : forms,
+    behavior: sectionBody(source, "## Behavior") || command.description
+  }
+}
+
 const documentedCommands = [...catalog.commands.values()]
-  .filter((command) => shipped.has(command.name))
+  .filter((command) => existsSync(commandPage(command.name)))
   .sort((left, right) => left.name.localeCompare(right.name))
 
+const shipped = new Map(documentedCommands.map((command) => [command.name, commandContract(command)]))
+
 for (const command of documentedCommands) {
-  const contract = shipped.get(command.name)
+  const commandDocs = shipped.get(command.name)
   const body = [
     frontmatter(command.description),
     "",
@@ -126,12 +128,12 @@ for (const command of documentedCommands) {
     "```",
     ""
   ]
-  if (contract.forms.length > 1) {
+  if (commandDocs.forms.length > 1) {
     body.push("## Forms", "")
-    for (const form of contract.forms) body.push(`- \`smithers ${form}\``)
+    for (const form of commandDocs.forms) body.push(`- \`smithers ${form}\``)
     body.push("")
   }
-  body.push("## Behavior", "", contractProse(contract.behavior), "")
+  body.push("## Behavior", "", commandDocs.behavior, "")
   const commandFlags = command.help.flags.filter((flag) => !catalog.root.flags.some((shared) => shared.name === flag.name))
   if (commandFlags.length > 0) {
     body.push("## Flags", "", "| Flag | Meaning |", "| --- | --- |")
@@ -152,16 +154,15 @@ for (const command of documentedCommands) {
     )
     for (const flag of parentFlags) {
       const reason = spokenFlagReason(flag.parent, flag.flag) ?? flag.reason
-      body.push(`| \`${cell(flag.flag)}\` | ${cell(contractProse(reason))} |`)
+      body.push(`| \`${cell(flag.flag)}\` | ${cell(reason)} |`)
     }
     body.push("")
   }
   body.push(
     "## Source",
     "",
-    "This page is generated from the binary's `--help` output and section 4.1 of the",
-    "[release contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md).",
-    "Run `pnpm docs:pages` after changing either.",
+    "This page is generated from the binary's `--help` output. Run",
+    "`pnpm docs:pages` after changing the command.",
     ""
   )
   pages.set(`docs/pages/cli/${command.name}.md`, `${body.join("\n").replace(/\n{3,}/g, "\n\n")}`)
@@ -193,7 +194,7 @@ for (const command of documentedCommands) {
     body.push(
       "The binary also registers the reserved system verbs " +
         undocumented.map((command) => `\`${command.name}\``).join(", ") +
-        ". Section 4.2 of the release contract removes them; see the",
+        ". The upgrade guide documents why they were removed; see the",
       "[migration guide](/migration/1.0#removed-commands).",
       ""
     )
@@ -217,7 +218,14 @@ for (const command of documentedCommands) {
     body.push(`| \`${cell(flag.signature)}\` | ${cell(flag.description) || "See the command pages."} |`)
   }
   body.push("", "## Exit codes", "", "| Code | Meaning |", "| --- | --- |")
-  for (const row of exitCodes()) body.push(`| ${row.code} | ${cell(contractProse(row.meaning))} |`)
+  for (const row of [
+    { code: "0", meaning: "success" },
+    { code: "1", meaning: "runtime or command failure" },
+    { code: "2", meaning: "usage error" },
+    { code: "3", meaning: "migration refused before changing the project" },
+    { code: "130", meaning: "interrupted by SIGINT" },
+    { code: "143", meaning: "interrupted by SIGTERM" }
+  ]) body.push(`| ${row.code} | ${cell(row.meaning)} |`)
   body.push(
     "",
     "## Removed commands",
@@ -229,8 +237,7 @@ for (const command of documentedCommands) {
     "",
     "## Source",
     "",
-    "This page is generated from the binary's `--help` output and section 4 of the",
-    "[release contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md).",
+    "This page is generated from the binary's `--help` output and removal registry.",
     "Run `pnpm docs:pages` after changing either.",
     ""
   )
@@ -410,12 +417,10 @@ for (const [name, rpc] of rpcEntries) {
   ]
   for (const name of names) {
     // The reason a reader is given is the binary's, the same string the block
-    // below quotes. The contract's own cell explains the removal to the
-    // migration's record and cites phases and dispositions a reader has no way
-    // to look up.
+    // below quotes.
     const reason = Unsupported.removedVerbs.find((verb) => verb.name === name)?.reason
     if (reason === undefined) throw new Error(`generate-docs-pages: the binary does not refuse ${name}`)
-    lines.push(`| [\`smithers ${name}\`](#${name}) | ${cell(contractProse(reason))} |`)
+    lines.push(`| [\`smithers ${name}\`](#${name}) | ${cell(reason)} |`)
   }
   lines.push("")
   for (const form of forms) {
@@ -425,7 +430,7 @@ for (const [name, rpc] of rpcEntries) {
   for (const flag of flags) {
     // Same rule as the verbs: the binary owns the sentence a reader is given.
     const reason = spokenFlagReason(flag.parent, flag.flag) ?? flag.reason
-    lines.push(`| \`${cell(flag.parent)}\` | \`${cell(flag.flag)}\` | ${cell(contractProse(reason))} |`)
+    lines.push(`| \`${cell(flag.parent || "global")}\` | \`${cell(flag.flag)}\` | ${cell(reason)} |`)
   }
   lines.push("")
   // A flag refusal links to an anchor of its own when the flag is not attached
@@ -466,15 +471,15 @@ for (const [name, rpc] of rpcEntries) {
   for (const name of [...names, ...survivingParents.map((verb) => verb.name)].sort()) {
     const parent = survivingParents.find((verb) => verb.name === name)
     if (parent !== undefined) {
-      // Not a removed verb: section 4.1 keeps the command and section 4.2
-      // removes subcommands of it. The heading exists because every one of
-      // those refusals links to `#<parent>`, and an operator who follows the
+      // The parent command remains available while these subcommands do not.
+      // The heading exists because every one of those refusals links to
+      // `#<parent>`, and an operator who follows the
       // link from their terminal has to land on the sentence they were shown.
       const kept = [...aliases].filter((alias) => alias.split(/\s+/)[0] === name)
       lines.push(
         `### ${name}`,
         "",
-        `Section 4.1 keeps ${(kept.length > 0 ? kept : [name]).map((form) => `\`smithers ${form}\``).join(" and ")}.` +
+        `${(kept.length > 0 ? kept : [name]).map((form) => `\`smithers ${form}\``).join(" and ")} remains available.` +
           " These forms are removed, and each prints its own sentence:",
         "",
         "```",
@@ -485,122 +490,23 @@ for (const [name, rpc] of rpcEntries) {
       continue
     }
     const entry = removed.get(name)
-    // Byte for byte what the binary prints. The contract decides which verbs are
-    // removed; the binary owns the sentence it puts on a terminal, and the two
-    // spell the same reasons with different code marks. An operator pastes this
-    // line from their shell, so a block that quietly differs is not a quotation.
+    // Byte for byte what the binary prints. An operator pastes this line from
+    // their shell, so a block that quietly differs is not a quotation.
     const refusal = refusals.get(name)
     if (refusal === undefined) throw new Error(`generate-docs-pages: the binary does not refuse ${name}`)
     lines.push(`### ${name}`, "", "```", refusal, "```", "")
-    if (entry.spellings.some((spelling) => spelling !== name)) {
-      lines.push(`Removed forms: ${entry.spellings.map((spelling) => `\`${spelling}\``).join(", ")}.`, "")
+    if (entry.subcommands !== undefined) {
+      lines.push(
+        `Removed forms: ${entry.subcommands.map((subcommand) => `\`${name} ${subcommand}\``).join(", ")}.`,
+        ""
+      )
     }
   }
   pages.set("docs/pages/migration/1.0.md", replaceRegion(source, "removed-commands", lines.join("\n")))
 }
 
 // -----------------------------------------------------------------------------
-// Release pages
-// -----------------------------------------------------------------------------
-
-{
-  const page = join(repoRoot, "docs/pages/release/support-matrix.md")
-  const lines = ["## Runtimes", "", "| Runtime | Status | Minimum |", "| --- | --- | --- |"]
-  for (const row of runtimes()) {
-    lines.push(`| ${cell(row.runtime)} | ${cell(contractProse(row.status))} | ${cell(contractProse(row.minimum))} |`)
-  }
-  lines.push(
-    "",
-    "## Databases",
-    "",
-    "SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see",
-    "[databases](/databases) for the files, the ladder, and the operating limits.",
-    "",
-    "## Commands",
-    "",
-    "| Command | Behavior |",
-    "| --- | --- |"
-  )
-  for (const [name, command] of [...shipped].sort(([left], [right]) => left.localeCompare(right))) {
-    const link = pages.has(`docs/pages/cli/${name}.md`) ? `[\`smithers ${name}\`](/cli/${name})` : `\`smithers ${name}\``
-    lines.push(`| ${link} | ${cell(contractProse(command.behavior))} |`)
-  }
-  lines.push("", "## Run control", "", "| Feature | Contract |", "| --- | --- |")
-  for (const row of supportedRunControl()) {
-    lines.push(`| ${cell(row.feature)} | ${cell(contractProse(row.contract))} |`)
-  }
-  lines.push(
-    "",
-    "## Published packages",
-    "",
-    "All of them carry version `1.0.0-rc.0`. The browser column is the bundling",
-    "claim [browser support](/architecture/browser-support) executes, not a durable",
-    "execution claim.",
-    "",
-    "| Package | Purpose | Browser |",
-    "| --- | --- | --- |"
-  )
-  // Most published packages are documented by an API page named after them.
-  // Two are documented somewhere else instead: the CLI has its own reference
-  // section, and the migration tool is documented with the migration guide
-  // because an operator reaches it from the 0.x upgrade path, not from the API.
-  const documentedElsewhere = new Map([
-    ["@smthrs/cli", "/cli"],
-    ["@smthrs/migrate", "/migration/migrate-tool"]
-  ])
-  for (const row of publishedPackages()) {
-    // The API pages are written by hand, so they are on disk and never in the
-    // generated-page map. Asking the map put every package in the table as
-    // bare text with its reference page one directory away.
-    const apiRoute = `/api/${row.name.replace("@smthrs/", "")}`
-    const hasApiPage = [".md", ".mdx"].some((extension) =>
-      existsSync(join(repoRoot, `docs/pages${apiRoute}${extension}`))
-    )
-    const route = hasApiPage ? apiRoute : documentedElsewhere.get(row.name)
-    const link = route === undefined ? `\`${row.name}\`` : `[\`${row.name}\`](${route})`
-    lines.push(`| ${link} | ${cell(contractProse(row.purpose))} | ${cell(row.browser)} |`)
-  }
-  pages.set("docs/pages/release/support-matrix.md", replaceRegion(readFileSync(page, "utf8"), "support-matrix", lines.join("\n")))
-}
-
-// The known-limitations page is authored by the release-enforcement work from
-// the contract's exclusion table, not here. This block only refreshes the
-// `release-notes` region of that page once it exists, so the page is written by
-// one owner and its release-note region still cannot drift from the contract.
-// With the page absent the region has nothing to refresh and the block is
-// skipped, which is what keeps the documentation gate green before it lands.
-if (existsSync(join(repoRoot, "docs/pages/release/known-limitations.md"))) {
-  const page = join(repoRoot, "docs/pages/release/known-limitations.md")
-  const notes = releaseNotes()
-  const excluded = exclusions()
-  const lines = ["## Release notes", ""]
-  for (const note of notes) {
-    const ids = excluded.filter((exclusion) => exclusion.titles.includes(note.title))
-    lines.push(`### ${note.title}`, "", note.line, "")
-    if (ids.length > 0) {
-      lines.push(
-        `Exclusions: ${ids.map((exclusion) => `${exclusion.id} (${exclusion.disposition})`).join(", ")}.`,
-        ""
-      )
-    }
-  }
-  lines.push(
-    "## How each exclusion is enforced",
-    "",
-    "A dropped feature is removed, and a deferred one fails with a typed error. The",
-    "state column is what the release does today.",
-    "",
-    "| Feature | State in 1.0.0-rc.0 |",
-    "| --- | --- |"
-  )
-  for (const row of unsupportedFeatures()) {
-    lines.push(`| ${cell(row.feature)} | ${cell(contractProse(row.state))} |`)
-  }
-  pages.set("docs/pages/release/known-limitations.md", replaceRegion(readFileSync(page, "utf8"), "release-notes", lines.join("\n")))
-}
-
-// -----------------------------------------------------------------------------
-// Changelog index and the route plan
+// Changelog index
 // -----------------------------------------------------------------------------
 
 {
@@ -634,90 +540,6 @@ if (existsSync(join(repoRoot, "docs/pages/release/known-limitations.md"))) {
   for (const version of versions) body.push(`- [${version}](/changelogs/${version})`)
   body.push("")
   pages.set("docs/pages/changelogs/index.md", body.join("\n").replace(/\n{3,}/g, "\n\n"))
-}
-
-{
-  const plan = routePlan()
-  if (plan.problems.length > 0) {
-    for (const problem of plan.problems) console.error(`  route plan: ${problem}`)
-    throw new Error(`generate-docs-pages: ${plan.problems.length} route-plan problem(s)`)
-  }
-  const families = [
-    { title: "Release images", prefix: "docs/public/images/" },
-    { title: "Changelogs", prefix: "docs/pages/changelogs/" },
-    { title: "Model registry", prefix: "docs/data/" }
-  ]
-  const body = [
-    frontmatter("Where every asset the Mintlify-era documentation left behind lives now, and how a reader reaches it."),
-    "",
-    "# Route plan",
-    "",
-    "The documentation moved from Mintlify to vocs in Smithers 1.0. Pages were",
-    "rewritten, but three families of asset were kept rather than replaced: the",
-    "release image trees, the Smithers 0.x changelogs, and the SOTA model registry.",
-    "This page says where each one is now, and where the page trees themselves",
-    "moved to.",
-    "",
-    `It covers ${plan.entries.length} kept assets, ${movedTrees.length} moved page trees and ${plan.deletions.length} deletion rules. The tables are`,
-    "generated from `docs/migration/disposition-ledger.json` and the tree itself,",
-    "and `check-docs` fails when an asset the ledger keeps has no place here, a",
-    "file the ledger deletes is still present, or a page is written to a tree vocs",
-    "no longer publishes.",
-    ""
-  ]
-  for (const family of families) {
-    const rows = plan.entries.filter((entry) => entry.path.startsWith(family.prefix))
-    if (rows.length === 0) continue
-    body.push(`## ${family.title}`, "", `${rows.length} files. ${rows[0].note}.`, "", "| Was | Is | Route |", "| --- | --- | --- |")
-    for (const row of rows) {
-      // The route is printed rather than linked: a Markdown link to a static
-      // asset is a dead link to vocs's checker, which only resolves pages.
-      body.push(`| \`${row.before}\` | \`${row.path}\` | ${row.route === undefined ? "not routed" : `\`${row.route}\``} |`)
-    }
-    body.push("")
-  }
-  body.push(
-    "## Moved page trees",
-    "",
-    "vocs publishes `docs/pages` and nothing else. These roots held the Mintlify",
-    "pages; a page written to one of them today builds no route, joins no sidebar",
-    "section, and reaches no llms bundle, so `check-docs` fails on any file left",
-    "in one.",
-    "",
-    "| Was | Is | Route or reason |",
-    "| --- | --- | --- |"
-  )
-  for (const moved of movedTrees) {
-    body.push(`| \`${moved.from}\` | \`${moved.to}\` | \`${moved.route}\` |`)
-    for (const exception of moved.exceptions) {
-      body.push(`| \`${exception.from}\` | \`${exception.to}\` | ${cell(exception.note)} |`)
-    }
-  }
-  body.push("")
-  if (deferredRoutes.length > 0) {
-    body.push("## Routes still waiting for their page", "")
-    for (const entry of deferredRoutes) {
-      body.push(`- \`${entry.route}\` is linked from this documentation and written by ${entry.owner}: ${entry.reason}.`)
-    }
-    body.push("")
-  }
-  body.push(
-    "## Deleted, with the reason",
-    "",
-    "Each rule below names assets the ledger deletes. Nothing in the tree matches",
-    "them; the rule stays here so a file that comes back is caught.",
-    "",
-    "| Rule | Reason |",
-    "| --- | --- |"
-  )
-  const seen = new Set()
-  for (const deletion of plan.deletions) {
-    if (seen.has(deletion.label)) continue
-    seen.add(deletion.label)
-    body.push(`| \`${cell(deletion.glob)}\` | ${cell(deletion.label)} |`)
-  }
-  body.push("")
-  pages.set("docs/pages/routes.md", body.join("\n").replace(/\n{3,}/g, "\n\n"))
 }
 
 // -----------------------------------------------------------------------------

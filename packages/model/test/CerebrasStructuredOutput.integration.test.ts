@@ -1,9 +1,8 @@
 /**
  * The native-structured-output toggle against a live Cerebras seat.
  *
- * Cerebras serves the Chat Completions wire shape and is the seat the rc.0
- * cutover gate names for this check (`docs/migration/rc-contract.md` §10,
- * "Provider seat"). The suite is gated on `CEREBRAS_API_KEY`; the credential is
+ * Cerebras serves the Chat Completions wire shape and is the release-validation
+ * seat for this check. The suite is gated on `CEREBRAS_API_KEY`; the credential is
  * applied only by the route's auth layer and never enters a prepared request or
  * test output.
  *

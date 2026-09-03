@@ -9,8 +9,8 @@ import { join, resolve } from "node:path";
  * their own package subpath and never weigh down the base barrel.
  *
  * Nothing enforced it. `scripts/check-ui-architecture.mjs`, the script both
- * READMEs named, was deleted in the 1.0 migration (disposition-ledger row
- * `scripts/check-ui-architecture.mjs`, disposition `delete`), and by the time
+ * READMEs named, was deleted in the 1.0 migration (package inventory row
+ * `scripts/check-ui-architecture.mjs`, since deleted), and by the time
  * this ratchet was written `export * from "./vault"` was pulling `d3-force`
  * into `@smthrs/ui` through `KnowledgeGraph`.
  *

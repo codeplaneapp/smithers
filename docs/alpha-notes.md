@@ -60,7 +60,7 @@ longer a proxy for feature scope, so a package can ship and still not be a
 release-candidate feature. The following exist in this repository but are not
 rc.0 features: `@smthrs/triggers` and `@smthrs/evals` (both private at rc.0),
 memory semantic recall, and observability OTLP export. `@smthrs/gateway`
-publishes because the Plue cutover needs its wire schemas, but its supervision
+publishes because consumers need its wire schemas, but its supervision
 runtime is still a noop. The
 [implementation-status scope table](../pages/release/support-matrix.md#not-in-release-1)
 explains the status of each; in particular, the published OTLP layer is
@@ -121,7 +121,7 @@ purpose, so the operator names the seat: set `SMITHERS_MIGRATE_SEAT` to a
 (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`), then run
 `pnpm --filter @smthrs/migrate test`. Without both, each case skips and says
 which variable is missing rather than passing without doing the work. What
-breaks if it regresses: the migration path an operator runs at cutover could
+breaks if it regresses: an operator's migration could
 stop producing a compiling flow and only the release rehearsal would find out.
 Closing it for the default gate means paying for a model seat in CI, which
 the RC does not do.
@@ -135,8 +135,8 @@ What breaks if they regress: a provider changes a response shape, a header, or
 an error code, and nothing notices until an application does. Run them with
 `GITHUB_TOKEN=…`, `LINEAR_API_KEY=…`, or `TELEGRAM_BOT_TOKEN=…`; all three are
 read-only, and the Telegram poll confirms no offset so a running bot keeps its
-backlog. GitHub and Linear are `1.0.0-rc.0`'s release-smoke integrations
-(`rc-contract.md` section 7), so both are run by hand at release time.
+backlog. GitHub and Linear are `1.0.0-rc.0`'s release-smoke integrations, so
+both are run by hand at release time.
 Note for whoever tightens the register: `scripts/check-test-pins.mjs` does not
 currently see these, because `readsOptInEnv` matches `process.env.NAME` and
 these read `process.env["NAME"]`. They are listed here on their merits, not
@@ -151,7 +151,7 @@ Node-only dependency and nothing would notice until an edge deployment. Run it
 with `FLOWS_WORKERD_SMOKE=1 pnpm --filter @smthrs/harness test` after
 installing `workerd`. Closing it for the default gate means adding `workerd` to
 the toolchain the CI lane installs, which the RC does not claim (see the
-browser and edge entry in `rc-contract.md` section 7).
+[support matrix](pages/release/support-matrix.md)).
 
 **`migrate` — the three live-model cases.** `MigrateFlow.live.e2e.test.ts`
 runs the migration flow against a real provider, and a real provider costs
@@ -213,7 +213,7 @@ Surviving pins table only, so a pin here again needs a new row above.
 
 ### Resolved: the audit's `it.fails` count
 
-The 2026-08-16 readiness audit recorded finding F4, "`it.fails` pins: 29
+A 2026-08-16 readiness audit recorded "`it.fails` pins: 29
 remain", distributed across engine-store, flow, kernel, time-travel,
 capability, database, harness, jj, platform-node, sync, targets and
 build-cli. That count was stale at the commit it was filed against. There are

@@ -28,7 +28,7 @@ so leaves every hop visible to [@smthrs/kernel](/api/kernel). See
 
 | Requirement                                        | Why                                                                                                       |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Node.js >=22.19.0                                  | the durable runtime the release contract supports                                                         |
+| Node.js >=22.19.0                                  | the durable runtime the release policy supports                                                           |
 | CPython 3 at `/usr/bin/python3`                    | `AtomicFileSystem` runs every filesystem syscall through it                                               |
 | that interpreter's `os` module supporting `dir_fd` | with `O_NOFOLLOW` and `O_DIRECTORY`, for `open`, `mkdir`, `readlink`, `rename`, `rmdir`, `stat`, `unlink` |
 | a POSIX host                                       | Windows has none of those primitives and is unsupported                                                   |
@@ -248,7 +248,7 @@ a later incarnation cannot answer differently is final.
 | `identity-mismatch`   | yes     |
 | `kill-failed`         | no      |
 
-Windows reaping is unsupported best-effort. The release contract lists Windows
+Windows reaping is unsupported best-effort. The release policy lists Windows
 as unsupported and `AtomicFileSystem` fails every operation closed there, but
 `systemFor("win32")` still reaches `taskkill /T /F` through the sweep rather
 than retiring every record unsignalled, because an excluded feature that appears

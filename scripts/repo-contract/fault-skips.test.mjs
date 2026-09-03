@@ -49,9 +49,9 @@ const harness = join(root, "e2e", "harness")
 /**
  * The tests that are required to exist, whatever colour they are.
  *
- * A required parity test is a promise the repository made in the release
- * contract, and the cheapest way to break one is to delete the test rather than
- * the promise. This map is what stops that: a gate listed here has to be in the
+ * A required parity test is a promise the repository made for the release, and
+ * the cheapest way to break one is to delete the test rather than the promise.
+ * This map is what stops that: a gate listed here has to be in the
  * matrix, under its own title, or this suite fails and names it.
  */
 const requiredGates = new Map([
@@ -59,8 +59,8 @@ const requiredGates = new Map([
     "faults/case22-secret-never-in-journal.test.ts",
     {
       title: "redacts the credential out of the operator's terminal",
-      why: "rc-contract R-12 requires case 22 to cover the logs as well as the journal. It was red at rc.0 "
-        + "and went green when the section 5.2 redaction deliverable landed `@smthrs/journal` "
+      why: "case 22 must cover the logs as well as the journal. It was red at rc.0 "
+        + "and went green when the redaction deliverable landed `@smthrs/journal` "
         + "`RedactedLogger`. It runs the real binary and reads its real stderr, so it is the only thing "
         + "that proves the redacting logger is installed under the durable engine rather than merely "
         + "exported. Deleting it retires the proof, not the requirement."
@@ -79,7 +79,7 @@ const requiredGates = new Map([
  *
  * Empty. Case 22's terminal-log half was the last entry: rc.0 shipped no
  * redacting logger, so the gate was red by design and `e2e-faults` carried
- * `continueOnError` for it. The section 5.2 redaction deliverable landed the
+ * `continueOnError` for it. The redaction deliverable landed the
  * logger, the gate went green with no edit to the case, and `e2e-faults` became
  * a required CI job. While this map is empty the matrix is expected to be green
  * end to end; adding an entry back means putting `continueOnError` back on that
@@ -216,8 +216,7 @@ describe("the fault-suite skip audit", () => {
         page.includes(`### ${gate.limitation.heading}`),
         `${relative} is red by design, so rc.0 ships the limitation it names. `
           + `docs/pages/release/known-limitations.md has no "${gate.limitation.heading}" section, so a reader of `
-          + "the release learns about it only from a failing CI job. Add the paragraph to rc-contract §7 and "
-          + "regenerate the page."
+          + "the release learns about it only from a failing CI job. Add the paragraph to the page."
       )
     }
   })
@@ -237,10 +236,8 @@ describe("the fault-suite skip audit", () => {
 
   it("counts the limits the release page says remain", () => {
     // The paragraph states a number and then lists the limits. Nothing checked
-    // the number against the list: `check-docs` and `check-llms` prove the
-    // generated page matches rc-contract §7, not that §7 can count. It said
-    // "Two limits remain" over three sentences, and the miscount shipped to
-    // the release page verbatim.
+    // the number against the list. It once said "Two limits remain" over three
+    // sentences, and the miscount shipped on the release page.
     const page = readFileSync(knownLimitations, "utf8")
     const paragraph = page.split("\n").find((line) => line.includes("**Credential redaction in logs.**"))
     assert.ok(paragraph !== undefined, "known-limitations.md has no credential-redaction paragraph")
@@ -258,8 +255,8 @@ describe("the fault-suite skip audit", () => {
       claimed,
       `the paragraph says "${counted[0]}" and then lists ${listed.length}: ${
         listed.map((sentence) => sentence.slice(0, 60)).join(" | ")
-      }. Fix the count in rc-contract §7 and regenerate the page, or move a sentence that is standing policy `
-        + "rather than a limit ahead of the count."
+      }. Fix the count in the known-limitations page, or move a sentence that is standing policy rather than a `
+        + "limit ahead of the count."
     )
     // And the count is not free to drift from the matrix: fault-gaps row 22
     // says "Both limits", so the page has to name exactly those two.

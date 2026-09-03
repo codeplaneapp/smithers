@@ -14,7 +14,7 @@
  * `AgentSession.settle` deliberately writes none either, because the control
  * operation owns a cancellation's terminal write. So a detached `smithers up`
  * whose run was cancelled by a second process waited for an event nothing
- * emits: the Phase 7 smoke's pid 10105, alive at 0.1 % CPU four and a half
+ * emits: the release validation's pid 10105, alive at 0.1 % CPU four and a half
  * minutes after its only run reached `Terminal cancelled`, killed by hand.
  */
 import { Effect, Stream } from "effect"

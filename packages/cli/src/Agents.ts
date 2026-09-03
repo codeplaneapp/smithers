@@ -309,7 +309,7 @@ export const manualInstructions = (targets: ReadonlyArray<string> = agents.map((
  * `skills add` installs one hand-written file, not a rendering of the verb
  * table. The curated skill teaches the routing rules, the mental model, the
  * removed-verb table, and the MCP tool split, and a file generated from the
- * verb list carries none of that (rc-contract ruling F2: rc.0 `skills add`
+ * verb list carries none of that (release policy: rc.0 `skills add`
  * "writes the single curated `smithers` skill ... and generates no per-verb
  * skills").
  *

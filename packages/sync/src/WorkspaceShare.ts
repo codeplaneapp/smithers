@@ -314,7 +314,7 @@ export const layerHmac = (keyring: Keyring): Layer.Layer<WorkspaceShare, SyncErr
  *
  * `FLOWS_SYNC_SECRET` and `FLOWS_SYNC_KEY_ID` are read as rc.0 ALIASES, after
  * the canonical spelling, and are removed at 1.0.0. `SMITHERS_` is the
- * product's environment namespace (`docs/migration/rc-contract.md` section 4),
+ * product's environment namespace (the release policy),
  * `FLOWS_` names survive only so a deployment configured against the imported
  * repository keeps working through the release candidates, and these two were
  * the only credential variables still carrying the imported prefix alone. The

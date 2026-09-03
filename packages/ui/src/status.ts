@@ -63,9 +63,9 @@ const STATUS_CLASS_BY_STATUS = {
   finished: "ok",
   /*
    * `continued` and `paused` below name outcomes 1.0.0-rc.0 does not produce:
-   * `docs/migration/rc-contract.md` removes the `Continued` terminal (:294) and
+   * The release policy removes the `Continued` terminal (:294) and
    * the `Pause` RPC (:330). Both entries stay because the table is additive and
-   * drops no alias (disposition-ledger row 176) AND because both spellings are
+   * drops no alias (package inventory row 176) AND because both spellings are
    * still rendered from real sources:
    *  - `paused` is what `sandboxStateToStatus` emits for a suspended sandbox
    *    (`src/sandbox/AgentSandbox.tsx`), which is a sandbox lifecycle, not a run
@@ -189,7 +189,7 @@ export function formatStatus(status: string | undefined): string {
     // "Quiet", which is the pill apps/ui's run card has always worn
     // (apps/ui CardFrames.test.tsx, "a quiet or stopped run card never wears a
     // Running pill"). A label entry here would change a rendered string, and
-    // this table's Phase 4 additions are additive only.
+    // this table's additions are additive only.
     stopped: "Stopped",
     "no-capacity": "No capacity",
     ready: "Ready",

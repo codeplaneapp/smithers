@@ -2,11 +2,8 @@
 
 ## 1.0.0-rc.0
 
-`@smthrs/ui` was kept unchanged through the 1.0 migration rather than replaced
-(`docs/migration/disposition-ledger.md`, row `packages/ui`, disposition `keep`),
-and it is `private: true` at this release: `apps/ui` and `apps/review` consume
-it through the workspace, and the Phase 4 UI port decides its public future.
-Everything below landed on top of the imported 0.x kit.
+`@smthrs/ui` is `private: true` at this release: `apps/ui` and `apps/review`
+consume it through the workspace.
 
 ### Added
 
@@ -107,7 +104,7 @@ Everything below landed on top of the imported 0.x kit.
 ### Changed
 
 - `Checkpoint`'s action vocabulary is restricted to the operations rc.0 actually
-  has. `docs/migration/rc-contract.md` rules that a checkpoint at rc.0 is a
+  has. the release policy rules that a checkpoint at rc.0 is a
   pinned git tree per cell call, and that replay, fork and rewind exist only as
   the `@smthrs/time-travel` library API; `restore` and `return-to-live` had no
   rc.0 counterpart at all and are gone.
@@ -141,6 +138,5 @@ Everything below landed on top of the imported 0.x kit.
   shipped three links to a `docs/contracts.md` that was never written, and no
   gate noticed, because `scripts/check-ui-architecture.mjs` had been the only
   checker of this package's documentation claims.
-- This package still runs `bun test` rather than the 1.0 vitest baseline, and
-  declares no eslint or dprint target. `PACKAGE.ts` records why; the Phase 4 UI
-  port is what moves it.
+- This package runs `bun test` and declares no eslint or dprint target;
+  `PACKAGE.ts` records the package-specific tooling boundary.

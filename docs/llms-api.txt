@@ -2112,7 +2112,7 @@ reported by the fields it does carry, contract code first:
 ### Command documentation
 
 The `smithers` command pages are generated from the real Effect CLI
-parser and the frozen release contract. This API page documents the library
+parser and the frozen release policy. This API page documents the library
 surface used to compose or embed that executable.
 
 ### Exports
@@ -2197,7 +2197,7 @@ surface used to compose or embed that executable.
 | `Doctor.Level` (type) | models | The outcome of one check. |
 | `Doctor.Check` (interface) | models | One line of the report. |
 | `Doctor.Report` (interface) | models | The whole report. |
-| `Doctor.minimumNode` (const) | constants | The minimum Node the durable engine runs on (rc-contract section 1). |
+| `Doctor.minimumNode` (const) | constants | The minimum Node the durable engine runs on (the release policy). |
 | `Doctor.satisfiesNode` (const) | predicates | Whether a Node version satisfies the rc.0 floor. |
 | `Doctor.Options` (interface) | models | Arguments accepted by `inspect`. |
 | `Doctor.inspect` (const) | constructors | Runs every check and returns the report. |
@@ -2209,8 +2209,8 @@ surface used to compose or embed that executable.
 | `Environment.ambientWorkingDirectory` (const) | getters | Reads the directory the process was started in by deliberate host choice. |
 | `Environment.read` (const) | getters | Reads one canonical name, falling back to its rc.0 `FLOWS_*` alias. |
 | `Environment.readInteger` (const) | getters | Reads one canonical name as a positive integer, ignoring anything else. |
-| `Environment.unsupportedBackendMessage` (const) | constants | The refusal sentence, verbatim from rc-contract section 2. |
-| `Environment.unsupportedBackend` (const) | getters | The database-backend refusal required by rc-contract section 2. |
+| `Environment.unsupportedBackendMessage` (const) | constants | The database-backend refusal sentence. |
+| `Environment.unsupportedBackend` (const) | getters | The database-backend refusal. |
 | `ExecutorOwnership.ExecutorOwnership` (const) | references | Whether this process holds the executor that drives accepted runs to settlement. |
 | `ExecutorOwnership.layer` (const) | layers | Declares, for one command scope, whether this process drives accepted runs. |
 | `Forensics.Refusal` (interface) | models | One refused flow call, aggregated by its refusal message. |
@@ -2320,7 +2320,7 @@ surface used to compose or embed that executable.
 | `Project.flowsDirectory` (const) | getters | Where a project's flow sources live. |
 | `Project.legacyDatabases` (const) | getters | Every 0.x run database beside a project, newest ancestor first. |
 | `Project.legacyState` (const) | getters | Smithers 0.x state found beside a project, newest ancestor first. |
-| `Project.legacyNotice` (const) | constructors | The one-line notice rc-contract section 6 requires on stderr when 0.x state is found and rc.0 state is not. |
+| `Project.legacyNotice` (const) | constructors | The one-line notice written to stderr when 0.x state is found and rc.0 state is not. |
 | `Project.ProjectRoot` (const) | references | The project root this invocation resolved, as a service. |
 | `Project.LegacyState` (const) | references | The Smithers 0.x state found beside this project when the invocation started, as a service. |
 | `Project.MigrationRoot` (const) | references | The 0.x project `smithers migrate` converts when no path is given, as a service. |
@@ -2340,9 +2340,9 @@ surface used to compose or embed that executable.
 | `Serve.host` (const) | constructors | Hosts the assembled gateway until the process is interrupted. |
 | `Unsupported.migrationUrl` (const) | constants | The documentation base every removal message points at. |
 | `Unsupported.RemovedVerb` (interface) | models | One removed verb: its name, the anchor its message links to, and why it is gone. |
-| `Unsupported.removedVerbs` (const) | constants | Every verb removed in 1.0.0-rc.0, in rc-contract section 4.2 order. |
+| `Unsupported.removedVerbs` (const) | constants | Every verb removed in 1.0.0-rc.0. |
 | `Unsupported.RemovedFlag` (interface) | models | One removed flag, declared hidden on the command that used to carry it. |
-| `Unsupported.removedFlags` (const) | constants | Every flag removed in 1.0.0-rc.0, in rc-contract section 4.2 order. |
+| `Unsupported.removedFlags` (const) | constants | Every flag removed in 1.0.0-rc.0. |
 | `Unsupported.message` (const) | constructors | The removal sentence for one verb. |
 | `Unsupported.flagMessage` (const) | constructors | The removal sentence for one flag. |
 | `Unsupported.verbError` (const) | constructors | The failure a removed verb raises: exit 1, never a usage error. |
@@ -2358,7 +2358,7 @@ surface used to compose or embed that executable.
 | `Update.compare` (const) | constructors | Turns a dist-tag document into a status. |
 | `Update.render` (const) | conversions | The human rendering of a status. |
 | `Verb.Verb` (interface) | models | One command that ships in rc.0. |
-| `Verb.shipped` (const) | constants | Every command that ships in rc.0, in rc-contract section 4.1 order. |
+| `Verb.shipped` (const) | constants | Every command that ships in rc.0. |
 | `Verb.subcommands` (const) | constants | The verbs that are subcommands of the command tree, which is every shipped verb except the ones `effect/unstable/cli` provides as built-in flags. |
 | `Verb.names` (const) | constants | Every shipped command name. |
 | `Verb.find` (const) | getters | Finds one shipped verb by name. |
@@ -3655,7 +3655,7 @@ defect with `isUnsupportedDatabase` when a command needs to report it.
 | `database_locked`           | a peer held the file for the whole ladder, so it was never read | `<path> could not be inspected because another process holds it`                     |
 
 The runtime check runs first, so a Bun process learns it is the wrong runtime
-rather than something about the file it named (exclusion X-18). The file check
+rather than something about the file it named. The file check
 reads `sqlite_master` through a read-only connection, including for a SQLite
 `file:` URI filename, which `node:sqlite` accepts and which would otherwise slip
 past a filesystem probe. A URI is probed by its path alone: its query says how
@@ -3664,7 +3664,7 @@ to open the file, never which tables the file holds, and a read-only open of
 wave a 0.x database through. It says nothing when the file cannot be inspected
 at all: a path that does not exist, a directory, an in-memory name, or a file
 SQLite refuses to read. None of those is a 0.x database, so the driver's own
-open decides what happens next (exclusion X-13).
+open decides what happens next.
 
 A file a peer holds locked is not one of those cases. The probe retries on the
 same ladder the open uses, so a 0.x `smithers.db` is refused whether or not a
@@ -3801,8 +3801,8 @@ stores. See Assembling a durable engine and the
 
 | Export | Kind | Summary |
 | --- | --- | --- |
-| `ignoredNames` (const) | getters | The `SMITHERS_*` names rc.0 ignores: `SMITHERS_TEST_PG_URL` and every `SMITHERS_POSTGRES_*` name (rc-contract section 2). |
-| `ignoredNotice` (const) | constructors | The one line an ignored name gets, verbatim from rc-contract section 2. |
+| `ignoredNames` (const) | getters | The `SMITHERS_*` names rc.0 ignores: `SMITHERS_TEST_PG_URL` and every `SMITHERS_POSTGRES_*` name (the release policy). |
+| `ignoredNotice` (const) | constructors | The one line an ignored name gets, verbatim from the release policy. |
 
 #### NodeDatabase
 
@@ -4646,12 +4646,12 @@ one. See sync.
 `GatewaySchema.Workspace`, `GatewayConfig`, `GatewayStatus`, `SingletonRecord`,
 `TokenScope`, and `TokenRecord` describe a workspace singleton handshake that
 1.0.0-rc.0 has no route for. No code in this release mints, reads, persists, or
-serves one. `docs/migration/plue-consumer-contract.md` records the same fact
+serves one. The gateway projection contract records the same fact
 against its `connect` handshake row: the schemas exist and the route does not.
 Read them as a proposal, not as a contract a client can call.
 
 Everything else the schema declares is served. `ProjectionName` in particular
-equals the set the read path answers, which is ruling R-8.
+equals the set the read path answers.
 
 ### Test layers
 
@@ -10007,7 +10007,7 @@ design decisions for why the old `Shell` and
 
 | Requirement                                        | Why                                                                                                       |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Node.js >=22.19.0                                  | the durable runtime the release contract supports                                                         |
+| Node.js >=22.19.0                                  | the durable runtime the release policy supports                                                           |
 | CPython 3 at `/usr/bin/python3`                    | `AtomicFileSystem` runs every filesystem syscall through it                                               |
 | that interpreter's `os` module supporting `dir_fd` | with `O_NOFOLLOW` and `O_DIRECTORY`, for `open`, `mkdir`, `readlink`, `rename`, `rmdir`, `stat`, `unlink` |
 | a POSIX host                                       | Windows has none of those primitives and is unsupported                                                   |
@@ -10227,7 +10227,7 @@ a later incarnation cannot answer differently is final.
 | `identity-mismatch`   | yes     |
 | `kill-failed`         | no      |
 
-Windows reaping is unsupported best-effort. The release contract lists Windows
+Windows reaping is unsupported best-effort. The release policy lists Windows
 as unsupported and `AtomicFileSystem` fails every operation closed there, but
 `systemFor("win32")` still reaches `taskkill /T /F` through the sweep rather
 than retiring every record unsignalled, because an excluded feature that appears

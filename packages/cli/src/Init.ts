@@ -11,7 +11,7 @@
  * The one thing the scaffold reads from the host is its seat. `smithers up`
  * cannot run a prompt flow that declares none, so a scaffold without a
  * `model:` line is a scaffold that is not launchable, which is what rc.0 first
- * shipped (Phase 7 verdict cd14388ed7). {@link defaultSeat} chooses it from
+ * shipped (release rehearsal). {@link defaultSeat} chooses it from
  * the same environment keys `smithers doctor` reports.
  *
  * The ignore edit is idempotent and repository-scoped, carried over from the
@@ -125,7 +125,7 @@ export const ensureIgnored = (root: string): IgnoreStatus => {
  * `CEREBRAS_API_KEY` is missing on purpose. `Doctor` names it a provider key
  * and `NodeControl.seatResolver` has no route for the provider, so a scaffold
  * that chose it would write a flow whose launch answers `No route is
- * configured for the cerebras provider` (Phase 7 plue-cutover, S3).
+ * configured for the cerebras provider` (release rehearsal).
  */
 const providerSeats: ReadonlyArray<readonly [variable: string, seat: string]> = [
   ["ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-5"],
@@ -160,7 +160,7 @@ export interface Seat {
  * A directory with no provider key still gets a `model:` line. A scaffold
  * without one is not launchable at all: `smithers up` on it answered `Run
  * run-1 was accepted but the executor did not take it` and left a run nothing
- * would ever drive (Phase 7 verdict cd14388ed7). With the line, the same
+ * would ever drive (release rehearsal). With the line, the same
  * launch refuses by naming the key to set.
  *
  * @category constructors

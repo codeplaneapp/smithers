@@ -35,8 +35,8 @@ const PLUGIN_SKILLS = {
   codex: "codex-plugin/skills/smithers/SKILL.md",
 };
 
-/** Commands, flags, and APIs 1.0 removed (rc-contract.md section 4.2). */
-// rc-contract section 4.2 keeps `inspect`, `why`, `events`, `resume`,
+/** Commands, flags, and APIs 1.0 removed. */
+// The CLI keeps `inspect`, `why`, `events`, `resume`,
 // `gateway`, and `workflow list` as aliases, so none of them belongs here.
 const REMOVED = [
   "smithers ui",

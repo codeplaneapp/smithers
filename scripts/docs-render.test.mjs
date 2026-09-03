@@ -3,9 +3,7 @@ import test from "node:test"
 import {
   cell,
   mdxText,
-  contractProse,
   errorTags,
-  exitCodes,
   frontmatter,
   isOptional,
   regionEnd,
@@ -33,16 +31,6 @@ test("a cell is both pipe-safe and MDX-safe", () => {
 test("escapes a pipe so a cell cannot end its column", () => {
   assert.equal(cell("a|b"), "a\\|b")
   assert.equal(cell("first\n  second"), "first second")
-})
-
-test("keeps contract prose and drops the sentences that address the migration", () => {
-  const behavior =
-    "Run listing; `--status` is validated. At the import reference `Command.ts:241` declares a string. The Phase 4 CLI port row changes it."
-  assert.equal(contractProse(behavior), "Run listing; `--status` is validated.")
-})
-
-test("turns a section sign into a word and unescapes a cell pipe", () => {
-  assert.equal(contractProse("Hosts the control server (§10) for `a\\|b`."), "Hosts the control server (section 10) for `a|b`.")
 })
 
 test("writes frontmatter as one quoted key", () => {
@@ -112,36 +100,4 @@ test("reads an error union as tags with their codes", () => {
     ]
   }
   assert.deepEqual(errorTags(ast), [{ tag: "RunNotFound", code: "run_not_found" }])
-})
-
-test("reads the exit codes out of the contract sentence and stops at its prose", () => {
-  const rows = exitCodes()
-  assert.deepEqual(rows.map((row) => row.code), ["0", "1", "2", "3", "130", "143"])
-  assert.equal(rows[0].meaning, "success")
-})
-
-test("drops a contract-internal parenthesis without dropping the sentence around it", () => {
-  // The migration tool's contract row is one sentence and ends with a phase
-  // reference. Dropping the whole sentence left its cell in the published
-  // package table blank, so a reader learned the package exists and nothing
-  // else about it.
-  assert.equal(
-    contractProse("The 0.x to 1.0 migration tool: `smithers-migrate` scan/plan/apply over a project (PLAN Phase 6, rule (e))."),
-    "The 0.x to 1.0 migration tool: `smithers-migrate` scan/plan/apply over a project."
-  )
-})
-
-test("drops a rule citation that addresses the contract rather than a reader", () => {
-  assert.equal(
-    contractProse("Consumed by `@smthrs/cli` (rule (a): `packages/cli/package.json:95`)."),
-    "Consumed by `@smthrs/cli`."
-  )
-})
-
-test("still drops a sentence that is nothing but an internal reference", () => {
-  assert.equal(contractProse("Runs a flow. At the import reference this was two commands."), "Runs a flow.")
-})
-
-test("never renders prose as an empty cell", () => {
-  assert.notEqual(contractProse("Phase 6 tooling."), "")
 })

@@ -88,7 +88,7 @@ const setup = Effect.gen(function*() {
   }
   // Parked and unowned: the state a run is left in when its driver is gone.
   //
-  // `Control.pause` is gone at rc.0 (rc-contract sections 4.2 and 5.2), so the
+  // `Control.pause` is gone at rc.0 (the release policy), so the
   // park is written through the runtime the way a driver writes its own: claim
   // the run, then move the row to `parked`, which `SqlControlRuntime`'s
   // `storeStatus` projects onto the store's `suspended`. The `flows_runs`

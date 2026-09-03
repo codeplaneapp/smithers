@@ -90,8 +90,8 @@ worktrees/
 .flows/
 
 # 0.x Smithers pack and run store. `.smithers/` is the 0.x directory the
-# migration workflow reads in a consumer project; nothing in this repository
-# tracks one except the Phase 6 migration fixtures.
+# migration workflow reads in a consumer project; only focused package fixtures
+# track one in this repository.
 .smithers/
 # The repository's own UI plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest") is source, not run state.
 !/.smithers/

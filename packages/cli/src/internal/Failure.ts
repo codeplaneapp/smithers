@@ -7,8 +7,8 @@
  * refusal with none is a refusal with no reason". The rest have none, and the
  * executable's reporter printed the class name and a bare colon for them:
  * `smithers resume` against a run another process owns answered the whole line
- * `ClaimLost: `, which names neither the run nor the `code` rc-contract
- * section 4 promises a script can grep for.
+ * `ClaimLost: `, which names neither the run nor the stable `code` a script
+ * must be able to grep for.
  *
  * It lives here rather than in `bin.ts` because importing that module runs the
  * command line: the reporter itself can only be exercised through a real

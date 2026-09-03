@@ -106,7 +106,7 @@ it delegates to the named durable flow the file also exports. A directory with
 no \`description\` is discovered with a warning and is not runnable.`
 
 /**
- * One verified old-to-new pair, copied from `docs/migration/feature-parity-audit.md`.
+ * One verified old-to-new pair used to teach the transform agent.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -118,7 +118,7 @@ export interface Example {
 }
 
 /**
- * The worked pairs the prompt carries, verbatim from the parity audit.
+ * The worked pairs the prompt carries.
  *
  * These are the only examples in the contract, and they are real: each one was
  * executed on both runtimes and its output recorded. An invented example would

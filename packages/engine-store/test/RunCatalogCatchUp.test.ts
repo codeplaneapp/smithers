@@ -152,7 +152,7 @@ describe("run catalog catch-up", () => {
 
       // The read orders by the run table's physical row order, which is the
       // order the workspace gained its runs. `VACUUM INTO` is the backup this
-      // release ships (rc-contract section 2) and a restore is a copy of its
+      // release ships (the release policy) and a restore is a copy of its
       // output, so the tail a follower sees has to survive one — including
       // after retention has deleted rows out of the middle and the end, which
       // is when SQLite reuses row identifiers.

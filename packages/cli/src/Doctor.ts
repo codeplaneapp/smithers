@@ -56,7 +56,7 @@ export interface Report {
 }
 
 /**
- * The minimum Node the durable engine runs on (rc-contract section 1).
+ * The minimum Node the durable engine runs on (the release policy).
  *
  * @category constants
  * @since 1.0.0
@@ -291,7 +291,7 @@ export const inspect = (options: Options): Report => {
   const backend = Environment.unsupportedBackend(Environment.read(environment, "SMITHERS_BACKEND"))
   if (backend !== undefined) checks.push({ name: "backend", level: "fail", detail: backend })
 
-  // Two sources, because section 6 gates them differently. The markers are
+  // Two sources, because the 0.x-project guard gates them differently. The markers are
   // the notice's paths and stop at a directory that already holds `.flows/`.
   // The databases are the refusal's input and do not, so doctor keeps
   // answering "what does the old database still hold?" for a project that

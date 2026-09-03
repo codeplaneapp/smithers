@@ -15,11 +15,11 @@
  * write path and the first test reads what the write path left behind.
  *
  * The operator's terminal is the other place, and the second test reads the
- * child's whole stdout and stderr. rc-contract R-12 makes case 22 a required
- * Phase 7 parity test across the journal *and* the logs. That half was RED at
+ * child's whole stdout and stderr. release requirements makes case 22 a required
+ * release parity test across the journal *and* the logs. That half was RED at
  * rc.0 and stayed in the matrix as a plain failing test rather than as prose,
  * because a matrix that is green while a live credential reaches the terminal
- * reports a truth the product does not have. The section 5.2 redaction
+ * reports a truth the product does not have. The redaction
  * deliverable closed it: `@smthrs/journal` `RedactedLogger` puts every log
  * line through the same rules the journal applies on the write path, and
  * `packages/cli/src/bin.ts` and `packages/flows/src/NodeRuntime.ts` install
@@ -101,8 +101,8 @@ describe("case22 a secret never reaches the journal", () => {
     expect(committed).toContain("token=[REDACTED]")
   }, 120_000)
 
-  // REQUIRED GATE. rc-contract R-12 requires case 22 to cover the logs as well
-  // as the journal. This was red until the section 5.2 redaction deliverable
+  // REQUIRED GATE. Case 22 covers the logs as well
+  // as the journal. This was red until the redaction deliverable
   // landed `@smthrs/journal` `RedactedLogger`; before it, `Effect.logInfo`
   // wrote the credential straight to the child's stderr. It reads the real
   // binary's real output, so it is the only thing that proves the layer is

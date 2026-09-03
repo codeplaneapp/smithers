@@ -701,7 +701,7 @@ const settlementReplacer = (_key: string, value: unknown): unknown =>
  * instance instead — a `HarnessError` wrapping a `ModelError`, a
  * `SeatUnresolved` — so the codec rejected every one of them, `engine-store`
  * degraded the settlement into a projection, and it said so in a second WARN
- * stack beside the run's own `An agent run failed` (Phase 7 smoke observation
+ * stack beside the run's own `An agent run failed` (release validation observation
  * N1: two stack traces for one billing refusal).
  *
  * Values already accepted by the JSON codec retain their identity. An OBJECT
@@ -1533,7 +1533,7 @@ export const make = (
      * returns on `control.run.completed` (`packages/cli/src/Command.ts`
      * `awaitRun`), its scope closes, and this finalizer interrupted the driver
      * 10 to 14 ms before `engine.execute` had recorded the `Complete` result.
-     * The Phase 7 smoke measured it on both a foreground `smithers run` and a
+     * The release validation measured it on both a foreground `smithers run` and a
      * `smithers up -d`: `control.run.completed` at 1788163027537,
      * `flows.engine.run-decision interrupt-released` at 1788163027551. The row
      * was left `suspended`/`released` with no result, so every later process
@@ -1578,7 +1578,7 @@ export const make = (
           // and answered `GuardFailed`, `cancelOwned` completed the run's
           // clock rows 150 seconds before they fell due, and the journal
           // gained `flows.engine.interrupted {"outcome":"cancelled"}` for a
-          // run nobody had cancelled (Phase 7 smoke, sections 2b and 3).
+          // run nobody had cancelled (release rehearsal).
           //
           // The durable half of a cancellation belongs to the caller that
           // meant one. `Control.cancel` writes it through
@@ -1659,7 +1659,7 @@ export const make = (
      * wrote on the engine row. The engine's own parked-run sweep ticks once
      * per `Ownership.heartbeatInterval`, but a `smithers cancel` process
      * writes the request at the very end of its life and exits before that
-     * tick lands: the Phase 7 smoke watched an engine row stay `suspended`
+     * tick lands: the release validation watched an engine row stay `suspended`
      * with `cancel_requested_at_ms` set through six more commands and 15
      * seconds, so `gc` skipped the run in `engine.db` while collecting it in
      * `control.db`, and only a 20-second `smithers serve` finalized it.
@@ -1837,7 +1837,7 @@ export const make = (
         // reclaimable by design: `RunDriver.sweepCancelRequested` wakes every
         // released row once per heartbeat, in EVERY process that opened the
         // same `engine.db`. Without this guard each of them re-enters the
-        // agent body: the Phase 7 smoke counted ten processes replaying run-1,
+        // agent body: the release validation counted ten processes replaying run-1,
         // 162 journal events against 36 for an untouched run, and a token
         // total six times the truth. Returning here records a terminal
         // result instead, which is the one write the row is missing, so the
@@ -1909,7 +1909,7 @@ export const make = (
      * A second is the same bound `SqlJournal`'s own cross-process follower
      * uses to recheck the durable tail, and the same heartbeat tick the engine
      * sweeps cancellations on. Nothing here is event-driven, because rc.0 has
-     * no cross-process wake (rc-contract §5.2).
+     * no cross-process wake (the release policy).
      */
     const pendingResumeBridge = drainPendingResumes.pipe(
       Effect.andThen(Effect.sleep(Duration.seconds(1))),
@@ -1957,7 +1957,7 @@ export const make = (
         // host can ever run one, so `pending` promised a driver that was never
         // coming: `smithers init hello && smithers up hello` exited 1 and left
         // `run-1` at `accepted` under an owner with pid 0, which only
-        // `smithers cancel` could end (Phase 7 verdict cd14388ed7, D1).
+        // `smithers cancel` could end (release rehearsal, D1).
         if (Option.isNone(descriptor.value.model)) {
           return yield* new LaunchFailed({
             runId: input.run.runId,

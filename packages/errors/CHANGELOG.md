@@ -13,7 +13,7 @@
 
 - Trimmed the Smithers 0.x registry from 180 codes to the five codes the
   `@smthrs/integrations` trees raise under orchestrator ruling A1 (R-34) in
-  `docs/migration/rc-contract.md` §8.2.
+  the release policy.
 - Closed the `SmithersErrorCode` union over the keys of
   `smithersErrorDefinitions`.
 - Copy and freeze the top-level `details` record at construction, and freeze

@@ -9,8 +9,8 @@ It exercises both shapes the migration tool's detector recognizes as 0.x: a
 `createSmithers`.
 
 Origin: `/Users/williamcory/smithers` at commit `cfb570f193` (Smithers 0.35.0),
-moved into `legacy/examples/` by Phase 1 of the 1.0 migration and assembled here
-by the Phase 4 `pack-skills-plugins` lane.
+removed from the runtime tree during the 1.0 rewrite and assembled here as a
+stable product fixture.
 
 | Fixture path | Origin path |
 | --- | --- |

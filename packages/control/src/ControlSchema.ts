@@ -794,7 +794,7 @@ export const PageLimit = Schema.Int.check(
  * run. Deleting the field would have moved the same overbroad answer one layer
  * out, because Effect struct decoding strips a property the schema does not
  * declare and the server would never see it. A refusal is the clear failure the
- * release contract asks an unsupported feature for.
+ * release policy asks an unsupported feature for.
  *
  * @since 0.1.0
  * @category models

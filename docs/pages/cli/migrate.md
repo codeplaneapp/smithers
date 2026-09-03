@@ -42,10 +42,9 @@ These flags existed in Smithers 0.x. `smithers migrate` declares each one so it 
 
 | Flag | Reason |
 | --- | --- |
-| `--to &lt;backend&gt;` | SQLite only; the 0.x database move is removed |
+| `--to` | SQLite only; the 0.x database move is removed |
 
 ## Source
 
-This page is generated from the binary's `--help` output and section 4.1 of the
-[release contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md).
-Run `pnpm docs:pages` after changing either.
+This page is generated from the binary's `--help` output. Run
+`pnpm docs:pages` after changing the command.

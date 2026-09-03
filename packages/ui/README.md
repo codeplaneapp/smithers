@@ -7,8 +7,7 @@ dark and honors `prefers-reduced-motion`.
 
 `@smthrs/ui` is `private: true` and workspace-only at `1.0.0-rc.0`. It is not
 published to any registry: `apps/ui` and `apps/review` consume it through the
-workspace, and the Phase 4 UI port is what decides its public future
-(`docs/migration/disposition-ledger.md`, row `packages/ui`, disposition `keep`).
+workspace.
 Import it by its scoped name, `@smthrs/ui`; the unscoped `smthrs` package
 publishes only a deprecation notice whose module throws on import.
 
@@ -18,7 +17,7 @@ root; every component also self-injects the composed sheet plus its lane CSS
 fragment as a fallback. All classes are namespaced `sui-*`.
 
 ```tsx
-import { Button, SmithersUiStyles, StatusPill } from "@smthrs/ui"
+import { SmithersUiStyles, Button, StatusPill } from "@smthrs/ui";
 ```
 
 ## Families
@@ -81,5 +80,4 @@ pnpm --filter @smthrs/ui run check    # tsc -p tsconfig.json --noEmit
 
 Both are declared in `PACKAGE.ts` as `//packages/ui:unitTests` and
 `//packages/ui:check`. This package does not run vitest, coverage thresholds,
-eslint or dprint: `PACKAGE.ts` records why, and the Phase 4 UI port is what moves
-it onto the 1.0 tooling baseline.
+eslint or dprint; `PACKAGE.ts` records the package-specific tooling boundary.

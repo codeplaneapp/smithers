@@ -28,8 +28,7 @@ const repoRoot = resolve(import.meta.dirname, "..")
  * Packages whose published entry throws on purpose.
  *
  * `smthrs` keeps its place on the registry only to tell an upgrading project
- * where the code went, so a successful load is the failure (rc-contract.md
- * section 3.3).
+ * where the code went, so a successful load is the failure.
  */
 const noticeOnly = new Set(["smthrs"])
 const noticeFirstLine = "smthrs 1.0 is a migration notice, not a runtime."
@@ -178,8 +177,8 @@ try {
     )
     if (noticeOnly.has(entry.name)) {
       // The unscoped `smthrs` package is a migration notice: loading is
-      // supposed to fail, with the notice as the message (rc-contract.md
-      // section 3.3). A load that succeeds means the notice stopped working.
+      // supposed to fail with the notice as the message. A load that succeeds
+      // means the notice stopped working.
       const results = [["ESM import", esm], ["CJS require", cjs]]
       const wrong = results.filter(([, result]) => result.ok || !result.output.includes(noticeFirstLine))
       const status = wrong.length === 0 ? "ok  " : "FAIL"

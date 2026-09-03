@@ -7,7 +7,7 @@
  * statements are engine-store-owned storage created idempotently at
  * construction instead (issues #40/#41/#79/#81). That is a deliberate lane
  * boundary, not an oversight — but it left the statements invisible to the
- * pg-porting plan in `docs/migration/smithers-replacement-gaps.md`, which
+ * pg-porting plan in the database roadmap, which
  * scoped only the journal migration's SQLite-specific DDL. Declaring them here
  * makes the inventory machine-readable: a test diffs the database's schema
  * objects across `make` against this list, so no engine-owned statement can

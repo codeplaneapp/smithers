@@ -1,5 +1,5 @@
 /**
- * Every removed verb and flag of rc-contract section 4.2, driven through the
+ * Every removed verb and flag of the release policy, driven through the
  * real parser.
  *
  * The complete sets live here rather than in `Bin.test.ts` because the fact
@@ -45,7 +45,7 @@ describe("every removed verb", () => {
       // Two removed entries have a bare form that still does something:
       // `gateway` is the `serve` alias and `workflow list` is the `ls` alias.
       // Both are driven through a removed subcommand instead, which is the
-      // only form section 4.2 removed.
+      // only form the removed-command contract removed.
       const error = await failure(
         verb.subcommands === undefined || !ownGroups.has(name) ? [name] : [name, verb.subcommands[0]!]
       )
@@ -70,7 +70,7 @@ describe("every removed verb", () => {
 
 describe("the refusal `bin.ts` answers before the control plane boots", () => {
   /**
-   * Every form section 4.2 removes, spelled the way an operator types it:
+   * Every form the removed-command contract removes, spelled the way an operator types it:
    * the bare verbs, and the removed subcommands of the two parents that live.
    */
   const forms = Unsupported.removedVerbs.flatMap((verb) =>
@@ -145,7 +145,7 @@ describe("every removed flag", () => {
       const message = (error as CliError.UnsupportedError).message
       // `--backend` is the one entry whose refusal is the database contract's
       // own error code rather than the removal sentence, because
-      // `--backend sqlite` is accepted (rc-contract section 2).
+      // `--backend sqlite` is accepted (the release policy).
       expect(message).toContain(flag.flag === "backend" ? "unsupported_database" : "was removed in 1.0.0-rc.0")
       expect(message).toContain(`${Unsupported.migrationUrl}#${flag.anchor}`)
       expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
@@ -171,7 +171,7 @@ describe("the SQLite-only backend flag", () => {
     for (const backend of ["pglite", "postgres", "mysql"]) {
       const error = await failure(["--backend", backend, "ls"])
 
-      // rc-contract section 2 prints one exact sentence for every rejected
+      // the release policy prints one exact sentence for every rejected
       // value, so the message names the fix rather than echoing the value.
       expect((error as CliError.UnsupportedError).message).toBe(Environment.unsupportedBackend(backend))
     }

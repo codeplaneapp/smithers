@@ -88,7 +88,7 @@ const terminal = (status: RunSummary["status"]): boolean =>
  * approval therefore spends its whole second life `accepted`. Both statuses
  * project onto the store's `running` (`SqlControlRuntime`'s `storeStatus`), so
  * a lost claim against either one means a live peer owns the row — which
- * rc-contract 5.1 answers `ClaimLost`. Asking for the literal `running` alone
+ * release policy 5.1 answers `ClaimLost`. Asking for the literal `running` alone
  * answered `Accepted` for a peer's accepted run and hid the peer.
  */
 const live = (status: RunSummary["status"]): boolean => status === "running" || status === "accepted"
@@ -325,7 +325,7 @@ export const layer: Layer.Layer<
      * executor is consulted — and the failure rolls the mutation's transaction
      * back, so the run survived with no journal entry, `status` reported it
      * unlaunched forever, and `smithers cancel` was the only verb that could
-     * end it (Phase 7 verdict cd14388ed7; plue-cutover S3).
+     * end it.
      *
      * It runs OUTSIDE the mutation, for that rollback's reason: a settlement
      * written inside the failing transaction is discarded with it.
@@ -364,7 +364,7 @@ export const layer: Layer.Layer<
      * the operator asks again: a cancel against a run a live peer owns answers
      * `Accepted` and finishes nothing, and replaying that answer as
      * `AlreadyApplied` turned a run nobody could reach into a run nobody could
-     * ask about either — the Phase 7 smoke left two of them, with `smithers
+     * ask about either — the release validation left two of them, with `smithers
      * cancel` and `smithers down` both answering from the receipt and neither
      * ever reaching the row. Cancellation needs no receipt to be idempotent:
      * the run's own terminality is stronger, and `cancel` reads it first and
@@ -437,7 +437,7 @@ export const layer: Layer.Layer<
         // the idempotency replay for `resume`'s reason: the recorded receipt
         // describes the earlier call, not the run. Answering `Accepted` sent
         // `smithers approve` into `awaitRun` waiting for a settlement that had
-        // already happened — the Phase 7 smoke's 120-second silent block — and
+        // already happened — the release validation's 120-second silent block — and
         // recorded a resume delegation for a run no host may take up.
         //
         // A plan-level decision has no run yet, and a target whose run this
@@ -531,7 +531,7 @@ export const layer: Layer.Layer<
         // Terminality is read BEFORE the idempotency replay, as `cancel` reads
         // it. A recorded receipt is the proof a restart was made once; it is
         // not an answer about the run, and the run settles afterwards. The
-        // Phase 7 smoke asked `run --resume` for a completed run and was told
+        // release validation asked `run --resume` for a completed run and was told
         // `AlreadyApplied`, which describes the earlier call and says nothing
         // about the run the operator named (spec item 3).
         const settled = yield* runtime.getRun(input.runId)
@@ -1257,7 +1257,7 @@ export const layer: Layer.Layer<
                     // the park to do it. Answering `Accepted` here left the row
                     // parked forever — `ps` still showed it waiting, `gc` skipped
                     // it, and a later `approve` blocked on a settlement no writer
-                    // was going to produce (Phase 7 smoke section 3, "the parked
+                    // was going to produce (release rehearsal, "the parked
                     // rows cannot be terminated"). A claim that loses the race is
                     // a peer that just took the park, which is the case above.
                     : runtime.resume(input.runId).pipe(
@@ -1272,8 +1272,7 @@ export const layer: Layer.Layer<
               // journaling. So `control.run.cancelled` had no writer at all, and
               // `smithers run` waits on exactly that event to know it has
               // nothing left to drive: a detached engine whose only run was
-              // cancelled by a second process waited for it forever (Phase 7
-              // smoke, section 5; pid 10105 alive 4 min 33 s).
+              // cancelled by a second process waited for it forever in the release rehearsal.
               if (run !== undefined && terminal(run.status)) {
                 yield* emit(input.runId, `control.run.${run.status}`, {
                   runId: input.runId,
@@ -1291,7 +1290,7 @@ export const layer: Layer.Layer<
             // drives a parked run, so the row stayed `suspended` until some
             // later long-lived engine happened to sweep it: `gc` collected the
             // run in `control.db` and skipped it in `engine.db` for fifteen
-            // seconds and six commands in the Phase 7 smoke.
+            // seconds and six commands in the release validation.
             Effect.tap(() => executorSettleCancelledPark(input.runId))
           ))
       ),

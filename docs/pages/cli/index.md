@@ -73,11 +73,11 @@ against a remote `smithers serve` with `--remote`.
 | Code | Meaning |
 | --- | --- |
 | 0 | success |
-| 1 | unsupported or generic error |
-| 2 | usage |
-| 3 | parked (`waiting-approval`) |
-| 130 | SIGINT |
-| 143 | SIGTERM |
+| 1 | runtime or command failure |
+| 2 | usage error |
+| 3 | migration refused before changing the project |
+| 130 | interrupted by SIGINT |
+| 143 | interrupted by SIGTERM |
 
 ## Removed commands
 
@@ -88,6 +88,5 @@ verb and its replacement.
 
 ## Source
 
-This page is generated from the binary's `--help` output and section 4 of the
-[release contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md).
+This page is generated from the binary's `--help` output and removal registry.
 Run `pnpm docs:pages` after changing either.

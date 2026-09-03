@@ -97,7 +97,7 @@
 ### Removed
 
 - Removed `plan-cards` from `ProjectionName`, `PlanCardsSelector`, and the read
-  path: the declared projection set equals the served set (rc-contract R-8), and
+  path: the declared projection set equals the served set (release requirements), and
   a plan card is what `Control.plan` returns rather than something projected.
 - Removed the never-produced `GatewayErrorCode` members `already_running`,
   `not_running`, `token_expired`, `unsupported_projection`,
@@ -106,8 +106,6 @@
   and `UnauthorizedFrame`, and the unreferenced `SubscriptionTick` and
   `SubscriptionWatch` schemas.
 - Removed `SubmitApprovalOutput.resume` and the `layerRefuseMalformedRpc`
-  alias: a first release has nothing to be compatible with (rc-contract
-  section 11).
+  alias: a first release has nothing to be compatible with.
 - The 0.x gateway protocol is replaced rather than adapted. No 0.x method name
-  or path is served and there is no compatibility projection (rc-contract
-  section 7).
+  or path is served and there is no compatibility projection.

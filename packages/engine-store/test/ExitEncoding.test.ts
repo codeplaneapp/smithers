@@ -1,7 +1,7 @@
 /**
  * What the drain writes when a flow's own codec rejects its settlement.
  *
- * Phase 7's Plue cutover found the drain guarding the terminal transition with
+ * release validation found the drain guarding the terminal transition with
  * `Effect.orDie` around that encode: `engine-store: coordinated drain failed
  * for run-1 SchemaError: Expected JSON value at ["exit"]["cause"][0]["error"]`,
  * after which the engine row stayed `running` under a dead owner and the next
@@ -25,7 +25,7 @@ const unknownFlow = Flow.make("test/unknown", {
   body: () => Node.succeed(undefined)
 })
 
-/** The provider failure the cutover's run actually carried. */
+/** A provider failure shape observed by a persisted run. */
 class ModelError extends Schema.TaggedError<ModelError>()("flows/model/ModelError", {
   code: Schema.String,
   message: Schema.String

@@ -203,7 +203,7 @@ const renderHooks: ReadonlySet<string> = new Set([
  *
  * The copy is not an instance of the original's class, so a renderer that
  * special-cases `instanceof MyError` sees a plain `Error`. That is the fidelity
- * trade rc-contract section 7 already records for every other value, and it is
+ * trade the release policy already records for every other value, and it is
  * the trade the same problem's earlier, crashing form was settled with: a copy
  * on a host prototype, such as the `DOMException` an `AbortSignal` carries as
  * its reason, is an impostor whose brand check throws from inside `Cause.pretty`

@@ -128,7 +128,7 @@ export const watchHeartbeatKind = "control.gateway.heartbeat"
  * Merges a keepalive into a followed `Watch` stream.
  *
  * A followed stream is silent while a run is thinking, and a relay cuts an
- * idle tunnel at 600 s (plue-consumer-contract §11). The Effect RPC client
+ * idle tunnel at 600 s. The Effect RPC client
  * sends its own `Ping` every 5 s, but a non-Effect consumer behind a relay
  * sends nothing, so the keepalive has to come from the server.
  *
@@ -479,7 +479,7 @@ export const carriesRpcRequest = (
  * `effect/unstable/rpc` hands every decoded message to the server loop, and a
  * body that decodes to something else — `{}`, `[]`, prose, nothing at all —
  * reached it as a message with no tag and died there, so the gateway answered
- * `500 Internal Server Error` with an empty body (Phase 7 smoke). That is the
+ * `500 Internal Server Error` with an empty body (release validation). That is the
  * wrong half of the contract twice over: it tells an operator the gateway
  * broke, and it tells a client to retry a request that can never succeed.
  *

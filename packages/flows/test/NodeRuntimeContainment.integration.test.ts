@@ -2,7 +2,7 @@
  * The containment matrix, driven through a real durable cancel.
  *
  * `packages/std`'s `ExecContainment` suite pins the same two shapes directly
- * against a spawner. This one asks the question the release contract actually
+ * against a spawner. This one asks the question the release policy actually
  * words: after `smithers cancel`, does the machine still carry anything the
  * run started. So everything here is the production composition —
  * `NodeRuntime.layerHost` over a real SQLite file, a flow body reaching the

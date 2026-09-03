@@ -5,8 +5,8 @@
  * pnpm links the whole workspace under one `node_modules`, so a package can
  * import a sibling it never declared and still resolve locally. A consumer who
  * installs the published tarball gets a module-not-found error instead. This
- * gate is what PLAN.md Phase 3 means by "no package imports files through
- * unpublished workspace-relative paths".
+ * This gate prevents package imports through unpublished workspace-relative
+ * paths.
  *
  * Test files, config files, and anything under a `scripts/` directory may use
  * `devDependencies`; everything else may use only runtime, peer, and optional
@@ -43,9 +43,6 @@ const ignoredDirs = new Set([
   "coverage",
   "dist",
   "eval-runs",
-  // The Smithers 0.x tree later phases port from. It is outside the workspace
-  // and no live module imports it.
-  "legacy",
   "node_modules",
   "target",
   "tmp",
@@ -193,7 +190,7 @@ function filesForPackage(pkg, memberDirs = new Set()) {
   } else {
     // Some workspaces have no src/ and keep their sources at the package root.
     // Scan the whole package dir; the recursive collector already skips
-    // node_modules, dist, coverage, and legacy.
+    // node_modules, dist, and coverage.
     collectSourceFiles(pkg.dir, files, nestedPackageDirs);
   }
   return { files: files.sort(), nestedPackageDirs: nestedPackageDirs.sort() };

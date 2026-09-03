@@ -233,12 +233,12 @@ one. See [sync](/concepts/sync).
 `GatewaySchema.Workspace`, `GatewayConfig`, `GatewayStatus`, `SingletonRecord`,
 `TokenScope`, and `TokenRecord` describe a workspace singleton handshake that
 1.0.0-rc.0 has no route for. No code in this release mints, reads, persists, or
-serves one. `docs/migration/plue-consumer-contract.md` records the same fact
+serves one. The gateway projection contract records the same fact
 against its `connect` handshake row: the schemas exist and the route does not.
 Read them as a proposal, not as a contract a client can call.
 
 Everything else the schema declares is served. `ProjectionName` in particular
-equals the set the read path answers, which is ruling R-8.
+equals the set the read path answers.
 
 ## Test layers
 

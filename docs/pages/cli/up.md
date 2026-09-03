@@ -37,12 +37,13 @@ These flags existed in Smithers 0.x. `smithers up` declares each one so it fails
 | `--report` | replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted |
 | `--force` | the run driver's heartbeat sweep owns recovery |
 | `--steal-ownership` | the run driver's heartbeat sweep owns recovery |
-| `--resume-claim-*` | the run driver's heartbeat sweep owns recovery |
-| `--resume-restore-*` | the run driver's heartbeat sweep owns recovery |
-| `--max-concurrency &lt;n&gt;` | parallelism is declared by the flow and bounded by plan admission |
+| `--resume-claim-owner` | the run driver's heartbeat sweep owns recovery |
+| `--resume-claim-heartbeat` | the run driver's heartbeat sweep owns recovery |
+| `--resume-restore-owner` | the run driver's heartbeat sweep owns recovery |
+| `--resume-restore-heartbeat` | the run driver's heartbeat sweep owns recovery |
+| `--max-concurrency` | parallelism is declared by the flow and bounded by plan admission |
 
 ## Source
 
-This page is generated from the binary's `--help` output and section 4.1 of the
-[release contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md).
-Run `pnpm docs:pages` after changing either.
+This page is generated from the binary's `--help` output. Run
+`pnpm docs:pages` after changing the command.

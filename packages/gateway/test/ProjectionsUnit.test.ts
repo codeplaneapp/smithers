@@ -1248,7 +1248,7 @@ describe("Projections delta failures", () => {
 
 describe("Projections keepalive cadence", () => {
   it("stays under the relay's idle cut with margin", () => {
-    // plue-consumer-contract §11: the relay drops an idle tunnel at 600 s.
+    // the deployed relay behavior: the relay drops an idle tunnel at 600 s.
     expect(Projections.heartbeatIntervalMillis).toBeLessThan(600_000 / 2)
   })
 })

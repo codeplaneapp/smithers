@@ -21,5 +21,5 @@ export const Manifest = {
       target: "README.md"
     }
   ],
-  references: ["docs/pages/routes.md"]
+  references: []
 } as const

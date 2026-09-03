@@ -2,7 +2,7 @@
  * The adapter pinned against the contracts the durable engine enforces, using
  * runtime doubles that decorate the real in-memory `FlowRuntime`.
  *
- * `docs/migration/rc-contract.md` section 7 requires the durable engine to
+ * The release policy requires the durable engine to
  * refuse `FlowRuntime.interruptUnsafe` with `unsafe_interrupt_unsupported`, so
  * an adapter that cancels through it cannot run one interrupt pin against the
  * only durable engine that ships. Nothing in the repository caught that,

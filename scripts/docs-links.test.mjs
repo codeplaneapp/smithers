@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import test from "node:test"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 import { anchorsLinkedTo, deadLinks, isInternal, linkTargets, missingAnchors, resolveLink } from "./docs-links.mjs"
 
 const site = {

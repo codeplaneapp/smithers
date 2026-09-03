@@ -391,8 +391,7 @@ export const contract = (name: string, harness: Harness): void => {
      * the CLI keeps runs in `control.db` and journals control events into
      * `engine.db` — the row outlived the rollback, and rc.0 left it `accepted`
      * under an owner with pid 0: `smithers status` answered "unlaunched"
-     * forever and only `smithers cancel` could end it (Phase 7 verdict
-     * cd14388ed7; plue-cutover S3). So the contract is stated over what
+     * forever and only `smithers cancel` could end it. So the contract is stated over what
      * survives: whatever run the refusal leaves behind is terminal, carries
      * the cause, and is `failed`.
      */
@@ -508,9 +507,9 @@ export const contract = (name: string, harness: Harness): void => {
 
         expect(receipt).toEqual({ _tag: "Terminal", runId, status: "cancelled" })
         // Retargeted: a second cancel answers from the RUN, not from the
-        // recorded receipt. rc-contract section 7 says a cancel against a
+        // recorded receipt. the release policy says a cancel against a
         // terminal run returns the `Terminal` receipt, and the old
-        // `AlreadyApplied` replay hid it — which is how the Phase 7 smoke's
+        // `AlreadyApplied` replay hid it — which is how the release validation's
         // two non-terminal runs became unreachable by `cancel` and `down`
         // alike. Cancellation is idempotent through the run's terminality,
         // which is the stronger fact.

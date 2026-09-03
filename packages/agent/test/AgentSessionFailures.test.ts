@@ -575,8 +575,7 @@ describe("the executor's registry seam", () => {
    * `pending` says "not mine, somebody else may take it". No agent host can
    * ever take a prompt flow with no seat, so the acceptance promised a driver
    * that was never coming: `smithers init hello && smithers up hello` exited 1
-   * and left `run-1` at `accepted` with nothing running (Phase 7 verdict
-   * cd14388ed7, D1).
+   * and left `run-1` at `accepted` with nothing running (release rehearsal).
    */
   it("refuses a discovered flow with no declared seat, and drives nothing", async () => {
     const record = recorder()
@@ -1294,7 +1293,7 @@ describe("the settlement a failure is persisted as", () => {
    * reads as "any JSON value". Every real agent failure is an `Error`
    * instance, so the codec rejected every one, `engine-store` degraded the
    * settlement into a projection, and it announced that in a second WARN stack
-   * beside the run's own `An agent run failed` (Phase 7 smoke observation N1).
+   * beside the run's own `An agent run failed` (release validation observation N1).
    * Rendering the error to the text the operator already reads is what makes
    * the settlement encodable.
    */

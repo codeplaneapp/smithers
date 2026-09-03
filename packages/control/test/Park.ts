@@ -3,9 +3,9 @@
  *
  * `Control.pause` used to be the one call that released a run's ownership
  * without settling it, and half the fence suites leaned on it to reach a
- * parked, unowned row. 1.0.0-rc.0 removes it (rc-contract §5.2, "Attributed
+ * parked, unowned row. 1.0.0-rc.0 removes it (the release policy, "Attributed
  * pause"): it flipped the control row and parked no engine run, which is the
- * partial behavior PLAN.md Phase 5 forbids. The transition itself is not gone —
+ * partial behavior the release scope forbids. The transition itself is not gone —
  * `ControlRuntime.writeStatus` performs it, and clears the owner for every
  * non-running status — so this is the same two lines the suites used to spell
  * with `pause`, in one place.

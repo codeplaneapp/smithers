@@ -2,10 +2,10 @@ import { describe, expect, it } from "@effect/vitest"
 import * as UnsupportedBackend from "../src/UnsupportedBackend.ts"
 
 /**
- * Negative gates for the environment half of exclusion X-01: rc.0 stores run
+ * Negative gates for unsupported backend environment names: rc.0 stores run
  * state in local SQLite only, so the connection strings a 0.x PostgreSQL or
  * PGlite deployment exports have no effect. Ignoring them silently is the
- * failure rc-contract section 2 was written to remove — a project would run
+ * failure the release policy was written to remove — a project would run
  * against SQLite believing it ran against PostgreSQL — so each name is
  * announced once, with the sentence the contract fixes.
  *
@@ -13,7 +13,7 @@ import * as UnsupportedBackend from "../src/UnsupportedBackend.ts"
  * can silently stop covering a name.
  */
 
-describe("names rc.0 ignores (X-01, rc-contract section 2)", () => {
+describe("names rc.0 ignores (X-01, the release policy)", () => {
   it.each([
     "SMITHERS_TEST_PG_URL",
     "SMITHERS_POSTGRES_URL",

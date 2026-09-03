@@ -388,11 +388,11 @@ describe("Control surface", () => {
       ["parked for approval", "control.run.waiting-approval", 3]
     ] as const
   )("exits with the terminal status of a run that settled %s", async (_label, kind, expected) => {
-    // rc-contract section 4's `up` row and section 10 both say an attached
+    // The attached-launch contract says an attached
     // launch exits with the terminal status code. Before this, `runLaunch`
     // failed only on `control.run.pending`: a run that settled `failed`
     // rendered its receipt and exited 0, so no caller of `smithers up` could
-    // read a red run from the exit code (plue-cutover finding S1).
+    // read a red run from the exit code.
     const previous = process.exitCode
     try {
       const receipt = await Effect.runPromise(

@@ -13,7 +13,7 @@ export default defineConfig({
       // `Smithers.Vitest` only declines to pass `--coverage.enabled=false`,
       // and vitest's own default is off, so nothing measured this package
       // until this block existed. The thresholds are the workspace contract
-      // (rc-contract section 9): 100% on every default run.
+      // (the release policy): 100% on every default run.
       enabled: true,
       provider: "v8",
       reportsDirectory: join(tmpdir(), `flows-build-infra-coverage-${process.pid}`),

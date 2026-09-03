@@ -22,7 +22,7 @@ export type CheckpointModel = {
   messageCount?: number;
 };
 
-// Keep this vocabulary aligned with docs/migration/rc-contract.md sections 5.2 and 7.
+// Keep this vocabulary aligned with the release policy.
 export type CheckpointActionKind = "fork" | "replay" | "rewind";
 
 const CHECKPOINT_ACTION_LABELS: Readonly<Record<CheckpointActionKind, string>> = {

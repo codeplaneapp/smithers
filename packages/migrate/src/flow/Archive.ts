@@ -97,7 +97,7 @@ const sorted = (record: Record<string, string>): Record<string, string> =>
  *
  * A name with no pin is refused rather than written as `"*"`. A floating
  * specifier is never a correct pin, and for the `effect` family it is at odds
- * with the release contract's single-version invariant.
+ * with the release policy's single-version invariant.
  *
  * @category conversions
  * @since 1.0.0-rc.0

@@ -6,7 +6,7 @@ citations used to name research notes under `docs/specs/` and clones under
 repository — comments that ship inside the published `.d.ts`. The designs
 themselves are recorded here instead, in the package that implements them.
 
-The frozen release contract is `docs/migration/rc-contract.md`; where this page
+The release behavior is pinned by the conformance suites; where this page
 and that document disagree, the contract wins.
 
 ## A test harness is a layer set
@@ -68,8 +68,7 @@ recorded result: both kinds replay. Sealed is content identity, so aliased
 occurrences of one key share a single recorded result. Unsealed is occurrence
 identity, so duplicate declared keys run and journal separately.
 
-Cancellation goes through `FlowRuntime.interrupt`. Section 7 of the release
-contract requires the durable engine to refuse `interruptUnsafe` with
+Cancellation goes through `FlowRuntime.interrupt`. The durable engine refuses `interruptUnsafe` with
 `unsafe_interrupt_unsupported`, so an adapter built on the unsafe path could not
 run a single interrupt pin against the engine that ships.
 

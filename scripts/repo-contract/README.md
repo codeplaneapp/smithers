@@ -26,16 +26,13 @@ pnpm exec smithers-build test '//scripts/repo-contract/...'
 | `fault-skips.test.mjs` | No focused, parked, or inverted test in `e2e/`, every conditional skip declared with its reason, and every required gate still in the matrix — including the ones that are red. |
 | `machine-paths.test.mjs` | No tracked file under `e2e/`, `evals/` or `scripts/` names one machine's home directory. Recorded material — wave reports, archives, the authoring corpus — is exempt, because rewriting it would falsify a record. |
 
-## Ported from Smithers 0.x
+## Retired-suite coverage
 
-These replace `packages/smithers/tests/`, which is gone. Fifteen suites lived
-there. Three of them — the bin-delegation trio — are the cli-ops lane's, per the
-disposition ledger's `packages/smithers/src/bin` row: they pin the bin that row
-ports, and they travel with it. Of the twelve this lane owns, four requirements
-survived the migration. The rest are recorded below with why they did not, so
-each deletion is a decision rather than an omission.
+These gates preserve the requirements that remain relevant from the retired
+test suite. The table records where each surviving behavior is checked and why
+obsolete checks were removed.
 
-| 0.x suite | Disposition |
+| Retired suite | Outcome |
 | --- | --- |
 | `package-and-build-contract`, `package-and-build-process-contract` | Ported into `package-contract.test.mjs`. The half that asserted a `tsup` entry-point layout, a `dist/` shape, and a bin shim went with the build system; the manifest claims survived. |
 | `barrels`, `umbrella-agent-exports` | Ported into `barrels.test.mjs`. The 0.x umbrella is now a migration notice that throws, so "re-exports the agent surface" became "refuses to run". |
@@ -46,4 +43,4 @@ each deletion is a decision rather than an omission.
 | `release-tag-guard` | Dropped. `scripts/release-tag-guard.mjs` has no successor: the RC release flow is `release.yml`, whose dry-run and tag-push paths are covered by `//scripts:releaseRehearsal`. |
 | `coverage-script-gate` | Dropped. It tested `scripts/coverage.mjs` and the Bun LCOV merge, neither of which exists. Coverage is vitest's, and the gate that keeps its denominator honest is `packages/flows/test/vitestCoverageIsolation.test.ts`. |
 | `workspace-test-sharding` | Dropped. `scripts/run-workspace-tests.mjs` and the Windows shard runner are gone; the Windows lane runs `//packages/...` directly. |
-| `bin-smithers-delegation`, `bin-dangling-workspace-link-hint`, `dangling-many-links` | Not this lane's. The disposition ledger assigns all three to the `packages/smithers/src/bin` row, which the cli-ops lane executes. That lane ported them: the dangling-workspace-link diagnosis is `packages/cli/bin/dangling-workspace-links.mjs`, driven by `packages/cli/test/DanglingWorkspaceLinks.test.ts`, and the shim's resolution order is `packages/cli/test/Bin.test.ts`. The 0.x delegation to a locally installed CLI has no successor, because `@smthrs/cli`'s bin runs `dist/esm/bin.js` or `src/bin.ts` in its own package and delegates to nothing. |
+| `bin-smithers-delegation`, `bin-dangling-workspace-link-hint`, `dangling-many-links` | The dangling-workspace-link diagnosis is `packages/cli/bin/dangling-workspace-links.mjs`, driven by `packages/cli/test/DanglingWorkspaceLinks.test.ts`, and the executable resolution order is pinned by `packages/cli/test/Bin.test.ts`. Delegation to a locally installed CLI has no successor because `@smthrs/cli` runs `dist/esm/bin.js` or `src/bin.ts` in its own package and delegates to nothing. |

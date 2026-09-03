@@ -62,7 +62,7 @@ reported by the fields it does carry, contract code first:
 ## Command documentation
 
 The [`smithers` command pages](/cli) are generated from the real Effect CLI
-parser and the frozen release contract. This API page documents the library
+parser and the frozen release policy. This API page documents the library
 surface used to compose or embed that executable.
 
 ## Exports
@@ -147,7 +147,7 @@ surface used to compose or embed that executable.
 | `Doctor.Level` (type) | models | The outcome of one check. |
 | `Doctor.Check` (interface) | models | One line of the report. |
 | `Doctor.Report` (interface) | models | The whole report. |
-| `Doctor.minimumNode` (const) | constants | The minimum Node the durable engine runs on (rc-contract section 1). |
+| `Doctor.minimumNode` (const) | constants | The minimum Node the durable engine runs on (the release policy). |
 | `Doctor.satisfiesNode` (const) | predicates | Whether a Node version satisfies the rc.0 floor. |
 | `Doctor.Options` (interface) | models | Arguments accepted by `inspect`. |
 | `Doctor.inspect` (const) | constructors | Runs every check and returns the report. |
@@ -159,8 +159,8 @@ surface used to compose or embed that executable.
 | `Environment.ambientWorkingDirectory` (const) | getters | Reads the directory the process was started in by deliberate host choice. |
 | `Environment.read` (const) | getters | Reads one canonical name, falling back to its rc.0 `FLOWS_*` alias. |
 | `Environment.readInteger` (const) | getters | Reads one canonical name as a positive integer, ignoring anything else. |
-| `Environment.unsupportedBackendMessage` (const) | constants | The refusal sentence, verbatim from rc-contract section 2. |
-| `Environment.unsupportedBackend` (const) | getters | The database-backend refusal required by rc-contract section 2. |
+| `Environment.unsupportedBackendMessage` (const) | constants | The database-backend refusal sentence. |
+| `Environment.unsupportedBackend` (const) | getters | The database-backend refusal. |
 | `ExecutorOwnership.ExecutorOwnership` (const) | references | Whether this process holds the executor that drives accepted runs to settlement. |
 | `ExecutorOwnership.layer` (const) | layers | Declares, for one command scope, whether this process drives accepted runs. |
 | `Forensics.Refusal` (interface) | models | One refused flow call, aggregated by its refusal message. |
@@ -270,7 +270,7 @@ surface used to compose or embed that executable.
 | `Project.flowsDirectory` (const) | getters | Where a project's flow sources live. |
 | `Project.legacyDatabases` (const) | getters | Every 0.x run database beside a project, newest ancestor first. |
 | `Project.legacyState` (const) | getters | Smithers 0.x state found beside a project, newest ancestor first. |
-| `Project.legacyNotice` (const) | constructors | The one-line notice rc-contract section 6 requires on stderr when 0.x state is found and rc.0 state is not. |
+| `Project.legacyNotice` (const) | constructors | The one-line notice written to stderr when 0.x state is found and rc.0 state is not. |
 | `Project.ProjectRoot` (const) | references | The project root this invocation resolved, as a service. |
 | `Project.LegacyState` (const) | references | The Smithers 0.x state found beside this project when the invocation started, as a service. |
 | `Project.MigrationRoot` (const) | references | The 0.x project `smithers migrate` converts when no path is given, as a service. |
@@ -290,9 +290,9 @@ surface used to compose or embed that executable.
 | `Serve.host` (const) | constructors | Hosts the assembled gateway until the process is interrupted. |
 | `Unsupported.migrationUrl` (const) | constants | The documentation base every removal message points at. |
 | `Unsupported.RemovedVerb` (interface) | models | One removed verb: its name, the anchor its message links to, and why it is gone. |
-| `Unsupported.removedVerbs` (const) | constants | Every verb removed in 1.0.0-rc.0, in rc-contract section 4.2 order. |
+| `Unsupported.removedVerbs` (const) | constants | Every verb removed in 1.0.0-rc.0. |
 | `Unsupported.RemovedFlag` (interface) | models | One removed flag, declared hidden on the command that used to carry it. |
-| `Unsupported.removedFlags` (const) | constants | Every flag removed in 1.0.0-rc.0, in rc-contract section 4.2 order. |
+| `Unsupported.removedFlags` (const) | constants | Every flag removed in 1.0.0-rc.0. |
 | `Unsupported.message` (const) | constructors | The removal sentence for one verb. |
 | `Unsupported.flagMessage` (const) | constructors | The removal sentence for one flag. |
 | `Unsupported.verbError` (const) | constructors | The failure a removed verb raises: exit 1, never a usage error. |
@@ -308,7 +308,7 @@ surface used to compose or embed that executable.
 | `Update.compare` (const) | constructors | Turns a dist-tag document into a status. |
 | `Update.render` (const) | conversions | The human rendering of a status. |
 | `Verb.Verb` (interface) | models | One command that ships in rc.0. |
-| `Verb.shipped` (const) | constants | Every command that ships in rc.0, in rc-contract section 4.1 order. |
+| `Verb.shipped` (const) | constants | Every command that ships in rc.0. |
 | `Verb.subcommands` (const) | constants | The verbs that are subcommands of the command tree, which is every shipped verb except the ones `effect/unstable/cli` provides as built-in flags. |
 | `Verb.names` (const) | constants | Every shipped command name. |
 | `Verb.find` (const) | getters | Finds one shipped verb by name. |

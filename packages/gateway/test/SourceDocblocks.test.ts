@@ -45,7 +45,7 @@ describe("the package's own sources", () => {
   /**
    * A docblock that documents nothing is a copy nobody deleted. eslint and
    * dprint both accept it, and a reader hunting the contract of an export
-   * reads the wrong paragraph: the Phase 7 verifier found two consecutive
+   * reads the wrong paragraph: release validation found two consecutive
    * blocks above `carriesRpcRequest`, one of them the layer's text repeated
    * verbatim from further down the file.
    */

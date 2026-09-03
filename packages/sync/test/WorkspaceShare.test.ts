@@ -232,7 +232,7 @@ describe("WorkspaceShare", () => {
     }))
 
   // `SMITHERS_` is the product's environment namespace and `FLOWS_` names
-  // survive only as rc.0 aliases, removed at 1.0.0 (rc-contract section 4).
+  // survive only as rc.0 aliases, removed at 1.0.0 (the release policy).
   // These two were the only credential variables still reading the imported
   // prefix alone, so the canonical spelling is read first and the alias keeps
   // an already-configured deployment working.

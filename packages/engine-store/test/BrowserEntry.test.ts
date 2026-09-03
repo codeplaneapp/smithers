@@ -1,7 +1,7 @@
 /**
  * The browser half of this package's contract, pinned in the package itself.
  *
- * `docs/migration/rc-contract.md` section 3.1 lists `@smthrs/engine-store` as
+ * The release policy lists `@smthrs/engine-store` as
  * a browser entry point, and `scripts/browser-contract.mjs` executes that
  * promise for the whole repository with esbuild. The repository gate is the
  * contract's owner; this case is the local one, so the package that owns a

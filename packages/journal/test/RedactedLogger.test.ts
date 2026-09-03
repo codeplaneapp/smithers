@@ -2,7 +2,7 @@
  * The redacting logger over the rule fixtures `Redaction.test.ts` documents.
  *
  * The assertions read what the logger handed the console, because that is what
- * reaches the operator's terminal. rc-contract section 5.2 owns this
+ * reaches the operator's terminal. the release policy owns this
  * deliverable and `e2e/faults/case22-secret-never-in-journal.test.ts` proves
  * the same rules on the real binary.
  */
@@ -731,7 +731,7 @@ describe("RedactedLogger", () => {
     // gone: it rebuilt each value on its own prototype, and a host class keeps
     // state a property walk cannot see, so the clone threw the moment a brand
     // check read it and killed the run. The collapse is documented in
-    // rc-contract section 7. The invariant this case now holds is the one that
+    // the release policy. The invariant this case now holds is the one that
     // matters: whatever the shape, nothing leaks and nothing throws.
     const redactor = Redaction.make()
     const values: ReadonlyArray<unknown> = [

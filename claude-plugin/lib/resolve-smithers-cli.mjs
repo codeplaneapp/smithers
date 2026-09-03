@@ -35,7 +35,7 @@
 //      with no install gets.
 //
 // Tiers 1 and 2 spawn `node`, never `bun`: the durable engine is unsupported
-// on Bun (rc-contract.md section 1) and `packages/cli/bin/smithers.mjs` pins
+// on Bun, and `packages/cli/bin/smithers.mjs` pins
 // Node in its shebang for the same reason.
 //
 // Dependency-free (Node built-ins only): this module is copied verbatim into

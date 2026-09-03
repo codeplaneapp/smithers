@@ -131,7 +131,7 @@ describe("the dependency closure", () => {
 })
 
 /*
- * AGENTS.md "New Smithers only": the legacy runtime packages under legacy/ use
+ * AGENTS.md "New Smithers only": retired runtime packages use
  * the retired @smithers scope; product code may only import the new @smthrs
  * packages owned by this repository. Scans all product source, not just shared.
  */

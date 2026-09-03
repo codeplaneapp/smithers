@@ -38,7 +38,7 @@
   is the identity a grant envelope is deduplicated and sorted by. The bytes of
   every valid value are unchanged.
 - **Breaking.** Removed the Windows path accommodation. Windows is Unsupported
-  in the frozen rc.0 release contract, and matching is now byte-exact over
+  in the frozen rc.0 release policy, and matching is now byte-exact over
   UTF-16 code units with no separator normalization and no case folding. A
   stored grant relying on either behavior no longer matches. This closes four
   widenings. On Linux and macOS, where `\` is a legal filename character, 0.1.0

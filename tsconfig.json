@@ -28,7 +28,6 @@
   ],
   "exclude": [
     "**/dist/**",
-    "legacy/**",
     "packages/coding-agent/examples/extensions/gondolin/**"
   ]
 }

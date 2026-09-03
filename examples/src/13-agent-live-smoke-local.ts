@@ -98,7 +98,7 @@ export const liveLocalSeats = (baseUrl: string) =>
  * remaining flake: at the provider default the same prompt sometimes spent
  * all eight frames writing prose and never called `ctx.done`, and the step
  * failed with `model_failed`, "ended without a completed answer" — the
- * sentence the Phase 7 examples gate recorded as its blocker. Greedy decoding
+ * last flake observed by the examples gate. Greedy decoding
  * answered 20 of 20 direct runs and 12 of 12 suite runs.
  */
 export const LiveSmokeLocal = AgentAction.make("examples/LiveSmokeLocal", {

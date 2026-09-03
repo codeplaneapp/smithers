@@ -1,7 +1,7 @@
 /**
  * What a run that COMPLETED leaves on disk when its launching process exits.
  *
- * The Phase 7 smoke launched `hello` with `smithers run` and with
+ * The release validation launched `hello` with `smithers run` and with
  * `smithers up -d`. Both were reported `completed` by the control plane and
  * both left `.flows/engine.db` `flows_runs` `suspended`/`released`, because
  * `AgentSession` writes `control.run.completed` from the flow body's exit
@@ -271,7 +271,7 @@ const countTurns = (root: string, runId: string): number => {
 /**
  * Rewrites one engine row into the state a launcher killed between the two
  * settlement writes leaves behind: `suspended`/`released`, no result, no
- * owner and no claim. It is the row the Phase 7 smoke read for run-1 and
+ * owner and no claim. It is the row the release validation read for run-1 and
  * run-9, written directly here so the pin survives the fix that stops the
  * launcher producing it.
  */
@@ -424,7 +424,7 @@ describe("a run the control plane reported completed", () => {
  *
  * A launcher killed between `control.run.completed` and the engine's terminal
  * write leaves `suspended`/`released` with no result. That row is reclaimable
- * by design, and rc-contract section 7 allows one terminal write per run, so
+ * by design, and the release policy allows one terminal write per run, so
  * the reclaiming process must finish it rather than run the agent turn a
  * second time. In the smoke it ran the turn: ten processes replayed run-1
  * between them.

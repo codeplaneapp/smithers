@@ -55,13 +55,12 @@ concurrency:
 jobs:
   probe:
     name: probe the live deployment
-    # INERT until the Plue cutover, and this line is what keeps it that way.
-    # rc-contract R-27: the deployed Worker at canary.smithers.sh and this
-    # hourly job are not an rc.0 validation surface, and apps/server's deploy
-    # path is broken until the cutover (a Phase 7 gate). Pointed at this
+    # INERT until this repository owns the deployment; this line keeps it so.
+    # The deployed Worker at canary.smithers.sh and this hourly job are not an
+    # rc.0 validation surface. Pointed at this
     # repository the schedule would probe a deployment this repository does not
     # own yet, and the alert steps below would file a GitHub issue every time it
-    # answered wrong. Re-enabling the canary after the cutover means changing
+    # answered wrong. Re-enabling the canary after ownership moves means changing
     # this line and the assertion in apps/review/tests/action/deployWorkflows.test.ts.
     if: github.repository == 'smithersai/flows'
     runs-on: ubuntu-latest

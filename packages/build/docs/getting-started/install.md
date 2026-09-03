@@ -12,7 +12,7 @@ smithers/
 ```
 
 All three are private workspace packages and none of them is published: the
-rc.0 release contract fixes `@smthrs/build` as private alongside
+rc.0 release policy fixes `@smthrs/build` as private alongside
 `@smthrs/targets` and `@smthrs/build-cli`. A consumer reaches them through the
 workspace, never through a registry.
 

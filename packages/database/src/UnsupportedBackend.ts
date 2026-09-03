@@ -4,7 +4,7 @@
  * rc.0 stores run state in local SQLite only. A project migrating from a 0.x
  * PostgreSQL or PGlite deployment still exports that deployment's connection
  * strings, and rc.0 ignores them. Ignoring them *silently* is the failure
- * rc-contract section 2 was written to remove: the project would run against
+ * The release policy was written to remove: the project would run against
  * SQLite believing it ran against PostgreSQL, and nothing in the run would say
  * otherwise.
  *
@@ -23,7 +23,7 @@ type Source = Readonly<Record<string, string | undefined>>
 
 /**
  * The `SMITHERS_*` names rc.0 ignores: `SMITHERS_TEST_PG_URL` and every
- * `SMITHERS_POSTGRES_*` name (rc-contract section 2).
+ * `SMITHERS_POSTGRES_*` name (the release policy).
  *
  * The separator is part of the prefix. Every name 0.x actually read carries it
  * (`SMITHERS_POSTGRES_URL`, `SMITHERS_POSTGRES_POOL_MAX`,
@@ -48,7 +48,7 @@ export const ignoredNames = (environment: Source): ReadonlyArray<string> =>
     .sort()
 
 /**
- * The one line an ignored name gets, verbatim from rc-contract section 2.
+ * The one line an ignored name gets, verbatim from the release policy.
  *
  * @category constructors
  * @since 1.0.0

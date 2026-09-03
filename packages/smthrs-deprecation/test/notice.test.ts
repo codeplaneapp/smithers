@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import { fences, notice, section } from "./golden.ts"
+import { fences, notice } from "./golden.ts"
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), "utf8")
 
@@ -19,21 +19,15 @@ describe("the notice this package throws", () => {
     expect(fences(read("../README.md"))[0]).toBe(notice)
   })
 
-  it("is quoted verbatim by contract section 3.3, which freezes it", () => {
-    const contract = read("../../../docs/migration/rc-contract.md")
-
-    expect(fences(section(contract, "### 3.3 The unscoped `smthrs` package"))[0]).toBe(notice)
-  })
-
   it("is quoted verbatim by the package-owned documentation fragment", () => {
     expect(fences(read("../docs/notice.md"))[0]).toBe(notice)
   })
 
-  it("is quoted verbatim by the migration guide the notice links to", () => {
+  it("is quoted verbatim by the upgrade guide the notice links to", () => {
     expect(read("../../../docs/pages/migration/1.0.md")).toContain(notice)
   })
 
-  it("projects the entire package-owned fragment into the migration guide", () => {
+  it("projects the entire package-owned fragment into the upgrade guide", () => {
     const fragment = read("../docs/notice.md").trim()
 
     expect(read("../../../docs/pages/migration/1.0.md")).toContain(fragment)

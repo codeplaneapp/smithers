@@ -2,8 +2,8 @@
  * The migration pack inputs, checked against the real registry and the real
  * migration detector.
  *
- * These files are data for two consumers that do not exist yet: the Phase 6
- * `migrate-smithers-v1` flow body, and the init pack. Data that nothing runs
+ * These files are data for the `migrate-smithers-v1` flow and the init pack.
+ * Data that nothing runs
  * rots silently, so this suite runs the registry over the prompt bodies and the
  * detector over the fixture, both through their production entry points.
  *
@@ -471,13 +471,13 @@ describe("the fixture under the real CLI", () => {
   const smithers = (project, ...args) =>
     spawnSync(process.execPath, [cli, ...args], { cwd: project, encoding: "utf8", timeout: 300_000 });
 
-  it("prints the section 6 notice the first time a command runs in it", () => {
+  it("prints the 0.x-project notice the first time a command runs in it", () => {
     const project = detached();
 
     const first = smithers(project, "ls");
 
     assert.equal(first.status, 0, first.stderr);
-    // rc-contract.md section 6, verbatim opening. Building the durable layers
+    // The 0.x run-data warning begins with this text. Building the durable layers
     // creates `.flows/`, which is the very thing the detector reads as "this
     // is an rc.0 project", so a reading taken inside the handler found nothing
     // on precisely the run this notice is written for.
@@ -487,7 +487,7 @@ describe("the fixture under the real CLI", () => {
 
     const second = smithers(project, "ls");
 
-    // Once `.flows/` exists the project is mid-migration, and section 6 stops
+    // Once `.flows/` exists the project is mid-migration, and the 0.x-project guard stops
     // the notice rather than repeating it on every command forever.
     assert.equal(second.status, 0, second.stderr);
     assert.equal(second.stderr, "");
@@ -526,7 +526,7 @@ describe("the fixture under the real CLI", () => {
     const constructs = /^Constructs: (\d+) rows across (\d+) mapping decisions\.$/m.exec(result.stdout);
     assert.ok(constructs, `the planner reported no construct line:\n${result.stdout}`);
     assert.ok(Number(constructs[1]) > 0 && Number(constructs[2]) > 0);
-    // The 0.x `<UI>` element is the construct the rc contract has no
+    // The 0.x `<UI>` element is the construct the 1.0 command contract has no
     // counterpart for, and the fixture carries one so a person sees it.
     assert.match(result.stdout, /\.smithers\/workflows\/hello\.tsx/);
   });

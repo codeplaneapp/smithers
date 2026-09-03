@@ -12,7 +12,7 @@ import type { AppStore } from "../state/AppStore"
  * an optimistic hope. Events are schema-validated in both directions, so a
  * corrupted row fails loudly as JournalError instead of feeding the chain
  * garbage. This layer is the app-side stand-in the Smithers engine journal
- * replaces in Phase 4; nothing outside this module knows the residency.
+ * replaces; nothing outside this module knows the residency.
  *
  * Single-writer assumption: seq derives from this instance's view of the
  * collection, and the persistence layer enforces no cross-instance

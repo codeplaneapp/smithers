@@ -5,7 +5,7 @@ import { defineConfig } from "vocs/config"
  *
  * `docs/pages` is the whole site and the repository's `public/` is served at its
  * root, which is where vocs resolves static assets from. The
- * CLI, control, release, changelog-index, and route-plan sections are generated
+ * CLI, control, upgrade, and changelog-index sections are generated
  * by `scripts/generate-docs-pages.mjs`; the sidebar below names them once so a
  * new command or RPC needs no edit here.
  */
@@ -128,8 +128,7 @@ export default defineConfig({
         { text: "rc.0 support matrix", link: "/release/support-matrix" },
         { text: "Known limitations", link: "/release/known-limitations" },
         { text: "Compatibility policy", link: "/changelogs/compatibility-policy" },
-        { text: "Changelogs", link: "/changelogs" },
-        { text: "Route plan", link: "/routes" }
+        { text: "Changelogs", link: "/changelogs" }
       ]
     },
     {

@@ -47,10 +47,7 @@ const tsconfig = Smithers.Tsconfig({
     "packages/storage/*/test/**/*",
     "packages/coding-agent/examples/**/*"
   ],
-  // `legacy/**` is the Smithers 0.x source tree Phase 4 lanes port from. It is
-  // outside the workspace and no live module imports it, so it must not enter
-  // the root TypeScript program.
-  exclude: ["**/dist/**", "legacy/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+  exclude: ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
 })
 
 const lockfile = Smithers.Lockfile({
@@ -228,15 +225,15 @@ const ci = Smithers.GithubCiGen({
       // The fault-injection matrix: 18 crash, restart, gateway, time-travel,
       // provider, and safety cases that each inject a real fault into a real
       // process. Until this job existed the matrix ran under no gate at all
-      // (Phase 7 blocker B6): `//packages/...` does not reach `e2e/`, and
-      // `e2e` was not a workspace member, so the target failed in 262 ms with
+      // because `//packages/...` does not reach `e2e/`, and `e2e` was not a
+      // workspace member, so the target failed in 262 ms with
       // `Command "vitest" not found`.
       //
       // Required. It was advisory while `case22 ... redacts the credential out
-      // of the operator's terminal` was red by design (rc-contract R-12): rc.0
+      // of the operator's terminal` was red by design: rc.0
       // shipped no redacting logger, so a required job would have been red on
-      // every commit for a defect no commit introduced. The section 5.2
-      // redaction deliverable landed that logger (`@smthrs/journal`
+      // every commit for a defect no commit introduced. The redaction
+      // deliverable landed that logger (`@smthrs/journal`
       // `RedactedLogger`, installed by `packages/cli/src/bin.ts` and
       // `packages/flows/src/NodeRuntime.ts`), the case is green in both
       // halves, and the matrix is 67 of 67. The durable-park defect the old

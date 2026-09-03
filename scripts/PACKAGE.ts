@@ -174,8 +174,8 @@ const releaseSmoke = Smithers.NodeTest({
  * One `effect` version across every manifest, both lockfiles, and the install.
  *
  * Two Effect instances do not share schema internals, so a duplicate is a
- * runtime defect rather than a size problem. `rc-contract.md` section 9 pins
- * the supported range to one version and this target proves the tree agrees.
+ * runtime defect rather than a size problem. The release pins one supported
+ * version and this target proves the tree agrees.
  *
  * @since 0.1.0
  * @category test
@@ -261,8 +261,8 @@ const npmDedupeUnit = Smithers.NodeTest({
  *
  * pnpm links the whole workspace under one `node_modules`, so an undeclared
  * import of a sibling still resolves locally and then fails for a consumer who
- * installs the tarball. This is PLAN.md Phase 3's "no package imports files
- * through unpublished workspace-relative paths", executed.
+ * installs the tarball. This executes the rule against unpublished
+ * workspace-relative imports.
  *
  * The sources it reads live in other packages, and a declared glob may not
  * cross a package boundary, so `srcs` names only this directory. The gate is
@@ -357,9 +357,9 @@ const llms = Smithers.NodeTest({
 
 /**
  * The unit suites behind those two gates: the served-bundle comparison, the
- * contract parser, the deploy workflow, the removal surface, the render
- * helpers, the help parser, the route plan, the sidebar, the bundle builder,
- * the version guard, and the invocation normalizer.
+ * deploy workflow, the removal surface, the render helpers, the help parser,
+ * the sidebar, the bundle builder, the version guard, and the invocation
+ * normalizer.
  *
  * @since 0.1.0
  * @category test
@@ -368,12 +368,10 @@ const docsUnit = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([
     Smithers.file("//scripts/check-llms.test.mjs"),
-    Smithers.file("//scripts/docs-contract.test.mjs"),
     Smithers.file("//scripts/docs-deploy.test.mjs"),
     Smithers.file("//scripts/docs-links.test.mjs"),
     Smithers.file("//scripts/docs-removals.test.mjs"),
     Smithers.file("//scripts/docs-render.test.mjs"),
-    Smithers.file("//scripts/docs-routes.test.mjs"),
     Smithers.file("//scripts/docs-sidebar.test.mjs"),
     Smithers.file("//scripts/generate-docs-pages.test.mjs"),
     Smithers.file("//scripts/generate-llms.test.mjs"),

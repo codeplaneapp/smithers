@@ -16,7 +16,7 @@
  */
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { repoRoot } from "./docs-contract.mjs"
+import { repoRoot } from "./docs-shared.mjs"
 
 /** The site configuration, imported for its sidebar. */
 export const configPath = join(repoRoot, "vocs.config.ts")

@@ -223,9 +223,9 @@ export const makeConfig = (
   }
   return {
     remote,
-    // New in Phase 4: at the import reference `--credential` had no environment
+    // The imported reference gave `--credential` no environment
     // fallback, so a hosted gateway had to spell the token on every command
-    // line (rc-contract section 4).
+    // line (the release policy).
     credential: valueFromArguments(args, "credential") ?? Environment_.read(environment, "SMITHERS_API_KEY"),
     mcpServers: mcpServersFromArguments(args, environment),
     // `--root` is resolved here rather than in a handler because the durable
@@ -1168,8 +1168,8 @@ export const layer = (applicationConfig: Application.Config) => {
   const durable = engineDurable(root, registry)
   // Sampled here, before anything opens the control database. `Project.layer`
   // reads the 0.x markers eagerly when it is called, and opening the control
-  // database writes `<root>/.flows`, which is the very absence rc-contract
-  // section 6 gates the notice on. Building this inside `compose` therefore
+  // database writes `<root>/.flows`, which is the very absence release policy
+  // the 0.x-project guard gates the notice on. Building this inside `compose` therefore
   // sampled a directory the same invocation had already created, and the
   // notice stopped printing on exactly the 0.x projects it exists for.
   const project = Project.layer(root, applicationConfig.migrationRoot ?? Project.legacyRoot(undefined, root))

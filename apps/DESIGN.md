@@ -297,7 +297,7 @@ Full plan with phase bars and rationale: the agent-chain UI integration plan of 
 
 **Catalog.** The command registry is the catalog: `agentVisible()` commands project as entries whose handlers run `executeForAgent` (actor `smithers`), plus `Catalog.system` (`sys/now`, `sys/random`), typed card entries (`card.show`, `card.update` — widgets are typed cards; no generative HTML in v1), worldview `remember`/`recall` bound to `worldDocuments`, and the recursive `agent` entry. Every entry is journaled, envelope-gated, and disclosed exactly once (the double-declaration hazard is a resume-breaker).
 
-**Journal residency.** Chain events persist as a `chainEvents` collection (same persisted-collection layer as every other row). This is the honest app-layer stand-in §13's "one durable database" eventually replaces: when the Smithers engine mounts (Phase 4), the collection becomes a sync-fed projection and the UI folds do not change. Acceptance tests assert journal contents, never runtime API.
+**Journal residency.** Chain events persist as a `chainEvents` collection (same persisted-collection layer as every other row). This is the honest app-layer stand-in §13's "one durable database" eventually replaces: when the Smithers engine mounts, the collection becomes a sync-fed projection and the UI folds do not change. Acceptance tests assert journal contents, never runtime API.
 
 **Approvals.** `Authorize.layerRules` encodes the three-tier policy (free / ask-once-per-session-revocable / outbound-always-asks). `approval_required` parks the lineage without `LinkEnded`; approval resumes it, re-executing the link from its settled prefix. Denial is a journaled observation the next link routes around.
 
