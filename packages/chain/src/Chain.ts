@@ -322,7 +322,7 @@ export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError,
               // The settled result only replays under the same declaration
               // it was produced under: a redeclared entry re-keys its calls
               // and a resumed chain refuses loudly rather than serving a
-              // stale result (the legacy resume-metadata-mismatch rule).
+              // stale result (the declaration-identity resume rule).
               const entry = catalog.lookup(name)
               const currentDigest = name === authorName
                 ? authorDigest

@@ -151,7 +151,7 @@ describe("the composer hot path: typing never re-renders the transcript", () => 
 
   test("typing leaves the transcript's rendered messages untouched", async () => {
     const view = await mountCounted()
-    await view.act(() => view.controller.runCommandArgs("send", "a message worth keeping"))
+    await view.act(() => view.controller.runCommandArgs("chat.send", "a message worth keeping"))
     const before = view.host.querySelector(".smithers-transcript")?.innerHTML
     const renders = view.renders()
 

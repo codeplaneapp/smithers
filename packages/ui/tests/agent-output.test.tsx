@@ -25,7 +25,6 @@ describe("parseAgentOutput", () => {
 
     expect(model).toEqual({
       response: "Found **two** matches.",
-      reasoning: "I should search first.",
       reasoningSummary: "I should search first.",
       streaming: false,
       toolCalls: [
@@ -77,7 +76,7 @@ describe("parseAgentOutput", () => {
 
     expect(model?.streaming).toBe(true);
     // Raw `thinking` fields may be private transcripts; they are never surfaced.
-    expect(model?.reasoning).toBeUndefined();
+    expect(model?.reasoningSummary).toBeUndefined();
     expect(model?.reasoningSummary).toBeUndefined();
     expect(model?.toolCalls[0]).toMatchObject({
       name: "read",
@@ -117,7 +116,6 @@ describe("parseAgentOutput", () => {
       }),
     ).toEqual({
       response: "Found **the answer**.",
-      reasoning: "Inspect the nested result",
       reasoningSummary: "Inspect the nested result",
       streaming: true,
       toolCalls: [

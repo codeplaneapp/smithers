@@ -28,14 +28,6 @@ import type { Report as RegressionReport } from "./Regression.ts"
  */
 export const json = (report: RegressionReport): string => stringify(report, { maxStringLength })
 
-/**
- * Alias for {@link json}.
- *
- * @category serialization
- * @since 0.1.0
- */
-export const renderJson = json
-
 /** The longest run of text any single Markdown cell renders. */
 const maxCellLength = 240
 
@@ -162,11 +154,3 @@ export const markdown = (report: RegressionReport): string => {
   ]
   return `${lines.join("\n").trim()}\n`
 }
-
-/**
- * Alias for {@link markdown}.
- *
- * @category rendering
- * @since 0.1.0
- */
-export const renderMarkdown = markdown

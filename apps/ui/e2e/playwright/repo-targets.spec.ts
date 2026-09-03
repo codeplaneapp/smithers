@@ -97,8 +97,6 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   expect(await targets.locator("[data-target-row]").count()).toBeGreaterThanOrEqual(1)
   await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
 
-  await expect(page.locator(".smithers-card[data-kind=\"html\"]")).toHaveCount(0)
-
   // The table scrolls inside the card, never the transcript: a bounded, overflow-auto container.
   const scroll = targets.getByTestId("targets-scroll")
   const overflow = await scroll.evaluate((node) => {

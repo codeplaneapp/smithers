@@ -25,7 +25,7 @@
  * @since 0.1.0
  */
 import { Sha256 } from "@smthrs/crypto"
-import { Key, type Key as KeyType } from "@smthrs/keys"
+import { DerivedKey, type StoredKey } from "@smthrs/keys"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -131,7 +131,7 @@ export const allocationScope = (
       const digest = yield* Schema.decodeUnknownEffect(Sha256)(identity.idempotency)
       scope = `${scope}/s:${digest}`
     } else if (identity.idempotency !== undefined) {
-      const key = yield* Schema.decodeUnknownEffect(Key)({ kind: "declaration", input: identity.idempotency })
+      const key = yield* Schema.decodeUnknownEffect(DerivedKey)({ kind: "declaration", input: identity.idempotency })
       scope = `${scope}/c:${key}`
     }
     if (identity.site === undefined) return scope
@@ -155,7 +155,7 @@ export const invocationKey = (input: {
   readonly parentScope?: string | undefined
   readonly ordinal: number
   readonly tier: "unsealed" | "compensable" | "irreversible"
-}): Effect.Effect<KeyType, Schema.SchemaError, Crypto.Crypto> =>
+}): Effect.Effect<StoredKey, Schema.SchemaError, Crypto.Crypto> =>
   Schema.decodeUnknownEffect(Invocation)(input).pipe(
-    Effect.flatMap((validated) => Schema.decodeUnknownEffect(Key)({ kind: "invocation", ...validated }))
+    Effect.flatMap((validated) => Schema.decodeUnknownEffect(DerivedKey)({ kind: "invocation", ...validated }))
   )

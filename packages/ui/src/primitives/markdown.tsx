@@ -18,9 +18,6 @@ const LINK = /^\[([^\]]+)\]\(([^)]+)\)$/;
 /** Handler invoked when a rendered link is activated. */
 export type MarkdownLinkClick = (href: string, event: MouseEvent<HTMLAnchorElement>) => void;
 
-/** @deprecated Use `safeHref` from `internal/safeHref` instead. */
-export { safeHref as safeMarkdownHref } from "../internal/safeHref";
-
 /**
  * Everything renders through React children (never `innerHTML`), so model
  * output can't inject markup -- this lightweight renderer is XSS-safe by

@@ -118,8 +118,8 @@ const canonical = (value: unknown, seen: Set<object> = new Set()): unknown => {
  * The compiler is `@smthrs/plan`'s — the revived `KeyMaterial` → `StepKey`
  * module that owns `Ref`/`Pending` substitution — so the keys asserted here are
  * the keys the persisted plan records. It hashes through the injected `Crypto`
- * service; `Digest.runSync` supplies the synchronous one so plan projection
- * stays pure and total under `TestLayers.poisoned`.
+ * service; the synchronous crypto service keeps plan projection pure and total
+ * under `TestLayers.poisoned`.
  *
  * @category constructors
  * @since 0.0.0
@@ -129,7 +129,7 @@ export const keys = (graph: CoreGraph.Graph, options: KeysOptions = {}): Record<
   const digests: Record<string, string> = {}
   Result.getOrThrow(CoreGraph.keyMaterial(graph)).forEach((entry, index) => {
     const material = entry.material
-    digests[entry.nodeId] = Digest.runSync(
+    digests[entry.nodeId] = Effect.runSync(Digest.provideSync(
       material.kind === "sealed"
         ? StepKey.fromKeyMaterial(
           {
@@ -153,7 +153,7 @@ export const keys = (graph: CoreGraph.Graph, options: KeysOptions = {}): Record<
           ordinal: index,
           tier: material.kind
         })
-    )
+    ))
   })
   return digests
 }

@@ -6,7 +6,15 @@ import { useInjectUiCss } from "../styles";
 import { MessageResponse as Response } from "./MessageResponse";
 import { Reasoning, ReasoningSummary } from "./Reasoning";
 import { REASONING_TOOLS_CSS_ID, reasoningToolsCss } from "./reasoningToolsCss";
-import { ToolCall, type ToolCallState } from "./ToolCall";
+import {
+  ToolCall,
+  ToolCallContent,
+  ToolCallError,
+  ToolCallHeader,
+  ToolCallInput,
+  ToolCallOutput,
+  type ToolCallState,
+} from "./ToolCall";
 
 export type AgentOutputToolCall = {
   id?: string;
@@ -29,8 +37,6 @@ export type AgentOutputModel = {
    * the parser and never rendered. Never raw private chain-of-thought.
    */
   reasoningSummary?: string;
-  /** @deprecated Use reasoningSummary. Both are populated identically. */
-  reasoning?: string;
   toolCalls: readonly AgentOutputToolCall[];
   streaming: boolean;
 };
@@ -43,7 +49,7 @@ export type AgentOutputProps = Omit<ComponentProps<"div">, "children"> & {
 export function AgentOutput({ model, className, ...props }: AgentOutputProps) {
   useInjectUiCss();
   useInjectLaneCss(REASONING_TOOLS_CSS_ID, reasoningToolsCss);
-  const summary = model.reasoningSummary ?? model.reasoning;
+  const summary = model.reasoningSummary;
   return (
     <div
       data-slot="agent-output"
@@ -63,13 +69,18 @@ export function AgentOutput({ model, className, ...props }: AgentOutputProps) {
               key={call.id ?? `${call.name}:${index}`}
               name={call.name}
               state={call.state}
-              args={call.args}
-              argsText={call.argsText}
-              result={call.result}
-              resultText={call.resultText}
-              errorText={call.errorText}
               durationMs={call.durationMs}
-            />
+            >
+              <ToolCallHeader />
+              <ToolCallContent>
+                {call.args !== undefined || call.argsText !== undefined ?
+                  <ToolCallInput args={call.args} argsText={call.argsText} /> : null}
+                {call.state === "output-error" || call.state === "output-denied" ?
+                  <ToolCallError message={call.errorText ?? (call.state === "output-denied" ? "Denied" : undefined)} /> :
+                  call.result !== undefined || call.resultText !== undefined ?
+                  <ToolCallOutput result={call.result} resultText={call.resultText} /> : null}
+              </ToolCallContent>
+            </ToolCall>
           ))}
         </div>
       ) : null}

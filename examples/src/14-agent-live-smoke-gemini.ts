@@ -2,7 +2,7 @@
  * A live smoke test against Gemini's OpenAI-compatible endpoint: the same
  * assembled production agent stack as {@link liveLocalSmoke} (see
  * `13-agent-live-smoke-local.ts`), run against a real hosted provider over
- * `Route.openaiCompatible` instead of a fully local one.
+ * `Route.openaiChatCompatible` instead of a fully local one.
  *
  * Exists to get a witnessed, real, successful completion once a local model
  * proves too small to finish the harness's own convention — Gemini's free
@@ -61,7 +61,12 @@ export const liveGeminiSeats = (baseUrl: string, apiKey: string) =>
           Effect.gen(function*() {
             const modelId = Seat.modelIdOf(id)
             const routeConfig = yield* Effect.fromResult(
-              Route.openaiCompatible({ id: "gemini", baseUrl, apiKey: Redacted.make(apiKey) })
+              Route.openaiChatCompatible({
+                id: "gemini",
+                baseUrl,
+                path: "/chat/completions",
+                apiKey: Redacted.make(apiKey)
+              })
             ).pipe(
               Effect.mapError((error) => new Seat.SeatUnresolved({ seat: id, message: error.message }))
             )

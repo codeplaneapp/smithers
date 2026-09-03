@@ -78,15 +78,4 @@ describe("Digest", () => {
     expect(second).toBe(first)
     expect(JSON.parse(first)).toEqual({ a: "first", nested: { a: 1, b: 2 }, z: 3 })
   })
-
-  it.effect("runs an Effect-shaped hashing program synchronously", () =>
-    Effect.sync(() => {
-      const key = Digest.runSync(Schema.decodeUnknownEffect(Sha256)("abc"))
-      expect(key).toBe(Digest.digest("abc"))
-    }))
-
-  it.effect("refuses to invent randomness", () =>
-    Effect.sync(() => {
-      expect(() => Digest.crypto.nextIntUnsafe()).toThrow(/SHA-256 only/)
-    }))
 })

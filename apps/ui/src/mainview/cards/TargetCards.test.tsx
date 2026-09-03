@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import type { Card } from "../state/AppState"
-import { HtmlCardBody, inertHtmlDocument, TargetRunCardBody, TargetsCardBody } from "./TargetCards"
+import { TargetRunCardBody, TargetsCardBody } from "./TargetCards"
 
 GlobalRegistrator.register()
 
@@ -183,28 +183,6 @@ describe("trusted target cards", () => {
     expect(render(none).host.querySelector('.targets-card[data-status="empty"]')?.textContent).toContain("No targets declared")
   })
 
-  test("legacy HTML cards are scriptless and carry a network-denying CSP", () => {
-    const document = inertHtmlDocument('<script>parent.postMessage({smithers:"run"},"*")</script><img src="https://evil.test/x">')
-    expect(document).toContain("default-src 'none'")
-    expect(document.indexOf("Content-Security-Policy")).toBeLessThan(document.indexOf("evil.test"))
-
-    const host = globalThis.document.createElement("div")
-    globalThis.document.body.append(host)
-    const card: Extract<Card, { kind: "html" }> = {
-      id: "html-old",
-      kind: "html",
-      title: "Old panel",
-      status: "acted",
-      createdAt: 0,
-      ordinal: 0,
-      payload: { title: "Old panel", html: "<script>evil()</script>", source: "agent", repoId: "force" }
-    }
-    flushSync(() => createRoot(host).render(<HtmlCardBody card={card} />))
-    const frame = host.querySelector("iframe")
-    expect(frame?.getAttribute("sandbox")).toBe("")
-    expect(frame?.getAttribute("referrerpolicy")).toBe("no-referrer")
-    expect(frame?.hasAttribute("data-html-card")).toBe(false)
-  })
 })
 
 describe("featured, starred, and grouped rows", () => {

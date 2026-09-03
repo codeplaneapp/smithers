@@ -3,11 +3,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
-  AgentSandbox,
-  AgentSandboxActions,
-  AgentSandboxContent,
-  AgentSandboxHeader,
-  AgentSandboxStatus,
   Sandbox,
   SandboxActions,
   SandboxContent,
@@ -59,9 +54,9 @@ describe("sandboxStateToStatus", () => {
   });
 });
 
-describe("AgentSandbox", () => {
+describe("Sandbox", () => {
   test("renders open by default with identity and mapped status", async () => {
-    await render(<AgentSandbox state="ready" workspace="/tmp/ws" repository="acme/app" />);
+    await render(<Sandbox state="ready" workspace="/tmp/ws" repository="acme/app" />);
 
     const rootEl = container!.querySelector('[data-slot="agent-sandbox"]')!;
     expect(rootEl.getAttribute("data-state")).toBe("open");
@@ -75,7 +70,7 @@ describe("AgentSandbox", () => {
 
   test("collapses via the trigger with aria wiring and reports requested state", async () => {
     const changes: boolean[] = [];
-    await render(<AgentSandbox state="ready" onOpenChange={(open) => changes.push(open)} />);
+    await render(<Sandbox state="ready" onOpenChange={(open) => changes.push(open)} />);
     const trigger = container!.querySelector('[data-slot="agent-sandbox-trigger"]') as HTMLButtonElement;
     const content = container!.querySelector('[data-slot="agent-sandbox-content"]')!;
 
@@ -96,7 +91,7 @@ describe("AgentSandbox", () => {
     function Harness() {
       const [open, setOpen] = useState(false);
       return (
-        <AgentSandbox
+        <Sandbox
           state="ready"
           open={open}
           onOpenChange={(next) => {
@@ -116,7 +111,7 @@ describe("AgentSandbox", () => {
   });
 
   test("non-ready states render an honest EmptyState instead of fabricated output", async () => {
-    await render(<AgentSandbox state="failed" />);
+    await render(<Sandbox state="failed" />);
     const empty = container!.querySelector('[data-slot="agent-sandbox-content"] [data-slot="empty-state"]')!;
     expect(empty.textContent).toContain("Sandbox failed");
     expect(empty.textContent).toContain("failed to start");
@@ -124,12 +119,12 @@ describe("AgentSandbox", () => {
 
   test("children content wins over the state EmptyState", async () => {
     await render(
-      <AgentSandbox state="ready">
-        <AgentSandboxHeader />
-        <AgentSandboxContent>
+      <Sandbox state="ready">
+        <SandboxHeader />
+        <SandboxContent>
           <pre>real output only</pre>
-        </AgentSandboxContent>
-      </AgentSandbox>,
+        </SandboxContent>
+      </Sandbox>,
     );
     expect(container!.querySelector('[data-slot="agent-sandbox-content"]')?.textContent).toBe("real output only");
     expect(container!.querySelector('[data-slot="empty-state"]')).toBeNull();
@@ -137,9 +132,9 @@ describe("AgentSandbox", () => {
 
   test("retry shows only for failed; reconnect only for disconnected/suspended", async () => {
     await render(
-      <AgentSandbox state="disconnected">
-        <AgentSandboxActions onRetry={() => {}} onReconnect={() => {}} />
-      </AgentSandbox>,
+      <Sandbox state="disconnected">
+        <SandboxActions onRetry={() => {}} onReconnect={() => {}} />
+      </Sandbox>,
     );
     expect(container!.querySelector('[data-slot="agent-sandbox-retry"]')).toBeNull();
     expect(container!.querySelector('[data-slot="agent-sandbox-reconnect"]')).not.toBeNull();
@@ -149,13 +144,13 @@ describe("AgentSandbox", () => {
     document.documentElement.dataset.theme = "dark";
     let retries = 0;
     await render(
-      <AgentSandbox state="failed">
-        <AgentSandboxActions
+      <Sandbox state="failed">
+        <SandboxActions
           onRetry={() => {
             retries += 1;
           }}
         />
-      </AgentSandbox>,
+      </Sandbox>,
     );
     const retry = container!.querySelector('[data-slot="agent-sandbox-retry"]') as HTMLButtonElement;
     expect(container!.querySelector('[data-slot="agent-sandbox-actions"]')?.getAttribute("role")).toBe("group");
@@ -164,20 +159,15 @@ describe("AgentSandbox", () => {
     expect(document.querySelector(`style[data-smithers-ui-lane="${SANDBOX_CSS_ID}"]`)).not.toBeNull();
   });
 
-  test("AgentSandboxStatus maps suspended to a paused pill with the sandbox label", async () => {
-    await render(<AgentSandboxStatus state="suspended" />);
+  test("SandboxStatus maps suspended to a paused pill with the sandbox label", async () => {
+    await render(<SandboxStatus state="suspended" />);
     const pill = container!.querySelector('[data-slot="agent-sandbox-status"]')!;
     expect(pill.getAttribute("data-status")).toBe("paused");
     expect(pill.getAttribute("data-sandbox-state")).toBe("suspended");
     expect(pill.textContent).toContain("Suspended");
   });
 
-  test("ships the frozen Sandbox compound API names as the same implementations", async () => {
-    expect(Sandbox).toBe(AgentSandbox);
-    expect(SandboxHeader).toBe(AgentSandboxHeader);
-    expect(SandboxStatus).toBe(AgentSandboxStatus);
-    expect(SandboxActions).toBe(AgentSandboxActions);
-    expect(SandboxContent).toBe(AgentSandboxContent);
+  test("ships the Sandbox compound API", async () => {
     await render(
       <Sandbox state="ready" workspace="/tmp/ws">
         <SandboxHeader>
@@ -196,7 +186,7 @@ describe("AgentSandbox", () => {
     function Harness() {
       const [state, setSandboxState] = useState<SandboxState>("provisioning");
       setState = setSandboxState;
-      return <AgentSandbox state={state} />;
+      return <Sandbox state={state} />;
     }
     await render(<Harness />);
     const live = container!.querySelector('[data-slot="agent-sandbox-live"]')!;

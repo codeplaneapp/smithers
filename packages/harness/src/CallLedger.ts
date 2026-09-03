@@ -155,19 +155,7 @@ export class Entry extends Schema.Class<Entry>("flows/harness/CallLedger/Entry")
   signature: Schema.String.pipe(
     Schema.withConstructorDefault(Effect.succeed("")),
     Schema.withDecodingDefaultKey(Effect.succeed(""))
-  ),
-  /**
-   * What came back, verbatim.
-   *
-   * **Deprecated: decode-only.** The filing surface kept a bounded window of
-   * result bytes in durable controller state so a later frame could ask for
-   * them back by ordinal. A run holds its results under the names its own cells
-   * bound them to, so nothing writes this; it stays on the schema so the
-   * journals of the waves that did still decode.
-   *
-   * @deprecated
-   */
-  retained: Schema.optional(Schema.String)
+  )
 }) {}
 
 /**

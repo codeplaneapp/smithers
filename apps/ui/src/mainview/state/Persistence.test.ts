@@ -1,6 +1,5 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import { APP_SCHEMA_VERSION, SCHEMA_VERSION_STORAGE_KEY } from "../chain/SchemaVersion"
 import { ENVELOPE_STORAGE_KEY } from "../chain/TransactionalStorage"
 import type { ChainEventRecord, ToolCallRecord, TransitionRecord } from "./AppState"
 import { createAppStore, MAX_CHAIN_EVENT_RECORDS, MAX_TOOL_CALL_RECORDS, MAX_TRANSITION_RECORDS } from "./AppStore"
@@ -126,36 +125,5 @@ describe("retention bounds", () => {
     expect(remaining.length).toBe(MAX_CHAIN_EVENT_RECORDS)
     expect(remaining.some((record) => record.id === "chain-seed-0")).toBe(false)
     expect(remaining.some((record) => record.id === `chain-seed-${MAX_CHAIN_EVENT_RECORDS + 4}`)).toBe(true)
-  })
-})
-
-describe("adoption of pre-envelope rows", () => {
-  test("a legacy message row is adopted into a reopened store only after schema decode", async () => {
-    const host = memoryStorage()
-    // A store written before the envelope existed: the app-level version
-    // stamp matches, and the collection key holds TanStack's row map.
-    host.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
-    host.setItem(
-      "smithers-mvp.app-messages",
-      JSON.stringify({
-        m1: {
-          versionKey: "v1",
-          data: {
-            id: "m1",
-            role: "user",
-            text: "from before the envelope",
-            status: "complete",
-            createdAt: 1,
-            ordinal: 0
-          }
-        },
-        m2: { versionKey: "v2", data: { id: "m2", role: "user", text: 42 } }
-      })
-    )
-    const store = await createAppStore({ kind: "localStorage", storage: host })
-    expect(store.collections.messages.get("m1")?.text).toBe("from before the envelope")
-    // The row that fails decode was quarantined, not adopted blind.
-    expect(store.collections.messages.get("m2")).toBe(undefined)
-    expect(host.getItem("smithers-mvp-quarantine.row.app-messages.m2")).not.toBe(null)
   })
 })

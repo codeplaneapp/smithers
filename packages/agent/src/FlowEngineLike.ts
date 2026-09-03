@@ -590,13 +590,12 @@ const accountingFailed = (cause: Budget.AccountingUnavailable): HarnessError.Har
  *
  * The compiler is the main tree's, so the material it hashes and the `key1_`
  * format it emits are the main tree's too. Only the hash *provider* is local:
- * `Digest.crypto` is a synchronous SHA-256 proven byte-identical to the
+ * `Digest.provideSync` uses a synchronous SHA-256 proven byte-identical to the
  * platform service (`@smthrs/core` `Digest.test.ts`), which keeps `EngineLike`
  * free of a `Crypto` requirement it would otherwise have to thread through
  * every stream and activity signature.
  */
-const keyed = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Effect.Effect<A, E> =>
-  Effect.provideService(effect, Crypto.Crypto, Digest.crypto)
+const keyed = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Effect.Effect<A, E> => Digest.provideSync(effect)
 
 /**
  * Drops `undefined`-valued properties from an already-encoded JSON value.

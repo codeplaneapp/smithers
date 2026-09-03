@@ -1535,8 +1535,7 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "CEREBRAS_API_KEY",
-    "SMITHERS_OPENAI_AUTH",
-    "FLOWS_OPENAI_AUTH"
+    "SMITHERS_OPENAI_AUTH"
   ]
 
   /**

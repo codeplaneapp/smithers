@@ -48,7 +48,12 @@ const options = {
 }
 
 const probe = Effect.void.pipe(
-  Effect.provide(NodeRuntime.layerHost({ filename: options.filename, owner: { hostId: options.hostId }, signals: [] }, Layer.empty)),
+  Effect.provide(NodeRuntime.layerHost({
+    filename: options.filename,
+    workspaceRoot: options.markerDir,
+    owner: { hostId: options.hostId },
+    signals: []
+  }, Layer.empty)),
   Effect.scoped
 )
 

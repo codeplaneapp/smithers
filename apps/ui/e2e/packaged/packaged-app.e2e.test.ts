@@ -278,7 +278,7 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       )
       expect(await app.eval<number>("6 * 7")).toBe(42)
 
-      await sendMessage(app, "/theme")
+      await sendMessage(app, "/appearance.theme")
       expect(await app.waitFor<boolean>(`document.querySelector('[data-testid="card-theme-picker"]') !== null`)).toBe(
         true
       )

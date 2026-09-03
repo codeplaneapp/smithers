@@ -37,7 +37,7 @@ export function sandboxStateToStatus(state: SandboxState): string {
   }
 }
 
-type AgentSandboxContextValue = {
+type SandboxContextValue = {
   state: SandboxState;
   workspace?: string;
   repository?: string;
@@ -46,9 +46,9 @@ type AgentSandboxContextValue = {
   contentId: string;
 };
 
-const AgentSandboxContext = createContext<AgentSandboxContextValue | null>(null);
+const SandboxContext = createContext<SandboxContextValue | null>(null);
 
-export type AgentSandboxProps = Omit<ComponentProps<"div">, "children"> & {
+export type SandboxProps = Omit<ComponentProps<"div">, "children"> & {
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -72,7 +72,7 @@ const STATE_EMPTY: Record<Exclude<SandboxState, "ready">, { title: string; descr
  * only what props provide, and non-ready states explain themselves through an
  * EmptyState.
  */
-export function AgentSandbox({
+export function Sandbox({
   state,
   workspace,
   repository,
@@ -82,7 +82,7 @@ export function AgentSandbox({
   className,
   children,
   ...props
-}: AgentSandboxProps) {
+}: SandboxProps) {
   useInjectUiCss();
   useInjectLaneCss(SANDBOX_CSS_ID, sandboxCss);
   const triggerId = useId();
@@ -117,7 +117,7 @@ export function AgentSandbox({
       className={cn("sui-sandbox", className)}
       {...props}
     >
-      <AgentSandboxContext.Provider value={{ state, workspace, repository, open, triggerId, contentId }}>
+      <SandboxContext.Provider value={{ state, workspace, repository, open, triggerId, contentId }}>
         <span data-slot="agent-sandbox-live" role="status" aria-live="polite" className="sui-sr-only">
           {announcement}
         </span>
@@ -137,21 +137,21 @@ export function AgentSandbox({
         </button>
         {children ?? (
           <>
-            <AgentSandboxHeader>
-              <AgentSandboxStatus state={state} />
-            </AgentSandboxHeader>
-            <AgentSandboxContent />
+            <SandboxHeader>
+              <SandboxStatus state={state} />
+            </SandboxHeader>
+            <SandboxContent />
           </>
         )}
-      </AgentSandboxContext.Provider>
+      </SandboxContext.Provider>
     </div>
   );
 }
 
-export function AgentSandboxHeader({ className, children, ...props }: ComponentProps<"div">) {
+export function SandboxHeader({ className, children, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(SANDBOX_CSS_ID, sandboxCss);
-  const ctx = useContext(AgentSandboxContext);
+  const ctx = useContext(SandboxContext);
   return (
     <div data-slot="agent-sandbox-header" className={cn("sui-sandbox-header", className)} {...props}>
       {ctx && (ctx.workspace !== undefined || ctx.repository !== undefined) ? (
@@ -173,11 +173,11 @@ export function AgentSandboxHeader({ className, children, ...props }: ComponentP
   );
 }
 
-export type AgentSandboxStatusProps = Omit<ComponentProps<"span">, "children"> & {
+export type SandboxStatusProps = Omit<ComponentProps<"span">, "children"> & {
   state: SandboxState;
 };
 
-export function AgentSandboxStatus({ state, className, ...props }: AgentSandboxStatusProps) {
+export function SandboxStatus({ state, className, ...props }: SandboxStatusProps) {
   useInjectUiCss();
   useInjectLaneCss(SANDBOX_CSS_ID, sandboxCss);
   return (
@@ -192,16 +192,16 @@ export function AgentSandboxStatus({ state, className, ...props }: AgentSandboxS
   );
 }
 
-export type AgentSandboxActionsProps = Omit<ComponentProps<"div">, "children"> & {
+export type SandboxActionsProps = Omit<ComponentProps<"div">, "children"> & {
   onRetry?: () => void;
   onReconnect?: () => void;
   children?: ReactNode;
 };
 
-export function AgentSandboxActions({ onRetry, onReconnect, className, children, ...props }: AgentSandboxActionsProps) {
+export function SandboxActions({ onRetry, onReconnect, className, children, ...props }: SandboxActionsProps) {
   useInjectUiCss();
   useInjectLaneCss(SANDBOX_CSS_ID, sandboxCss);
-  const ctx = useContext(AgentSandboxContext);
+  const ctx = useContext(SandboxContext);
   const showRetry = onRetry !== undefined && (ctx === null || ctx.state === "failed");
   const showReconnect =
     onReconnect !== undefined && (ctx === null || ctx.state === "disconnected" || ctx.state === "suspended");
@@ -228,10 +228,10 @@ export function AgentSandboxActions({ onRetry, onReconnect, className, children,
   );
 }
 
-export function AgentSandboxContent({ className, children, ...props }: ComponentProps<"div">) {
+export function SandboxContent({ className, children, ...props }: ComponentProps<"div">) {
   useInjectUiCss();
   useInjectLaneCss(SANDBOX_CSS_ID, sandboxCss);
-  const ctx = useContext(AgentSandboxContext);
+  const ctx = useContext(SandboxContext);
   if (ctx !== null && !ctx.open) return null;
   const empty = ctx !== null && ctx.state !== "ready" ? STATE_EMPTY[ctx.state] : null;
   return (
@@ -247,19 +247,3 @@ export function AgentSandboxContent({ className, children, ...props }: Component
     </div>
   );
 }
-
-/**
- * The frozen compound API names from the upstream ai-elements anatomy. The
- * AgentSandbox-prefixed names stay exported for back-compat, but the frozen
- * names are the canonical surface.
- */
-export {
-  AgentSandbox as Sandbox,
-  AgentSandboxHeader as SandboxHeader,
-  AgentSandboxStatus as SandboxStatus,
-  AgentSandboxActions as SandboxActions,
-  AgentSandboxContent as SandboxContent,
-};
-export type SandboxProps = AgentSandboxProps;
-export type SandboxStatusProps = AgentSandboxStatusProps;
-export type SandboxActionsProps = AgentSandboxActionsProps;

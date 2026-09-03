@@ -160,6 +160,7 @@ describe("multi-workspace repo wire model", () => {
 
   test("a Target carries the workspace its loader ran in", () => {
     const target = TargetSchema.parse({
+      id: "target-capability",
       label: "//src:lint",
       target: "Shell.Test",
       kinds: ["lint"],

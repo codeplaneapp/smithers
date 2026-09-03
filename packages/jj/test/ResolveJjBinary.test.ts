@@ -58,61 +58,25 @@ describe("resolveJjBinary", () => {
     expect(Resolve.permissionHint("/opt/jj", "linux")).not.toContain("xattr")
   })
 
-  it("reads FLOWS_JJ_PATH as the rc.0 alias, after the SMITHERS name", () =>
-    staged((directory) => {
-      const preferred = write(join(directory, "preferred"), 0o755)
-      const alias = write(join(directory, "alias"), 0o755)
-
-      const aliased = Resolve.resolveJjBinary({ environment: { FLOWS_JJ_PATH: alias }, platform: "linux" })
-      expect(aliased).toMatchObject({ path: alias, variable: "FLOWS_JJ_PATH" })
-      expect(Resolve.describe(aliased)).toBe(`jj: ${alias} (FLOWS_JJ_PATH)`)
-      expect(
-        Resolve.resolveJjBinary({
-          environment: { SMITHERS_JJ_PATH: preferred, FLOWS_JJ_PATH: alias },
-          platform: "linux"
-        })
-      ).toMatchObject({ path: preferred, variable: "SMITHERS_JJ_PATH" })
-      expect(Resolve.overrideVariables).toEqual(["SMITHERS_JJ_PATH", "FLOWS_JJ_PATH"])
-    }))
-
   it("ignores an empty or missing override and searches PATH", () =>
     staged((directory) => {
       const binary = write(join(directory, "jj"), 0o755)
       const environment = {
-        SMITHERS_JJ_PATH: "",
-        FLOWS_JJ_PATH: join(directory, "absent"),
+        SMITHERS_JJ_PATH: join(directory, "absent"),
         PATH: `${join(directory, "empty")}${delimiter}${directory}`
       }
 
       const resolved = Resolve.resolveJjBinary({ environment, platform: "linux" })
 
-      // The fall-through itself is the recorded 0.x behaviour and is unchanged.
-      // What is new is that it is REPORTED: an operator whose override was a
-      // typo otherwise reads a clean `doctor` line for a jj they did not pick.
       expect(resolved).toEqual({
         path: binary,
         source: "path",
         executable: true,
-        ignored: { variable: "FLOWS_JJ_PATH", path: join(directory, "absent") }
+        ignored: { variable: "SMITHERS_JJ_PATH", path: join(directory, "absent") }
       })
       expect(Resolve.describe(resolved)).toBe(
-        `jj: ${binary} - FLOWS_JJ_PATH names ${join(directory, "absent")}, which does not exist, and was ignored`
+        `jj: ${binary} - SMITHERS_JJ_PATH names ${join(directory, "absent")}, which does not exist, and was ignored`
       )
-    }))
-
-  it("keeps a later usable override authoritative and still reports the skipped one", () =>
-    staged((directory) => {
-      const alias = write(join(directory, "alias"), 0o755)
-      const resolved = Resolve.resolveJjBinary({
-        environment: { SMITHERS_JJ_PATH: join(directory, "absent"), FLOWS_JJ_PATH: alias },
-        platform: "linux"
-      })
-
-      expect(resolved.path).toBe(alias)
-      expect(resolved.source).toBe("env")
-      expect(resolved.variable).toBe("FLOWS_JJ_PATH")
-      expect(resolved.ignored).toEqual({ variable: "SMITHERS_JJ_PATH", path: join(directory, "absent") })
-      expect(Resolve.describe(resolved)).toContain("was ignored")
     }))
 
   it("reports a skipped override alongside the no-jj-anywhere hint", () =>

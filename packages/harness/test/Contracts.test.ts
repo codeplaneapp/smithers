@@ -92,7 +92,7 @@ describe("AgentEvent", () => {
         eventType: "flows.harness.cell-settled.v1",
         cell: cellSource.digest,
         outcome: new Cell.Settled({
-          transition: new Cell.Complete({ state: null, output: "done", reason: "the tests pass" })
+          transition: new Cell.Complete({ output: "done" })
         })
       }),
       new AgentEvent.CellSettled({
@@ -107,15 +107,11 @@ describe("AgentEvent", () => {
       }),
       new AgentEvent.TransitionApplied({
         eventType: "flows.harness.transition-applied.v1",
-        transition: new Cell.Continue({
-          state: { step: 1 },
-          context: [new Cell.ContextEntry({ role: "user", text: "keep this" })],
-          justification: "the workspace is still being read"
-        })
+        transition: new Cell.Continue({ justification: "the workspace is still being read" })
       }),
       new AgentEvent.TransitionApplied({
         eventType: "flows.harness.transition-applied.v1",
-        transition: new Cell.Park({ state: { step: 1 }, reason: "waiting-input", message: "choose a branch" })
+        transition: new Cell.Park({ reason: "waiting-input", message: "choose a branch" })
       }),
       new AgentEvent.Suspended({
         eventType: "flows.harness.suspended.v1",
@@ -348,7 +344,7 @@ describe("AgentEvent", () => {
       }),
       new AgentEvent.TransitionApplied({
         eventType: "flows.harness.transition-applied.v1",
-        transition: new Cell.Complete({ state: null, output: "" })
+        transition: new Cell.Complete({ output: "" })
       })
     ]
 

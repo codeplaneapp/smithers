@@ -312,17 +312,8 @@ export const layerHmac = (keyring: Keyring): Layer.Layer<WorkspaceShare, SyncErr
  * from `SMITHERS_SYNC_KEY_ID`, defaulting to `primary`. Rotation beyond one
  * configured key uses {@link layerHmac} with an explicit keyring.
  *
- * `FLOWS_SYNC_SECRET` and `FLOWS_SYNC_KEY_ID` are read as rc.0 ALIASES, after
- * the canonical spelling, and are removed at 1.0.0. `SMITHERS_` is the
- * product's environment namespace (the release policy),
- * `FLOWS_` names survive only so a deployment configured against the imported
- * repository keeps working through the release candidates, and these two were
- * the only credential variables still carrying the imported prefix alone. The
- * canonical name wins when both are set, matching how the CLI resolves every
- * other aliased name.
- *
  * There is deliberately no default secret: a deployment that configures
- * neither spelling fails to construct the authority, and the read path stays
+ * neither name fails to construct the authority, and the read path stays
  * closed.
  *
  * @category layers
@@ -331,13 +322,8 @@ export const layerHmac = (keyring: Keyring): Layer.Layer<WorkspaceShare, SyncErr
 export const layerConfig: Layer.Layer<WorkspaceShare, SyncError | Config.ConfigError> = Layer.effect(
   WorkspaceShare,
   Effect.gen(function*() {
-    const secret = yield* Config.redacted("SMITHERS_SYNC_SECRET").pipe(
-      Config.orElse(() => Config.redacted("FLOWS_SYNC_SECRET"))
-    )
-    const kid = yield* Config.string("SMITHERS_SYNC_KEY_ID").pipe(
-      Config.orElse(() => Config.string("FLOWS_SYNC_KEY_ID")),
-      Config.withDefault("primary")
-    )
+    const secret = yield* Config.redacted("SMITHERS_SYNC_SECRET")
+    const kid = yield* Config.string("SMITHERS_SYNC_KEY_ID").pipe(Config.withDefault("primary"))
     return yield* makeHmac({ activeKid: kid, keys: [{ kid, secret }] })
   })
 )

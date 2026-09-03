@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Markdown, safeMarkdownHref } from "../src/index";
+import { Markdown } from "../src/index";
 
 describe("Markdown fenced CodeBlock routing", () => {
   test("routes fences through CodeBlock and parses the first info token as lowercase language", () => {
@@ -33,11 +33,4 @@ describe("Markdown fenced CodeBlock routing", () => {
     });
   }
 
-  test("exports the frozen safe href algorithm", () => {
-    expect(safeMarkdownHref(" https://smithers.sh/docs ")).toBe("https://smithers.sh/docs");
-    expect(safeMarkdownHref("mailto:hello@smithers.sh")).toBe("mailto:hello@smithers.sh");
-    expect(safeMarkdownHref("/runs/one")).toBe("/runs/one");
-    expect(safeMarkdownHref("javascript:alert(1)")).toBeUndefined();
-    expect(safeMarkdownHref("data:text/html,test")).toBeUndefined();
-  });
 });

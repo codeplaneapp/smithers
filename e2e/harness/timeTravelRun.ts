@@ -138,6 +138,7 @@ export const layer = (root: string, filename: string, hostId: string) => {
       NodeRuntime.layerHost(
         {
           filename,
+          workspaceRoot: root,
           owner: { hostId },
           signals: [],
           // A compensable action's pre-image and its restore are the engine's

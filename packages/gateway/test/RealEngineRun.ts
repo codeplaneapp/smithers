@@ -121,7 +121,12 @@ export class EngineRun extends Context.Service<EngineRun, {
 /** The engine's own composition: its own SQLite file, its own journal. */
 const engineLayer = (filename: string, implementation: (path: string) => Effect.Effect<string>) =>
   NodeRuntime.layer(
-    { filename, owner: { hostId: "gateway-suite" }, isAlive: () => Effect.succeed(false) },
+    {
+      filename,
+      workspaceRoot: dirname(filename),
+      owner: { hostId: "gateway-suite" },
+      isAlive: () => Effect.succeed(false)
+    },
     StepBoundary.layer,
     WorkspaceSandbox.layerFileSystem(),
     Layer.mergeAll(

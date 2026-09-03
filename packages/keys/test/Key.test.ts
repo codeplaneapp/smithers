@@ -11,8 +11,8 @@ const provideCrypto = <A, E>(
 
 const derive = (input: unknown): Keys.KeyV1 => Effect.runSync(provideCrypto(Keys.deriveKey(input)))
 
-const decodeCompatibilitySchema = (input: unknown): Keys.Key =>
-  Effect.runSync(provideCrypto(Schema.decodeUnknownEffect(Keys.Key)(input)))
+const decodeDerivedKey = (input: unknown): Keys.StoredKey =>
+  Effect.runSync(provideCrypto(Schema.decodeUnknownEffect(Keys.DerivedKey)(input)))
 
 const failingCrypto = Layer.succeed(
   Crypto.Crypto,
@@ -33,17 +33,14 @@ describe("stored key validation", () => {
   it("parses a supported stored key unchanged without Crypto", () => {
     expect(Schema.decodeUnknownSync(Keys.StoredKey)(stored)).toBe(stored)
     expect(Schema.decodeUnknownSync(Keys.KeyV1)(stored)).toBe(stored)
-    expect(Schema.decodeUnknownSync(Keys.Key.StoredKey)(stored)).toBe(stored)
-    expect(Schema.decodeUnknownSync(Keys.Key.KeyV1)(stored)).toBe(stored)
     expect(Keys.digest(Schema.decodeUnknownSync(Keys.StoredKey)(stored))).toBe("a".repeat(64))
-    expect(Keys.Key.digest(Schema.decodeUnknownSync(Keys.StoredKey)(stored))).toBe("a".repeat(64))
   })
 
   it("keeps parsing separate from deriving a key from key-shaped text", () => {
     const parsed = Schema.decodeUnknownSync(Keys.StoredKey)(stored)
     expect(parsed).toBe(stored)
     expect(derive(stored)).not.toBe(parsed)
-    expect(decodeCompatibilitySchema(stored)).toBe(derive(stored))
+    expect(decodeDerivedKey(stored)).toBe(derive(stored))
   })
 
   it("rejects unsupported versions and malformed wire values", () => {
@@ -65,10 +62,6 @@ describe("stored key validation", () => {
       expect(() => Schema.decodeUnknownSync(Keys.StoredKey)(value)).toThrow()
     }
   })
-
-  it("keeps Schema.toType(Key) as a compatibility view of the stored schema", () => {
-    expect(Schema.decodeUnknownSync(Schema.toType(Keys.Key))(stored)).toBe(stored)
-  })
 })
 
 describe("key derivation", () => {
@@ -79,7 +72,7 @@ describe("key derivation", () => {
     ["", "key1_12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"]
   ])("matches the frozen key1 wire vector for %#", (input, expected) => {
     expect(derive(input)).toBe(expected)
-    expect(decodeCompatibilitySchema(input)).toBe(expected)
+    expect(decodeDerivedKey(input)).toBe(expected)
   })
 
   it("derives the same key from canonically equivalent JSON", () => {
@@ -106,7 +99,7 @@ describe("key derivation", () => {
 
   it("returns a typed digest failure with the crypto cause chain", () => {
     const error = Effect.runSync(Effect.flip(
-      Effect.provide(Keys.Key.derive({ operation: "compile" }), failingCrypto)
+      Effect.provide(Keys.deriveKey({ operation: "compile" }), failingCrypto)
     ))
     expect(error).toBeInstanceOf(Keys.KeyDerivationError)
     expect(error).toMatchObject({
@@ -122,7 +115,7 @@ describe("key derivation", () => {
   it("redacts key material from schema failures", () => {
     const secret = "key-material-that-must-not-appear"
     const error = Effect.runSync(Effect.flip(
-      Schema.decodeUnknownEffect(Keys.Key)({ secret }).pipe(
+      Schema.decodeUnknownEffect(Keys.DerivedKey)({ secret }).pipe(
         Effect.provide(failingCrypto)
       )
     ))
@@ -145,7 +138,7 @@ describe("key derivation", () => {
     const secret = "canonical-secret-that-must-not-appear"
     const error = Effect.runSync(Effect.flip(
       provideCrypto(
-        Schema.decodeUnknownEffect(Keys.Key)({ [secret]: 1n }, { reportInput: true })
+        Schema.decodeUnknownEffect(Keys.DerivedKey)({ [secret]: 1n }, { reportInput: true })
       )
     ))
     expect(error.message).toContain("[canonicalization_failed] Key input could not be canonicalized")
@@ -174,12 +167,12 @@ describe("key derivation", () => {
 
   it("cannot reconstruct its input", () => {
     const key = derive({ operation: "compile" })
-    const typed = Effect.runSync(Effect.flip(Schema.encodeEffect(Keys.Key)(key)))
+    const typed = Effect.runSync(Effect.flip(Schema.encodeEffect(Keys.DerivedKey)(key)))
     expect(typed._tag).toBe("SchemaError")
     expect(typed.message).toContain("A key cannot be converted back into its input")
 
     const raw = Effect.runSync(
-      Effect.flip(Schema.encodeUnknownEffect(Keys.Key)(`key1_${"a".repeat(64)}`))
+      Effect.flip(Schema.encodeUnknownEffect(Keys.DerivedKey)(`key1_${"a".repeat(64)}`))
     )
     expect(raw._tag).toBe("SchemaError")
   })

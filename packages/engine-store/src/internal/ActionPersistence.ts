@@ -14,7 +14,7 @@ import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
-import { Key } from "@smthrs/keys"
+import { DerivedKey } from "@smthrs/keys"
 import * as FileSet from "@smthrs/plan/FileSet"
 import { AttemptStore, Ownership, RunStore } from "@smthrs/run-store"
 import { CacheStore } from "@smthrs/step-cache"
@@ -290,11 +290,7 @@ export interface Dependencies {
   readonly sourceId: string
   /** Runs one action body. The only part of a dispatch this module delegates. */
   readonly execute: (input: ActionInput) => Effect.Effect<unknown, unknown>
-  /**
-   * Repository authority reserved for engine bookkeeping. When omitted, the
-   * ambient public `Jj` service preserves the standalone constructor's
-   * compatibility behavior.
-   */
+  /** Repository authority reserved for engine bookkeeping. */
   readonly engineJj?: Jj.Jj | undefined
   /**
    * Makes a retry of an irreversible action recognizable downstream. Its
@@ -922,7 +918,7 @@ export const make = (deps: Dependencies) => {
           // rows are indistinguishable, so a fenced evict of one is exactly
           // a fenced evict of the other.
           //
-          // The digest goes through `Key`, which is the repo's one hashing
+          // The digest goes through `DerivedKey`, the repo's one hashing
           // chokepoint: RFC 8785 canonical JSON, then SHA-256. Hashing
           // `JSON.stringify` output made "byte stable" depend on key order,
           // and the two paths do not build `meta` the same way — the fresh
@@ -935,7 +931,7 @@ export const make = (deps: Dependencies) => {
           // different `generation`, append fresh provenance on every later
           // dispatch, and reopen the unbounded-append regression issue #124
           // closed. Canonical JSON makes the stability structural.
-          const generation = yield* Schema.decodeUnknownEffect(Key)({
+          const generation = yield* Schema.decodeUnknownEffect(DerivedKey)({
             kind: "cache-generation",
             meta: options.meta,
             result: options.result
@@ -2184,7 +2180,7 @@ export const make = (deps: Dependencies) => {
               ...(settlement.deviations.length === 0
                 ? {
                   wholeTreeWritesVerified: true as const,
-                  // `StepSandbox` is the injectable façade; the legacy
+                  // `StepSandbox` is the injectable façade; the
                   // `WorkspaceSandbox` service is the same isolated
                   // transaction backend and proves the same read property.
                   hermeticReadsVerified: true as const

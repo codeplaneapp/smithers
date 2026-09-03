@@ -455,38 +455,6 @@ describe("a durable lineage", () => {
       expect(Exit.isFailure(observed.successor)).toBe(true)
     }))
 
-  it.effect("continues a legacy root row whose additive lineage columns are null", () =>
-    Effect.gen(function*() {
-      const observed = yield* durable(Effect.gen(function*() {
-        const store = yield* RunStore.RunStore
-        const payload = yield* Schema.encodeEffect(
-          Schema.toCodecJson(Counter.payloadSchema)
-        )({ value: 0, target: 2 })
-        yield* store.create(
-          "legacy-lineage",
-          JSON.stringify({ version: 1, flowName: Counter._tag, payload })
-        )
-        const { calls, wiring } = yield* incarnation("legacy-host", [Counter])
-        const value = yield* Counter.execute({ value: 0, target: 2 }, {
-          executionId: "legacy-lineage"
-        }).pipe(Effect.provide(wiring))
-        return {
-          calls,
-          root: yield* store.get("legacy-lineage"),
-          successor: yield* store.get(roundId("legacy-lineage", 1)),
-          value
-        }
-      }))
-
-      expect(observed.value).toBe(2)
-      expect(observed.calls).toEqual([0, 1])
-      expect(observed.root.lineageId).toBeNull()
-      expect(observed.root.roundOrdinal).toBeNull()
-      expect(observed.successor.parentRunId).toBe("legacy-lineage")
-      expect(observed.successor.lineageId).toBe("legacy-lineage")
-      expect(observed.successor.roundOrdinal).toBe(1)
-    }))
-
   it.effect("rejects a derived-id collision whose persisted round metadata is not identical", () =>
     Effect.gen(function*() {
       const observed = yield* durable(Effect.gen(function*() {

@@ -13,7 +13,6 @@ import * as Model from "../src/Model.ts"
 import { ModelError } from "../src/ModelError.ts"
 import * as ModelEvent from "../src/ModelEvent.ts"
 import * as ModelRequest from "../src/ModelRequest.ts"
-import * as OpenAICompatible from "../src/OpenAICompatible.ts"
 import * as Protocol from "../src/Protocol.ts"
 import * as RequestExecutor from "../src/RequestExecutor.ts"
 import * as Route from "../src/Route.ts"
@@ -313,7 +312,7 @@ describe("Route.prepare", () => {
   })
 
   it("keeps OpenAI-compatible routes on the portable protocol surface", async () => {
-    const compatible = Result.getOrThrow(OpenAICompatible.make({
+    const compatible = Result.getOrThrow(Route.openaiResponsesCompatible({
       id: "groq",
       baseUrl: "https://api.groq.com/openai",
       apiKey: Redacted.make("compatible-secret")
@@ -346,21 +345,6 @@ describe("Route.prepare", () => {
         })).endpoint.url
       ).toBe("https://openrouter.ai/api/v1/chat/completions")
     }
-
-    expect(
-      Result.getOrThrow(OpenAICompatible.make({
-        id: "legacy-responses",
-        baseUrl: origin,
-        apiKey: key
-      })).endpoint.url
-    ).toBe("https://openrouter.ai/api/v1/responses")
-    expect(
-      Result.getOrThrow(Route.openaiCompatible({
-        id: "legacy-chat",
-        baseUrl: `${origin}/v1`,
-        apiKey: key
-      })).endpoint.url
-    ).toBe("https://openrouter.ai/api/v1/chat/completions")
   })
 
   it("keeps the explicitly named compatible routes on their documented surfaces", async () => {
@@ -400,9 +384,9 @@ describe("Route.prepare", () => {
   })
 
   it("mounts the live Chat Completions route on compatible provider base paths", async () => {
-    const groq = Result.getOrThrow(Route.openaiCompatible({
+    const groq = Result.getOrThrow(Route.openaiChatCompatible({
       id: "groq-chat",
-      baseUrl: "https://api.groq.com/openai/v1",
+      baseUrl: "https://api.groq.com/openai",
       apiKey: Redacted.make("compatible-secret")
     }))
 
@@ -410,13 +394,13 @@ describe("Route.prepare", () => {
     expect(groq.protocol.supportsDeferred("gpt-5.4")).toBe(false)
     expect(groq.endpoint.url).toBe("https://api.groq.com/openai/v1/chat/completions")
 
-    const gemini = Result.getOrThrow(Route.openaiCompatible({
+    const gemini = Result.getOrThrow(Route.openaiChatCompatible({
       id: "gemini-chat",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
       apiKey: Redacted.make("compatible-secret")
     }))
     expect(gemini.endpoint.url).toBe(
-      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+      "https://generativelanguage.googleapis.com/v1beta/openai/v1/chat/completions"
     )
     await expect(Route.prepare(gemini, request).pipe(Effect.runPromise)).resolves.toMatchObject({
       protocolId: "openai-chat-completions"
@@ -424,7 +408,7 @@ describe("Route.prepare", () => {
   })
 
   it("carries an OpenAI-compatible deployment's own headers and rejects an unusable base URL", async () => {
-    const withHeaders = Result.getOrThrow(OpenAICompatible.make({
+    const withHeaders = Result.getOrThrow(Route.openaiResponsesCompatible({
       id: "vllm",
       baseUrl: "https://vllm.test/",
       apiKey: Redacted.make("compatible-secret"),
@@ -436,7 +420,7 @@ describe("Route.prepare", () => {
     const prepared = await Effect.runPromise(Route.prepare(withHeaders, request))
     expect(prepared.publicHeaders).toEqual({ "content-type": "application/json", "x-tenant": "acme" })
 
-    const invalid = OpenAICompatible.make({
+    const invalid = Route.openaiResponsesCompatible({
       id: "broken",
       baseUrl: "not a url",
       apiKey: Redacted.make("compatible-secret")

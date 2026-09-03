@@ -25,19 +25,6 @@ const mintedKid = (environment: Record<string, string>) =>
     return minted.claims.kid
   }).pipe(Effect.provide(fromEnvironment(environment)))
 
-/**
- * Whether a capability the configured authority mints verifies under an
- * explicit keyring holding `secret`, which is what says WHICH configured
- * spelling supplied the signing key.
- */
-const verifiesUnder = (environment: Record<string, string>, secret: string) =>
-  Effect.gen(function*() {
-    const configured = yield* WorkspaceShare.WorkspaceShare
-    const minted = yield* configured.mint({ capabilityId: "cap-config", access: "read", ttlMs: 60_000 })
-    const explicit = yield* WorkspaceShare.makeHmac({ activeKid: "primary", keys: [key("primary", secret)] })
-    return yield* Effect.as(explicit.verify(minted, { access: "read" }), true)
-  }).pipe(Effect.provide(fromEnvironment(environment)))
-
 describe("WorkspaceShare", () => {
   it.effect("mints a capability whose claims are keyed, timed, and verifiable", () =>
     Effect.gen(function*() {
@@ -229,46 +216,6 @@ describe("WorkspaceShare", () => {
 
       expect(defaultKid).toBe("primary")
       expect(namedKid).toBe("2026-08")
-    }))
-
-  // `SMITHERS_` is the product's environment namespace and `FLOWS_` names
-  // survive only as rc.0 aliases, removed at 1.0.0 (the release policy).
-  // These two were the only credential variables still reading the imported
-  // prefix alone, so the canonical spelling is read first and the alias keeps
-  // an already-configured deployment working.
-  it.effect("layerConfig reads the FLOWS_ spelling as an alias, and the canonical name wins", () =>
-    Effect.gen(function*() {
-      const [aliasKid, canonicalKid, aliasSecretWorks, canonicalSecretWins] = yield* run(
-        Effect.gen(function*() {
-          const alias = yield* mintedKid({
-            FLOWS_SYNC_SECRET: "alias-secret",
-            FLOWS_SYNC_KEY_ID: "aliased"
-          })
-          const both = yield* mintedKid({
-            SMITHERS_SYNC_SECRET: "canonical-secret",
-            SMITHERS_SYNC_KEY_ID: "canonical",
-            FLOWS_SYNC_SECRET: "alias-secret",
-            FLOWS_SYNC_KEY_ID: "aliased"
-          })
-          // The kid names the key; only a signature check says which SECRET
-          // was used, so both spellings are cross-verified against an explicit
-          // keyring built from the secret each one configures.
-          const aliasVerified = yield* verifiesUnder(
-            { FLOWS_SYNC_SECRET: "alias-secret" },
-            "alias-secret"
-          )
-          const canonicalVerified = yield* verifiesUnder(
-            { SMITHERS_SYNC_SECRET: "canonical-secret", FLOWS_SYNC_SECRET: "alias-secret" },
-            "canonical-secret"
-          )
-          return [alias, both, aliasVerified, canonicalVerified] as const
-        })
-      )
-
-      expect(aliasKid).toBe("aliased")
-      expect(canonicalKid).toBe("canonical")
-      expect(aliasSecretWorks).toBe(true)
-      expect(canonicalSecretWins).toBe(true)
     }))
 
   it.effect("layerConfig fails closed when no secret is configured", () =>

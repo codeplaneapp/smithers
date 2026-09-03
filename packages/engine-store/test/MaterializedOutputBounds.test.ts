@@ -232,57 +232,6 @@ describe("materialized outputs are digest-referenced and bounded (issue #113)", 
     }))
 })
 
-describe("legacy round-7 evidence rows still decode and replay (issue #123)", () => {
-  // The exact persisted shape of commit c855553's `declaredOutputs`:
-  // `{outputs: [{path, content: string | null}]}` — no digest anywhere.
-  const legacyEvidence = (outputs: ReadonlyArray<{ path: string; content: string | null }>) => ({
-    declaredOutputs: { outputs },
-    diffIdentity: "legacy-round-7"
-  })
-
-  it.effect("materializes a legacy inline row, deriving its digest from the decoded bytes", () =>
-    Effect.gen(function*() {
-      const host = memoryFs({})
-      yield* withCrypto(
-        Effect.gen(function*() {
-          const boundary = yield* StepBoundary.StepBoundary
-          yield* boundary.replayOutputs(legacyEvidence([
-            { path: "legacy.txt", content: Encoding.encodeBase64(encoder.encode("hello from round 7")) }
-          ]))
-        }).pipe(Effect.provide(boundaryLayer(host.fs)))
-      )
-      expect(decoder.decode(host.files.get("legacy.txt"))).toBe("hello from round 7")
-    }))
-
-  it.effect("treats legacy null content as path-absent and removes the stale file", () =>
-    Effect.gen(function*() {
-      const host = memoryFs({ "legacy.txt": "stale" })
-      yield* withCrypto(
-        Effect.gen(function*() {
-          const boundary = yield* StepBoundary.StepBoundary
-          yield* boundary.replayOutputs(legacyEvidence([{ path: "legacy.txt", content: null }]))
-        }).pipe(Effect.provide(boundaryLayer(host.fs)))
-      )
-      expect(host.files.has("legacy.txt")).toBe(false)
-    }))
-
-  it.effect("refuses undecodable legacy content instead of materializing garbage", () =>
-    Effect.gen(function*() {
-      const host = memoryFs({})
-      const failure = yield* withCrypto(
-        Effect.gen(function*() {
-          const boundary = yield* StepBoundary.StepBoundary
-          return yield* Effect.flip(
-            boundary.replayOutputs(legacyEvidence([{ path: "legacy.txt", content: "%%%not-base64%%%" }]))
-          )
-        }).pipe(Effect.provide(boundaryLayer(host.fs)))
-      )
-      // Classified as corruption since issue #159 — see above.
-      expect(failure).toMatchObject({ code: "boundary_corruption" })
-      expect(host.files.has("legacy.txt")).toBe(false)
-    }))
-})
-
 describe("an artifact store that refuses outright stays a retryable host refusal", () => {
   it.effect("classifies a store failure as unsupported_boundary, never as a missing artifact", () =>
     Effect.gen(function*() {

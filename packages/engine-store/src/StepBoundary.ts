@@ -8,7 +8,7 @@ import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import { Sha256 } from "@smthrs/crypto"
 import { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { FileInput } from "@smthrs/flow/FileInput"
-import { Key } from "@smthrs/keys"
+import { DerivedKey } from "@smthrs/keys"
 import * as FileSet from "@smthrs/plan/FileSet"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
@@ -402,32 +402,8 @@ const DigestReferencedOutput = Schema.Struct({
   content: Schema.optional(Schema.String)
 })
 
-/**
- * The round-7 shape (commit c855553): every output inlined as
- * `{path, content: string | null}`, no digest anywhere. Rows persisted by
- * that layer must decode forever (issue #123): `content: null` records that
- * the path was absent at settle time, and an inline payload's digest is
- * derived lazily from the decoded bytes — there is no stored digest to
- * verify against.
- */
-const LegacyInlineOutput = Schema.Struct({
-  path: Schema.String,
-  content: Schema.NullOr(Schema.String),
-  // A round-7 row never carried a digest key. Forbidding the key keeps a
-  // digest-carrying row that fails the strict address schema above from
-  // silently degrading into this trusted-inline branch, whose digest is
-  // derived from the bytes rather than verified against a recorded address.
-  digest: Schema.optionalKey(Schema.Never)
-})
-
-/**
- * Whether a decoded output row is the digest-referenced shape. The decode
- * already discriminated the union; this is the type-level witness for it.
- */
-const isDigestRow = Schema.is(DigestReferencedOutput)
-
 const MaterializedOutputs = Schema.Struct({
-  outputs: Schema.Array(Schema.Union([DigestReferencedOutput, LegacyInlineOutput])),
+  outputs: Schema.Array(DigestReferencedOutput),
   trees: Schema.optional(Schema.Array(Schema.Struct({
     path: Schema.String,
     identity: Schema.String
@@ -444,31 +420,6 @@ const parentDirectory = (path: string): string | undefined => {
   const index = path.lastIndexOf("/")
   return index <= 0 ? undefined : path.slice(0, index)
 }
-
-/**
- * Normalizes a legacy round-7 output row into the digest-referenced shape
- * (issue #123): `content: null` meant the path was absent (the digest-null
- * removal semantics), and an inline payload's digest is derived from the
- * decoded bytes so the ordinary materialization path applies unchanged.
- */
-const fromLegacyOutput = Effect.fn("StepBoundary.fromLegacyOutput")(function*(
-  output: typeof LegacyInlineOutput.Type
-) {
-  if (output.content === null) return { path: output.path, digest: null } satisfies MaterializedOutput
-  const decoded = Encoding.decodeBase64(output.content)
-  if (Result.isFailure(decoded)) {
-    // The bytes came from recorded evidence, so an undecodable payload is
-    // tampering of the durable row, not a host refusal (issue #159). A
-    // legacy row stores no digest to compare against; the sentinel says so.
-    return yield* Effect.fail(inlineCorruption(output.path, "legacy_inline"))
-  }
-  return {
-    path: output.path,
-    digest: yield* Schema.decodeUnknownEffect(Sha256)(decoded.success).pipe(Effect.orDie),
-    sizeBytes: decoded.success.length,
-    content: output.content
-  } satisfies MaterializedOutput
-})
 
 const hostFailure = (cause: unknown): UnsupportedBoundary =>
   new UnsupportedBoundary({
@@ -533,11 +484,6 @@ export interface FileSystemOptions {
    * {@link maxInlineBytes}. Defaults to 8 MiB.
    */
   readonly maxTotalInlineBytes?: number | undefined
-  /**
-   * @deprecated Digests are always recomputed from bytes. Retained only for
-   * source compatibility with pre-rc callers.
-   */
-  readonly maxDigestMemoEntries?: number | undefined
 }
 
 const defaultMaxInlineBytes = 1024 * 1024
@@ -567,9 +513,6 @@ export const referencedDigests = (evidence: BoundaryEvidence): ReadonlyArray<Art
   if (decoded._tag === "Failure") return []
   const digests: Array<ArtifactStore.Digest> = []
   for (const output of decoded.success.outputs) {
-    // A legacy round-7 row carries no digest at all, and an inline row carries
-    // its bytes with it; neither references the artifact store.
-    if (!isDigestRow(output)) continue
     if (output.digest === null || output.content !== undefined) continue
     digests.push(output.digest)
   }
@@ -598,7 +541,6 @@ export const makeFileSystem = (
   const maxTotalInlineBytes = options.maxTotalInlineBytes ?? defaultMaxTotalInlineBytes
   // Stat tuples are not content identities: a same-size rewrite can preserve
   // mtime, device, and inode on every supported filesystem.
-  void options.maxDigestMemoEntries
   const readDigest = Effect.fn("StepBoundary.readDigest")(function*(path: string) {
     const bytes = yield* fs.readFile(path)
     const digest = yield* Schema.decodeUnknownEffect(Sha256)(bytes).pipe(Effect.orDie)
@@ -805,7 +747,9 @@ export const makeFileSystem = (
           for (const path of files) pairs.push([path.slice(entry.path.length + 1), yield* measure(path)])
           trees.push({
             path: entry.path,
-            identity: yield* Schema.decodeUnknownEffect(Key)({ kind: "tree-artifact", files: pairs }).pipe(Effect.orDie)
+            identity: yield* Schema.decodeUnknownEffect(DerivedKey)({ kind: "tree-artifact", files: pairs }).pipe(
+              Effect.orDie
+            )
           })
         }
       }
@@ -827,10 +771,10 @@ export const makeFileSystem = (
         // bytes under a declaration that disclaimed them.
         if (captured.output.digest !== null && removes.includes(path)) surviving.push(path)
       }
-      // Through `Key` — the repo's one hashing chokepoint — so the identity is
+      // Through `DerivedKey` — the repo's one hashing chokepoint — so the identity is
       // a digest of the RFC 8785 canonical form rather than of whatever
       // `JSON.stringify` happened to emit for this shape.
-      const diffIdentity = yield* Schema.decodeUnknownEffect(Key)({
+      const diffIdentity = yield* Schema.decodeUnknownEffect(DerivedKey)({
         kind: "diff-identity",
         outputs: outputs.map((output) => [output.path, output.digest]),
         trees
@@ -921,8 +865,7 @@ export const makeFileSystem = (
         }
         for (const directory of entries.directories) emptyDirectoryCandidates.add(directory)
       }
-      for (const recorded of decoded.success.outputs) {
-        const output = isDigestRow(recorded) ? recorded : yield* fromLegacyOutput(recorded)
+      for (const output of decoded.success.outputs) {
         if (output.digest === null) {
           const present = yield* fs.exists(output.path).pipe(Effect.mapError(hostFailure))
           if (present) yield* fs.remove(output.path).pipe(Effect.mapError(hostFailure))

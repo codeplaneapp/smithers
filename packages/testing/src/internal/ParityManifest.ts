@@ -97,7 +97,7 @@ const smithersRows: ReadonlyArray<ParityRow> = [
     flowsEquivalent: "—",
     status: "skipped",
     reason:
-      "The production engine has no approval-timeout scheduler; TASK_TIMEOUT is reserved as a typed failure rather than simulated as success."
+      "The production engine has no approval-timeout scheduler; task_timeout is reserved as a typed failure rather than simulated as success."
   },
   {
     source: "smithers #10 packages/engine/tests/pause-lifecycle.test.jsx + packages/driver/tests/pause-drain.test.js",
@@ -123,11 +123,11 @@ const smithersRows: ReadonlyArray<ParityRow> = [
   {
     source:
       "smithers #13 packages/scheduler/tests/makeFlowSession-coverage.test.js + packages/engine/tests/engine.test.jsx",
-    behavior: "Loop termination re-evaluates until and fails with RALPH_MAX_REACHED at its bound.",
+    behavior: "Loop termination re-evaluates until and fails with ralph_max_reached at its bound.",
     flowsEquivalent: "—",
     status: "skipped",
     reason:
-      "The production engine has no loop runtime; RALPH_MAX_REACHED is reserved as a typed failure rather than a successful max-iterations value."
+      "The production engine has no loop runtime; ralph_max_reached is reserved as a typed failure rather than a successful max-iterations value."
   },
   {
     source: "smithers #14 packages/engine/tests/deps-deadlock.test.jsx + makeFlowSession-coverage.test.js",

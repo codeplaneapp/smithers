@@ -42,7 +42,7 @@ const call = new Cell.Call({
 })
 
 const cell = Cell.source("ctx.done('done')")
-const transition = new Cell.Complete({ state: null, output: "done", reason: "finished" })
+const transition = new Cell.Complete({ output: "done" })
 const outcome = new Cell.Settled({ transition })
 const reason = new EngineLike.SuspendReason({ code: "waiting-input", message: "Needs an answer" })
 const request = new Permission.PermissionRequired({

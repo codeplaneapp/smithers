@@ -7,9 +7,9 @@
  * 1. **It lives here, not in `@smthrs/keys`.** That package owns generic
  *    derivation and stored-key validation; a compiler that understands plan
  *    material belongs above it.
- * 2. **It produces `@smthrs/keys` `Key` values, not a second `sk1_` digest
+ * 2. **It produces `@smthrs/keys` `StoredKey` values, not a second `sk1_` digest
  *    format.** The original minted its own prefix over a private `Digest`
- *    module. The engine dispatches under `Key` (`FlowEngine/ActionKey.ts`),
+ *    module. The engine dispatches under `StoredKey` (`FlowEngine/ActionKey.ts`),
  *    so a plan whose node keys were a *different* string format could never be
  *    the thing the cache is consulted against, and that is the whole point of
  *    a `Plan`. One key format, one hashing
@@ -26,7 +26,7 @@
  *
  * @since 0.1.0
  */
-import { Key } from "@smthrs/keys"
+import { DerivedKey, type StoredKey } from "@smthrs/keys"
 import * as Cause from "effect/Cause"
 import type * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
@@ -44,7 +44,7 @@ import type * as KeyMaterial from "./KeyMaterial.ts"
  * @category models
  * @slop
  */
-export type StepKey = Key
+export type StepKey = StoredKey
 
 /**
  * The nominal brand carried by every {@link DigestInput}. Kept private: the
@@ -364,7 +364,7 @@ const normalizeHermetic = (hermetic: NonNullable<ContentIdentity["hermetic"]>) =
   }
 }
 
-const decodeKey = Schema.decodeUnknownEffect(Key)
+const decodeKey = Schema.decodeUnknownEffect(DerivedKey)
 
 /**
  * Produces a cross-run reusable key for a sealed or hermetic step. Set-like

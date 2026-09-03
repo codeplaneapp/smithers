@@ -152,16 +152,6 @@ const flow = <I extends Payload>(declaration: Declaration<I>): FlowEntry => {
   }
 }
 
-/**
- * A hidden bare alias of a namespaced flow: the old spelling keeps working
- * (typed, stamped, persisted in recentCommands / pendingCommand) while the
- * canonical name lives in its namespace. Execution resolves to the target
- * through `canonical()`, so the alias never ranks, lists, or reaches the
- * model's catalog.
- */
-const alias = <I extends Payload>(name: string, target: Declaration<I>): FlowEntry =>
-  flow({ ...target, name, aliasOf: target.name, hidden: true })
-
 /** The payload of a flow that takes nothing. */
 const NoPayload = Schema.Struct({})
 /** An optional trailing `owner/repo` target. */
@@ -202,8 +192,7 @@ export const USER_ONLY_VISIBLE: ReadonlyArray<{ readonly name: string; readonly 
 
 export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {
   /*
-   * The canonical declarations that also keep a bare alias: declared once so
-   * the alias cannot drift from the flow it spells.
+   * Shared declarations used by the registry and UI controls.
    */
   const THEME = {
     name: "appearance.theme",
@@ -277,7 +266,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   /*
    * The explainer inside the app (AgentRoles.ts): one side turn on the
    * explainer role, answered as an embedded card. Callable by the model and
-   * by a human; `/explain` stays as the bare spelling.
+   * by a human through `/agent.explain`.
    */
   const EXPLAIN = {
     name: "agent.explain",
@@ -351,18 +340,14 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    * the list and where the human already is. User-only browser chrome.
    */
   flow(THEME),
-  alias("theme", THEME),
   flow(DARK_MODE),
-  alias("dark-mode", DARK_MODE),
   /*
    * `chat.*` — the conversation's own controls. C-1 (wave 13): the composer's
    * surfaces-menu trigger is a flow like every other affordance — the button
    * dispatches /chat.surfaces, and the name typed opens the same menu.
    */
   flow(SURFACES),
-  alias("surfaces", SURFACES),
   flow(VERBOSE),
-  alias("verbose", VERBOSE),
   flow({
     /*
      * The next-step recommender (state/Recommend.ts): system-invoked after
@@ -387,7 +372,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: () => actions.showChat()
   }),
   flow(RETRY),
-  alias("retry", RETRY),
   flow({
     name: "chat.stop",
     summary: "Stop the current response",
@@ -395,21 +379,9 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: NoPayload,
     handler: () => actions.stop()
   }),
-  flow({
-    name: "stop",
-    summary: "Stop the current response",
-    aliasOf: "chat.stop",
-    hidden: true,
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.stop()
-  }),
   flow(SEND),
-  alias("send", SEND),
   flow(CLEAR),
-  alias("clear", CLEAR),
   flow(BROWSER),
-  alias("browser", BROWSER),
   flow({
     /*
      * Wave 11 — "make me a workflow". The agent invokes this with the user's
@@ -717,7 +689,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: () => actions.forkFrame()
   }),
   flow(COPY_MESSAGE),
-  alias("copy-message", COPY_MESSAGE),
   flow({
     name: "approval.approve",
     summary: "Approve a pending approval card",
@@ -909,17 +880,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "billing.balance",
     summary: "Show your balance",
-    runtime: ["identity"],
-    requires: ["signed-in"],
-    input: NoPayload,
-    handler: () => actions.showBalance()
-  }),
-  flow({
-    /* The one-click path to the balance: it is never main-page chrome. */
-    name: "balance",
-    summary: "Show your balance",
-    aliasOf: "billing.balance",
-    hidden: true,
     runtime: ["identity"],
     requires: ["signed-in"],
     input: NoPayload,
@@ -1152,7 +1112,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   /*
    * Lane sync (ADR 0005): Linear and GitHub sync as actions. The reads
    * render the connector-setup and sync-ops cards; the writes ride the same
-   * seams. `repos.app` stays as the hidden alias of its rename `github.app`.
+   * seams.
    * The routes that do not exist (plue#468 ops/retry, plue#469 setup lookup,
    * plue#473 reconcile/linear-link) refuse with the ADR's wording from the
    * seams — the flows never fake them.
@@ -1160,17 +1120,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "github.app",
     summary: "Check the Smithers GitHub App on a repository",
-    runtime: ["jjhub"],
-    args: "[owner/repo]",
-    requires: ["signed-in"],
-    input: RepoTarget,
-    handler: ({ repo }) => actions.githubApp(repo)
-  }),
-  flow({
-    name: "repos.app",
-    summary: "Check the Smithers GitHub App on a repository",
-    aliasOf: "github.app",
-    hidden: true,
     runtime: ["jjhub"],
     args: "[owner/repo]",
     requires: ["signed-in"],
@@ -1599,9 +1548,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ changeId, facet }) => actions.setChangeFacet(changeId, facet)
   }),
   flow(RELOAD),
-  alias("reload", RELOAD),
   flow(COMMANDS),
-  alias("flows", COMMANDS),
   /*
    * The local-app tabs (docs/LOCAL-APP.md "Tabs"): the strip, the `+` menu,
    * a maximized card's "Open in tab", and Cmd+T / Cmd+W / Cmd+1..9 all
@@ -1674,7 +1621,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
         : `There is no agent role named ${roleId}. Roles: ${AGENT_ROLE_IDS.join(", ")}.`
   }),
   flow(EXPLAIN),
-  alias("explain", EXPLAIN),
   flow({
     name: "tab.card",
     summary: "Open a card in a tab",
@@ -2083,7 +2029,6 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
    * Users get /chat.clear instead.
    */
   flow(RESET),
-  alias("reset", RESET),
   flow({
     /* The admin dev-tools panel (§2b/§2d): the machinery, visible. */
     name: "admin.devtools",

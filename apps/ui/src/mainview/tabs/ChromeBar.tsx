@@ -57,12 +57,12 @@ export function ChromeBar() {
    * cloud inventory grouped `org/ → repo → working copies`, and local
    * checkouts the inventory does not know as standalone rows (their repoId
    * never invents an owner). Selecting a repo row names `org/repo`; selecting
-   * a copy row names `org/repo#copyId` — the legacy pin key still selects.
+   * a copy row names `org/repo#copyId`; a local-only checkout uses its local key.
    * No mirror glyph: the backend has no mirror status yet (plue#445).
    */
   const activeKey = session?.activeRepoKey ?? null
   const selection = activeKey === null ? null : parseRepoSelection(activeKey)
-  const activeCopyId = selection === null ? null : "repoId" in selection ? selection.copyId ?? null : selection.legacyCopyId
+  const activeCopyId = selection === null ? null : "repoId" in selection ? selection.copyId ?? null : selection.localCopyId
   const pinIds = new Set(pinRows.map((pin) => pin.id))
   const openPaths = new Set(repoRows.map((repo) => repo.path))
   const copiesByRepoId = new Map<string, ReadonlyArray<WorkingCopy>>()

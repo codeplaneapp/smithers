@@ -147,13 +147,6 @@ describe("NodeControl.makeConfig", () => {
       .toBe("from-argv")
   })
 
-  it("accepts the rc.0 FLOWS_* aliases, with the SMITHERS name winning", () => {
-    expect(configuration([], { FLOWS_REMOTE: "https://alias.test" }).remote).toBe("https://alias.test")
-    expect(
-      configuration([], { SMITHERS_REMOTE: "https://canonical.test", FLOWS_REMOTE: "https://alias.test" }).remote
-    ).toBe("https://canonical.test")
-  })
-
   it("reads the MCP servers named by --mcp-config, and by the environment", async () => {
     const directory = await mkdtemp(join(tmpdir(), "flows-cli-mcp-"))
     try {
@@ -163,9 +156,6 @@ describe("NodeControl.makeConfig", () => {
 
       expect(NodeControl.makeConfig(["--mcp-config", file], {}, "/work").mcpServers).toEqual([entry])
       expect(NodeControl.makeConfig([], { SMITHERS_MCP_CONFIG: file }, "/work").mcpServers).toEqual([entry])
-      // The rc.0 alias, removed at 1.0.0.
-      expect(NodeControl.makeConfig([], { FLOWS_MCP_CONFIG: file }, "/work").mcpServers).toEqual([entry])
-
       // A typo'd config must not look like "no MCP servers configured".
       const malformed = join(directory, "malformed.json")
       await writeFile(malformed, JSON.stringify([{ server: "docs" }]))

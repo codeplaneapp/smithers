@@ -17,7 +17,6 @@ const expectedExports = [
   "ModelRequest",
   "OpenAIChatCompletions",
   "OpenAIChatGPT",
-  "OpenAICompatible",
   "OpenAIResponses",
   "Protocol",
   "RequestExecutor",

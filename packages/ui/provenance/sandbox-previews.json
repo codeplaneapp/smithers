@@ -1,12 +1,12 @@
 [
   {
     "file": "src/sandbox/AgentSandbox.tsx",
-    "exports": ["AgentSandbox", "AgentSandboxHeader", "AgentSandboxStatus", "AgentSandboxActions", "AgentSandboxContent", "Sandbox", "SandboxHeader", "SandboxStatus", "SandboxActions", "SandboxContent", "sandboxStateToStatus"],
+    "exports": ["Sandbox", "SandboxHeader", "SandboxStatus", "SandboxActions", "SandboxContent", "sandboxStateToStatus"],
     "collection": "agentic/ai-elements",
     "registryItem": "https://elements.ai-sdk.dev/components/sandbox",
     "ported": "partial-anatomy",
     "omissions": ["sandbox terminal/output streaming anatomy"],
-    "divergences": ["frozen compound names (Sandbox/SandboxHeader/SandboxStatus/SandboxActions/SandboxContent) ship as aliases; AgentSandbox-prefixed names kept for back-compat (bare Sandbox collides with the smthrs workflow export in shared scope)", "non-ready states render an honest EmptyState instead of placeholder output", "lifecycle state changes are announced via an aria-live=polite visually-hidden region"]
+    "divergences": ["bare Sandbox collides with the Smithers workflow export in shared scope", "non-ready states render an honest EmptyState instead of placeholder output", "lifecycle state changes are announced via an aria-live=polite visually-hidden region"]
   },
   {
     "file": "src/sandbox/WebPreview.tsx",

@@ -41,15 +41,13 @@ describe("referencedDigests", () => {
     expect(StepBoundary.referencedDigests(referenced)).toEqual([digest])
   })
 
-  it("ignores inline payloads, removals, and legacy rows", () => {
+  it("ignores inline payloads and removals", () => {
     // An inline row carries its bytes with it, a null digest records a removal,
-    // and a round-7 legacy row has no digest at all: none of the three
-    // references the artifact store.
+    // neither references the artifact store.
     const mixed = evidenceFor({
       outputs: [
         { path: "inline.txt", digest: sha256(encoder.encode("small")), content: "c21hbGw=" },
         { path: "removed.txt", digest: null },
-        { path: "legacy.txt", content: "bGVnYWN5" },
         { path: "artifact.bin", digest, sizeBytes: payload.length }
       ]
     })

@@ -14,7 +14,7 @@ const params = {
 
 const attemptKey = (value: unknown): Result.Result<string, Schema.SchemaError> =>
   Effect.runSync(
-    Effect.result(Schema.decodeUnknownEffect(Keys.Key)(value)).pipe(Effect.provide(NodeCrypto.layer))
+    Effect.result(Schema.decodeUnknownEffect(Keys.DerivedKey)(value)).pipe(Effect.provide(NodeCrypto.layer))
   )
 
 const attemptCanonical = (value: unknown): Result.Result<string, Schema.SchemaError> =>

@@ -464,8 +464,7 @@ export type Intent =
  * A cell states its intent by calling, so this is the only place a
  * {@link Cell.Transition} is constructed. The realm is the run's memory and the
  * print buffer is what the next turn reads, so nothing is filed on the way out:
- * the deprecated `state`, `context`, `render` and `recall` fields exist to
- * decode journals written before that was true and are never populated.
+ * the transition carries only the current intent.
  *
  * @category constructors
  * @since 0.1.0
@@ -476,7 +475,7 @@ export const replTransition = (
 ): Cell.Transition => {
   if (intent === undefined) return new Cell.Continue({ justification })
   return intent._tag === "Done"
-    ? new Cell.Complete({ output: intent.output, reason: undefined })
+    ? new Cell.Complete({ output: intent.output })
     : new Cell.Park({ reason: intent.reason, message: intent.message })
 }
 

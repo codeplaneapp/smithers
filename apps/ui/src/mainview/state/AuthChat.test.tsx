@@ -235,7 +235,7 @@ describe("auth is a conversation state — the chat is the only page", () => {
     expect(host.querySelector(".corner-balance-chip")).toBeNull()
     expect(markup()).not.toContain("Balance unavailable")
     expect(markup()).not.toContain("$0")
-    expect(controller.commands.find("balance")?.metadata.aliasOf).toBe("billing.balance")
+    expect(controller.commands.find("billing.balance")).toBeDefined()
     expect(host.querySelector("textarea")?.placeholder).toBe("Ask Smithers to work on something…")
     // Calm is the budget (§2g): the persistent status line is gone — no
     // "live" chrome when healthy, no standing free-chat sentence.

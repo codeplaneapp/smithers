@@ -788,41 +788,10 @@ describe("QuickJSSandbox.openRealm", () => {
 })
 
 describe("Sandbox.replTransition", () => {
-  it("populates none of the deprecated fields the filing surface wrote", () => {
+  it("produces the minimal continuation contract", () => {
     const transition = Sandbox.replTransition(undefined, undefined)
     expect(transition).toEqual(new Cell.Continue({ justification: undefined }))
     expect(Schema.encodeUnknownSync(Cell.Transition)(transition)).toBeDefined()
-  })
-
-  it("still decodes a journal written while those fields carried something", () => {
-    // The r90–r96 waves are on disk and have to stay readable, so the fields
-    // survive on the schema as decode-only. Nothing writes them.
-    const legacy = Schema.decodeUnknownSync(Cell.Transition)({
-      _tag: "continue",
-      state: { plan: ["read"] },
-      context: [{ role: "user", text: "keep exactly this" }],
-      render: ["plan"],
-      recall: [1]
-    })
-    expect(legacy._tag).toBe("continue")
-    expect((legacy as Cell.Continue).state).toEqual({ plan: ["read"] })
-    expect((legacy as Cell.Continue).context?.[0]?.text).toBe("keep exactly this")
-    expect((legacy as Cell.Continue).render).toEqual(["plan"])
-    expect((legacy as Cell.Continue).recall).toEqual([1])
-
-    const completed = Schema.decodeUnknownSync(Cell.Transition)({
-      _tag: "complete",
-      state: { verification: "x" },
-      output: "done"
-    })
-    expect((completed as Cell.Complete).state).toEqual({ verification: "x" })
-    const parked = Schema.decodeUnknownSync(Cell.Transition)({
-      _tag: "park",
-      state: null,
-      reason: "waiting-input",
-      message: "which branch?"
-    })
-    expect((parked as Cell.Park).state).toBeNull()
   })
 })
 

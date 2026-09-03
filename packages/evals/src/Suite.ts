@@ -44,14 +44,6 @@ export interface Case {
 }
 
 /**
- * Alias for a fixed-suite case.
- *
- * @category models
- * @since 0.1.0
- */
-export type SuiteCase = Case
-
-/**
  * Options for constructing a suite.
  *
  * @category models
@@ -63,14 +55,6 @@ export interface MakeOptions {
   readonly bindings?: ReadonlyArray<Binding> | undefined
   readonly concurrency: number
 }
-
-/**
- * Alias for suite construction options.
- *
- * @category models
- * @since 0.1.0
- */
-export type SuiteOptions = MakeOptions
 
 /**
  * A validated, named collection of fixed cases and scorer bindings.

@@ -289,7 +289,7 @@ describe("Sandbox", () => {
 
     expect(outcome).toStrictEqual(
       new Cell.Settled({
-        transition: new Cell.Complete({ output: "1", reason: undefined })
+        transition: new Cell.Complete({ output: "1" })
       })
     )
   })

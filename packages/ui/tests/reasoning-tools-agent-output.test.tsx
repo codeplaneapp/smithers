@@ -9,7 +9,7 @@ describe("reasoning summary safety boundary", () => {
   test("explicit reasoningSummary fields populate the deprecated reasoning alias identically", () => {
     const model = parseAgentOutput({ reasoningSummary: "Provider disclosed summary" });
     expect(model?.reasoningSummary).toBe("Provider disclosed summary");
-    expect(model?.reasoning).toBe("Provider disclosed summary");
+    expect(model?.reasoningSummary).toBe("Provider disclosed summary");
     expect(parseAgentOutput({ reasoning_summary: "Snake summary" })?.reasoningSummary).toBe("Snake summary");
   });
 
@@ -25,7 +25,7 @@ describe("reasoning summary safety boundary", () => {
       thinkingText: "raw thinkingText transcript",
     });
     expect(model?.reasoningSummary).toBeUndefined();
-    expect(model?.reasoning).toBeUndefined();
+    expect(model?.reasoningSummary).toBeUndefined();
 
     const partsModel = parseAgentOutput({
       response: "done",
@@ -36,7 +36,7 @@ describe("reasoning summary safety boundary", () => {
       ],
     });
     expect(partsModel?.reasoningSummary).toBeUndefined();
-    expect(partsModel?.reasoning).toBeUndefined();
+    expect(partsModel?.reasoningSummary).toBeUndefined();
   });
 
   test("summary-typed parts and nested summary arrays are extracted", () => {
@@ -65,7 +65,7 @@ describe("reasoning summary safety boundary", () => {
       ],
     });
     expect(model?.reasoningSummary).toBe("Real reasoning summary");
-    expect(model?.reasoning).toBe("Real reasoning summary");
+    expect(model?.reasoningSummary).toBe("Real reasoning summary");
   });
 
   test("a summary field on an untyped generic content part is never reasoning text", () => {
@@ -82,7 +82,7 @@ describe("reasoning summary safety boundary", () => {
       ],
     });
     expect(model?.reasoningSummary).toBe("Real reasoning summary");
-    expect(model?.reasoning).toBe("Real reasoning summary");
+    expect(model?.reasoningSummary).toBe("Real reasoning summary");
   });
 
   test("drops redacted_thinking parts and signature/redactedData fields", () => {
@@ -96,7 +96,7 @@ describe("reasoning summary safety boundary", () => {
       ],
     });
     expect(model?.reasoningSummary).toBe("Visible summary");
-    expect(model?.reasoning).toBe("Visible summary");
+    expect(model?.reasoningSummary).toBe("Visible summary");
   });
 
   test("renderer prefers reasoningSummary over the deprecated alias", () => {

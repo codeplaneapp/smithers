@@ -158,7 +158,7 @@ describe("agent roles — launching", () => {
 describe("agent roles — the explainer", () => {
   test("agent.explain runs one side turn on the explainer role and streams into an embedded card", async () => {
     const { store, controller, recorder } = await boot()
-    controller.runCommandArgs("explain", "why is vendor/jj not a regular file")
+    controller.runCommandArgs("agent.explain", "why is vendor/jj not a regular file")
     await settle()
     const launch = recorder.launches.at(-1)
     expect(launch).toBeDefined()
@@ -192,7 +192,7 @@ describe("agent roles — the explainer", () => {
       payload: { phase: "failed", error: "upstream refused" }
     })
     const before = recorder.launches.length
-    controller.runCommandArgs("explain", "   ")
+    controller.runCommandArgs("agent.explain", "   ")
     await settle()
     expect(recorder.launches.length).toBe(before)
   })

@@ -8,7 +8,6 @@ import { createAppStore } from "../state/AppStore"
 import { executeAgentToolCall } from "./agentTools"
 import { visibleItems } from "./Commands"
 import {
-  canonical,
   matches,
   namespaceOf,
   namespacesOf,
@@ -74,13 +73,6 @@ describe("command registry pure model", () => {
     expect(recommendedNames({ ...chatState, signedOut: true })).toEqual(["auth.sign-in"])
     // Typing still outranks everything.
     expect(recommendedNames({ ...chatState, signedOut: true, typing: true })).toEqual(["chat.stop"])
-  })
-
-  test("aliases resolve to their canonical target", () => {
-    const commands = [{ name: "theme", summary: "" }, { name: "dark-mode", summary: "", aliasOf: "theme" }]
-    expect(canonical("dark-mode", commands)).toBe("theme")
-    expect(canonical("theme", commands)).toBe("theme")
-    expect(canonical("unknown", commands)).toBe("unknown")
   })
 
   test("slash filtering matches name and summary, case-insensitively", () => {
@@ -219,9 +211,7 @@ describe("command registry pure model", () => {
    */
   /*
    * The namespace tree. A flow's namespace is its dotted head; the only bare
-   * names are the three surface switches. Every other old bare spelling is a
-   * hidden alias, so `/dark-mode` still runs while the menu shows
-   * `/appearance ›` instead of a loose toggle at the top.
+   * names are the three surface switches.
    */
   test("every visible flow lives in a namespace, except the surface switches", async () => {
     const { controller } = await freshController()
@@ -229,36 +219,6 @@ describe("command registry pure model", () => {
       .map((command) => command.name)
       .filter((name) => namespaceOf(name) === undefined && !SURFACE_FLOWS.includes(name))
     expect(orphans).toEqual([])
-  })
-
-  test("the old bare spellings are hidden aliases of their namespaced flows", async () => {
-    const { controller } = await freshController()
-    const registered = controller.commands.all()
-    for (
-      const [bare, home] of [
-        ["dark-mode", "appearance.dark-mode"],
-        ["theme", "appearance.theme"],
-        ["surfaces", "chat.surfaces"],
-        ["retry", "chat.retry"],
-        ["send", "chat.send"],
-        ["clear", "chat.clear"],
-        ["copy-message", "chat.copy-message"],
-        ["reload", "chat.reload"],
-        ["flows", "chat.commands"],
-        ["verbose", "debug.verbose"],
-        ["browser", "browser.open"],
-        ["balance", "billing.balance"],
-        ["stop", "chat.stop"],
-        ["explain", "agent.explain"]
-      ] as const
-    ) {
-      expect(canonical(bare, registered)).toBe(home)
-      expect(controller.commands.find(bare)?.metadata.hidden).toBe(true)
-      expect(controller.commands.find(home)?.metadata.aliasOf).toBeUndefined()
-    }
-    // The alias runs the canonical flow and records the canonical name.
-    expect((await controller.commands.run("dark-mode")).status).toBe("executed")
-    expect(controller.store.session().recentCommands?.[0]).toBe("appearance.dark-mode")
   })
 
   test("namespaces list only where a visible flow lives, in display order", () => {
@@ -478,7 +438,7 @@ describe("command registry bindings", () => {
     expect(localNames).not.toContain("auth.sign-in")
     expect(localNames).not.toContain("issues.list")
     expect(localNames).not.toContain("flow.run")
-    expect(localNames).not.toContain("browser")
+    expect(localNames).not.toContain("browser.open")
 
     const cloud = await freshController({
       apiVersion: 1,
@@ -493,7 +453,7 @@ describe("command registry bindings", () => {
     expect(cloudNames).toContain("auth.sign-in")
     expect(cloudNames).toContain("issues.list")
     expect(cloudNames).toContain("flow.run")
-    expect(cloudNames).toContain("browser")
+    expect(cloudNames).toContain("browser.open")
     expect(cloudNames).not.toContain("repo.open")
     expect(cloudNames).not.toContain("target.run")
     expect(cloudNames).not.toContain("tab.terminal")
@@ -507,25 +467,16 @@ describe("command registry bindings", () => {
       "connect",
       "world",
       "appearance.theme",
-      "theme",
       "appearance.dark-mode",
-      "dark-mode",
       "chat.surfaces",
-      "surfaces",
       "debug.verbose",
-      "verbose",
       "system.recommend",
       "chat",
       "chat.retry",
-      "retry",
       "chat.stop",
-      "stop",
       "chat.send",
-      "send",
       "chat.clear",
-      "clear",
       "browser.open",
-      "browser",
       "flow.create",
       "flow.repo.choose",
       "flow.run.stop",
@@ -553,7 +504,6 @@ describe("command registry bindings", () => {
       "frame.forward",
       "frame.fork",
       "chat.copy-message",
-      "copy-message",
       "approval.approve",
       "approval.deny",
       "connector.add",
@@ -574,7 +524,6 @@ describe("command registry bindings", () => {
       "cloud.sign-out",
       "toast.dismiss",
       "billing.balance",
-      "balance",
       "repos.import",
       "issues.list",
       "issues.view",
@@ -598,10 +547,8 @@ describe("command registry bindings", () => {
       "branches.list",
       "files.list",
       "files.read",
-      // Lane sync: Linear and GitHub sync as actions (ADR 0005); repos.app
-      // stays as github.app's hidden alias.
+      // Lane sync: Linear and GitHub sync as actions (ADR 0005).
       "github.app",
-      "repos.app",
       "github.app.open",
       "github.reconcile",
       "github.mirror-sync",
@@ -642,16 +589,13 @@ describe("command registry bindings", () => {
       "change.revert",
       "change.facet",
       "chat.reload",
-      "reload",
       "chat.commands",
-      "flows",
       "tab.terminal",
       "tab.read",
       "tab.harness",
       "agent.role",
       "agent.delegate",
       "agent.explain",
-      "explain",
       "tab.card",
       "tab.select",
       "tab.close",
@@ -701,7 +645,7 @@ describe("command registry bindings", () => {
     expect(store.session().surface).toBe("chat")
 
     const before = store.session().theme
-    expect((await controller.commands.run("dark-mode")).status).toBe("executed")
+    expect((await controller.commands.run("appearance.dark-mode")).status).toBe("executed")
     expect(store.session().theme).not.toBe(before)
 
     expect((await controller.commands.run("world.new-note")).status).toBe("executed")
@@ -733,19 +677,18 @@ describe("command registry bindings", () => {
     // Not hidden — absent. A non-admin session's enumeration surface has no trace.
     expect(names.some((name) => name.startsWith("admin."))).toBe(false)
     expect((await controller.commands.run("admin.health")).status).toBe("unknown-command")
-    // The bare reset refresh affordance is admin-only too (§2): /reset for a
-    // non-admin renders the same unknown-command state as any typo, and no
-    // registry surface carries it.
-    expect(names).not.toContain("reset")
-    expect((await controller.commands.run("reset")).status).toBe("unknown-command")
-    expect(controller.slashItems("reset")).toHaveLength(0)
+    // The reset affordance is admin-only too (§2): /admin.reset for a
+    // non-admin renders the same unknown-command state as any typo.
+    expect(names).not.toContain("admin.reset")
+    expect((await controller.commands.run("admin.reset")).status).toBe("unknown-command")
+    expect(controller.slashItems("admin.reset")).toHaveLength(0)
     // The agent tool's list carries no trace either.
     const listed = await executeAgentToolCall(controller.commands, {
       name: "commands",
       arguments: JSON.stringify({ action: "list" })
     })
     expect(listed).not.toContain("admin.")
-    expect(listed).not.toContain("\"reset\"")
+    expect(listed).not.toContain("admin.reset")
 
     // Flip the session to admin (as a validated identity.session.loaded would).
     store.dispatch({
@@ -763,7 +706,7 @@ describe("command registry bindings", () => {
     expect(adminNames).toContain("admin.grant")
     expect(adminNames).toContain("admin.requests")
     expect(adminNames).toContain("admin.health")
-    expect(adminNames).toContain("reset")
+    expect(adminNames).toContain("admin.reset")
     expect(adminNames).toContain("admin.reset.ask")
     expect(adminNames).toContain("admin.reset.cancel")
     expect(adminNames).toContain("admin.devtools")
@@ -807,17 +750,16 @@ describe("command registry bindings", () => {
     expect(signIn).toContain("user-only")
     expect(signIn).toContain("answer with text instead")
 
-    // The theme alias executes for the agent now — every listed flow is a
-    // tool call (flows/invocable.test.ts pins the invariant).
+    // Every listed flow is a tool call (flows/invocable.test.ts pins the invariant).
     const theme = await executeAgentToolCall(controller.commands, {
       name: "commands",
-      arguments: JSON.stringify({ action: "execute", name: "theme" })
+      arguments: JSON.stringify({ action: "execute", name: "appearance.theme" })
     })
-    expect(theme).toBe("executed /theme")
+    expect(theme).toBe("executed /appearance.theme")
 
     // The user-only guard never leaks into the user path: the human's own
     // invocation still executes.
-    expect((await controller.commands.run("theme")).status).toBe("executed")
+    expect((await controller.commands.run("appearance.theme")).status).toBe("executed")
   })
 
   /*
@@ -828,16 +770,9 @@ describe("command registry bindings", () => {
    */
   test("the color theme and the light/dark toggle are independent commands", async () => {
     const { store, controller } = await freshController()
-    const registered = controller.commands.all()
-    // Both live in `appearance`; the bare spellings are hidden aliases of them.
-    expect(canonical("theme", registered)).toBe("appearance.theme")
-    expect(canonical("dark-mode", registered)).toBe("appearance.dark-mode")
-    expect(canonical("appearance.dark-mode", registered)).toBe("appearance.dark-mode")
     const toggle = controller.commands.find("appearance.dark-mode")
-    expect(toggle?.metadata.aliasOf).toBeUndefined()
     expect(toggle?.metadata.hidden).toBeUndefined()
-    expect(controller.commands.find("dark-mode")?.metadata.aliasOf).toBe("appearance.dark-mode")
-    // Listed, so the human can find the toggle in the slash menu by either spelling.
+    // Listed, so the human can find the toggle in the slash menu.
     expect(controller.slashItems("dark-mode").map((item) => item.flow.name)).toContain("appearance.dark-mode")
     // The args hint is what makes `/appearance.theme <palette>` parse as an invocation.
     expect(controller.commands.find("appearance.theme")?.metadata.args).toBeDefined()
@@ -845,7 +780,7 @@ describe("command registry bindings", () => {
     // The default palette is night-owl, and every key round-trips.
     expect(store.session().palette).toBe("night-owl")
     for (const palette of PALETTES) {
-      expect((await controller.commands.run("theme", palette)).status).toBe("executed")
+      expect((await controller.commands.run("appearance.theme", palette)).status).toBe("executed")
       expect(store.session().palette).toBe(palette)
     }
     const last = PALETTES[PALETTES.length - 1]
@@ -854,7 +789,7 @@ describe("command registry bindings", () => {
     // An unknown key never rounds to the nearest palette: it fails honestly,
     // opens the picker (the list of valid answers IS the interface), and
     // leaves the current palette alone.
-    const unknown = await controller.commands.run("theme", "dracula")
+    const unknown = await controller.commands.run("appearance.theme", "dracula")
     expect(unknown.status).toBe("failed")
     if (unknown.status === "failed") expect(unknown.error).toContain("night-owl")
     expect(store.session().palette).toBe(last)
@@ -865,22 +800,22 @@ describe("command registry bindings", () => {
     }
 
     // Bare /theme surfaces the picker card with the current palette marked.
-    expect((await controller.commands.run("theme")).status).toBe("executed")
+    expect((await controller.commands.run("appearance.theme")).status).toBe("executed")
     expect(picker()?.kind).toBe("theme-picker")
     if (picker()?.kind === "theme-picker") {
       expect(picker()?.payload).toEqual({ selected: last })
     }
 
     // Choosing from the picker keeps its "current" mark honest.
-    expect((await controller.commands.run("theme", PALETTES[0] ?? "night-owl")).status).toBe("executed")
+    expect((await controller.commands.run("appearance.theme", PALETTES[0] ?? "night-owl")).status).toBe("executed")
     if (picker()?.kind === "theme-picker") {
       expect(picker()?.payload).toEqual({ selected: PALETTES[0] })
     }
-    expect((await controller.commands.run("theme", last ?? "night-owl")).status).toBe("executed")
+    expect((await controller.commands.run("appearance.theme", last ?? "night-owl")).status).toBe("executed")
 
     // The axes never touch: the toggle flips the theme and nothing else.
     const before = store.session().theme
-    expect((await controller.commands.run("dark-mode")).status).toBe("executed")
+    expect((await controller.commands.run("appearance.dark-mode")).status).toBe("executed")
     expect(store.session().theme).not.toBe(before)
     expect(store.session().palette).toBe(last)
   })

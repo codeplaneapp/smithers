@@ -28,17 +28,6 @@ import * as KeyMaterial from "./KeyMaterial.ts"
 import * as StepKey from "./StepKey.ts"
 
 /**
- * Compatibility name for the storage-facing key schema owned by
- * `@smthrs/keys`. `StepKey.content` produces this branded value and a
- * persisted plan validates it without re-hashing it.
- *
- * @since 0.1.0
- * @category schemas
- * @slop
- */
-export const KeyDigest = StoredKey
-
-/**
  * What a node does to the world, declared. Paths only — measuring them is
  * run-time work, so a digest here would break the no-I/O law.
  *
@@ -50,11 +39,9 @@ export const NodeEffects = Schema.Struct({
   reads: Schema.Array(FileSet.ReadDeclaration),
   writes: Schema.Array(FileSet.Declaration),
   /**
-   * Paths the node declares it will DELETE. Optional with an empty default, so
-   * plans persisted before it keep decoding. A removal mutates the world
-   * exactly as a write does, so {@link produces} folds the two together and
-   * both the conflict pass and the reader-after-writer pass see them as one
-   * set.
+   * Paths the node declares it will DELETE. A removal mutates the world exactly
+   * as a write does, so {@link produces} folds the two together and both the
+   * conflict pass and the reader-after-writer pass see them as one set.
    */
   removes: Schema.optional(Schema.Array(FileSet.Pattern)),
   boundaryMode: Schema.Literals(["hard", "expected"])
@@ -155,7 +142,7 @@ export type ConflictAnnotation = typeof ConflictAnnotation.Type
 export const PlanNode = Schema.Struct({
   id: Schema.NonEmptyString,
   kind: NodeKind,
-  key: KeyDigest,
+  key: StoredKey,
   material: KeyMaterial.KeyMaterial,
   effects: NodeEffects,
   dependsOn: Schema.Array(Schema.NonEmptyString),
@@ -189,8 +176,8 @@ export const Plan = Schema.Struct({
   planId: Schema.NonEmptyString,
   flow: Schema.NonEmptyString,
   generation: Schema.Int,
-  baseDigest: KeyDigest,
-  digest: KeyDigest,
+  baseDigest: StoredKey,
+  digest: StoredKey,
   nodes: Schema.Array(PlanNode)
 })
 

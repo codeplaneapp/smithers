@@ -13,10 +13,7 @@
  * A cell does not *return* its transition. The realm is a REPL that outlives
  * the cell, so a cell states its intent by calling `ctx.done` or `ctx.park` and
  * `Sandbox.replTransition` builds the value; there is no returned object to
- * decode. What the cell filed by hand — durable state, a projected context, a
- * list of keys to re-render, a list of ordinals to recall — is gone with the
- * surface that asked for it, and the fields survive here for one purpose only:
- * decoding the journals that were written while it existed.
+ * decode.
  *
  * Governing design: `../docs/concepts.md#durable-cell-loop`,
  * `../docs/concepts.md#repl-realm` and
@@ -95,78 +92,17 @@ export const source = (text: string, language: Language = "javascript"): Source 
   new Source({ language, text, digest: digestOf(language, text) })
 
 /**
- * One projected message a filing cell placed in the next model context.
- *
- * **Deprecated: decode-only.** It is the element type of {@link Continue}
- * `context`, and nothing constructs one any more. See that field.
- *
- * @category models
- * @since 0.1.0
- * @deprecated
- * @slop
- */
-export class ContextEntry extends Schema.Class<ContextEntry>("flows/harness/Cell/ContextEntry")({
-  role: Schema.Literals(["user", "assistant"]),
-  text: Schema.String
-}) {}
-
-/**
  * The cell's turn ended without settling the run.
  *
  * A REPL cell that calls neither `ctx.done` nor `ctx.park` gets another frame,
  * and this is what that frame is journaled as. The only thing it carries is a
- * justification, because everything else a `continue` used to carry was the
- * filing surface's bookkeeping and the realm holds it now.
- *
- * The four deprecated fields below are decode-only. They stay on the schema —
- * rather than behind a versioned decoder — because a journal payload carries no
- * version to switch on: the events are read back by decoding this very class,
- * so one schema that accepts both shapes is the only mechanism that leaves the
- * r90–r96 waves readable. They are optional, nothing populates them, and no
- * behaviour reads them.
+ * justification; all other bookkeeping belongs to the realm.
  *
  * @category models
  * @since 0.1.0
  * @slop
  */
 export class Continue extends Schema.TaggedClass<Continue>("flows/harness/Cell/Continue")("continue", {
-  /**
-   * The JSON a filing cell filed for its successor.
-   *
-   * **Deprecated: decode-only.** The realm is the run's memory now — a name a
-   * cell binds is still bound in the next cell — so there is nothing to file
-   * and nothing to re-read. See `../docs/concepts.md#repl-realm`.
-   *
-   * @deprecated
-   */
-  state: Schema.optional(Schema.Json),
-  /**
-   * The exact messages a filing cell chose for its successor's context.
-   *
-   * **Deprecated: decode-only.** A REPL run's window is
-   * `[cell₁, prints₁], [cell₂, prints₂], …`, appended rather than replaced, so
-   * what the next turn reads is what the cell printed.
-   *
-   * @deprecated
-   */
-  context: Schema.optional(Schema.Array(ContextEntry)),
-  /**
-   * Ordinals of settled calls a filing cell asked to be shown again.
-   *
-   * **Deprecated: decode-only.** A REPL run's results are under the names its
-   * cells gave them, so there is nothing to recall.
-   *
-   * @deprecated
-   */
-  recall: Schema.optional(Schema.Array(Schema.Number)),
-  /**
-   * Durable-state keys a filing cell asked to be shown in full.
-   *
-   * **Deprecated: decode-only.** The sibling of `state`, and gone with it.
-   *
-   * @deprecated
-   */
-  render: Schema.optional(Schema.Array(Schema.String)),
   /**
    * Why this frame changed nothing, when the controller demanded that it
    * either mutate or say why not.
@@ -195,23 +131,7 @@ export class Continue extends Schema.TaggedClass<Continue>("flows/harness/Cell/C
  * @slop
  */
 export class Complete extends Schema.TaggedClass<Complete>("flows/harness/Cell/Complete")("complete", {
-  /**
-   * The JSON a filing cell filed alongside its answer.
-   *
-   * **Deprecated: decode-only.** See {@link Continue} `state`.
-   *
-   * @deprecated
-   */
-  state: Schema.optional(Schema.Json),
-  output: Schema.String,
-  /**
-   * **Deprecated: decode-only.** Nothing in this release populates it and
-   * nothing reads it. It remains so journals written before the cell-first
-   * loop still decode.
-   *
-   * @deprecated
-   */
-  reason: Schema.optional(Schema.String)
+  output: Schema.String
 }) {}
 
 /**
@@ -222,14 +142,6 @@ export class Complete extends Schema.TaggedClass<Complete>("flows/harness/Cell/C
  * @slop
  */
 export class Park extends Schema.TaggedClass<Park>("flows/harness/Cell/Park")("park", {
-  /**
-   * The JSON a filing cell filed alongside its question.
-   *
-   * **Deprecated: decode-only.** See {@link Continue} `state`.
-   *
-   * @deprecated
-   */
-  state: Schema.optional(Schema.Json),
   reason: Schema.Literals(["waiting-input", "waiting-event", "waiting-quota"]),
   message: Schema.String
 }) {}

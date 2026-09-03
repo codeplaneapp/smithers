@@ -35,6 +35,7 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { dirname } from "node:path"
 
 /** The child's one step: park until somebody answers. */
 export const Watch = Flow.make("examples/Watch", {
@@ -107,6 +108,7 @@ const host = <Registered, RegistrationRequirements>(
   NodeRuntime.layerHost(
     {
       filename,
+      workspaceRoot: dirname(filename),
       owner: { hostId },
       // No signal handlers: the example is the one deciding when things stop.
       signals: [],

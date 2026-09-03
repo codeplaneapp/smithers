@@ -196,6 +196,7 @@ const registerFlows = Layer.mergeAll(Interpreter.layer(Review), Interpreter.laye
 
 const options = (hostId: string) => ({
   filename,
+  workspaceRoot: directory,
   owner: { hostId },
   // A single-process host: no previously recorded owner is ever still alive.
   isAlive: () => Effect.succeed(false)
@@ -255,13 +256,20 @@ describe("the supported Node SQLite composition", () => {
         Layer.empty
       )
 
-    expect(declare({ filename: "", owner: { hostId: "gate" }, isAlive: () => Effect.succeed(false) }))
+    expect(
+      declare({
+        filename: "",
+        workspaceRoot: directory,
+        owner: { hostId: "gate" },
+        isAlive: () => Effect.succeed(false)
+      })
+    )
       .toThrowError(refusal("filename"))
-    expect(declare({ filename, owner: { hostId: "" }, isAlive: () => Effect.succeed(false) }))
+    expect(declare({ filename, workspaceRoot: directory, owner: { hostId: "" }, isAlive: () => Effect.succeed(false) }))
       .toThrowError(refusal("owner.hostId"))
     // A JavaScript caller can omit `owner` altogether; the refusal still has
     // to name the field rather than crash on the dereference.
-    expect(declare({ filename, isAlive: () => Effect.succeed(false) } as never))
+    expect(declare({ filename, workspaceRoot: directory, isAlive: () => Effect.succeed(false) } as never))
       .toThrowError(refusal("owner.hostId"))
     expect(declare({ filename, workspaceRoot: "", owner: { hostId: "gate" }, isAlive: () => Effect.succeed(false) }))
       .toThrowError(refusal("workspaceRoot"))
@@ -273,7 +281,9 @@ describe("the supported Node SQLite composition", () => {
     // is not a JSON value. A JavaScript caller that passes the wrong shape has
     // to hear about it here rather than at the first ownership claim, hours
     // into a run.
-    expect(declare({ filename, owner: { hostId: "gate" }, isAlive: "not a function" as never }))
+    expect(
+      declare({ filename, workspaceRoot: directory, owner: { hostId: "gate" }, isAlive: "not a function" as never })
+    )
       .toThrowError(refusal("isAlive"))
     // Nothing above may have created the database the journey below owns.
     expect(existsSync(filename)).toBe(false)
@@ -304,6 +314,7 @@ describe("the supported Node SQLite composition", () => {
     const originalDirectory = process.cwd()
     const mutable = {
       filename: "state/runtime.sqlite",
+      workspaceRoot: directory,
       owner: { hostId: "relative-a" },
       isAlive: () => Effect.succeed(false)
     }
@@ -453,6 +464,7 @@ describe("the supported Node SQLite composition", () => {
         const context = yield* NodeRuntime.make(
           {
             filename: own,
+            workspaceRoot: directory,
             owner: { hostId: "make-context" },
             isAlive: () => Effect.succeed(false)
           },
@@ -644,7 +656,7 @@ describe("the Node host composition", () => {
   it("cannot name a registry service without supplying its layer", () => {
     // @ts-expect-error the registry-typed overload requires the registry layer
     const declared = NodeRuntime.layerHost<never, never, never, Catalog, never, never>(
-      { filename: hostFile, owner: { hostId: "registry-arity-host" }, signals: [] },
+      { filename: hostFile, workspaceRoot: directory, owner: { hostId: "registry-arity-host" }, signals: [] },
       Layer.empty
     )
     expect(declared).toBeDefined()
@@ -686,6 +698,7 @@ describe("the Node host composition", () => {
           NodeRuntime.layerHost(
             {
               filename: hostFile,
+              workspaceRoot: directory,
               owner: { hostId: "host-a" },
               signals: [],
               rules: [[
@@ -710,7 +723,7 @@ describe("the Node host composition", () => {
       Host.execute({ what: "spawn" }, { executionId: "host-spawn" }).pipe(
         Effect.provide(
           NodeRuntime.layerHost(
-            { filename: hostFile, owner: { hostId: "host-b" }, signals: [] },
+            { filename: hostFile, workspaceRoot: directory, owner: { hostId: "host-b" }, signals: [] },
             hostFlows
           )
         ),
@@ -750,6 +763,7 @@ describe("the Node host composition", () => {
           NodeRuntime.layerHost(
             {
               filename: hostFile,
+              workspaceRoot: directory,
               owner: { hostId: "host-registry" },
               signals: [],
               rules: [[
@@ -788,7 +802,13 @@ describe("the Node host composition", () => {
       Effect.runPromise(
         Host.execute({ what: "spawn" }, { executionId }).pipe(
           Effect.provide(
-            NodeRuntime.layerHost({ filename: hostFile, owner: { hostId }, signals: [], rules }, hostFlows)
+            NodeRuntime.layerHost({
+              filename: hostFile,
+              workspaceRoot: directory,
+              owner: { hostId },
+              signals: [],
+              rules
+            }, hostFlows)
           ),
           Effect.scoped
         )
@@ -808,7 +828,10 @@ describe("the Node host composition", () => {
     const during = await Effect.runPromise(
       Effect.sync(() => process.listenerCount("SIGTERM")).pipe(
         Effect.provide(
-          NodeRuntime.layerHost({ filename: hostFile, owner: { hostId: "host-c" } }, Layer.empty)
+          NodeRuntime.layerHost(
+            { filename: hostFile, workspaceRoot: directory, owner: { hostId: "host-c" } },
+            Layer.empty
+          )
         ),
         Effect.scoped
       )
@@ -871,7 +894,12 @@ describe("the Node host composition", () => {
     for (const signal of ["SIGKILL", "SIGSTOP", "SIGNOTASIGNAL"] as Array<NodeJS.Signals>) {
       expect(() =>
         NodeRuntime.layerHost(
-          { filename: hostFile, owner: { hostId: "invalid-signal" }, signals: ["SIGUSR2", signal] },
+          {
+            filename: hostFile,
+            workspaceRoot: directory,
+            owner: { hostId: "invalid-signal" },
+            signals: ["SIGUSR2", signal]
+          },
           Layer.empty
         )
       ).toThrow(/cannot install signal/)
@@ -887,7 +915,13 @@ describe("the Node host composition", () => {
     ) {
       expect(() =>
         NodeRuntime.layerHost(
-          { filename: hostFile, owner: { hostId: "invalid-timeout" }, signals: [], shutdownTimeoutMs },
+          {
+            filename: hostFile,
+            workspaceRoot: directory,
+            owner: { hostId: "invalid-timeout" },
+            signals: [],
+            shutdownTimeoutMs
+          },
           Layer.empty
         )
       ).toThrow(/shutdownTimeoutMs/)
@@ -904,13 +938,24 @@ describe("the Node host composition", () => {
     const before = process.listenerCount("SIGUSR2")
     expect(() =>
       NodeRuntime.layerHost(
-        { filename: hostFile, owner: { hostId: "invalid-signals" }, signals: "SIGTERM" as never },
+        {
+          filename: hostFile,
+          workspaceRoot: directory,
+          owner: { hostId: "invalid-signals" },
+          signals: "SIGTERM" as never
+        },
         Layer.empty
       )
     ).toThrow(/signals must be an array/)
     expect(() =>
       NodeRuntime.layerHost(
-        { filename: hostFile, owner: { hostId: "invalid-rules" }, signals: [], rules: "deny-everything" as never },
+        {
+          filename: hostFile,
+          workspaceRoot: directory,
+          owner: { hostId: "invalid-rules" },
+          signals: [],
+          rules: "deny-everything" as never
+        },
         Layer.empty
       )
     ).toThrow(/rules must be an array/)
@@ -921,6 +966,7 @@ describe("the Node host composition", () => {
       NodeRuntime.layerHost(
         {
           filename: hostFile,
+          workspaceRoot: directory,
           owner: { hostId: "invalid-ruleset" },
           signals: [],
           rules: [[], "deny-everything"] as never
@@ -1008,6 +1054,7 @@ describe("the Node host composition", () => {
     const declared = NodeRuntime.layerHost(
       {
         filename: containmentFile,
+        workspaceRoot: directory,
         owner: { hostId: containmentHost },
         signals: [],
         containment
@@ -1051,7 +1098,7 @@ describe("the Node host composition", () => {
         }).pipe(
           Effect.provide(
             NodeRuntime.layerHost(
-              { filename: hostFile, owner: { hostId: "host-twice" }, shutdownTimeoutMs: 0 },
+              { filename: hostFile, workspaceRoot: directory, owner: { hostId: "host-twice" }, shutdownTimeoutMs: 0 },
               Layer.empty
             )
           ),
@@ -1099,6 +1146,7 @@ describe("the Node host composition", () => {
           NodeRuntime.layerHost(
             {
               filename: hostFile,
+              workspaceRoot: directory,
               owner: { hostId: "host-d" },
               signals: ["SIGUSR2"],
               rules: [[
@@ -1141,7 +1189,7 @@ describe("the Node host composition", () => {
       Effect.exit(Host.execute({ what: "mutate" }, { executionId: "host-mutate" })).pipe(
         Effect.provide(
           NodeRuntime.layerHost(
-            { filename: hostFile, owner: { hostId: "host-m" }, signals: [] },
+            { filename: hostFile, workspaceRoot: hostRoot, owner: { hostId: "host-m" }, signals: [] },
             hostFlows
           )
         ),
@@ -1155,7 +1203,7 @@ describe("the Node host composition", () => {
       Host.execute({ what: "jj-status" }, { executionId: "host-jj-status" }).pipe(
         Effect.provide(
           NodeRuntime.layerHost(
-            { filename: hostFile, owner: { hostId: "host-j" }, signals: [] },
+            { filename: hostFile, workspaceRoot: hostRoot, owner: { hostId: "host-j" }, signals: [] },
             hostFlows
           )
         ),
@@ -1174,6 +1222,7 @@ describe("the Node host composition", () => {
           NodeRuntime.layerHost(
             {
               filename: hostFile,
+              workspaceRoot: hostRoot,
               owner: { hostId: "host-n" },
               signals: [],
               rules: [
@@ -1202,6 +1251,7 @@ describe("the Node host composition", () => {
       NodeRuntime.layerHost(
         {
           filename: hostFile,
+          workspaceRoot: directory,
           owner: { hostId },
           signals: [],
           containment: { graceMs: 300 },

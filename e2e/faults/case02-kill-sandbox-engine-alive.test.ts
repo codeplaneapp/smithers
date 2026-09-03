@@ -62,7 +62,7 @@ const probe = (executionId: string): Promise<typeof Report.Type> =>
     CheckSandbox.execute({}, { executionId }).pipe(
       Effect.provide(
         NodeRuntime.layerHost(
-          { filename: join(directory, "case02.sqlite"), owner: { hostId: "case02-host" }, signals: [] },
+          { filename: join(directory, "case02.sqlite"), workspaceRoot: directory, owner: { hostId: "case02-host" }, signals: [] },
           registration
         ).pipe(
           Layer.provideMerge(SandboxHealth.layer(sandbox.provider, { deadline: "500 millis" }))

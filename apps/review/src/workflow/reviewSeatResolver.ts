@@ -254,7 +254,7 @@ export function reviewSeatResolver(
               )
               : provider === "openrouter"
               ? seatOf(
-                Route.openaiCompatible({
+                Route.openaiResponsesCompatible({
                   id: "openrouter",
                   baseUrl: "https://openrouter.ai/api",
                   apiKey: credential,

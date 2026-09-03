@@ -12,7 +12,7 @@ import {
 } from "../chain/SchemaVersion"
 import { openSqliteRowStorage } from "../chain/SqliteRowStorage"
 import { openTransactionalStorage } from "../chain/TransactionalStorage"
-import type { LegacyCollectionSpec, TransactionalStorage } from "../chain/TransactionalStorage"
+import type { TransactionalStorage } from "../chain/TransactionalStorage"
 import { PALETTE_MIRROR_KEY, rememberAppearance, THEME_MIRROR_KEY } from "./Appearance"
 import {
   BillingAccountSchema,
@@ -265,7 +265,7 @@ interface ResolvedPersistence {
 
 const OPFS_DATABASE_NAME = "smithers-mvp.sqlite"
 
-const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
+const PERSISTED_COLLECTION_SPECS = [
   { id: "app-sessions", schema: SessionSchema },
   { id: "app-messages", schema: MessageSchema },
   { id: "app-connectors", schema: LocalRepositoryConnectorSchema },
@@ -1078,11 +1078,9 @@ export const createAppStore = async (
   let transactional: TransactionalStorage | undefined
   if (persistedLocally !== undefined && resolvedBackend.kind === "localStorage") {
     enforceSchemaVersion(persistedLocally)
-    /* Open recovers any interrupted localStorage commit and migrates or
-     * quarantines the envelope before the first collection reads it. */
-    transactional = await openTransactionalStorage(persistedLocally, {
-      collections: PERSISTED_COLLECTION_SPECS
-    })
+    /* Open recovers any interrupted localStorage commit and validates the
+     * envelope before the first collection reads it. */
+    transactional = await openTransactionalStorage(persistedLocally)
     resolvedBackend = { ...resolvedBackend, storage: transactional.storage }
   }
   const collections: AppCollections = {
@@ -2753,9 +2751,8 @@ export const createAppStore = async (
         case "repo.selected": {
           /*
            * Lane piper grammar: `org/repo` selects the repository (its
-           * head), `org/repo#copyId` one working copy. The legacy pin key
-           * (`local:/path`) still selects, so rows persisted before the
-           * grammar keep working until every reader moves.
+           * head), `org/repo#copyId` one working copy, and `local:/path` a
+           * checkout with no repository remote.
            */
           const selection = parseRepoSelection(transition.id)
           if (selection === null) return
@@ -2767,8 +2764,8 @@ export const createAppStore = async (
               ![...collections.workingCopies.values()].some((copy) => copy.repoId === selection.repoId)
             ) return
           } else if (
-            collections.pinnedRepos.get(selection.legacyCopyId) === undefined &&
-            collections.workingCopies.get(selection.legacyCopyId) === undefined
+            collections.pinnedRepos.get(selection.localCopyId) === undefined &&
+            collections.workingCopies.get(selection.localCopyId) === undefined
           ) return
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.activeRepoKey = transition.id

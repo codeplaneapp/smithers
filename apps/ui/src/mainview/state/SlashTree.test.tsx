@@ -137,17 +137,12 @@ describe("the slash menu is a tree", () => {
     expect(view.controller.store.session().draft).toBe("/chat.")
   })
 
-  test("a leaf's Enter runs the flow, by canonical name or by its old bare spelling", async () => {
+  test("a leaf's Enter runs the flow by name", async () => {
     const view = await mount()
     await view.act(() => view.controller.changeDraft("/appearance."))
     await press(view, "ArrowDown")
     await press(view, "Enter")
     expect(view.controller.store.session().draft).toBe("")
     expect(view.controller.store.session().recentCommands?.[0]).toBe("appearance.dark-mode")
-    const before = view.controller.store.session().theme
-    await view.act(() => view.controller.changeDraft("/dark-mode"))
-    expect(rows(view.host)).toEqual(["appearance.dark-mode"])
-    await press(view, "Enter")
-    expect(view.controller.store.session().theme).not.toBe(before)
   })
 })

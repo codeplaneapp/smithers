@@ -339,12 +339,8 @@ export const TargetDefinitionSchema = z.object({
 })
 export type TargetDefinition = z.infer<typeof TargetDefinitionSchema>
 
-/*
- * The browser receives an opaque id minted by the local repository authority.
- * Optional keeps previously persisted target cards readable; a legacy row has
- * no runnable capability until the repository is queried again.
- */
-export const TargetSchema = TargetDefinitionSchema.extend({ id: z.string().min(1).optional() })
+/** The browser receives an opaque id minted by the local repository authority. */
+export const TargetSchema = TargetDefinitionSchema.extend({ id: z.string().min(1) })
 export type Target = z.infer<typeof TargetSchema>
 
 /** `POST /api/targets/query` */

@@ -1,12 +1,10 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import { z } from "zod"
 import {
   ENVELOPE_QUARANTINE_PREFIX,
   ENVELOPE_STORAGE_KEY,
   ENVELOPE_VERSION,
   openTransactionalStorage,
-  ROW_QUARANTINE_PREFIX,
   STAGED_ENVELOPE_STORAGE_KEY
 } from "./TransactionalStorage"
 
@@ -41,10 +39,7 @@ const scriptableHost = () => {
   return host
 }
 
-const WidgetSchema = z.object({ id: z.string(), label: z.string() })
-const COLLECTIONS = [{ id: "widgets", schema: WidgetSchema }]
-
-const open = (host: StorageApi) => openTransactionalStorage(host, { collections: COLLECTIONS })
+const open = (host: StorageApi) => openTransactionalStorage(host)
 
 /** The envelope bytes an open store committed, decoded. */
 const liveEntries = (host: StorageApi): Record<string, string> => {
@@ -176,54 +171,13 @@ describe("the write-ahead commit protocol", () => {
   })
 })
 
-describe("versioned envelopes, migrations, and quarantine", () => {
-  test("unstamped legacy rows are schema-decoded before adoption, never adopted blind", async () => {
+describe("versioned envelopes and quarantine", () => {
+  test("an envelope from an unsupported earlier version is quarantined", async () => {
     const host = scriptableHost()
-    // The pre-envelope layout: one host key per collection, TanStack's
-    // { encodedKey: { versionKey, data } } map, with one row that satisfies
-    // the schema and one that does not.
-    host.setItem(
-      "smithers-mvp.widgets",
-      JSON.stringify({
-        w1: { versionKey: "v1", data: { id: "w1", label: "adopted" } },
-        w2: { versionKey: "v2", data: { id: "w2", label: 42 } }
-      })
-    )
-    const store = await open(host)
-    const adopted = JSON.parse(liveEntries(host)["smithers-mvp.widgets"] ?? "{}") as Record<string, unknown>
-    expect(Object.keys(adopted)).toEqual(["w1"])
-    expect(store.quarantinedKeys).toEqual([`${ROW_QUARANTINE_PREFIX}widgets.w2`])
-    // The quarantined row keeps its raw bytes and is never deleted.
-    expect(host.getItem(`${ROW_QUARANTINE_PREFIX}widgets.w2`)).toContain("\"label\":42")
-    // The legacy key left the live namespace.
-    expect(host.getItem("smithers-mvp.widgets")).toBe(null)
-    await open(host)
-    expect(host.getItem(`${ROW_QUARANTINE_PREFIX}widgets.w2`)).toContain("\"label\":42")
-  })
-
-  test("a legacy collection key whose bytes do not parse is quarantined whole", async () => {
-    const host = scriptableHost()
-    host.setItem("smithers-mvp.widgets", "{not json")
-    const store = await open(host)
-    expect(store.quarantinedKeys).toEqual([`${ENVELOPE_QUARANTINE_PREFIX}unparseable.widgets`])
-    expect(host.getItem(`${ENVELOPE_QUARANTINE_PREFIX}unparseable.widgets`)).toBe("{not json")
-    expect(host.getItem("smithers-mvp.widgets")).toBe(null)
-  })
-
-  test("migrations run in order from the stored version to the current one", async () => {
-    const host = scriptableHost()
-    // A version-0 envelope (envelope entries already present) plus legacy
-    // host rows: the 0→1 step must run over the envelope's own entries too.
     host.setItem(ENVELOPE_STORAGE_KEY, JSON.stringify({ version: 0, entries: { earlier: "kept" } }))
-    host.setItem(
-      "smithers-mvp.widgets",
-      JSON.stringify({ w1: { versionKey: "v", data: { id: "w1", label: "migrated" } } })
-    )
     const store = await open(host)
-    expect(store.storage.getItem("earlier")).toBe("kept")
-    expect(store.storage.getItem("smithers-mvp.widgets")).toContain("\"label\":\"migrated\"")
-    const raw = host.getItem(ENVELOPE_STORAGE_KEY)
-    expect((JSON.parse(raw ?? "{}") as { version: number }).version).toBe(ENVELOPE_VERSION)
+    expect(store.quarantinedKeys).toEqual([`${ENVELOPE_QUARANTINE_PREFIX}unsupported.0`])
+    expect(store.storage.getItem("earlier")).toBe(null)
   })
 
   test("an envelope from a future version quarantines and is never deleted", async () => {

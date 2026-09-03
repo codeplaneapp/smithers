@@ -77,15 +77,15 @@ describe("/verbose", () => {
 
   test("a hidden flow leaves a trace line only while verbose is on", async () => {
     const { store, controller } = await fresh()
-    // `stop` is a hidden alias of chat.stop: off, it leaves no line at all.
-    await controller.commands.run("stop")
+    // When verbosity is off, a hidden presentation action leaves no line.
+    await controller.commands.run("card.minimize")
     expect(traces(store)).toEqual([])
     const before = [...store.collections.messages.values()].length
 
     await controller.commands.run("debug.verbose")
-    await controller.commands.run("stop")
+    await controller.commands.run("card.minimize")
     const lines = traces(store)
-    expect(lines.some((line) => line.startsWith("You ran /stop [hidden] → executed"))).toBe(true)
+    expect(lines.some((line) => line.startsWith("You ran /card.minimize [hidden] → executed"))).toBe(true)
     // Every act is recorded as a transition whether or not it is rendered.
     const invoked = [...store.collections.transitions.values()].filter((record) => record.type === "flow.invoked")
     expect(invoked.length).toBeGreaterThanOrEqual(2)

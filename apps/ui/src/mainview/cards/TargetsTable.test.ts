@@ -109,7 +109,7 @@ describe("name groups across packages", () => {
     const group = rows[0]?.group
     expect(group?.members.map((member) => member.target.label)).toEqual(["//packages/a:lint", "//packages/b:lint", "//packages/c:lint"])
     expect(rows[0]?.target.kinds).toEqual(["lint", "check"])
-    expect(rows[0]?.target.id).toBeUndefined()
+    expect(rows[0]?.target.id).toBe("//...:lint")
   })
 
   test("a group's state is its worst member's, its last run the latest, and its summary counts states", () => {

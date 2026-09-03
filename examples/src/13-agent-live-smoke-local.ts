@@ -1,7 +1,7 @@
 /**
  * A live smoke test against a fully local model: the same assembled
  * production agent stack as {@link liveOpenAiSmoke} (see `12-agent-live-smoke.ts`),
- * run against Ollama over `Route.openaiCompatible` instead of a paid provider.
+ * run against Ollama over `Route.openaiChatCompatible` instead of a paid provider.
  *
  * This needs no API key, no billing, and no external network access — only
  * a local Ollama daemon with a model pulled (`ollama pull qwen2.5:7b`). It
@@ -63,7 +63,7 @@ export const liveLocalSeats = (baseUrl: string) =>
           Effect.gen(function*() {
             const modelId = Seat.modelIdOf(id)
             const routeConfig = yield* Effect.fromResult(
-              Route.openaiCompatible({ id: "local", baseUrl, apiKey: Redacted.make("local") })
+              Route.openaiChatCompatible({ id: "local", baseUrl, apiKey: Redacted.make("local") })
             ).pipe(
               Effect.mapError((error) => new Seat.SeatUnresolved({ seat: id, message: error.message }))
             )
@@ -162,7 +162,7 @@ export const liveLayer = (baseUrl: string) =>
  * @category constructors
  * @since 0.1.0
  */
-export const main = (question: string, baseUrl = "http://localhost:11434/v1") =>
+export const main = (question: string, baseUrl = "http://localhost:11434") =>
   LiveSmokeLocalWorkflow.execute(
     { question },
     { executionId: `live-smoke-local-${Date.now()}` }

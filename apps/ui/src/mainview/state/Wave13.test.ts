@@ -190,7 +190,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
      * must name both shapes.
      */
     const prompt = smithersInstructions(
-      [{ name: "browser", summary: "Open a web page as a card Smithers can read", args: "<url>" }],
+      [{ name: "browser.open", summary: "Open a web page as a card Smithers can read", args: "<url>" }],
       {
         github: { connected: true, login: "codeplanesmithers", repositories: 1 },
         localRepositories: [],

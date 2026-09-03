@@ -1310,14 +1310,8 @@ export const make = (
         }
         const existing = yield* store.get(options.executionId).pipe(Effect.orDie)
         const persisted = yield* decodeState(existing.stateJson)
-        // A pre-lineage round-0 row has null metadata. It remains an identical
-        // root create after the additive migration; later rounds must carry
-        // the exact chain metadata because no earlier build could create them.
-        const legacyRoot = options.roundOrdinal === 0 &&
-          existing.lineageId == null &&
-          existing.roundOrdinal == null
-        const sameRound = legacyRoot ||
-          (existing.lineageId === options.lineageId && existing.roundOrdinal === options.roundOrdinal)
+        const sameRound = existing.lineageId === options.lineageId &&
+          existing.roundOrdinal === options.roundOrdinal
         const sameParent = options.parentRunId === undefined ||
           existing.parentRunId === options.parentRunId
         if (
@@ -1564,8 +1558,8 @@ export const make = (
     const handOff = (seam: HandoffSeam): Effect.Effect<void, never, Crypto.Crypto> =>
       FlowEngine.Round.next(
         {
-          lineageId: seam.row.lineageId ?? seam.executionId,
-          ordinal: seam.row.roundOrdinal ?? 0
+          lineageId: seam.row.lineageId!,
+          ordinal: seam.row.roundOrdinal!
         },
         // The origin persisted its budget into every round's state, so a
         // multi-flow handoff cannot reset the lineage by changing targets.

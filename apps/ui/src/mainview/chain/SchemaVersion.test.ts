@@ -44,7 +44,7 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
  * {"<key>": {versionKey, data}}. Writing one by hand is how a store left by an
  * older build is reproduced without shipping an old build.
  */
-const legacyRow = (key: string, row: Record<string, unknown>): string =>
+const persistedRow = (key: string, row: Record<string, unknown>): string =>
   JSON.stringify({ [key]: { versionKey: "legacy", data: row } })
 
 describe("the persisted collection inventory the gate clears", () => {
@@ -92,38 +92,12 @@ describe("enforceSchemaVersion", () => {
   test("stamps a fresh store and then matches it", () => {
     const storage = memoryStorage()
     const first = enforceSchemaVersion(storage)
-    expect(first.action).toBe("adopt")
+    expect(first.action).toBe("match")
     expect(first.from).toBe(null)
     expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(String(APP_SCHEMA_VERSION))
     const second = enforceSchemaVersion(storage)
     expect(second.action).toBe("match")
     expect(second.clearedKeys).toEqual([])
-  })
-
-  /*
-   * The upgrade path, and the reason `adopt` exists. Every store written
-   * before this gate shipped carries no stamp. Clearing it would wipe the
-   * conversation of every existing user on their first boot after the
-   * upgrade — the silent whole-store loss the backend stamp exists to
-   * prevent, reintroduced by the version half.
-   *
-   * This caught a real regression: the gate's first form cleared unstamped
-   * stores, which failed the connectors e2e suite because its seeded rows
-   * were wiped before the collections loaded.
-   */
-  test("adopts an unstamped store instead of wiping a pre-gate user's data", () => {
-    const storage = memoryStorage()
-    for (const key of persistedStorageKeys()) storage.setItem(key, "{\"rows\":\"real user data\"}")
-    const outcome = enforceSchemaVersion(storage)
-    expect(outcome.action).toBe("adopt")
-    expect(outcome.from).toBe(null)
-    expect(outcome.clearedKeys).toEqual([])
-    for (const key of persistedStorageKeys()) {
-      expect(storage.getItem(key)).toBe("{\"rows\":\"real user data\"}")
-    }
-    expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(String(APP_SCHEMA_VERSION))
-    // Adopted once: the next boot is an ordinary match, not a second adopt.
-    expect(enforceSchemaVersion(storage).action).toBe("match")
   })
 
   test("clears every declared collection key on a bump", () => {
@@ -167,8 +141,7 @@ describe("enforceSchemaVersion", () => {
   test("an enumerating storage also clears a retired collection's key", () => {
     const storage = enumerableStorage()
     storage.setItem(`${PERSISTED_KEY_PREFIX}app-retired-collection`, "{}")
-    // A genuine bump, so the stamp must be present: an unstamped store is
-    // adopted rather than cleared, and would clear nothing to enumerate.
+    // A genuine bump, so the stamp must be present.
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
     const outcome = enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1 })
     expect(outcome.clearedKeys).toContain(`${PERSISTED_KEY_PREFIX}app-retired-collection`)
@@ -185,39 +158,6 @@ describe("a real store across a schema version bump", () => {
    * the path the app actually takes: an older build's store is reproduced by
    * writing its bytes and its stamp, never by calling the gate by hand.
    */
-  /*
-   * A boot over an UNSTAMPED store keeps its rows. This test asserted the
-   * opposite until the whole-suite gate proved that behaviour was a
-   * data-loss defect: every store written before this gate shipped carries
-   * no stamp, so clearing on a missing stamp wipes the conversation of every
-   * existing user on their first boot after the upgrade. It also broke the
-   * connectors e2e suite, whose seeded rows were wiped before the
-   * collections loaded.
-   *
-   * The mismatch case below is what actually protects against an
-   * incompatible shape, and it is unchanged. A wedged collection from an
-   * adopted row is recoverable with /clear; a wiped conversation is not.
-   */
-  test("a boot adopts rows written before the gate existed", async () => {
-    const storage = memoryStorage()
-    storage.setItem(
-      `${PERSISTED_KEY_PREFIX}app-messages`,
-      legacyRow("kept-message", {
-        id: "kept-message",
-        role: "user",
-        text: "written before the gate existed",
-        status: "complete",
-        createdAt: 1,
-        ordinal: 1
-      })
-    )
-    const store = await createAppStore({ kind: "localStorage", storage })
-    expect(store.collections.messages.get("kept-message")?.text).toBe(
-      "written before the gate existed"
-    )
-    expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(String(APP_SCHEMA_VERSION))
-  })
-
   test("a boot over an older stamp keeps that row out and reseeds clean", async () => {
     const storage = memoryStorage()
     const first = await createAppStore({ kind: "localStorage", storage })
@@ -225,13 +165,13 @@ describe("a real store across a schema version bump", () => {
       .isPersisted.promise
     storage.setItem(
       `${PERSISTED_KEY_PREFIX}app-cards`,
-      legacyRow("legacy-card", { id: "legacy-card", kind: "kind-that-no-longer-exists" })
+      persistedRow("invalid-card", { id: "invalid-card", kind: "kind-that-no-longer-exists" })
     )
     // The store as an older build left it: its rows, under its version.
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION - 1))
 
     const second = await createAppStore({ kind: "localStorage", storage })
-    expect(second.collections.cards.get("legacy-card")).toBeUndefined()
+    expect(second.collections.cards.get("invalid-card")).toBeUndefined()
     expect(second.collections.cards.size).toBe(0)
     expect(second.session().draft).toBe("")
     expect(second.session().id).toBe("main")
@@ -282,12 +222,12 @@ describe("a real store across a schema version bump", () => {
     recordBackend(storage, "localStorage")
     storage.setItem(
       `${PERSISTED_KEY_PREFIX}app-cards`,
-      legacyRow("legacy-card", { id: "legacy-card", kind: "kind-that-no-longer-exists" })
+      persistedRow("invalid-card", { id: "invalid-card", kind: "kind-that-no-longer-exists" })
     )
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION - 1))
 
     const store = await createAppStore({ kind: "localStorage", storage })
-    expect(store.collections.cards.get("legacy-card")).toBeUndefined()
+    expect(store.collections.cards.get("invalid-card")).toBeUndefined()
     expect(readRecordedBackend(storage)).toBe("localStorage")
   })
 })

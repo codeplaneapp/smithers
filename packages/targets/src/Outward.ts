@@ -134,7 +134,7 @@ export const refuse = (requirements: Requirements, invocation: Invocation): Refu
  * Runs the gate and refuses everything past it.
  *
  * Passing the gate is not success: the outward action itself is not
- * implemented in the build system, and saying so loudly is the no-fake-green
+ * implemented by this executor, and saying so loudly is the no-fake-green
  * rule. Callers that do implement the action call {@link refuse} instead.
  *
  * @category execution

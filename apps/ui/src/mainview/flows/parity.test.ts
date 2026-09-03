@@ -70,13 +70,12 @@ const PRESENTATION_ONLY = [
   "maximizeThenFocus",
   "minimizeThenFocus",
   // C-1 (wave 13): these two are NOT local state — calling either dispatches
-  // runCommand("surfaces"). The old "local presentation state" reason here is
-  // what let a command-less affordance ship; the wrappers stay listed only
+  // runCommand("chat.surfaces"). The wrappers stay listed only
   // because the registry call is one indirection away from the onClick.
   "openNamespace", // slash-menu tree: opening a namespace rewrites the draft to `/ns.` — a draft edit, never a command
   "changeDraft(", // composer prefill (the issue card's Link to Linear…): a draft edit, never a command — same class as openNamespace
   "openMenu", // dispatches runCommand("chat.surfaces") — the /chat.surfaces command
-  "closeMenu", // dispatches runCommand("surfaces"); the entry itself runs its own command
+  "closeMenu", // dispatches runCommand("chat.surfaces"); the entry itself runs its own command
   "onCopy(", // delegated: App.tsx binds it to runCommandArgs("chat.copy-message", ...)
   "onDecideApproval(", // delegated: App.tsx binds it to approval.approve / approval.deny
   "onRecoAction(", // delegated: App.tsx binds it to reco.accept / reco.edit / reco.dismiss
@@ -428,8 +427,8 @@ describe("launch-law parity: every affordance is a command", () => {
     expect(chrome).not.toContain("runCommand(\"appearance.theme\")")
     expect(files["../App.tsx"] ?? "").not.toContain("runCommand(\"appearance.dark-mode\")")
     const registrySource = read("./Flows.ts")
-    // A canonical declaration is a const literal (`const THEME = { ... }`) so its
-    // bare alias cannot drift from it; the slice ends at the literal's close.
+    // A declaration is a const literal (`const THEME = { ... }`); the slice ends
+    // at the literal's close.
     const entry = (name: string): string => {
       const start = registrySource.indexOf(`name: "${name}"`)
       expect(start).toBeGreaterThan(-1)
@@ -441,11 +440,8 @@ describe("launch-law parity: every affordance is a command", () => {
     expect(entry("appearance.theme")).not.toContain("userOnly")
     expect(entry("appearance.theme")).toContain("args:")
     expect(entry("appearance.dark-mode")).not.toContain("userOnly")
-    // The toggle is its own flow, not a hidden alias of the palette flow; the
-    // bare `/dark-mode` is the alias, declared beside it.
-    expect(entry("appearance.dark-mode")).not.toContain("aliasOf")
+    // The toggle is its own flow, separate from the palette flow.
     expect(entry("appearance.dark-mode")).not.toContain("hidden")
-    expect(registrySource).toContain('alias("dark-mode", DARK_MODE)')
   })
 
   test("the slash menu wrapper dispatches through the registry", () => {

@@ -19,7 +19,7 @@
  * @since 0.1.0
  */
 import { Sha256 } from "@smthrs/crypto"
-import { Key } from "@smthrs/keys"
+import { DerivedKey } from "@smthrs/keys"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -62,7 +62,7 @@ const canonicalKey = (
   payload: unknown
 ): Effect.Effect<string, ExecutionIdRequired, Crypto.Crypto> =>
   (Schema.encodeEffect(Schema.toCodecJson(flow.payloadSchema))(payload) as Effect.Effect<unknown, unknown>).pipe(
-    Effect.flatMap((encoded) => Schema.decodeUnknownEffect(Key)(encoded)),
+    Effect.flatMap((encoded) => Schema.decodeUnknownEffect(DerivedKey)(encoded)),
     Effect.mapError(() => new ExecutionIdRequired({ flowName: flow._tag }))
   )
 

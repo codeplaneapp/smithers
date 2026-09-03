@@ -605,7 +605,7 @@ describe("the guest runner in process", () => {
   it("writes the encoded success of the flow the request names", async () => {
     const environment = request("sum", { flow: Sum._tag, executionId: "in-process", payload: { n: 1 } })
     await Guest.run(childEntry, environment)
-    expect(resultOf(environment)).toEqual({ status: "finished", output: 12 })
+    expect(resultOf(environment)).toEqual({ status: "succeeded", output: 12 })
   })
 
   it("writes the failure of a flow that failed", async () => {
@@ -640,7 +640,7 @@ describe("the guest runner in process", () => {
       payload: { value: "still here" }
     })
     await Guest.run(pureEntry, environment)
-    expect(resultOf(environment)).toEqual({ status: "finished", output: "still here" })
+    expect(resultOf(environment)).toEqual({ status: "succeeded", output: "still here" })
   })
 
   it("drives a child boundary the entry registered beside its flow", async () => {
@@ -650,7 +650,7 @@ describe("the guest runner in process", () => {
       payload: { n: 4 }
     })
     await Guest.run(childEntry, environment)
-    expect(resultOf(environment)).toEqual({ status: "finished", output: 15 })
+    expect(resultOf(environment)).toEqual({ status: "succeeded", output: 15 })
   })
 
   it("describes a defect by its name and message", async () => {

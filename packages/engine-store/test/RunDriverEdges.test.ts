@@ -899,7 +899,10 @@ describe("RunDriver cancellation paths", () => {
         const store = yield* RunStore.RunStore
         const state = yield* DurableEngineState.DurableEngineState
         const driver = yield* makeDriver()
-        yield* store.create("clocked-complete", stateJson(EdgeFlow._tag))
+        yield* store.create("clocked-complete", stateJson(EdgeFlow._tag), {
+          lineageId: "clocked-complete",
+          roundOrdinal: 0
+        })
         yield* scheduleClockFor(state, "clocked-complete")
         yield* driver.register(EdgeFlow, () => Effect.succeed("done"))
         yield* driver.execute(EdgeFlow, { executionId: "clocked-complete", payload: {}, discard: true })

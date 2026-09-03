@@ -6,6 +6,7 @@
  * law was broken.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { StoredKey } from "@smthrs/keys"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { FastCheck } from "effect/testing"
@@ -1320,7 +1321,7 @@ describe("PlanDiff.diff", () => {
         ...before,
         nodes: [{
           ...before.nodes[0]!,
-          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          key: Schema.decodeUnknownSync(StoredKey)(`key1_${"0".repeat(64)}`),
           material: {
             ...before.nodes[0]!.material,
             version: "flows/key-material/v3" as KeyMaterial.KeyMaterial["version"]
@@ -1378,7 +1379,7 @@ describe("PlanDiff.diff", () => {
         ...before,
         nodes: [{
           ...before.nodes[0]!,
-          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          key: Schema.decodeUnknownSync(StoredKey)(`key1_${"0".repeat(64)}`),
           material: { ...before.nodes[0]!.material, body: new Date(86_400_000) }
         }]
       }
@@ -1404,7 +1405,7 @@ describe("PlanDiff.diff", () => {
         ...before,
         nodes: [{
           ...before.nodes[0]!,
-          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          key: Schema.decodeUnknownSync(StoredKey)(`key1_${"0".repeat(64)}`),
           material: { ...before.nodes[0]!.material, body }
         }]
       }
@@ -1436,7 +1437,7 @@ describe("PlanDiff.diff", () => {
         ...before,
         nodes: [{
           ...before.nodes[0]!,
-          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          key: Schema.decodeUnknownSync(StoredKey)(`key1_${"0".repeat(64)}`),
           material: { ...before.nodes[0]!.material, body }
         }]
       })
@@ -1465,7 +1466,7 @@ describe("PlanDiff.diff", () => {
         ...before,
         nodes: [{
           ...before.nodes[0]!,
-          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          key: Schema.decodeUnknownSync(StoredKey)(`key1_${"0".repeat(64)}`),
           material: { ...before.nodes[0]!.material, body }
         }]
       })
@@ -1488,7 +1489,7 @@ describe("PlanDiff.diff", () => {
         ...before,
         nodes: [{
           ...before.nodes[0]!,
-          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          key: Schema.decodeUnknownSync(StoredKey)(`key1_${"0".repeat(64)}`),
           material: { ...before.nodes[0]!.material, body: 2n }
         }]
       }

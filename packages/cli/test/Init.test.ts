@@ -175,7 +175,6 @@ describe("the seat the scaffold writes", () => {
       variable: "SMITHERS_OPENAI_AUTH",
       resolved: true
     })
-    expect(Init.defaultSeat({ FLOWS_OPENAI_AUTH: "chatgpt" }).variable).toBe("SMITHERS_OPENAI_AUTH")
     expect(Init.defaultSeat({ ANTHROPIC_API_KEY: "" }).resolved).toBe(false)
   })
 

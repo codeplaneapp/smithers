@@ -41,7 +41,7 @@ interface PublishAttribution {
  * /api/walkthroughs — store and manage hosted HTML walkthroughs.
  *
  * Publish accepts three credentials in order of preference:
- *  1. Bearer REVIEW_PUBLISH_TOKEN (legacy, unchanged).
+ *  1. Bearer REVIEW_PUBLISH_TOKEN (service automation).
  *  2. A valid session token (action-issued, via x-api-key or Bearer).
  *  3. A valid srk_ API key (operator-issued, via x-api-key or Bearer).
  */
@@ -64,9 +64,9 @@ export async function handleWalkthroughs(
 }
 
 async function handlePublish(request: Request, env: ReviewWorkerEnv, url: URL, now: number): Promise<Response> {
-  const legacyOk = isLegacyPublishToken(request, env);
+  const publishTokenOk = isPublishToken(request, env);
   let credential: ProxyAuth | null = null;
-  if (!legacyOk) {
+  if (!publishTokenOk) {
     credential = await authenticateProxyRequest(request, env, now);
     if (!credential) return jsonError(401, "unauthorized");
   }
@@ -75,7 +75,7 @@ async function handlePublish(request: Request, env: ReviewWorkerEnv, url: URL, n
   if (html.byteLength === 0) return jsonError(400, "empty body");
   if (html.byteLength > MAX_WALKTHROUGH_BYTES) return jsonError(413, "walkthrough exceeds 25MB");
 
-  const attribution = publishAttribution(legacyOk ? null : credential);
+  const attribution = publishAttribution(publishTokenOk ? null : credential);
   if (attribution.sessionHash) {
     const countRow = await env.DB.prepare("SELECT COUNT(*) AS count FROM walkthroughs WHERE session_hash = ?")
       .bind(attribution.sessionHash)
@@ -129,16 +129,16 @@ async function handleDelete(request: Request, env: ReviewWorkerEnv, url: URL, no
   const id = url.pathname.slice("/api/walkthroughs/".length);
   if (!/^[a-z0-9]{8,32}$/.test(id)) return jsonError(400, "invalid walkthrough id");
 
-  const legacyOk = isLegacyPublishToken(request, env);
+  const publishTokenOk = isPublishToken(request, env);
   let credential: ProxyAuth | null = null;
-  if (!legacyOk) {
+  if (!publishTokenOk) {
     credential = await authenticateProxyRequest(request, env, now);
     if (!credential) return jsonError(401, "unauthorized");
   }
 
   const row = await env.DB.prepare("SELECT repo FROM walkthroughs WHERE id = ?").bind(id).first<WalkthroughRepoRow>();
   if (!row) return jsonError(404, "not found");
-  if (!legacyOk && (!credential || !canAccessRepo(credential, row.repo))) {
+  if (!publishTokenOk && (!credential || !canAccessRepo(credential, row.repo))) {
     return jsonError(403, "forbidden");
   }
 
@@ -160,7 +160,7 @@ function canAccessRepo(credential: ProxyAuth, repo: string): boolean {
   return credential.repos.includes(repo);
 }
 
-function isLegacyPublishToken(request: Request, env: ReviewWorkerEnv): boolean {
+function isPublishToken(request: Request, env: ReviewWorkerEnv): boolean {
   const publishToken = env.REVIEW_PUBLISH_TOKEN ?? "";
   const auth = request.headers.get("authorization") ?? "";
   return Boolean(publishToken && timingSafeStringEqual(auth, `Bearer ${publishToken}`));

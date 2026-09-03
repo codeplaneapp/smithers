@@ -135,7 +135,7 @@ const requireRevision = (method: string, command: string, revision: string): Eff
 /**
  * The `jj` to spawn.
  *
- * `SMITHERS_JJ_PATH` (and its `FLOWS_JJ_PATH` alias) is an operator saying
+ * `SMITHERS_JJ_PATH` is an operator saying
  * "run THIS jj", and `smithers doctor` already prints the file it names, so the
  * override has to be the file that actually runs. A resolution that came from
  * `PATH` stays the bare name: the operating system searches the same `PATH` a

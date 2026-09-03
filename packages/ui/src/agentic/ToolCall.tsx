@@ -75,30 +75,13 @@ type ToolCallOpenable = {
   onOpenChange?: (open: boolean) => void;
 };
 
-export type ToolCallLegacyProps = Omit<ComponentProps<"div">, "children"> &
-  ToolCallOpenable & {
-    name: string;
-    state: ToolCallState;
-    args?: unknown;
-    argsText?: string;
-    result?: unknown;
-    resultText?: string;
-    errorText?: string;
-    durationMs?: number;
-    layout?: "compact" | "expanded";
-    approvalSlot?: ReactNode;
-    children?: never;
-  };
-
-export type ToolCallCompoundProps = Omit<ComponentProps<"div">, "children"> &
+export type ToolCallProps = Omit<ComponentProps<"div">, "children"> &
   ToolCallOpenable & {
     name: string;
     state: ToolCallState;
     durationMs?: number;
     children: ReactNode;
   };
-
-export type ToolCallProps = ToolCallLegacyProps | ToolCallCompoundProps;
 
 type ToolCallContextValue = {
   name: string;
@@ -175,29 +158,14 @@ export function ToolCall(props: ToolCallProps) {
     defaultOpen = false,
     onOpenChange,
     className,
+    children,
     ...rest
   } = props;
-  const compound = (rest as { children?: ReactNode }).children !== undefined;
-  const {
-    args,
-    argsText,
-    result,
-    resultText,
-    errorText,
-    layout = "compact",
-    approvalSlot,
-    children,
-    ...domProps
-  } = rest as Partial<ToolCallLegacyProps> & { children?: ReactNode };
 
   const bodyId = `${useId()}-tool-call-body`;
-  const expanded = !compound && layout === "expanded";
   const isControlled = controlledOpen !== undefined;
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
-  const isOpen = expanded ? true : isControlled ? controlledOpen : uncontrolledOpen;
-  const hasArgs = argsText !== undefined || args !== undefined;
-  const hasResult = resultText !== undefined || result !== undefined;
-  const isFailure = state === "output-error" || state === "output-denied";
+  const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
 
   function toggle() {
     const next = !isOpen;
@@ -205,108 +173,20 @@ export function ToolCall(props: ToolCallProps) {
     onOpenChange?.(next);
   }
 
-  const announcement = useToolCallAnnouncement(state, hasResult && !isFailure);
-
-  const duration =
-    durationMs != null && isTerminalToolState(state) ? (
-      <span data-slot="tool-call-duration" className="sui-toolcall-duration">
-        {formatDurationMs(durationMs)}
-      </span>
-    ) : null;
-
-  const heading = (
-    <>
-      {!expanded ? (
-        <span className="sui-toolcall-chevron" aria-hidden="true">
-          ›
-        </span>
-      ) : null}
-      <span className="sui-toolcall-name">{name}</span>
-      <StatusPill status={toolCallStatus(state)} label={TOOL_CALL_STATE_LABELS[state]} />
-      {duration}
-    </>
-  );
-
-  if (compound) {
-    return (
-      <ToolCallContext.Provider value={{ name, state, open: isOpen, bodyId, durationMs, toggle }}>
-        <div
-          data-slot="tool-call"
-          data-state={isOpen ? "open" : "closed"}
-          data-layout="compound"
-          className={cn("sui-toolcall", className)}
-          {...domProps}
-        >
-          {children}
-          <ToolCallLiveRegion announcement={announcement} />
-        </div>
-      </ToolCallContext.Provider>
-    );
-  }
-
+  const announcement = useToolCallAnnouncement(state, state === "output-available");
   return (
-    <div
-      data-slot="tool-call"
-      data-state={isOpen ? "open" : "closed"}
-      data-layout={layout}
-      className={cn("sui-toolcall", className)}
-      {...domProps}
-    >
-      {expanded ? (
-        <div data-slot="tool-call-header" className="sui-toolcall-header">
-          {heading}
-        </div>
-      ) : (
-        <button
-          type="button"
-          data-slot="tool-call-trigger"
-          className="sui-toolcall-trigger"
-          aria-expanded={isOpen}
-          aria-controls={bodyId}
-          onClick={toggle}
-        >
-          {heading}
-        </button>
-      )}
-      {state === "approval-requested" && approvalSlot != null ? (
-        <div data-slot="tool-call-approval" className="sui-toolcall-approval">
-          {approvalSlot}
-        </div>
-      ) : null}
-      {isOpen ? (
-        <div data-slot="tool-call-body" id={bodyId} className="sui-toolcall-body">
-          {hasArgs ? (
-            <section data-slot="tool-call-args" className="sui-toolcall-section">
-              <div className="sui-toolcall-section-title">Input</div>
-              <pre className="sui-toolcall-pre" role="region" aria-label={`Tool input: ${name}`} tabIndex={0}>
-                {argsText ?? formatJsonSafe(args)}
-              </pre>
-            </section>
-          ) : null}
-          {isFailure ? (
-            <section data-slot="tool-call-result" className="sui-toolcall-section">
-              <div className="sui-toolcall-section-title">Output</div>
-              <pre
-                className="sui-toolcall-pre sui-toolcall-error"
-                role="region"
-                aria-label={`Tool output: ${name}`}
-                tabIndex={0}
-              >
-                {errorText ?? (state === "output-denied" ? "Denied" : "Tool call failed")}
-              </pre>
-            </section>
-          ) : hasResult ? (
-            <section data-slot="tool-call-result" className="sui-toolcall-section">
-              <div className="sui-toolcall-section-title">Output</div>
-              <pre className="sui-toolcall-pre" role="region" aria-label={`Tool output: ${name}`} tabIndex={0}>
-                {resultText ?? formatJsonSafe(result)}
-              </pre>
-            </section>
-          ) : null}
-        </div>
-      ) : null}
-      <ToolCallLiveRegion announcement={announcement} />
-    </div>
+    <ToolCallContext.Provider value={{ name, state, open: isOpen, bodyId, durationMs, toggle }}>
+      <div
+        data-slot="tool-call"
+        data-state={isOpen ? "open" : "closed"}
+        data-layout="compound"
+        className={cn("sui-toolcall", className)}
+        {...rest}
+      >
+        {children}
+        <ToolCallLiveRegion announcement={announcement} />
+      </div>
+    </ToolCallContext.Provider>
   );
 }
 
@@ -465,7 +345,7 @@ export type ToolCallOutputProps = Omit<ComponentProps<"div">, "children"> & {
   children?: ReactNode;
 };
 
-/** Tool output section: legacy result, structured parts, or custom children. */
+/** Tool output section: structured parts or custom children. */
 export function ToolCallOutput({ result, resultText, parts, children, className, ...props }: ToolCallOutputProps) {
   useToolCallInjected();
   const context = useToolCallContext("ToolCallOutput");

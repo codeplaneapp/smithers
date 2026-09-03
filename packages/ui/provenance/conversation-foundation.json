@@ -2,7 +2,6 @@
   {
     "file": "src/chat/MessageScroller.tsx",
     "exports": [
-      "MessageScroller",
       "MessageScrollerProvider",
       "MessageScrollerViewport",
       "MessageScrollerContent",
@@ -17,8 +16,7 @@
     "ported": "full-anatomy",
     "omissions": [],
     "divergences": [
-      "Upstream explicitly rejects default auto-scroll (scrollAnchor default 'none'); the flat compat component keeps our opt-out stickToBottom (default true, passed as scrollAnchor 'bottom') because every Smithers surface streams",
-      "Flat compat component retained with its exact legacy props/DOM/classes; inside an ambient MessageScrollerProvider it renders the upstream compound anatomy (Viewport/Content/Item/Button) verbatim with a single provider-owned scroll region",
+      "Upstream defaults scrollAnchor to 'none'; ChatTranscript explicitly selects 'bottom' because Smithers chat surfaces stream",
       "MessageScrollerItem scrollAnchor marks a turn-start row that anchors near the top while the reply streams (mount-time and prepended rows never anchor)",
       "Programmatic jumps are tracked with a visible data-autoscrolling attribute and reconciled on scrollend so follow state recovers after scrollbar drags",
       "MessageScrollerButton stays rendered and goes inert (tabIndex=-1, data-active=false) with nothing to scroll toward, and gains a start direction",
@@ -33,7 +31,7 @@
     "ported": "full-anatomy",
     "omissions": [],
     "divergences": [
-      "smithers-original: accessible transcript container (role=log, aria-busy while pending) composing MessageScroller with a pending assistant bubble and an empty-state slot"
+      "smithers-original: accessible transcript container (role=log, aria-busy while pending) composing the MessageScroller compound anatomy with a pending assistant bubble and an empty-state slot"
     ]
   },
   {

@@ -11,6 +11,7 @@ const failure = (effect: Effect.Effect<unknown, EvalError>): Promise<EvalError> 
 
 const baseline = {
   version: 1 as const,
+  suite: "s",
   records: [{ suite: "s", case: "c", scorer: "x", stepKey: "old", score: 0.9 }]
 }
 const run = (stepKey: string, score: number): Runner.RunResult => ({
@@ -57,6 +58,7 @@ describe("Regression", () => {
   it("reports any drop from a zero baseline score whatever the relative tolerance", async () => {
     const zero = {
       version: 1 as const,
+      suite: "s",
       records: [{ suite: "s", case: "c", scorer: "x", stepKey: "old", score: 0 }]
     }
     const improved = await Effect.runPromise(Regression.compare(zero, run("new", 0.5), { relative: 10 }))
@@ -85,7 +87,7 @@ describe("Regression", () => {
   it("refuses a baseline that belongs to another suite", async () => {
     const foreign = await failure(
       Regression.compare(
-        { version: 1, records: [{ suite: "OTHER", case: "c", scorer: "x", stepKey: "old", score: 0.9 }] },
+        { version: 1, suite: "s", records: [{ suite: "OTHER", case: "c", scorer: "x", stepKey: "old", score: 0.9 }] },
         run("old", 0.9)
       )
     )
@@ -97,6 +99,7 @@ describe("Regression", () => {
       Regression.compare(
         {
           version: 1,
+          suite: "s",
           records: [
             { suite: "s", case: "c", scorer: "x", stepKey: "old", score: 0.9 },
             { suite: "a", case: "c", scorer: "x", stepKey: "old", score: 0.9 },
@@ -122,36 +125,6 @@ describe("Regression", () => {
     expect(foreign.path).toBe("baseline.suite")
   })
 
-  it("refuses a suite-less empty baseline made or loaded through the public API", async () => {
-    const candidates = [
-      await Effect.runPromise(Baseline.make({ records: [] })),
-      await Effect.runPromise(Baseline.load("{\"version\":1,\"records\":[]}"))
-    ]
-    for (const candidate of candidates) {
-      const error = await failure(
-        Regression.compare(candidate, { runId: "run", suite: "s", cases: [], observations: [] })
-      )
-      expect(error.code).toBe("invalid_baseline")
-      expect(error.message).toBe(
-        "Baseline has no suite and no records, so it cannot establish ownership for run suite 's'"
-      )
-      expect(error.path).toBe("baseline.suite")
-    }
-  })
-
-  it("compares a legacy baseline whose records establish suite ownership", async () => {
-    const legacy = await Effect.runPromise(
-      Baseline.load(
-        "{\"version\":1,\"records\":[{\"suite\":\"s\",\"case\":\"c\",\"scorer\":\"x\",\"stepKey\":\"old\",\"score\":0.9}]}"
-      )
-    )
-    const report = await Effect.runPromise(Regression.compare(legacy, run("old", 0.9)))
-    expect(legacy.suite).toBeUndefined()
-    expect(report.regressions).toEqual([])
-    expect(report.nondeterminism).toEqual([])
-    expect(report.missing).toEqual([])
-  })
-
   it("retains observations missing from either side", async () => {
     const missingFromRun = await Effect.runPromise(
       Regression.compare(baseline, { runId: "run", suite: "s", cases: [], observations: [] })
@@ -169,6 +142,7 @@ describe("Regression", () => {
       Regression.compare(
         {
           version: 1,
+          suite: "s",
           records: [{
             suite: "s",
             case: "expected",
@@ -229,6 +203,7 @@ describe("Regression", () => {
   it("matches repeated scorer observations by step key before array order", async () => {
     const repeated = {
       version: 1 as const,
+      suite: "s",
       records: [
         { suite: "s", case: "c", scorer: "x", stepKey: "a", score: 0.2 },
         { suite: "s", case: "c", scorer: "x", stepKey: "b", score: 0.8 }
@@ -253,6 +228,7 @@ describe("Regression", () => {
   it("pairs a repeated scorer's leftovers in stable order and reports the rest as missing", async () => {
     const repeated = {
       version: 1 as const,
+      suite: "s",
       records: [
         { suite: "s", case: "c", scorer: "x", stepKey: "a", score: 0.2 },
         { suite: "s", case: "c", scorer: "x", stepKey: "a", score: 0.8 },
@@ -280,6 +256,7 @@ describe("Regression", () => {
   it("orders leftovers sharing a step key by score", async () => {
     const repeated = {
       version: 1 as const,
+      suite: "s",
       records: [
         { suite: "s", case: "c", scorer: "x", stepKey: "a", score: 0.8 },
         { suite: "s", case: "c", scorer: "x", stepKey: "a", score: 0.2 }
@@ -308,6 +285,7 @@ describe("Regression", () => {
   it("groups by an injective (case, scorer) key", async () => {
     const collidable = {
       version: 1 as const,
+      suite: "s",
       records: [
         { suite: "s", case: "a", scorer: "b\u0000c", stepKey: "k", score: 1 },
         { suite: "s", case: "a\u0000b", scorer: "c", stepKey: "k", score: 1 }
@@ -320,9 +298,5 @@ describe("Regression", () => {
       { side: "run", case: "a", scorer: "b\u0000c", stepKey: "k" },
       { side: "run", case: "a\u0000b", scorer: "c", stepKey: "k" }
     ])
-  })
-
-  it("is exported under its alias", () => {
-    expect(Regression.check).toBe(Regression.compare)
   })
 })

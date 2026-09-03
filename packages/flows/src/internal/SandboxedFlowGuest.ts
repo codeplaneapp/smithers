@@ -63,14 +63,11 @@ export const Request = Schema.Struct({
  * What the guest writes back: the flow's success value encoded through its
  * success schema's JSON codec, or the reason it did not produce one.
  *
- * `finished` and `failed` are the 0.x status words, kept so a result file
- * reads the same to anyone who knew the old protocol.
- *
  * @category schemas
  * @since 1.0.0
  */
 export const Result = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("finished"), output: Schema.Unknown }),
+  Schema.Struct({ status: Schema.Literal("succeeded"), output: Schema.Unknown }),
   Schema.Struct({ status: Schema.Literal("failed"), error: Schema.String })
 ])
 
@@ -242,6 +239,6 @@ const execute = (
       ) as Effect.Effect<unknown, unknown>
     )
     return Exit.isSuccess(exit)
-      ? { status: "finished", output: exit.value } as const
+      ? { status: "succeeded", output: exit.value } as const
       : { status: "failed", error: describeCause(exit.cause) } as const
   })

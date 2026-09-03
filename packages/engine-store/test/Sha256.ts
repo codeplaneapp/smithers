@@ -1,6 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { Sha256 } from "@smthrs/crypto"
-import { Key, type Key as KeyType } from "@smthrs/keys"
+import { DerivedKey, type StoredKey } from "@smthrs/keys"
 import { Crypto, Effect, Schema } from "effect"
 
 /** Hashes test fixtures with the concrete Node crypto layer. */
@@ -25,8 +25,8 @@ export const runPromise = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): Pr
   Effect.runPromise(Effect.provide(effect, NodeCrypto.layer))
 
 /** Derives a canonical key with concrete test cryptography. */
-export const key = (input: unknown): KeyType =>
-  Effect.runSync(Schema.decodeUnknownEffect(Key)(input).pipe(Effect.provide(NodeCrypto.layer), Effect.orDie))
+export const key = (input: unknown): StoredKey =>
+  Effect.runSync(Schema.decodeUnknownEffect(DerivedKey)(input).pipe(Effect.provide(NodeCrypto.layer), Effect.orDie))
 
 /** Mirrors the engine's private invocation-key encoding. */
-export const invocationKey = (input: unknown): KeyType => key({ kind: "invocation", ...(input as object) })
+export const invocationKey = (input: unknown): StoredKey => key({ kind: "invocation", ...(input as object) })

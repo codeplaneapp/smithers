@@ -59,11 +59,13 @@ const buildGraph = (): Core.Graph.Graph => {
 
 const actualKeys = (): Record<string, string> => {
   const keys = Plan.keys(buildGraph())
+  const runKey = <A, E>(effect: Effect.Effect<A, E, import("effect/Crypto").Crypto>): A =>
+    Effect.runSync(Digest.provideSync(effect))
   return {
-    "content/basic": Digest.runSync(
+    "content/basic": runKey(
       StepKey.content({ body: "x", inputs: {}, layers: [], capabilities: {} })
     ),
-    "ordinal/basic": Digest.runSync(
+    "ordinal/basic": runKey(
       StepKey.ordinal({ runId: "golden-run", ordinal: 0, tier: "unsealed" })
     ),
     "graph/root": keys["root"]!,

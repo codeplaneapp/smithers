@@ -85,6 +85,7 @@ const program = Effect.gen(function*() {
     NodeRuntime.layerHost(
       {
         filename,
+        workspaceRoot: process.cwd(),
         owner: { hostId: "signal-host" },
         ...shutdownTimeoutMs === undefined ? {} : { shutdownTimeoutMs }
       },

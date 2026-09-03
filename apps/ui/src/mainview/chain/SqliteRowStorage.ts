@@ -1,10 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { StorageApi } from "@tanstack/db"
 import { PERSISTED_KEY_PREFIX, SCHEMA_VERSION_STORAGE_KEY } from "./SchemaVersion"
-import {
-  openTransactionalStorage,
-  type LegacyCollectionSpec
-} from "./TransactionalStorage"
 
 export const ROW_TABLE_NAME = "smithers_collection_rows"
 export const METADATA_TABLE_NAME = "smithers_metadata"
@@ -29,7 +25,7 @@ export interface SqliteRowStorage {
 }
 
 export interface SqliteRowStorageOptions {
-  readonly collections: ReadonlyArray<LegacyCollectionSpec>
+  readonly collections: ReadonlyArray<{ readonly id: string; readonly schema: StandardSchemaV1 }>
   readonly schemaVersion: number
 }
 
@@ -45,7 +41,6 @@ interface StoredItem {
 }
 
 const SCHEMA_VERSION_KEY = "schema-version"
-const LEGACY_IMPORT_KEY = "legacy-import-complete"
 
 const collectionStorageKey = (id: string): string => `${PERSISTED_KEY_PREFIX}${id}`
 
@@ -78,79 +73,6 @@ const validates = async (schema: StandardSchemaV1, value: unknown): Promise<bool
   const result = schema["~standard"].validate(value)
   const settled = result instanceof Promise ? await result : result
   return settled.issues === undefined || settled.issues.length === 0
-}
-
-const tableExists = async (database: SqliteRowDatabase, name: string): Promise<boolean> =>
-  (await database.execute(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-    [name]
-  )).length > 0
-
-const memoryStorage = (entries: ReadonlyMap<string, string>): StorageApi => {
-  const values = new Map(entries)
-  return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => void values.set(key, value),
-    removeItem: (key) => void values.delete(key)
-  }
-}
-
-/**
- * Reads either legacy `smithers_kv` envelopes or the first TanStack SQLite
- * adapter's registry tables into the old StorageApi shape. Source tables are
- * retained byte-for-byte; this importer only copies validated rows forward.
- */
-const readLegacyStorage = async (
-  database: SqliteRowDatabase,
-  collections: ReadonlyArray<LegacyCollectionSpec>
-): Promise<StorageApi | undefined> => {
-  const legacy = new Map<string, string>()
-  if (await tableExists(database, "smithers_kv")) {
-    const rows = await database.execute<{ readonly key?: unknown; readonly value?: unknown }>(
-      "SELECT key, value FROM smithers_kv"
-    )
-    for (const row of rows) {
-      if (typeof row.key === "string" && typeof row.value === "string") legacy.set(row.key, row.value)
-    }
-  }
-
-  if (await tableExists(database, "collection_registry")) {
-    const allowed = new Set(collections.map((collection) => collection.id))
-    const registry = await database.execute<{
-      readonly collection_id?: unknown
-      readonly table_name?: unknown
-    }>("SELECT collection_id, table_name FROM collection_registry")
-    for (const entry of registry) {
-      if (
-        typeof entry.collection_id !== "string" ||
-        !allowed.has(entry.collection_id) ||
-        typeof entry.table_name !== "string" ||
-        !/^[A-Za-z0-9_]+$/.test(entry.table_name)
-      ) continue
-      const storageKey = collectionStorageKey(entry.collection_id)
-      if (legacy.has(storageKey)) continue
-      const rows = await database.execute<{
-        readonly key?: unknown
-        readonly value?: unknown
-        readonly row_version?: unknown
-      }>(`SELECT key, value, row_version FROM "${entry.table_name}"`)
-      const stored = new Map<string, StoredItem>()
-      for (const row of rows) {
-        if (typeof row.key !== "string" || typeof row.value !== "string") continue
-        try {
-          stored.set(row.key, {
-            versionKey: `sqlite-${String(row.row_version ?? 0)}`,
-            data: JSON.parse(row.value)
-          })
-        } catch {
-          // The schema-decoded import below quarantines malformed rows only
-          // when they carry data; unreadable JSON remains in the source table.
-        }
-      }
-      legacy.set(storageKey, serializeStoredCollection(stored))
-    }
-  }
-  return legacy.size === 0 ? undefined : memoryStorage(legacy)
 }
 
 const insertQuarantine = async (
@@ -209,47 +131,6 @@ export const openSqliteRowStorage = async (
   const metadata = new Map<string, string>()
   for (const row of metadataRows) {
     if (typeof row.key === "string" && typeof row.value === "string") metadata.set(row.key, row.value)
-  }
-
-  if (metadata.get(LEGACY_IMPORT_KEY) !== "1") {
-    const host = await readLegacyStorage(database, options.collections)
-    if (host !== undefined) {
-      const migrated = await openTransactionalStorage(host, { collections: options.collections })
-      await database.execute("BEGIN IMMEDIATE")
-      try {
-        for (const [collectionId, spec] of specs) {
-          const raw = migrated.storage.getItem(collectionStorageKey(collectionId))
-          for (const [rowKey, row] of parseStoredCollection(raw)) {
-            const encoded = JSON.stringify(row.data)
-            if (!(await validates(spec.schema, row.data))) {
-              await insertQuarantine(database, collectionId, rowKey, encoded, "legacy-schema-validation")
-              continue
-            }
-            await database.execute(
-              `INSERT INTO ${ROW_TABLE_NAME} (collection_id, row_key, version_key, value)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(collection_id, row_key) DO NOTHING`,
-              [collectionId, rowKey, row.versionKey, encoded]
-            )
-          }
-        }
-        await database.execute(
-          `INSERT INTO ${METADATA_TABLE_NAME} (key, value) VALUES (?, ?)
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-          [LEGACY_IMPORT_KEY, "1"]
-        )
-        await database.execute("COMMIT")
-      } catch (error) {
-        await database.execute("ROLLBACK")
-        throw error
-      }
-    } else {
-      await database.execute(
-        `INSERT INTO ${METADATA_TABLE_NAME} (key, value) VALUES (?, ?)`,
-        [LEGACY_IMPORT_KEY, "1"]
-      )
-    }
-    metadata.set(LEGACY_IMPORT_KEY, "1")
   }
 
   const recordedVersion = Number(metadata.get(SCHEMA_VERSION_KEY) ?? options.schemaVersion)
@@ -315,8 +196,7 @@ export const openSqliteRowStorage = async (
       serializeStoredCollection(byCollection.get(collection.id) ?? new Map())
     )
   }
-  // Preserve legacy schema bookkeeping for callers that inspect StorageApi;
-  // the physical SQLite schema version remains authoritative.
+  // Keep the StorageApi view aligned with the physical SQLite schema version.
   scheduled.set(SCHEMA_VERSION_STORAGE_KEY, String(options.schemaVersion))
 
   let pending: Map<string, string | null> | undefined

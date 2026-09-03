@@ -165,6 +165,7 @@ const host = (root: string, owner: Ownership.OwnerId, engineHost: string) => {
   const engine = NodeRuntime.layer(
     {
       filename: join(root, "engine.db"),
+      workspaceRoot: root,
       owner: { hostId: engineHost },
       isAlive: () => Effect.succeed(false)
     },

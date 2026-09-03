@@ -102,34 +102,11 @@ describe("normalized SQLite row storage", () => {
     db.sqlite.close()
   })
 
-  test("imports the legacy envelope once and retains its source bytes", async () => {
-    const db = database()
-    db.sqlite.run("CREATE TABLE smithers_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-    const envelope = JSON.stringify({
-      version: 1,
-      entries: {
-        "smithers-mvp.widgets": wire({
-          "s:legacy": { versionKey: "old", data: { id: "legacy", label: "kept" } }
-        })
-      }
-    })
-    db.sqlite.query("INSERT INTO smithers_kv (key, value) VALUES (?, ?)").run("smithers-mvp.store", envelope)
-    const storage = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
-    expect(JSON.parse(storage.storage.getItem("smithers-mvp.widgets") ?? "{}")).toEqual({
-      "s:legacy": { versionKey: "old", data: { id: "legacy", label: "kept" } }
-    })
-    expect((db.sqlite.query("SELECT value FROM smithers_kv WHERE key = ?").get("smithers-mvp.store") as { value: string }).value).toBe(envelope)
-    expect(db.sqlite.query(`SELECT count(*) AS count FROM ${ROW_TABLE_NAME}`).get()).toEqual({ count: 1 })
-    await storage.close()
-  })
-
-  test("quarantines invalid older rows and refuses newer schemas without mutation", async () => {
+  test("quarantines invalid rows and refuses newer schemas without mutation", async () => {
     const old = database()
     old.sqlite.run(`CREATE TABLE ${ROW_TABLE_NAME} (collection_id TEXT NOT NULL, row_key TEXT NOT NULL, version_key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (collection_id, row_key))`)
     old.sqlite.run(`CREATE TABLE ${METADATA_TABLE_NAME} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
-    old.sqlite.query(`INSERT INTO ${METADATA_TABLE_NAME} (key, value) VALUES (?, ?), (?, ?)`).run(
-      "legacy-import-complete", "1", "schema-version", "8"
-    )
+    old.sqlite.query(`INSERT INTO ${METADATA_TABLE_NAME} (key, value) VALUES (?, ?)`).run("schema-version", "8")
     old.sqlite.query(`INSERT INTO ${ROW_TABLE_NAME} VALUES (?, ?, ?, ?)`).run(
       "widgets", "s:bad", "v1", JSON.stringify({ id: "bad", label: 42 })
     )
@@ -140,9 +117,7 @@ describe("normalized SQLite row storage", () => {
 
     const future = database()
     future.sqlite.run(`CREATE TABLE ${METADATA_TABLE_NAME} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
-    future.sqlite.query(`INSERT INTO ${METADATA_TABLE_NAME} (key, value) VALUES (?, ?), (?, ?)`).run(
-      "legacy-import-complete", "1", "schema-version", "99"
-    )
+    future.sqlite.query(`INSERT INTO ${METADATA_TABLE_NAME} (key, value) VALUES (?, ?)`).run("schema-version", "99")
     await expect(openSqliteRowStorage(future.host, { collections, schemaVersion: 9 }))
       .rejects.toBeInstanceOf(FutureSqliteSchemaError)
     expect(future.sqlite.query(`SELECT value FROM ${METADATA_TABLE_NAME} WHERE key = 'schema-version'`).get())

@@ -376,8 +376,8 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
   const selectRepo: TabsController["selectRepo"] = async (repoKey) => {
     /*
      * Lane piper: `org/repo` and `org/repo#copyId` tokens select from the
-     * inventory — the reducer validates them. The legacy pin key keeps its
-     * reopen-an-unopened-checkout behavior until every reader moves.
+     * inventory — the reducer validates them. A local checkout key can reopen
+     * a checkout that is not currently open.
      */
     const selection = parseRepoSelection(repoKey)
     if (selection !== null && "repoId" in selection) {

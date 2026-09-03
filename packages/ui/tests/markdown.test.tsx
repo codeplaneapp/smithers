@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Markdown, safeMarkdownHref, SMITHERS_UI_STYLE_ATTR } from "../src/index";
+import { Markdown, SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import { markdownBlockParser } from "../src/primitives/markdown";
 
 /**
@@ -27,34 +27,6 @@ const SAMPLE = [
   "const x = 1;",
   "```",
 ].join("\n");
-
-describe("safeMarkdownHref", () => {
-  test("rejects browser-normalized control characters and unsafe schemes", () => {
-    for (const href of [
-      "java\tscript:alert(1)",
-      "java\nscript:alert(1)",
-      "java\rscript:alert(1)",
-      "\x01javascript:alert(1)",
-      "javascript:alert(1)",
-      "data:text/html,<script>alert(1)</script>",
-    ]) {
-      expect(safeMarkdownHref(href)).toBeUndefined();
-    }
-  });
-
-  test("allows navigable schemes, relative links, and anchors", () => {
-    for (const href of [
-      "https://smithers.sh/docs",
-      "http://smithers.sh/docs",
-      "mailto:hello@smithers.sh",
-      "/docs/getting-started",
-      "docs/getting-started",
-      "#anchor",
-    ]) {
-      expect(safeMarkdownHref(href)).toBe(href);
-    }
-  });
-});
 
 describe("Markdown (static markup)", () => {
   test("is a memoized component (re-renders only on prop change)", () => {
