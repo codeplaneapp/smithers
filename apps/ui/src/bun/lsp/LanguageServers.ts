@@ -5,8 +5,16 @@
  * "Repository and process authority"). v1 is TypeScript through
  * `typescript-language-server --stdio`; the table is ready for more rows.
  * A missing server is stated with its install line and never installed.
+ *
+ * The binary comes from the HOST — the harness candidate dirs and PATH —
+ * never from the repository. A repository is data the user opened, often
+ * read-only, often someone else's; a `node_modules/.bin/typescript-language-
+ * server` inside it is a program the repository chose, and a hover must not
+ * run it. (tsserver still resolves the repository's own `typescript` from
+ * inside the language server: that is the server's job, under the sandbox.)
  */
 import { delimiter, extname, join } from "node:path"
+import { LSP_LANGUAGE_EXTENSIONS } from "@smthrs/rpc/LocalApp"
 import type { LspLanguageId } from "@smthrs/rpc/LocalApp"
 import { harnessCandidateDirs } from "../Harnesses"
 import type { HarnessHost } from "../Harnesses"
@@ -44,7 +52,7 @@ const TYPESCRIPT_DOCUMENT_IDS: Readonly<Record<string, string>> = {
 export const TYPESCRIPT_SERVER: ServerSpec = {
   id: "typescript",
   displayName: "TypeScript",
-  extensions: Object.keys(TYPESCRIPT_DOCUMENT_IDS),
+  extensions: LSP_LANGUAGE_EXTENSIONS.typescript,
   bin: "typescript-language-server",
   args: ["--stdio"],
   install: "npm i -g typescript-language-server typescript",
@@ -83,21 +91,20 @@ export interface ServerLookup extends Pick<HarnessHost, "env" | "home" | "listDi
 export type ResolvedServer = { readonly argv: ReadonlyArray<string> } | { readonly missing: string }
 
 /**
- * The argv that starts a server: the repository's own install
- * (`<repo>/node_modules/.bin`) first, then the harness candidate dirs and
- * PATH (a Finder launch has the launchd PATH). A JavaScript entry runs on
- * the Node sidecar so `#!/usr/bin/env node` never has to resolve; anything
- * else (pnpm's shell shim) runs as-is with the sidecar's dir on PATH, which
- * the host puts there. Nothing here installs anything.
+ * The argv that starts a server: the harness candidate dirs, then PATH (a
+ * Finder launch has the launchd PATH) — the host's own installs, never a
+ * directory inside a repository. A JavaScript entry runs on the Node sidecar
+ * so `#!/usr/bin/env node` never has to resolve; anything else (pnpm's shell
+ * shim) runs as-is with the sidecar's dir on PATH, which the host puts
+ * there. Nothing here installs anything.
  */
 export const resolveServer = (
   spec: ServerSpec,
   lookup: ServerLookup,
-  repoRoot: string,
   node: NodeSidecar | null
 ): ResolvedServer => {
   const fromPath = (lookup.env.PATH ?? "").split(delimiter).filter((dir) => dir !== "")
-  const dirs = [join(repoRoot, "node_modules", ".bin"), ...harnessCandidateDirs(lookup), ...fromPath]
+  const dirs = [...harnessCandidateDirs(lookup), ...fromPath]
   const bin = dirs.map((dir) => join(dir, spec.bin)).find((candidate) => lookup.isFile(candidate))
   if (bin === undefined) return { missing: spec.install }
   const entry = lookup.realpath(bin)

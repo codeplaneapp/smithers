@@ -1,9 +1,16 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
+import type { StorageApi } from "@tanstack/db"
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import type { Root } from "react-dom/client"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
+import { cloudCapabilities, localCapabilities } from "@smthrs/rpc/HostCapabilities"
+import { ControllerTestProvider } from "../ControllerContext"
+import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
+import { createAppController } from "../state/AppController"
 import type { Card } from "../state/AppState"
+import { createAppStore } from "../state/AppStore"
 import { contentKey, FileCardAddressLine, FileCardBody, isMarkdownPath } from "./FileCards"
 
 /*
@@ -118,9 +125,17 @@ const codeView = (host: HTMLElement): HTMLElement | null => host.querySelector<H
 
 const shadowOf = (host: HTMLElement): ShadowRoot | null => codeView(host)?.querySelector("diffs-container")?.shadowRoot ?? null
 
-/** Poll until the lazy chunk mounted and pierre coloured a token; React settles between macrotasks. */
+/*
+ * Poll until the lazy chunk mounted and pierre coloured a token; React settles
+ * between macrotasks. The bound is wall-clock, not ticks: a 10 ms timer takes
+ * far longer under a loaded machine (2026-09-03: 600 ticks expired at 8.5 s
+ * with a load average of 100 while the token arrived later), and a real
+ * first tokenize measures 2.6 s idle under bun/JSC.
+ */
+const HIGHLIGHT_DEADLINE_MS = 30_000
 const highlighted = async (host: HTMLElement): Promise<void> => {
-  for (let tick = 0; tick < 600 && shadowOf(host)?.querySelector("[data-line] span[style]") == null; tick += 1) {
+  const deadline = Date.now() + HIGHLIGHT_DEADLINE_MS
+  while (Date.now() < deadline && shadowOf(host)?.querySelector("[data-line] span[style]") == null) {
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   if (shadowOf(host)?.querySelector("[data-line] span[style]") == null) throw new Error("the code view never painted a token")
@@ -154,11 +169,11 @@ describe("the file card's code view", () => {
     expect(codeView(host)).toBeNull()
   }, 30_000)
 
-  test("a truncated code file keeps the plain block: half a file is not highlighted", async () => {
+  test("a truncated code file is highlighted like any other, and the cut is stated below it", async () => {
     await highlighted(render(fileCard("warm2.ts", "let warm = 2\n")))
     const host = render(fileCard("src/big.ts", "export const cut = 1\n", { truncated: true }))
-    expect(host.querySelector("pre.world-card-path")?.textContent).toBe("export const cut = 1\n")
-    expect(codeView(host)).toBeNull()
+    await highlighted(host)
+    expect(codeView(host)).not.toBeNull()
     expect(host.textContent).toContain("Truncated")
   }, 30_000)
 
@@ -232,6 +247,14 @@ describe("the file card's code intelligence", () => {
     expect(mixed.querySelector('[data-slot="code-diagnostics-count"]')?.textContent).toBe("1 error · 2 warnings")
   })
 
+  test("a publication the host capped counts what the card holds and says how many of the total that is; a complete list says nothing more", () => {
+    const fifty = Array.from({ length: 50 }, (_item, index) => diagnostic(index + 1, "error", `e${index}`))
+    expect(render(fileCard("src/app.ts", "export {}\n", { diagnostics: fifty, diagnosticsTotal: 132 })).querySelector('[data-slot="code-diagnostics-count"]')?.textContent)
+      .toBe("50 errors · 0 warnings · 50 of 132 shown")
+    expect(render(fileCard("src/app.ts", "export {}\n", { diagnostics: fifty, diagnosticsTotal: 50 })).querySelector('[data-slot="code-diagnostics-count"]')?.textContent)
+      .toBe("50 errors · 0 warnings")
+  })
+
   test("a diagnostic renders under its line with its severity, message and origin", async () => {
     const host = render(
       fileCard("src/app.ts", "const message = 'x'\nconst length = message.lenght\n", {
@@ -257,9 +280,26 @@ describe("the file card's code intelligence", () => {
     expect(box?.textContent).toContain("const answer: number")
     expect(box?.textContent).not.toContain("```")
     expect(box?.closest("[slot]")?.getAttribute("slot")).toBe("annotation-1")
+    expect(box?.querySelector('[data-slot="code-hover-cut"]')).toBeNull()
     expect(render(fileCard("src/b.ts", "export {}\n", { hover: null })).querySelector('[data-slot="code-hover"]')).toBeNull()
     expect(render(fileCard("src/c.ts", "export {}\n")).querySelector('[data-slot="code-hover"]')).toBeNull()
   }, 30_000)
+
+  test("a hover the host cut at its cap says so in the box instead of ending as if complete", async () => {
+    const host = render(
+      fileCard("src/app.ts", "export const answer: number = 42\n", {
+        hover: { line: 1, character: 14, contents: "```typescript\nconst answer: number\n```\nA very long doc comment", truncated: true }
+      })
+    )
+    await highlighted(host)
+    expect(host.querySelector('[data-slot="code-hover-cut"]')?.textContent).toBe("(cut at 4 KiB)")
+  }, 30_000)
+
+  test("a ready server's one-line note renders when the seam left one, and nothing when it did not", () => {
+    const noted = render(fileCard("src/app.ts", "export {}\n", { intel: { state: "ready", note: "Definition of src/app.ts:1:14: outside the repository (1 location not openable here)" } }))
+    expect(noted.querySelector('[data-intel="ready"]')?.textContent).toBe("Definition of src/app.ts:1:14: outside the repository (1 location not openable here)")
+    expect(render(fileCard("src/app.ts", "export {}\n", { intel: { state: "ready" } })).querySelector("[data-intel]")).toBeNull()
+  })
 
   test("the server state is stated only when it is not ready: missing with its install line, unavailable with the host's message, starting", () => {
     const missing = render(fileCard("src/app.ts", "export {}\n", { intel: { state: "missing", note: "npm i -g typescript-language-server typescript" } }))
@@ -319,6 +359,96 @@ describe("the file card's code intelligence", () => {
     expect(calls).toHaveLength(1)
     await rest(tokenIn(host, 1, "42"))
     expect(calls[1]).toEqual(["code.hover", "src/app.ts:1:31 smithersai/smithers"])
+  }, 30_000)
+})
+
+/*
+ * THE THREE-DOOR LAW meets the host matrix: the gestures are bindings to
+ * code.hover / code.definition, and those flows carry `runtime: ["local.lsp"]`,
+ * a door the web host lacks. A card that bound them there would be a dead
+ * control (the pointer path drops an unregistered name silently), so the
+ * card reads the catalog: bound where the flows exist, and on the web the
+ * door is stated once under the header, on the files a language server
+ * would serve.
+ */
+const memoryStorage = (): StorageApi => {
+  const data = new Map<string, string>()
+  return { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => void data.set(key, value), removeItem: (key) => void data.delete(key) }
+}
+const unavailableAgent: NativeAgent = { available: false, startTurn: async () => ({ status: "error", message: "unavailable" }), cancelTurn: async () => {}, subscribe: () => () => {} }
+const unavailableRepositories: NativeRepositories = {
+  available: false,
+  pickLocalRepository: async () => ({ status: "error", code: "native-required", message: "Local repositories can only be connected from the Smithers native app." })
+}
+const WEB: AppBootstrap = {
+  apiVersion: 1,
+  host: "cloud",
+  version: "test",
+  buildSha: "cloud",
+  capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: true }),
+  authFlow: "redirect",
+  sandbox: null
+}
+const NATIVE: AppBootstrap = {
+  apiVersion: 1,
+  host: "local",
+  version: "test",
+  buildSha: "local",
+  capabilities: localCapabilities({ agent: true, identity: true, jjhub: true, pathEntry: true }),
+  authFlow: "native-handoff",
+  sandbox: null
+}
+
+const renderOn = async (bootstrap: AppBootstrap, card: Extract<Card, { kind: "file" }>): Promise<{ readonly host: HTMLElement; readonly calls: Array<[string, string | undefined]> }> => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const controller = createAppController(store, unavailableRepositories, unavailableAgent, { bootstrap, socketUrl: () => undefined })
+  const calls: Array<[string, string | undefined]> = []
+  const host = document.createElement("div")
+  document.body.appendChild(host)
+  const root = createRoot(host)
+  mounted.push({ root, host })
+  flushSync(() =>
+    root.render(
+      <ControllerTestProvider controller={controller}>
+        <FileCardBody card={card} onRunCommand={(name, args) => calls.push([name, args])} />
+      </ControllerTestProvider>
+    )
+  )
+  return { host, calls }
+}
+
+describe("the file card's gestures follow the host's catalog", () => {
+  test("on the web host a TypeScript card binds no code.* gesture and states the door once under the header", async () => {
+    const { host, calls } = await renderOn(WEB, fileCard("src/app.ts", "export const answer: number = 42\n"))
+    await highlighted(host)
+    expect(host.querySelector('[data-flow="code.hover"]')).toBeNull()
+    expect(host.querySelector("[data-flow-activate]")).toBeNull()
+    expect(host.querySelector('[data-intel="unavailable"]')?.textContent).toBe("Hover and definitions: /code.hover is not in the web app — it needs the native app.")
+    // The file is still highlighted: highlighting is client-side everywhere.
+    expect((shadowOf(host)?.querySelectorAll("[data-line] span[style]").length ?? 0) > 1).toBe(true)
+    // No gesture is armed: a rest or ⌘-click on the code runs nothing — not a silently dropped command.
+    const span = shadowOf(host)?.querySelector<HTMLElement>("[data-line] span[style]")
+    if (span == null) throw new Error("no coloured token")
+    span.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, pointerType: "mouse" }))
+    await wait(400)
+    span.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, metaKey: true }))
+    expect(calls).toEqual([])
+  }, 30_000)
+
+  test("on the web host a file no language server would serve carries no note, and a card the seam already annotated keeps its own state", async () => {
+    const json = await renderOn(WEB, fileCard("package.json", "{ \"name\": \"x\" }\n"))
+    expect(json.host.querySelector("[data-intel]")).toBeNull()
+    const cloud = await renderOn(WEB, fileCard("src/app.ts", "export {}\n", { intel: { state: "unavailable", note: "Hover and definitions need a workspace language server; Smithers Cloud does not relay one yet." } }))
+    expect(cloud.host.querySelector('[data-intel="unavailable"]')?.textContent).toContain("Smithers Cloud does not relay one yet")
+  })
+
+  test("on the native host with local.lsp the same card binds both gestures and states nothing", async () => {
+    const { host, calls } = await renderOn(NATIVE, fileCard("src/app.ts", "export const answer: number = 42\n"))
+    await highlighted(host)
+    expect(host.querySelector('[data-flow="code.hover"]')?.getAttribute("data-flow-activate")).toBe("code.definition")
+    expect(host.querySelector("[data-intel]")).toBeNull()
+    tokenIn(host, 1, "answer").dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, metaKey: true }))
+    expect(calls).toEqual([["code.definition", "src/app.ts:1:14 smithersai/smithers"]])
   }, 30_000)
 })
 

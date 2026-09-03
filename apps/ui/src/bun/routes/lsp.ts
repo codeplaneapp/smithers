@@ -2,8 +2,9 @@
  * The code-intel routes (LOCAL-APP.md "HTTP and WebSocket surface", code-intel
  * PLAN.md §3): `POST /api/lsp/{hover,definition,diagnostics}` and
  * `GET /api/lsp/servers`. The renderer names a repoId, a relative path and a
- * 1-based position; the host owns the binary, its argv and its cwd. Read
- * access suffices: a language server reads. Refusals use the
+ * 1-based position; the host owns the binary, its argv and its cwd, and
+ * finds the binary on the host, never inside the repository, so read access
+ * suffices: a language server reads. Refusals use the
  * `{ error: { code, message } }` envelope; `409 language_server_missing`
  * carries the install line verbatim in `install` and nothing installs it.
  * Diagnostics also ride `/ws` on `lsp:<repoId>` (the host publishes them).
@@ -101,13 +102,13 @@ export const registerLspRoutes = (host: LspRouteHost, lsp: LspHost, repositories
 
   router.add("POST", LSP_HOVER_PATH, ({ request }) =>
     withSession(request, LspPositionRequestSchema, "{ repoId, path, line, character }", async (session, body) => {
-      const answer: LspHoverResponse = { hover: await session.hover(body.path, body) }
+      const answer: LspHoverResponse = await session.hover(body.path, body)
       return json(answer)
     }))
 
   router.add("POST", LSP_DEFINITION_PATH, ({ request }) =>
     withSession(request, LspPositionRequestSchema, "{ repoId, path, line, character }", async (session, body) => {
-      const answer: LspDefinitionResponse = { locations: [...await session.definition(body.path, body)] }
+      const answer: LspDefinitionResponse = await session.definition(body.path, body)
       return json(answer)
     }))
 

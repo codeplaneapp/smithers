@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -684,7 +685,9 @@ describe("POST /api/repo/files", () => {
       size: Buffer.byteLength("# Smithers — files\n"),
       content: "# Smithers — files\n",
       truncated: false,
-      binary: false
+      binary: false,
+      // The digest of the bytes carried, so a language server's answer can say whether it is about this text.
+      digest: createHash("sha256").update("# Smithers — files\n").digest("hex")
     })
   })
 
@@ -702,7 +705,8 @@ describe("POST /api/repo/files", () => {
       size: 5,
       content: "",
       truncated: false,
-      binary: true
+      binary: true,
+      digest: createHash("sha256").update(Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47])).digest("hex")
     })
   })
 

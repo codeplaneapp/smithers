@@ -35,9 +35,7 @@ import type { LocalServer } from "../server"
  */
 
 const node = await findNode()
-const probeRoot = await mkdtemp(join(tmpdir(), "smithers-lsp-route-probe-"))
-const resolved = resolveServer(TYPESCRIPT_SERVER, defaultServerLookup(), probeRoot, node)
-await rm(probeRoot, { recursive: true, force: true })
+const resolved = resolveServer(TYPESCRIPT_SERVER, defaultServerLookup(), node)
 const skipReason = node === null
   ? "no Node.js >= 22.19 on this machine to run the language server"
   : "missing" in resolved

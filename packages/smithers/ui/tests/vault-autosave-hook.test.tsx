@@ -19,6 +19,25 @@ afterEach(async () => {
   container = undefined;
 });
 
+/**
+ * Poll a predicate across React commits instead of waiting a fixed duration.
+ *
+ * Each iteration yields to the real event loop (so a real debounce timer and
+ * the save's own microtasks can run) and then lets `act` flush React, which is
+ * what re-reads the hook's snapshot: an async `act` body never sees its own
+ * renders, so the flush has to be the loop rather than something inside it.
+ * The deadline is a hang guard, not a wait -- the assertions after the call
+ * are what decide the test, and they run as soon as the transition lands.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    });
+  }
+}
+
 describe("useAutosaveDoc", () => {
   test("drives the state machine from React with the real (default) timer", async () => {
     let api: UseAutosaveDocResult | undefined;
@@ -44,21 +63,28 @@ describe("useAutosaveDoc", () => {
     expect(api!.state).toBe("clean");
     expect(api!.statusText).toBe("");
 
-    await act(async () => {
+    // The debounce is a REAL timer here, so "dirty" is only true until it
+    // fires: any `await` between the edit and the read races it. That is the
+    // flake this test had -- a loaded runner stalls React's flush past 5ms and
+    // the snapshot already reads "saved" (or "saving") by the assertion. A
+    // synchronous `act` callback commits the edit's render before `act`
+    // returns, so the read below happens on the same uninterrupted stack, on
+    // which no timer callback can run. The callback returns `null` purely so
+    // the call is typed as the thenable it always is at runtime; awaiting it
+    // immediately after the read keeps React's "act was awaited" contract.
+    const editCommitted = act(() => {
       api!.setValue("hello world");
+      return null;
     });
-    expect(api!.state).toBe("dirty");
-    expect(api!.statusText).toBe("Unsaved");
+    const edited = { state: api!.state, statusText: api!.statusText };
+    await editCommitted;
+    expect(edited).toEqual({ state: "dirty", statusText: "Unsaved" });
 
-    // Poll the real (5ms-debounce) timer to completion instead of a fixed
-    // sleep: a loaded CI runner (Windows especially) can exceed a hard 25ms
-    // window, which flaked this test. Bounded so a genuine hang still fails.
-    await act(async () => {
-      const deadline = Date.now() + 2000;
-      while (saved.length === 0 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    });
+    // Nothing here forces the save: reaching "saved" proves the default
+    // scheduler is live, since no `schedule` was injected. Wait on the
+    // transition itself rather than on `saved.length`, which the writer pushes
+    // before the machine has emitted anything.
+    await waitFor(() => api!.state === "saved");
     expect(saved).toEqual(["hello world"]);
     expect(api!.state).toBe("saved");
     expect(api!.statusText).toBe("Saved");
@@ -130,11 +156,8 @@ describe("useAutosaveDoc", () => {
     });
     await act(async () => {
       api!.setValue("strict edit");
-      const deadline = Date.now() + 2000;
-      while (saved.length === 0 && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
     });
+    await waitFor(() => saved.length > 0);
 
     expect(api!.value).toBe("strict edit");
     expect(saved).toEqual(["strict edit"]);

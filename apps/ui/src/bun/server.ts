@@ -31,11 +31,17 @@ import {
   CLOUD_AUTH_SESSION_PATH,
   CLOUD_AUTH_SIGN_OUT_PATH,
   CLOUD_AUTH_START_PATH,
+  CLOUD_LSP_FRAME_CAP_BYTES,
   CLOUD_ROUTE_PREFIX,
+  CLOUD_TERMINAL_FRAME_CAP_BYTES,
+  CLOUD_WS_NOT_READY_CLOSE_CODE,
+  CLOUD_WS_PENDING_CLOSE_CODE,
   CLOUD_WS_ROUTE_PREFIX,
   LINEAR_AUTH_SESSION_PATH,
-  LINEAR_AUTH_START_PATH
+  LINEAR_AUTH_START_PATH,
+  withRetryAfter
 } from "@smthrs/rpc/LocalApp"
+import type { CloudWsSessionKind } from "@smthrs/rpc/LocalApp"
 import {
   isLocalSessionToken,
   localSessionProtocol,
@@ -84,14 +90,26 @@ export const CLIENT_ERROR_MAX_BODY = 16 * 1024
 /** Long conversations are replayed on every turn, so the cap is generous, not tight. */
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_WS_FRAME_BYTES = 128 * 1024
-/** plue's terminal route caps a message at 64 KiB; the tunnel refuses larger renderer frames before they reach it. */
-const MAX_CLOUD_WS_FRAME_BYTES = 64 * 1024
+/*
+ * What one renderer frame may carry per branch: `/ws` its own cap, a cloud
+ * terminal bridge plue's 64 KiB, a cloud lsp bridge plue's 1 MiB (lane L6). The
+ * server's own ceiling sits at twice the largest so every branch refuses an
+ * over-cap frame with its own reason (a frame past the ceiling is Bun's to
+ * drop, as an abnormal close).
+ */
+const MAX_CLOUD_WS_FRAME_BYTES: Readonly<Record<CloudWsSessionKind, number>> = {
+  terminal: CLOUD_TERMINAL_FRAME_CAP_BYTES,
+  lsp: CLOUD_LSP_FRAME_CAP_BYTES
+}
+const MAX_ANY_WS_FRAME_BYTES = 2 * Math.max(MAX_WS_FRAME_BYTES, ...Object.values(MAX_CLOUD_WS_FRAME_BYTES))
 const MAX_WS_SUBSCRIPTIONS = 64
 const MAX_WS_TOPIC_CHARS = 256
 /** Frames a cloud-terminal tunnel queues before its upstream opens. */
 const MAX_CLOUD_WS_PENDING = 256
 /** Renderer→upstream bytes the tunnel may hold before it closes the renderer's socket. */
 const MAX_CLOUD_WS_UPSTREAM_BUFFER = 1024 * 1024
+/** Upstream→renderer bytes Bun may hold per socket; one lsp frame at its cap must fit with room to spare. */
+const MAX_WS_BACKPRESSURE_BYTES = 4 * 1024 * 1024
 
 export interface LocalServerOptions {
   /** 0 (the default) picks a free port. */
@@ -165,6 +183,8 @@ export interface WsSocketData {
 }
 
 export interface CloudWsBridge {
+  /** Which plue socket this bridges: the terminal (binary PTY bytes) or the language-server relay (JSON-RPC text frames, lane L6). */
+  readonly kind: CloudWsSessionKind
   readonly target: string
   readonly token: string | undefined
   upstream: WebSocket | undefined
@@ -176,15 +196,30 @@ export interface CloudWsBridge {
 /*
  * plue's pre-upgrade refusals as the close codes the renderer sees (ADR 0002
  * "Terminal attach contract"): the renderer stops redialing on every one of
- * them. 425 is plue's "session still provisioning", the same fact as 409.
+ * them. For the terminal, 425 is plue's "session still provisioning", the
+ * same fact as 409. The lsp branch (lane L6, plue #505) keeps 425
+ * `workspace_session_pending` and 503 `guest_not_ready` apart from 409: both
+ * carry a `Retry-After`, and the renderer's client retries them on the
+ * server's clock while it shows the server's words.
  */
-const CLOUD_WS_REFUSAL_CODES: Readonly<Record<number, number>> = {
-  401: 4401,
-  403: 4403,
-  404: 4404,
-  409: 4409,
-  425: 4409,
-  429: 4429
+const CLOUD_WS_REFUSAL_CODES: Readonly<Record<CloudWsSessionKind, Readonly<Record<number, number>>>> = {
+  terminal: {
+    401: 4401,
+    403: 4403,
+    404: 4404,
+    409: 4409,
+    425: 4409,
+    429: 4429
+  },
+  lsp: {
+    401: 4401,
+    403: 4403,
+    404: 4404,
+    409: 4409,
+    425: CLOUD_WS_PENDING_CLOSE_CODE,
+    429: 4429,
+    503: CLOUD_WS_NOT_READY_CLOSE_CODE
+  }
 }
 
 const CLOUD_WS_REFUSAL_REASONS: Readonly<Record<number, string>> = {
@@ -192,7 +227,9 @@ const CLOUD_WS_REFUSAL_REASONS: Readonly<Record<number, string>> = {
   4403: "forbidden",
   4404: "session gone",
   4409: "session not running",
-  4429: "rate limited"
+  [CLOUD_WS_PENDING_CLOSE_CODE]: "session pending",
+  4429: "rate limited",
+  [CLOUD_WS_NOT_READY_CLOSE_CODE]: "guest not ready"
 }
 
 /** A WebSocket close reason is at most 123 UTF-8 bytes; anything longer is refused by the socket, so it is cut here. */
@@ -203,7 +240,7 @@ const closeReasonOf = (text: string): string => {
   return reason
 }
 
-/** The headers the tunnel dials the cloud terminal with: the bearer, and an Origin only where an environment still enforces one. */
+/** The headers the tunnel dials the cloud socket with: the bearer, and an Origin only where an environment still enforces one. */
 const cloudWsUpstreamHeaders = (token: string | undefined): Record<string, string> => {
   const headers: Record<string, string> = {}
   // plue#475: the terminal upgrade skips the Origin check for Bearer principals, so a desktop app sends none — SMITHERS_CLOUD_WS_ORIGIN is the knob for an environment that still enforces it.
@@ -222,6 +259,12 @@ const cloudWsUpstreamHeaders = (token: string | undefined): Record<string, strin
  * state) before it ever upgrades, so the GET answers the status the
  * handshake got. An answer this table does not know stays 1011, the code
  * the renderer retries once.
+ *
+ * On the lsp branch the reason carries plue's machine-readable `code` before
+ * its message (`language_server_missing: npm i -g …`, the install line
+ * verbatim) — three different 409s reach the renderer as one close code, and
+ * the code is what tells them apart — and the `Retry-After` a 425 or 503
+ * named, in words at the end, so the renderer retries on the server's clock.
  */
 const classifyCloudWsRefusal = async (
   bridge: CloudWsBridge,
@@ -233,22 +276,30 @@ const classifyCloudWsRefusal = async (
   try {
     response = await fetchImpl(url, { headers: cloudWsUpstreamHeaders(bridge.token), redirect: "manual" })
   } catch {
-    return { code: 1011, reason: "cloud terminal upstream failed" }
+    return { code: 1011, reason: `cloud ${bridge.kind} upstream failed` }
   }
-  const code = CLOUD_WS_REFUSAL_CODES[response.status]
+  const code = CLOUD_WS_REFUSAL_CODES[bridge.kind][response.status]
   let message: string | undefined
+  let plueCode: string | undefined
   try {
-    const body = (await response.json()) as { message?: unknown; error?: unknown }
+    const body = (await response.json()) as { message?: unknown; error?: unknown; code?: unknown }
     if (typeof body.message === "string" && body.message !== "") message = body.message
     else if (typeof body.error === "string" && body.error !== "") message = body.error
     else if (typeof body.error === "object" && body.error !== null && typeof (body.error as { message?: unknown }).message === "string") {
       message = (body.error as { message: string }).message
     }
+    if (typeof body.code === "string" && body.code !== "") plueCode = body.code
   } catch {
     // A body that is not JSON is plumbing, never copy.
   }
-  if (code === undefined) return { code: 1011, reason: closeReasonOf(`cloud terminal upstream answered ${response.status}`) }
-  return { code, reason: closeReasonOf(message ?? CLOUD_WS_REFUSAL_REASONS[code] ?? "refused") }
+  if (code === undefined) return { code: 1011, reason: closeReasonOf(`cloud ${bridge.kind} upstream answered ${response.status}`) }
+  let reason = message ?? CLOUD_WS_REFUSAL_REASONS[code] ?? "refused"
+  if (bridge.kind === "lsp") {
+    if (plueCode !== undefined && !reason.startsWith(`${plueCode}:`)) reason = `${plueCode}: ${reason}`
+    const retryAfter = Number(response.headers.get("retry-after")?.trim())
+    if (Number.isInteger(retryAfter) && retryAfter >= 0) reason = withRetryAfter(reason, retryAfter)
+  }
+  return { code, reason: closeReasonOf(reason) }
 }
 
 export type WsSocket = ServerWebSocket<WsSocketData>
@@ -806,12 +857,13 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     }
     if (pathname.startsWith(CLOUD_WS_ROUTE_PREFIX)) {
       /*
-       * Lane citc: the workspace-terminal tunnel. Same authorization shape
-       * as /ws — origin and the local-session subprotocol — because a
-       * browser upgrade carries no custom headers. The path mirrors the
-       * cloud API's terminal route exactly (`repos/{o}/{r}/workspace/
-       * sessions/{id}/terminal`, nothing else), and the bearer attaches
-       * HERE from the Bun-held credential, never from the renderer.
+       * Lane citc: the workspace-terminal tunnel; lane L6: the workspace
+       * language-server tunnel beside it. Same authorization shape as /ws —
+       * origin and the local-session subprotocol — because a browser upgrade
+       * carries no custom headers. The path mirrors the cloud API's two
+       * socket routes exactly (`repos/{o}/{r}/workspace/sessions/{id}/
+       * terminal` and `…/lsp`, nothing else), and the bearer attaches HERE
+       * from the Bun-held credential, never from the renderer.
        */
       const requestOrigin = request.headers.get("origin")
       if (requestOrigin !== null && requestOrigin !== origin) {
@@ -829,18 +881,20 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       const rest = pathname.slice(CLOUD_WS_ROUTE_PREFIX.length)
       // `[^/]+` admits `.` and `..`; a segment-wise check keeps the joined target under /api/repos/ (WHATWG normalizes dot segments).
       const segments = rest.split("/")
+      const branch = /^repos\/[^/]+\/[^/]+\/workspace\/sessions\/[^/]+\/(terminal|lsp)$/.exec(rest)
       if (
-        !/^repos\/[^/]+\/[^/]+\/workspace\/sessions\/[^/]+\/terminal$/.test(rest) ||
+        branch === null ||
         segments.some((segment) => segment === "." || segment === ".." || segment.includes("%2F") || segment.includes("%2f") || segment.includes("\\"))
       ) {
-        return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal sessions.")
+        return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal and lsp sessions.")
       }
+      const kind: CloudWsSessionKind = branch[1] === "lsp" ? "lsp" : "terminal"
       const upstreamWs = cloudUpstream.startsWith("https:")
         ? `wss:${cloudUpstream.slice("https:".length)}`
         : `ws:${cloudUpstream.slice("http:".length)}`
       const tunnelTarget = new URL(`/api/${rest}${url.search}`, upstreamWs)
       if (tunnelTarget.origin !== new URL(upstreamWs).origin || !tunnelTarget.pathname.startsWith("/api/repos/")) {
-        return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal sessions.")
+        return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal and lsp sessions.")
       }
       // Signed out, the tunnel never dials plue: an anonymous attach would only be refused there.
       const token = cloudAuth?.token()
@@ -851,6 +905,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         data: {
           topics: new Set<string>(),
           cloud: {
+            kind,
             target: tunnelTarget.toString(),
             token,
             upstream: undefined,
@@ -945,19 +1000,21 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       return response
     },
     websocket: {
-      maxPayloadLength: MAX_WS_FRAME_BYTES,
-      backpressureLimit: 1024 * 1024,
+      maxPayloadLength: MAX_ANY_WS_FRAME_BYTES,
+      backpressureLimit: MAX_WS_BACKPRESSURE_BYTES,
       closeOnBackpressureLimit: true,
       open: (socket) => {
         const bridge = socket.data.cloud
         if (bridge === undefined) return
         /*
-         * Lane citc: connect the cloud terminal. plue requires the
-         * `terminal` subprotocol at upgrade; Bun's client carries it (and
-         * the bearer) as headers. Frames that arrived first flush on open.
+         * Lane citc: connect the cloud socket. plue requires its own
+         * subprotocol at upgrade — `terminal` for the PTY, `lsp` for the
+         * language-server relay (lane L6) — and the branch IS the kind; Bun's
+         * client carries it (and the bearer) as headers. Frames that arrived
+         * first flush on open.
          */
         cloudBridges.add(socket)
-        const headers: Record<string, string> = { "sec-websocket-protocol": "terminal", ...cloudWsUpstreamHeaders(bridge.token) }
+        const headers: Record<string, string> = { "sec-websocket-protocol": bridge.kind, ...cloudWsUpstreamHeaders(bridge.token) }
         const upstream = new WebSocket(bridge.target, { headers } as never)
         bridge.upstream = upstream
         upstream.binaryType = "arraybuffer"
@@ -1001,29 +1058,36 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
             refuse()
             return
           }
-          end(1011, "cloud terminal upstream failed")
+          end(1011, `cloud ${bridge.kind} upstream failed`)
         })
       },
       message: (socket, raw) => {
         const bridge = socket.data.cloud
+        const frameBytes = typeof raw === "string" ? Buffer.byteLength(raw) : raw.byteLength
         if (bridge !== undefined) {
+          // Each branch refuses its own over-cap frame with its own reason: plue's 64 KiB for the terminal, 1 MiB for the lsp relay.
+          const cap = MAX_CLOUD_WS_FRAME_BYTES[bridge.kind]
+          if (frameBytes > cap) {
+            socket.close(1009, `A ${bridge.kind} frame is larger than the upstream accepts (${cap / 1024} KiB).`)
+            return
+          }
           const upstream = bridge.upstream
           if (upstream !== undefined && upstream.readyState === WebSocket.OPEN) {
             // A flooding renderer must not grow the upstream client's buffer without bound (the other direction is capped by backpressureLimit).
-            if ((typeof raw === "string" ? Buffer.byteLength(raw) : raw.byteLength) > MAX_CLOUD_WS_FRAME_BYTES) {
-              socket.close(1009, "A terminal frame is larger than the upstream accepts (64 KiB).")
-              return
-            }
             if (upstream.bufferedAmount > MAX_CLOUD_WS_UPSTREAM_BUFFER) {
-              socket.close(1009, "The terminal input outran the upstream.")
+              socket.close(1009, `The ${bridge.kind} input outran the upstream.`)
               return
             }
             upstream.send(raw)
           } else if (bridge.pending.length < MAX_CLOUD_WS_PENDING) {
             bridge.pending.push(raw)
           } else {
-            socket.close(1011, "cloud terminal upstream never opened")
+            socket.close(1011, `cloud ${bridge.kind} upstream never opened`)
           }
+          return
+        }
+        if (frameBytes > MAX_WS_FRAME_BYTES) {
+          socket.close(1009, `A /ws frame is larger than the bus accepts (${MAX_WS_FRAME_BYTES / 1024} KiB).`)
           return
         }
         let parsed: unknown

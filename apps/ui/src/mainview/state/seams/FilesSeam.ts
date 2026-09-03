@@ -75,6 +75,25 @@ type FileListEntry = FileListPayload["entries"][number]
 /** The card cap (characters): a transcript card states a file, it is not an editor. */
 const CARD_CONTENT_CAP = 16 * 1024
 
+/**
+ * The content fields of a local file card from the route's answer: the card
+ * cap applied, binary stated, the digest of the bytes kept so a later answer
+ * about the file (the code-intel seam's) can tell whether it is about this
+ * text. The code-intel seam re-reads a card through this, in place.
+ */
+export const localFileFields = (
+  body: Extract<RepoFilesResponse, { kind: "file" }>
+): { readonly content: string; readonly truncated: boolean; readonly binary?: true; readonly digest?: string } => {
+  const { content, binary } = body
+  const truncated = !binary && (body.truncated || content.length > CARD_CONTENT_CAP)
+  return {
+    content: binary ? "" : content.slice(0, CARD_CONTENT_CAP),
+    truncated,
+    ...(binary ? { binary: true as const } : {}),
+    ...(body.digest === undefined ? {} : { digest: body.digest })
+  }
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
@@ -350,14 +369,10 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     const answer = await localRequest(repo, normalized, normalized, "read")
     if ("error" in answer) return answer.error
     if (answer.body.kind === "dir") return `${normalized} in ${repo.name} is a directory — run /files.list ${normalized} instead`
-    const { content, binary } = answer.body
-    const truncated = !binary && (answer.body.truncated || content.length > CARD_CONTENT_CAP)
     const payload = {
       repo: repo.name,
       path: normalized,
-      content: binary ? "" : content.slice(0, CARD_CONTENT_CAP),
-      truncated,
-      ...(binary ? { binary: true } : {}),
+      ...localFileFields(answer.body),
       ...localAddressing(ctx.store, repo, normalized),
       ...anchored(anchor)
     }

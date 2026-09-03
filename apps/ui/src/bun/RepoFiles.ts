@@ -10,8 +10,11 @@
  * session-gated, and the writer of such a swap already owns the checkout.)
  * Reads are bounded (REPO_FILE_READ_CAP_BYTES), listings are bounded
  * (REPO_LISTING_CAP_ENTRIES), binary is stated, never printed, and no error
- * body carries an absolute path.
+ * body carries an absolute path. A file answer names the digest of the bytes
+ * it carries, so a later answer about the same path (a language server's)
+ * can say whether it is about these bytes.
  */
+import { createHash } from "node:crypto"
 import { open, readdir, realpath, stat } from "node:fs/promises"
 import { join, sep } from "node:path"
 import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "@smthrs/rpc/LocalApp"
@@ -135,6 +138,14 @@ export const readRepoPath = async (root: string, path: string): Promise<RepoFile
   const { content, binary } = decodeText(bytes, shrank ? false : truncated)
   return {
     status: "ok",
-    body: { kind: "file", path: relative, size: shrank ? read : size, content, truncated: binary || shrank ? false : truncated, binary }
+    body: {
+      kind: "file",
+      path: relative,
+      size: shrank ? read : size,
+      content,
+      truncated: binary || shrank ? false : truncated,
+      binary,
+      digest: createHash("sha256").update(bytes).digest("hex")
+    }
   }
 }

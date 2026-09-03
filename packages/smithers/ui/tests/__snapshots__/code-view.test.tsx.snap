@@ -6,21 +6,19 @@ exports[`CodeFileView token model (happy-dom, main thread) ts: every line surviv
     "line": 1,
     "tokens": [
       "#C792EA|import",
-      "#D6DEEB| { REPO_FILES_PATH } ",
+      "-| ",
+      "#D6DEEB|{ REPO_FILES_PATH }",
+      "-| ",
       "#C792EA|from",
-      "#D9F5DD| "",
+      "#D6DEEB| ",
+      "#D9F5DD|"",
       "#ECC48D|@smthrs/rpc/LocalApp",
       "#D9F5DD|"",
     ],
   },
   {
     "line": 2,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 3,
@@ -32,61 +30,81 @@ exports[`CodeFileView token model (happy-dom, main thread) ts: every line surviv
     "line": 4,
     "tokens": [
       "#C792EA|const",
-      "#82AAFF| CARD_CONTENT_CAP",
-      "#C792EA| =",
-      "#F78C6C| 16",
-      "#C792EA| *",
-      "#F78C6C| 1024",
+      "#C792EA| ",
+      "#82AAFF|CARD_CONTENT_CAP",
+      "#C792EA| ",
+      "#C792EA|=",
+      "#C792EA| ",
+      "#F78C6C|16",
+      "#C792EA| ",
+      "#C792EA|*",
+      "#C792EA| ",
+      "#F78C6C|1024",
     ],
   },
   {
     "line": 5,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 6,
     "tokens": [
-      "#C792EA|export ",
+      "#C792EA|export",
+      "-| ",
       "#C792EA|const",
-      "#82AAFF| isRecord",
-      "#C792EA| =",
-      "#D9F5DD| (",
+      "#C792EA| ",
+      "#82AAFF|isRecord",
+      "#C792EA| ",
+      "#C792EA|=",
+      "#C792EA| ",
+      "#D9F5DD|(",
       "#D7DBE0|value",
       "#7FDBCA|:",
-      "#C5E478| unknown",
+      "#C792EA| ",
+      "#C5E478|unknown",
       "#D9F5DD|)",
       "#7FDBCA|:",
-      "#D7DBE0| value",
-      "#7FDBCA| is",
-      "#FFCB8B| Record",
+      "#C792EA| ",
+      "#D7DBE0|value",
+      "#C792EA| ",
+      "#7FDBCA|is",
+      "#C792EA| ",
+      "#FFCB8B|Record",
       "#C792EA|<",
       "#C5E478|string",
       "#C792EA|,",
-      "#C5E478| unknown",
+      "#C792EA| ",
+      "#C5E478|unknown",
       "#C792EA|>",
-      "#C792EA| =>",
+      "#C792EA| ",
+      "#C792EA|=>",
     ],
   },
   {
     "line": 7,
     "tokens": [
-      "#D6DEEB|  value",
-      "#C792EA| !==",
-      "#FF5874| null",
-      "#C792EA| &&",
-      "#7FDBCA| typeof",
-      "#D6DEEB| value",
-      "#C792EA| ===",
-      "#D9F5DD| "",
+      "#C792EA|  ",
+      "#D6DEEB|value",
+      "#C792EA| ",
+      "#C792EA|!==",
+      "#C792EA| ",
+      "#FF5874|null",
+      "#C792EA| ",
+      "#C792EA|&&",
+      "#C792EA| ",
+      "#7FDBCA|typeof",
+      "#C792EA| ",
+      "#D6DEEB|value",
+      "#C792EA| ",
+      "#C792EA|===",
+      "#C792EA| ",
+      "#D9F5DD|"",
       "#ECC48D|object",
       "#D9F5DD|"",
-      "#C792EA| &&",
-      "#C792EA| !",
+      "#C792EA| ",
+      "#C792EA|&&",
+      "#C792EA| ",
+      "#C792EA|!",
       "#D6DEEB|Array",
       "#C792EA|.",
       "#82AAFF|isArray",
@@ -97,37 +115,44 @@ exports[`CodeFileView token model (happy-dom, main thread) ts: every line surviv
   },
   {
     "line": 8,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 9,
     "tokens": [
-      "#C792EA|export ",
+      "#C792EA|export",
+      "-| ",
       "#C792EA|const",
-      "#82AAFF| label",
-      "#C792EA| =",
-      "#D9F5DD| (",
+      "#C792EA| ",
+      "#82AAFF|label",
+      "#C792EA| ",
+      "#C792EA|=",
+      "#C792EA| ",
+      "#D9F5DD|(",
       "#D7DBE0|repo",
       "#7FDBCA|:",
-      "#C5E478| string",
+      "#C792EA| ",
+      "#C5E478|string",
       "#C792EA|,",
-      "#D7DBE0| path",
+      "#C792EA| ",
+      "#D7DBE0|path",
       "#7FDBCA|:",
-      "#C5E478| string",
+      "#C792EA| ",
+      "#C5E478|string",
       "#D9F5DD|)",
       "#7FDBCA|:",
-      "#C5E478| string",
-      "#C792EA| =>",
-      "#D6DEEB| \`",
+      "#C792EA| ",
+      "#C5E478|string",
+      "#C792EA| ",
+      "#C792EA|=>",
+      "#C792EA| ",
+      "#D6DEEB|\`",
       "#D3423E|\${",
       "#D6DEEB|path",
       "#D3423E|}",
-      "#ECC48D| in ",
+      "-| ",
+      "#ECC48D|in",
+      "-| ",
       "#D3423E|\${",
       "#D6DEEB|repo",
       "#D3423E|}",
@@ -136,12 +161,7 @@ exports[`CodeFileView token model (happy-dom, main thread) ts: every line surviv
   },
   {
     "line": 10,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
 ]
 `;
@@ -152,75 +172,97 @@ exports[`CodeFileView token model (happy-dom, main thread) tsx: every line survi
     "line": 1,
     "tokens": [
       "#C792EA|import",
-      "#D6DEEB| { Button } ",
+      "-| ",
+      "#D6DEEB|{ Button }",
+      "-| ",
       "#C792EA|from",
-      "#D9F5DD| "",
+      "#D6DEEB| ",
+      "#D9F5DD|"",
       "#ECC48D|@smthrs/ui",
       "#D9F5DD|"",
     ],
   },
   {
     "line": 2,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 3,
     "tokens": [
-      "#C792EA|export ",
+      "#C792EA|export",
+      "-| ",
       "#C792EA|const",
-      "#82AAFF| Row",
-      "#C792EA| =",
-      "#D9F5DD| (",
+      "#C792EA| ",
+      "#82AAFF|Row",
+      "#C792EA| ",
+      "#C792EA|=",
+      "#C792EA| ",
+      "#D9F5DD|(",
       "#C792EA|{",
-      "#D7DBE0| name",
+      "#C792EA| ",
+      "#D7DBE0|name",
       "#C792EA|,",
-      "#D7DBE0| onOpen",
-      "#C792EA| }",
+      "#C792EA| ",
+      "#D7DBE0|onOpen",
+      "#C792EA| ",
+      "#C792EA|}",
       "#7FDBCA|:",
-      "#C792EA| {",
-      "#C792EA| readonly ",
+      "#C792EA| ",
+      "#C792EA|{",
+      "-| ",
+      "#C792EA|readonly",
+      "-| ",
       "#D6DEEB|name",
       "#7FDBCA|:",
-      "#C5E478| string",
+      "#C792EA| ",
+      "#C5E478|string",
       "#C792EA|;",
-      "#C792EA| readonly ",
+      "-| ",
+      "#C792EA|readonly",
+      "-| ",
       "#82AAFF|onOpen",
       "#7FDBCA|:",
-      "#D9F5DD| ()",
-      "#C792EA| =>",
-      "#C5E478| void",
-      "#C792EA| }",
+      "#C792EA| ",
+      "#D9F5DD|()",
+      "#C792EA| ",
+      "#C792EA|=>",
+      "#C792EA| ",
+      "#C5E478|void",
+      "#C792EA| ",
+      "#C792EA|}",
       "#D9F5DD|)",
-      "#C792EA| =>",
-      "#D6DEEB| (",
+      "#C792EA| ",
+      "#C792EA|=>",
+      "#C792EA| ",
+      "#D6DEEB|(",
     ],
   },
   {
     "line": 4,
     "tokens": [
-      "#7FDBCA|  <",
+      "#C792EA|  ",
+      "#7FDBCA|<",
       "#F78C6C|Button",
-      "#C5E478| variant",
+      "#7FDBCA| ",
+      "#C5E478|variant",
       "#C792EA|=",
       "#D9F5DD|"",
       "#ECC48D|ghost",
       "#D9F5DD|"",
-      "#C5E478| size",
+      "#7FDBCA| ",
+      "#C5E478|size",
       "#C792EA|=",
       "#D9F5DD|"",
       "#ECC48D|sm",
       "#D9F5DD|"",
-      "#C5E478| data-flow",
+      "#7FDBCA| ",
+      "#C5E478|data-flow",
       "#C792EA|=",
       "#D9F5DD|"",
       "#ECC48D|files.read",
       "#D9F5DD|"",
-      "#C5E478| onClick",
+      "#7FDBCA| ",
+      "#C5E478|onClick",
       "#C792EA|=",
       "#D3423E|{",
       "#D6DEEB|onOpen",
@@ -231,7 +273,8 @@ exports[`CodeFileView token model (happy-dom, main thread) tsx: every line survi
   {
     "line": 5,
     "tokens": [
-      "#D3423E|    {",
+      "#D6DEEB|    ",
+      "#D3423E|{",
       "#D6DEEB|name",
       "#D3423E|}",
     ],
@@ -239,7 +282,8 @@ exports[`CodeFileView token model (happy-dom, main thread) tsx: every line survi
   {
     "line": 6,
     "tokens": [
-      "#7FDBCA|  </",
+      "#D6DEEB|  ",
+      "#7FDBCA|</",
       "#F78C6C|Button",
       "#7FDBCA|>",
     ],
@@ -252,12 +296,7 @@ exports[`CodeFileView token model (happy-dom, main thread) tsx: every line survi
   },
   {
     "line": 8,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
 ]
 `;
@@ -273,8 +312,10 @@ exports[`CodeFileView token model (happy-dom, main thread) json: every line surv
   {
     "line": 2,
     "tokens": [
-      "#7FDBCA|  "name"",
-      "#D6DEEB|: ",
+      "#D6DEEB|  ",
+      "#7FDBCA|"name"",
+      "#D6DEEB|:",
+      "-| ",
       "#D9F5DD|"",
       "#C789D6|@smthrs/ui",
       "#D9F5DD|"",
@@ -284,8 +325,10 @@ exports[`CodeFileView token model (happy-dom, main thread) json: every line surv
   {
     "line": 3,
     "tokens": [
-      "#7FDBCA|  "private"",
-      "#D6DEEB|: ",
+      "#D6DEEB|  ",
+      "#7FDBCA|"private"",
+      "#D6DEEB|:",
+      "-| ",
       "#FF5874|true",
       "#D6DEEB|,",
     ],
@@ -293,23 +336,30 @@ exports[`CodeFileView token model (happy-dom, main thread) json: every line surv
   {
     "line": 4,
     "tokens": [
-      "#7FDBCA|  "exports"",
-      "#D6DEEB|: { ",
+      "#D6DEEB|  ",
+      "#7FDBCA|"exports"",
+      "#D6DEEB|: {",
+      "-| ",
       "#7FDBCA|"."",
-      "#D6DEEB|: { ",
+      "#D6DEEB|: {",
+      "-| ",
       "#7FDBCA|"import"",
-      "#D6DEEB|: ",
+      "#D6DEEB|:",
+      "-| ",
       "#D9F5DD|"",
       "#C789D6|./src/index.ts",
       "#D9F5DD|"",
-      "#D6DEEB| } },",
+      "-| ",
+      "#D6DEEB|} },",
     ],
   },
   {
     "line": 5,
     "tokens": [
-      "#7FDBCA|  "sideEffects"",
-      "#D6DEEB|: ",
+      "#D6DEEB|  ",
+      "#7FDBCA|"sideEffects"",
+      "#D6DEEB|:",
+      "-| ",
       "#FF5874|false",
       "#D6DEEB|,",
     ],
@@ -317,8 +367,10 @@ exports[`CodeFileView token model (happy-dom, main thread) json: every line surv
   {
     "line": 6,
     "tokens": [
-      "#7FDBCA|  "count"",
-      "#D6DEEB|: ",
+      "#D6DEEB|  ",
+      "#7FDBCA|"count"",
+      "#D6DEEB|:",
+      "-| ",
       "#F78C6C|3",
     ],
   },
@@ -330,12 +382,7 @@ exports[`CodeFileView token model (happy-dom, main thread) json: every line surv
   },
   {
     "line": 8,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
 ]
 `;
@@ -350,44 +397,38 @@ exports[`CodeFileView token model (happy-dom, main thread) md: every line surviv
   },
   {
     "line": 2,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 3,
     "tokens": [
-      "#D6DEEB|Durable ",
+      "#D6DEEB|Durable",
+      "-| ",
       "#C5E478|**",
       "#C5E478|agent",
       "#C5E478|**",
-      "#D6DEEB| workflows, journaled as they happen.",
+      "-| ",
+      "#D6DEEB|workflows, journaled as they happen.",
     ],
   },
   {
     "line": 4,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 5,
     "tokens": [
       "#D9F5DD|-",
-      "#D6DEEB| one",
+      "-| ",
+      "#D6DEEB|one",
     ],
   },
   {
     "line": 6,
     "tokens": [
       "#D9F5DD|-",
-      "#D6DEEB| [",
+      "-| ",
+      "#D6DEEB|[",
       "#D6DEEB|two",
       "#D6DEEB|]",
       "#7FDBCA|(",
@@ -397,12 +438,7 @@ exports[`CodeFileView token model (happy-dom, main thread) md: every line surviv
   },
   {
     "line": 7,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 8,
@@ -414,9 +450,12 @@ exports[`CodeFileView token model (happy-dom, main thread) md: every line surviv
     "line": 9,
     "tokens": [
       "#C792EA|const",
-      "#82AAFF| x",
-      "#C792EA| =",
-      "#F78C6C| 1",
+      "#C792EA| ",
+      "#82AAFF|x",
+      "#C792EA| ",
+      "#C792EA|=",
+      "#C792EA| ",
+      "#F78C6C|1",
     ],
   },
   {
@@ -427,12 +466,7 @@ exports[`CodeFileView token model (happy-dom, main thread) md: every line surviv
   },
   {
     "line": 11,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
 ]
 `;
@@ -443,7 +477,8 @@ exports[`CodeFileView token model (happy-dom, main thread) rs: every line surviv
     "line": 1,
     "tokens": [
       "#C792EA|use",
-      "#D6DEEB| std",
+      "-| ",
+      "#D6DEEB|std",
       "#7FDBCA|::",
       "#D6DEEB|collections",
       "#7FDBCA|::",
@@ -452,12 +487,7 @@ exports[`CodeFileView token model (happy-dom, main thread) rs: every line surviv
   },
   {
     "line": 2,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 3,
@@ -469,40 +499,44 @@ exports[`CodeFileView token model (happy-dom, main thread) rs: every line surviv
     "line": 4,
     "tokens": [
       "#C792EA|pub",
-      "#C792EA| struct",
-      "#D6DEEB| ChangeId(",
+      "#D6DEEB| ",
+      "#C792EA|struct",
+      "-| ",
+      "#D6DEEB|ChangeId(",
       "#C792EA|pub",
-      "#D6DEEB| String);",
+      "-| ",
+      "#D6DEEB|String);",
     ],
   },
   {
     "line": 5,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
   {
     "line": 6,
     "tokens": [
       "#C792EA|pub",
-      "#C792EA| fn",
-      "#82AAFF| count",
+      "#D6DEEB| ",
+      "#C792EA|fn",
+      "#D6DEEB| ",
+      "#82AAFF|count",
       "#D6DEEB|(",
       "#C5E478|ids",
       "#7FDBCA|:",
-      "#7FDBCA| &",
-      "#D6DEEB|[ChangeId]) ",
+      "#D6DEEB| ",
+      "#7FDBCA|&",
+      "#D6DEEB|[ChangeId])",
+      "-| ",
       "#7FDBCA|->",
-      "#D6DEEB| usize {",
+      "-| ",
+      "#D6DEEB|usize {",
     ],
   },
   {
     "line": 7,
     "tokens": [
-      "#C5E478|    ids",
+      "#D6DEEB|    ",
+      "#C5E478|ids",
       "#7FDBCA|.",
       "#82AAFF|iter",
       "#D6DEEB|()",
@@ -512,7 +546,8 @@ exports[`CodeFileView token model (happy-dom, main thread) rs: every line surviv
       "#C792EA||",
       "#C5E478|id",
       "#C792EA||",
-      "#C792EA| !",
+      "#D6DEEB| ",
+      "#C792EA|!",
       "#C5E478|id",
       "#7FDBCA|.",
       "#F78C6C|0.",
@@ -531,12 +566,7 @@ exports[`CodeFileView token model (happy-dom, main thread) rs: every line surviv
   },
   {
     "line": 9,
-    "tokens": [
-      
-"-|
-"
-,
-    ],
+    "tokens": [],
   },
 ]
 `;

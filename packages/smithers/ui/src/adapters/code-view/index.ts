@@ -15,3 +15,10 @@ export {
   type CodeTokenPosition,
   type CodeViewMode,
 } from "./CodeFileView";
+export {
+  CODE_VIEW_POOL_DEADLINE_MS,
+  currentCodeViewPool,
+  subscribeCodeViewPool,
+  type CodeViewPool,
+  type CodeViewPoolState,
+} from "./workerPool";

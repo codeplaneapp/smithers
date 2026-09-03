@@ -91,12 +91,25 @@ the current graph before spawning it.
 Language servers (`apps/ui/src/bun/lsp/`) read: `/api/lsp/*` requires read
 access. One `typescript-language-server --stdio` runs per (repository,
 language), started on the first request from a static registry that names
-the binary, its argv and its install line (the renderer names none of them),
-under the `lsp` sandbox policy (no network, scratch-only writes), with the
-PTYs' allowlisted environment. At most four run; the least recently used
-makes room; ten idle minutes, `POST /api/repo/close` and shutdown end them
-(LSP `shutdown`/`exit`, SIGKILL after two seconds). Requests are bounded:
-64 KiB bodies, 8 in flight per server, 5 s each.
+the binary, its argv and its install line (the renderer names none of them).
+The binary is found on the HOST — the harness candidate dirs and PATH — and
+never inside the repository: a `node_modules/.bin/typescript-language-server`
+a repository ships is a program the repository chose, and opening a
+repository (read-only or not) runs nothing it ships. The server runs under
+the `lsp` sandbox policy (no network, scratch-only writes) with an
+environment of its own (`HOME`, `PATH`, `TMPDIR`, locale, zone — none of the
+provider keys, SSH agent or config dirs the PTY allowlist hands a harness).
+At most four run; the least recently used makes room; ten idle minutes with
+no request in flight, `POST /api/repo/close` and shutdown end them (LSP
+`shutdown`/`exit`, SIGKILL after two seconds). Requests are bounded: 64 KiB
+bodies, 8 in flight per server, 5 s each. What the server writes in free text
+(hover markdown, diagnostic messages, its last stderr line) has the host's
+absolute paths made repository-relative, or cut to their last segment
+outside the repository, before it reaches the renderer, the model or `/ws`;
+the type of a symbol imported from outside the repository is still the type
+tsserver computed for it. Every answer names the digest
+(`RepoFilesResponse.digest`, SHA-256 of the bytes) of the file text it was
+about, and every cap says it cut (`total`, `omitted`, `truncated`).
 
 PTY count, target-run count, input bytes, output buffering, and WebSocket
 subscriptions are bounded. Shutdown awaits agent cancellation, process
@@ -138,10 +151,10 @@ All mutations require `Content-Type: application/json`; failures use
 | POST | `/api/repo/open` | Consume `{ authorizationId }`, or dev-only `{ path }` |
 | GET | `/api/repos` | Open repository snapshot |
 | POST | `/api/repo/close` | Close `{ repoId }` |
-| POST | `/api/repo/files` | `{ repoId, path? }`: a directory's entries or one file's text (read access; bounded; binary stated) |
-| POST | `/api/lsp/hover` | `{ repoId, path, line, character }` (1-based): the language server's hover at the position, `{ hover: { contents, range? } \| null }`, text cut at 4 KiB (read access) |
-| POST | `/api/lsp/definition` | Same body: `{ locations }`, repository-relative, at most 20; targets outside the repository are omitted |
-| POST | `/api/lsp/diagnostics` | `{ repoId, path }`: the server's publication for the file, `{ path, version, items }` (at most 50; `items: null` when none arrived within 5 s) |
+| POST | `/api/repo/files` | `{ repoId, path? }`: a directory's entries or one file's text with its `digest` (read access; bounded; binary stated) |
+| POST | `/api/lsp/hover` | `{ repoId, path, line, character }` (1-based): the language server's hover at the position, `{ hover: { contents, truncated, range? } \| null, digest }`, text cut at 4 KiB and `truncated` when it was (read access) |
+| POST | `/api/lsp/definition` | Same body: `{ locations, total, omitted, digest }`, repository-relative, at most 20; targets outside the repository are counted in `omitted`, never listed |
+| POST | `/api/lsp/diagnostics` | `{ repoId, path }`: the server's publication for the file, `{ path, version, items, total, digest }` (at most 50 items of `total`; `items: null` when none arrived within 5 s) |
 | GET | `/api/lsp/servers` | `{ servers: [{ repoId, language, state }] }`: the language servers running, `starting \| ready \| exited` |
 | POST | `/api/targets/query` | Query `{ repoId }` and mint target ids |
 | POST | `/api/targets/run` | Run `{ repoId, targetId }` |
@@ -158,8 +171,9 @@ All mutations require `Content-Type: application/json`; failures use
 | GET | `/api/linear-auth/session` | `{ state: "idle" \| "waiting" \| "authorized", setupKey? }` — the setup key once the callback lands, never the token |
 
 WebSocket subscriptions carry target-run and PTY output and, on
-`lsp:<repoId>`, every diagnostics publication a language server makes for the
-repository (`{ type: "lsp.diagnostics", repoId, path, version, items }`).
+`lsp:<repoId>`, every diagnostics publication a language server makes for a
+file the renderer asked about (`{ type: "lsp.diagnostics", repoId, path,
+version, items, total, digest }`).
 Client messages are limited to subscription control, `target-run.attach`, and
 `pty.input`.
 
@@ -169,6 +183,27 @@ install line verbatim in `error.install` (nothing installs it),
 handles, `504 language_server_timeout` and `502 language_server_failed` name
 a server that did not answer or left, and path refusals reuse the files
 route's codes.
+
+A file card of a CLOUD repository asks the language server plue runs inside
+the repository's running workspace instead (lane L6, plue#505): the renderer's
+`CloudLspClient` creates the session (`POST …/workspace/sessions
+{ workspace_id, kind: "lsp", language }` through `/api/cloud/`), opens
+`/api/cloud-ws/repos/{o}/{r}/workspace/sessions/{id}/lsp` — the same tunnel
+as the terminal, with plue's `lsp` subprotocol and a 1 MiB frame cap on that
+branch alone (a larger message crosses as `{ seq, last, data }` fragments the
+renderer reassembles up to 16 MiB) — and speaks LSP itself: `initialize` with
+`rootUri file:///home/developer/workspace`, `initialized`, `didOpen` with the
+card's text at its checkout-relative path, then hover, definition and the
+publications. A refused upgrade closes the renderer's socket with a 44xx code
+that mirrors plue's status; on this branch the reason carries plue's
+`code: message` verbatim (`language_server_missing: npm i -g …`) and, for a
+425 `workspace_session_pending` (4425) or 503 `guest_not_ready` (4503), the
+`Retry-After` it named, which the client honors with a bounded retry while the
+card shows the server's words. 1011 retries once with a fresh initialize,
+1001 and an abnormal drop reconnect, 1008/1002/1003/1009 are final, and every
+close reason reaches the card verbatim. A cloud repository without a running
+workspace is told which act opens or resumes one; a file no relayed language
+handles is told the DTO's `lsp.languages`.
 
 ## Target presentation
 
@@ -231,7 +266,10 @@ Lane `citc` (ADR 0002) adds the persistent cloud computers:
   facet strip switches Terminal (the attached session, every session with
   its Destroy), Files and Services (empty with the ADR's wording — no routes
   exist, plue#449), and Snapshots (Fork from, Make template, Delete per
-  row). The footer acts: Suspend or Resume, Fork, Snapshot, and Delete
+  row). Since plue#505 the header's facts line also states the languages
+  the workspace relays a language server for (`lsp: typescript`, from the
+  DTO's `lsp.languages`; nothing when the DTO names none), and a session row
+  carries its `kind` (`terminal` or `lsp`) and the lsp session's language. The footer acts: Suspend or Resume, Fork, Snapshot, and Delete
   behind a typed confirm. `/workspace.terminal` opens the workspace's
   terminal as an ordinary terminal tab whose row carries a `workspaceId`
   instead of a `cwd` — the socket tunnels through the Bun server's

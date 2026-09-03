@@ -1,13 +1,14 @@
 /** @jsxImportSource react */
-import { useMemo, useRef, type ReactNode } from "react";
+import { useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { getFiletypeFromFileName, type FileOptions, type LineAnnotation } from "@pierre/diffs";
-import { File, useStableCallback } from "@pierre/diffs/react";
+import { File, WorkerPoolContext, useStableCallback } from "@pierre/diffs/react";
 import { cn } from "../../cn";
 import { useInjectUiCss } from "../../styles";
 import { useResolvedTheme } from "../../internal/useResolvedTheme";
 import { useResolvedPalette } from "../../internal/useResolvedPalette";
 import type { ResolvedPalette } from "../../internal/resolvePalette";
 import { diffsThemeForMode, type PierreDiffMode } from "../pierre-diff-view";
+import { codeViewWorkerPool, currentCodeViewPool, subscribeCodeViewPool } from "./workerPool";
 
 /**
  * CodeFileView renders ONE repository file, syntax highlighted, through
@@ -22,12 +23,22 @@ import { diffsThemeForMode, type PierreDiffMode } from "../pierre-diff-view";
  * the theme have loaded, so the view carries the file as a plain `<pre>` and
  * hides it (`data-state="ready"`) on the first render that has lines. The
  * flip and the scroll to the anchored line are DOM work inside pierre's own
- * `onPostRender` callback: no effect, no component state.
+ * `onPostRender` callback and a keyed sentinel's ref callback: no effect, no
+ * component state.
  *
- * Highlighting runs on the main thread: pierre's worker pool needs a consumer
- * supplied worker factory, and the files this view is asked to show are
- * capped at a few tens of kilobytes, which tokenize in tens of milliseconds
- * once the grammar is loaded.
+ * Highlighting runs in pierre's worker pool (workerPool.ts) wherever a
+ * Worker exists. It is not cheap on the main thread: Shiki's JavaScript
+ * regex engine compiles the grammar inside the first synchronous tokenize,
+ * measured at 2.6 s for a 16 KiB TypeScript file under JavaScriptCore (the
+ * native shell) and ~300 ms once warm, 436 ms / ~70 ms in Chromium. Off the
+ * pool — no Worker, or a pool that failed its probe — the view still renders
+ * on the main thread, plain text first.
+ *
+ * One pierre instance per view for its life: the anchor is pierre's
+ * controlled `selectedLines`, and the scroll to a new anchor runs from the
+ * sentinel's ref callback, so moving the anchor never remounts pierre and
+ * never tokenizes the file again (a remount paid the whole tokenize and
+ * flashed the plain text in between).
  *
  * Code intelligence (apps/ui/docs/code-intel/PLAN.md §5) enters through three
  * props and no state: `annotations` render under their lines as light-DOM
@@ -146,14 +157,25 @@ export function CodeFileView({
   const language = languageForFile(name);
   const file = useMemo(() => ({ name, contents }), [name, contents]);
   const selectedLines = useMemo(() => (line === undefined ? null : { start: line, end: line }), [line]);
+  const theme = diffsThemeForMode(resolvedMode, resolvedPalette);
+
+  /*
+   * The worker pool, started on the first view and told this view's theme
+   * (pierre renders every pooled file with the pool's theme). The live state
+   * is an external store: a pool that fails its probe flips `manager` to
+   * undefined, and the `key` below remounts pierre on the main thread.
+   */
+  codeViewWorkerPool(theme);
+  const pool = useSyncExternalStore(subscribeCodeViewPool, currentCodeViewPool, currentCodeViewPool);
+  const manager = pool.state === "starting" || pool.state === "ready" ? pool.manager : undefined;
 
   /*
    * The anchor last scrolled to. pierre calls onPostRender on the passes
    * that touch the DOM (mount, the highlight landing, a theme change) and
-   * not on a selection-only update, so the frame below is keyed on the
-   * anchor: a new anchor remounts the view, pierre paints from its cache and
-   * emits the mount pass, and the scroll happens once per anchor on the
-   * first pass where the line exists.
+   * not on a selection-only update, so the first reveal rides onPostRender
+   * (the pass where the line first exists) and every later anchor rides the
+   * sentinel below, whose ref callback runs on each anchor change after
+   * pierre's layout effect has applied the new selection.
    */
   const revealed = useRef<number | null>(null);
 
@@ -166,6 +188,16 @@ export function CodeFileView({
     }
     if (revealed.current !== line && revealLine(node, line)) revealed.current = line;
   });
+
+  const revealFromSentinel = (sentinel: HTMLElement | null): void => {
+    if (sentinel === null) return;
+    if (line === undefined) {
+      revealed.current = null;
+      return;
+    }
+    const container = sentinel.parentElement?.querySelector<HTMLElement>("diffs-container");
+    if (container != null && revealed.current !== line && revealLine(container, line)) revealed.current = line;
+  };
 
   /*
    * The pointer-rest timer. pierre reports token enter and leave from its own
@@ -207,7 +239,7 @@ export function CodeFileView({
    */
   const options = useMemo<FileOptions<AnnotationMeta>>(
     () => ({
-      theme: diffsThemeForMode(resolvedMode, resolvedPalette),
+      theme,
       themeType: resolvedMode,
       disableFileHeader: true,
       overflow: "wrap",
@@ -215,7 +247,7 @@ export function CodeFileView({
       onPostRender,
       ...(interactive ? { useTokenTransformer: true, onTokenEnter, onTokenLeave, onTokenClick } : {}),
     }),
-    [resolvedMode, resolvedPalette, onPostRender, interactive, onTokenEnter, onTokenLeave, onTokenClick],
+    [theme, resolvedMode, onPostRender, interactive, onTokenEnter, onTokenLeave, onTokenClick],
   );
 
   const lineAnnotations = useMemo<LineAnnotation<AnnotationMeta>[] | undefined>(
@@ -228,7 +260,6 @@ export function CodeFileView({
 
   return (
     <div
-      key={line ?? "unanchored"}
       ref={(node) => {
         if (node === null) disarm();
       }}
@@ -238,16 +269,21 @@ export function CodeFileView({
       data-palette={resolvedPalette}
       data-language={language ?? "text"}
       data-interactive={interactive ? "" : undefined}
+      data-highlighter={manager === undefined ? "main-thread" : "worker"}
     >
       <pre className="sui-code-view-plain">{contents}</pre>
-      <File<AnnotationMeta>
-        file={file}
-        selectedLines={selectedLines}
-        options={options}
-        lineAnnotations={lineAnnotations}
-        renderAnnotation={renderAnnotation}
-        disableWorkerPool
-      />
+      <WorkerPoolContext.Provider value={manager}>
+        <File<AnnotationMeta>
+          key={manager === undefined ? "main-thread" : "worker"}
+          file={file}
+          selectedLines={selectedLines}
+          options={options}
+          lineAnnotations={lineAnnotations}
+          renderAnnotation={renderAnnotation}
+          disableWorkerPool={manager === undefined}
+        />
+      </WorkerPoolContext.Provider>
+      <span key={line ?? "unanchored"} hidden ref={revealFromSentinel} data-slot="code-view-anchor" />
     </div>
   );
 }

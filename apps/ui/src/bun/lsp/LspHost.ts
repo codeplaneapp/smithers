@@ -1,11 +1,12 @@
 /*
  * The language-server host (code-intel PLAN.md §3 "Native"): one session per
  * (repository, language), spawned on first use under the `lsp` seatbelt
- * policy with the PTYs' allowlisted environment, retired after ten idle
- * minutes, with the repository (`POST /api/repo/close`) and with the server
- * (`stop`). At most four servers run; the least recently used one makes
- * room. A missing binary is answered with its install line and never
- * installed.
+ * policy with an environment of its own (`lspChildEnv`: HOME, PATH, scratch,
+ * locale and zone — none of the PTYs' credentials, which a language server
+ * has no use for), retired after ten idle minutes with no request in flight,
+ * with the repository (`POST /api/repo/close`) and with the server (`stop`).
+ * At most four servers run; the least recently used one makes room. A
+ * missing binary is answered with its install line and never installed.
  */
 import { readdirSync, realpathSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -21,6 +22,30 @@ import type { LspSession } from "./LspSession"
 
 export const LSP_MAX_SERVERS = 4
 export const LSP_IDLE_MS = 10 * 60 * 1000
+
+/**
+ * What a language server's environment carries. The PTYs' allowlist
+ * (Pty.ts ENV_ALLOWLIST) hands a harness its provider keys, SSH agent and
+ * config dirs because a harness acts on the user's behalf; a language server
+ * reads the repository and answers questions, and the lsp policy denies it
+ * the network, so it gets none of them.
+ */
+export const LSP_ENV_KEYS = ["HOME", "PATH", "TMPDIR", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "TZ"] as const
+
+/** The child environment for a language server: the PTYs' PATH assembly, the keys above and nothing else. */
+export const lspChildEnv = (
+  source: Readonly<Record<string, string | undefined>>,
+  home: string,
+  pathPrepend: ReadonlyArray<string>
+): Record<string, string> => {
+  const full = childEnv(source, home, pathPrepend)
+  const env: Record<string, string> = {}
+  for (const key of LSP_ENV_KEYS) {
+    const value = full[key]
+    if (value !== undefined) env[key] = value
+  }
+  return env
+}
 
 export interface LspHostOptions {
   /** `lsp:<repoId>` frames go out through here (the server's publish). */
@@ -110,7 +135,14 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
 
   const arm = (entry: Live): void => {
     if (entry.timer !== undefined) clearTimeout(entry.timer)
-    entry.timer = setTimeout(() => void retire(entry, "idle"), idleMs)
+    entry.timer = setTimeout(() => {
+      // A request still running (the first one carries tsserver's project load) is activity: the clock restarts behind it.
+      if (entry.session.inFlight > 0) {
+        arm(entry)
+        return
+      }
+      void retire(entry, "idle")
+    }, idleMs)
     entry.timer.unref()
   }
 
@@ -127,7 +159,7 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
         repoRoot,
         spec,
         argv: wrapped.argv,
-        env: childEnv(env, options.home, binDirOf(node?.path)),
+        env: lspChildEnv(env, options.home, binDirOf(node?.path)),
         publish: options.publish,
         ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
         ...(options.killGraceMs === undefined ? {} : { killGraceMs: options.killGraceMs }),
@@ -161,7 +193,7 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
     const raced = live.get(key)
     if (raced !== undefined && raced.session.state !== "exited") return { status: "ok", session: raced.session }
     const spec = serverFor(language)
-    const resolved = resolveServer(spec, lookup, root, node)
+    const resolved = resolveServer(spec, lookup, node)
     if ("missing" in resolved) return { status: "missing", language, install: resolved.missing }
     while (live.size >= maxServers) {
       const oldest = [...live.values()].sort((left, right) => left.session.lastUsed - right.session.lastUsed)[0]

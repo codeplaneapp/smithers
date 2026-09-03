@@ -29,6 +29,8 @@ afterAll(async () => {
 })
 
 const TERMINAL_PATH = "/api/cloud-ws/repos/will/smithers/workspace/sessions/sess-1/terminal"
+/** Lane L6: the language-server relay rides the same tunnel under plue's `lsp` route. */
+const LSP_PATH = "/api/cloud-ws/repos/will/smithers/workspace/sessions/sess-2/lsp"
 
 interface UpstreamRecord {
   protocols: string | null
@@ -43,11 +45,22 @@ interface UpstreamRecord {
 const newRecord = (): UpstreamRecord => ({ protocols: null, authorization: null, origin: null, hits: [], live: 0 })
 
 /**
- * A cloud-API double: requires plue's `terminal` subprotocol, records the
- * upgrade, echoes frames. With `refuse`, it answers that HTTP status to every
- * request — the upgrade and the plain GET alike, as plue's pre-upgrade checks do.
+ * A cloud-API double: requires plue's subprotocol for the branch (`terminal`
+ * by default, `lsp` for the relay), records the upgrade, echoes frames. With
+ * `refuse`, it answers that HTTP status to every request — the upgrade and
+ * the plain GET alike, as plue's pre-upgrade checks do — with plue's own body
+ * and headers when the test names them.
  */
-const startUpstream = (record: UpstreamRecord, received: Array<string | Buffer>, options: { readonly refuse?: number } = {}) =>
+const startUpstream = (
+  record: UpstreamRecord,
+  received: Array<string | Buffer>,
+  options: {
+    readonly refuse?: number
+    readonly refuseBody?: unknown
+    readonly refuseHeaders?: Record<string, string>
+    readonly protocol?: "terminal" | "lsp"
+  } = {}
+) =>
   Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -61,18 +74,21 @@ const startUpstream = (record: UpstreamRecord, received: Array<string | Buffer>,
         origin: record.origin
       })
       if (options.refuse !== undefined) {
-        return new Response(JSON.stringify({ message: `refused ${options.refuse}` }), {
+        return new Response(JSON.stringify(options.refuseBody ?? { message: `refused ${options.refuse}` }), {
           status: options.refuse,
-          headers: { "content-type": "application/json" }
+          headers: { "content-type": "application/json", ...options.refuseHeaders }
         })
       }
-      if ((record.protocols ?? "").includes("terminal")) {
-        const upgraded = server.upgrade(request, { headers: { "sec-websocket-protocol": "terminal" } })
+      const protocol = options.protocol ?? "terminal"
+      if ((record.protocols ?? "").split(",").map((value) => value.trim()).includes(protocol)) {
+        const upgraded = server.upgrade(request, { headers: { "sec-websocket-protocol": protocol } })
         if (upgraded) return undefined
       }
-      return new Response("terminal subprotocol required", { status: 400 })
+      return new Response(`${protocol} subprotocol required`, { status: 400 })
     },
     websocket: {
+      // plue's lsp route accepts a 1 MiB frame; the double must not refuse below that.
+      maxPayloadLength: 2 * 1024 * 1024,
       open: (socket) => {
         record.live += 1
         socket.send(new TextEncoder().encode("upstream says hello\r\n"))
@@ -382,3 +398,155 @@ describe("the workspace terminal tunnel", () => {
     }
   })
 })
+
+/*
+ * Lane L6 (plue #505): the same tunnel relays the workspace language-server
+ * socket. Its branch is the path's last segment — plue's `lsp` subprotocol
+ * goes upstream, its 1 MiB frame cap applies to that branch alone, a
+ * fragment set (`{ seq, last, data }`) crosses untouched for the renderer to
+ * reassemble, and a refused upgrade maps to a 44xx code whose reason carries
+ * plue's `code: message` verbatim and the `Retry-After` it named.
+ */
+describe("the workspace lsp tunnel", () => {
+  const MIB = 1024 * 1024
+
+  test("forwards plue's lsp subprotocol and the bearer, and relays a 1 MiB JSON-RPC frame both ways", async () => {
+    const record = newRecord()
+    const received: Array<string | Buffer> = []
+    const upstream = startUpstream(record, received, { protocol: "lsp" })
+    const local = await startLocal(upstream)
+    try {
+      const { socket, opened, frames, closed } = connect(local, LSP_PATH, { protocol: local.websocketProtocol })
+      expect(await opened).toBe(true)
+      await waitFor(() => frames.length > 0)
+      expect(record.protocols).toBe("lsp")
+      expect(record.authorization).toBe("Bearer smithers_test_token")
+      // One JSON-RPC message per text frame, exactly at plue's cap: a hover can carry this much.
+      const big = JSON.stringify({ jsonrpc: "2.0", id: 1, result: { contents: "x".repeat(MIB - 200) } })
+      const padded = big + " ".repeat(MIB - Buffer.byteLength(big))
+      expect(Buffer.byteLength(padded)).toBe(MIB)
+      socket.send(padded)
+      await waitFor(() => frames.length >= 2, 500)
+      expect(frames[1]).toBe(padded)
+      expect(received.length).toBe(1)
+      // The terminal's 64 KiB never bound this branch.
+      socket.send("x".repeat(100 * 1024))
+      await waitFor(() => frames.length >= 3, 500)
+      expect(frames[2]!.length).toBe(100 * 1024)
+      // One byte past the cap is refused with the branch's own reason, before it reaches plue.
+      socket.send(" ".repeat(MIB + 1))
+      const end = await closed
+      expect(end.code).toBe(1009)
+      expect(end.reason).toBe("A lsp frame is larger than the upstream accepts (1024 KiB).")
+      expect(received.length).toBe(2)
+    } finally {
+      await local.stop()
+      upstream.stop(true)
+    }
+  })
+
+  test("the terminal branch keeps plue's 64 KiB cap and its own reason", async () => {
+    const record = newRecord()
+    const received: Array<string | Buffer> = []
+    const upstream = startUpstream(record, received)
+    const local = await startLocal(upstream)
+    try {
+      const { socket, opened, frames, closed } = connect(local, TERMINAL_PATH, { protocol: local.websocketProtocol })
+      expect(await opened).toBe(true)
+      await waitFor(() => frames.length > 0)
+      socket.send(new Uint8Array(64 * 1024 + 1))
+      const end = await closed
+      expect(end.code).toBe(1009)
+      expect(end.reason).toBe("A terminal frame is larger than the upstream accepts (64 KiB).")
+      expect(received.length).toBe(0)
+    } finally {
+      await local.stop()
+      upstream.stop(true)
+    }
+  })
+
+  test("a fragment set crosses the tunnel untouched, in order, for the renderer to reassemble", async () => {
+    const record = newRecord()
+    const upstream = startUpstream(record, [], { protocol: "lsp" })
+    const local = await startLocal(upstream)
+    try {
+      const { socket, opened, frames } = connect(local, LSP_PATH, { protocol: local.websocketProtocol })
+      expect(await opened).toBe(true)
+      await waitFor(() => frames.length > 0)
+      const fragments = [
+        JSON.stringify({ seq: 1, last: false, data: "{\"jsonrpc\":\"2.0\",\"id\":7," }),
+        JSON.stringify({ seq: 2, last: false, data: "\"result\":{\"contents\":\"" + "y".repeat(70 * 1024) }),
+        JSON.stringify({ seq: 3, last: true, data: "\"}}" })
+      ]
+      for (const fragment of fragments) socket.send(fragment)
+      await waitFor(() => frames.length >= 4, 500)
+      expect(frames.slice(1)).toEqual(fragments)
+      socket.close()
+    } finally {
+      await local.stop()
+      upstream.stop(true)
+    }
+  })
+
+  test.each([
+    [425, { code: "workspace_session_pending", message: "session pending" }, { "retry-after": "2" }, 4425, "workspace_session_pending: session pending (retry after 2 s)"],
+    [503, { code: "guest_not_ready", message: "guest is activating" }, { "retry-after": "3" }, 4503, "guest_not_ready: guest is activating (retry after 3 s)"],
+    [409, { code: "language_server_missing", message: "npm i -g typescript-language-server typescript", details: { language: "typescript" } }, {}, 4409, "language_server_missing: npm i -g typescript-language-server typescript"],
+    [409, { code: "workspace_session_kind_mismatch", message: "session is a terminal" }, {}, 4409, "workspace_session_kind_mismatch: session is a terminal"],
+    [401, { message: "unauthorized" }, {}, 4401, "unauthorized"],
+    [429, { code: "rate_limited", message: "too many opens" }, {}, 4429, "rate_limited: too many opens"],
+    [500, { message: "server died before ready" }, {}, 1011, "cloud lsp upstream answered 500"]
+  ])("an lsp upstream %i closes the renderer with %i, plue's code and words and its Retry-After in the reason, after one re-read", async (status, body, headers, code, reason) => {
+    const record = newRecord()
+    const upstream = startUpstream(record, [], { protocol: "lsp", refuse: status, refuseBody: body, refuseHeaders: headers })
+    const local = await startLocal(upstream)
+    try {
+      const { closed } = connect(local, LSP_PATH, { protocol: local.websocketProtocol })
+      const end = await closed
+      expect(end.code).toBe(code)
+      expect(end.reason).toBe(reason)
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      expect(record.hits.map((hit) => hit.upgrade)).toEqual([true, false])
+      expect(record.hits.every((hit) => hit.authorization === "Bearer smithers_test_token")).toBe(true)
+    } finally {
+      await local.stop()
+      upstream.stop(true)
+    }
+  })
+
+  test("the terminal branch's 425 and 503 mappings are unchanged, and a plue code never reaches a terminal's reason", async () => {
+    const record = newRecord()
+    const upstream = startUpstream(record, [], { refuse: 425, refuseBody: { code: "workspace_session_pending", message: "session pending" }, refuseHeaders: { "retry-after": "2" } })
+    const local = await startLocal(upstream)
+    try {
+      const end = await connect(local, TERMINAL_PATH, { protocol: local.websocketProtocol }).closed
+      expect(end).toEqual({ code: 4409, reason: "session pending" })
+    } finally {
+      await local.stop()
+      upstream.stop(true)
+    }
+  })
+
+  test("sign-out closes an lsp bridge like a terminal one", async () => {
+    const record = newRecord()
+    const upstream = startUpstream(record, [], { protocol: "lsp" })
+    const local = await startLocal(upstream)
+    try {
+      const bridge = connect(local, LSP_PATH, { protocol: local.websocketProtocol })
+      expect(await bridge.opened).toBe(true)
+      await waitFor(() => record.live === 1)
+      const signedOut = await fetch(`${local.origin}/api/cloud-auth/sign-out`, {
+        method: "POST",
+        headers: { [LOCAL_SESSION_HEADER]: local.sessionToken, "content-type": "application/json" },
+        body: "{}"
+      })
+      expect(signedOut.status).toBe(200)
+      expect((await bridge.closed).code).toBe(4401)
+      await waitFor(() => record.live === 0)
+    } finally {
+      await local.stop()
+      upstream.stop(true)
+    }
+  })
+})
+

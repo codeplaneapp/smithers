@@ -7,19 +7,31 @@
  * segments under the root, real path inside it, bounded read. The server
  * publishes diagnostics for the files it was asked about; each publication
  * goes out as one `lsp.diagnostics` frame on `lsp:<repoId>`.
+ *
+ * What leaves this module is bounded and names no host path: every answer
+ * carries the digest of the text the server saw (so a card showing older
+ * text is not annotated as if it were this one), every cap says it cut
+ * (`total`, `omitted`, `truncated`), and the free text the server writes —
+ * hover markdown, diagnostic messages, its last words on stderr — has the
+ * host's absolute paths made repository-relative, or cut to their last
+ * segment when they point outside it. The boundary is the path, not the
+ * type: a symbol imported from outside the repository still hovers as the
+ * type the server computed for it, because that is the truth about the code
+ * the card shows.
  */
+import { createHash } from "node:crypto"
 import { basename, join, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { LSP_DIAGNOSTICS_CAP, LSP_HOVER_CAP_CHARS, LSP_LOCATIONS_CAP, LSP_REQUEST_TIMEOUT_MS, lspTopic } from "@smthrs/rpc/LocalApp"
+import { LSP_DIAGNOSTICS_CAP, LSP_LOCATIONS_CAP, LSP_REQUEST_TIMEOUT_MS, lspTopic } from "@smthrs/rpc/LocalApp"
 import type {
-  LspDiagnostic,
+  LspDefinitionResponse,
   LspDiagnosticsMessage,
   LspDiagnosticsResponse,
-  LspHover,
-  LspLocation,
-  LspRange,
-  LspSeverity
+  LspHoverResponse,
+  LspLocation
 } from "@smthrs/rpc/LocalApp"
+import { hoverContents, LSP_CLIENT_CAPABILITIES, redactHostPaths, toDiagnostic, toWireRange } from "@smthrs/rpc/LspWire"
+import type { LspDiagnosticWire, LspHoverWire, LspLocationLinkWire, LspLocationWire } from "@smthrs/rpc/LspWire"
 import { readRepoPath } from "../RepoFiles"
 import { createJsonRpc, JsonRpcError } from "./JsonRpc"
 import type { JsonRpc } from "./JsonRpc"
@@ -82,8 +94,10 @@ export interface LspSession {
   readonly ready: Promise<void>
   /** The child's exit code, once it exits. */
   readonly exited: Promise<number | null>
-  hover(path: string, position: WirePosition): Promise<LspHover | null>
-  definition(path: string, position: WirePosition): Promise<ReadonlyArray<LspLocation>>
+  /** Requests started and not yet answered; the host's idle clock never fires past one. */
+  readonly inFlight: number
+  hover(path: string, position: WirePosition): Promise<LspHoverResponse>
+  definition(path: string, position: WirePosition): Promise<LspDefinitionResponse>
   /**
    * The server's publication for the file: the last one when the file is
    * unchanged since it arrived, otherwise the next one within `waitMs`.
@@ -95,78 +109,25 @@ export interface LspSession {
   shutdown(): Promise<void>
 }
 
-/* The server's shapes, as far as this module reads them (LSP 3.17). */
-interface LspPositionWire {
-  readonly line: number
-  readonly character: number
-}
-interface LspRangeWire {
-  readonly start: LspPositionWire
-  readonly end: LspPositionWire
-}
-interface LspDiagnosticWire {
-  readonly range: LspRangeWire
-  readonly message: string
-  readonly severity?: number
-  readonly code?: number | string
-  readonly source?: string
-  readonly relatedInformation?: unknown
-}
-interface LspLocationWire {
-  readonly uri: string
-  readonly range: LspRangeWire
-}
-interface LspLocationLinkWire {
-  readonly targetUri: string
-  readonly targetRange: LspRangeWire
-  readonly targetSelectionRange?: LspRangeWire
-}
-type MarkedString = string | { readonly language: string; readonly value: string }
-type HoverContents = MarkedString | ReadonlyArray<MarkedString> | { readonly kind: string; readonly value: string }
-interface HoverWire {
-  readonly contents: HoverContents
-  readonly range?: LspRangeWire
-}
-
-const SEVERITIES: Readonly<Record<number, LspSeverity>> = { 1: "error", 2: "warning", 3: "information", 4: "hint" }
+/*
+ * The wire shapes and their one conversion live in @smthrs/rpc/LspWire, shared
+ * with the renderer's cloud client (CloudLspClient.ts); the host's own
+ * redaction root is the repository's real path.
+ */
+export { hoverContents, redactHostPaths, toDiagnostic, toWireRange } from "@smthrs/rpc/LspWire"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
-/** 0-based, end-exclusive → 1-based, end-exclusive. */
-export const toWireRange = (range: LspRangeWire): LspRange => ({
-  line: range.start.line + 1,
-  character: range.start.character + 1,
-  endLine: range.end.line + 1,
-  endCharacter: range.end.character + 1
-})
-
-const markedString = (value: MarkedString): string =>
-  typeof value === "string" ? value : `\`\`\`${value.language}\n${value.value}\n\`\`\``
-
-/** The hover's text as one markdown string, cut at the cap. */
-export const hoverContents = (contents: HoverContents): string => {
-  const text = Array.isArray(contents)
-    ? (contents as ReadonlyArray<MarkedString>).map(markedString).join("\n\n")
-    : isRecord(contents) && "kind" in contents
-    ? String(contents.value)
-    : markedString(contents as MarkedString)
-  return text.length > LSP_HOVER_CAP_CHARS ? text.slice(0, LSP_HOVER_CAP_CHARS) : text
-}
-
-/** One diagnostic as the card and the model see it; related information stays with the server. */
-export const toDiagnostic = (item: LspDiagnosticWire): LspDiagnostic => ({
-  ...toWireRange(item.range),
-  severity: SEVERITIES[item.severity ?? 1] ?? "error",
-  message: item.message,
-  ...(item.source === undefined ? {} : { source: item.source }),
-  ...(item.code === undefined ? {} : { code: String(item.code) })
-})
+/** RepoFilesResponse.digest for text the route did not stamp (a peer without the field). */
+const digestOf = (text: string): string => createHash("sha256").update(text).digest("hex")
 
 interface OpenDocument {
   readonly relative: string
   readonly uri: string
   version: number
   text: string
+  /** The digest of `text` as the files route stamps it; every answer about this document names it. */
+  digest: string
   /** The last publication for this document, or null before the first. */
   latest: LspDiagnosticsResponse | null
   /** True from an open or change until the server publishes for it. */
@@ -181,7 +142,9 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
   const documents = new Map<string, OpenDocument>()
   let state: LspSessionState = "starting"
   let lastUsed = Date.now()
+  let inFlight = 0
   let stderrTail = ""
+  const redact = (text: string): string => redactHostPaths(text, repoRoot)
 
   const proc = Bun.spawn([...options.argv], {
     cwd: repoRoot,
@@ -217,18 +180,19 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
     if (!isRecord(params) || typeof params.uri !== "string" || !Array.isArray(params.diagnostics)) return
     const relative = relativeOf(params.uri)
     if (relative === null) return
-    const items = (params.diagnostics as ReadonlyArray<LspDiagnosticWire>).slice(0, LSP_DIAGNOSTICS_CAP).map(toDiagnostic)
-    const version = typeof params.version === "number" && Number.isInteger(params.version) && params.version >= 0 ? params.version : null
-    const response: LspDiagnosticsResponse = { path: relative, version, items }
+    // A publication for a file this session never opened has no card and no digest to name: it stays with the server.
     const document = documents.get(relative)
-    if (document !== undefined) {
-      document.latest = response
-      document.awaitingPublication = false
-      const waiters = document.waiters
-      document.waiters = []
-      for (const waiter of waiters) waiter(response)
-    }
-    const frame: LspDiagnosticsMessage = { type: "lsp.diagnostics", repoId, path: relative, version, items }
+    if (document === undefined) return
+    const wire = params.diagnostics as ReadonlyArray<LspDiagnosticWire>
+    const items = wire.slice(0, LSP_DIAGNOSTICS_CAP).map((item) => toDiagnostic(item, redact))
+    const version = typeof params.version === "number" && Number.isInteger(params.version) && params.version >= 0 ? params.version : null
+    const response: LspDiagnosticsResponse = { path: relative, version, items, total: wire.length, digest: document.digest }
+    document.latest = response
+    document.awaitingPublication = false
+    const waiters = document.waiters
+    document.waiters = []
+    for (const waiter of waiters) waiter(response)
+    const frame: LspDiagnosticsMessage = { type: "lsp.diagnostics", repoId, path: relative, version, items, total: wire.length, digest: document.digest }
     publish(lspTopic(repoId), frame)
   }
 
@@ -257,14 +221,7 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
       clientInfo: { name: "smithers" },
       rootUri,
       workspaceFolders: [{ uri: rootUri, name: basename(repoRoot) }],
-      capabilities: {
-        textDocument: {
-          synchronization: { dynamicRegistration: false, didSave: false },
-          hover: { contentFormat: ["markdown", "plaintext"] },
-          publishDiagnostics: { relatedInformation: false }
-        },
-        workspace: { configuration: true, workspaceFolders: true }
-      },
+      capabilities: LSP_CLIENT_CAPABILITIES,
       ...(spec.initializationOptions === undefined ? {} : { initializationOptions: spec.initializationOptions })
     }, requestTimeoutMs)
     .then(() => {
@@ -282,7 +239,7 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
     for (const document of documents.values()) {
       const waiters = document.waiters
       document.waiters = []
-      for (const waiter of waiters) waiter({ path: document.relative, version: null, items: null })
+      for (const waiter of waiters) waiter({ path: document.relative, version: null, items: null, total: null, digest: document.digest })
     }
     log(`lsp ${repoId}/${spec.id}: exited ${String(code)}`)
     options.onExit?.(exitCode)
@@ -307,7 +264,9 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
           return new LspRequestError(
             "language_server_failed",
             502,
-            stderrTail.trim() === "" ? `The ${spec.displayName} language server exited.` : `The ${spec.displayName} language server exited: ${stderrTail.trim().split("\n").at(-1)}`
+            stderrTail.trim() === ""
+              ? `The ${spec.displayName} language server exited.`
+              : `The ${spec.displayName} language server exited: ${redact(stderrTail.trim().split("\n").at(-1) ?? "")}`
           )
         case "response":
           return new LspRequestError("language_server_failed", 502, error.message)
@@ -329,6 +288,7 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
       throw new LspRequestError("file_too_large", 413, `${read.body.path} is larger than the language server read cap.`)
     }
     const relative = read.body.path
+    const digest = read.body.digest ?? digestOf(read.body.content)
     const existing = documents.get(relative)
     if (existing === undefined) {
       const document: OpenDocument = {
@@ -336,6 +296,7 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
         uri: pathToFileURL(join(repoRoot, ...relative.split("/"))).href,
         version: 1,
         text: read.body.content,
+        digest,
         latest: null,
         awaitingPublication: true,
         waiters: []
@@ -349,6 +310,7 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
     if (existing.text !== read.body.content) {
       existing.version += 1
       existing.text = read.body.content
+      existing.digest = digest
       existing.awaitingPublication = true
       rpc.notify("textDocument/didChange", {
         textDocument: { uri: existing.uri, version: existing.version },
@@ -358,71 +320,88 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
     return existing
   }
 
-  /* The idle clock counts from the last activity: a request touches on entry and on exit. */
-  const positioned = async <T>(path: string, position: WirePosition, method: string): Promise<T> => {
+  /*
+   * The idle clock counts from the last activity: a request touches on entry
+   * and on exit, and counts itself in flight in between so the host never
+   * retires a server mid-answer (a first request carries the project load).
+   */
+  const positioned = async <T>(path: string, position: WirePosition, method: string): Promise<{ readonly answer: T; readonly document: OpenDocument }> => {
     touch()
+    inFlight += 1
     try {
       await ready
       const document = await sync(path)
-      return await rpc.request<T>(method, {
+      const answer = await rpc.request<T>(method, {
         textDocument: { uri: document.uri },
         position: { line: position.line - 1, character: position.character - 1 }
       }, requestTimeoutMs)
+      return { answer, document }
     } catch (error) {
       throw refused(error)
     } finally {
+      inFlight -= 1
       touch()
     }
   }
 
   const hover: LspSession["hover"] = async (path, position) => {
-    const answer = await positioned<HoverWire | null>(path, position, "textDocument/hover")
-    if (answer === null || !isRecord(answer) || answer.contents === undefined) return null
-    const contents = hoverContents(answer.contents)
-    if (contents.trim() === "") return null
-    return { contents, ...(answer.range === undefined ? {} : { range: toWireRange(answer.range) }) }
+    const { answer, document } = await positioned<LspHoverWire | null>(path, position, "textDocument/hover")
+    if (answer === null || !isRecord(answer) || answer.contents === undefined) return { hover: null, digest: document.digest }
+    const { contents, truncated } = hoverContents(answer.contents, redact)
+    if (contents.trim() === "") return { hover: null, digest: document.digest }
+    return { hover: { contents, truncated, ...(answer.range === undefined ? {} : { range: toWireRange(answer.range) }) }, digest: document.digest }
   }
 
   const definition: LspSession["definition"] = async (path, position) => {
-    const answer = await positioned<LspLocationWire | ReadonlyArray<LspLocationWire | LspLocationLinkWire> | null>(path, position, "textDocument/definition")
-    if (answer === null) return []
-    const list = Array.isArray(answer) ? answer : [answer as LspLocationWire]
+    const { answer, document } = await positioned<LspLocationWire | ReadonlyArray<LspLocationWire | LspLocationLinkWire> | null>(
+      path,
+      position,
+      "textDocument/definition"
+    )
+    const list = answer === null ? [] : Array.isArray(answer) ? answer : [answer as LspLocationWire]
     const locations: Array<LspLocation> = []
+    let omitted = 0
     for (const entry of list) {
       const uri = "targetUri" in entry ? entry.targetUri : entry.uri
       const range = "targetUri" in entry ? entry.targetSelectionRange ?? entry.targetRange : entry.range
       const relative = relativeOf(uri)
-      // A target outside the repository (a linked package, a lib.d.ts) is not a file card the renderer can open.
-      if (relative === null) continue
-      locations.push({ path: relative, ...toWireRange(range) })
-      if (locations.length >= LSP_LOCATIONS_CAP) break
+      // A target outside the repository (a linked package, a lib.d.ts) is not a file card the renderer can open; it is counted, never invented away.
+      if (relative === null) {
+        omitted += 1
+        continue
+      }
+      if (locations.length < LSP_LOCATIONS_CAP) locations.push({ path: relative, ...toWireRange(range) })
     }
-    return locations
+    return { locations, total: list.length, omitted, digest: document.digest }
   }
 
   const diagnostics: LspSession["diagnostics"] = async (path, waitMs) => {
     touch()
-    let document: OpenDocument
+    inFlight += 1
     try {
-      await ready
-      document = await sync(path)
-    } catch (error) {
-      throw refused(error)
-    }
-    if (!document.awaitingPublication && document.latest !== null) return document.latest
-    const published = await new Promise<LspDiagnosticsResponse>((resolve) => {
-      const timer = setTimeout(() => {
-        document.waiters = document.waiters.filter((waiter) => waiter !== settle)
-        resolve({ path: document.relative, version: null, items: null })
-      }, waitMs)
-      const settle = (response: LspDiagnosticsResponse): void => {
-        clearTimeout(timer)
-        resolve(response)
+      let document: OpenDocument
+      try {
+        await ready
+        document = await sync(path)
+      } catch (error) {
+        throw refused(error)
       }
-      document.waiters.push(settle)
-    })
-    touch()
-    return published
+      if (!document.awaitingPublication && document.latest !== null) return document.latest
+      return await new Promise<LspDiagnosticsResponse>((resolve) => {
+        const timer = setTimeout(() => {
+          document.waiters = document.waiters.filter((waiter) => waiter !== settle)
+          resolve({ path: document.relative, version: null, items: null, total: null, digest: document.digest })
+        }, waitMs)
+        const settle = (response: LspDiagnosticsResponse): void => {
+          clearTimeout(timer)
+          resolve(response)
+        }
+        document.waiters.push(settle)
+      })
+    } finally {
+      inFlight -= 1
+      touch()
+    }
   }
 
   let shutdownPromise: Promise<void> | undefined
@@ -456,6 +435,9 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
     pid: proc.pid,
     get lastUsed() {
       return lastUsed
+    },
+    get inFlight() {
+      return inFlight
     },
     ready,
     exited,

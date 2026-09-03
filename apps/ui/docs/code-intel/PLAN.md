@@ -134,8 +134,8 @@ apps/ui/src/bun/lsp/LanguageServers.ts
     args: readonly string[]; rootMarkers: readonly string[]; install: string;
     initializationOptions?: Record<string, unknown> }        // TS: disableAutomaticTypingAcquisition
   export const languageFor: (path: string) => LanguageId | null
-  export const resolveServer: (spec: ServerSpec, host: HarnessHost, repoRoot: string, node: NodeSidecar | null)
-    => { argv: readonly string[] } | { missing: string }     // <repo>/node_modules/.bin, then harnessCandidateDirs + PATH; node sidecar runs the cli
+  export const resolveServer: (spec: ServerSpec, lookup: ServerLookup, node: NodeSidecar | null)
+    => { argv: readonly string[] } | { missing: string }     // harnessCandidateDirs + PATH on the HOST, never <repo>/node_modules/.bin (see Remediation 1); node sidecar runs the cli
 
 apps/ui/src/bun/lsp/JsonRpc.ts                               // Content-Length framing over Bun.spawn stdio; no dependency
   export const createJsonRpc: (proc: Subprocess, opts: { onNotification; log }) => JsonRpc
@@ -181,10 +181,15 @@ apps/ui/src/bun/routes/lsp.ts                                // POST /api/lsp/{h
   unrelated: local servers belong to local repositories.
 - **Security boundary.** New `Sandbox.ts` policy `lsp`: network `deny`,
   writable = scratch tmpdir only (`sandboxPolicies` gains the id; profile
-  snapshot-tested like the others). Env allowlisted as PTYs are. Caps: 4
-  servers, 8 in-flight requests per server, 5 s per request, 64 KiB bodies,
-  hover text cut at 4 KiB, 50 diagnostics, 20 locations. A missing server is
-  stated with its install line and never installed.
+  snapshot-tested like the others). Env is the server's own (`lspChildEnv`:
+  HOME, PATH, TMPDIR, locale, zone — none of the PTY allowlist's provider
+  keys, SSH agent or config dirs; Remediation 2). Caps: 4 servers, 8
+  in-flight requests per server, 5 s per request, 64 KiB bodies, hover text
+  cut at 4 KiB, 50 diagnostics, 20 locations — every cap stated on the wire
+  (`truncated`, `total`, `omitted`). A missing server is stated with its
+  install line and never installed. Free text from the server has host paths
+  made repository-relative or cut to a last segment before it leaves the
+  session.
 - **Capability.** `RuntimeCapabilitySchema` gains `"local.lsp"`
   (`packages/rpc/src/AppBootstrap.ts:6-21`); `localCapabilities` emits it
   (`HostCapabilities.ts:48-60`); `code.*` flows carry `runtime: ["local.lsp"]`
@@ -202,11 +207,14 @@ JSON-RPC message each, max message 1 MiB (hover and diagnostics exceed 64 KiB;
 if plue keeps 64 KiB, frames carry `{ seq, last }` fragments), server pings,
 same pre-upgrade statuses (401/403/409/429) plus `409 language_server_missing`
 with the install line, same close codes (1000/1001/1008/1011). The Bun tunnel
-adds an `lsp` branch beside the terminal one in `server.ts:820-850`
-(`CloudWsBridge` unchanged); the Worker relay comes with web-mode W4. Until the
-relay exists, cloud file cards highlight client-side and `code.*` on a cloud
-target answers "Hover and definitions need a workspace language server;
-Smithers Cloud does not relay one yet."
+adds an `lsp` branch beside the terminal one in `server.ts` (`CloudWsBridge`
+gains `kind`); the Worker relay comes with web-mode W4. **Built (lane L6,
+2026-09-03):** `state/CloudLspClient.ts` speaks the relay's wire through the
+tunnel and `CodeIntelSeam` picks it for a cloud repository with a running
+workspace; a cloud repository without one is told `/workspace.open` or
+`/workspace.resume`, and a file no relayed language handles is told the DTO's
+`lsp.languages`. On the web host (no tunnel) the three flows are hidden with
+`local.lsp` and a cloud card is told the native app has the tunnel.
 
 ### Web without a workspace
 
@@ -358,6 +366,58 @@ and L5 run in parallel after L0.
    trailing `:\d+(:\d+)?`; repository paths with colons keep working.
 8. The cloud relay depends on plue. Mitigation: the ask is filed in L2 with
    the framing above; cloud cards degrade honestly until then.
+
+### Remediation landed (2026-09-03, confirmed findings)
+
+1. **No repository binary.** `resolveServer` searches the harness candidate
+   dirs and PATH only; a `node_modules/.bin/typescript-language-server` a
+   repository ships is never run (a read-only open executed repo code).
+   `LspHost.test.ts` spawns a real trap binary and proves it never runs.
+2. **Own environment.** `lspChildEnv` (LspHost.ts) hands the server HOME,
+   PATH, TMPDIR, locale and zone; the PTY allowlist's API keys and
+   `SSH_AUTH_SOCK` stay out.
+3. **No host paths.** `redactHostPaths` (LspSession.ts) rewrites hover
+   markdown, diagnostic messages and the stderr tail: repo paths become
+   relative, others `…/<basename>`. The type of a symbol imported from
+   outside the repository is still the type (documented in LOCAL-APP.md).
+4. **Digest reconciliation.** `POST /api/repo/files` answers `digest`
+   (SHA-256); every LSP answer and `/ws` frame names the digest it is about;
+   the seam re-reads a card in place (same id, ordinal, anchor) before an
+   answer about newer text lands, and drops it when they still disagree.
+5. **Caps stated.** `LspHover.truncated`, `LspDefinitionResponse.total/
+   omitted`, `LspDiagnosticsResponse.total`; the card prints `50 of 132
+   shown`, the hover box `(cut at 4 KiB)`, the model `… and N more`; a
+   definition outside the repository is stated as that, never "none".
+6. **Catalog-gated gestures.** `FileCardBody` reads the catalog: the surface
+   binds `code.hover` / `code.definition` only where they are registered; on
+   the web it states `explainAbsent("code.hover").reason` once under the
+   header on files a server would serve (`LSP_LANGUAGE_EXTENSIONS`, rpc).
+   `parity-hosts` (a‴) sweeps a `.ts` card and `data-flow-activate`.
+7. **Prompt honesty.** The code.* clause left the static sentence; it is
+   `CODE_INTEL_LINE`, present only when `code.hover` is in the catalog;
+   `WEB_HOST_LINE` names code intelligence as native-only.
+8. **Budget floor.** `controller/turns.ts` `composeTurn`: the catalog
+   degrades through stage 2, then the World bodies give way (each cut note
+   says so), then stage 3 (namespaces and counts) — `InstructionsBudget.test`
+   pins a session with three notes at `WORLD_BODY_BUDGET` and roles present
+   under the cap. Measured: the empty-context native session already lands
+   in stage 2 (11 557 prompt bytes, 14 313 composed).
+9. **Worker pool.** `packages/smithers/ui/src/adapters/code-view/workerPool.ts`:
+   pierre's pool with one worker, started on the first view, theme followed
+   through `setRenderOptions`, probed (worker `error` or 15 s without
+   `initialize` → main thread). Measured under bun/JSC: main-thread first
+   tokenize of a 16 KiB TypeScript file 2.6 s, warm ~300 ms; pooled, the
+   longest main-thread block is ~70 ms and a second file's synchronous
+   render ~8 ms (`code-view.test.tsx` pins both under 300 ms). Vite emits the
+   worker as `assets/worker-*.js` (833 kB iife, self-contained) referenced
+   from the CodeSurface chunk, the same way the OPFS worker ships.
+10. **One pierre instance per view.** The anchor no longer keys the frame;
+    the scroll to a new anchor runs from a keyed sentinel's ref callback
+    after pierre applied `selectedLines`; the test asserts the same
+    `diffs-container` survives an anchor move with its tokens still coloured.
+11. **Idle clock.** A request in flight (the first one carries the project
+    load) restarts the host's idle timer instead of retiring the server
+    under it (the load-dependent `LspHost.test` failure).
 
 ### Open questions for will (default in parentheses)
 

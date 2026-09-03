@@ -809,7 +809,7 @@ describe("workspace seam terminal", () => {
     const payload = payloadOf(store)
     expect(payload?.terminalSessionId).toBe("sess-1")
     expect(payload?.facet).toBe("terminal")
-    expect(payload?.sessions).toEqual([{ id: "sess-1", status: "running", createdAt: null }])
+    expect(payload?.sessions).toEqual([{ id: "sess-1", status: "running", createdAt: null, kind: null, language: null }])
   })
 
   test("a live attached session re-attaches instead of creating", async () => {
@@ -1122,6 +1122,57 @@ describe("workspace seam header facts (plue#446)", () => {
         sshHost: null
       })
     )
+  })
+
+  /* Lane L6 (plue#505): the DTO's `lsp.languages`, and a session's `kind` and `language`. */
+  test("the DTO's lsp.languages and a session's kind and language read onto the row and the card", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, { ...WS_LIVE, lsp: { languages: ["typescript"] } }),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [
+        { id: "sess-1", workspace_id: "ws-1", status: "running", kind: "terminal", created_at: "2026-09-03T08:00:00Z" },
+        { id: "lsps-1", workspace_id: "ws-1", status: "running", kind: "lsp", language: "typescript", idle_timeout_secs: 600, created_at: "2026-09-03T08:01:00Z" }
+      ])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(workspacesOf(store)[0]?.lspLanguages).toEqual(["typescript"])
+    expect(payloadOf(store)?.lspLanguages).toEqual(["typescript"])
+    expect(payloadOf(store)?.sessions).toEqual([
+      { id: "sess-1", status: "running", createdAt: "2026-09-03T08:00:00Z", kind: "terminal", language: null },
+      { id: "lsps-1", status: "running", createdAt: "2026-09-03T08:01:00Z", kind: "lsp", language: "typescript" }
+    ])
+  })
+
+  test("a DTO without an lsp object carries null (unknown), one with an lsp object and no languages carries an empty list", async () => {
+    const absent = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_LIVE),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(absent.store)
+    await absent.seam.viewWorkspace("ws-1")
+    expect(workspacesOf(absent.store)[0]?.lspLanguages).toBeNull()
+    expect(payloadOf(absent.store)?.lspLanguages).toBeNull()
+    const empty = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, { ...WS_LIVE, lsp: {} }),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(empty.store)
+    await empty.seam.viewWorkspace("ws-1")
+    expect(workspacesOf(empty.store)[0]?.lspLanguages).toEqual([])
+    /* The per-user row does not carry the list; what the collection knows stands. */
+    const merged = await harness({
+      "api/repos/will/smithers/workspaces": json(200, [{ ...WS_LIVE, status: "running", lsp: { languages: ["typescript"] } }]),
+      "api/user/workspaces": json(200, [{ ...USER_ROW, workspace_title: "smithers landing", state: "running" }])
+    })
+    await merged.seam.listWorkspaces("will/smithers")
+    await merged.seam.listWorkspaces()
+    expect(workspacesOf(merged.store)[0]?.lspLanguages).toEqual(["typescript"])
   })
 
   test("a started workspace carries its start time; the per-user row keeps the facts but drops the uptime once it stops running", async () => {

@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { getSharedHighlighter } from "@pierre/diffs";
-import { CodeFileView, languageForFile } from "../src/adapters/code-view";
+import { CodeFileView, currentCodeViewPool, languageForFile } from "../src/adapters/code-view";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import { themeRegistry } from "../src/styles";
 import { smithersUiCss } from "../src/uiCss";
@@ -302,12 +302,21 @@ describe("CodeFileView token model (happy-dom, main thread)", () => {
       // Line 40 sits at 780px; centred in a 200px viewport of 20px lines: 780 - (200 - 20) / 2.
       expect(scroller.scrollTop).toBe(690);
       expect(shadow().querySelector('[data-line="40"]')?.hasAttribute("data-selected-line")).toBe(true);
+      const instance = host().querySelector("diffs-container");
       await rerender(
         <div className="proto-scroller" style={{ overflowY: "auto" }}>
           <CodeFileView name="src/long.ts" contents={contents} line={10} mode="dark" palette="night-owl" />
         </div>,
       );
-      await highlighted();
+      /*
+       * The anchor moved without remounting pierre: the same element, its
+       * tokens still coloured on the very next frame (a remount paid the
+       * whole tokenize again and showed plain text until it landed), and the
+       * scroll landed anyway.
+       */
+      expect(host().querySelector("diffs-container")).toBe(instance);
+      expect(shadow().querySelector("[data-line] span[style]")).not.toBeNull();
+      expect(host().getAttribute("data-state")).toBe("ready");
       expect(scroller.scrollTop).toBe(90);
       expect(shadow().querySelector('[data-line="10"]')?.hasAttribute("data-selected-line")).toBe(true);
       // A line already in view leaves the scroller where it is.
@@ -324,6 +333,61 @@ describe("CodeFileView token model (happy-dom, main thread)", () => {
       Element.prototype.getBoundingClientRect = original;
     }
   }, 30_000);
+
+  /*
+   * The 300 ms law on the first open (apps/ui/docs/code-intel/PLAN.md §1
+   * "Where the work runs"). Under this runtime's JavaScriptCore the first
+   * synchronous tokenize of a 16 KiB TypeScript file measures ~2.6 s and a
+   * warm one ~300 ms, so a main-thread render fails both bounds below; the
+   * worker pool is what passes them. The watchdog is a setTimeout chain: the
+   * longest gap between its ticks is the longest block on this thread.
+   */
+  test("a 16 KiB TypeScript file highlights off the main thread: no block past 300 ms, and a second file's synchronous render stays under it", async () => {
+    const line = (index: number): string => `export const value${index} = (input: Readonly<Record<string, number>>): number => Object.values(input).reduce((sum, n) => sum + n, ${index})`;
+    let contents = "";
+    for (let index = 0; contents.length < 16 * 1024; index += 1) contents += `${line(index)}\n`;
+    expect(contents.length).toBeGreaterThanOrEqual(16 * 1024);
+    let last = performance.now();
+    let longest = 0;
+    let watching = true;
+    const tick = (): void => {
+      const now = performance.now();
+      longest = Math.max(longest, now - last);
+      last = now;
+      if (watching) setTimeout(tick, 0);
+    };
+    setTimeout(tick, 0);
+    try {
+      await mount(<CodeFileView name="src/big.ts" contents={contents} mode="dark" palette="night-owl" />);
+      await highlighted();
+      expect(host().getAttribute("data-highlighter")).toBe("worker");
+      expect(currentCodeViewPool().state).toBe("ready");
+      expect(shadow().querySelectorAll("[data-line]").length).toBeGreaterThan(100);
+      const first = longest;
+      // A second file of the same language: the render that hands it to pierre is one synchronous slice.
+      const second = document.createElement("div");
+      document.body.appendChild(second);
+      const secondRoot = createRoot(second);
+      const started = performance.now();
+      await act(async () => secondRoot.render(<CodeFileView name="src/big2.ts" contents={contents.slice(200)} mode="dark" palette="night-owl" />));
+      const slice = performance.now() - started;
+      for (let i = 0; i < 1500 && !second.querySelector("diffs-container")?.shadowRoot?.querySelector("[data-line] span[style]"); i += 1) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+      }
+      expect(second.querySelector("diffs-container")?.shadowRoot?.querySelector("[data-line] span[style]")).not.toBeNull();
+      await act(async () => secondRoot.unmount());
+      second.remove();
+      watching = false;
+      console.info(`code view: longest main-thread block ${longest.toFixed(0)} ms (first file ${first.toFixed(0)} ms), second file's synchronous render ${slice.toFixed(0)} ms`);
+      expect(first).toBeLessThan(300);
+      expect(slice).toBeLessThan(300);
+      expect(longest).toBeLessThan(300);
+    } finally {
+      watching = false;
+    }
+  }, 60_000);
 
   test("with no explicit mode or palette the view follows the document root", async () => {
     document.documentElement.setAttribute("data-theme", "light");
@@ -419,15 +483,29 @@ describe("CodeFileView annotations and token gestures", () => {
     expect(activations).toHaveLength(2);
   }, 30_000);
 
-  test("without gesture handlers the view keeps the plain token model: no column marks, no interactive flag", async () => {
+  /*
+   * The worker pool renders every file with one set of options, so pierre's
+   * column marks (`data-char`) are on every pooled token whether or not a
+   * gesture is bound; what a view without handlers must not do is present
+   * itself as interactive (the cursor rule keys on `data-interactive`) or
+   * fire a gesture. With handlers, the marks are what the gestures read.
+   */
+  test("without gesture handlers the view is not interactive and no gesture fires; with them it is, and the column marks are there to read", async () => {
     await mount(<CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" />);
     await highlighted();
     expect(host().hasAttribute("data-interactive")).toBe(false);
-    expect(shadow().querySelector("[data-line] [data-char]")).toBeNull();
-    await rerender(<CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" onTokenRest={() => {}} />);
+    const span = shadow().querySelector<HTMLElement>("[data-line] span[style]");
+    span?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, pointerType: "mouse" }));
+    await settle(60);
+    span?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, metaKey: true }));
+    const rests: Array<unknown> = [];
+    await rerender(<CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" restMs={40} onTokenRest={(at) => rests.push(at)} />);
     await highlighted();
     expect(host().hasAttribute("data-interactive")).toBe(true);
     for (let i = 0; i < 100 && shadow().querySelector("[data-line] [data-char]") == null; i += 1) await settle(10);
     expect(shadow().querySelector("[data-line] [data-char]")).not.toBeNull();
+    token(2, "a").dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, pointerType: "mouse" }));
+    await settle(60);
+    expect(rests).toEqual([{ line: 2, column: 11, text: "a" }]);
   }, 30_000);
 });

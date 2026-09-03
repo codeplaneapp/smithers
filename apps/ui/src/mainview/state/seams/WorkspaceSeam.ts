@@ -15,7 +15,8 @@
  *   DELETE /api/repos/{o}/{r}/workspace-snapshots/{id}
  *   POST   /api/repos/{o}/{r}/workspace-snapshots        { workspace_id, name } — a template
  *   GET    /api/repos/{o}/{r}/workspace/sessions         { workspace_id }
- *   POST   /api/repos/{o}/{r}/workspace/sessions         { workspace_id, cols, rows }
+ *   POST   /api/repos/{o}/{r}/workspace/sessions         { workspace_id, cols, rows } — a terminal;
+ *                                                         { workspace_id, kind: "lsp", language } is CloudLspClient's (lane L6)
  *   GET    /api/repos/{o}/{r}/workspace/sessions/{id}
  *   POST   /api/repos/{o}/{r}/workspace/sessions/{id}/destroy
  *   GET    /api/repos/{o}/{r}/workspaces/{id}/files?path=            — the Files facet
@@ -25,7 +26,9 @@
  *
  * Lane L3: plue#446 and plue#449 landed, so the DTO's kind, environment,
  * head, ahead/behind, persistence, ssh host and started_at are parsed and the
- * Files, Services and Egress facets read their own routes. Every one of those
+ * Files, Services and Egress facets read their own routes. Lane L6: plue#505
+ * landed, so the DTO's `lsp.languages` and a session's `kind` and `language`
+ * are parsed too. Every one of those
  * fields is absent-tolerant: a field the wire omits is null on the row and
  * renders NOTHING — no default, no guess. `bookmarkHead` stays the TARGET
  * BOOKMARK's head from the bookmarks call, labeled as such and separate from
@@ -214,6 +217,10 @@ interface SessionRow {
   readonly id: string
   readonly status: string
   readonly createdAt: string | null
+  /** plue #505: `terminal` or `lsp`; null on a row that predates the field. */
+  readonly kind: string | null
+  /** The lsp session's language; null on a terminal. */
+  readonly language: string | null
 }
 
 /** The auxiliaries a workspace card renders beside the DTO row. */
@@ -434,6 +441,18 @@ const parseEnvironmentImage = (value: unknown): EnvironmentImageRow | null => {
 const countOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) ? value : null
 
+/**
+ * The DTO's `lsp.languages` (plue #505): the languages the workspace relays a
+ * language server for. A DTO with no `lsp` object is null — unknown, never
+ * an empty list; an `lsp` object with no readable languages is `[]`.
+ */
+const parseLspLanguages = (value: unknown): Array<string> | null => {
+  if (!isRecord(value)) return null
+  const languages = value.languages
+  if (!Array.isArray(languages)) return []
+  return languages.flatMap((entry) => (typeof entry === "string" && entry !== "" ? [entry] : []))
+}
+
 /** One workspace row off the wire; malformed rows drop. */
 const parseWorkspaceWire = (value: unknown, fallbackRepo?: string): CloudWorkspaceInput | null => {
   if (!isRecord(value)) return null
@@ -463,7 +482,8 @@ const parseWorkspaceWire = (value: unknown, fallbackRepo?: string): CloudWorkspa
     environment: parseEnvironment(value.environment),
     persistence: textOrNull(value.persistence),
     sshHost: textOrNull(value.ssh_host),
-    desktop: parseDesktop(value.desktop)
+    desktop: parseDesktop(value.desktop),
+    lspLanguages: parseLspLanguages(value.lsp)
   }
 }
 
@@ -545,7 +565,8 @@ const parseUserWorkspaceWire = (value: unknown): CloudWorkspaceInput | null => {
     environment: null,
     persistence: null,
     sshHost: null,
-    desktop: null
+    desktop: null,
+    lspLanguages: null
   }
 }
 
@@ -574,7 +595,14 @@ const parseSession = (value: unknown): (SessionRow & { readonly workspaceId: str
   const id = str(value.id)
   const status = str(value.status)
   if (id === null || status === null) return null
-  return { id, status, createdAt: textOrNull(value.created_at), workspaceId: textOrNull(value.workspace_id) }
+  return {
+    id,
+    status,
+    createdAt: textOrNull(value.created_at),
+    workspaceId: textOrNull(value.workspace_id),
+    kind: textOrNull(value.kind),
+    language: textOrNull(value.language)
+  }
 }
 
 const cardIdOf = (workspaceId: string): string => `workspace-${workspaceId}`
@@ -856,6 +884,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       persistence: current.persistence ?? null,
       sshHost: current.sshHost ?? null,
       desktop: current.desktop ?? null,
+      lspLanguages: current.lspLanguages ?? null,
       snapshots: overrides.snapshots !== undefined ? [...overrides.snapshots] : prior?.snapshots ?? [],
       sessions: overrides.sessions !== undefined ? [...overrides.sessions] : prior?.sessions ?? [],
       ...(overrides.files !== undefined
@@ -997,7 +1026,8 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
           environment: known.environment ?? null,
           persistence: known.persistence ?? null,
           sshHost: known.sshHost ?? null,
-          desktop: known.desktop ?? null
+          desktop: known.desktop ?? null,
+          lspLanguages: known.lspLanguages ?? null
         }
       })
       : parsed

@@ -12,9 +12,13 @@
  * `code.hover <path>:<line>:<col> <repo>`, ⌘/Ctrl-click runs
  * `code.definition` with the same position — the same door every row in
  * FileCards.tsx uses, so the slash and the agent tool run the identical act.
- * Nothing here is component state; the one ref is the position last asked,
- * so a pointer that stays put asks once.
+ * The gestures bind only where those flows exist (`codeIntel`, the card's
+ * reading of the catalog): a host without `local.lsp` renders the same
+ * highlighted file with no dead gesture. Nothing here is component state;
+ * the one ref is the position last asked, so a pointer that stays put asks
+ * once.
  */
+import { LSP_HOVER_CAP_CHARS } from "@smthrs/rpc/LocalApp"
 import { Markdown } from "@smthrs/ui"
 import { CodeFileView, languageForFile } from "@smthrs/ui/adapters/code-view"
 import type { CodeLineAnnotation, CodeTokenPosition } from "@smthrs/ui/adapters/code-view"
@@ -41,18 +45,25 @@ const DiagnosticRow = ({ item }: { readonly item: Diagnostic }) => {
 /** The modifier the definition gesture takes on this machine, as the hover box names it. */
 const activateKey = (): string => (typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘-click" : "Ctrl-click")
 
-const HoverBox = ({ contents }: { readonly contents: string }) => (
+/** The host cut the server's text at its cap: the box says so rather than ending mid-sentence as if complete. */
+const HOVER_CUT = `(cut at ${LSP_HOVER_CAP_CHARS / 1024} KiB)`
+
+const HoverBox = ({ contents, truncated }: { readonly contents: string; readonly truncated: boolean }) => (
   <div className="code-hover" data-slot="code-hover">
     <Markdown className="code-hover-body" content={contents} />
+    {truncated ? <span className="code-hover-hint" data-slot="code-hover-cut">{HOVER_CUT}</span> : null}
     <span className="code-hover-hint">{activateKey()}: definition</span>
   </div>
 )
 
 export const CodeSurface = ({
   payload,
+  codeIntel,
   onRunCommand
 }: {
   readonly payload: FilePayload
+  /** Whether this host registers the code.* flows (FileCards reads the catalog); false binds no gesture. */
+  readonly codeIntel: boolean
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
   const { path, content, line, repo, hover, diagnostics, intel } = payload
@@ -60,7 +71,7 @@ export const CodeSurface = ({
   const annotations = useMemo<ReadonlyArray<CodeLineAnnotation>>(
     () => [
       ...(diagnostics ?? []).map((item, index) => ({ key: `diagnostic-${index}`, line: item.line, node: <DiagnosticRow item={item} /> })),
-      ...(hover == null ? [] : [{ key: "hover", line: hover.line, node: <HoverBox contents={hover.contents} /> }])
+      ...(hover == null ? [] : [{ key: "hover", line: hover.line, node: <HoverBox contents={hover.contents} truncated={hover.truncated === true} /> }])
     ],
     [diagnostics, hover]
   )
@@ -84,11 +95,12 @@ export const CodeSurface = ({
 
   if (languageForFile(path) === null) return <pre className="world-card-path">{content}</pre>
   /*
-   * A card that already knows there is no server to ask (the note under the
-   * header states it, with the install line) binds no gesture: every rest
-   * would be one more refusal.
+   * A host without the flows, or a card that already knows there is no
+   * server to ask (the note under the header states it, with the install
+   * line), binds no gesture: every rest would be one more refusal — or, on
+   * a host that drops an unregistered name, nothing at all.
    */
-  const bound = intel?.state !== "missing" && intel?.state !== "unavailable"
+  const bound = codeIntel && intel?.state !== "missing" && intel?.state !== "unavailable"
   return (
     <div className="code-surface" data-flow={bound ? "code.hover" : undefined} data-flow-activate={bound ? "code.definition" : undefined}>
       <CodeFileView

@@ -5,6 +5,7 @@
  * onRunCommand — the one delegated dispatch CardView threads from App.tsx —
  * and carries data-flow with its registered command name.
  */
+import { lspLanguageFor } from "@smthrs/rpc/LocalApp"
 import { Button } from "@smthrs/ui"
 import { FileText, Folder } from "lucide-react"
 import { lazy, Suspense, useContext } from "react"
@@ -71,25 +72,32 @@ export const languageWord = (path: string): string | null => {
   return extension === undefined ? null : LANGUAGE_WORDS[extension] ?? null
 }
 
-/** The count line under the header, present only once the server answered: errors and warnings, as the mockup counts them. */
+/**
+ * The count line under the header, present only once the server answered:
+ * errors and warnings, as the mockup counts them — of the rows the card
+ * holds, so when the host's cap cut the publication the line says how many
+ * of the total it counted rather than passing the cap off as the total.
+ */
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`
-export const diagnosticsCount = (items: ReadonlyArray<{ readonly severity: string }>): string =>
+export const diagnosticsCount = (items: ReadonlyArray<{ readonly severity: string }>, total?: number): string =>
   `${plural(items.filter((item) => item.severity === "error").length, "error")} · ${
     plural(items.filter((item) => item.severity === "warning").length, "warning")
-  }`
+  }${total !== undefined && total > items.length ? ` · ${items.length} of ${total} shown` : ""}`
 
 /*
  * The language server as the card knows it (payload.intel), stated only when
- * it is not ready: a missing server with its install line verbatim, a host
- * refusal with the host's message, and the spawn in progress. `ready`
- * renders nothing — absence is the state.
+ * there is something to state: a missing server with its install line
+ * verbatim, a host refusal with the host's message, the spawn in progress,
+ * and a ready server's one-line note when the seam left one (a definition
+ * that lies outside the repository). `ready` with no note renders nothing —
+ * absence is the state.
  */
 const CodeIntelNote = ({ intel, language }: {
   readonly intel: NonNullable<Extract<Card, { kind: "file" }>["payload"]["intel"]>
   readonly language: string | null
 }) => {
   const server = `${language === null ? "" : `${language} `}language server`
-  if (intel.state === "ready") return null
+  if (intel.state === "ready") return intel.note === undefined ? null : <p className="code-intel-note" data-intel="ready">{intel.note}</p>
   if (intel.state === "starting") return <p className="code-intel-note" data-intel="starting">Starting the {server}…</p>
   if (intel.state === "missing") {
     return (
@@ -289,6 +297,21 @@ export const FileCardBody = ({
   onRunCommand
 }: { readonly card: Extract<Card, { kind: "file" }> } & FileCardActions) => {
   const language = languageWord(card.payload.path)
+  /*
+   * The gestures follow the catalog (THE THREE-DOOR LAW): the surface binds
+   * code.hover / code.definition only where this host registers them. The
+   * web host lacks the `local.lsp` door, so there the card states the door
+   * once, under the header, on exactly the files a language server would
+   * serve — the pointer path drops an unregistered name silently, and a
+   * gesture that does nothing is a dead control. Without a controller (a
+   * component test) the caller's onRunCommand is the whole door.
+   */
+  const controller = useContext(ControllerContext)
+  const codeIntel = controller === null || controller.commands.find("code.hover") !== undefined
+  const absent = codeIntel ? undefined : controller?.commands.explainAbsent("code.hover")
+  const text = card.payload.binary !== true && !isMarkdownPath(card.payload.path)
+  const intel = card.payload.intel ??
+    (absent !== undefined && text && lspLanguageFor(card.payload.path) !== null ? { state: "unavailable" as const, note: absent.reason } : undefined)
   return (
     /*
      * Ask 6 (will, 2026-09-02): the body is a PANEL — capped height, its own
@@ -312,10 +335,10 @@ export const FileCardBody = ({
           data-slot="code-diagnostics-count"
           data-errors={card.payload.diagnostics.filter((item) => item.severity === "error").length}
         >
-          {diagnosticsCount(card.payload.diagnostics)}
+          {diagnosticsCount(card.payload.diagnostics, card.payload.diagnosticsTotal)}
         </p>
       )}
-      {card.payload.intel === undefined ? null : <CodeIntelNote intel={card.payload.intel} language={language} />}
+      {intel === undefined ? null : <CodeIntelNote intel={intel} language={language} />}
       {card.payload.binary === true ?
         (
           <p className="world-card-empty">
@@ -335,12 +358,15 @@ export const FileCardBody = ({
             </Suspense>
           </div>
         ) :
-        /* A cut file is not highlighted: half a token would lie about the file. */
-        card.payload.truncated ?
-        <pre className="world-card-path">{card.payload.content}</pre> :
+        /*
+         * A cut file is still code (will, 2026-09-03: a 16 KiB TypeScript file
+         * rendered monochrome was the complaint). The prefix is highlighted and
+         * the truncation line below states the cut; at most the last token is
+         * split, and the language server reads the file from disk, not the card.
+         */
         (
           <Suspense fallback={<pre className="world-card-path">{card.payload.content}</pre>}>
-            <CodeSurface payload={card.payload} onRunCommand={onRunCommand} />
+            <CodeSurface payload={card.payload} codeIntel={codeIntel} onRunCommand={onRunCommand} />
           </Suspense>
         )}
       {card.payload.truncated ?

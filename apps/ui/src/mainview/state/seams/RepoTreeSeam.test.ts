@@ -207,8 +207,9 @@ describe("repo tree seam — one directory per request, the route's answer verba
     const unknown = await controller.commands.run("repo.tree", "local:/nowhere")
     expect(unknown.status).toBe("failed")
     expect(JSON.stringify(unknown)).toContain("There is no working copy with id local:/nowhere.")
+    // A blank line lacks the copy id: the form asks for it (THE FORM LAW), nothing is refused.
     const blank = await controller.commands.run("repo.tree", "")
-    expect(blank.status).toBe("failed")
+    expect(blank).toEqual({ status: "form", flow: "repo.tree", cardId: "form-repo.tree", fields: ["copy"] })
   })
 
   test("the rows are collection state for this launch only: a store reopened over the same storage starts collapsed", async () => {
@@ -241,15 +242,14 @@ describe("repo tree seam — one directory per request, the route's answer verba
 })
 
 describe("the workspace name", () => {
-  test("/workspace.rename writes the heading's name; a blank name is refused; the pencil toggles the inline editor", async () => {
+  test("/workspace.rename writes the heading's name; a blank name renders the form; the pencil toggles the inline editor", async () => {
     const { store, controller } = await treeController([])
     expect(store.session().workspaceName).toBeUndefined()
     expect((await controller.commands.run("workspace.rename", "  Force  ")).status).toBe("executed")
     expect(store.session().workspaceName).toBe("Force")
     expect(store.session().workspaceRenameOpen).toBe(false)
     const blank = await controller.commands.run("workspace.rename", "   ")
-    expect(blank.status).toBe("failed")
-    expect(JSON.stringify(blank)).toContain("workspace.rename needs a name")
+    expect(blank).toEqual({ status: "form", flow: "workspace.rename", cardId: "form-workspace.rename", fields: ["name"] })
     expect(store.session().workspaceName).toBe("Force")
     expect((await controller.commands.run("workspace.rename.edit")).status).toBe("executed")
     expect(store.session().workspaceRenameOpen).toBe(true)
