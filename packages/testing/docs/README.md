@@ -29,7 +29,7 @@ Testing guide.
 
 `@smthrs/testing` was the last name in the release's published set with no page
 on the documentation site, because the page cannot land before
-`vocs.config.ts` lists it: `scripts/check-docs.mjs` fails any published page
+`docs/sidebar.ts` lists it: `scripts/check-docs.mjs` fails any published page
 the sidebar does not reach, and fails any sidebar link no page answers. That
 file is hand-written editorial order no generator writes, so the entry and the
 page land in the same commit.

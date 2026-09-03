@@ -8,15 +8,15 @@
  * copy whose exports are rewritten to the already-built ESM/CJS artifacts.
  */
 import { spawn } from "node:child_process"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { libraryPackages, packageKey } from "./workspace-packages.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
-const packagesRoot = join(repoRoot, "packages")
 const packageGroups = new Set(["engine", "agent", "tooling"])
 
 /**
@@ -81,26 +81,28 @@ export const publishedPackages = [
 ]
 
 /**
- * Reads every publishable workspace under `packages/`, keyed by directory name.
+ * Reads every publishable workspace under `packages/`, keyed by its
+ * repository-relative directory.
+ *
+ * The key is a path — `packages/smithers/flows/plan`, `packages/smithers/flows/canonical` — because a
+ * package's directory is where it lives and a nested package's basename is not
+ * enough to find it. `scripts/workspace-packages.mjs` answers what the members
+ * are, from `pnpm-workspace.yaml`, so publication and installation cannot
+ * disagree about the set and nesting is decided in one place.
  *
  * Membership is derived from `smthrs.group` and `private`, then checked against
  * {@link publishedPackages}. Every manifest must declare a known group so a new
- * package cannot silently fall outside a release train. Directories a deleted
- * package left behind carry no manifest and are skipped.
+ * package cannot silently fall outside a release train.
  */
-export const readWorkspaceManifests = (root = packagesRoot) => {
+export const readWorkspaceManifests = (root = repoRoot) => {
   const manifests = new Map()
-  for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
-    if (!entry.isDirectory()) continue
-    const manifestPath = join(root, entry.name, "package.json")
-    if (!existsSync(manifestPath)) continue
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
-    const group = manifest.smthrs?.group
+  for (const entry of libraryPackages(root)) {
+    const group = entry.manifest.smthrs?.group
     if (!packageGroups.has(group)) {
-      throw new Error(`${manifestPath}: smthrs.group must be one of ${[...packageGroups].join(", ")}`)
+      throw new Error(`${entry.manifestPath}: smthrs.group must be one of ${[...packageGroups].join(", ")}`)
     }
-    if (manifest.private || !releaseGroups.has(group)) continue
-    manifests.set(entry.name, manifest)
+    if (entry.manifest.private || !releaseGroups.has(group)) continue
+    manifests.set(entry.dir, entry.manifest)
   }
   const declared = [...manifests.values()].map((manifest) => manifest.name).sort()
   const expected = [...publishedPackages].sort()
@@ -155,6 +157,12 @@ const dependsOnItself = (node, dependencies, remaining) => {
 /**
  * Orders workspaces so a package follows every workspace dependency it declares.
  *
+ * The tiebreak among unblocked workspaces is the directory's last segment
+ * rather than the whole path. Release order is a property of the packages, not
+ * of where their directories sit, so nesting a granular package inside the
+ * product package it belongs to publishes the same forty names in the same
+ * order it published them from a top-level directory.
+ *
  * The graph is not acyclic. `@smthrs/kernel` publishes `kernel/test/TestHost`,
  * which imports `@smthrs/platform-browser`, and `platform-browser` imports
  * `@smthrs/kernel` back. So the order emits an unblocked workspace whenever one
@@ -162,7 +170,12 @@ const dependsOnItself = (node, dependencies, remaining) => {
  * member. Only a genuine cycle is ever broken; every other edge is respected.
  */
 export const dependencyOrder = (dependencies) => {
-  const remaining = new Set([...dependencies.keys()].sort())
+  const byBasename = (left, right) => {
+    const a = packageKey({ dir: left })
+    const b = packageKey({ dir: right })
+    return a < b ? -1 : a > b ? 1 : 0
+  }
+  const remaining = new Set([...dependencies.keys()].sort(byBasename))
   const ordered = []
   while (remaining.size > 0) {
     const unblocked = [...remaining].find((candidate) =>
@@ -463,13 +476,15 @@ const run = (command, args, options = {}) =>
     })
   })
 
-const packWorkspace = async (name, outputDirectory, stagingRoot) => {
-  const packageRoot = join(repoRoot, "packages", name)
+const packWorkspace = async (directory, outputDirectory, stagingRoot) => {
+  const packageRoot = join(repoRoot, directory)
   const manifestPath = join(packageRoot, "package.json")
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
   await assertBuilt(packageRoot, manifest)
 
-  const stagedPackage = join(stagingRoot, name)
+  // The staging directory is flat: a tarball is named from the manifest, so a
+  // nested package stages beside its siblings under its own basename.
+  const stagedPackage = join(stagingRoot, packageKey({ dir: directory }))
   await cp(packageRoot, stagedPackage, {
     recursive: true,
     filter: copyFilter(packageRoot)
@@ -538,8 +553,8 @@ export const main = async (args) => {
   const stagingRoot = await mkdtemp(join(tmpdir(), "smthrs-release-pack-"))
   try {
     const packed = []
-    for (const name of workspaces) {
-      packed.push(await packWorkspace(name, outputDirectory, stagingRoot))
+    for (const directory of workspaces) {
+      packed.push(await packWorkspace(directory, outputDirectory, stagingRoot))
     }
     await writeFile(
       join(outputDirectory, "manifest.json"),

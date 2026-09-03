@@ -22,14 +22,4 @@ describe("the notice this package throws", () => {
   it("is quoted verbatim by the package-owned documentation fragment", () => {
     expect(fences(read("../docs/notice.md"))[0]).toBe(notice)
   })
-
-  it("is quoted verbatim by the upgrade guide the notice links to", () => {
-    expect(read("../../../docs/pages/migration/1.0.md")).toContain(notice)
-  })
-
-  it("projects the entire package-owned fragment into the upgrade guide", () => {
-    const fragment = read("../docs/notice.md").trim()
-
-    expect(read("../../../docs/pages/migration/1.0.md")).toContain(fragment)
-  })
 })

@@ -1,15 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 import {
   ALLOWLIST,
-  MIRRORED_RESOLVERS,
   REPO_ROOT,
   SOURCE_ENTRY,
-  checkMirroredResolvers,
   findViolationsInFile,
   isCommentLine,
   listScannedFiles,
@@ -79,11 +76,11 @@ describe("findViolationsInFile", () => {
     assert.deepEqual(findViolationsInFile("w.tsx", source), []);
   });
 
-  it("flags every line of a plugin server config", () => {
+  it("flags every line of an MCP server config", () => {
     const contents = JSON.stringify({
       mcpServers: { smithers: { command: "bunx smthrs", args: ["--mcp"] } },
     });
-    assert.equal(findViolationsInFile("claude-plugin/.mcp.json", contents).length, 1);
+    assert.equal(findViolationsInFile("examples/.mcp.json", contents).length, 1);
   });
 
   it("returns nothing for an allowlisted path", () => {
@@ -92,66 +89,12 @@ describe("findViolationsInFile", () => {
   });
 });
 
-describe("checkMirroredResolvers", () => {
-  const created = [];
-
-  function makeTmp() {
-    const dir = mkdtempSync(join(tmpdir(), "check-local-smithers-"));
-    created.push(dir);
-    return dir;
-  }
-
-  function writeResolvers(root, contents) {
-    for (let index = 0; index < MIRRORED_RESOLVERS.length; index++) {
-      const path = join(root, MIRRORED_RESOLVERS[index]);
-      mkdirSync(join(path, ".."), { recursive: true });
-      writeFileSync(path, contents[index]);
-    }
-  }
-
-  it("passes when the copies are byte-identical", () => {
-    const root = makeTmp();
-    writeResolvers(
-      root,
-      MIRRORED_RESOLVERS.map(() => "export const a = 1;\n"),
-    );
-    assert.deepEqual(checkMirroredResolvers(root), []);
-  });
-
-  it("reports drift with the command that repairs it", () => {
-    const root = makeTmp();
-    writeResolvers(root, ["export const a = 1;\n", "export const a = 2;\n"]);
-    const problems = checkMirroredResolvers(root);
-    assert.equal(problems.length, 1);
-    assert.match(problems[0], /has drifted/);
-    assert.match(problems[0], /cp /);
-  });
-
-  it("reports a copy that is missing beside a copy that exists", () => {
-    const root = makeTmp();
-    const present = join(root, MIRRORED_RESOLVERS[0]);
-    mkdirSync(join(present, ".."), { recursive: true });
-    writeFileSync(present, "export const a = 1;\n");
-    const problems = checkMirroredResolvers(root);
-    assert.equal(problems.length, MIRRORED_RESOLVERS.length - 1);
-    assert.match(problems[0], /is missing/);
-  });
-
-  it("passes when no plugin resolver copy exists", () => {
-    assert.deepEqual(checkMirroredResolvers(makeTmp()), []);
-  });
-
-  process.on("exit", () => {
-    for (const dir of created) rmSync(dir, { recursive: true, force: true });
-  });
-});
-
 describe("the repo itself", () => {
   it("scans the internal execution surfaces", () => {
     const scanned = listScannedFiles();
     assert.ok(scanned.includes("package.json"));
     assert.ok(scanned.includes("scripts/check-local-smithers.mjs"));
-    assert.ok(scanned.some((path) => path.startsWith("ci/")));
+    assert.ok(scanned.some((path) => path.startsWith("examples/")));
     assert.ok(!scanned.some((path) => path.includes("node_modules")));
   });
 
@@ -160,8 +103,7 @@ describe("the repo itself", () => {
   });
 
   it("has no internal script running the published CLI", () => {
-    const { violations, resolverProblems } = check();
-    assert.deepEqual(resolverProblems, []);
+    const { violations } = check();
     assert.deepEqual(
       violations.map((violation) => `${violation.path}:${violation.line}`),
       [],

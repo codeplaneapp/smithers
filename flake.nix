@@ -1,11 +1,13 @@
 {
-  # The toolchain the root BUILD.ts pins, as one Nix closure.
+  # The toolchain `.smithers/WORKSPACE.ts` declares, as one Nix closure.
   #
-  # `Smithers.Nix.Environment({ flake: Smithers.file("//flake.nix") })` in a
-  # BUILD.ts makes smithers build resolve every tool from this shell and key
-  # every spawning target on the shell's store hash. The declared runtime and
-  # package-manager versions in BUILD.ts are asserted against what this shell
-  # provides, so a pin here and a pin there cannot drift apart silently.
+  # The workspace exports it as `environment = S.Nix.Environment({ flake })`
+  # and hands it to the Microsandbox sandbox declaration, so a sandboxed
+  # session plants this flake in its microVM and runs every command under
+  # `nix develop` of it. `nix develop` at the root enters the same shell on a
+  # host. `scripts/check-toolchain-pins.mjs` asserts the pnpm and Node pins
+  # below against the workspace declaration, so a pin here and a pin there
+  # cannot drift apart silently.
   #
   # Rust comes from `rust-toolchain.toml` through rust-overlay, so the crates
   # build with the same channel, profile, components, and targets rustup would
@@ -22,14 +24,16 @@
     };
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = { nixpkgs, rust-overlay, ... }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      # nixpkgs dropped x86_64-darwin; the Linux systems are what a
+      # Microsandbox microVM and the hosted runners are.
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
         f (import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; }));
-      # pnpm at exactly the version `packageManager` in package.json and the
-      # root BUILD.ts declare. nixpkgs carries a moving pnpm; a build tool that
-      # asserts an exact version needs the tarball npm publishes, not a
+      # pnpm at exactly the version `.smithers/WORKSPACE.ts` and package.json
+      # `packageManager` declare. nixpkgs carries a moving pnpm; a build tool
+      # that asserts an exact version needs the tarball npm publishes, not a
       # channel's latest.
       pnpmPinned = pkgs: pkgs.stdenvNoCC.mkDerivation rec {
         pname = "pnpm";
@@ -38,7 +42,6 @@
           url = "https://registry.npmjs.org/pnpm/-/pnpm-${version}.tgz";
           hash = "sha256-hyN9N+rbedxiagV26zpS0j1wQiwyOuXgD8BckfQyN4A=";
         };
-        nativeBuildInputs = [ pkgs.nodejs_22 ];
         dontBuild = true;
         installPhase = ''
           mkdir -p $out/lib/pnpm $out/bin

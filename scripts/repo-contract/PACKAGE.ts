@@ -11,7 +11,6 @@
  * `node`.
  */
 import { Smithers } from "@smthrs/targets"
-import { runtime } from "../../PACKAGE.ts"
 
 /** Every gate in this directory, digested as the input of each target. */
 const sources = Smithers.glob("//scripts/repo-contract/**/*.mjs")
@@ -29,7 +28,6 @@ const sources = Smithers.glob("//scripts/repo-contract/**/*.mjs")
  * @category test
  */
 const packageContract = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/package-contract.test.mjs")]),
   srcs: [sources],
   deps: []
@@ -45,7 +43,6 @@ const packageContract = Smithers.NodeTest({
  * @category test
  */
 const barrels = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/barrels.test.mjs")]),
   srcs: [sources],
   deps: []
@@ -58,34 +55,37 @@ const barrels = Smithers.NodeTest({
  * @category test
  */
 const testScriptWiring = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/test-script-wiring.test.mjs")]),
   srcs: [sources],
   deps: []
 })
 
 /**
- * No focused or parked test in the fault matrix, and every conditional skip
- * declared with its reason.
+ * No focused or parked test in the fault matrix, every conditional skip
+ * declared with its reason, and every package that carries fault cases wired to
+ * a target that runs them.
+ *
+ * The coverage record the suite reads is an input beside the gates themselves:
+ * a required red gate names a row in `fault-gaps.md`, so editing that row has
+ * to re-key this target.
  *
  * @since 1.0.0
  * @category test
  */
 const faultSkips = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/fault-skips.test.mjs")]),
-  srcs: [sources],
+  srcs: [sources, Smithers.file("//scripts/repo-contract/fault-gaps.md")],
   deps: []
 })
 
 /**
- * No operator rig under `evals/` names one machine's home directory.
+ * No operator rig under `evals/`, `scripts/`, or a package's `test/faults` tree
+ * names one machine's home directory.
  *
  * @since 1.0.0
  * @category test
  */
 const machinePaths = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/machine-paths.test.mjs")]),
   srcs: [sources],
   deps: []

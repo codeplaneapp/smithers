@@ -18,11 +18,11 @@
  *   node scripts/set-release-version.mjs --check <version>
  *                                                      report drift, exit 1
  */
-import { globSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { readFileSync, writeFileSync } from "node:fs"
+import { join, resolve } from "node:path"
+import { workspacePackages } from "./workspace-packages.mjs"
 
 const repoRoot = resolve(import.meta.dirname, "..")
-const workspaceFile = join(repoRoot, "pnpm-workspace.yaml")
 
 const dependencyFields = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
 
@@ -36,17 +36,17 @@ const dependencyFields = ["dependencies", "devDependencies", "peerDependencies",
  */
 export const versionedSources = [
   {
-    path: "packages/observability/src/Otlp.ts",
+    path: "packages/smithers/flows/observability/src/Otlp.ts",
     declaration: "defaultServiceVersion",
     pattern: /(export const defaultServiceVersion = ")([^"]*)(")/
   },
   {
-    path: "packages/migrate/src/flow/Cli.ts",
+    path: "packages/smithers/migrate/src/flow/Cli.ts",
     declaration: "version",
     pattern: /(export const version = ")([^"]*)(")/
   },
   {
-    path: "packages/migrate/src/Report.ts",
+    path: "packages/smithers/migrate/src/Report.ts",
     declaration: "tool.version",
     pattern: /(export const tool = \{ name: "@smthrs\/migrate", version: ")([^"]*)(" \} as const)/
   }
@@ -79,42 +79,19 @@ export const sourceMismatches = (version, root = repoRoot, sources = versionedSo
 }
 
 /**
- * Reads the package globs from pnpm's workspace manifest.
- */
-export const readWorkspacePatterns = (path = workspaceFile) => {
-  const lines = readFileSync(path, "utf8").split(/\r?\n/)
-  const heading = lines.findIndex((line) => /^\s*packages\s*:\s*(?:#.*)?$/.test(line))
-  if (heading < 0) throw new Error(`${path} has no packages list`)
-  const indentation = lines[heading].match(/^\s*/)[0].length
-  const patterns = []
-  for (const line of lines.slice(heading + 1)) {
-    if (/^\s*(?:#.*)?$/.test(line)) continue
-    const currentIndentation = line.match(/^\s*/)[0].length
-    if (currentIndentation <= indentation) break
-    const item = line.match(/^\s*-\s*(?:"([^"]+)"|'([^']+)'|([^#\s]+))\s*(?:#.*)?$/)
-    if (item === null) throw new Error(`unsupported packages entry in ${path}: ${line.trim()}`)
-    patterns.push(item[1] ?? item[2] ?? item[3])
-  }
-  if (patterns.length === 0) throw new Error(`${path} has an empty packages list`)
-  return patterns
-}
-
-/**
  * Reads every manifest selected by `pnpm-workspace.yaml`, keyed by its path
  * relative to the repository root.
+ *
+ * The membership reading is `scripts/workspace-packages.mjs`, the one place
+ * that knows where packages live, so a package nested inside the product
+ * package it belongs to is bumped like any other.
  */
-export const readManifests = (root = repoRoot, path = join(root, "pnpm-workspace.yaml")) => {
-  const manifests = new Set(
-    readWorkspacePatterns(path).flatMap((pattern) =>
-      globSync(`${pattern.replace(/\/$/, "")}/package.json`, { cwd: root })
-    )
-  )
-  return [...manifests].sort().map((relativePath) => ({
-    directory: dirname(relativePath),
-    path: join(root, relativePath),
-    manifest: JSON.parse(readFileSync(join(root, relativePath), "utf8"))
+export const readManifests = (root = repoRoot) =>
+  workspacePackages(root).map((entry) => ({
+    directory: entry.dir,
+    path: entry.manifestPath,
+    manifest: entry.manifest
   }))
-}
 
 /**
  * Retargets one manifest at `version`.

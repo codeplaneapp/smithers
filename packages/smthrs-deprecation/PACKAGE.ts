@@ -1,7 +1,6 @@
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../PACKAGE.ts"
 
-const standard = Smithers.StandardPackage({ packageManager, cwd: "packages/smthrs-deprecation" })
+const standard = Smithers.StandardPackage({ cwd: "packages/smthrs-deprecation" })
 
 const { check, circular, docs, fmt, lib, lint, test } = standard
 

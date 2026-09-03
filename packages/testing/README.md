@@ -33,6 +33,28 @@ for (const testCase of Conformance.coreSuite()) {
 }
 ```
 
+`Faults` is the second module outside the barrel, and for a different reason:
+it is not a double but a set of real, machine-global fault primitives —
+`killProcess` sends a real signal to a real pid and waits for the operating
+system to reap it, `parentPid` and `waitForReparent` read the orphan a kill
+leaves behind, and `skewClock` moves the wall clock a durable timer is measured
+against. Every package's fault tier imports one implementation of them from
+`@smthrs/testing/Faults`, so "the process is really gone" means the same thing
+in all of them. A suite that uses it to
+kill somebody else's engine belongs in that package's `test/faults` tree,
+behind a `Smithers.FaultSuite` target and a `vitest.faults.config.ts` with
+`fileParallelism: false`. This module's own suite is the exception and stays in
+`test/`: it only signals pids it spawned itself, so it reaches no neighbour, and
+staying there is what keeps `src/Faults.ts` inside the package's 100% coverage
+denominator.
+
+```ts
+import { isAlive, killProcess, waitForReparent } from "@smthrs/testing/Faults"
+
+await killProcess(engine.process)
+const reparented = await waitForReparent(orphan, engine.process.pid!)
+```
+
 `@smthrs/testing/package.json` is also exported. `internal/*` and nested
 `*/index` subpaths are not public.
 

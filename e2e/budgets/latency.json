@@ -1,5 +1,0 @@
-{
-  "perPRSuiteWallTimeMaxMs": 900000,
-  "nightlySoakWallTimeMaxMs": 7200000,
-  "reconnectCursorMaxMs": 5000
-}

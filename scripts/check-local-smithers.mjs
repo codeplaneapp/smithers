@@ -7,14 +7,13 @@
 // bin's delegation, but that is a fallback, not a guarantee: it needs an
 // installed `node_modules`, so a fresh worktree or a slimmed checkout silently
 // runs a release build instead of the code under edit. Internal scripts
-// therefore name the source entry (SOURCE_ENTRY below) directly, or resolve it
-// through a plugin's `lib/resolve-smithers-cli.mjs`.
+// therefore name the source entry (SOURCE_ENTRY below) directly.
 //
 // User-facing prose still says `bunx smthrs`: that is the right command for
 // someone who has no checkout, and this repo's text is full of it legitimately
 // in agent prompts, docs assertions, and fixtures. So the scan only looks at
 // positions that actually spawn a process: `package.json` scripts, shell
-// scripts, plugin server and monitor configs, and JS/TS lines carrying a
+// scripts, agent-harness server and monitor configs, and JS/TS lines carrying a
 // shell-execution call. The few execution sites that must keep the published
 // fallback are allowlisted below with a reason.
 //
@@ -29,12 +28,11 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /**
  * The working-tree entry an internal script must name.
  *
- * The user-facing binary is `packages/cli/bin/smithers.mjs`. The shim runs
- * `dist/esm/bin.js` when a published install has
- * one and `src/bin.ts` otherwise, so naming it here covers both. Both plugin
- * `lib/resolve-smithers-cli.mjs` copies change with it.
+ * The user-facing binary is `packages/smithers/bin/smithers.mjs`. The shim runs
+ * `dist/esm/bin.js` when a published install has one and `src/bin.ts`
+ * otherwise, so naming it here covers both.
  */
-export const SOURCE_ENTRY = "packages/cli/bin/smithers.mjs";
+export const SOURCE_ENTRY = "packages/smithers/bin/smithers.mjs";
 
 /**
  * Directories (and single files) whose code executes the Smithers CLI.
@@ -46,10 +44,6 @@ export const SOURCE_ENTRY = "packages/cli/bin/smithers.mjs";
 export const SCANNED_PATHS = [
   "package.json",
   "scripts",
-  "ci",
-  "lint",
-  "claude-plugin",
-  "codex-plugin",
   "flows",
   "evals",
   "examples",
@@ -73,25 +67,9 @@ const SKIPPED_DIRECTORIES = new Set([
  * not a defect. Keys are repo-relative POSIX paths.
  */
 export const ALLOWLIST = {
-  "claude-plugin/lib/resolve-smithers-cli.mjs": "defines the published fallback used when there is no source checkout",
-  "codex-plugin/lib/resolve-smithers-cli.mjs": "defines the published fallback used when there is no source checkout",
-  "codex-plugin/.mcp.json":
-    "Codex does not substitute ${PLUGIN_ROOT} in .mcp.json, so the launcher path cannot be named here; the published bin delegates to the checkout instead",
   "scripts/check-local-smithers.mjs": "this guard names the patterns it forbids",
   "scripts/check-local-smithers.test.mjs": "exercises the guard with sample violations",
 };
-
-/**
- * Resolver copies that must stay byte-identical across the plugin trees.
- *
- * Each plugin ships standalone (Codex sparse-checkouts a plugin directory
- * alone), so the resolver is copied verbatim rather than imported. A tree may
- * contain neither plugin without creating a drift failure.
- */
-export const MIRRORED_RESOLVERS = [
-  "claude-plugin/lib/resolve-smithers-cli.mjs",
-  "codex-plugin/lib/resolve-smithers-cli.mjs",
-];
 
 /** Package managers that fetch and run the published CLI. */
 const RUNNERS = ["bunx", "npx", "pnpm dlx", "yarn dlx", "deno run -A npm:"];
@@ -225,38 +203,7 @@ export function listScannedFiles(root = REPO_ROOT) {
 
 /**
  * @param {string} [root]
- * @returns {string[]} Human-readable problem descriptions; empty when clean.
- */
-export function checkMirroredResolvers(root = REPO_ROOT) {
-  const contents = MIRRORED_RESOLVERS.map((path) => {
-    try {
-      return readFileSync(join(root, path), "utf8");
-    } catch {
-      return null;
-    }
-  });
-  // No copy at all is valid. One copy present and another absent is drift.
-  if (contents.every((content) => content === null)) return [];
-  const problems = [];
-  for (let index = 0; index < MIRRORED_RESOLVERS.length; index++) {
-    if (contents[index] === null) problems.push(`${MIRRORED_RESOLVERS[index]} is missing`);
-  }
-  if (problems.length) return problems;
-  const [first, ...rest] = contents;
-  for (let index = 0; index < rest.length; index++) {
-    if (rest[index] !== first) {
-      problems.push(
-        `${MIRRORED_RESOLVERS[index + 1]} has drifted from ${MIRRORED_RESOLVERS[0]}. ` +
-          `Each plugin ships standalone (Codex sparse-checkouts the plugin directory alone), so the ` +
-          `resolver is copied verbatim: run \`cp ${MIRRORED_RESOLVERS[0]} ${MIRRORED_RESOLVERS[index + 1]}\`.`,
-      );
-    }
-  }
-  return problems;
-}
-
-/**
- * @param {string} [root]
+ * @returns {{ violations: { path: string, line: number, text: string }[] }}
  */
 export function check(root = REPO_ROOT) {
   const violations = [];
@@ -269,15 +216,12 @@ export function check(root = REPO_ROOT) {
     }
     violations.push(...findViolationsInFile(path, contents));
   }
-  return { violations, resolverProblems: checkMirroredResolvers(root) };
+  return { violations };
 }
 
 const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  const { violations, resolverProblems } = check();
-  for (const problem of resolverProblems) {
-    console.error(`check-local-smithers: ${problem}`);
-  }
+  const { violations } = check();
   for (const violation of violations) {
     console.error(`check-local-smithers: ${violation.path}:${violation.line}: ${violation.text}`);
   }
@@ -285,11 +229,10 @@ if (invokedDirectly) {
     console.error(
       "\nInternal scripts must execute the working tree, not the published package.\n" +
         `  - shell and npm scripts: run ${SOURCE_ENTRY}\n` +
-        "  - plugin code: `resolveSmithersCli()` from lib/resolve-smithers-cli.mjs\n" +
         "If a file genuinely needs the published fallback, add it to ALLOWLIST in " +
         "scripts/check-local-smithers.mjs with the reason.",
     );
+    process.exit(1);
   }
-  if (violations.length || resolverProblems.length) process.exit(1);
   console.log("check-local-smithers: internal scripts run the Smithers working tree");
 }

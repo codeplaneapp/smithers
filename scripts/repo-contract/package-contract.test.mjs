@@ -50,11 +50,27 @@ const manifestNotExposed = new Map([
   ]
 ])
 
-/** Every directory under `packages/` that has a manifest. */
-const manifests = readdirSync(join(root, "packages"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => ({ directory: entry.name, path: join(root, "packages", entry.name, "package.json") }))
-  .filter((entry) => existsSync(entry.path))
+/**
+ * Every directory under `packages/` that has a manifest, at any depth.
+ *
+ * The walk descends. A granular package can sit inside the product package it
+ * belongs to — `packages/smithers/flows/canonical` is `@smthrs/canonical` — and a
+ * one-level reading would both stop checking it and start failing the
+ * workspace-dependency cell below, because every package that depends on
+ * `@smthrs/canonical` would resolve it to nothing.
+ */
+const packageDirectories = (parent = "") =>
+  readdirSync(join(root, "packages", parent), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
+    .flatMap((entry) => {
+      const directory = parent === "" ? entry.name : `${parent}/${entry.name}`
+      return existsSync(join(root, "packages", directory, "package.json"))
+        ? [directory, ...packageDirectories(directory)]
+        : []
+    })
+
+const manifests = packageDirectories()
+  .map((directory) => ({ directory, path: join(root, "packages", directory, "package.json") }))
   .map((entry) => ({ ...entry, manifest: JSON.parse(readFileSync(entry.path, "utf8")) }))
 
 const publishable = manifests.filter((entry) => entry.manifest.private !== true)

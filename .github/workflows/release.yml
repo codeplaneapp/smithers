@@ -75,7 +75,16 @@ jobs:
           # together. Tooling is private and never packed. A private manifest
           # is still group-checked, so a package cannot leave the train by
           # dropping its group.
-          for manifest in packages/*/package.json; do
+          # The member list comes from `pnpm-workspace.yaml` through the one
+          # reader every gate shares, never from a shell glob. Packages nest —
+          # a granular package lives inside the product package it belongs to,
+          # three directory levels deep — and a glob deep enough to reach one
+          # also matches the generated `dist/cjs/package.json` a built package
+          # ships, which carries no group and would fail this loop on a build
+          # artifact. No package is named here: the published set is the pack
+          # manifest, and this loop only checks what the workspace declares.
+          for directory in $(node scripts/workspace-packages.mjs --library-dirs); do
+            manifest="$directory/package.json"
             package_group="$(node -p "require('./' + process.argv[1]).smthrs?.group ?? ''" "$manifest")"
             case "$package_group" in
               engine|agent) ;;
@@ -111,7 +120,7 @@ jobs:
       - name: Release version coherence
         run: node --test scripts/set-release-version.test.mjs
       - name: Disaster-recovery script test
-        run: node --test scripts/flows-backup.test.mjs
+        run: pnpm exec smithers-build test '//packages/smithers/flows/engine-store:disasterRecovery'
       - name: Test-pin register guard
         run: node --test scripts/check-test-pins.test.mjs
       - name: Build all workspaces from clean artifacts
@@ -143,7 +152,7 @@ jobs:
           # A prerelease never takes `latest`: `npm install smthrs` and every
           # range that tracks the tag must keep resolving 0.35.0 until 1.0.0 is
           # final. Prereleases publish under `next`, which is also pinned in each
-          # manifest's publishConfig.tag (docs/internal/release-runbook.md).
+          # manifest's publishConfig.tag (the release runbook in Smithers-Ops).
           publish_tag="latest"
           case "$release_version" in *-*) publish_tag="next" ;; esac
           node -e '

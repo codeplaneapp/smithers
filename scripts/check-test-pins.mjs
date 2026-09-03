@@ -1,6 +1,6 @@
 /**
  * Fails when a test pin in any package group is not written down in
- * docs/alpha-notes.md.
+ * scripts/test-pins.md.
  *
  * A pin is a test the default gate never runs to a pass. Three forms count:
  * `it.fails`/`test.fails` (an assertion that current behavior is wrong),
@@ -21,15 +21,16 @@
  * case this guard exists for.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
-import { dirname, join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
+import { libraryPackages } from "./workspace-packages.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 /** The package groups whose pins this register covers. */
 export const guardedGroups = new Set(["engine", "agent", "tooling"])
 
-export const notesPath = join(repoRoot, "docs", "alpha-notes.md")
+export const notesPath = join(repoRoot, "scripts", "test-pins.md")
 
 /**
  * Matches an outright pin and captures its title.
@@ -103,26 +104,34 @@ const ignoredDirectories = new Set(["node_modules", "dist", "build", "coverage",
 
 const isTestFile = (name) => /\.(test|spec)\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(name)
 
-/** Every package directory whose manifest declares one of the guarded groups. */
-export const guardedPackages = (packagesRoot = join(repoRoot, "packages")) => {
-  const found = []
-  for (const entry of readdirSync(packagesRoot, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
-    if (!entry.isDirectory()) continue
-    const manifestPath = join(packagesRoot, entry.name, "package.json")
-    if (!existsSync(manifestPath)) continue
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
-    if (guardedGroups.has(manifest.smthrs?.group)) found.push(join(packagesRoot, entry.name))
-  }
-  return found
-}
+/**
+ * Every package directory whose manifest declares one of the guarded groups.
+ *
+ * The candidates come from `pnpm-workspace.yaml` through the shared reader, so
+ * a package nested inside the product package it belongs to keeps its own row
+ * instead of having its pins counted against its parent.
+ */
+export const guardedPackages = (root = repoRoot) =>
+  libraryPackages(root)
+    .filter((entry) => guardedGroups.has(entry.manifest.smthrs?.group))
+    .map((entry) => join(root, entry.dir.split("/").join(sep)))
 
-const testFilesUnder = (directory, collected = []) => {
+/**
+ * Every test file a package owns.
+ *
+ * The walk stops at a nested package: a directory holding its own
+ * `package.json` is another package's tree, and its pins belong to that
+ * package's row in the register, not to the enclosing one.
+ */
+const testFilesUnder = (directory, collected = [], root = directory) => {
   if (!existsSync(directory)) return collected
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
     if (ignoredDirectories.has(entry.name)) continue
     const path = join(directory, entry.name)
-    if (entry.isDirectory()) testFilesUnder(path, collected)
-    else if (entry.isFile() && isTestFile(entry.name)) collected.push(path)
+    if (entry.isDirectory()) {
+      if (existsSync(join(path, "package.json"))) continue
+      testFilesUnder(path, collected, root)
+    } else if (entry.isFile() && isTestFile(entry.name)) collected.push(path)
   }
   return collected
 }
@@ -200,13 +209,13 @@ const main = () => {
     console.log("No undocumented test pins in any package group.")
     return
   }
-  console.error(`${unexplained.length} test pin(s) are not documented in docs/alpha-notes.md:`)
+  console.error(`${unexplained.length} test pin(s) are not documented in scripts/test-pins.md:`)
   for (const pin of unexplained) {
     console.error(`  ${pin.file}:${pin.line}  .${pin.form}  ${JSON.stringify(pin.title)}`)
   }
   console.error("")
   console.error("Fix the defect and unpin it, or add the pin to the \"Known test pins\" section")
-  console.error("of docs/alpha-notes.md with a rationale. See that file's \"Adding a pin\".")
+  console.error("of scripts/test-pins.md with a rationale. See that file's \"Adding a pin\".")
   process.exit(1)
 }
 

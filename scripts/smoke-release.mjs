@@ -203,49 +203,6 @@ try {
     throw new Error(`release tarballs failed to load:\n${failures.join("\n\n")}`)
   }
 
-  // Invoke the CLI's lazy documentation API through both published spellings
-  // and module systems. A root import alone did not expose a broken CJS
-  // `import.meta` fallback because the Docs namespace was never evaluated.
-  const docsChecks = [
-    [
-      "ESM",
-      [
-        "--input-type=module",
-        "--eval",
-        [
-          'const direct = await import("@smthrs/cli/Docs")',
-          'const { Docs: root } = await import("@smthrs/cli")',
-          "for (const docs of [direct, root]) {",
-          '  if (!docs.directory().endsWith("/node_modules/@smthrs/cli/docs")) throw new Error(docs.directory())',
-          '  if (!docs.file(false).endsWith("/docs/llms.txt")) throw new Error(docs.file(false))',
-          '  const read = docs.read(false)',
-          '  if (!read.found || !read.text.includes("# Smithers")) throw new Error("CLI docs bundle was not readable")',
-          "}"
-        ].join("\n")
-      ]
-    ],
-    [
-      "CJS",
-      [
-        "--eval",
-        [
-          'const direct = require("@smthrs/cli/Docs")',
-          'const { Docs: root } = require("@smthrs/cli")',
-          "for (const docs of [direct, root]) {",
-          '  if (!docs.directory().endsWith("/node_modules/@smthrs/cli/docs")) throw new Error(docs.directory())',
-          '  if (!docs.file(false).endsWith("/docs/llms.txt")) throw new Error(docs.file(false))',
-          '  const read = docs.read(false)',
-          '  if (!read.found || !read.text.includes("# Smithers")) throw new Error("CLI docs bundle was not readable")',
-          "}"
-        ].join("\n")
-      ]
-    ]
-  ]
-  for (const [label, args] of docsChecks) {
-    const checked = await runQuietly(process.execPath, args, smokeRoot)
-    if (!checked.ok) failures.push(`@smthrs/cli: ${label} Docs invocation failed\n${checked.output.trimEnd()}`)
-  }
-
   // Bundle a bare side-effect import from the installed tarball. The package
   // manifest, not this repository's source graph, decides whether esbuild may
   // erase the CLI entry. Other packages stay external so this assertion is

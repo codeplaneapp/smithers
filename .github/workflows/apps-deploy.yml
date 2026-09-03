@@ -45,12 +45,12 @@ jobs:
       # this pipeline offers when no credential is configured.
       - name: Typecheck apps
         run: |
-          for app in smithers-ui smithers-server smithers-shared smithers-tui; do
+          for app in smithers-ui smithers-server @smthrs/rpc; do
             pnpm --filter "$app" run typecheck
           done
       - name: Test apps
         run: |
-          for app in smithers-ui smithers-server smithers-shared smithers-tui; do
+          for app in smithers-ui smithers-server @smthrs/rpc; do
             pnpm --filter "$app" run test
           done
       # Issue I-4: the deploy is gated on end-to-end behaviour, not only on
@@ -143,7 +143,7 @@ jobs:
       # comparison.
       #
       # The steps below carry `if:` conditions. That is allowed in this file:
-      # the issue-#176 pin in packages/flows/test/vitestCoverageIsolation.test.ts
+      # the issue-#176 pin in packages/smithers/flows/test/vitestCoverageIsolation.test.ts
       # forbids `if:` in ci.yml only.
       - name: CN-1 — the deployment serves the sha it just published
         if: ${{ !cancelled() && steps.deploy_real.outcome == 'success' }}

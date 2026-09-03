@@ -1,0 +1,108 @@
+{
+  "name": "@smthrs/fs",
+  "type": "module",
+  "version": "0.1.0",
+  "license": "MIT",
+  "smthrs": {
+    "group": "agent"
+  },
+  "private": true,
+  "description": "Private metadata routing and schema-checked command projections for Smithers flows",
+  "homepage": "https://github.com/smithersai/smithers",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smithersai/smithers.git",
+    "directory": "packages/smithers/agent/fs"
+  },
+  "bugs": {
+    "url": "https://github.com/smithersai/smithers/issues"
+  },
+  "tags": [
+    "typescript",
+    "effect",
+    "flow",
+    "filesystem"
+  ],
+  "keywords": [
+    "typescript",
+    "effect",
+    "flow",
+    "filesystem"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./internal/*": null,
+    "./*/index": null
+  },
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "dist/**/package.json",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./*": {
+        "types": "./dist/esm/*.d.ts",
+        "import": "./dist/esm/*.js",
+        "require": "./dist/cjs/*.js"
+      },
+      "./internal/*": null,
+      "./*/index": null
+    }
+  },
+  "scripts": {
+    "lint": "eslint src --max-warnings=0 && dprint check",
+    "format": "dprint fmt",
+    "build": "node scripts/build.mjs",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.types.json --noEmit",
+    "circular": "node scripts/circular.mjs",
+    "test": "vitest",
+    "coverage": "vitest --coverage"
+  },
+  "dependencies": {
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/registry": "1.0.0-rc.0",
+    "effect": "4.0.0-rc.108",
+    "incur": "0.4.19"
+  },
+  "devDependencies": {
+    "@effect/language-service": "0.87.1",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/vitest": "4.0.0-rc.108",
+    "@eslint/js": "9.39.1",
+    "@types/node": "25.9.5",
+    "@vitest/coverage-v8": "4.1.9",
+    "dprint": "0.55.2",
+    "esbuild": "0.28.1",
+    "eslint": "9.39.1",
+    "eslint-import-resolver-typescript": "4.4.5",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-jsdoc": "64.1.0",
+    "eslint-plugin-unicorn": "61.0.2",
+    "madge": "8.0.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vite": "^8.2.1",
+    "vitest": "4.1.9"
+  }
+}

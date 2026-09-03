@@ -20,15 +20,20 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
+import { workspacePackages } from "./workspace-packages.mjs";
 
 // Resolved from this file, not from `process.cwd()`: the build system runs a
 // target from the directory that owns it, and this gate is about the whole
 // workspace.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-// The `pnpm-workspace.yaml` membership globs: `packages/*` and `apps/*` are
-// scanned by directory, `examples` and `packages/build/infra` are named.
-const workspaceRoots = ["packages", "apps"];
-const directWorkspaceDirs = ["examples", join("packages", "build", "infra")];
+// Membership comes from `pnpm-workspace.yaml` through the shared reader, so a
+// package nested inside the product package it belongs to
+// (`packages/smithers/flows/canonical`) is checked like any other. This gate scans
+// `packages/` and `apps/`; the remaining members (`examples`,
+// `packages/smithers/build/infra` is one of them and needs no separate row now the
+// reader finds it) are named, and `evals/*` stays out.
+const scannedRoots = ["packages/", "apps/"];
+const directWorkspaceDirs = ["examples"];
 const sourceExtensions = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const ignoredDirs = new Set([
   ".alchemy",
@@ -78,14 +83,10 @@ function readPackage(dir) {
 function findWorkspacePackages() {
   /** @type {WorkspacePackage[]} */
   const packages = [];
-  for (const root of workspaceRoots) {
-    const absRoot = join(repoRoot, root);
-    if (!isDirectory(absRoot)) continue;
-    for (const entry of readdirSync(absRoot)) {
-      const dir = join(root, entry);
-      const pkg = readPackage(dir);
-      if (pkg) packages.push(pkg);
-    }
+  for (const member of workspacePackages(repoRoot)) {
+    if (!scannedRoots.some((root) => member.dir.startsWith(root))) continue;
+    const pkg = readPackage(member.dir.split("/").join(sep));
+    if (pkg) packages.push(pkg);
   }
   for (const dir of directWorkspaceDirs) {
     const pkg = readPackage(dir);
@@ -205,6 +206,7 @@ function packageNameForSpecifier(specifier) {
     specifier.startsWith("#") ||
     specifier.startsWith("~/") ||
     specifier.startsWith("node:") ||
+    specifier.startsWith("astro:") ||
     specifier.startsWith("bun:")
   ) {
     return null;

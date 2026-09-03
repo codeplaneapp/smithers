@@ -11,15 +11,18 @@
  * The gate's own prose therefore names no such path either. Writing the example
  * out is what tripped it the first time it ran over `scripts/`.
  *
- * So the gate is a class, not one file. Every tracked file under `e2e/`,
- * `evals/` and `scripts/` is read, and any absolute home-directory path in it
- * fails. `git ls-files` is the file list, because the untracked working files a
- * wave leaves behind — pinned subjects, extracted testbeds, virtualenvs —
- * legitimately hold absolute paths and are gitignored for exactly that reason.
+ * So the gate is a class, not one file. Every tracked file under `evals/`,
+ * `scripts/` and every package's `test/faults` tree is read, and any absolute
+ * home-directory path in it fails. `git ls-files` is the file list, because the
+ * untracked working files a wave leaves behind — pinned subjects, extracted
+ * testbeds, virtualenvs — legitimately hold absolute paths and are gitignored
+ * for exactly that reason.
  *
- * It covers `e2e/` because the same mistake landed there under its own name: a
- * debug probe committed with the author's checkout path in a dynamic `import`,
- * which runs on one machine and throws on every other.
+ * It covers the fault trees because the same mistake landed there under its own
+ * name, while they were still a standalone `e2e/` member: a debug probe
+ * committed with the author's checkout path in a dynamic `import`, which runs
+ * on one machine and throws on every other. The cases moved into the packages
+ * they test; the class of mistake did not move with them.
  *
  * Run it with `node --test "scripts/repo-contract/*.test.mjs"`.
  */
@@ -39,8 +42,14 @@ const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
  */
 const homePath = /(?:\/Users|\/home)\/[A-Za-z0-9._-]+\//
 
-/** The directories this gate reads, as repository-relative prefixes. */
-const scanned = ["e2e", "evals", "scripts"]
+/** The paths this gate reads, as `git ls-files` pathspecs. */
+// `git ls-files` pathspecs. `*` crosses directory separators here, and the
+// trailing `/*` is what makes the wildcard form match files rather than a
+// directory name, so one entry reaches every `test/faults` tree whatever depth
+// its package sits at. Packages nest — a granular package lives inside the
+// product package it belongs to — and a depth-bound spelling would silently
+// stop reading most of the matrix.
+const scanned = ["evals", "scripts", "packages/*/test/faults/*"]
 
 /** Every tracked file under {@link scanned}, as repository-relative paths. */
 const tracked = () => {

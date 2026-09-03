@@ -1,0 +1,433 @@
+/** @jsxImportSource react */
+// The code-view adapter (apps/ui/docs/code-intel/PLAN.md §1): one repository
+// file rendered by `@pierre/diffs` `File`, Shiki underneath, exported through
+// `@smthrs/ui/adapters/code-view` and never the base barrel. Tokenizing is
+// asynchronous (the grammar and the theme load on first use), so the live
+// mount polls until the first coloured token exists and then reads the token
+// model straight out of pierre's shadow root: per line, the inline colour and
+// the text of every span. That sequence is what a viewer sees; the snapshot
+// pins it per language, and the structural checks say what the snapshot means.
+import { afterEach, describe, expect, test } from "bun:test";
+import { act, type ReactElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { getSharedHighlighter } from "@pierre/diffs";
+import { CodeFileView, languageForFile } from "../src/adapters/code-view";
+import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
+import { themeRegistry } from "../src/styles";
+import { smithersUiCss } from "../src/uiCss";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/*
+ * One fixture per language the plan names. Each is a real, small file shape
+ * (imports, a doc comment, a template literal, JSX, a nested object, a list
+ * and a fence, a Rust closure) so the token sequence exercises more than a
+ * keyword.
+ */
+const FIXTURES = {
+  ts: {
+    name: "src/state/seams/FilesSeam.ts",
+    contents: [
+      'import { REPO_FILES_PATH } from "@smthrs/rpc/LocalApp"',
+      "",
+      "/** The card cap (characters): a transcript card states a file, it is not an editor. */",
+      "const CARD_CONTENT_CAP = 16 * 1024",
+      "",
+      "export const isRecord = (value: unknown): value is Record<string, unknown> =>",
+      '  value !== null && typeof value === "object" && !Array.isArray(value)',
+      "",
+      "export const label = (repo: string, path: string): string => `${path} in ${repo}`",
+      "",
+    ].join("\n"),
+  },
+  tsx: {
+    name: "src/cards/FileCards.tsx",
+    contents: [
+      'import { Button } from "@smthrs/ui"',
+      "",
+      "export const Row = ({ name, onOpen }: { readonly name: string; readonly onOpen: () => void }) => (",
+      '  <Button variant="ghost" size="sm" data-flow="files.read" onClick={onOpen}>',
+      "    {name}",
+      "  </Button>",
+      ")",
+      "",
+    ].join("\n"),
+  },
+  json: {
+    name: "package.json",
+    contents: [
+      "{",
+      '  "name": "@smthrs/ui",',
+      '  "private": true,',
+      '  "exports": { ".": { "import": "./src/index.ts" } },',
+      '  "sideEffects": false,',
+      '  "count": 3',
+      "}",
+      "",
+    ].join("\n"),
+  },
+  md: {
+    name: "README.md",
+    contents: [
+      "# Smithers",
+      "",
+      "Durable **agent** workflows, journaled as they happen.",
+      "",
+      "- one",
+      "- [two](https://smithers.sh)",
+      "",
+      "```ts",
+      "const x = 1",
+      "```",
+      "",
+    ].join("\n"),
+  },
+  rs: {
+    name: "crates/flows-jj/src/lib.rs",
+    contents: [
+      "use std::collections::HashMap;",
+      "",
+      "/// A change id as jj prints it.",
+      "pub struct ChangeId(pub String);",
+      "",
+      "pub fn count(ids: &[ChangeId]) -> usize {",
+      "    ids.iter().filter(|id| !id.0.is_empty()).count()",
+      "}",
+      "",
+    ].join("\n"),
+  },
+} as const;
+
+let container: HTMLElement | undefined;
+let root: Root | undefined;
+
+afterEach(async () => {
+  if (root) {
+    const r = root;
+    await act(async () => r.unmount());
+    root = undefined;
+  }
+  container?.remove();
+  container = undefined;
+  document.querySelectorAll(`style[${SMITHERS_UI_STYLE_ATTR}]`).forEach((el) => el.remove());
+  document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-palette");
+});
+
+const host = (): HTMLElement => {
+  const el = container?.querySelector<HTMLElement>('[data-slot="code-view"]');
+  if (el == null) throw new Error("code view not mounted");
+  return el;
+};
+
+const shadow = (): ShadowRoot => {
+  const sr = host().querySelector("diffs-container")?.shadowRoot;
+  if (sr == null) throw new Error("pierre has not attached its shadow root");
+  return sr;
+};
+
+async function mount(element: ReactElement): Promise<void> {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  const r = root;
+  await act(async () => r.render(element));
+}
+
+async function rerender(element: ReactElement): Promise<void> {
+  const r = root;
+  if (!r) throw new Error("nothing rendered yet");
+  await act(async () => r.render(element));
+}
+
+/** Poll until pierre has painted at least one coloured token (grammar + theme are async). */
+async function highlighted(): Promise<void> {
+  for (let i = 0; i < 400 && !shadow().querySelector("[data-line] span[style]"); i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+  }
+  if (!shadow().querySelector("[data-line] span[style]")) throw new Error("no token was ever coloured");
+}
+
+/** The token model a viewer sees: per line, `colour|text` for every span, plain text as `-|text`. */
+function tokenModel(): ReadonlyArray<{ readonly line: number; readonly tokens: ReadonlyArray<string> }> {
+  return Array.from(shadow().querySelectorAll<HTMLElement>("[data-line]")).map((row) => ({
+    line: Number(row.getAttribute("data-line")),
+    tokens: Array.from(row.childNodes).flatMap((node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent === "" ? [] : [`-|${node.textContent ?? ""}`];
+      if (!(node instanceof HTMLElement) || node.tagName === "BR") return [];
+      const colour = /color:\s*([^;]+)/.exec(node.getAttribute("style") ?? "")?.[1]?.trim() ?? "-";
+      return [`${colour}|${node.textContent ?? ""}`];
+    }),
+  }));
+}
+
+const coloursOf = (model: ReturnType<typeof tokenModel>): ReadonlySet<string> =>
+  new Set(model.flatMap((row) => row.tokens.map((token) => token.split("|")[0]!)).filter((colour) => colour !== "-"));
+
+describe("languageForFile", () => {
+  test("maps the fixture extensions onto pierre's grammar ids", () => {
+    expect(languageForFile(FIXTURES.ts.name)).toBe("typescript");
+    expect(languageForFile(FIXTURES.tsx.name)).toBe("tsx");
+    expect(languageForFile(FIXTURES.json.name)).toBe("json");
+    expect(languageForFile(FIXTURES.md.name)).toBe("markdown");
+    expect(languageForFile(FIXTURES.rs.name)).toBe("rust");
+    // A well-known file name without an extension is still a grammar.
+    expect(languageForFile("Makefile")).toBe("makefile");
+  });
+
+  test("answers null for a file no grammar claims, so the caller keeps plain text", () => {
+    expect(languageForFile("LICENSE")).toBeNull();
+    expect(languageForFile("notes.zzz")).toBeNull();
+    expect(languageForFile("")).toBeNull();
+  });
+});
+
+describe("the syntax theme ids", () => {
+  test("every palette's shikiDark and shikiLight load through the highlighter pierre uses", async () => {
+    const ids = Object.values(themeRegistry).flatMap((theme) => [theme.syntax.shikiDark, theme.syntax.shikiLight]);
+    expect(ids).toHaveLength(Object.keys(themeRegistry).length * 2);
+    const highlighter = await getSharedHighlighter({ themes: ids, langs: ["typescript"] });
+    expect(highlighter.getLoadedThemes()).toEqual(expect.arrayContaining(ids));
+  }, 60_000);
+
+  test("the frame follows the house code tokens on both axes", () => {
+    const rule = smithersUiCss.match(/\.sui-code-view \{[^}]+\}/)?.[0] ?? "";
+    for (const token of ["var(--code-bg,", "var(--code-text,", "--diffs-light-bg:", "--diffs-dark-bg:"]) {
+      expect(rule).toContain(token);
+    }
+    // Plain text is a complete state: the fallback is visible until pierre has painted, then hidden.
+    expect(smithersUiCss).toContain('.sui-code-view[data-state="ready"] > .sui-code-view-plain { display:none; }');
+  });
+});
+
+describe("CodeFileView token model (happy-dom, main thread)", () => {
+  for (const [key, fixture] of Object.entries(FIXTURES) as ReadonlyArray<[keyof typeof FIXTURES, (typeof FIXTURES)[keyof typeof FIXTURES]]>) {
+    test(`${key}: every line survives tokenizing losslessly, more than one colour appears, and the sequence is pinned`, async () => {
+      await mount(<CodeFileView name={fixture.name} contents={fixture.contents} mode="dark" palette="night-owl" />);
+      await highlighted();
+      const model = tokenModel();
+      const sourceLines = fixture.contents.split("\n");
+      // Trailing newline: pierre renders the empty last line too.
+      expect(model.map((row) => row.line)).toEqual(sourceLines.map((_line, index) => index + 1));
+      for (const row of model) {
+        // pierre keeps a line's own newline as a text node; the source split dropped it.
+        const text = row.tokens.map((token) => token.slice(token.indexOf("|") + 1)).join("").replace(/\n$/, "");
+        expect(text).toBe(sourceLines[row.line - 1]);
+      }
+      expect(coloursOf(model).size).toBeGreaterThan(1);
+      expect(host().getAttribute("data-language")).toBe(languageForFile(fixture.name));
+      expect(model).toMatchSnapshot();
+    }, 30_000);
+  }
+
+  test("light and dark of the same palette colour the same tokens differently", async () => {
+    await mount(<CodeFileView name={FIXTURES.ts.name} contents={FIXTURES.ts.contents} mode="dark" palette="night-owl" />);
+    await highlighted();
+    const dark = coloursOf(tokenModel());
+    expect(host().getAttribute("data-theme-mode")).toBe("dark");
+    await rerender(<CodeFileView name={FIXTURES.ts.name} contents={FIXTURES.ts.contents} mode="light" palette="night-owl" />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    for (let i = 0; i < 400 && coloursOf(tokenModel()).size === 0; i += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+    const light = coloursOf(tokenModel());
+    expect(host().getAttribute("data-theme-mode")).toBe("light");
+    expect(light.size).toBeGreaterThan(1);
+    expect([...light].sort()).not.toEqual([...dark].sort());
+  }, 30_000);
+
+  test("plain text is a complete state: the fallback carries the file, and the sheet hides it only once pierre has lines", async () => {
+    /*
+     * A grammar no other fixture uses. With the shared highlighter warm and
+     * the grammar not, pierre paints uncoloured lines at once and colours
+     * them when the grammar lands; with nothing loaded it paints nothing
+     * until both land. Either way the state follows the lines: the fallback
+     * is the visible text exactly while pierre has none. (The process-cold
+     * sequence cannot be forced inside one shared bun process, so the
+     * invariant is asserted rather than one fixed order.)
+     */
+    const contents = "package main\n\nfunc main() {\n\tprintln(\"hi\")\n}\n";
+    await mount(<CodeFileView name="cmd/main.go" contents={contents} mode="dark" palette="night-owl" />);
+    expect(host().querySelector(".sui-code-view-plain")?.textContent).toBe(contents);
+    const painted = shadow().querySelector("[data-line]") != null;
+    expect(host().getAttribute("data-state")).toBe(painted ? "ready" : null);
+    await highlighted();
+    expect(host().getAttribute("data-state")).toBe("ready");
+    // The fallback stays in the DOM (the sheet hides it); the tokens are the visible state.
+    expect(host().querySelector(".sui-code-view-plain")).not.toBeNull();
+  }, 30_000);
+
+  test("the anchored line is marked, and the mark follows the prop", async () => {
+    await mount(<CodeFileView name={FIXTURES.ts.name} contents={FIXTURES.ts.contents} line={4} mode="dark" palette="night-owl" />);
+    await highlighted();
+    expect(shadow().querySelector('[data-line="4"]')?.hasAttribute("data-selected-line")).toBe(true);
+    expect(shadow().querySelectorAll("[data-line][data-selected-line]")).toHaveLength(1);
+    await rerender(<CodeFileView name={FIXTURES.ts.name} contents={FIXTURES.ts.contents} line={6} mode="dark" palette="night-owl" />);
+    expect(shadow().querySelector('[data-line="6"]')?.hasAttribute("data-selected-line")).toBe(true);
+    expect(shadow().querySelector('[data-line="4"]')?.hasAttribute("data-selected-line")).toBe(false);
+    await rerender(<CodeFileView name={FIXTURES.ts.name} contents={FIXTURES.ts.contents} mode="dark" palette="night-owl" />);
+    expect(shadow().querySelectorAll("[data-line][data-selected-line]")).toHaveLength(0);
+  }, 30_000);
+
+  test("the anchored line is scrolled to the middle of the nearest scroller, on mount and again when the anchor moves", async () => {
+    const contents = Array.from({ length: 60 }, (_line, index) => `const v${index} = ${index}`).join("\n") + "\n";
+    /*
+     * happy-dom lays nothing out, so the geometry is stubbed: the scroller
+     * shows 200px, every line is 20px tall, and a line's position follows
+     * the scroller's current scrollTop the way a real layout would.
+     */
+    const original = Element.prototype.getBoundingClientRect;
+    const rect = (top: number, height: number): DOMRect =>
+      ({ top, bottom: top + height, height, left: 0, right: 500, width: 500, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.classList.contains("proto-scroller")) return rect(0, 200);
+      const line = this.getAttribute("data-line");
+      if (line !== null) return rect((Number(line) - 1) * 20 - (document.querySelector(".proto-scroller")?.scrollTop ?? 0), 20);
+      return rect(0, 0);
+    };
+    try {
+      await mount(
+        <div className="proto-scroller" style={{ overflowY: "auto" }}>
+          <CodeFileView name="src/long.ts" contents={contents} line={40} mode="dark" palette="night-owl" />
+        </div>,
+      );
+      await highlighted();
+      const scroller = document.querySelector<HTMLElement>(".proto-scroller")!;
+      // Line 40 sits at 780px; centred in a 200px viewport of 20px lines: 780 - (200 - 20) / 2.
+      expect(scroller.scrollTop).toBe(690);
+      expect(shadow().querySelector('[data-line="40"]')?.hasAttribute("data-selected-line")).toBe(true);
+      await rerender(
+        <div className="proto-scroller" style={{ overflowY: "auto" }}>
+          <CodeFileView name="src/long.ts" contents={contents} line={10} mode="dark" palette="night-owl" />
+        </div>,
+      );
+      await highlighted();
+      expect(scroller.scrollTop).toBe(90);
+      expect(shadow().querySelector('[data-line="10"]')?.hasAttribute("data-selected-line")).toBe(true);
+      // A line already in view leaves the scroller where it is.
+      await rerender(
+        <div className="proto-scroller" style={{ overflowY: "auto" }}>
+          <CodeFileView name="src/long.ts" contents={contents} line={12} mode="dark" palette="night-owl" />
+        </div>,
+      );
+      await highlighted();
+      expect(scroller.scrollTop).toBe(90);
+      // The document itself is never the scroller a card reaches for.
+      expect(document.documentElement.scrollTop).toBe(0);
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  }, 30_000);
+
+  test("with no explicit mode or palette the view follows the document root", async () => {
+    document.documentElement.setAttribute("data-theme", "light");
+    document.documentElement.setAttribute("data-palette", "catppuccin");
+    await mount(<CodeFileView name={FIXTURES.json.name} contents={FIXTURES.json.contents} />);
+    expect(host().getAttribute("data-theme-mode")).toBe("light");
+    expect(host().getAttribute("data-palette")).toBe("catppuccin");
+  });
+});
+
+/*
+ * Code intelligence L4 (apps/ui/docs/code-intel/PLAN.md §5): the view's
+ * interaction contract. Annotations render under their line as light-DOM
+ * children pierre slots into the shadow root (a diagnostic, a hover box);
+ * a pointer at rest on a token for `restMs` is one `onTokenRest` with the
+ * 1-based line and column; ⌘/Ctrl-click on a token is one `onTokenActivate`.
+ * The timer lives in the view, never in a consumer's effect.
+ */
+describe("CodeFileView annotations and token gestures", () => {
+  const CONTENTS = "const a = 1\nconst b = a + 1\nexport { b }\n";
+
+  const token = (line: number, text: string): HTMLElement => {
+    const span = Array.from(shadow().querySelectorAll<HTMLElement>(`[data-line="${line}"] [data-char]`)).find(
+      (candidate) => candidate.textContent === text,
+    );
+    if (span == null) throw new Error(`no token "${text}" on line ${line}`);
+    return span;
+  };
+
+  const settle = (ms: number): Promise<void> =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    });
+
+  test("an annotation renders under its line, slotted by line number, and follows the prop", async () => {
+    await mount(
+      <CodeFileView
+        name="src/a.ts"
+        contents={CONTENTS}
+        mode="dark"
+        palette="night-owl"
+        annotations={[{ key: "d1", line: 2, node: <p data-slot="probe-annotation">Property 'x' does not exist</p> }]}
+      />,
+    );
+    await highlighted();
+    const slotted = host().querySelector<HTMLElement>('[data-slot="probe-annotation"]');
+    expect(slotted?.textContent).toBe("Property 'x' does not exist");
+    expect(slotted?.closest("[slot]")?.getAttribute("slot")).toBe("annotation-2");
+    // pierre placed a slot for it in the shadow root, after line 2.
+    expect(shadow().querySelector('slot[name="annotation-2"]')).not.toBeNull();
+    await rerender(<CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" annotations={[]} />);
+    expect(host().querySelector('[data-slot="probe-annotation"]')).toBeNull();
+  }, 30_000);
+
+  test("a pointer at rest on a token for restMs is one onTokenRest with the 1-based line and column; leaving first cancels it", async () => {
+    const rests: Array<{ line: number; column: number; text: string }> = [];
+    await mount(
+      <CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" restMs={40} onTokenRest={(at) => rests.push(at)} />,
+    );
+    await highlighted();
+    // `a` on line 2 is the 11th character (0-based 10): `const b = a + 1`.
+    const a = token(2, "a");
+    a.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, pointerType: "mouse" }));
+    await settle(15);
+    expect(rests).toEqual([]);
+    a.dispatchEvent(new PointerEvent("pointerleave", { bubbles: true, composed: true, pointerType: "mouse" }));
+    await settle(60);
+    expect(rests).toEqual([]);
+    a.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, pointerType: "mouse" }));
+    await settle(60);
+    expect(rests).toEqual([{ line: 2, column: 11, text: "a" }]);
+    // Resting on the same token does not fire again; a new token does.
+    await settle(60);
+    expect(rests).toHaveLength(1);
+    token(1, "const").dispatchEvent(new PointerEvent("pointermove", { bubbles: true, composed: true, pointerType: "mouse" }));
+    await settle(60);
+    expect(rests[1]).toEqual({ line: 1, column: 1, text: "const" });
+  }, 30_000);
+
+  test("⌘-click or Ctrl-click on a token is one onTokenActivate; a plain click is nothing", async () => {
+    const activations: Array<{ line: number; column: number; text: string }> = [];
+    await mount(
+      <CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" onTokenActivate={(at) => activations.push(at)} />,
+    );
+    await highlighted();
+    // Shiki tokenizes `{ b }` on line 3 as one span; `a` on line 2 is its own token.
+    const a = token(2, "a");
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    expect(activations).toEqual([]);
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, metaKey: true }));
+    expect(activations).toEqual([{ line: 2, column: 11, text: "a" }]);
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, ctrlKey: true }));
+    expect(activations).toHaveLength(2);
+  }, 30_000);
+
+  test("without gesture handlers the view keeps the plain token model: no column marks, no interactive flag", async () => {
+    await mount(<CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" />);
+    await highlighted();
+    expect(host().hasAttribute("data-interactive")).toBe(false);
+    expect(shadow().querySelector("[data-line] [data-char]")).toBeNull();
+    await rerender(<CodeFileView name="src/a.ts" contents={CONTENTS} mode="dark" palette="night-owl" onTokenRest={() => {}} />);
+    await highlighted();
+    expect(host().hasAttribute("data-interactive")).toBe(true);
+    for (let i = 0; i < 100 && shadow().querySelector("[data-line] [data-char]") == null; i += 1) await settle(10);
+    expect(shadow().querySelector("[data-line] [data-char]")).not.toBeNull();
+  }, 30_000);
+});

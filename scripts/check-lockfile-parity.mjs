@@ -6,7 +6,7 @@
  * proved by `--frozen-lockfile` on every run while `bun.lock` is never read.
  * Bun still runs `apps/*`, the `ci/legacy declaration` matrix, and `evals/agent`, so a
  * stale entry there resolves a real package at the wrong version, and it does
- * so only on the Bun surfaces. `packages/fs` reached rc.0 still asking for
+ * so only on the Bun surfaces. `packages/smithers/agent/fs` reached rc.0 still asking for
  * `@smthrs/core@0.1.0` that way.
  *
  * The check is a comparison, not an install: it reads the lockfile's own
@@ -14,8 +14,9 @@
  * each workspace, and holds it against the manifests on disk. That runs
  * offline in milliseconds and needs no Bun on the machine.
  */
-import { globSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import * as path from "node:path"
+import { workspacePackages } from "./workspace-packages.mjs"
 
 const root = path.resolve(import.meta.dirname, "..")
 
@@ -36,7 +37,13 @@ const readLock = () => {
 const FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
 
 const workspaces = readLock().workspaces ?? {}
-const manifests = globSync(["packages/*/package.json", "apps/*/package.json"], { cwd: root }).sort()
+// The set comes from `pnpm-workspace.yaml` through the shared reader, so a
+// package that moves — a granular package nesting inside the product package
+// it belongs to — is still compared. A glob written here would answer for one
+// directory depth and silently stop covering the moved package.
+const manifests = workspacePackages(root)
+  .filter((entry) => entry.dir.startsWith("packages/") || entry.dir.startsWith("apps/"))
+  .map((entry) => `${entry.dir}/package.json`)
 
 const problems = []
 for (const manifest of manifests) {

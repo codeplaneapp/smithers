@@ -15,7 +15,7 @@ jobs:
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.11
         with:
-          args: ".github/workflows/ci.yml .github/workflows/release.yml .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/docs-deploy.yml .github/workflows/pr-review.yml"
+          args: ".github/workflows/ci.yml .github/workflows/release.yml .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/pr-review.yml"
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -76,13 +76,33 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: JSDoc rule harness
+        run: pnpm exec smithers-build test '//:jsdocRules'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: "Agent eval suite (offline, baseline-gated)"
-        run: pnpm exec smithers-build test '//evals/agent:suite'
+        run: pnpm exec smithers-build test '//evals/agent:test'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Agent eval typecheck
-        run: pnpm exec smithers-build build '//evals/agent:types'
+        run: pnpm exec smithers-build build '//evals/agent:check'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: "Authoring eval dataset (offline)"
+        run: pnpm exec smithers-build test '//evals/authoring:test'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Authoring eval typecheck
+        run: pnpm exec smithers-build build '//evals/authoring:check'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: SWE-bench rig typecheck
+        run: pnpm exec smithers-build build '//evals/swebench:check'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -101,28 +121,23 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Site
+        run: pnpm exec smithers-build ci '//apps/site'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: "Review eval suite (offline, baseline-gated)"
         run: pnpm exec smithers-build test '//evals/review-seeded-bugs'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Review eval typecheck
-        run: pnpm exec smithers-build build '//evals/review-seeded-bugs:types'
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - name: Fault matrix typecheck
-        run: pnpm exec smithers-build build '//e2e:check'
+        run: pnpm exec smithers-build build '//evals/review-seeded-bugs:check'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Generated workflow drift
         run: pnpm exec smithers-build lint '//:ci'
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - name: Known-file registry drift
-        run: pnpm exec smithers-build lint '//:knownFiles'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -171,8 +186,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
@@ -197,8 +210,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
@@ -235,33 +246,7 @@ jobs:
       - name: Initialize colocated jj repository
         run: jj git init --colocate
       - name: Fault matrix
-        run: pnpm exec smithers-build test '//e2e:faults'
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-  bun:
-    name: test on bun
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.19.0
-          cache: pnpm
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Install jj
-        uses: taiki-e/install-action@v2
-        with:
-          tool: jj-cli@0.39.0
-      - name: Initialize colocated jj repository
-        run: jj git init --colocate
-      - name: Bun-compatible suites
-        run: pnpm exec smithers-build test '//ci/...'
+        run: pnpm exec smithers-build test '//packages/...:faults' --jobs 1
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -352,6 +337,26 @@ jobs:
         shell: bash
       - name: Package test targets
         run: pnpm exec smithers-build test '//packages/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+  review-lints:
+    name: "model reviews (advisory)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: "0"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Review lints
+        run: pnpm exec smithers-build review '//...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"

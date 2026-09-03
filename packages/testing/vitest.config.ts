@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   test: {
     environment: "node",
-    // House convention (see packages/journal/vitest.config.ts): a finite 30 s
+    // House convention (see packages/smithers/flows/journal/vitest.config.ts): a finite 30 s
     // wall-clock budget so correct suites survive coverage-instrumented load
     // while a genuine hang still fails the run.
     testTimeout: 30_000,

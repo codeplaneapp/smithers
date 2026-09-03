@@ -23,7 +23,7 @@
 //
 // Scope is `src/**` throughout. Tests are deliberately outside: `test/**` is
 // not matched at all, and `src/test/**` (the in-package doubles under
-// `packages/control/src/test`, `packages/kernel/src/test`, and eight more) is
+// `packages/smithers/control/src/test`, `packages/smithers/flows/kernel/src/test`, and eight more) is
 // ignored, because an uninstalled service and a discarded failure are what a
 // double is for.
 
@@ -39,9 +39,9 @@ const ignores = ["src/**/*.test.ts", "src/test/**"]
  *
  * Four spellings are named because four exist in the tree today, each verified
  * present: `QuotaPolicy.layerUnclassified` and `Budget.layerUnbounded` in
- * `packages/agent` (the explicit names the rename settled on, replacing the
- * old no-op defaults), `GrantStore.layerNoop` in `packages/kernel`, and
- * `ControlRpcs.layerNoopAuth` in `packages/control`, which is the same class
+ * `packages/smithers/agent` (the explicit names the rename settled on, replacing the
+ * old no-op defaults), `GrantStore.layerNoop` in `packages/smithers/flows/kernel`, and
+ * `ControlRpcs.layerNoopAuth` in `packages/smithers/control`, which is the same class
  * wearing a different noun: an unauthenticated control plane.
  *
  * The last selector bans the *shape* rather than a name: any `layerNoop` or
@@ -56,7 +56,7 @@ export const uninstalledSafety = {
   selectors: [{
     selector: "MemberExpression[property.name=/^(layerUnclassified|makeUnclassified|layerUnbounded|makeUnbounded)$/]",
     message:
-      "This uninstalls a safety service. `QuotaPolicy.layerUnclassified` stops classifying quota failures, so a rate-limited seat reads as a crash and the run never parks. `Budget.layerUnbounded` removes the spend ceiling, so nothing stops a loop from burning the whole envelope. A production composition names the installed spelling instead: `QuotaPolicy.layerDefault()` and `Budget.layerFromEnvelope`, both wired in `packages/cli/src/NodeControl.ts`. Doubles belong under `test/**` or `src/test/**`, which this rule does not reach."
+      "This uninstalls a safety service. `QuotaPolicy.layerUnclassified` stops classifying quota failures, so a rate-limited seat reads as a crash and the run never parks. `Budget.layerUnbounded` removes the spend ceiling, so nothing stops a loop from burning the whole envelope. A production composition names the installed spelling instead: `QuotaPolicy.layerDefault()` and `Budget.layerFromEnvelope`, both wired in `packages/smithers/src/NodeControl.ts`. Doubles belong under `test/**` or `src/test/**`, which this rule does not reach."
   }, {
     selector: "MemberExpression[object.name='GrantStore'][property.name=/^(layerNoop|makeNoop)$/]",
     message:
@@ -130,7 +130,7 @@ export const swallowedCause = {
     selector:
       "CallExpression[callee.property.name=/^catchCause/] > :matches(ArrowFunctionExpression, FunctionExpression)[params.length=0]",
     message:
-      "A `catchCause` handler that takes no parameter cannot have looked at the cause, so it turns a cancellation into a success and a defect into a silent one. The house pattern takes the cause and branches on `Cause.hasInterruptsOnly` before it recovers: `packages/flow/src/Flow/Runtime.ts` records a real failure and re-interrupts otherwise, and `packages/engine-store/src/internal/RunCoordinator.ts` logs a failed drain but stays quiet on an interrupt. Accept the cause, then either re-raise it or log why it is safe to drop."
+      "A `catchCause` handler that takes no parameter cannot have looked at the cause, so it turns a cancellation into a success and a defect into a silent one. The house pattern takes the cause and branches on `Cause.hasInterruptsOnly` before it recovers: `packages/smithers/flows/flow/src/Flow/Runtime.ts` records a real failure and re-interrupts otherwise, and `packages/smithers/flows/engine-store/src/internal/RunCoordinator.ts` logs a failed drain but stays quiet on an interrupt. Accept the cause, then either re-raise it or log why it is safe to drop."
   }]
 }
 

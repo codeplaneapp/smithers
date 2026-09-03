@@ -1,0 +1,1028 @@
+/**
+ * Incur command surface for smithers build.
+ *
+ * Every command returns structured data for incur's envelope. Progress and
+ * the human-facing rendering of that data go through {@link Reporter}: a
+ * person at a terminal sees a live or coloured account on standard error and
+ * a tree or table on standard output, while a pipe, a CI log, or an explicit
+ * `--format` sees exactly the plain lines and the envelope it always did.
+ *
+ * @since 0.1.0
+ */
+import * as Config from "@smthrs/targets/Config"
+import * as Target from "@smthrs/targets/Target"
+import { Cli, z } from "incur"
+import * as NodePath from "node:path"
+import * as Ansi from "./Ansi.ts"
+import { normalizePublishNamespace } from "./Cache.ts"
+import * as CreateApp from "./CreateApp.ts"
+import * as Diagnostic from "./Diagnostic.ts"
+import * as Executor from "./Executor.ts"
+import * as GitHooks from "./GitHooks.ts"
+import * as GraphOutput from "./GraphOutput.ts"
+import * as Owners from "./Owners.ts"
+import * as PackageDiscovery from "./PackageDiscovery.ts"
+import * as PackageExec from "./PackageExec.ts"
+import * as PackageIndex from "./PackageIndex.ts"
+import * as PackageLoader from "./PackageLoader.ts"
+import * as Planner from "./Planner.ts"
+import * as Query from "./Query.ts"
+import * as RepoResolution from "./RepoResolution.ts"
+import * as Reporter from "./Reporter.ts"
+import { type RemoteCacheAccess, remoteCacheOf, type ResolvedRemoteCache } from "./Workspace.ts"
+
+const workspaceOption = z.object({
+  workspace: z.string().default(process.cwd()).describe("Directory inside a workspace containing WORKSPACE.ts"),
+  cacheDir: z.string().optional().describe(
+    "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration"
+  )
+})
+
+const executionOptions = workspaceOption.extend({
+  plan: z.boolean().default(false).describe("Print the inert plan instead of executing"),
+  jobs: z.number().int().min(1).optional().describe("Maximum concurrent targets; defaults to host parallelism"),
+  cache: z.boolean().default(true).describe("Consult the result cache before running; --no-cache bypasses reads")
+})
+
+/** The flags outward and agent targets take: the commit message override, the sweep, and payload inputs. */
+const invocationOptions = {
+  message: z.string().optional().describe("Commit message for a Git.Commit target; wins over the declared message"),
+  sweep: z.boolean().default(false).describe(
+    "Let a Git.Commit target with no declared path scope commit the whole working tree"
+  ),
+  input: z.array(z.string()).optional().describe("Payload input for agent targets as name=value; repeatable")
+}
+
+const runOptions = executionOptions.extend({
+  name: z.string().optional().describe("Package name supplied to scaffold targets"),
+  ...invocationOptions
+})
+
+const executionAlias = { workspace: "w", jobs: "j" }
+
+const invocationAlias = { message: "m", input: "i" }
+
+const patternArgument = z.object({
+  pattern: z.string().describe("Bazel label or recursive pattern")
+})
+
+/** The options every command accepts, parsed before the command is resolved. */
+const globalOptions = z.object({
+  ui: z.enum(Reporter.uiModes).default("auto").describe(
+    "Terminal renderer: tty draws in place, stream colours without cursor motion, plain prints bare lines; " +
+      "auto picks tty on a terminal and plain under a pipe, CI, NO_COLOR, or an explicit --format"
+  )
+})
+
+/** The flags every command shares. */
+interface WorkspaceFlags {
+  readonly workspace: string
+  readonly cacheDir?: string | undefined
+}
+
+/** The flags shared by commands that execute targets. */
+interface ExecutionFlags extends WorkspaceFlags {
+  readonly plan: boolean
+  readonly jobs?: number | undefined
+  readonly cache: boolean
+}
+
+/**
+ * Process-scoped configuration captured before declaration evaluation.
+ *
+ * `stdout` and `stderr` default to the process streams; tests inject
+ * in-memory terminals. `exit` records the exit code of a failure a
+ * human renderer has already explained, so the envelope's error block is not
+ * printed twice; without it the structured error is returned instead. The
+ * process entry point supplies it, because deciding the exit code is a
+ * choice only a process owner may make.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface RuntimeConfig {
+  readonly cacheUrl?: string | undefined
+  readonly cacheToken?: string | undefined
+  readonly signal?: AbortSignal | undefined
+  /**
+   * The environment PACKAGE.ts execution reads for agent-fake selection
+   * (`SMTHRS_AGENT_FAKE`), backend PATH lookups, and outward preconditions.
+   * Defaults to `process.env`; tests inject a hermetic record.
+   */
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  readonly stdout?: Reporter.Terminal | undefined
+  readonly stderr?: Reporter.Terminal | undefined
+  readonly exit?: ((code: number) => void) | undefined
+}
+
+/** The slice of an incur command context the presentation helpers read. */
+interface Presentation {
+  readonly agent: boolean
+  readonly formatExplicit: boolean
+  readonly globals: { readonly ui: Reporter.UiMode }
+}
+
+/** incur's error result constructor, as the command context exposes it. */
+type ErrorResult = (options: {
+  readonly code: string
+  readonly exitCode?: number | undefined
+  readonly message: string
+  readonly retryable?: boolean | undefined
+}) => never
+
+const environmentOf = (config: RuntimeConfig): Ansi.Environment => config.environment ?? process.env
+
+/**
+ * The trust domain this process publishes cache results into.
+ *
+ * Which domain a job belongs to is a property of the job, not of the workspace
+ * it builds, so it comes from the environment rather than target declarations. An
+ * unset value means the trusted domain, which is what a post-merge build has.
+ */
+const publishNamespaceOf = (config: RuntimeConfig): string | undefined => {
+  const declared = environmentOf(config)["SMITHERS_CACHE_NAMESPACE"]?.trim()
+  return declared === undefined || declared === ""
+    ? undefined
+    : normalizePublishNamespace(declared, "SMITHERS_CACHE_NAMESPACE")
+}
+
+const terminalsOf = (
+  config: RuntimeConfig
+): { readonly stdout: Reporter.Terminal; readonly stderr: Reporter.Terminal } => ({
+  stdout: config.stdout ?? Reporter.terminalOf(process.stdout),
+  stderr: config.stderr ?? Reporter.terminalOf(process.stderr)
+})
+
+/**
+ * The renderer one command draws with. Execution progress goes to standard
+ * error, so both streams are consulted; a tree or table goes to standard
+ * output, so only that stream matters.
+ */
+const rendererFor = (context: Presentation, config: RuntimeConfig, bound: "stdout" | "stderr"): Reporter.Renderer => {
+  const { stderr, stdout } = terminalsOf(config)
+  const streams = bound === "stderr"
+    ? { stdout: stdout.isTTY, stderr: stderr.isTTY }
+    : { stdout: stdout.isTTY, stderr: stdout.isTTY }
+  return Reporter.resolveRenderer(context.globals.ui, environmentOf(config), streams, context.formatExplicit)
+}
+
+/** Whether a person is reading: a human renderer, and incur agrees standard output is theirs. */
+const forPeople = (context: Presentation, renderer: Reporter.Renderer): boolean =>
+  renderer !== "plain" && !context.agent
+
+const reporterFor = (context: Presentation, config: RuntimeConfig): Reporter.Reporter =>
+  Reporter.make({
+    renderer: rendererFor(context, config, "stderr"),
+    terminal: terminalsOf(config).stderr,
+    env: environmentOf(config)
+  })
+
+/**
+ * Hands data to a person as rendered text on standard output, or to incur as
+ * the envelope's data.
+ */
+const present = <A>(
+  context: Presentation,
+  config: RuntimeConfig,
+  data: A,
+  render: (style: Ansi.Palette) => string
+): A | undefined => {
+  const renderer = rendererFor(context, config, "stdout")
+  if (!forPeople(context, renderer)) return data
+  const { stdout } = terminalsOf(config)
+  stdout.write(`${render(Ansi.palette(environmentOf(config), stdout.isTTY))}\n`)
+  return undefined
+}
+
+/**
+ * Settles the cache directory one command runs under. Executing commands apply
+ * the declared gitignore policy before writing state; query, graph, and plan
+ * commands pass `writeState = false` and remain observational.
+ *
+ * The declared token is not read here. The cache transport receives a reader
+ * and invokes it only while constructing an outbound request.
+ * Removing the name from `process.env` here would mutate state the caller
+ * owns: `makeCli` is a library entry point, and two concurrent commands with
+ * different declared token names would delete each other's credentials. The
+ * child-process boundary is where the credential is withheld, and `ExecLive`
+ * already strips both `SMITHERS_CACHE_URL` and every name in `sensitiveEnv`
+ * from a spawned tool's environment. The process entry point in `main.ts`
+ * captures and clears the default names for its own short-lived process,
+ * which is a choice only a process owner may make.
+ */
+/**
+ * Binds a resolved remote cache to the readers that fetch its credentials.
+ *
+ * Shared remote-cache credential resolution.
+ * {@link prepare}; WORKSPACE.ts builds the same access directly, which used
+ * to be schema-validated and then dropped, so a workspace declaring a remote
+ * cache ran local-only with no warning and no line in the plan.
+ */
+const remoteCacheAccess = (
+  remoteCache: ResolvedRemoteCache | undefined,
+  runtime: RuntimeConfig
+): RemoteCacheAccess | undefined => {
+  if (remoteCache === undefined) return undefined
+  // The process entry point captures and clears the default name, so its
+  // value arrives as `cacheToken`; every other declared name is read from
+  // the environment at the instant a request is built.
+  const tokenAt = (name: string) => (): string | undefined =>
+    name === "SMITHERS_CACHE_TOKEN"
+      ? runtime.cacheToken ?? environmentOf(runtime)[name]
+      : environmentOf(runtime)[name]
+  const credentials = remoteCache.credentials
+  const publishNamespace = publishNamespaceOf(runtime)
+  switch (credentials._tag) {
+    case "shared": {
+      // One declared credential authenticates both directions, which is the
+      // posture every deployment had before the split existed.
+      const readToken = tokenAt(credentials.tokenEnv)
+      return { ...remoteCache, readToken, writeToken: readToken, publishNamespace }
+    }
+    case "split":
+      return {
+        ...remoteCache,
+        readToken: tokenAt(credentials.readTokenEnv),
+        writeToken: tokenAt(credentials.writeTokenEnv),
+        publishNamespace
+      }
+    case "public":
+      // The committed literal reads; the environment publishes. The literal
+      // never reaches a child process: it is not an environment variable.
+      return {
+        ...remoteCache,
+        readToken: () => credentials.publicReadToken,
+        writeToken: tokenAt(credentials.writeTokenEnv),
+        publishNamespace
+      }
+    case "anonymous": {
+      // Discovered from the jjhub remote with nothing committed: reads go out
+      // bare (a public repository answers them), and a credential in the
+      // environment, when one is there, serves both directions.
+      const token = tokenAt(credentials.writeTokenEnv)
+      return { ...remoteCache, readToken: token, writeToken: token, publishNamespace }
+    }
+  }
+}
+
+/**
+ * Opens the target index rooted by the nearest WORKSPACE.ts declaration.
+ */
+const openPackageIndex = async (
+  flags: WorkspaceFlags,
+  runtime: RuntimeConfig = {}
+): Promise<PackageIndex.PackageIndex> => {
+  runtime.signal?.throwIfAborted()
+  const root = await PackageDiscovery.findWorkspaceRoot(NodePath.resolve(flags.workspace))
+  if (root === undefined) {
+    throw new Error("not a workspace; create .smithers/WORKSPACE.ts")
+  }
+  // Evaluate the one root declaration before walking: both its cache and its
+  // opaque child repositories are discovery boundaries. The full graph load
+  // imports the same module instance together with the admitted Packages.
+  const workspaceFile = await PackageDiscovery.workspaceFileOf(root)
+  if (workspaceFile === undefined) throw new Error("not a workspace; create .smithers/WORKSPACE.ts")
+  const workspace = await PackageLoader.loadWorkspaceDeclaration(root, workspaceFile)
+  const cacheDirectory = flags.cacheDir === undefined
+    ? workspace.cache.directory
+    : Config.normalizeCacheDirectory(flags.cacheDir)
+  const discovery = await PackageDiscovery.discover(root, {
+    cacheDirectory,
+    repositories: workspace.repos,
+    signal: runtime.signal
+  })
+  const loaded = await PackageLoader.load(discovery)
+  return PackageIndex.PackageIndex.make(loaded, process.cwd())
+}
+
+/** Evaluates a query against the target index. */
+const packageQuery = async (
+  index: PackageIndex.PackageIndex,
+  expression: string
+): Promise<Query.Listing | Query.Dependencies | Query.Dependents | Query.PackageOwners> => {
+  const dependentsMatch = expression.match(/^rdeps\((.+)\)$/)
+  if (dependentsMatch?.[1] !== undefined) {
+    const label = dependentsMatch[1].trim()
+    const rows = index.resolve(label)
+    if (rows.length !== 1) throw new Error("rdeps() requires one exact or default target")
+    return { query: expression, root: rows[0]!.label, dependents: Owners.rdeps(index, label) }
+  }
+  const ownersMatch = expression.match(/^owners\((.+)\)$/)
+  if (ownersMatch?.[1] !== undefined) {
+    const rows = index.resolve(ownersMatch[1].trim())
+    if (rows.length !== 1) throw new Error("owners() requires one exact or default target")
+    const packagePath = rows[0]!.packagePath
+    const directory = packagePath === "" ? "PACKAGE.ts" : `${packagePath}/PACKAGE.ts`
+    return {
+      query: expression,
+      package: packagePath === "" ? "//" : `//${packagePath}`,
+      owners: Owners.packageOwners(index, packagePath).map((entry) => ({
+        owner: entry.owner,
+        role: entry.role,
+        reasons: entry.reasons.map(Owners.reasonText)
+      })),
+      agentPolicy: Owners.agentPolicyOf(index, directory),
+      upstream: Owners.upstreamPackages(index, packagePath).map((path) => path === "" ? "//" : `//${path}`)
+    }
+  }
+  const dependencyMatch = expression.match(/^deps\((.+)\)$/)
+  if (dependencyMatch?.[1] !== undefined) {
+    const rows = index.resolve(dependencyMatch[1].trim())
+    if (rows.length !== 1) throw new Error("deps() requires one exact or default target")
+    const root = rows[0]!
+    const closure = new Set<string>()
+    const stack = [root.target]
+    const seen = new Set<Target.AnyTarget>()
+    while (stack.length > 0) {
+      const current = stack.pop()!
+      if (seen.has(current)) continue
+      seen.add(current)
+      const label = index.labelOf(current)
+      if (label !== undefined && label !== root.label) closure.add(label)
+      for (const dependency of Target.metadata(current).dependencies) stack.push(dependency)
+    }
+    return {
+      query: expression,
+      root: root.label,
+      dependencies: [...closure].sort(),
+      edges: index.edges(rows)
+    }
+  }
+  const cache: RepoResolution.ResolutionCache = new Map()
+  const rows = index.resolve(expression)
+  return {
+    query: expression,
+    targets: await Promise.all(rows.map(async (row) => {
+      const metadata = Target.metadata(row.target)
+      const resolution = metadata.target === "Repo.Target"
+        ? await RepoResolution.resolve(index, row.target, cache)
+        : undefined
+      return {
+        label: row.label,
+        target: metadata.target,
+        kinds: await RepoResolution.effectiveKinds(index, row.target, cache),
+        ...presentationOf(metadata),
+        ...(resolution?.refusal === undefined ? {} : { refusal: resolution.refusal })
+      }
+    }))
+  }
+}
+
+/** The listing's presentation columns: only the facts a declaration stated, so an unannotated row stays `{ label, target, kinds }`. */
+const presentationOf = (metadata: Target.Metadata): { readonly summary?: string; readonly featured?: true } => ({
+  ...(metadata.summary === undefined ? {} : { summary: metadata.summary }),
+  ...(metadata.featured ? { featured: true as const } : {})
+})
+
+/** PACKAGE.ts `graph`: labeled nodes plus classified local and repository edges. */
+const packageGraph = async (
+  index: PackageIndex.PackageIndex,
+  pattern: string,
+  mermaid: boolean
+): Promise<{
+  readonly rows: ReadonlyArray<GraphOutput.PackageRow>
+  readonly edges: ReadonlyArray<GraphOutput.PackageEdge>
+  readonly data: unknown
+}> => {
+  const rows = index.resolve(pattern)
+  const localEdges = index.edges(rows)
+  const cache: RepoResolution.ResolutionCache = new Map()
+  const resolutions = await Promise.all(rows.map(async (row) =>
+    Target.metadata(row.target).target === "Repo.Target"
+      ? { row, resolution: await RepoResolution.resolve(index, row.target, cache) }
+      : undefined
+  ))
+  const repositoryEdges = resolutions
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
+    .map(({ resolution, row }) => ({ from: row.label, to: resolution.externalLabel, kind: "repo" as const }))
+  const edges = [...localEdges, ...repositoryEdges]
+  const renderRows = rows.map((row) => {
+    const refusal = resolutions.find((entry) => entry?.row === row)?.resolution?.refusal
+    return {
+      label: row.label,
+      target: Target.metadata(row.target).target,
+      ...(refusal === undefined ? {} : { refusal })
+    }
+  })
+  const targets = await Promise.all(rows.map(async (row) => {
+    const resolution = resolutions.find((entry) => entry?.row === row)?.resolution
+    const metadata = Target.metadata(row.target)
+    return {
+      label: row.label,
+      target: metadata.target,
+      kinds: await RepoResolution.effectiveKinds(index, row.target, cache),
+      ...presentationOf(metadata),
+      ...(resolution?.refusal === undefined ? {} : { refusal: resolution.refusal })
+    }
+  }))
+  return {
+    rows: renderRows,
+    edges,
+    data: {
+      pattern,
+      format: mermaid ? "mermaid" : "text",
+      graph: mermaid ? GraphOutput.packageMermaid(renderRows, edges) : GraphOutput.packageText(renderRows, edges),
+      roots: rows.map((row) => row.label),
+      targets,
+      edges,
+      warnings: []
+    }
+  }
+}
+
+/** The plan printed by `ci --plan`: all CI verb plans merged over one pattern. */
+interface CiPlan extends Executor.MergedPlan {
+  readonly verb: "ci"
+  readonly pattern: string
+}
+
+/** Removes executor-private fields from the stable plan envelope. */
+const plannedTarget = (target: Planner.PlannedTarget): Planner.PlannedTarget => ({
+  label: target.label,
+  target: target.target,
+  kinds: target.kinds,
+  attrs: target.attrs,
+  dependencies: target.dependencies,
+  declaredInputs: target.declaredInputs,
+  declaredOutputs: target.declaredOutputs,
+  cacheable: target.cacheable,
+  cacheLookup: target.cacheLookup,
+  wouldRun: target.wouldRun,
+  keyMaterial: target.keyMaterial,
+  keyPreview: target.keyPreview,
+  ...(target.nixEnvironment === undefined ? {} : { nixEnvironment: target.nixEnvironment })
+})
+
+/** The mode and invocation flags the PACKAGE.ts execution surface accepts. */
+interface ModeFlags {
+  readonly write?: boolean | undefined
+  readonly fix?: boolean | undefined
+  readonly message?: string | undefined
+  readonly sweep?: boolean | undefined
+  readonly input?: ReadonlyArray<string> | undefined
+}
+
+/** Parses repeated `--input name=value` flags into the agent payload record. */
+const parseInputs = (entries: ReadonlyArray<string> | undefined): Readonly<Record<string, string>> | undefined => {
+  if (entries === undefined || entries.length === 0) return undefined
+  const values: Record<string, string> = {}
+  for (const entry of entries) {
+    const separator = entry.indexOf("=")
+    if (separator <= 0) throw new Error(`--input expects name=value, received ${JSON.stringify(entry)}`)
+    const name = entry.slice(0, separator)
+    if (name in values) throw new Error(`--input names ${JSON.stringify(name)} twice`)
+    values[name] = entry.slice(separator + 1)
+  }
+  return values
+}
+
+/**
+ * Runs one execution verb through the build executor.
+ */
+const runPackageVerb = async (
+  verb: PackageExec.PackageVerb,
+  pattern: string,
+  flags: ExecutionFlags & ModeFlags,
+  config: RuntimeConfig,
+  reporter: Reporter.Reporter
+): Promise<Executor.Summary | PackageExec.PlanReport> => {
+  const index = await openPackageIndex(flags, config)
+  const cacheDirectory = flags.cacheDir === undefined
+    ? index.workspace.cache.directory
+    : Config.normalizeCacheDirectory(flags.cacheDir)
+  // The WORKSPACE.ts declaration and SMITHERS_CACHE_URL both reach execution
+  // here, under the workspace declaration's precedence.
+  const remoteCache = remoteCacheAccess(
+    remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
+    config
+  )
+  return PackageExec.run({
+    index,
+    cacheDirectory,
+    ...(remoteCache === undefined ? {} : { remoteCache }),
+    verb,
+    pattern,
+    write: flags.write,
+    fix: flags.fix,
+    plan: flags.plan,
+    jobs: flags.jobs,
+    readCache: flags.cache,
+    signal: config.signal,
+    reporter,
+    message: flags.message,
+    sweep: flags.sweep,
+    inputs: parseInputs(flags.input),
+    environment: config.environment,
+    packageName: "name" in flags && typeof flags.name === "string" ? flags.name : undefined
+  })
+}
+
+/**
+ * The `gitHooks` command: renders the WORKSPACE.ts hook bindings to
+ * `.git/hooks` scripts, byte-checks them by default, installs them under
+ * `--write`. Drift is a red exit, like every other generated file.
+ */
+const runGitHooks = async (
+  flags: WorkspaceFlags & { readonly write: boolean },
+  config: RuntimeConfig
+): Promise<
+  | { readonly mode: "check"; readonly clean: boolean; readonly entries: ReadonlyArray<GitHooks.CheckEntry> }
+  | { readonly mode: "install"; readonly installed: ReadonlyArray<string> }
+> => {
+  const index = await openPackageIndex(flags, config)
+  const bindings = GitHooks.resolveHookLabels(index.workspace, index)
+  const rendered = GitHooks.render(bindings)
+  if (flags.write) {
+    const { wrote } = await GitHooks.install(index.root, rendered)
+    return { mode: "install", installed: wrote }
+  }
+  const report = await GitHooks.check(index.root, rendered)
+  return { mode: "check", clean: report.clean, entries: report.entries }
+}
+
+/** Plans one verb and executes it unless `--plan` asked for the inert print. */
+const runVerb = async (
+  verb: "build" | "test" | "lint" | "run" | "docs" | "review",
+  pattern: string,
+  flags: ExecutionFlags & ModeFlags,
+  config: RuntimeConfig,
+  reporter: Reporter.Reporter
+): Promise<Planner.Plan | Executor.Summary | PackageExec.PlanReport> => {
+  return runPackageVerb(verb, pattern, flags, config, reporter)
+}
+
+/**
+ * The verbs `ci` merges, LINT FIRST.
+ *
+ * `mergePlans` deduplicates on label and first occurrence wins, so the plan a
+ * target contributes to `ci` is the one from the first verb that selected it.
+ * A generator target participates in both `build` and `lint`, and its `lint`
+ * form is the non-mutating one (`attrsForKind` maps write to check). Planning
+ * `build` first therefore made `smithers-build ci` rewrite checked-in package
+ * manifests and workflow files as a side effect of asking whether the
+ * repository was green. Lint first makes the merged graph the checking form,
+ * which is the only correct posture for a CI verb.
+ *
+ * `review` is absent for the same reason `run` is. A review target expands a
+ * git diff against a base revision at plan time and then spawns a model CLI,
+ * so planning one on a shallow pull-request checkout kills the aggregate plan
+ * before any target runs, and executing one needs a binary and a credential no
+ * hosted runner has. The reviews are their own verb, asked for by name.
+ */
+const ciKinds = ["lint", "build", "test", "docs"] as const
+
+/** Plans every CI-safe verb over one pattern and executes the merged graph. */
+const runCi = async (
+  pattern: string,
+  flags: ExecutionFlags,
+  config: RuntimeConfig,
+  reporter: Reporter.Reporter
+): Promise<CiPlan | Executor.Summary> => {
+  const index = await openPackageIndex(flags, config)
+  {
+    const cacheDirectory = flags.cacheDir === undefined
+      ? index.workspace.cache.directory
+      : Config.normalizeCacheDirectory(flags.cacheDir)
+    const remoteCache = remoteCacheAccess(
+      remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
+      config
+    )
+    const packagePlans: Array<{ readonly kind: (typeof ciKinds)[number]; readonly plan: PackageExec.PackagePlan }> = []
+    const refusals: Array<unknown> = []
+    for (const kind of ciKinds) {
+      try {
+        packagePlans.push({
+          kind,
+          plan: await PackageExec.plan({
+            index,
+            cacheDirectory,
+            ...(remoteCache === undefined ? {} : { remoteCache }),
+            verb: kind,
+            pattern,
+            plan: flags.plan,
+            jobs: flags.jobs,
+            readCache: flags.cache,
+            signal: config.signal,
+            reporter,
+            environment: config.environment
+          })
+        })
+      } catch (cause) {
+        if (cause instanceof Planner.UnsupportedVerbError && cause.verb === kind) refusals.push(cause)
+        else throw cause
+      }
+    }
+    if (packagePlans.length === 0) throw refusals[0] ?? new Error(`no targets selected by ${pattern}`)
+    const merged = Executor.mergePlans(packagePlans.map(({ kind, plan }) => ({
+      verb: kind,
+      pattern,
+      roots: plan.roots,
+      targets: plan.workList,
+      edges: plan.workList.flatMap((node) => node.dependencies.map((from) => ({ from, to: node.label }))),
+      warnings: []
+    })))
+    if (flags.plan) return { verb: "ci", pattern, ...merged, targets: merged.targets.map(plannedTarget) }
+    const nodes = new Map(merged.targets.map((target) => [target.label, target as PackageExec.PackageNode]))
+    const closures = new Map(packagePlans.flatMap(({ plan }) => [...plan.closures]))
+    return PackageExec.execute(
+      {
+        roots: merged.roots,
+        workList: merged.targets as ReadonlyArray<PackageExec.PackageNode>,
+        nodes,
+        closures
+      },
+      {
+        index,
+        cacheDirectory,
+        ...(remoteCache === undefined ? {} : { remoteCache }),
+        verb: "ci",
+        pattern,
+        jobs: flags.jobs,
+        readCache: flags.cache,
+        signal: config.signal,
+        reporter,
+        environment: config.environment
+      }
+    )
+  }
+}
+
+/** Every outcome an execution command can return before settling. */
+type Outcome = Planner.Plan | CiPlan | Executor.Summary | PackageExec.PlanReport
+
+/** Whether an outcome is an execution summary rather than an inert plan. */
+const isSummary = (outcome: Outcome): outcome is Executor.Summary => "ok" in outcome
+
+/** Whether an outcome is an execution summary that went red. */
+const failedSummary = (outcome: Outcome): outcome is Executor.Summary => isSummary(outcome) && !outcome.ok
+
+const failureMessage = (summary: Executor.Summary): string =>
+  `${summary.counts.failed} of ${summary.results.length} targets failed` +
+  (summary.counts.skipped === 0 ? "" : ` (${summary.counts.skipped} skipped)`)
+
+/**
+ * Turns an execution outcome into the command's return.
+ *
+ * A red summary is the structured `targets_failed` error, unless a human
+ * renderer already told a person what failed, in which case only the exit
+ * code remains to record. A green summary is the envelope's data, unless the
+ * same renderer already drew it, in which case standard output stays empty.
+ * An inert plan is always data.
+ */
+const settle = <A extends Outcome>(
+  context: Presentation & { readonly error: ErrorResult },
+  config: RuntimeConfig,
+  reporter: Reporter.Reporter,
+  outcome: A
+): A | undefined => {
+  const people = forPeople(context, reporter.renderer)
+  if (failedSummary(outcome)) {
+    if (people && config.exit !== undefined) {
+      config.exit(1)
+      return undefined
+    }
+    return context.error({
+      code: "targets_failed",
+      exitCode: 1,
+      message: failureMessage(outcome),
+      retryable: false
+    })
+  }
+  if (people && isSummary(outcome)) return undefined
+  return outcome
+}
+
+/**
+ * Runs one execution command under a reporter that is closed however the
+ * run ends, so a live renderer always hands the terminal back.
+ */
+const executeCommand = async <A extends Outcome>(
+  context: Presentation & { readonly error: ErrorResult },
+  config: RuntimeConfig,
+  code: string,
+  body: (reporter: Reporter.Reporter) => Promise<A>
+): Promise<A | undefined> => {
+  const reporter = reporterFor(context, config)
+  let outcome: A
+  try {
+    outcome = await body(reporter)
+  } catch (cause) {
+    return context.error({ code, exitCode: 1, message: Diagnostic.describe(cause) })
+  } finally {
+    reporter.close()
+  }
+  return settle(context, config, reporter, outcome)
+}
+
+/**
+ * Creates the configured smithers-build CLI.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const makeCli = (config: RuntimeConfig = {}) =>
+  Cli.create("smithers-build", {
+    description: "Execute declared targets and install the workspace with flows",
+    version: "0.1.0",
+    globals: globalOptions
+  })
+    .command("install", {
+      description: "Plan and execute the install Flow under the toolchain the workspace declares",
+      options: workspaceOption,
+      alias: { workspace: "w" },
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const installs = index.targets().filter((row) =>
+            row.packagePath === "" && Target.metadata(row.target).target === "Install"
+          )
+          if (installs.length !== 1) {
+            throw new Error(
+              installs.length === 0
+                ? "the root PACKAGE.ts declares no Install target"
+                : "the root PACKAGE.ts declares more than one Install target"
+            )
+          }
+          const cacheDirectory = context.options.cacheDir === undefined
+            ? index.workspace.cache.directory
+            : Config.normalizeCacheDirectory(context.options.cacheDir)
+          const remoteCache = remoteCacheAccess(
+            remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
+            config
+          )
+          const summary = await PackageExec.run({
+            index,
+            cacheDirectory,
+            ...(remoteCache === undefined ? {} : { remoteCache }),
+            verb: "run",
+            pattern: installs[0]!.label,
+            environment: config.environment,
+            signal: config.signal
+          })
+          if ("ok" in summary && !summary.ok) throw new Error(failureMessage(summary))
+          return summary
+        } catch (cause) {
+          return context.error({
+            code: "install_failed",
+            exitCode: 1,
+            message: Diagnostic.describe(cause),
+            retryable: false
+          })
+        }
+      }
+    })
+    .command("create-app", {
+      description: "Scaffold a Smithers app from a @smthrs/create-app template",
+      args: z.object({ dir: z.string().describe("Directory to create; its name becomes the app name") }),
+      options: z.object({
+        template: z.string().default("default").describe("Template name: default or aomi"),
+        link: z.boolean().default(true).describe(
+          "Point @smthrs/* dependencies at the checkout the templates came from; --no-link keeps versions"
+        )
+      }),
+      alias: { template: "t" },
+      async run(context) {
+        try {
+          return await CreateApp.scaffold({
+            directory: context.args.dir,
+            template: context.options.template,
+            link: context.options.link
+          })
+        } catch (cause) {
+          return context.error({
+            code: "create_app_failed",
+            exitCode: 1,
+            message: Diagnostic.describe(cause),
+            retryable: false
+          })
+        }
+      }
+    })
+    .command("build", {
+      description: "Execute the build targets selected by a pattern",
+      args: patternArgument,
+      options: executionOptions,
+      alias: executionAlias,
+      run: (context) =>
+        executeCommand(
+          context,
+          config,
+          "build_failed",
+          (reporter) => runVerb("build", context.args.pattern, context.options, config, reporter)
+        )
+    })
+    .command("test", {
+      description: "Execute the test targets selected by a pattern",
+      args: patternArgument,
+      options: executionOptions,
+      alias: executionAlias,
+      run: (context) =>
+        executeCommand(
+          context,
+          config,
+          "test_failed",
+          (reporter) => runVerb("test", context.args.pattern, context.options, config, reporter)
+        )
+    })
+    .command("lint", {
+      description: "Execute the lint targets selected by a pattern",
+      args: patternArgument,
+      options: executionOptions.extend({
+        fix: z.boolean().default(false).describe("Apply agent lint fixes inside the declared fixes write-set")
+      }),
+      alias: executionAlias,
+      run: (context) =>
+        executeCommand(
+          context,
+          config,
+          "lint_failed",
+          (reporter) => runVerb("lint", context.args.pattern, context.options, config, reporter)
+        )
+    })
+    .command("docs", {
+      description: "Execute the documentation-parity targets selected by a pattern",
+      args: patternArgument,
+      options: executionOptions,
+      alias: executionAlias,
+      run: (context) =>
+        executeCommand(
+          context,
+          config,
+          "docs_failed",
+          (reporter) => runVerb("docs", context.args.pattern, context.options, config, reporter)
+        )
+    })
+    .command("review", {
+      description:
+        "Execute the model-review targets selected by a pattern (needs the engine CLI; skips where it is absent)",
+      args: patternArgument,
+      options: executionOptions,
+      alias: executionAlias,
+      run: (context) =>
+        executeCommand(
+          context,
+          config,
+          "review_failed",
+          (reporter) => runVerb("review", context.args.pattern, context.options, config, reporter)
+        )
+    })
+    .command("run", {
+      description: "Execute run targets selected by a pattern",
+      args: patternArgument,
+      options: runOptions,
+      alias: { ...executionAlias, ...invocationAlias, name: "n" },
+      run: (context) =>
+        executeCommand(
+          context,
+          config,
+          "run_failed",
+          (reporter) => runVerb("run", context.args.pattern, context.options, config, reporter)
+        )
+    })
+    .command("target", {
+      description: "Execute one PACKAGE.ts label with its flavor-implied verb (the bare-label form)",
+      args: patternArgument,
+      options: executionOptions.extend({
+        write: z.boolean().default(false).describe("Apply Diff/Generate/CiGen targets instead of checking drift"),
+        fix: z.boolean().default(false).describe("Apply agent lint fixes inside the declared fixes write-set"),
+        ...invocationOptions
+      }),
+      alias: { ...executionAlias, ...invocationAlias },
+      run: (context) =>
+        executeCommand(context, config, "target_failed", async (reporter) => {
+          const outcome = await runPackageVerb("auto", context.args.pattern, context.options, config, reporter)
+          return outcome
+        })
+    })
+    .command("gitHooks", {
+      description: "Check the WORKSPACE.ts gitHooks scripts against .git/hooks, or install them with --write",
+      options: workspaceOption.extend({
+        write: z.boolean().default(false).describe("Install the rendered hook scripts into .git/hooks")
+      }),
+      alias: { workspace: "w" },
+      async run(context) {
+        let outcome: Awaited<ReturnType<typeof runGitHooks>>
+        try {
+          outcome = await runGitHooks(context.options, config)
+        } catch (cause) {
+          return context.error({ code: "git_hooks_failed", exitCode: 1, message: Diagnostic.describe(cause) })
+        }
+        if (outcome.mode === "check" && !outcome.clean) {
+          return context.error({
+            code: "git_hooks_drift",
+            exitCode: 1,
+            message: `git hooks drift (run with --write to install): ${
+              outcome.entries.filter((entry) => entry.status !== "clean").map((entry) =>
+                `${entry.file}=${entry.status}`
+              )
+                .join(", ")
+            }`,
+            retryable: false
+          })
+        }
+        return outcome
+      }
+    })
+    .command("ci", {
+      description: "Execute build, test, lint, and documentation targets over one merged graph",
+      args: patternArgument,
+      options: executionOptions,
+      alias: executionAlias,
+      run: (context) =>
+        executeCommand(
+          context,
+          config,
+          "ci_failed",
+          (reporter) => runCi(context.args.pattern, context.options, config, reporter)
+        )
+    })
+    .command("query", {
+      description: "List labels or evaluate deps(label), rdeps(label), or owners(label)",
+      args: z.object({ expr: z.string().describe("Label, pattern, deps(label), rdeps(label), or owners(label)") }),
+      options: workspaceOption,
+      alias: { workspace: "w" },
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const result = await packageQuery(index, context.args.expr)
+          return present(context, config, result, (style) => Query.text(result, style))
+        } catch (cause) {
+          return context.error({ code: "query_failed", exitCode: 1, message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("owners", {
+      description: "Resolve owners, reasons, and the agent policy for paths, or for the paths a diff touches",
+      args: z.object({
+        paths: z.array(z.string()).optional().describe("Workspace-relative paths; omit them and pass --diff instead")
+      }),
+      options: workspaceOption.extend({
+        diff: z.string().optional().describe(
+          "Also resolve every path changed since this git base, like S.gitDiff(base)"
+        )
+      }),
+      alias: { workspace: "w", diff: "d" },
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const paths = [...(context.args.paths ?? [])]
+          if (context.options.diff !== undefined) {
+            paths.push(...await Owners.changedPaths(index.root, context.options.diff))
+          }
+          if (paths.length === 0) throw new Error("owners needs at least one path, or --diff <base>")
+          const resolution = Owners.resolve(index, paths)
+          return present(context, config, Owners.toJson(resolution), (style) => Owners.text(resolution, style))
+        } catch (cause) {
+          return context.error({ code: "owners_failed", exitCode: 1, message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("graph", {
+      description: "Print the target graph without executing it",
+      args: patternArgument,
+      options: workspaceOption.extend({
+        mermaid: z.boolean().default(false).describe("Render Mermaid instead of a text tree")
+      }),
+      alias: { workspace: "w", mermaid: "m" },
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const { data, edges, rows } = await packageGraph(index, context.args.pattern, context.options.mermaid)
+          // Mermaid is meant for a file or a renderer, never a terminal.
+          if (context.options.mermaid) return data
+          return present(context, config, data, (style) => GraphOutput.packageText(rows, edges, style))
+        } catch (cause) {
+          return context.error({ code: "graph_failed", exitCode: 1, message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+
+/**
+ * Rewrites a bare-label argv into the `target` command.
+ *
+ * `smithers-build '//src:lint'` — a first argument that is a label rather than a
+ * command — executes the label under its flavor-implied verb. Every other
+ * argv passes through unchanged.
+ *
+ * @category parsing
+ * @since 0.1.0
+ * @slop
+ */
+export const normalizeArgv = (argv: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const first = argv[0]
+  if (first !== undefined && (first.startsWith("//") || first.startsWith(":"))) {
+    return ["target", ...argv]
+  }
+  return argv
+}
+
+/**
+ * Programmatic CLI without process-scoped remote cache or interruption state.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const cli = makeCli()

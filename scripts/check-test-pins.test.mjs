@@ -56,7 +56,7 @@ test("an environment-variable gate is a pin, inline or through a const", () => {
  * register does.
  *
  * Re-pinned 2026-09-01: the two cases below used to read the live register and
- * the live `packages/database` pin. `ef7ee4d0c0` unpinned that test once the
+ * the live `packages/smithers/flows/database` pin. `ef7ee4d0c0` unpinned that test once the
  * open path's read-only probe brought it inside the package's per-test budget,
  * so the register row they quoted stopped naming a pin and both cases went
  * vacuous: the wrong-package variant found nothing to report and asserted
@@ -154,7 +154,7 @@ test("every package group is guarded, read from the manifests", () => {
 })
 
 test("the register exists and every pin in the tree appears in it", () => {
-  assert.ok(existsSync(notesPath), "docs/alpha-notes.md is the register the guard reads")
+  assert.ok(existsSync(notesPath), "scripts/test-pins.md is the register the guard reads")
   assert.match(readFileSync(notesPath, "utf8"), /## Known test pins/)
   assert.deepEqual(undocumentedPins(), [])
 })

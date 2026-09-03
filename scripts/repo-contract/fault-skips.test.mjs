@@ -1,10 +1,20 @@
 /**
- * No fault case may focus, skip, or park itself unnoticed.
+ * No fault case may focus, skip, or park itself unnoticed, and none may exist
+ * under no gate.
  *
  * Ported from the Smithers 0.x `fault-skip-audit-gate` and `fault-only-todo-audit`
  * suites. Those drove a standalone `check-fault-skips.mjs` against synthetic
  * fixtures; the script is gone, so what survives is the audit itself, run
  * against the real matrix.
+ *
+ * The matrix is not a directory any more. Every case lives in the package whose
+ * behaviour it asserts, under `packages/<package>/test/faults/`, and every one
+ * of those packages declares a `faults` target, so `//packages/...:faults` is
+ * the whole matrix. That move deleted the manifest the old audit read
+ * (`e2e/fault-matrix.json`) along with the runner that read it, so the two jobs
+ * the manifest actually did — a case may not exist undeclared, and a case may
+ * not skip undeclared — are done here instead, against the filesystem and the
+ * package declarations that replaced it.
  *
  * The failure modes are different. A focused test (`.only`) silently drops
  * every other case in its file, and a `.todo` reports as a pass. Both are
@@ -20,14 +30,13 @@
  * gate line stops naming the defect, and the requirement is enforced by
  * nothing. So the rule is about the marking, not about the colour — state the
  * requirement as a plain failing test and record the shipped limitation in
- * `e2e/fault-gaps.md` beside it.
+ * `fault-gaps.md` beside this file.
  *
  * A required red gate is also a shipped limitation, and a shipped limitation
- * that is only written down in `e2e/fault-gaps.md` is written down where no
- * reader of the release looks. Each entry in `requiredRedGates` therefore names
- * the section of `docs/pages/release/known-limitations.md` that states the
- * limitation, and this suite checks both that the section exists and that the
- * fault-gaps row points at it.
+ * that is only written down in `fault-gaps.md` is written down where no reader
+ * of the release looks. Each entry in `requiredRedGates` therefore names the
+ * release-notes section that states the limitation, and this suite checks that
+ * the fault-gaps row points at it.
  *
  * A conditional skip is legitimate — cases 12 and 21 need the `jj` binary —
  * but every one has to be listed here with the condition it skips on, so "this
@@ -37,14 +46,13 @@
  * Run it with `node --test "scripts/repo-contract/*.test.mjs"`.
  */
 import assert from "node:assert/strict"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { join, relative, resolve } from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
-const faults = join(root, "e2e", "faults")
-const harness = join(root, "e2e", "harness")
+const packagesRoot = join(root, "packages")
 
 /**
  * The tests that are required to exist, whatever colour they are.
@@ -56,7 +64,7 @@ const harness = join(root, "e2e", "harness")
  */
 const requiredGates = new Map([
   [
-    "faults/case22-secret-never-in-journal.test.ts",
+    "packages/smithers/flows/journal/test/faults/case22-secret-never-in-journal.test.ts",
     {
       title: "redacts the credential out of the operator's terminal",
       why: "case 22 must cover the logs as well as the journal. It was red at rc.0 "
@@ -73,7 +81,7 @@ const requiredGates = new Map([
  *
  * A requirement the product does not meet yet is enforced by a plain failing
  * test, not by prose, and a shipped limitation that is written down only in
- * `e2e/fault-gaps.md` is written down where no reader of the release looks. An
+ * `fault-gaps.md` is written down where no reader of the release looks. An
  * entry here therefore also has to name its section of the known-limitations
  * page, and the fault-gaps row has to link to it.
  *
@@ -87,8 +95,7 @@ const requiredGates = new Map([
  */
 const requiredRedGates = new Map([])
 
-const knownLimitations = join(root, "docs", "pages", "release", "known-limitations.md")
-const faultGaps = join(root, "e2e", "fault-gaps.md")
+const faultGaps = join(root, "scripts", "repo-contract", "fault-gaps.md")
 
 /**
  * The conditional skips the matrix is allowed to carry, and what each skips on.
@@ -98,34 +105,55 @@ const faultGaps = join(root, "e2e", "fault-gaps.md")
  */
 const allowedSkips = new Map([
   [
-    "faults/case12-rewind-reverts-vcs.test.ts",
+    "packages/smithers/flows/time-travel/test/faults/case12-rewind-reverts-vcs.test.ts",
     "Needs the jj binary to rewind a real workspace. Skips locally without it and throws on CI."
   ],
   [
-    "faults/case21-jj-pointer-integrity.test.ts",
+    "packages/smithers/flows/jj/test/faults/case21-jj-pointer-integrity.test.ts",
     "Needs the jj binary to take and restore real snapshots. Skips locally without it and throws on CI."
-  ],
-  [
-    "harness/sandboxToolPlacement.test.ts",
-    "Needs a running Docker daemon to place the standard tools inside a real Alpine machine. Skips "
-      + "without one. It does not throw on CI, as the two jj cases do, because no CI job runs this suite: "
-      + "the workflow builds //e2e:check and never executes //e2e:harness."
   ]
 ])
 
-const sources = [faults, harness]
-  .filter((directory) => existsSync(directory))
-  .flatMap((directory) =>
-    readdirSync(directory)
-      .filter((file) => file.endsWith(".ts"))
-      .map((file) => ({
-        relative: `${directory === faults ? "faults" : "harness"}/${file}`,
-        text: readFileSync(join(directory, file), "utf8")
-      }))
-  )
+/**
+ * Every package directory under `packages/`, at any depth, that has a
+ * `test/faults` tree.
+ *
+ * The walk descends. Packages nest — a granular package lives inside the
+ * product package it belongs to — and a reading that stopped at the first
+ * directory level would leave most of the matrix outside this audit while the
+ * audit stayed green, which is the exact failure the matrix's own gate exists
+ * to stop. Names are paths under `packages/`, which is what reaches them.
+ */
+const packageDirectories = (parent = "") =>
+  readdirSync(join(packagesRoot, parent), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
+    .flatMap((entry) => {
+      const directory = parent === "" ? entry.name : `${parent}/${entry.name}`
+      return existsSync(join(packagesRoot, directory, "package.json"))
+        ? [directory, ...packageDirectories(directory)]
+        : []
+    })
+
+const faultPackages = packageDirectories()
+  .filter((name) => existsSync(join(packagesRoot, name, "test", "faults")))
+  .sort()
+
+/** Every TypeScript file under a package's `test/faults` tree. */
+const walk = (directory) =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return walk(path)
+    return entry.isFile() && path.endsWith(".ts") ? [path] : []
+  })
+
+const sources = faultPackages
+  .flatMap((name) => walk(join(packagesRoot, name, "test", "faults")))
+  .map((path) => ({ relative: relative(root, path), text: readFileSync(path, "utf8") }))
+  .sort((left, right) => left.relative.localeCompare(right.relative))
 
 describe("the fault-suite skip audit", () => {
   it("has sources to audit", () => {
+    assert.ok(faultPackages.length > 5, `expected several packages to carry fault cases, found ${faultPackages.length}`)
     assert.ok(sources.length > 15, `expected the matrix to be populated, found ${sources.length} files`)
   })
 
@@ -163,28 +191,28 @@ describe("the fault-suite skip audit", () => {
         0,
         `${source.relative} pins a defect with .fails, which turns a failing required gate into a pass. `
           + "State the requirement as a plain test that fails, cite its owner in the case file, and record "
-          + "the shipped limitation in e2e/fault-gaps.md."
+          + "the shipped limitation in scripts/repo-contract/fault-gaps.md."
       )
     }
   })
 
   it("keeps every required gate in the matrix, including the ones that are red", () => {
     const byRelative = new Map(sources.map((source) => [source.relative, source.text]))
-    for (const [relative, gate] of requiredGates) {
-      const text = byRelative.get(relative)
-      assert.ok(text !== undefined, `${relative} is a required gate and is not in the matrix any more. ${gate.why}`)
+    for (const [relative_, gate] of requiredGates) {
+      const text = byRelative.get(relative_)
+      assert.ok(text !== undefined, `${relative_} is a required gate and is not in the matrix any more. ${gate.why}`)
       assert.ok(
         text.includes(gate.title),
-        `${relative} no longer contains the required test "${gate.title}". ${gate.why}`
+        `${relative_} no longer contains the required test "${gate.title}". ${gate.why}`
       )
     }
   })
 
   it("keeps every red gate in the required set, so its existence is checked too", () => {
-    for (const relative of requiredRedGates.keys()) {
+    for (const relative_ of requiredRedGates.keys()) {
       assert.ok(
-        requiredGates.has(relative),
-        `${relative} is listed as red by design and is not in requiredGates, so nothing checks that the test `
+        requiredGates.has(relative_),
+        `${relative_} is listed as red by design and is not in requiredGates, so nothing checks that the test `
           + "still exists. Add it there as well."
       )
     }
@@ -209,23 +237,11 @@ describe("the fault-suite skip audit", () => {
     }
   })
 
-  it("states every required red gate as a shipped limitation on the release page", () => {
-    const page = readFileSync(knownLimitations, "utf8")
-    for (const [relative, gate] of requiredRedGates) {
-      assert.ok(
-        page.includes(`### ${gate.limitation.heading}`),
-        `${relative} is red by design, so rc.0 ships the limitation it names. `
-          + `docs/pages/release/known-limitations.md has no "${gate.limitation.heading}" section, so a reader of `
-          + "the release learns about it only from a failing CI job. Add the paragraph to the page."
-      )
-    }
-  })
-
   it("points the fault-gaps row at that limitation instead of describing it", () => {
     const gaps = readFileSync(faultGaps, "utf8")
-    for (const [relative, gate] of requiredRedGates) {
+    for (const [relative_, gate] of requiredRedGates) {
       const row = gaps.split("\n").find((line) => line.startsWith(gate.limitation.row))
-      assert.ok(row !== undefined, `e2e/fault-gaps.md has no ${gate.limitation.row} row for ${relative}`)
+      assert.ok(row !== undefined, `scripts/repo-contract/fault-gaps.md has no ${gate.limitation.row} row for ${relative_}`)
       assert.ok(
         row.includes(gate.limitation.anchor),
         `the ${gate.limitation.row} row claims the limitation is recorded on the known-limitations page and does `
@@ -234,45 +250,100 @@ describe("the fault-suite skip audit", () => {
     }
   })
 
-  it("counts the limits the release page says remain", () => {
-    // The paragraph states a number and then lists the limits. Nothing checked
-    // the number against the list. It once said "Two limits remain" over three
-    // sentences, and the miscount shipped on the release page.
-    const page = readFileSync(knownLimitations, "utf8")
-    const paragraph = page.split("\n").find((line) => line.includes("**Credential redaction in logs.**"))
-    assert.ok(paragraph !== undefined, "known-limitations.md has no credential-redaction paragraph")
-    const counted = /\b(One|Two|Three|Four|Five) limits? remain\./.exec(paragraph)
-    assert.ok(counted !== null, "the credential-redaction paragraph no longer states how many limits remain")
-    const spelled = new Map([["One", 1], ["Two", 2], ["Three", 3], ["Four", 4], ["Five", 5]])
-    const claimed = spelled.get(counted[1])
-    // A sentence ends at a period followed by whitespace and a capital, which
-    // leaves `flows_runs.state_json` and the other dotted identifiers alone.
-    const listed = paragraph.slice(counted.index + counted[0].length).trim()
-      .split(/(?<=\.)\s+(?=[A-Z])/)
-      .filter((sentence) => sentence.length > 0)
-    assert.equal(
-      listed.length,
-      claimed,
-      `the paragraph says "${counted[0]}" and then lists ${listed.length}: ${
-        listed.map((sentence) => sentence.slice(0, 60)).join(" | ")
-      }. Fix the count in the known-limitations page, or move a sentence that is standing policy rather than a `
-        + "limit ahead of the count."
-    )
-    // And the count is not free to drift from the matrix: fault-gaps row 22
-    // says "Both limits", so the page has to name exactly those two.
-    const row = readFileSync(faultGaps, "utf8").split("\n").find((line) => line.startsWith("| 22 |"))
-    assert.ok(row !== undefined, "e2e/fault-gaps.md has no row 22")
-    assert.ok(
-      row.includes("Both limits are stated in"),
-      "row 22 no longer claims two limits, so this check and the release page have to move together"
-    )
-    assert.equal(claimed, 2, "fault-gaps row 22 names two limits, so the release page must state two")
-  })
-
   it("keeps the skip allow-list pointed at files that exist", () => {
     const present = new Set(sources.map((source) => source.relative))
-    for (const relative of allowedSkips.keys()) {
-      assert.ok(present.has(relative), `the allow-list names ${relative}, which is not in the matrix any more`)
+    for (const relative_ of allowedSkips.keys()) {
+      assert.ok(present.has(relative_), `the allow-list names ${relative_}, which is not in the matrix any more`)
+    }
+  })
+})
+
+describe("the fault matrix is wired to a gate", () => {
+  // release gate B6: `pnpm exec smithers-build test '//e2e:faults'` failed in
+  // 262 ms with `Command "vitest" not found`, because the directory that owned
+  // every case was not a pnpm workspace member and so had no vitest binary.
+  // Eighteen cases existed and had never run under any gate. The cases live in
+  // real workspace packages now, which removes that failure mode, but the one
+  // it belongs to is a new one: a package can grow a `test/faults` tree and
+  // never declare the target that runs it.
+
+  it("declares a faults target in every package that carries fault cases", () => {
+    for (const name of faultPackages) {
+      const declaration = join(packagesRoot, name, "PACKAGE.ts")
+      assert.ok(
+        existsSync(declaration),
+        `packages/${name} has a test/faults tree and no PACKAGE.ts, so nothing runs its cases`
+      )
+      const text = readFileSync(declaration, "utf8")
+      assert.match(
+        text,
+        /const faults = Smithers\.FaultSuite\(/,
+        `packages/${name} carries fault cases and declares no Smithers.FaultSuite target, so //packages/...:faults `
+          + "does not reach them"
+      )
+      assert.match(
+        text,
+        /targets: \{[^}]*\bfaults\b/,
+        `packages/${name} builds a FaultSuite target and does not export it under the conventional \`faults\` key`
+      )
+    }
+  })
+
+  it("gives every fault package its own serial, coverage-free vitest config", () => {
+    for (const name of faultPackages) {
+      const config = join(packagesRoot, name, "vitest.faults.config.ts")
+      assert.ok(existsSync(config), `packages/${name} declares a faults target and has no vitest.faults.config.ts`)
+      const text = readFileSync(config, "utf8")
+      assert.match(
+        text,
+        /fileParallelism: false/,
+        `packages/${name}'s fault config runs its cases in parallel; they kill process groups and bind ports`
+      )
+      assert.match(
+        text,
+        /include: \["test\/faults\/\*\*\/\*\.test\.ts"\]/,
+        `packages/${name}'s fault config does not select test/faults`
+      )
+    }
+  })
+
+  it("keeps the fault cases out of the package's ordinary suite", () => {
+    // The two tiers cannot share a machine: a unit suite running beside a case
+    // that reaps process groups is racing a reaper it never declared. The
+    // ordinary config excludes the tree the fault config selects.
+    for (const name of faultPackages) {
+      const text = readFileSync(join(packagesRoot, name, "vitest.config.ts"), "utf8")
+      assert.match(
+        text,
+        /exclude: \[\.\.\.configDefaults\.exclude, "test\/faults\/\*\*"\]/,
+        `packages/${name}'s ordinary vitest config would also select its fault cases`
+      )
+    }
+  })
+
+  it("selects the whole matrix from the generated CI workflow", () => {
+    const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8")
+    assert.match(
+      ci,
+      /^\s*run: pnpm exec smithers-build test '\/\/packages\/\.\.\.:faults' --jobs 1$/m,
+      "the generated workflow does not run the fault matrix serially over every package that declares one"
+    )
+  })
+
+  it("keeps every fault tree inside a package the workspace typechecks", () => {
+    // `//e2e:check` typechecked the old directory against its own tsconfig. The
+    // replacement is each package's own `check`, whose test tsconfig covers
+    // `test/**` — including `test/faults`. A tree outside `test/` would fall
+    // out of that.
+    for (const name of faultPackages) {
+      const testTsconfig = join(packagesRoot, name, "tsconfig.test.json")
+      assert.ok(existsSync(testTsconfig), `packages/${name} has no tsconfig.test.json to typecheck its cases`)
+      const config = JSON.parse(readFileSync(testTsconfig, "utf8"))
+      assert.ok(
+        config.include.some((pattern) => pattern === "test/**/*" || pattern === "test/**/*.ts"),
+        `packages/${name}'s test tsconfig does not include test/**, so its fault cases are never typechecked`
+      )
+      assert.ok(statSync(join(packagesRoot, name, "test", "faults")).isDirectory())
     }
   })
 })

@@ -18,6 +18,7 @@ import { createRequire } from "node:module"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { workspacePackages } from "./workspace-packages.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -29,11 +30,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
  */
 export const EXPECTED_EFFECT_VERSION = "4.0.0-rc.108"
 
-/** Directories whose `package.json` files are workspace manifests. */
-const MANIFEST_ROOTS = ["packages", "apps", "evals", "packages/build"]
-
-/** Directories never walked while collecting manifests. */
-const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", "coverage", "target", ".git", ".jj"])
 
 /** @type {Map<string, string[]>} */
 const versions = new Map()
@@ -71,18 +67,18 @@ const readManifestRanges = (manifestPath, source) => {
   }
 }
 
-/** Collects the exact `effect` pins every workspace manifest declares. */
+/**
+ * Collects the exact `effect` pins every workspace manifest declares.
+ *
+ * The member list comes from `pnpm-workspace.yaml` through the shared reader
+ * rather than from a list of directory roots walked one level deep: a package
+ * nested inside the product package it belongs to still pins `effect`, and a
+ * one-level walk would stop reading it the day it moved.
+ */
 const collectManifestVersions = () => {
   readManifestRanges(join(root, "package.json"), "package.json")
-  readManifestRanges(join(root, "examples", "package.json"), "examples/package.json")
-  for (const manifestRoot of MANIFEST_ROOTS) {
-    const absolute = join(root, manifestRoot)
-    if (!existsSync(absolute)) continue
-    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
-      if (!entry.isDirectory() || SKIPPED_DIRECTORIES.has(entry.name)) continue
-      const relativePath = `${manifestRoot}/${entry.name}/package.json`
-      readManifestRanges(join(absolute, entry.name, "package.json"), relativePath)
-    }
+  for (const member of workspacePackages(root)) {
+    readManifestRanges(member.manifestPath, `${member.dir}/package.json`)
   }
 }
 
@@ -133,8 +129,8 @@ const collectInstalledVersions = () => {
   // The CLI is the entry point a consumer runs, so resolve `effect` the way it
   // does. The package root is the closest stable anchor.
   try {
-    const cliRequire = createRequire(join(root, "packages", "cli", "package.json"))
-    readInstalledVersion(cliRequire.resolve("effect/package.json"), "packages/cli import resolution")
+    const cliRequire = createRequire(join(root, "packages", "smithers", "package.json"))
+    readInstalledVersion(cliRequire.resolve("effect/package.json"), "packages/smithers import resolution")
   } catch {
     // A missing install is reported by the lockfile checks above.
   }

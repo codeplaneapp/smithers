@@ -12,13 +12,12 @@
  * `node`.
  */
 import { Smithers } from "@smthrs/targets"
-import { runtime } from "../PACKAGE.ts"
 
 /**
  * Everything under `scripts/`, digested as the input of every gate here.
  *
- * Both extensions: the version guard and the invocation normalizer are
- * TypeScript, and a glob that saw only `.mjs` would leave an edit to either one
+ * Both extensions: a gate written in TypeScript is as much an input as one
+ * written in `.mjs`, and a glob that saw only `.mjs` would leave an edit to it
  * out of the digest every gate here is keyed on.
  */
 const sources = [Smithers.glob("//scripts/**/*.mjs"), Smithers.glob("//scripts/**/*.ts")]
@@ -40,7 +39,6 @@ const packDirectory = "dist/release-packs"
  * @category test
  */
 const packManifest = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/pack-release.test.mjs")]),
   srcs: sources,
   deps: []
@@ -57,7 +55,6 @@ const packManifest = Smithers.NodeTest({
  * @category test
  */
 const releaseRehearsal = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/release-rehearsal.test.mjs")]),
   srcs: [...sources, Smithers.file("//.github/workflows/release.yml")],
   deps: []
@@ -71,28 +68,13 @@ const releaseRehearsal = Smithers.NodeTest({
  * @category test
  */
 const releaseVersion = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/set-release-version.test.mjs")]),
   srcs: sources,
   deps: []
 })
 
 /**
- * Drives the operator's backup, verify, and restore entry point the way an
- * operator drives it: spawned invocations against a real migrated store.
- *
- * @since 0.1.0
- * @category test
- */
-const disasterRecovery = Smithers.NodeTest({
-  runtime,
-  runner: Smithers.testRunner([Smithers.file("//scripts/flows-backup.test.mjs")]),
-  srcs: sources,
-  deps: []
-})
-
-/**
- * Fails on any pin in the engine or tooling groups that `docs/alpha-notes.md`
+ * Fails on any pin in the engine or tooling groups that `scripts/test-pins.md`
  * does not explain.
  *
  * A test the default gate never runs to a pass is only acceptable when it is
@@ -102,9 +84,29 @@ const disasterRecovery = Smithers.NodeTest({
  * @category test
  */
 const testPinRegister = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/check-test-pins.test.mjs")]),
-  srcs: sources,
+  srcs: [...sources, Smithers.file("//scripts/test-pins.md")],
+  deps: []
+})
+
+/**
+ * The toolchain drift gate: package.json `engines` and `packageManager`,
+ * flake.nix, and the generated CI workflow must agree with the runtimes and
+ * package manager `.smithers/WORKSPACE.ts` declares. The gate reads the
+ * declaration itself, so a version moves in one file.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+const toolchainPins = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/check-toolchain-pins.test.mjs")]),
+  srcs: [
+    ...sources,
+    Smithers.file("//.smithers/WORKSPACE.ts"),
+    Smithers.file("//package.json"),
+    Smithers.file("//flake.nix"),
+    Smithers.file("//.github/workflows/ci.yml")
+  ],
   deps: []
 })
 
@@ -120,7 +122,8 @@ const testPinRegister = Smithers.NodeTest({
  * @category test
  */
 const browserContract = Smithers.NodeTest({
-  runtime,
+  summary: "The browser bundle builds and exposes the contract surface.",
+  featured: true,
   runner: Smithers.entrypoint(Smithers.file("//scripts/browser-check.mjs")),
   // The entry points this bundles live in other packages, and a declared glob
   // may not cross a package boundary — it would expand to nothing and read as
@@ -139,7 +142,6 @@ const browserContract = Smithers.NodeTest({
  * @category build
  */
 const releasePack = Smithers.NodeBinary({
-  runtime,
   entry: Smithers.file("//scripts/pack-release.mjs"),
   args: [packDirectory],
   srcs: sources,
@@ -164,7 +166,6 @@ const releasePack = Smithers.NodeBinary({
  * @category test
  */
 const releaseSmoke = Smithers.NodeTest({
-  runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/smoke-release.mjs"), [packDirectory]),
   srcs: sources,
   deps: [releasePack]
@@ -181,7 +182,8 @@ const releaseSmoke = Smithers.NodeTest({
  * @category test
  */
 const effectVersion = Smithers.NodeTest({
-  runtime,
+  summary: "Exactly one effect version resolves across every manifest and both lockfiles.",
+  featured: true,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-single-effect-version.mjs")),
   srcs: [...sources, Smithers.file("//pnpm-lock.yaml"), Smithers.file("//bun.lock")],
   deps: []
@@ -193,10 +195,10 @@ const effectVersion = Smithers.NodeTest({
  * A manifest change is required to refresh both lockfiles, but only
  * `pnpm-lock.yaml` was ever proved: every CI job installs with pnpm and
  * `--frozen-lockfile` rejects a stale one on the spot, while no job runs `bun
- * install` at all. Bun still executes `apps/*`, the `ci/PACKAGE.ts` matrix, and
- * `evals/agent`, so a stale entry resolves a real package at the wrong version
- * on exactly those surfaces and nowhere else. `packages/fs` reached rc.0 still
- * asking for `@smthrs/core@0.1.0` that way.
+ * install` at all. Bun still executes `apps/*`, the `//packages/...:bunTest`
+ * matrix, and `evals/agent`, so a stale entry resolves a real package at the
+ * wrong version on exactly those surfaces and nowhere else. `packages/smithers/agent/fs`
+ * reached rc.0 still asking for `@smthrs/core@0.1.0` that way.
  *
  * The target compares rather than installs. It reads the lockfile's own
  * `workspaces` table against the manifests on disk, which is offline,
@@ -206,7 +208,6 @@ const effectVersion = Smithers.NodeTest({
  * @category test
  */
 const lockfileParity = Smithers.NodeTest({
-  runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-lockfile-parity.mjs")),
   srcs: [
     ...sources,
@@ -234,7 +235,6 @@ const lockfileParity = Smithers.NodeTest({
  * @category test
  */
 const npmDedupe = Smithers.NodeTest({
-  runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-npm-dedupe.mjs")),
   srcs: sources,
   deps: []
@@ -250,7 +250,6 @@ const npmDedupe = Smithers.NodeTest({
  * @category test
  */
 const npmDedupeUnit = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/check-npm-dedupe.test.mjs")]),
   srcs: sources,
   deps: []
@@ -272,7 +271,8 @@ const npmDedupeUnit = Smithers.NodeTest({
  * @category test
  */
 const dependencyBoundaries = Smithers.NodeTest({
-  runtime,
+  summary: "No package imports cross declared workspace boundaries.",
+  featured: true,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-dependency-boundaries.mjs")),
   srcs: sources,
   deps: []
@@ -290,7 +290,6 @@ const dependencyBoundaries = Smithers.NodeTest({
  * @category test
  */
 const localSmithers = Smithers.NodeTest({
-  runtime,
   runner: Smithers.entrypoint(Smithers.file("//scripts/check-local-smithers.mjs")),
   srcs: sources,
   deps: []
@@ -298,99 +297,22 @@ const localSmithers = Smithers.NodeTest({
 
 /**
  * The guard's own unit suite: the violation patterns, the allowlist, and the
- * mirrored plugin resolvers.
+ * scanned execution surfaces.
  *
  * @since 0.1.0
  * @category test
  */
 const localSmithersUnit = Smithers.NodeTest({
-  runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/check-local-smithers.test.mjs")]),
   srcs: sources,
   deps: []
-})
-
-/**
- * The CLI build the documentation gates spawn.
- *
- * `packages/cli/bin/smithers.mjs` runs `dist/esm/bin.js` when that file
- * exists and `src/bin.ts` otherwise, so a gate that spawns the binary reads
- * the `//packages/cli:lib` output tree whenever the graph has produced one.
- * Without this edge the gate and the build race: `smithers-build test
- * '//scripts/...'` plans the package builds for {@link releasePack} alongside
- * these gates, and a spawn that lands mid-emit resolves half a `dist`.
- * `packages/cli` carries no PACKAGE.ts of its own, so the edge is a selector.
- */
-const cliBuild = Smithers.Target.subtree("//packages/cli/...", "lib")
-
-/**
- * The documentation gate: house style, page shape, links, the CLI catalog
- * against the binary, the removed surfaces, the generated pages, and the route
- * plan.
- *
- * It spawns the working-tree CLI to read `--help`, so it is not cacheable and
- * re-runs regardless.
- *
- * @since 0.1.0
- * @category test
- */
-const docs = Smithers.NodeTest({
-  runtime,
-  runner: Smithers.entrypoint(Smithers.file("//scripts/check-docs.mjs")),
-  srcs: sources,
-  deps: [cliBuild]
-})
-
-/**
- * The bundles `smithers docs`, the installed skill, and smithers.sh serve are
- * regenerated from `docs/pages` and compared byte for byte.
- *
- * @since 0.1.0
- * @category test
- */
-const llms = Smithers.NodeTest({
-  runtime,
-  runner: Smithers.entrypoint(Smithers.file("//scripts/check-llms.mjs")),
-  srcs: sources,
-  deps: []
-})
-
-/**
- * The unit suites behind those two gates: the served-bundle comparison, the
- * deploy workflow, the removal surface, the render helpers, the help parser,
- * the sidebar, the bundle builder, the version guard, and the invocation
- * normalizer.
- *
- * @since 0.1.0
- * @category test
- */
-const docsUnit = Smithers.NodeTest({
-  runtime,
-  runner: Smithers.testRunner([
-    Smithers.file("//scripts/check-llms.test.mjs"),
-    Smithers.file("//scripts/docs-deploy.test.mjs"),
-    Smithers.file("//scripts/docs-links.test.mjs"),
-    Smithers.file("//scripts/docs-removals.test.mjs"),
-    Smithers.file("//scripts/docs-render.test.mjs"),
-    Smithers.file("//scripts/docs-sidebar.test.mjs"),
-    Smithers.file("//scripts/generate-docs-pages.test.mjs"),
-    Smithers.file("//scripts/generate-llms.test.mjs"),
-    Smithers.file("//scripts/llms-version-guard.test.ts"),
-    Smithers.file("//scripts/normalize-bunx.test.ts")
-  ]),
-  srcs: sources,
-  deps: [cliBuild]
 })
 
 export const Package = Smithers.Package({
   targets: {
     browserContract,
     dependencyBoundaries,
-    disasterRecovery,
-    docs,
-    docsUnit,
     effectVersion,
-    llms,
     localSmithers,
     localSmithersUnit,
     lockfileParity,
@@ -401,6 +323,7 @@ export const Package = Smithers.Package({
     releaseRehearsal,
     releaseSmoke,
     releaseVersion,
-    testPinRegister
+    testPinRegister,
+    toolchainPins
   }
 })

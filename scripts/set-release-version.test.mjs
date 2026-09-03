@@ -49,34 +49,33 @@ test("retarget preserves private versions while updating exact workspace ranges"
 
 test("mismatches names the version and every stale internal range", () => {
   const entries = [
-    { directory: "packages/flows", manifest: example },
+    { directory: "packages/smithers/flows", manifest: example },
     {
-      directory: "packages/kernel",
+      directory: "packages/smithers/flows/kernel",
       manifest: { name: "@smthrs/kernel", version: "0.1.0-next.0" }
     }
   ]
 
   assert.deepEqual(mismatches(entries, "0.1.0-next.0"), [
-    "packages/flows: version is 0.1.0, expected 0.1.0-next.0",
-    "packages/flows: dependencies.@smthrs/kernel is 0.1.0, expected 0.1.0-next.0"
+    "packages/smithers/flows: version is 0.1.0, expected 0.1.0-next.0",
+    "packages/smithers/flows: dependencies.@smthrs/kernel is 0.1.0, expected 0.1.0-next.0"
   ])
   assert.deepEqual(mismatches(entries.slice(1), "0.1.0-next.0"), [])
 })
 
 test("this workspace is internally coherent at its current version", () => {
   const entries = readManifests()
-  const version = entries.find(({ directory }) => directory === "packages/flows").manifest.version
+  const version = entries.find(({ directory }) => directory === "packages/smithers/flows").manifest.version
 
   assert.deepEqual(mismatches(entries, version), [])
 })
 
 test("workspace discovery follows every pnpm-workspace package glob", () => {
   const directories = new Set(readManifests().map(({ directory }) => directory))
-  assert.equal(directories.has("packages/build/infra"), true)
+  assert.equal(directories.has("packages/smithers/build/infra"), true)
   assert.equal(directories.has("examples"), true)
   assert.equal(directories.has("apps/server"), true)
-  assert.equal(directories.has("apps/shared"), true)
-  assert.equal(directories.has("apps/tui"), true)
+  assert.equal(directories.has("packages/rpc"), true)
   assert.equal(directories.has("apps/ui"), true)
 })
 
@@ -110,9 +109,9 @@ test("retargetSource refuses a file that no longer carries the declaration", () 
 
 test("sourceMismatches names a literal the manifests left behind", () => {
   assert.deepEqual(sourceMismatches("9.9.9"), [
-    "packages/observability/src/Otlp.ts: defaultServiceVersion is 1.0.0-rc.0, expected 9.9.9",
-    "packages/migrate/src/flow/Cli.ts: version is 1.0.0-rc.0, expected 9.9.9",
-    "packages/migrate/src/Report.ts: tool.version is 1.0.0-rc.0, expected 9.9.9"
+    "packages/smithers/flows/observability/src/Otlp.ts: defaultServiceVersion is 1.0.0-rc.0, expected 9.9.9",
+    "packages/smithers/migrate/src/flow/Cli.ts: version is 1.0.0-rc.0, expected 9.9.9",
+    "packages/smithers/migrate/src/Report.ts: tool.version is 1.0.0-rc.0, expected 9.9.9"
   ])
 })
 

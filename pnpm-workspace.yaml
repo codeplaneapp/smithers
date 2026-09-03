@@ -1,9 +1,28 @@
+# Membership is declared one directory level at a time, under a named parent,
+# never with `packages/**` or a bare `packages/*/*`. Packages nest: a granular
+# package lives inside the product package it belongs to, so the hierarchy is
+# visible in the tree and a reviewer reads the relationship instead of
+# inferring it. Nesting changes directories only — every npm name, version,
+# dist-tag, and the published set are exactly what they were when the tree was
+# flat.
+#
+# The shape below is what makes that safe. A built package writes a generated
+# `dist/cjs/package.json`, which sits TWO levels below its package directory,
+# so any pattern with two wildcards in a row (`packages/*/*`, `packages/**`)
+# would enrol build output as a workspace member. One wildcard under a named
+# parent cannot: nothing one level inside a package directory carries a
+# manifest except another package. Adding a parent means adding its line here
+# and the identical line to `workspaces` in the root `package.json`.
 packages:
   - "packages/*"
-  - "packages/build/infra"
-  - "e2e"
+  - "packages/smithers/*"
+  - "packages/smithers/agent/*"
+  - "packages/smithers/build/*"
+  - "packages/smithers/flows/*"
+  - "packages/smithers/ui/*"
   - "examples"
   - "apps/*"
+  - "evals/*"
 
 allowBuilds:
   "@journeyapps/wa-sqlite": false
@@ -18,19 +37,4 @@ allowBuilds:
   workerd: false
 
 linkWorkspacePackages: true
-minimumReleaseAgeExclude:
-  - '@tanstack/react-router@1.170.31'
-  - '@tanstack/react-start-client@1.168.29'
-  - '@tanstack/react-start-rsc@0.1.47'
-  - '@tanstack/react-start-server@1.167.36'
-  - '@tanstack/react-start@1.168.48'
-  - '@tanstack/router-core@1.171.26'
-  - '@tanstack/router-generator@1.167.32'
-  - '@tanstack/router-plugin@1.168.34'
-  - '@tanstack/start-client-core@1.170.26'
-  - '@tanstack/start-plugin-core@1.171.38'
-  - '@tanstack/start-server-core@1.169.30'
-  - '@tanstack/start-storage-context@1.167.28'
-patchedDependencies:
-  vocs@2.8.5: patches/vocs@2.8.5.patch
 verifyDepsBeforeRun: false

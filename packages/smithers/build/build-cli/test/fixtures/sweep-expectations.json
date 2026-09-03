@@ -1,0 +1,459 @@
+{
+  "version": 1,
+  "workspace": "artsy/force",
+  "derivedFrom": [
+    "PACKAGE-API-CHECKLIST.md (W4 executes-green / correct-refusal sets, 2026-08-25 host probe)",
+    "packages/smithers/build/build-cli/test/fixtures/force-spec/ (frozen 2026-08-25, 14 Package maps, 81 labels)"
+  ],
+  "doc": {
+    "classes": {
+      "executes-green": "Cheap enough for the default sweep pass; expected to execute and exit 0.",
+      "typed-refusal": "Expected to fail fast with a typed refusal whose message contains `refusal.substring`; cheap to run.",
+      "heavy": "Force-scale build/test cost; the sweep runs it only with --heavy. `expect` says what the run must produce.",
+      "service": "Long-running Serve target (or a test that boots one); the sweep runs it only with --services and probes readiness."
+    },
+    "expect": {
+      "green": "exit 0",
+      "refusal": "nonzero exit and the declared refusal substring in the combined output",
+      "red": "nonzero exit that is an honest failure of the checked work, not a refusal (e.g. generator drift)",
+      "ready": "reaches readiness (a line matching /ready|listening|healthy/i), then shuts down cleanly on SIGTERM"
+    },
+    "refusalCodes": {
+      "host-bin-absent": "declared S.Host.bin missing from PATH; message must name the bin",
+      "missing-secret": "declared S.Secret unset at spawn; message must name the secret",
+      "approval-required": "approval: \"required\" with no interactive approver; message must contain 'approval'",
+      "needs-input": "Agent payload missing headless; message must contain 'payload'",
+      "memory-unavailable": "S.Memory.* with smithers cloud unreachable/unconfigured; message must contain 'memory'",
+      "script-precondition": "the target's own script refuses a stated precondition; matched by substring only"
+    },
+    "alternates": "Legitimate second outcomes where the checklist is ambiguous or environment-dependent; the sweep reports them as 'alternate', which passes but is listed separately.",
+    "mutates": "Running the target writes into the workspace tree; the sweep resets the clone (git checkout + clean, preserving node_modules/.flows/.env.shared) after it."
+  },
+  "labels": {
+    "//.github:ci": {
+      "class": "executes-green",
+      "notes": "Github.Workflow declaration; executing it renders/checks the ci workflow. W2 defines the execution semantics; a render-check green is expected."
+    },
+    "//.github:danger": {
+      "class": "typed-refusal",
+      "refusal": { "code": "missing-secret", "substring": "DANGER_GITHUB_API_TOKEN" },
+      "notes": "danger bin is present in node_modules; the declared secret is not set in the sweep environment (W4 correct-refusal set: danger (creds))."
+    },
+    "//.github:dangerCi": {
+      "class": "executes-green",
+      "notes": "Github.Workflow declaration; render-check expected green."
+    },
+    "//.github:github": {
+      "class": "executes-green",
+      "alternates": [
+        { "expect": "red", "notes": "drift red if the committed .github/workflows no longer match the CiGen render" }
+      ],
+      "notes": "CiGen in default check mode; the sweep never passes --write."
+    },
+    "//.github:pr": {
+      "class": "typed-refusal",
+      "refusal": { "code": "missing-secret", "substring": "GITHUB_TOKEN" },
+      "alternates": [{ "expect": "refusal", "refusal": { "code": "approval-required", "substring": "approval" } }],
+      "notes": "Lane E: refuses without token+approval; whichever check fires first is acceptable."
+    },
+    "//.github:review": {
+      "class": "executes-green",
+      "notes": "Github.Workflow declaration; render-check expected green."
+    },
+    "//.storybook:storybook": {
+      "class": "service",
+      "expect": "ready",
+      "notes": "storybook dev on :6006; port readiness."
+    },
+    "//.storybook:storybookBuild": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Full storybook production build; minutes."
+    },
+    "//data:schema": {
+      "class": "executes-green",
+      "notes": "S.file wrapped into a Filegroup; hashing sources is the whole execution."
+    },
+    "//data:syncSchema": {
+      "class": "executes-green",
+      "mutates": true,
+      "network": true,
+      "notes": "Fetches metaphysics schema (sandbox network:true) and rewrites data/schema.graphql; W4 executes-green set."
+    },
+    "//data:syncSchemaLocal": {
+      "class": "typed-refusal",
+      "refusal": { "code": "script-precondition", "substring": "metaphysics must be checked out beside force" },
+      "mutates": true,
+      "alternates": [{ "expect": "green", "notes": "green only if ../metaphysics exists beside the sweep workspace" }],
+      "notes": "W2 checklist: refusal without metaphysics. The e2e clone has no sibling metaphysics checkout."
+    },
+    "//:claudeConfig": {
+      "class": "executes-green",
+      "notes": "Generate in default check mode over scripts/generate-claude.mjs."
+    },
+    "//:claudeMd": {
+      "class": "executes-green",
+      "notes": "Generate emit symlink check; CLAUDE.md -> AGENTS.md already exists in the clone. W4 executes-green set."
+    },
+    "//:commit": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "detect-secrets-hook" },
+      "mutates": true,
+      "notes": "Git.Commit gates on preCommit, whose detectSecrets member needs the absent detect-secrets-hook host bin; the gate refusal blocks the commit."
+    },
+    "//:deleteReviewApp": {
+      "class": "typed-refusal",
+      "refusal": { "code": "approval-required", "substring": "approval" },
+      "notes": "approval: \"required\"; must never reach kubectl headless (W4 correct-refusal set)."
+    },
+    "//:detectSecrets": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "detect-secrets-hook" },
+      "notes": "2026-08-25 host probe: detect-secrets-hook ABSENT."
+    },
+    "//:detectSecretsRegen": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "detect-secrets" },
+      "mutates": true,
+      "notes": "2026-08-25 host probe: detect-secrets ABSENT. mutates guards the .secrets.baseline rewrite if the bin ever appears."
+    },
+    "//:detectSecretsRescan": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "detect-secrets" },
+      "notes": "2026-08-25 host probe: detect-secrets ABSENT."
+    },
+    "//:hokusai": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "hokusai" },
+      "notes": "A Serve target, but the declared host bin is absent, so the refusal fires at spawn and nothing serves; safe in the cheap pass."
+    },
+    "//:localPaletteDev": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "yalc" },
+      "mutates": true,
+      "notes": "2026-08-25 host probe: yalc ABSENT. mutates guards package.json/yarn.lock if it ever appears."
+    },
+    "//:localPaletteDevStop": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "yalc" },
+      "mutates": true,
+      "notes": "2026-08-25 host probe: yalc ABSENT."
+    },
+    "//:postCommit": {
+      "class": "typed-refusal",
+      "refusal": { "code": "memory-unavailable", "substring": "memory" },
+      "alternates": [
+        {
+          "expect": "green",
+          "notes": "Lane E allows Memory targets to no-op gracefully when smithers cloud is unconfigured; suite is then green via claudeConfig+routesGen"
+        }
+      ],
+      "notes": "Suite [claudeConfig, routesGen, retainCommit]; outcome tracks retainCommit. Integration must settle refusal-vs-graceful-no-op once W2/Lane E lands."
+    },
+    "//:postMerge": {
+      "class": "executes-green",
+      "notes": "Alias of //src:relay; relay-compiler build then materialize (~a minute; it is a dependency of most targets anyway)."
+    },
+    "//:preCommit": {
+      "class": "typed-refusal",
+      "refusal": { "code": "host-bin-absent", "substring": "detect-secrets-hook" },
+      "notes": "Suite member detectSecrets refuses on the absent host bin; lint+typeCheck members are green."
+    },
+    "//:prePush": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Suite [lint, typeCheck, test, agentLints]; contains the full jest run. Agent lints are vacuously green on a clean diff."
+    },
+    "//:prReview": {
+      "class": "executes-green",
+      "notes": "Agent.Lint over S.gitDiff(); Lane D: vacuously green with zero agent spawns on a clean diff."
+    },
+    "//:retainCommit": {
+      "class": "typed-refusal",
+      "refusal": { "code": "memory-unavailable", "substring": "memory" },
+      "alternates": [{ "expect": "green", "notes": "Lane E: Memory targets no-op gracefully without smithers cloud" }],
+      "notes": "S.Memory.Retain with no reachable smithers cloud in the sweep environment. Ambiguity (refuse vs graceful no-op) is real; both recorded."
+    },
+    "//:syncEnv": {
+      "class": "typed-refusal",
+      "refusal": { "code": "missing-secret", "substring": "AWS_ACCESS_KEY_ID" },
+      "mutates": true,
+      "notes": "aws bin is present; the declared secrets are not set (W4 correct-refusal set: syncEnv (creds))."
+    },
+    "//patches:patches": {
+      "class": "executes-green",
+      "notes": "Filegroup."
+    },
+    "//patches:prepare": {
+      "class": "executes-green",
+      "notes": "patch-package is present and idempotent. It writes into node_modules, which the e2e clone symlinks to the live checkout; patches are already applied there, so the run is a no-op re-apply. Not marked mutates: the git tree is untouched."
+    },
+    "//playwright:e2e": {
+      "class": "executes-green",
+      "notes": "Filegroup."
+    },
+    "//playwright:smoke": {
+      "class": "service",
+      "expect": "green",
+      "alternates": [{ "expect": "refusal", "refusal": { "code": "script-precondition", "substring": ".env.shared" } }],
+      "notes": "Playwright test that boots //src:dev as a service. Lane A: [b] acceptable if the app needs .env.shared (syncEnv is creds-blocked). The test itself terminates; 'green' is the pass shape, readiness belongs to the dev dependency."
+    },
+    "//src:agentLints": {
+      "class": "executes-green",
+      "notes": "Suite of five Agent.Lint targets; all vacuously green on a clean diff (Lane D)."
+    },
+    "//src:analyticsLint": {
+      "class": "executes-green",
+      "notes": "Vacuously green on a clean diff."
+    },
+    "//src:build": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Filegroup over buildClient+buildServer; forces both production rspack builds."
+    },
+    "//src:buildClient": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "rspack production client build."
+    },
+    "//src:buildClientDev": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "rspack development client build; W4 executes-green set."
+    },
+    "//src:buildServer": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "rspack production server build."
+    },
+    "//src:buildServerDev": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "rspack development server build."
+    },
+    "//src:bundleReportClient": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Production client build with BUNDLE_ANALYZE=true."
+    },
+    "//src:bundleReportServer": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Production server build with BUNDLE_ANALYZE=true."
+    },
+    "//src:bundleStats": {
+      "class": "heavy",
+      "expect": "green",
+      "network": true,
+      "alternates": [
+        {
+          "expect": "red",
+          "notes": "relative-ci-agent may require RELATIVE_CI credentials/CI context not modelled by declared secrets"
+        }
+      ],
+      "notes": "npx relative-ci-agent over bundleReportClient output; behavior outside CI is unverified."
+    },
+    "//src:clean": {
+      "class": "executes-green",
+      "mutates": true,
+      "notes": "Removes declared outputs and cache paths only."
+    },
+    "//src:cleanRelay": {
+      "class": "executes-green",
+      "alternates": [
+        { "expect": "red", "notes": "the default sandbox may deny writes outside the workspace ($TMPDIR)" }
+      ],
+      "notes": "rm -rf of RelayFindGraphQLTags-* under $TMPDIR; W2 checklist uses it as the Shell.Run command-form proof."
+    },
+    "//src:conventionsLint": {
+      "class": "executes-green",
+      "notes": "Vacuously green on a clean diff."
+    },
+    "//src:deadCode": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "knip over the whole project; --no-exit-code makes the tool exit 0 by design."
+    },
+    "//src:dev": {
+      "class": "service",
+      "expect": "ready",
+      "alternates": [{ "expect": "refusal", "refusal": { "code": "script-precondition", "substring": ".env.shared" } }],
+      "notes": "Express dev server; /health readiness with 90s timeout. Lane A: [b] acceptable if the app needs .env.shared."
+    },
+    "//src:format": {
+      "class": "executes-green",
+      "mutates": true,
+      "notes": "prettier --write over srcs, confined to the declared write-set (W4 executes-green set)."
+    },
+    "//src:formatProject": {
+      "class": "executes-green",
+      "mutates": true,
+      "notes": "prettier --write over src/**/*.{ts,tsx,js,jsx}."
+    },
+    "//src:importGraph": {
+      "class": "executes-green",
+      "notes": "rspack resolve pass over client.tsx/server entries; W4 executes-green set. Moderate cost, no emit."
+    },
+    "//src:jestDebug": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Full jest suite --runInBand with --inspect; extremely slow and opens an inspector port. Heavy pass only."
+    },
+    "//src:lint": {
+      "class": "executes-green",
+      "notes": "biome lint; the canonical W2 execution proof."
+    },
+    "//src:openConsentModal": {
+      "class": "executes-green",
+      "notes": "macOS `open` of a localhost URL; exits 0 whether or not anything listens. Visible side effect: a browser window opens on the host."
+    },
+    "//src:preDeploy": {
+      "class": "heavy",
+      "expect": "refusal",
+      "refusal": { "code": "missing-secret", "substring": "AWS_ACCESS_KEY_ID" },
+      "notes": "Alias of publishAssets. Classed heavy, not typed-refusal: the buildClient dependency builds before the spawn-time secret check fires."
+    },
+    "//src:publishAssets": {
+      "class": "heavy",
+      "expect": "refusal",
+      "refusal": { "code": "missing-secret", "substring": "AWS_ACCESS_KEY_ID" },
+      "notes": "W4 correct-refusal set (creds); the heavy buildClient dependency runs first."
+    },
+    "//src:publishAssetsLocal": {
+      "class": "heavy",
+      "expect": "refusal",
+      "refusal": { "code": "missing-secret", "substring": "AWS_ACCESS_KEY_ID" },
+      "notes": "Alias of publishAssets."
+    },
+    "//src:relay": {
+      "class": "executes-green",
+      "notes": "Materialize of relayArtifacts into src/__generated__ (gitignored, so no git reset is needed); W4 executes-green set."
+    },
+    "//src:relayArtifacts": {
+      "class": "executes-green",
+      "notes": "relay-compiler build into the CAS; W4 executes-green set and a dependency of most of the graph."
+    },
+    "//src:relayLint": {
+      "class": "executes-green",
+      "notes": "Vacuously green on a clean diff."
+    },
+    "//src:routesGen": {
+      "class": "executes-green",
+      "notes": "Generate in default check mode; W4 executes-green set."
+    },
+    "//src:ruleOfThree": {
+      "class": "typed-refusal",
+      "refusal": { "code": "approval-required", "substring": "approval" },
+      "alternates": [
+        {
+          "expect": "green",
+          "notes": "a clean diff may make the agent target vacuously green before the approval gate is consulted"
+        }
+      ],
+      "notes": "Agent.Pr with approval: \"required\"; headless refusal expected."
+    },
+    "//src:scan": {
+      "class": "heavy",
+      "expect": "green",
+      "network": true,
+      "alternates": [{ "expect": "red", "notes": "react-scan without a target app/URL may exit nonzero; unverified" }],
+      "notes": "npx react-scan@latest; network fetch of an npm package. Heavy pass only to keep the default sweep hermetic."
+    },
+    "//src:srcs": {
+      "class": "executes-green",
+      "notes": "Filegroup."
+    },
+    "//src:ssrLint": {
+      "class": "executes-green",
+      "notes": "Lane D canonical vacuous-green proof target on a clean diff."
+    },
+    "//src:startProd": {
+      "class": "service",
+      "expect": "ready",
+      "alternates": [{ "expect": "refusal", "refusal": { "code": "script-precondition", "substring": ".env.shared" } }],
+      "notes": "Production server; depends on the heavy //src:build, so the services pass implies heavy builds."
+    },
+    "//src:startProdDebug": {
+      "class": "service",
+      "expect": "ready",
+      "alternates": [{ "expect": "refusal", "refusal": { "code": "script-precondition", "substring": ".env.shared" } }],
+      "notes": "Production server with --inspect; no health interval by design (debugger pauses must not read unhealthy)."
+    },
+    "//src:test": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Full jest suite; the longest single target in the sweep. W4 executes-green set."
+    },
+    "//src:testAccuracyLint": {
+      "class": "executes-green",
+      "notes": "Vacuously green on a clean diff (scoped gitDiff with addedLines predicate)."
+    },
+    "//src:typeCheck": {
+      "class": "executes-green",
+      "notes": "tsc over the project (minutes, accepted in the default pass — it is the W2 cache hit/miss proof target)."
+    },
+    "//src:unreachableCode": {
+      "class": "executes-green",
+      "alternates": [
+        { "expect": "red", "notes": "an honest red if force currently has files outside the import closure" }
+      ],
+      "notes": "S.Test that srcs minus importGraph.files is empty; CI runs it, so green is the expected steady state."
+    },
+    "//src/Apps/Auction:srcs": {
+      "class": "executes-green",
+      "notes": "Filegroup."
+    },
+    "//src/Apps/Auction:test": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Scoped jest run keyed on the app's import closure (W4: app closure tests)."
+    },
+    "//src/Apps/Order2:srcs": {
+      "class": "executes-green",
+      "notes": "Filegroup."
+    },
+    "//src/Apps/Order2:test": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Scoped jest run keyed on the app's import closure."
+    },
+    "//src/Apps/Settings:srcs": {
+      "class": "executes-green",
+      "notes": "Filegroup."
+    },
+    "//src/Apps/Settings:test": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Scoped jest run keyed on the app's import closure."
+    },
+    "//src/Server:srcs": {
+      "class": "executes-green",
+      "notes": "Filegroup."
+    },
+    "//src/Server:test": {
+      "class": "heavy",
+      "expect": "green",
+      "notes": "Scoped jest run keyed on the server's import closure (W4: server closure tests)."
+    },
+    "//workflows/adding-a-new-app-route:addAppRoute": {
+      "class": "typed-refusal",
+      "refusal": { "code": "needs-input", "substring": "payload" },
+      "mutates": true,
+      "notes": "Agent.Diff with required Input.String payload fields; headless run must refuse naming the missing payload."
+    },
+    "//workflows/beep:beep": {
+      "class": "executes-green",
+      "notes": "afplay under sandbox \"none\"; audible side effect. W4 executes-green set."
+    },
+    "//workflows/fix-sentry-issue:fixSentryIssue": {
+      "class": "typed-refusal",
+      "refusal": { "code": "needs-input", "substring": "payload" },
+      "mutates": true,
+      "alternates": [
+        { "expect": "refusal", "refusal": { "code": "approval-required", "substring": "approval" } },
+        { "expect": "refusal", "refusal": { "code": "missing-secret", "substring": "GITHUB_TOKEN" } }
+      ],
+      "notes": "W4 correct-refusal set says (payload), though the issue field is Input.Optional; approval: \"required\" and the GITHUB_TOKEN secret are equally honest first refusals. Integration must settle the ordering."
+    }
+  }
+}

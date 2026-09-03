@@ -24,7 +24,7 @@ import {
 // those checks guard is vendored, so every checkout runs the same suite over
 // the same data whether or not a clone is present.
 const repositoryRoot = new URL("../../../", import.meta.url)
-const corpusSources = "opencode/packages/core/test/"
+const corpusSources = "opencode/packages/smithers/flows/core/test/"
 const namedCorpus = process.env["FLOWS_OPENCODE_CORPUS"]
 const corpusRoot = namedCorpus === undefined || namedCorpus.trim() === ""
   ? undefined
@@ -128,7 +128,7 @@ describe("ParityManifest", () => {
             name
           )
       )
-      .map((name) => `packages/core/test/${name}`)
+      .map((name) => `packages/smithers/flows/core/test/${name}`)
       .sort()
     expect([...requiredOpenCodeSources].sort()).toEqual(discovered)
   })
@@ -164,7 +164,7 @@ describe("ParityManifest", () => {
   it("classifies heartbeat fencing and exact harness descendants without overclaiming durability", () => {
     const heartbeat = rows.find((row) => row.source.startsWith("smithers #5 "))
     expect(heartbeat).toMatchObject({
-      flowsEquivalent: "flows/packages/engine-store/test/Ownership.test.ts",
+      flowsEquivalent: "flows/packages/smithers/flows/engine-store/test/Ownership.test.ts",
       status: "partial"
     })
 
@@ -189,7 +189,7 @@ describe("ParityManifest", () => {
     for (const [behavior, status] of expected) {
       expect(
         rows.find((row) =>
-          row.source === "packages/core/test/session-runner.test.ts" &&
+          row.source === "packages/smithers/flows/core/test/session-runner.test.ts" &&
           row.behavior === behavior
         ),
         behavior

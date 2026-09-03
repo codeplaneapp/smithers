@@ -1,5 +1,5 @@
 /**
- * Structural model seam coordinated read-only with `packages/model`.
+ * Structural model seam coordinated read-only with `packages/smithers/agent/model`.
  *
  * These shapes are a structural copy of `@smthrs/model`'s request, event, and
  * error contracts, and the copy is deliberate: a third-party engine subject or

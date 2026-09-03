@@ -30,7 +30,7 @@ const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
  * other reason. Node resolves the module's own `@smthrs/*` imports relative to
  * the file, so the workspace link does the rest.
  */
-const barrel = () => import(pathToFileURL(join(root, "packages", "flows", "src", "index.ts")).href)
+const barrel = () => import(pathToFileURL(join(root, "packages", "smithers", "flows", "src", "index.ts")).href)
 
 describe("the @smthrs/flows barrel", () => {
   it("re-exports every namespace it says it does, at runtime", async () => {
@@ -57,14 +57,14 @@ describe("the @smthrs/flows barrel", () => {
   })
 
   it("declares a dependency on every package it re-exports", () => {
-    const manifest = JSON.parse(readFileSync(join(root, "packages", "flows", "package.json"), "utf8"))
-    const source = readFileSync(join(root, "packages", "flows", "src", "index.ts"), "utf8")
+    const manifest = JSON.parse(readFileSync(join(root, "packages", "smithers", "flows", "package.json"), "utf8"))
+    const source = readFileSync(join(root, "packages", "smithers", "flows", "src", "index.ts"), "utf8")
     const dependencies = new Set(Object.keys(manifest.dependencies ?? {}))
     for (const match of source.matchAll(/^export \* (?:as \w+ )?from "(@smthrs\/[^"]+)"/gm)) {
       const name = match[1].split("/").slice(0, 2).join("/")
       assert.ok(
         dependencies.has(name),
-        `packages/flows re-exports ${name} without declaring it as a dependency; the import resolves through the `
+        `packages/smithers/flows re-exports ${name} without declaring it as a dependency; the import resolves through the `
           + "workspace link and then fails for anyone who installs the tarball"
       )
     }
@@ -84,11 +84,28 @@ describe("the 0.x umbrella", () => {
   })
 })
 
+/**
+ * Every package directory under `packages/`, at any depth.
+ *
+ * The walk descends because a granular package can live inside the product
+ * package it belongs to — `packages/smithers/flows/canonical` is `@smthrs/canonical` —
+ * and a reading that stopped at the first level would drop it silently. The
+ * directory it reports is the path under `packages/`, which is what reaches it
+ * on disk.
+ */
+const packageDirectories = (parent = "") =>
+  readdirSync(join(root, "packages", parent), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
+    .flatMap((entry) => {
+      const directory = parent === "" ? entry.name : `${parent}/${entry.name}`
+      return existsSync(join(root, "packages", directory, "package.json"))
+        ? [directory, ...packageDirectories(directory)]
+        : []
+    })
+
 describe("every package's declared root export", () => {
-  const packages = readdirSync(join(root, "packages"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => ({ directory: entry.name, path: join(root, "packages", entry.name, "package.json") }))
-    .filter((entry) => existsSync(entry.path))
+  const packages = packageDirectories()
+    .map((directory) => ({ directory, path: join(root, "packages", directory, "package.json") }))
     .map((entry) => ({ ...entry, manifest: JSON.parse(readFileSync(entry.path, "utf8")) }))
     .filter((entry) => entry.manifest.private !== true)
 

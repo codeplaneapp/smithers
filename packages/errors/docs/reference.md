@@ -54,7 +54,7 @@ if (isSmithersError(error) && error.code === "TELEGRAM_API_ERROR") {
 - `cause`, stored verbatim and not redacted. The caller must redact provider
   text, such as a bot token inside a URL or an API key inside a provider
   message, before attaching it. For example,
-  `packages/integrations/src/telegram/TelegramClient.ts` exports
+  `packages/smithers/agent/integrations/src/telegram/TelegramClient.ts` exports
   `redactBotToken` and runs it over provider text before constructing the
   error.
 - `docsUrl`, this page.

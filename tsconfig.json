@@ -11,19 +11,20 @@
     }
   },
   "include": [
-    "known-files.d.ts",
     "PACKAGE.ts",
     "apps/*/PACKAGE.ts",
-    "ci/PACKAGE.ts",
     "crates/*/PACKAGE.ts",
     "evals/*/PACKAGE.ts",
-    "lint/PACKAGE.ts",
     "scripts/PACKAGE.ts",
     "packages/*/PACKAGE.ts",
     "packages/*/src/**/*",
     "packages/*/test/**/*",
-    "packages/storage/*/src/**/*",
-    "packages/storage/*/test/**/*",
+    "packages/*/*/PACKAGE.ts",
+    "packages/*/*/src/**/*",
+    "packages/*/*/test/**/*",
+    "packages/*/*/*/PACKAGE.ts",
+    "packages/*/*/*/src/**/*",
+    "packages/*/*/*/test/**/*",
     "packages/coding-agent/examples/**/*"
   ],
   "exclude": [

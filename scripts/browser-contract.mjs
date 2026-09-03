@@ -14,37 +14,37 @@
  * browser; any resolution or syntax error fails the gate.
  */
 export const BROWSER_SAFE = [
-  { name: "@smthrs/artifacts", entry: "packages/artifacts/src/index.ts" },
-  { name: "@smthrs/canonical", entry: "packages/canonical/src/index.ts" },
-  { name: "@smthrs/capability", entry: "packages/capability/src/index.ts" },
-  { name: "@smthrs/chain", entry: "packages/chain/src/index.ts" },
-  { name: "@smthrs/crypto", entry: "packages/crypto/src/index.ts" },
-  { name: "@smthrs/jj", entry: "packages/jj/src/index.ts" },
-  { name: "@smthrs/jj/browser/BrowserJj", entry: "packages/jj/src/browser/BrowserJj.ts" },
-  { name: "@smthrs/platform-browser", entry: "packages/platform-browser/src/index.ts" },
+  { name: "@smthrs/artifacts", entry: "packages/smithers/flows/artifacts/src/index.ts" },
+  { name: "@smthrs/canonical", entry: "packages/smithers/flows/canonical/src/index.ts" },
+  { name: "@smthrs/capability", entry: "packages/smithers/flows/capability/src/index.ts" },
+  { name: "@smthrs/chain", entry: "packages/smithers/agent/chain/src/index.ts" },
+  { name: "@smthrs/crypto", entry: "packages/smithers/flows/crypto/src/index.ts" },
+  { name: "@smthrs/jj", entry: "packages/smithers/flows/jj/src/index.ts" },
+  { name: "@smthrs/jj/browser/BrowserJj", entry: "packages/smithers/flows/jj/src/browser/BrowserJj.ts" },
+  { name: "@smthrs/platform-browser", entry: "packages/smithers/flows/platform-browser/src/index.ts" },
   {
     name: "@smthrs/platform-browser/BrowserHost",
-    entry: "packages/platform-browser/src/BrowserHost.ts"
+    entry: "packages/smithers/flows/platform-browser/src/BrowserHost.ts"
   },
-  { name: "@smthrs/sandbox", entry: "packages/sandbox/src/index.ts" },
-  { name: "@smthrs/kernel", entry: "packages/kernel/src/index.ts" },
-  { name: "@smthrs/keys", entry: "packages/keys/src/index.ts" },
-  { name: "@smthrs/plan", entry: "packages/plan/src/index.ts" },
-  { name: "@smthrs/database", entry: "packages/database/src/index.ts" },
-  { name: "@smthrs/journal", entry: "packages/journal/src/index.ts" },
-  { name: "@smthrs/run-store", entry: "packages/run-store/src/index.ts" },
-  { name: "@smthrs/step-cache", entry: "packages/step-cache/src/index.ts" },
-  { name: "@smthrs/flow", entry: "packages/flow/src/index.ts" },
-  { name: "@smthrs/engine", entry: "packages/engine/src/index.ts" },
-  { name: "@smthrs/engine-store", entry: "packages/engine-store/src/index.ts" },
-  { name: "@smthrs/flows", entry: "packages/flows/src/index.ts" },
-  { name: "@smthrs/observability", entry: "packages/observability/src/index.ts" },
-  { name: "@smthrs/sync", entry: "packages/sync/src/index.ts" },
-  { name: "@smthrs/time-travel", entry: "packages/time-travel/src/index.ts" },
-  { name: "@smthrs/std/Grep", entry: "packages/std/src/Grep.ts" },
-  { name: "@smthrs/std/Glob", entry: "packages/std/src/Glob.ts" },
-  { name: "@smthrs/std/Search", entry: "packages/std/src/Search.ts" },
-  { name: "@smthrs/std/PortableSearch", entry: "packages/std/src/PortableSearch.ts" }
+  { name: "@smthrs/sandbox", entry: "packages/smithers/flows/sandbox/src/index.ts" },
+  { name: "@smthrs/kernel", entry: "packages/smithers/flows/kernel/src/index.ts" },
+  { name: "@smthrs/keys", entry: "packages/smithers/flows/keys/src/index.ts" },
+  { name: "@smthrs/plan", entry: "packages/smithers/flows/plan/src/index.ts" },
+  { name: "@smthrs/database", entry: "packages/smithers/flows/database/src/index.ts" },
+  { name: "@smthrs/journal", entry: "packages/smithers/flows/journal/src/index.ts" },
+  { name: "@smthrs/run-store", entry: "packages/smithers/flows/run-store/src/index.ts" },
+  { name: "@smthrs/step-cache", entry: "packages/smithers/flows/step-cache/src/index.ts" },
+  { name: "@smthrs/flow", entry: "packages/smithers/flows/flow/src/index.ts" },
+  { name: "@smthrs/engine", entry: "packages/smithers/flows/engine/src/index.ts" },
+  { name: "@smthrs/engine-store", entry: "packages/smithers/flows/engine-store/src/index.ts" },
+  { name: "@smthrs/flows", entry: "packages/smithers/flows/src/index.ts" },
+  { name: "@smthrs/observability", entry: "packages/smithers/flows/observability/src/index.ts" },
+  { name: "@smthrs/sync", entry: "packages/smithers/flows/sync/src/index.ts" },
+  { name: "@smthrs/time-travel", entry: "packages/smithers/flows/time-travel/src/index.ts" },
+  { name: "@smthrs/std/Grep", entry: "packages/smithers/agent/std/src/Grep.ts" },
+  { name: "@smthrs/std/Glob", entry: "packages/smithers/agent/std/src/Glob.ts" },
+  { name: "@smthrs/std/Search", entry: "packages/smithers/agent/std/src/Search.ts" },
+  { name: "@smthrs/std/PortableSearch", entry: "packages/smithers/agent/std/src/PortableSearch.ts" }
 ]
 
 /**
@@ -55,49 +55,49 @@ export const BROWSER_SAFE = [
 export const NODE_ONLY = [
   {
     name: "@smthrs/platform-node",
-    entry: "packages/platform-node/src/index.ts",
+    entry: "packages/smithers/flows/platform-node/src/index.ts",
     expect: "node:child_process",
     reason: "the Node host bundle spawns child processes"
   },
   {
     name: "@smthrs/platform-bun",
-    entry: "packages/platform-bun/src/index.ts",
+    entry: "packages/smithers/flows/platform-bun/src/index.ts",
     expect: "node:fs",
     reason: "the Bun bundle falls back to the @effect/platform-node adapters off Bun"
   },
   {
     name: "@smthrs/kernel/test/TestHost",
-    entry: "packages/kernel/src/test/TestHost.ts",
+    entry: "packages/smithers/flows/kernel/src/test/TestHost.ts",
     expect: "node:assert",
     reason: "effect/testing's TestClock pulls node:assert"
   },
   {
     name: "@smthrs/jj/node/NodeJj",
-    entry: "packages/jj/src/node/NodeJj.ts",
+    entry: "packages/smithers/flows/jj/src/node/NodeJj.ts",
     expect: "node:child_process",
     reason: "the Node jj adapter spawns the jj CLI"
   },
   {
     name: "@smthrs/jj/bun/BunJj",
-    entry: "packages/jj/src/bun/BunJj.ts",
+    entry: "packages/smithers/flows/jj/src/bun/BunJj.ts",
     expect: "node:child_process",
     reason: "the Bun jj adapter reuses the Node child-process implementation"
   },
   {
     name: "@smthrs/database/node/NodeDatabase",
-    entry: "packages/database/src/node/NodeDatabase.ts",
+    entry: "packages/smithers/flows/database/src/node/NodeDatabase.ts",
     expect: "node:sqlite",
     reason: "the Node database layer is node:sqlite through @effect/sql-sqlite-node"
   },
   {
     name: "@smthrs/flows/NodeRuntime",
-    entry: "packages/flows/src/NodeRuntime.ts",
+    entry: "packages/smithers/flows/src/NodeRuntime.ts",
     expect: "node:sqlite",
     reason: "the supported production composition opens the database through NodeDatabase"
   },
   {
     name: "@smthrs/flows/SandboxedFlow",
-    entry: "packages/flows/src/SandboxedFlow.ts",
+    entry: "packages/smithers/flows/src/SandboxedFlow.ts",
     expect: "node:url",
     reason: "the sandboxed child-flow tier bundles a host module with esbuild and starts a guest runtime"
   }

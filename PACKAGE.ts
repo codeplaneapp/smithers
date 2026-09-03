@@ -10,20 +10,10 @@ export const rootJSDocConfig = Smithers.file("//eslint.jsdoc.js")
 export const rootInvariantsConfig = Smithers.file("//eslint.invariants.js")
 const workspace = Smithers.pnpmWorkspace("//pnpm-workspace.yaml")
 
-const knownFiles = Smithers.Generate({
-  script: Smithers.file("//scripts/generate-known-files.mjs"),
-  changes: ["known-files.d.ts"]
-})
-
-export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
-export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
-
-export const bunRuntime = Smithers.Runtime.Bun({ version: ">=1.3.0" })
-export const bunPackageManager = Smithers.PackageManager.BunPackages({ runtime: bunRuntime })
-
-export const rustToolchain = Smithers.RustToolchain.Pinned({})
-
 const tsconfig = Smithers.Tsconfig({
+  summary: "Regenerate and check the workspace tsconfig.json from PACKAGE.ts.",
+  featured: true,
+  mode: "check",
   extends: rootTsconfig,
   compilerOptions: {
     noEmit: true,
@@ -32,42 +22,59 @@ const tsconfig = Smithers.Tsconfig({
     paths: { "*": ["./*"] }
   },
   include: [
-    "known-files.d.ts",
-    "PACKAGE.ts",
-    "apps/*/PACKAGE.ts",
-    "ci/PACKAGE.ts",
-    "crates/*/PACKAGE.ts",
-    "evals/*/PACKAGE.ts",
-    "lint/PACKAGE.ts",
-    "scripts/PACKAGE.ts",
-    "packages/*/PACKAGE.ts",
-    "packages/*/src/**/*",
-    "packages/*/test/**/*",
-    "packages/storage/*/src/**/*",
-    "packages/storage/*/test/**/*",
-    "packages/coding-agent/examples/**/*"
+    Smithers.file("PACKAGE.ts"),
+    Smithers.glob("apps/*/PACKAGE.ts"),
+    Smithers.glob("crates/*/PACKAGE.ts"),
+    Smithers.glob("evals/*/PACKAGE.ts"),
+    Smithers.file("scripts/PACKAGE.ts"),
+    // One entry per nesting depth, spelled out. Packages nest: a granular
+    // package lives inside the product package it belongs to, so
+    // `@smthrs/canonical` is `packages/smithers/flows/canonical` and
+    // `@smthrs/cli` is `packages/smithers`. Three depths cover the tree, and
+    // `packages/**` is deliberately not used: it would sweep in every `dist`
+    // tree a build writes, which is the same reason `pnpm-workspace.yaml`
+    // names one parent at a time.
+    Smithers.glob("packages/*/PACKAGE.ts"),
+    Smithers.glob("packages/*/src/**/*"),
+    Smithers.glob("packages/*/test/**/*"),
+    Smithers.glob("packages/*/*/PACKAGE.ts"),
+    Smithers.glob("packages/*/*/src/**/*"),
+    Smithers.glob("packages/*/*/test/**/*"),
+    Smithers.glob("packages/*/*/*/PACKAGE.ts"),
+    Smithers.glob("packages/*/*/*/src/**/*"),
+    Smithers.glob("packages/*/*/*/test/**/*"),
+    Smithers.glob("packages/coding-agent/examples/**/*")
   ],
-  exclude: ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
+  exclude: [
+    Smithers.glob("**/dist/**"),
+    Smithers.glob("packages/coding-agent/examples/extensions/gondolin/**")
+  ]
 })
 
+// The package manager comes from `.smithers/WORKSPACE.ts`, which is where the
+// workspace declares it once; the two targets name the file it writes because
+// a target's output tree and declared inputs are fixed when this file is
+// evaluated, before any workspace declaration has been read.
+const lockfilePath = "pnpm-lock.yaml"
+
 const lockfile = Smithers.Lockfile({
-  packageManager,
+  lockfilePath,
   manifests: [workspace]
 })
 
 const nodeModules = Smithers.Install({
-  packageManager,
+  lockfilePath,
   lockfile,
   workspaceManifest: workspace
 })
 
 const ubuntu = "ubuntu-latest"
 
-const node = Smithers.CiToolchain.Node({ runtime, release: "22.19.0" })
+const node = Smithers.CiToolchain.Node({ release: "22.19.0" })
 
-const bareNode = Smithers.CiToolchain.Node({ runtime, release: "22.19.0", cachePackageStore: false })
+const bareNode = Smithers.CiToolchain.Node({ release: "22.19.0", cachePackageStore: false })
 
-const bun = Smithers.CiToolchain.Bun({ runtime: bunRuntime, release: "1.3.14" })
+const bun = Smithers.CiToolchain.Bun({ release: "1.3.14" })
 
 const jj = Smithers.CiToolchain.Jj({ release: "0.39.0" })
 // `@smthrs/std` proves its portable search against a real `rg`: the conformance
@@ -78,7 +85,7 @@ const ripgrep = Smithers.CiToolchain.Ripgrep({ release: "14.1.1" })
 // Confined targets run under bubblewrap on Linux, which the hosted runner
 // image does not ship. The step is a no-op on the macOS and Windows rows.
 const bubblewrap = Smithers.CiToolchain.Apt({ packages: ["bubblewrap"] })
-// `//packages/build-cli:test` drives a real `forge` and a real Go toolchain:
+// `//packages/smithers/build/build-cli:test` drives a real `forge` and a real Go toolchain:
 // it builds and tests a Foundry package and asserts `forge fmt --check` drift,
 // and it builds a Go package tree. Without them six cases fail on the REQUIRED
 // ubuntu row with `host binary "forge" is not present on PATH`, which is a
@@ -94,7 +101,8 @@ const foundry = Smithers.CiToolchain.Foundry({ release: "v1.8.1" })
 const dockerImageStore = Smithers.CiToolchain.Docker({ imageStore: "containerd" })
 
 const ci = Smithers.GithubCiGen({
-  packageManager,
+  summary: "Regenerate and drift-check .github/workflows/ci.yml, the pipeline definition (not the run itself).",
+  featured: true,
   cacheUrlSecret: cacheUrl,
   cacheTokenSecret: cacheToken,
   workflowDispatch: false,
@@ -103,7 +111,7 @@ const ci = Smithers.GithubCiGen({
     { name: "documentation parity", verb: Smithers.Verb.Docs, pattern: "//packages/...", job: "test" },
     { name: "browser contract", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }
   ],
-  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "e2e-faults", "packages"],
+  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "browser", "e2e-faults", "packages"],
   jobs: [
     {
       id: "test",
@@ -124,7 +132,6 @@ const ci = Smithers.GithubCiGen({
             ".github/workflows/release.yml",
             ".github/workflows/apps-deploy.yml",
             ".github/workflows/canary.yml",
-            ".github/workflows/docs-deploy.yml",
             ".github/workflows/pr-review.yml"
           ]
         })
@@ -132,12 +139,30 @@ const ci = Smithers.GithubCiGen({
       steps: [
         { name: "Workspace targets", verb: Smithers.Verb.Ci, pattern: "//packages/...", parallelism: 2 },
         { name: "Script gates", verb: Smithers.Verb.Test, pattern: "//scripts/..." },
+        { name: "JSDoc rule harness", verb: Smithers.Verb.Test, pattern: "//:jsdocRules" },
+        // Every `evals/*` directory is its own workspace member now, so each
+        // one's targets carry the standard `check`/`test` names and run from
+        // the directory that pins their toolchain.
         {
           name: "Agent eval suite (offline, baseline-gated)",
           verb: Smithers.Verb.Test,
-          pattern: "//evals/agent:suite"
+          pattern: "//evals/agent:test"
         },
-        { name: "Agent eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/agent:types" },
+        { name: "Agent eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/agent:check" },
+        // The authoring fine-tune's dataset validator. It reads the committed
+        // `data/pilot-sft.jsonl` and nothing else, so it gates offline; the
+        // Fireworks upload and training targets beside it are `run`-verb only
+        // and never enter a `ci` graph.
+        {
+          name: "Authoring eval dataset (offline)",
+          verb: Smithers.Verb.Test,
+          pattern: "//evals/authoring:test"
+        },
+        { name: "Authoring eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/authoring:check" },
+        // The SWE-bench rig typechecks here and nowhere else. The benchmark
+        // itself spends real API tokens and needs docker with multi-gigabyte
+        // images, so it stays operator-run and has no target at all.
+        { name: "SWE-bench rig typecheck", verb: Smithers.Verb.Build, pattern: "//evals/swebench:check" },
         // The review app, the two Workers, and the seeded-bug eval. Without
         // these steps the only pipeline that ran them was the 0.x one this
         // repository replaced: `//packages/...` does not reach `apps/`, and the
@@ -146,29 +171,28 @@ const ci = Smithers.GithubCiGen({
         { name: "Review app and workers", verb: Smithers.Verb.Ci, pattern: "//apps/review" },
         { name: "Bug worker", verb: Smithers.Verb.Ci, pattern: "//apps/bug-worker" },
         { name: "Status site", verb: Smithers.Verb.Ci, pattern: "//apps/status-site" },
+        // smithers.sh: the landing page and the Starlight docs. `astro check`
+        // and `astro build` over apps/site/src/content/docs.
+        { name: "Site", verb: Smithers.Verb.Ci, pattern: "//apps/site" },
         {
           name: "Review eval suite (offline, baseline-gated)",
           verb: Smithers.Verb.Test,
           pattern: "//evals/review-seeded-bugs"
         },
-        // `evals/*` has no manifest of its own, so `types: ["node"]`
-        // (tsconfig.base.json) resolves by walking up to the root
-        // `node_modules/@types`. The root `@types/node` devDependency is what
-        // links it, and this step is the second of the two targets that
-        // typecheck there.
-        { name: "Review eval typecheck", verb: Smithers.Verb.Build, pattern: "//evals/review-seeded-bugs:types" },
-        // The fault matrix typechecks here, in the required job, while the
-        // matrix itself runs advisory below. A stale fixture is deterministic
-        // and cheap to catch: `fixtures/claimChild.ts` called the removed
-        // `Control.pause` and died at runtime in every case that spawned it,
-        // and no gate saw either the type error or the death.
-        { name: "Fault matrix typecheck", verb: Smithers.Verb.Build, pattern: "//e2e:check" },
-        { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" },
-        // The known-file registry is generated from a workspace scan, so a new
-        // or removed file drifts it. The job checks out without submodules and
-        // a maintainer's checkout has them initialized; the scan stops at every
-        // nested repository, so both produce the same file.
-        { name: "Known-file registry drift", verb: Smithers.Verb.Lint, pattern: "//:knownFiles" }
+        {
+          name: "Review eval typecheck",
+          verb: Smithers.Verb.Build,
+          pattern: "//evals/review-seeded-bugs:check"
+        },
+        // The fault matrix no longer typechecks here. It used to need its own
+        // step because it was its own workspace member with its own tsconfig;
+        // every case now lives in the package it tests, under `test/faults`,
+        // which that package's `check` already covers through the
+        // `//packages/...` step above. The reason for the check is unchanged:
+        // a stale fixture is deterministic and cheap to catch, and
+        // `fixtures/claimChild.ts` once called the removed `Control.pause` and
+        // died at runtime in every case that spawned it.
+        { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" }
       ]
     },
     {
@@ -195,9 +219,8 @@ const ci = Smithers.GithubCiGen({
       runsOn: ubuntu,
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({
-        submodules: true,
         runtimes: [bareNode],
-        rust: Smithers.CiToolchain.Rust({ toolchain: rustToolchain })
+        rust: Smithers.CiToolchain.Rust({})
       }),
       steps: [
         { name: "Cargo lint gates", verb: Smithers.Verb.Lint, pattern: "//crates/flows-jj" },
@@ -210,9 +233,8 @@ const ci = Smithers.GithubCiGen({
       runsOn: ubuntu,
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({
-        submodules: true,
         runtimes: [bareNode],
-        rust: Smithers.CiToolchain.Rust({ toolchain: rustToolchain, cache: false })
+        rust: Smithers.CiToolchain.Rust({ cache: false })
       }),
       steps: [
         { name: "Build-script unit tests", verb: Smithers.Verb.Test, pattern: "//crates/flows-jj:buildScript" },
@@ -224,23 +246,34 @@ const ci = Smithers.GithubCiGen({
       ]
     },
     {
-      // The fault-injection matrix: 18 crash, restart, gateway, time-travel,
-      // provider, and safety cases that each inject a real fault into a real
-      // process. Until this job existed the matrix ran under no gate at all
-      // because `//packages/...` does not reach `e2e/`, and `e2e` was not a
-      // workspace member, so the target failed in 262 ms with
-      // `Command "vitest" not found`.
+      // The fault-injection matrix: eighteen crash, restart, served-control,
+      // time-travel, provider, and safety cases, plus the primitive suites
+      // under them, that each inject a real fault into a real process. Until
+      // this job existed the matrix ran under no gate at all.
+      //
+      // It is one job over every package that declares a `faults` target, not
+      // one job over a directory. The matrix used to be a workspace member of
+      // its own, `e2e/`, which owned every case in the repository and was the
+      // only place they could live; each case now sits in the package whose
+      // behaviour it asserts, and `//packages/...:faults` selects all of them.
+      //
+      // `-j 1` is load-bearing rather than a throughput choice. A fault case
+      // kills process groups, binds ephemeral ports, and reads the machine's
+      // process table, so two packages' fault suites cannot run at once for the
+      // same reason two files inside one of them cannot: each package's
+      // `vitest.faults.config.ts` sets `fileParallelism: false`, and this flag
+      // is the same rule one level up.
       //
       // Required. It was advisory while `case22 ... redacts the credential out
       // of the operator's terminal` was red by design: rc.0
       // shipped no redacting logger, so a required job would have been red on
       // every commit for a defect no commit introduced. The redaction
       // deliverable landed that logger (`@smthrs/journal`
-      // `RedactedLogger`, installed by `packages/cli/src/bin.ts` and
-      // `packages/flows/src/NodeRuntime.ts`), the case is green in both
+      // `RedactedLogger`, installed by `packages/smithers/src/bin.ts` and
+      // `packages/smithers/flows/src/NodeRuntime.ts`), the case is green in both
       // halves, and the matrix is 67 of 67. The durable-park defect the old
-      // comment also named is a COVERAGE gap, not a red case: no case in this
-      // directory reaches it (`e2e/fault-gaps.md`, the `03, 05, 31` row), so
+      // comment also named is a COVERAGE gap, not a red case: no case reaches
+      // it (`scripts/repo-contract/fault-gaps.md`, the `03, 05, 31` row), so
       // nothing here fails for it and it cannot make this job red. A gate that
       // is green is a gate that can hold the line.
       //
@@ -252,15 +285,7 @@ const ci = Smithers.GithubCiGen({
       runsOn: ubuntu,
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({ runtimes: [node], jj }),
-      steps: [{ name: "Fault matrix", verb: Smithers.Verb.Test, pattern: "//e2e:faults" }]
-    },
-    {
-      id: "bun",
-      name: "test on bun",
-      runsOn: ubuntu,
-      timeoutMinutes: 30,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj }),
-      steps: [{ name: "Bun-compatible suites", verb: Smithers.Verb.Test, pattern: "//ci/..." }]
+      steps: [{ name: "Fault matrix", verb: Smithers.Verb.Test, pattern: "//packages/...:faults", parallelism: 1 }]
     },
     {
       id: "browser",
@@ -318,16 +343,98 @@ const ci = Smithers.GithubCiGen({
         docker: dockerImageStore
       }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
+    },
+    {
+      // The model reviews, and the only job that plans them. `LlmLint`
+      // declares `kinds: ["review"]` and is gated to that verb, so no wildcard
+      // `lint`, `test`, `build`, or `ci` step above reaches one. That gate is
+      // what this job exists to make safe: a review target expands
+      // `Smithers.gitDiff("origin/main")` at PLAN time, and the shallow
+      // `actions/checkout` every other job takes has no
+      // `refs/remotes/origin/main` on a pull request, so planning one there
+      // killed the whole required "Workspace targets" step with
+      // `git diff failed: ... bad revision`. `fetchDepth: 0` is the fix, and
+      // it is declared here alone because no other job pays for a full
+      // history.
+      //
+      // ADVISORY, and green by skip until a codex toolchain step exists. The
+      // reviews run through `codex`, which no hosted runner image ships and
+      // which needs a credential this repository has not declared. The build
+      // CLI reports a missing engine binary as a SKIPPED target with a notice
+      // naming the executable, so this job runs, says the review did not run,
+      // and stays green. Promote it out of `continueOnError` only together
+      // with a toolchain step that installs the engine and a declared
+      // credential for it; until then `requiredJobs` must not name it.
+      id: "review-lints",
+      name: "model reviews (advisory)",
+      runsOn: ubuntu,
+      timeoutMinutes: 30,
+      continueOnError: true,
+      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node], fetchDepth: 0 }),
+      steps: [{ name: "Review lints", verb: Smithers.Verb.Review, pattern: "//..." }]
     }
   ]
 })
 
+// The two workspace-wide model reviews. They cover every package's sources
+// with one wildcard rather than a hand-kept list of packages, so a new package
+// is under both rubrics the day it exists. A package that wants a narrower or
+// stricter review of its own declares one from the same macro in its own
+// PACKAGE.ts, the way the storage packages declare `durableIdentityGuard`.
+const docsReferenceSync = Smithers.DocsReferenceSync({
+  featured: true,
+  include: [
+    Smithers.glob("//packages/*/src/**"),
+    Smithers.glob("//packages/*/*/src/**"),
+    Smithers.glob("//packages/*/*/*/src/**")
+  ],
+  context: [
+    Smithers.glob("//packages/*/README.md"),
+    Smithers.glob("//packages/*/docs/*.md"),
+    Smithers.glob("//packages/*/*/README.md"),
+    Smithers.glob("//packages/*/*/docs/*.md"),
+    Smithers.glob("//packages/*/*/*/README.md"),
+    Smithers.glob("//packages/*/*/*/docs/*.md"),
+    Smithers.glob("//apps/site/src/content/docs/**/*.md"),
+    Smithers.glob("//apps/site/src/content/docs/**/*.mdx")
+  ]
+})
+
+const jsdocTruthfulness = Smithers.JsdocTruthfulness({
+  featured: true,
+  include: [
+    Smithers.glob("//packages/*/src/**/*.ts"),
+    Smithers.glob("//packages/*/*/src/**/*.ts"),
+    Smithers.glob("//packages/*/*/*/src/**/*.ts")
+  ]
+})
+
+/**
+ * The repository's custom JSDoc rule harness: `eslint.jsdoc.js` exports the
+ * module-header rule and the convention config, and this suite runs both
+ * through ESLint's `Linter` against sample sources. It sits at the root
+ * because the config it tests does, and `pnpm run test:jsdoc` is the operator
+ * alias.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+const jsdocRules = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//eslint.jsdoc.test.mjs")]),
+  srcs: [Smithers.file("//eslint.jsdoc.test.mjs"), Smithers.file("//eslint.jsdoc.js")],
+  deps: []
+})
+
+// Every nesting depth, in one brace pattern, because a declaration takes one
+// glob and the marker rule already decides the rest: a directory synthesizes
+// the standard targets only when it has a `package.json` and no `PACKAGE.ts`.
+// The depths are spelled out rather than written `packages/**` so a build's
+// `dist` tree can never be mistaken for a package.
 export const packageDefaults = Smithers.PackageDefaults({
-  directories: "packages/*",
-  macro: Smithers.StandardPackage,
-  attrs: { packageManager }
+  directories: "packages/{*,*/*,*/*/*}",
+  macro: Smithers.StandardPackage
 })
 
 export const Package = Smithers.Package({
-  targets: { ci, knownFiles, lockfile, nodeModules, tsconfig }
+  targets: { ci, docsReferenceSync, jsdocRules, jsdocTruthfulness, lockfile, nodeModules, tsconfig }
 })

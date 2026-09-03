@@ -24,7 +24,7 @@ credentials before constructing it.
   before attaching the record.
 - `cause` is stored verbatim and is not redacted. Callers must redact provider
   text, including bot tokens in URLs and API keys in messages, before attaching
-  it. `packages/integrations/src/telegram/TelegramClient.ts` exports
+  it. `packages/smithers/agent/integrations/src/telegram/TelegramClient.ts` exports
   `redactBotToken` and runs it over provider text before constructing the
   error.
 - `docsUrl` points at the reference page for the code.

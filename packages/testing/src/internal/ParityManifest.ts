@@ -29,7 +29,7 @@ export interface ParityRow {
 
 const smithersRows: ReadonlyArray<ParityRow> = [
   {
-    source: "smithers #1 packages/engine/tests/replay-unsafe-approval.e2e.test.jsx",
+    source: "smithers #1 packages/smithers/flows/engine/tests/replay-unsafe-approval.e2e.test.jsx",
     behavior: "Unsafe replay parks before reinvocation and a denial remains a veto across retries.",
     flowsEquivalent: "—",
     status: "skipped",
@@ -37,54 +37,55 @@ const smithersRows: ReadonlyArray<ParityRow> = [
       "The production engine has no unsafe-replay approval request contract; the removed test-only approval simulator was not parity."
   },
   {
-    source: "smithers #2 packages/engine/tests/crash-recovery.test.js",
+    source: "smithers #2 packages/smithers/flows/engine/tests/crash-recovery.test.js",
     behavior: "Recovery preserves committed state and never re-executes completed work.",
-    flowsEquivalent: "flows/packages/engine-store/test/Replay.test.ts",
+    flowsEquivalent: "flows/packages/smithers/flows/engine-store/test/Replay.test.ts",
     status: "partial",
     reason: "Production replay is pinned, but the public adapter cannot kill and reconstruct a durable engine process."
   },
   {
-    source: "smithers #3 packages/engine/tests/quota-chain-failover.e2e.test.jsx + quota-park-lifecycle.e2e.test.jsx",
+    source:
+      "smithers #3 packages/smithers/flows/engine/tests/quota-chain-failover.e2e.test.jsx + quota-park-lifecycle.e2e.test.jsx",
     behavior: "Quota-chain failover parks at the earliest reset only after every rung is limited.",
-    flowsEquivalent: "agent/packages/model/test/RequestExecutor.test.ts",
+    flowsEquivalent: "agent/packages/smithers/agent/model/test/RequestExecutor.test.ts",
     status: "partial",
     reason:
       "Production model retry classification and reset normalization are pinned; the engine has no public quota-chain scheduler."
   },
   {
-    source: "smithers #4 packages/time-travel/tests/jumpToFrame.test.ts + rewindRollback.test.ts",
+    source: "smithers #4 packages/smithers/flows/time-travel/tests/jumpToFrame.test.ts + rewindRollback.test.ts",
     behavior: "Failure at each rewind boundary atomically restores the pre-jump state.",
-    flowsEquivalent: "flows/packages/time-travel/test/RewindRollback.test.ts",
+    flowsEquivalent: "flows/packages/smithers/flows/time-travel/test/RewindRollback.test.ts",
     status: "pinned"
   },
   {
-    source: "smithers #5 packages/engine/tests/task-heartbeats.test.jsx",
+    source: "smithers #5 packages/smithers/flows/engine/tests/task-heartbeats.test.jsx",
     behavior: "A stale owner cannot commit outputs or terminal state after losing its heartbeat lease.",
-    flowsEquivalent: "flows/packages/engine-store/test/Ownership.test.ts",
+    flowsEquivalent: "flows/packages/smithers/flows/engine-store/test/Ownership.test.ts",
     status: "partial",
     reason:
       "RunDriver interruption on fence loss is pinned, but no adversarial store test proves a stale handler cannot commit output or terminal writes afterward."
   },
   {
     source:
-      "smithers #6 packages/engine/tests/xcombo-child-approval.e2e.test.jsx + xcombo-cancel-pause-subflow.e2e.test.jsx",
+      "smithers #6 packages/smithers/flows/engine/tests/xcombo-child-approval.e2e.test.jsx + xcombo-cancel-pause-subflow.e2e.test.jsx",
     behavior: "A parked child parks its parent and parent cancellation leaves no running child.",
-    flowsEquivalent: "flows/packages/engine/test/RetryOnInterrupt.test.ts",
+    flowsEquivalent: "flows/packages/smithers/flows/engine/test/RetryOnInterrupt.test.ts",
     status: "partial",
     reason:
       "Production interruption propagation is pinned; the engine has no public parent-child park or subflow-timeout contract."
   },
   {
     source:
-      "smithers #7 packages/engine/tests/wait-for-event-correlation.e2e.test.jsx + durable-deferred-contract.test.js",
+      "smithers #7 packages/smithers/flows/engine/tests/wait-for-event-correlation.e2e.test.jsx + durable-deferred-contract.test.js",
     behavior: "Signals are correlated and a pre-arrival survives durable resume.",
-    flowsEquivalent: "flows/packages/engine-store/test/DeferredPersistence.test.ts",
+    flowsEquivalent: "flows/packages/smithers/flows/engine-store/test/DeferredPersistence.test.ts",
     status: "partial",
     reason:
       "Production deferred pre-arrival persistence is pinned; correlation normalization is not exposed by the engine."
   },
   {
-    source: "smithers #8 packages/engine/tests/durability.test.jsx",
+    source: "smithers #8 packages/smithers/flows/engine/tests/durability.test.jsx",
     behavior: "Resume rejects changed flow/import hashes until explicitly accepted.",
     flowsEquivalent: "—",
     status: "skipped",
@@ -92,7 +93,7 @@ const smithersRows: ReadonlyArray<ParityRow> = [
   },
   {
     source:
-      "smithers #9 packages/scheduler/tests/approval-timeout-ondeny.test.js + packages/engine/tests/approval-gate-flow.e2e.test.jsx",
+      "smithers #9 packages/scheduler/tests/approval-timeout-ondeny.test.js + packages/smithers/flows/engine/tests/approval-gate-flow.e2e.test.jsx",
     behavior: "Approval timeout modes and automatic approval use durable logical time.",
     flowsEquivalent: "—",
     status: "skipped",
@@ -100,16 +101,17 @@ const smithersRows: ReadonlyArray<ParityRow> = [
       "The production engine has no approval-timeout scheduler; task_timeout is reserved as a typed failure rather than simulated as success."
   },
   {
-    source: "smithers #10 packages/engine/tests/pause-lifecycle.test.jsx + packages/driver/tests/pause-drain.test.js",
+    source:
+      "smithers #10 packages/smithers/flows/engine/tests/pause-lifecycle.test.jsx + packages/driver/tests/pause-drain.test.js",
     behavior: "Pause drains in-flight work and cancel wins while draining.",
-    flowsEquivalent: "agent/packages/control/test/ControlLive.test.ts",
+    flowsEquivalent: "agent/packages/smithers/control/test/ControlLive.test.ts",
     status: "partial",
     reason: "Production fenced pause/cancel control is pinned; the flow engine does not expose drain state."
   },
   {
-    source: "smithers #11 packages/engine/tests/engine-transactional-writes.test.jsx",
+    source: "smithers #11 packages/smithers/flows/engine/tests/engine-transactional-writes.test.jsx",
     behavior: "Frame, snapshot, output, and attempt writes commit atomically.",
-    flowsEquivalent: "flows/packages/engine-store/test/JournalIntegration.test.ts",
+    flowsEquivalent: "flows/packages/smithers/flows/engine-store/test/JournalIntegration.test.ts",
     status: "partial",
     reason: "Production journal commits are pinned, but there is no public multi-boundary failure injector."
   },
@@ -122,7 +124,7 @@ const smithersRows: ReadonlyArray<ParityRow> = [
   },
   {
     source:
-      "smithers #13 packages/scheduler/tests/makeFlowSession-coverage.test.js + packages/engine/tests/engine.test.jsx",
+      "smithers #13 packages/scheduler/tests/makeFlowSession-coverage.test.js + packages/smithers/flows/engine/tests/engine.test.jsx",
     behavior: "Loop termination re-evaluates until and fails with ralph_max_reached at its bound.",
     flowsEquivalent: "—",
     status: "skipped",
@@ -130,9 +132,10 @@ const smithersRows: ReadonlyArray<ParityRow> = [
       "The production engine has no loop runtime; ralph_max_reached is reserved as a typed failure rather than a successful max-iterations value."
   },
   {
-    source: "smithers #14 packages/engine/tests/deps-deadlock.test.jsx + makeFlowSession-coverage.test.js",
+    source:
+      "smithers #14 packages/smithers/flows/engine/tests/deps-deadlock.test.jsx + makeFlowSession-coverage.test.js",
     behavior: "Dependency deadlock fails with stable diagnostics after one stable-finish rerender.",
-    flowsEquivalent: "flows/packages/engine-store/test/CycleDetection.test.ts",
+    flowsEquivalent: "flows/packages/smithers/flows/engine-store/test/CycleDetection.test.ts",
     status: "partial",
     reason:
       "Production parent-chain cycle detection fails with the typed FlowCycleDetected carrying a stable cycle path; it is not a smithers-style dependency-deadlock scheduler with stable-finish rerender diagnostics."
@@ -149,7 +152,7 @@ const piRows: ReadonlyArray<ParityRow> = [
   {
     source: "pi §4 deferred tool loading",
     behavior: "A tool result activates deferred definitions additively for the next turn.",
-    flowsEquivalent: "agent/packages/model/test/DeferredTools.test.ts",
+    flowsEquivalent: "agent/packages/smithers/agent/model/test/DeferredTools.test.ts",
     status: "pinned"
   },
   {
@@ -158,13 +161,13 @@ const piRows: ReadonlyArray<ParityRow> = [
     // at the module that owns activation rather than at the Anthropic wire.
     source: "pi §4 deferred tool loading",
     behavior: "Tool activation is additive and cache-safe.",
-    flowsEquivalent: "agent/packages/harness/test/ContextWindow.test.ts",
+    flowsEquivalent: "agent/packages/smithers/agent/harness/test/ContextWindow.test.ts",
     status: "pinned"
   },
   {
     source: "pi §6 abort discipline",
     behavior: "Fiber interruption aborts a child batch without starting later work.",
-    flowsEquivalent: "agent/packages/harness/test/CellTurn.test.ts",
+    flowsEquivalent: "agent/packages/smithers/agent/harness/test/CellTurn.test.ts",
     status: "partial",
     reason:
       "The cell loop reports one typed abort on interruption and starts no later frame; the provider tool-call batch this constrained went away with the legacy loop."
@@ -172,7 +175,7 @@ const piRows: ReadonlyArray<ParityRow> = [
   {
     source: "pi §6 abort discipline",
     behavior: "Aborted child settlements remain well-formed transcript tool results.",
-    flowsEquivalent: "agent/packages/harness/test/Transcript.test.ts",
+    flowsEquivalent: "agent/packages/smithers/agent/harness/test/Transcript.test.ts",
     status: "pinned"
   },
   {
@@ -203,11 +206,11 @@ const piRows: ReadonlyArray<ParityRow> = [
  * @since 0.0.0
  */
 export const openCodeBehaviorInventory = {
-  "packages/core/test/session-compaction.test.ts": [
+  "packages/smithers/flows/core/test/session-compaction.test.ts": [
     "compaction prompt preserves detailed work state and relevant files",
     "compaction describes tool media without embedding base64"
   ],
-  "packages/core/test/session-create.test.ts": [
+  "packages/smithers/flows/core/test/session-create.test.ts": [
     "creates a fresh projected session when the ID is omitted",
     "returns the original session when the ID is retried",
     "stores supplied immutable create attributes",
@@ -228,7 +231,7 @@ export const openCodeBehaviorInventory = {
     "treats an omitted variant as the default variant",
     "rejects a model switch for a missing Session"
   ],
-  "packages/core/test/session-history.test.ts": [
+  "packages/smithers/flows/core/test/session-history.test.ts": [
     "returns an exhausted page for a migrated Session with no event sequence",
     "treats after as an exclusive aggregate sequence",
     "paginates public events in aggregate order across filtered gaps without duplicates",
@@ -236,7 +239,7 @@ export const openCodeBehaviorInventory = {
     "reports exhaustion for exact-limit and limit-plus-one pages",
     "fails with NotFoundError for a missing Session"
   ],
-  "packages/core/test/session-projector.test.ts": [
+  "packages/smithers/flows/core/test/session-projector.test.ts": [
     "projects staged, cleared, and committed reverts",
     "orders projected messages and context by durable aggregate sequence",
     "marks an inbox row promoted with the Prompted event sequence",
@@ -246,7 +249,7 @@ export const openCodeBehaviorInventory = {
     "does not revive a stale incomplete in-memory assistant projection",
     "updates only the newest incomplete assistant projection"
   ],
-  "packages/core/test/session-prompt.test.ts": [
+  "packages/smithers/flows/core/test/session-prompt.test.ts": [
     "exposes the execution registry",
     "delegates execution continuation through SessionExecution",
     "delegates process-local interruption through SessionExecution",
@@ -272,7 +275,7 @@ export const openCodeBehaviorInventory = {
     "starts execution when resume is explicitly true",
     "only records the prompt when resume is false"
   ],
-  "packages/core/test/session-run-coordinator.test.ts": [
+  "packages/smithers/flows/core/test/session-run-coordinator.test.ts": [
     "joins concurrent resumes for one key",
     "joins a wake-started execution without forcing a successor",
     "starts execution when woken while idle",
@@ -290,7 +293,7 @@ export const openCodeBehaviorInventory = {
     "runs different keys concurrently",
     "trampolines synchronous self-waking execution"
   ],
-  "packages/core/test/session-runner-message.test.ts": [
+  "packages/smithers/flows/core/test/session-runner-message.test.ts": [
     "omits empty assistant turns",
     "maps every top-level V2 Session message type",
     "replays durable tool media into canonical tool messages without structured base64",
@@ -298,7 +301,7 @@ export const openCodeBehaviorInventory = {
     "drops provider-native continuation metadata from failed assistant turns",
     "drops provider-native continuation metadata after a model switch"
   ],
-  "packages/core/test/session-runner-model.test.ts": [
+  "packages/smithers/flows/core/test/session-runner-model.test.ts": [
     "maps catalog OpenAI AI SDK models into native Responses routes",
     "keeps catalog apiKey credentials out of provider JSON",
     "uses merged API settings for OpenAI-compatible auth and request defaults",
@@ -313,17 +316,17 @@ export const openCodeBehaviorInventory = {
     "rejects catalog APIs without a native route",
     "reports whether a catalog model has a supported native route"
   ],
-  "packages/core/test/session-runner-recorded.test.ts": [
+  "packages/smithers/flows/core/test/session-runner-recorded.test.ts": [
     "executes one recorded V2 prompt through the recorded HTTP transport"
   ],
-  "packages/core/test/session-runner-tool-events.test.ts": [
+  "packages/smithers/flows/core/test/session-runner-tool-events.test.ts": [
     "local tool success serializes media base64 once and reconstructs from structured content",
     "provider-executed success retains its compatibility result",
     "binary failure emits no success event",
     "old success event data containing result still decodes",
     "step finish records settlement without publishing step ended"
   ],
-  "packages/core/test/session-runner-tool-registry.test.ts": [
+  "packages/smithers/flows/core/test/session-runner-tool-registry.test.ts": [
     "filters disabled tools with edit aliases and ordered wildcard precedence",
     "keeps permission decoration isolated between registrations",
     "reuses model definitions across provider turns",
@@ -341,7 +344,7 @@ export const openCodeBehaviorInventory = {
     "treats revealing a previous overlay as stale",
     "keeps captured execution running after registration mutation"
   ],
-  "packages/core/test/session-runner.test.ts": [
+  "packages/smithers/flows/core/test/session-runner.test.ts": [
     "advertises and executes a globally attached application tool",
     "starts a real runner turn after default prompt recording",
     "streams one request with registry definitions from chronological V2 user history",
@@ -420,10 +423,10 @@ export const openCodeBehaviorInventory = {
     "transitions streamed raw tool input to parsed called input",
     "rejects malformed streamed tool input ordering"
   ],
-  "packages/core/test/session-todo.test.ts": [
+  "packages/smithers/flows/core/test/session-todo.test.ts": [
     "replaces persisted todos in order and publishes updates"
   ],
-  "packages/core/test/session-tool-progress.test.ts": [
+  "packages/smithers/flows/core/test/session-tool-progress.test.ts": [
     "projects durable progress and keeps final settlements durable"
   ]
 } as const
@@ -450,59 +453,74 @@ const key = (source: string, behavior: string) => `${source}\u0000${behavior}`
 
 const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "reason">>([
   [
-    key("packages/core/test/session-runner-message.test.ts", "omits empty assistant turns"),
-    { flowsEquivalent: "agent/packages/harness/test/Transcript.test.ts", status: "pinned" }
+    key("packages/smithers/flows/core/test/session-runner-message.test.ts", "omits empty assistant turns"),
+    { flowsEquivalent: "agent/packages/smithers/agent/harness/test/Transcript.test.ts", status: "pinned" }
   ],
   [
     key(
-      "packages/core/test/session-runner-message.test.ts",
+      "packages/smithers/flows/core/test/session-runner-message.test.ts",
       "drops provider-native continuation metadata from failed assistant turns"
     ),
-    { flowsEquivalent: "agent/packages/harness/test/Transcript.test.ts", status: "pinned" }
+    { flowsEquivalent: "agent/packages/smithers/agent/harness/test/Transcript.test.ts", status: "pinned" }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "joins concurrent resume calls into one active provider run"),
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "joins concurrent resume calls into one active provider run"
+    ),
     {
-      flowsEquivalent: "flows/packages/engine-store/test/RunCoordinator.test.ts",
+      flowsEquivalent: "flows/packages/smithers/flows/engine-store/test/RunCoordinator.test.ts",
       status: "partial",
       reason: "The coordinator coalesces wakes; Smithers has no OpenCode Session aggregate adapter."
     }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "steers an active provider turn with newly recorded prompts"),
-    { flowsEquivalent: "agent/packages/harness/test/Steering.test.ts", status: "pinned" }
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "steers an active provider turn with newly recorded prompts"
+    ),
+    { flowsEquivalent: "agent/packages/smithers/agent/harness/test/Steering.test.ts", status: "pinned" }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "promotes queued inputs one at a time in FIFO order"),
-    { flowsEquivalent: "agent/packages/harness/test/Steering.test.ts", status: "pinned" }
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "promotes queued inputs one at a time in FIFO order"
+    ),
+    { flowsEquivalent: "agent/packages/smithers/agent/harness/test/Steering.test.ts", status: "pinned" }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "promotes steers before the next queued input"),
-    { flowsEquivalent: "agent/packages/harness/test/Steering.test.ts", status: "pinned" }
+    key("packages/smithers/flows/core/test/session-runner.test.ts", "promotes steers before the next queued input"),
+    { flowsEquivalent: "agent/packages/smithers/agent/harness/test/Steering.test.ts", status: "pinned" }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "durably settles local tool failures before continuing"),
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "durably settles local tool failures before continuing"
+    ),
     {
-      flowsEquivalent: "agent/packages/harness/test/Sandbox.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/harness/test/Sandbox.test.ts",
       status: "partial",
       reason:
-        "A refused flow call resolves with the { ok: false, error } envelope the cell branches on, so a failed call never fails the run and never discards the calls beside it; the journaled failure settlement is pinned in agent/packages/agent/test/AgentTrace.test.ts and durable storage remains engine-owned."
+        "A refused flow call resolves with the { ok: false, error } envelope the cell branches on, so a failed call never fails the run and never discards the calls beside it; the journaled failure settlement is pinned in agent/packages/smithers/agent/test/AgentTrace.test.ts and durable storage remains engine-owned."
     }
   ],
   [
     key(
-      "packages/core/test/session-runner.test.ts",
+      "packages/smithers/flows/core/test/session-runner.test.ts",
       "forces one compaction and retries after provider context overflow"
     ),
     {
-      flowsEquivalent: "agent/packages/harness/test/CellTurn.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/harness/test/CellTurn.test.ts",
       status: "partial",
       reason:
         "The cell loop forces one sealed compaction and asks the model again on the compacted window; it compacts on a declared token budget, so provider-overflow retry went away with the legacy provider-tool-call loop."
     }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "persists a second context overflow after one recovery"),
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "persists a second context overflow after one recovery"
+    ),
     {
       flowsEquivalent: "—",
       status: "skipped",
@@ -511,7 +529,10 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
     }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "recovers once from a raw context overflow failure"),
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "recovers once from a raw context overflow failure"
+    ),
     {
       flowsEquivalent: "—",
       status: "skipped",
@@ -521,7 +542,7 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
   ],
   [
     key(
-      "packages/core/test/session-runner.test.ts",
+      "packages/smithers/flows/core/test/session-runner.test.ts",
       "does not recover context overflow after durable assistant output"
     ),
     {
@@ -531,41 +552,47 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
     }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "forces a text response on an agent's configured final step"),
-    { flowsEquivalent: "agent/packages/harness/test/CellTurn.test.ts", status: "pinned" }
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "forces a text response on an agent's configured final step"
+    ),
+    { flowsEquivalent: "agent/packages/smithers/agent/harness/test/CellTurn.test.ts", status: "pinned" }
   ],
   [
     key(
-      "packages/core/test/session-runner.test.ts",
+      "packages/smithers/flows/core/test/session-runner.test.ts",
       "projects raw provider stream failures as terminal assistant step failures"
     ),
     {
-      flowsEquivalent: "agent/packages/harness/test/Transcript.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/harness/test/Transcript.test.ts",
       status: "partial",
       reason:
         "The transcript projects a metadata-free failed settlement preserving partial content; durable Session projection remains engine-owned."
     }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "keeps interleaved assistant text blocks separate"),
-    { flowsEquivalent: "agent/packages/model/test/ModelEvent.test.ts", status: "pinned" }
+    key("packages/smithers/flows/core/test/session-runner.test.ts", "keeps interleaved assistant text blocks separate"),
+    { flowsEquivalent: "agent/packages/smithers/agent/model/test/ModelEvent.test.ts", status: "pinned" }
   ],
   [
     key(
-      "packages/core/test/session-runner.test.ts",
+      "packages/smithers/flows/core/test/session-runner.test.ts",
       "broadcasts provider ${kind} deltas without storing projection rewrites"
     ),
     {
-      flowsEquivalent: "agent/packages/harness/test/Transcript.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/harness/test/Transcript.test.ts",
       status: "partial",
       reason:
         "Transcript ignores deltas and projects only settled entries, so no broadcast is stored as a rewrite; durable storage is engine-owned."
     }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "durably closes partial ${kind} when the provider stream fails"),
+    key(
+      "packages/smithers/flows/core/test/session-runner.test.ts",
+      "durably closes partial ${kind} when the provider stream fails"
+    ),
     {
-      flowsEquivalent: "agent/packages/model/test/AnthropicMessages.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/model/test/AnthropicMessages.test.ts",
       status: "partial",
       reason:
         "The model boundary flushes an open block without settling a failed stream and maps the failure to a typed ModelError; durable fragment storage remains engine-owned."
@@ -573,38 +600,38 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
   ],
   [
     key(
-      "packages/core/test/session-runner.test.ts",
+      "packages/smithers/flows/core/test/session-runner.test.ts",
       "durably closes partial ${kind} when the provider stream is interrupted"
     ),
     {
-      flowsEquivalent: "agent/packages/model/test/ModelEvent.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/model/test/ModelEvent.test.ts",
       status: "partial",
       reason:
         "Interrupted fragments settle as aborted with repaired tool JSON and preserved metadata; durable fragment storage remains engine-owned."
     }
   ],
   [
-    key("packages/core/test/session-runner.test.ts", "rejects malformed streamed tool input ordering"),
-    { flowsEquivalent: "agent/packages/model/test/ToolStream.test.ts", status: "pinned" }
+    key("packages/smithers/flows/core/test/session-runner.test.ts", "rejects malformed streamed tool input ordering"),
+    { flowsEquivalent: "agent/packages/smithers/agent/model/test/ToolStream.test.ts", status: "pinned" }
   ],
   [
     key(
-      "packages/core/test/session-tool-progress.test.ts",
+      "packages/smithers/flows/core/test/session-tool-progress.test.ts",
       "projects durable progress and keeps final settlements durable"
     ),
     {
-      flowsEquivalent: "agent/packages/harness/test/CellTurn.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/harness/test/CellTurn.test.ts",
       status: "partial",
       reason: "The cell loop emits live per-call start and settlement; durable storage remains engine-owned."
     }
   ],
   [
     key(
-      "packages/core/test/session-runner-recorded.test.ts",
+      "packages/smithers/flows/core/test/session-runner-recorded.test.ts",
       "executes one recorded V2 prompt through the recorded HTTP transport"
     ),
     {
-      flowsEquivalent: "agent/packages/model/test/RequestExecutor.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/model/test/RequestExecutor.test.ts",
       status: "partial",
       reason:
         "Byte-identical replay of a recorded request through the HTTP transport is pinned at the model boundary; the whole-session recorded replay went away with the legacy provider-tool-call loop."
@@ -612,11 +639,11 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
   ],
   [
     key(
-      "packages/core/test/session-runner-tool-registry.test.ts",
+      "packages/smithers/flows/core/test/session-runner-tool-registry.test.ts",
       "preserves an interrupted registration until its scope closes"
     ),
     {
-      flowsEquivalent: "agent/packages/model/test/DeferredTools.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/model/test/DeferredTools.test.ts",
       status: "partial",
       reason:
         "Smithers pins retained deferred definitions at the model boundary, but does not expose mutable scoped registrations."
@@ -624,18 +651,21 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
   ],
   [
     key(
-      "packages/core/test/session-runner-tool-registry.test.ts",
+      "packages/smithers/flows/core/test/session-runner-tool-registry.test.ts",
       "returns model errors without swallowing interruption or defects"
     ),
     {
-      flowsEquivalent: "agent/packages/model/test/ModelEvent.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/model/test/ModelEvent.test.ts",
       status: "partial",
       reason:
         "Interruption normalization is pinned at the model boundary; OpenCode registration defects are vendor-specific."
     }
   ],
   [
-    key("packages/core/test/session-runner-tool-registry.test.ts", "propagates retention failures through settlement"),
+    key(
+      "packages/smithers/flows/core/test/session-runner-tool-registry.test.ts",
+      "propagates retention failures through settlement"
+    ),
     {
       flowsEquivalent: "—",
       status: "skipped",
@@ -644,11 +674,11 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
   ],
   [
     key(
-      "packages/core/test/session-runner-tool-registry.test.ts",
+      "packages/smithers/flows/core/test/session-runner-tool-registry.test.ts",
       "enforces transformed codecs at execution and projection boundaries"
     ),
     {
-      flowsEquivalent: "agent/packages/model/test/ModelRequest.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/model/test/ModelRequest.test.ts",
       status: "partial",
       reason: "Provider request codecs are pinned; Smithers has no mutable OpenCode tool-registration codec."
     }
@@ -656,15 +686,15 @@ const pinned = new Map<string, Pick<ParityRow, "flowsEquivalent" | "status" | "r
 ])
 
 const defaultCoverage = (source: string): Pick<ParityRow, "flowsEquivalent" | "status" | "reason"> => {
-  if (source === "packages/core/test/session-runner-model.test.ts") {
+  if (source === "packages/smithers/flows/core/test/session-runner-model.test.ts") {
     return {
-      flowsEquivalent: "agent/packages/model/test/Route.test.ts",
+      flowsEquivalent: "agent/packages/smithers/agent/model/test/Route.test.ts",
       status: "partial",
       reason:
         "Smithers pins provider-neutral route/auth lowering, not OpenCode catalog and Session variant compatibility."
     }
   }
-  if (source === "packages/core/test/session-runner.test.ts") {
+  if (source === "packages/smithers/flows/core/test/session-runner.test.ts") {
     return {
       flowsEquivalent: "—",
       status: "skipped",
@@ -672,7 +702,7 @@ const defaultCoverage = (source: string): Pick<ParityRow, "flowsEquivalent" | "s
         "This OpenCode durable Session-runner behavior has no equivalent public Smithers harness contract; only exact translated descendants are pinned above."
     }
   }
-  if (source.startsWith("packages/core/test/session-runner")) {
+  if (source.startsWith("packages/smithers/flows/core/test/session-runner")) {
     return {
       flowsEquivalent: "—",
       status: "skipped",

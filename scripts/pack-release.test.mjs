@@ -94,12 +94,25 @@ test("publicationManifest rejects a package without publication exports", () => 
 test("workspaces covers every non-private engine and agent package under packages/", () => {
   // Recomputed here rather than imported, so a change to the derivation in
   // pack-release.mjs has to agree with an independent reading of packages/.
+  // The reading descends: a package nested inside the product package it
+  // belongs to (`packages/smithers/flows/canonical`) publishes the same name it always
+  // did, and a derivation that stopped at the first directory level would
+  // quietly drop it from the release while every assertion here stayed green.
   const packagesRoot = join(repoRoot, "packages")
-  const manifests = readdirSync(packagesRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .filter((name) => existsSync(join(packagesRoot, name, "package.json")))
-    .map((name) => [name, JSON.parse(readFileSync(join(packagesRoot, name, "package.json"), "utf8"))])
+  const directories = (parent) =>
+    readdirSync(join(packagesRoot, parent), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
+      .flatMap((entry) => {
+        const directory = parent === "" ? entry.name : `${parent}/${entry.name}`
+        return existsSync(join(packagesRoot, directory, "package.json"))
+          ? [directory, ...directories(directory)]
+          : []
+      })
+  const manifests = directories("")
+    .map((directory) => [
+      `packages/${directory}`,
+      JSON.parse(readFileSync(join(packagesRoot, directory, "package.json"), "utf8"))
+    ])
   const published = manifests
     .filter(([, manifest]) => !manifest.private && releaseGroups.has(manifest.smthrs?.group))
     .map(([name]) => name)
@@ -129,7 +142,7 @@ test("the packed set is exactly the 40 names the RC contract publishes", () => {
 test("every packed manifest carries the RC version and the next dist-tag", () => {
   // A prerelease published to `latest` would upgrade every `smthrs`-adjacent
   // install that tracks the tag, so the tag is pinned per manifest as well as
-  // on the publish command (docs/internal/release-runbook.md).
+  // on the publish command (the release runbook in Smithers-Ops).
   const manifests = readWorkspaceManifests()
   for (const directory of workspaces) {
     const manifest = manifests.get(directory)
@@ -169,7 +182,7 @@ test("pack-release order is a topological order of the workspace dependency grap
   // @smthrs/platform-browser, and platform-browser imports @smthrs/kernel
   // back. That cycle is the one edge publication order cannot respect. A
   // second entry here is a new cycle, and a new release-ordering hazard.
-  assert.deepEqual(unordered.sort(), ["kernel -> platform-browser"])
+  assert.deepEqual(unordered.sort(), ["packages/smithers/flows/kernel -> packages/smithers/flows/platform-browser"])
 })
 
 test("release.yml publishes exactly the packed workspaces, in the packed order", () => {
@@ -254,8 +267,8 @@ test("@smthrs/memory packs the SQL reference copies its shipped source cites", (
   // docstring sends a reader to `src/migrations/*.sql`. The tarball ships that
   // source, so it has to ship the files the source names.
   const manifests = readWorkspaceManifests()
-  const memory = manifests.get("memory")
-  const references = readdirSync(join(repoRoot, "packages", "memory", "src", "migrations"))
+  const memory = manifests.get("packages/smithers/agent/memory")
+  const references = readdirSync(join(repoRoot, "packages", "smithers", "agent", "memory", "src", "migrations"))
     .filter((name) => name.endsWith(".sql"))
 
   assert.ok(references.length > 0, "the reference copies exist in the tree")
@@ -281,7 +294,7 @@ test("the install docs pin the drifted @effect/platform-node-shared to the packe
 
   assert.deepEqual([...pins], ["4.0.0-rc.108"], "one effect pin across the published set")
   const pin = [...pins][0]
-  for (const relative of ["README.md", join("docs", "pages", "installation.md")]) {
+  for (const relative of ["README.md"]) {
     const source = readFileSync(join(repoRoot, relative), "utf8")
     assert.match(
       source,
@@ -306,7 +319,7 @@ test("the overrides recipe names the npm ls form that fails and the reinstall it
   // afterward. With `node_modules` and `package-lock.json` on disk, the
   // install answers `up to date` and leaves the drifted copy nested, so the
   // pin only takes effect on a clean install.
-  for (const relative of ["README.md", join("docs", "pages", "installation.md")]) {
+  for (const relative of ["README.md"]) {
     const source = readFileSync(join(repoRoot, relative), "utf8")
     assert.match(
       source,
@@ -330,11 +343,11 @@ test("every published package packs the markdown inside the source tree it ships
   // The `@smthrs/memory` rule stated once for every package instead of once per
   // file: a package that ships `src/**/*.ts` ships its source as the thing a
   // reader reads, so the prose filed beside that source belongs in the same
-  // tarball. `packages/keys/src/README.md` is the file that named the gap.
+  // tarball. `packages/smithers/flows/keys/src/README.md` is the file that named the gap.
   const manifests = readWorkspaceManifests()
   const unpacked = []
   for (const directory of workspaces) {
-    const source = join(repoRoot, "packages", directory, "src")
+    const source = join(repoRoot, directory, "src")
     if (!existsSync(source)) continue
     const files = manifests.get(directory).files ?? []
     for (const entry of readdirSync(source, { recursive: true })) {
@@ -367,7 +380,7 @@ test("the install line pins @effect/platform-node-shared beside @effect/platform
   )
   const pin = [...pins][0]
 
-  for (const relative of ["README.md", join("docs", "pages", "installation.md")]) {
+  for (const relative of ["README.md"]) {
     const source = readFileSync(join(repoRoot, relative), "utf8")
     const installLines = source
       .split("\n")
@@ -468,7 +481,7 @@ test("no published source module default-imports a sibling or exports a default"
   const sites = []
   let modules = 0
   for (const directory of manifests.keys()) {
-    const source = join(repoRoot, "packages", directory, "src")
+    const source = join(repoRoot, directory, "src")
     if (!existsSync(source)) continue
     for (const entry of readdirSync(source, { recursive: true })) {
       const relative = `src/${String(entry).split(sep).join("/")}`
@@ -477,7 +490,7 @@ test("no published source module default-imports a sibling or exports a default"
       if (!statSync(path).isFile()) continue
       modules += 1
       for (const site of defaultBindings(readFileSync(path, "utf8"))) {
-        sites.push(`packages/${directory}/${relative}:${site.line}  ${site.text}`)
+        sites.push(`${directory}/${relative}:${site.line}  ${site.text}`)
       }
     }
   }
