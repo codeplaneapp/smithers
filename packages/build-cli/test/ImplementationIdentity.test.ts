@@ -1,10 +1,54 @@
 /** Cross-process cache-key identity over a real CLI fixture. */
 import { spawn } from "node:child_process"
+import * as Fs from "node:fs/promises"
+import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
 const cli = NodePath.resolve(import.meta.dirname, "../src/main.js")
-const fixture = NodePath.resolve(import.meta.dirname, "fixtures/implementation-identity")
+
+/**
+ * The fixture is staged into a temporary directory rather than kept under
+ * `test/fixtures/`. `Workspace` treats every tracked `BUILD.ts` as a package
+ * of the repository's own graph, so a fixture that lived in the tree was
+ * discovered and executed by `smithers-build ci '//packages/...'`, and its
+ * build wrote `out` into the repository root on every CI run.
+ */
+let fixture = ""
+
+beforeAll(async () => {
+  fixture = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-implementation-identity-"))
+  await Fs.writeFile(
+    NodePath.join(fixture, "BUILD.ts"),
+    [
+      "import { Smithers } from \"@smthrs/targets\"",
+      "",
+      "export const sources = Smithers.Filegroup({ srcs: [Smithers.file(\"//input.txt\")], cwd: \".\" })",
+      "",
+      "export const build = Smithers.ToolBuild({",
+      "  tool: \"node\",",
+      "  command: \"node\",",
+      "  args: [\"-e\", \"require('node:fs').writeFileSync('out', 'built')\"],",
+      "  inputs: [Smithers.file(\"//input.txt\")],",
+      "  outputs: [\"out\"],",
+      "  deps: [sources],",
+      "  env: {},",
+      "  cache: true,",
+      "  cwd: \".\"",
+      "})",
+      ""
+    ].join("\n")
+  )
+  await Fs.writeFile(NodePath.join(fixture, "input.txt"), "stable input\n")
+  await Fs.writeFile(
+    NodePath.join(fixture, "package.json"),
+    `${JSON.stringify({ name: "implementation-identity-fixture", private: true, type: "module" }, undefined, 2)}\n`
+  )
+})
+
+afterAll(async () => {
+  if (fixture !== "") await Fs.rm(fixture, { recursive: true, force: true })
+})
 
 interface ProcessResult {
   readonly code: number | null
