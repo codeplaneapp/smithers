@@ -6,16 +6,16 @@
  * or the layers changes for telemetry. The store packages already open spans
  * through Effect's tracer and update `Metric` counters on their hot paths;
  * what they deliberately do not do is export. `Otlp.layerFetch` is that
- * exporter — one layer against an OTLP collector endpoint, no OpenTelemetry
- * SDK involved — and providing it is the entire wiring. Deleting the
+ * exporter (one layer against an OTLP collector endpoint, no OpenTelemetry
+ * SDK involved), and providing it is the entire wiring. Deleting the
  * `Effect.provide(telemetry)` line removes telemetry and changes nothing
  * else.
  *
  * The three read paths this example demonstrates:
  *
- * 1. The OTLP export: every span the packages open — the flow lifecycle, the
+ * 1. The OTLP export: every span the packages open (the flow lifecycle, the
  *    engine dispatch, run claims and heartbeats, journal writes, down to
- *    individual `sql.execute` statements — posts to `/v1/traces`, and every
+ *    individual `sql.execute` statements) posts to `/v1/traces`, and every
  *    metric series to `/v1/metrics`.
  * 2. The durable journal: `Journal.entries` reads the run's lifecycle events
  *    in-process, no collector involved.

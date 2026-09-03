@@ -18,7 +18,7 @@ import { Smithers } from "@smthrs/targets"
 
 const cwd = "packages/smithers/create-app"
 
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   deps: [],
   cwd
 })
@@ -64,5 +64,5 @@ const templates = Smithers.Vitest({
 })
 
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, fmt, lib, lint, templates, test }
+  targets: { check, circular, docs, docsFiles, fmt, lib, lint, templates, test }
 })

@@ -25,7 +25,7 @@ import * as Schema from "effect/Schema"
 
 /**
  * The declared atom. A declaration is pure data, so it bundles for the browser
- * whether or not this bundle also carries an implementation for it — which is
+ * whether or not this bundle also carries an implementation for it, which is
  * the placement half of the declaration/implementation split.
  */
 export const CompileTarget = Action.make("examples/CompileTarget", {

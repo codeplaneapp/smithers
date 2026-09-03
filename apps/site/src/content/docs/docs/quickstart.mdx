@@ -1,0 +1,103 @@
+---
+title: "Quickstart"
+description: "Install the Smithers CLI, let it suggest how it can help your project, and run what it writes."
+---
+
+import { CardGrid, Code, FileTree, LinkCard, TabItem, Tabs } from "@astrojs/starlight/components"
+import versions from "../../../data/versions.json"
+
+This is the shortest path to a working Smithers run: install the CLI, let it look at your project, pick a suggestion, and run what it wrote.
+
+## Prerequisites
+
+- Node.js {versions.node} or later. The durable engine runs on Node only.
+- One model seat: a Codex subscription, or a provider API key. `smthrs suggest` looks for them in the order listed below.
+
+## 1. Install the CLI
+
+```bash
+npm install --global @smthrs/cli@next
+```
+
+The `@next` suffix is required while 1.0 is a release candidate: release candidates publish to the `next` dist-tag, and `latest` still resolves the Smithers 0.x line.
+
+```text
+You should see: npm adds @smthrs/cli to your global installs, and the
+smthrs command is available in your terminal.
+```
+
+## 2. Let Smithers look at the project
+
+Run `smthrs suggest` from the repository you want help with:
+
+```bash
+smthrs suggest
+```
+
+`smthrs suggest` picks a model seat from what is already set up on your machine, reads the project, and streams suggestions as it finds them: a test loop that only reruns what changed, a review flow for pull requests, an `AGENTS.md` generated from the packages themselves, a release-notes flow, and more. It checks the cheap, high-value ones first. Anything that needs a lot of code or a big change to the repository waits for a follow-up.
+
+The seat comes from the first of these that is available:
+
+1. A Codex subscription (`codex login`, or `SMITHERS_OPENAI_AUTH=chatgpt`), through the default harness.
+2. A Kimi K3 API key, `MOONSHOT_API_KEY`.
+3. Any other provider key Smithers knows: `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`.
+
+To use a seat of your own, pass `--seat provider:model`. When nothing is available, `smthrs suggest` prints what it looked for and how to set one up, and exits 1.
+
+```text
+You should see: a short list of suggestions, each on its own line as it is
+found, then a prompt asking which one to implement.
+```
+
+## 3. Pick a suggestion
+
+Choose one with the arrow keys. The agent implements it in the project: a flow under `flows/`, a target in a `PACKAGE.ts`, or both, plus any prompt files they read. Every file it writes is listed when it finishes, and nothing is committed.
+
+After the change, `smthrs suggest` offers follow-ups for that suggestion, such as running it in CI, making it incremental so unchanged inputs reuse their recorded result, or the larger changes it set aside.
+
+```text
+You should see: the files written, the command that runs the new flow or
+target, and a follow-up prompt.
+```
+
+## 4. Run what it made
+
+Flows run with `up`, and targets run with `smithers-build`:
+
+```bash
+smthrs ls
+smthrs up <flow>
+smthrs ps
+```
+
+`up` plans the flow, approves the plan, and launches the run in one command, staying attached until the run settles. Every step the run finishes is recorded in the project's journal, so a stopped run resumes from the record instead of restarting. [Durable execution](/docs/concepts/durable-execution/) explains the mechanism.
+
+```text
+You should see: ls lists the flow suggest wrote, up prints a launch receipt
+with the run's id, and ps shows the run with its status.
+```
+
+To write a flow by hand instead, scaffold one:
+
+```bash
+smthrs init change
+```
+
+The scaffold is one flow file plus the run state directory:
+
+<FileTree>
+
+- flows/
+  - change/
+    - flow.mdx
+- .flows/
+
+</FileTree>
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Your first flow" href="/docs/tutorials/first-flow/" description="Build a flow end to end, one part at a time." />
+  <LinkCard title="Markdown flows" href="/docs/guides/markdown-flows/" description="Everything a flow.mdx file can declare." />
+  <LinkCard title="MCP setup" href="/docs/guides/mcp-setup/" description="Give a run's agent access to MCP tools." />
+</CardGrid>

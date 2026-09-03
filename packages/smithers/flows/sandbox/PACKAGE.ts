@@ -9,7 +9,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   deps: [],
   cwd: "packages/smithers/flows/sandbox",
   tests: Smithers.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
@@ -37,5 +37,5 @@ const bunTest = Smithers.BunSuite({ cwd: "packages/smithers/flows/sandbox" })
 const faults = Smithers.FaultSuite({ cwd: "packages/smithers/flows/sandbox" })
 
 export const Package = Smithers.Package({
-  targets: { bunTest, check, circular, docs, faults, fmt, lib, lint, test }
+  targets: { bunTest, check, circular, docs, docsFiles, faults, fmt, lib, lint, test }
 })

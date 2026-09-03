@@ -5,7 +5,7 @@
  * `ChildProcessSpawner`, `Jj`, and `HttpClient`. A program written against the
  * tags runs on any bundle that provides them. Note that `ChildProcessSpawner`
  * and `HttpClient` are Effect's own tags from `effect/unstable/process` and
- * `effect/unstable/http` — Smithers provides implementations of them rather
+ * `effect/unstable/http`. Smithers provides implementations of them rather
  * than a wrapper around them.
  *
  * This example runs one program twice:

@@ -410,4 +410,4 @@ This provider does not create infrastructure. The Durable Object namespace, its 
 
 ## Reading next
 
-[`@smthrs/kernel`](/api/kernel) owns the closed host list this satisfies a slot of, and the `proc:spawn` check written against the same rendered command line the provider receives. [`@smthrs/run-store`](/api/run-store) owns the run-ownership heartbeat that detects a dead engine owner rather than a dead sandbox. See also [Hosts and capabilities](/concepts/hosts-and-capabilities) and [failure and retry](/concepts/failure-and-retry).
+[`@smthrs/kernel`](/api/kernel) owns the closed host list this satisfies a slot of, and the `proc:spawn` check written against the same rendered command line the provider receives. [`@smthrs/run-store`](/api/run-store) owns the run-ownership heartbeat that detects a dead engine owner rather than a dead sandbox. See also [Capabilities and the host kernel](/docs/concepts/kernel/) and [Retries and interruption](/docs/concepts/retries/).

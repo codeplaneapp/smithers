@@ -3,8 +3,8 @@
  *
  * This is the shortest complete program in the library, and it is the two nouns
  * of the unified flow-authoring model at their smallest. `Action.make`
- * declares the atom that does the work — schemas and a stable
- * tag, no code — and `toLayer` attaches the implementation separately, where
+ * declares the atom that does the work (schemas and a stable
+ * tag, no code) and `toLayer` attaches the implementation separately, where
  * the code can run. `Flow.make` declares the composite, and its `body` names
  * the action rather than calling it: a body is planned, so `Greet.call`
  * records one node and executes nothing.

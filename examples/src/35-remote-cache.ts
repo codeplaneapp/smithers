@@ -3,7 +3,7 @@
  *
  * Everything before this example keeps a step's recorded result on the machine
  * that produced it. Here a second engine, over a database file the first one
- * never touched, replays that result without executing the body — because both
+ * never touched, replays that result without executing the body, because both
  * engines compose `CombinedCacheStore` over a shared HTTP tier.
  *
  * Two seams make it safe, and both are visible below:
@@ -14,8 +14,8 @@
  *   this host, so the engine journals an `unpublished` cache-provenance record
  *   and carries on. The third scenario below asserts exactly that.
  *
- * The server here speaks the action-cache half of the dumb-HTTP protocol —
- * `GET`/`PUT /ac/{keyDigest}` — over plain HTTP on localhost. The artifact half
+ * The server here speaks the action-cache half of the dumb-HTTP protocol
+ * (`GET`/`PUT /ac/{keyDigest}`) over plain HTTP on localhost. The artifact half
  * (`RemoteArtifacts`, `/cas/{digest}`) is deliberately not composed: it refuses
  * any endpoint that is not HTTPS, because it carries credentials, and a
  * loopback exception would be a credential leak waiting for a misconfiguration.

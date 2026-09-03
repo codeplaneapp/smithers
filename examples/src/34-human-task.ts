@@ -10,7 +10,7 @@
  * - Phase one asks. The run parks on the first attempt's wait point and
  *   releases its claim.
  * - Phase two answers with prose, which a `confirm` cannot accept. The run
- *   replays the recorded answer, refuses it, and parks again — on the SECOND
+ *   replays the recorded answer, refuses it, and parks again, on the SECOND
  *   attempt's wait point, because a durable deferred keeps its first
  *   completion and re-asking needs a wait point that has none.
  * - Phase three answers the second attempt, and the run completes.
@@ -21,9 +21,9 @@
  * Which attempt the question is open on is READ BACK from the engine rather
  * than assumed. A suspended run has a waiting row, and this run's row carries
  * the `approval` reason and the token of the one wait point that is currently
- * open, so {@link parkedAttempt} recovers the attempt number from durable
+ * open, so `parkedAttempt` recovers the attempt number from durable
  * state. The refusal is read back the same way: it is a sealed step, so it has
- * an attempt row, and {@link refusalsRecorded} finds it through the journal.
+ * an attempt row, and `refusalsRecorded` finds it through the journal.
  * Nothing about "which attempt is this" lived in the process that died, and
  * nothing about it is asserted from a counter this file keeps.
  */

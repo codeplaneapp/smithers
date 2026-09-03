@@ -173,7 +173,7 @@ requires both.
 under `src/` resolves a `node:` built-in; the package's build and documentation
 scripts do, and none of them ship in an entry point.
 
-See [browser support](/architecture/browser-support), the
+See [platform support](/docs/reference/api/#platform-support), the
 [`@smthrs/kernel` reference](/api/kernel), whose closed service list this
 package's `BrowserHost` bundle fills, and
-[Hosts and capabilities](/concepts/hosts-and-capabilities).
+[Capabilities and the host kernel](/docs/concepts/kernel/).

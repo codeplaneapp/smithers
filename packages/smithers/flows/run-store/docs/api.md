@@ -129,6 +129,6 @@ ladder. `@smthrs/run-store/test/TestRunStore` supplies migrated in-memory
 SQLite services for adapter tests. Cross-process fencing tests use a real
 SQLite file.
 
-See [concurrency](/concepts/concurrency), the
-[durable execution model](/concepts/durable-execution-model), and the
+See [Execution IDs and ownership](/docs/concepts/ownership/),
+[Durable execution](/docs/concepts/durable-execution/), and the
 [`@smthrs/journal` reference](/api/journal).

@@ -11,6 +11,54 @@
  * @since 1.0.0
  */
 import { Smithers } from "@smthrs/targets"
+import { Package as examplesPackage } from "../../examples/PACKAGE.ts"
+import { Package as cliPackage } from "../../packages/smithers/PACKAGE.ts"
+import { Package as agentPackage } from "../../packages/smithers/agent/PACKAGE.ts"
+import { Package as chainPackage } from "../../packages/smithers/agent/chain/PACKAGE.ts"
+import { Package as evalsPackage } from "../../packages/smithers/agent/evals/PACKAGE.ts"
+import { Package as fsPackage } from "../../packages/smithers/agent/fs/PACKAGE.ts"
+import { Package as harnessPackage } from "../../packages/smithers/agent/harness/PACKAGE.ts"
+import { Package as integrationsPackage } from "../../packages/smithers/agent/integrations/PACKAGE.ts"
+import { Package as memoryPackage } from "../../packages/smithers/agent/memory/PACKAGE.ts"
+import { Package as modelPackage } from "../../packages/smithers/agent/model/PACKAGE.ts"
+import { Package as pluginPackage } from "../../packages/smithers/agent/plugin/PACKAGE.ts"
+import { Package as registryPackage } from "../../packages/smithers/agent/registry/PACKAGE.ts"
+import { Package as scorersPackage } from "../../packages/smithers/agent/scorers/PACKAGE.ts"
+import { Package as stdPackage } from "../../packages/smithers/agent/std/PACKAGE.ts"
+import { Package as triggersPackage } from "../../packages/smithers/agent/triggers/PACKAGE.ts"
+import { Package as targetsPackage } from "../../packages/smithers/build/targets/PACKAGE.ts"
+import { Package as controlPackage } from "../../packages/smithers/control/PACKAGE.ts"
+import { Package as createAppPackage } from "../../packages/smithers/create-app/PACKAGE.ts"
+import { Package as flowsPackage } from "../../packages/smithers/flows/PACKAGE.ts"
+import { Package as artifactsPackage } from "../../packages/smithers/flows/artifacts/PACKAGE.ts"
+import { Package as canonicalPackage } from "../../packages/smithers/flows/canonical/PACKAGE.ts"
+import { Package as capabilityPackage } from "../../packages/smithers/flows/capability/PACKAGE.ts"
+import { Package as corePackage } from "../../packages/smithers/flows/core/PACKAGE.ts"
+import { Package as cryptoPackage } from "../../packages/smithers/flows/crypto/PACKAGE.ts"
+import { Package as databasePackage } from "../../packages/smithers/flows/database/PACKAGE.ts"
+import { Package as engineStorePackage } from "../../packages/smithers/flows/engine-store/PACKAGE.ts"
+import { Package as enginePackage } from "../../packages/smithers/flows/engine/PACKAGE.ts"
+import { Package as flowPackage } from "../../packages/smithers/flows/flow/PACKAGE.ts"
+import { Package as jjPackage } from "../../packages/smithers/flows/jj/PACKAGE.ts"
+import { Package as journalPackage } from "../../packages/smithers/flows/journal/PACKAGE.ts"
+import { Package as kernelPackage } from "../../packages/smithers/flows/kernel/PACKAGE.ts"
+import { Package as keysPackage } from "../../packages/smithers/flows/keys/PACKAGE.ts"
+import { Package as observabilityPackage } from "../../packages/smithers/flows/observability/PACKAGE.ts"
+import { Package as patternsPackage } from "../../packages/smithers/flows/patterns/PACKAGE.ts"
+import { Package as planPackage } from "../../packages/smithers/flows/plan/PACKAGE.ts"
+import { Package as platformBrowserPackage } from "../../packages/smithers/flows/platform-browser/PACKAGE.ts"
+import { Package as platformBunPackage } from "../../packages/smithers/flows/platform-bun/PACKAGE.ts"
+import { Package as platformNodePackage } from "../../packages/smithers/flows/platform-node/PACKAGE.ts"
+import { Package as runStorePackage } from "../../packages/smithers/flows/run-store/PACKAGE.ts"
+import { Package as sandboxPackage } from "../../packages/smithers/flows/sandbox/PACKAGE.ts"
+import { Package as stepCachePackage } from "../../packages/smithers/flows/step-cache/PACKAGE.ts"
+import { Package as syncPackage } from "../../packages/smithers/flows/sync/PACKAGE.ts"
+import { Package as timeTravelPackage } from "../../packages/smithers/flows/time-travel/PACKAGE.ts"
+import { Package as gatewayPackage } from "../../packages/smithers/gateway/PACKAGE.ts"
+import { Package as mcpPackage } from "../../packages/smithers/mcp/PACKAGE.ts"
+import { Package as migratePackage } from "../../packages/smithers/migrate/PACKAGE.ts"
+import { Package as notificationsPackage } from "../../packages/smithers/notifications/PACKAGE.ts"
+import { Package as testingPackage } from "../../packages/testing/PACKAGE.ts"
 
 const cwd = "apps/site"
 
@@ -44,4 +92,177 @@ const build = Smithers.ToolBuild({
   cwd
 })
 
-export const Package = Smithers.Package({ targets: { check, build } })
+// --- reference docs pipeline ----------------------------------------------
+// Generated reference pages. Each documented package writes its own
+// `docs/reference/*.md` (its `referenceDocs` Agent.Diff target); this target
+// is the deterministic ingest that copies them into
+// src/content/docs/docs/reference/<area>/ with Starlight frontmatter. The
+// committed copy is the cache: `smithers-build lint //apps/site:referenceIngest`
+// fails on drift, `smithers-build target //apps/site:referenceIngest --write`
+// applies. The data edges are the packages' `referencePages` filegroups, not
+// their agent targets, so no verb here ever spawns a model.
+const referenceIngest = Smithers.Generate({
+  summary: "Copy colocated package reference pages into the docs tree; check drift under lint.",
+  script: Smithers.file("scripts/ingest-reference.mjs"),
+  data: [flowPackage.referencePages, enginePackage.referencePages, targetsPackage.referencePages],
+  changes: ["src/content/docs/docs/reference/api/**", "src/content/docs/docs/reference/targets/**"]
+})
+// --- end reference docs pipeline ------------------------------------------
+
+// --- CLI data --------------------------------------------------------------
+// The CLI facts the docs quote instead of retyping: verbatim `--help` for
+// every verb and subcommand, the version pins, the removed-command anchor
+// contract (every `smithers.sh/migration/1.0#<anchor>` the binary links), and
+// the compatibility policy quoted from README.md. The script splices the
+// anchor entries and the policy into marker regions on the two migration
+// pages, so `smithers-build lint //apps/site:cliData` fails the moment a
+// removed verb, a help string, or the policy wording moves without the docs.
+const cliData = Smithers.Generate({
+  summary: "Regenerate CLI help captures, version pins, and the removed-command anchor contract; check drift under lint.",
+  script: Smithers.file("scripts/gen-cli-data.mjs"),
+  // `cliPackage.docsSources` is the CLI's src tree, README, docs, and
+  // package.json by label. A `//packages/smithers/src/**` glob declared here
+  // expands to nothing: input globs are package scoped, so a start inside
+  // another package yields no files and the edge is vacuous.
+  data: [
+    cliPackage.docsSources,
+    Smithers.file("//README.md"),
+    Smithers.file("src/data/migration-paths.json")
+  ],
+  changes: [
+    "src/data/versions.json",
+    "src/data/removed-commands.json",
+    "src/data/help/**",
+    "src/content/docs/docs/migration/1.0.mdx",
+    "src/content/docs/docs/migration/compatibility.mdx"
+  ]
+})
+// --- end CLI data ----------------------------------------------------------
+
+// --- API reference pages ---------------------------------------------------
+// One page per published package, stitched from its colocated docs/api.md by
+// scripts/sync-api-docs.mjs. The script discovers packages off disk (a
+// public @smthrs/* manifest beside a docs/api.md); this map is the same set
+// as declared edges, keyed by the page slug the script writes. Each entry is
+// the package's `docsFiles` filegroup (docs/**\/*.md, README, package.json),
+// which is what makes `smithers-build lint //apps/site:apiDocs` rerun when a
+// package's api.md or description moves. flow, engine, and targets are
+// absent on purpose: ingest-reference.mjs owns their pages through
+// `referenceIngest`, and the sync script skips those slugs.
+const apiPackages = {
+  agent: agentPackage,
+  artifacts: artifactsPackage,
+  canonical: canonicalPackage,
+  capability: capabilityPackage,
+  chain: chainPackage,
+  cli: cliPackage,
+  control: controlPackage,
+  core: corePackage,
+  "create-app": createAppPackage,
+  crypto: cryptoPackage,
+  database: databasePackage,
+  "engine-store": engineStorePackage,
+  evals: evalsPackage,
+  flows: flowsPackage,
+  fs: fsPackage,
+  gateway: gatewayPackage,
+  harness: harnessPackage,
+  integrations: integrationsPackage,
+  jj: jjPackage,
+  journal: journalPackage,
+  kernel: kernelPackage,
+  keys: keysPackage,
+  mcp: mcpPackage,
+  memory: memoryPackage,
+  migrate: migratePackage,
+  model: modelPackage,
+  notifications: notificationsPackage,
+  observability: observabilityPackage,
+  patterns: patternsPackage,
+  plan: planPackage,
+  "platform-browser": platformBrowserPackage,
+  "platform-bun": platformBunPackage,
+  "platform-node": platformNodePackage,
+  plugin: pluginPackage,
+  registry: registryPackage,
+  "run-store": runStorePackage,
+  sandbox: sandboxPackage,
+  scorers: scorersPackage,
+  std: stdPackage,
+  "step-cache": stepCachePackage,
+  sync: syncPackage,
+  testing: testingPackage,
+  "time-travel": timeTravelPackage,
+  triggers: triggersPackage
+}
+const apiDocs = Smithers.Generate({
+  summary: "Stitch every published package's docs/api.md into a reference page; check drift under lint.",
+  script: Smithers.file("scripts/sync-api-docs.mjs"),
+  data: Object.values(apiPackages).map((pkg) => pkg.docsFiles),
+  changes: Object.keys(apiPackages).map((slug) => `src/content/docs/docs/reference/api/${slug}.mdx`)
+})
+// --- end API reference pages -----------------------------------------------
+
+/**
+ * One page per example program: its leading doc comment as prose and its
+ * source as a fence, from `examples/src`. The examples are the tested programs
+ * behind `pnpm run test:examples`, so the pages show code proven to run at
+ * this commit. `lint` fails on drift; `--write` regenerates.
+ */
+const examplesPages = Smithers.Generate({
+  summary: "Generate one docs page per example in examples/src; check drift under lint.",
+  script: Smithers.file("scripts/gen-examples.mjs"),
+  // The examples package's `docs` filegroup, not a glob: a glob declared here
+  // never expands into examples/, so the label is the edge.
+  data: [examplesPackage.docs],
+  changes: ["src/content/docs/docs/examples/[0-9]*.mdx"]
+})
+
+/**
+ * `scripts/check-docs.mjs`: internal links resolve (fragments included), every
+ * `SMITHERS_*` name exists in the source tree, stated version pins match
+ * src/data/versions.json, and the authoring brief's hard rules hold (no
+ * dashes in prose, no body H1, every fence names a language, every page has a
+ * title and description). Reads the whole content tree and the repo's source
+ * for the env-name census.
+ */
+const docsLint = Smithers.Shell.Test({
+  script: Smithers.file("scripts/check-docs.mjs"),
+  data: [
+    Smithers.glob("//apps/site/src/content/**/*"),
+    Smithers.glob("//apps/site/src/pages/**/*"),
+    Smithers.file("//apps/site/src/data/versions.json")
+  ]
+})
+
+/**
+ * Every `ts` fence on the hand-written tutorial pages compiles against the
+ * real packages, so a tutorial cannot teach an API that does not ship. A
+ * fence's `title="<file>"` names the file it is or extends; same-title fences
+ * concatenate. The pages that continue the first tutorial's project list it
+ * as `context`, so their `import "./durable-layer.ts"` resolves.
+ */
+const tutorialPage = (page: string) => Smithers.file(`src/content/docs/docs/tutorials/${page}.mdx`)
+const tutorialTargetName = (page: string) =>
+  `tutorial${page.replace(/(^|-)(\w)/g, (_, __, c) => c.toUpperCase())}CodeBlocks`
+const tutorialCodeBlocks = Object.fromEntries(
+  (
+    [
+      ["first-flow", []],
+      ["crash-and-resume", ["first-flow"]],
+      ["retry-policy", ["first-flow"]],
+      ["human-approval", ["first-flow"]],
+      ["time-travel", []],
+      ["first-agent-flow", []],
+      ["agent-outputs", []],
+      ["memory", []]
+    ] as const
+  ).map(([page, context]) => [
+    tutorialTargetName(page),
+    Smithers.Markdown.CodeBlocks({ file: tutorialPage(page), lang: ["ts"], context: context.map(tutorialPage) })
+  ])
+)
+
+export const Package = Smithers.Package({
+  targets: { check, build, referenceIngest, cliData, apiDocs, docsLint, examplesPages, ...tutorialCodeBlocks }
+})

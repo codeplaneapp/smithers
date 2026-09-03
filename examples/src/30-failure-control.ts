@@ -2,8 +2,8 @@
  * Failure control: what runs, what unwinds, and what the plan shows first.
  *
  * `@smthrs/patterns` gives every container two halves. `make` builds the
- * conservative topology — every rung, member, and compensation that could be
- * reached — so a reader sees the failure paths before anything runs. `run` is
+ * conservative topology (every rung, member, and compensation that could be
+ * reached) so a reader sees the failure paths before anything runs. `run` is
  * the Effect that performs the value-dependent branch.
  *
  * This example releases a build: bounded checks, a quarantined flake, an

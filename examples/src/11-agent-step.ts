@@ -4,7 +4,7 @@
  * This is the Smithers form of a two-step research-then-write workflow: the
  * first step asks a model to research a topic and hands back
  * `{ summary, keyPoints }`, the second turns that into an article. Both are
- * model calls, and neither is special topology — the unified flow-authoring
+ * model calls, and neither is special topology: the unified flow-authoring
  * model says a model call is an ordinary action, so `AgentAction.make`
  * declares one exactly
  * the way `Action.make` declares any other. The difference is that the author
@@ -119,7 +119,7 @@ const scripted: Model.Model = Model.make({
     Stream.suspend(() => {
       // The loop keeps the task in a stable system prefix and rebuilds the
       // message tail every frame, so both halves of the request have to be read
-      // to see what was asked — which is what a real model does too.
+      // to see what was asked, which is what a real model does too.
       const asked = [
         ...request.system.map((part) => part.text),
         ...request.messages.flatMap((message) =>

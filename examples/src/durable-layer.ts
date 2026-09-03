@@ -2,8 +2,8 @@
  * The durable engine composition every persistence example reuses.
  *
  * `EngineStore.layer` needs the journal and its three state stores, the
- * durable deferred/clock state, a kernel `Jj`, a `StepBoundary`, and — to make
- * sealed results shareable — a `WorkspaceSandbox`. This module wires them over
+ * durable deferred/clock state, a kernel `Jj`, a `StepBoundary`, and (to make
+ * sealed results shareable) a `WorkspaceSandbox`. This module wires them over
  * one SQLite file so a restart in a later example reads the same rows a
  * previous one wrote.
  */
@@ -40,7 +40,7 @@ export const storesLayer = (filename: string) => NodeRuntime.storage(filename)
 /**
  * Everything `EngineStore` requires, minus the engine itself.
  *
- * The boundary and the sandbox are the PRODUCTION layers — `StepBoundary.layer`
+ * The boundary and the sandbox are the PRODUCTION layers: `StepBoundary.layer`
  * and `WorkspaceSandbox.layerFileSystem`, not `StepBoundary.layerTest`. That
  * pairing is what makes a sealed action's result eligible for the shared
  * step cache: the sandbox runs the body in an isolated workspace and observes
@@ -55,7 +55,7 @@ export const storesLayer = (filename: string) => NodeRuntime.storage(filename)
  * returns `false` without asking is the one thing a real deployment must not
  * do: it says "that owner is gone" about an owner it never looked at.
  *
- * `OwnerIdentity.layer` is the default owner minter — the process id plus a
+ * `OwnerIdentity.layer` is the default owner minter: the process id plus a
  * fresh nonce. It is listed here rather than assumed because it is the seam a
  * host with a better answer replaces.
  */

@@ -1,0 +1,24 @@
+DESCRIPTION
+  Report a bug with a run digest attached
+
+USAGE
+  smithers bug [flags] [<summary...>]
+
+ARGUMENTS
+  summary... string     (optional)
+
+FLAGS
+  --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY
+  --json                 Print the machine-readable document instead of the human rendering
+  --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
+  --quiet                Drop the banners and notices commands write to stderr
+  --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
+  --root string          Project root to act on, instead of walking up from the working directory
+  --run string           
+
+GLOBAL FLAGS
+  --help, -h                                                          Show help information
+  --version, -v                                                       Show version information
+  --wizard                                                            Start wizard mode for a command
+  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)

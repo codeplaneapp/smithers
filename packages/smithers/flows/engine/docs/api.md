@@ -149,4 +149,4 @@ control plane or a proxy classifies one without scraping prose.
 | `flow_proxy_collision`        | two derived operations share one wire name                                                |
 | `invalid_flow_tag`            | a flow tag is not well-formed UTF-16, so it has no route encoding                         |
 
-See [Getting started](/guides/getting-started), [Writing a flow](/guides/writing-a-flow), and [Determinism and replay](/concepts/determinism-and-replay).
+See the [Quickstart](/docs/quickstart/), [Build your first durable flow](/docs/tutorials/first-flow/), and [Replay, defined precisely](/docs/concepts/durable-execution/#replay-defined-precisely).

@@ -27,7 +27,7 @@ operating system has reaped the pid, and refuses a pid that was already dead,
 because a suite that "killed" a corpse injected nothing and would report green
 over a fault it never caused. `parentPid` and `waitForReparent` read the orphan
 a kill leaves behind rather than assuming it, and `skewClock` patches `Date.now`
-and a bare `new Date()` for this process only — a child does not inherit it,
+and a bare `new Date()` for this process only: a child does not inherit it,
 which is why a child runner takes an explicit skew instead. Its own suite,
 `test/Faults.test.ts`, is an ordinary one rather than a fault tier: it signals
 only pids it spawned itself, so unlike a case that kills a running engine it can

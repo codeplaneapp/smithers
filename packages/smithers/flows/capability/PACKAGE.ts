@@ -5,7 +5,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   deps: [],
   cwd: "packages/smithers/flows/capability"
 })
@@ -20,5 +20,5 @@ const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage
 const bunTest = Smithers.BunSuite({ cwd: "packages/smithers/flows/capability" })
 
 export const Package = Smithers.Package({
-  targets: { bunTest, check, circular, docs, fmt, lib, lint, test }
+  targets: { bunTest, check, circular, docs, docsFiles, fmt, lib, lint, test }
 })

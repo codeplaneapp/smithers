@@ -1,0 +1,242 @@
+---
+title: "Build your first durable flow"
+description: "Declare an action and a flow, attach an implementation, and run the flow in memory and durably over SQLite."
+sidebar:
+  order: 1
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components"
+
+In this tutorial you'll build the smallest complete Smithers program: one action, one flow that names it, an implementation attached as a layer, and two runs of that flow, first on the in-memory engine and then on the durable engine over a SQLite journal.
+
+Time: about 20 minutes. You need Node.js and pnpm.
+
+## Before you begin
+
+- You have Node.js 22.19.0 or later. The durable engine runs on Node only.
+- You have pnpm for installing packages.
+- The [quickstart](/docs/quickstart/) is a useful warm-up, but this tutorial starts from an empty directory.
+
+## 1. Set up the project
+
+Create a directory and install the flow and engine packages:
+
+```bash
+mkdir first-flow && cd first-flow
+pnpm init
+pnpm add @smthrs/flow@next @smthrs/engine@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/journal@next @smthrs/kernel@next @smthrs/run-store@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+```
+
+The `@next` suffix is required while 1.0 is a release candidate: `latest` still resolves the Smithers 0.x line. Effect is pinned to exactly `4.0.0-rc.108`.
+
+Add `"type": "module"` to the generated `package.json`, so the files in this tutorial run as ES modules. Every program here runs with `node <file>.ts`; Node 22.19.0 and later execute the TypeScript directly.
+
+```text
+You should see: pnpm writes a package.json and a lockfile and installs the
+packages into node_modules. Nothing from Smithers has run yet.
+```
+
+## 2. Declare the action
+
+An action is the atom that does the work: a stable tag, a payload schema, and a success schema, with no code attached. Create `greeting.ts` with the imports this file needs and the action declaration:
+
+```ts title="greeting.ts"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+
+export const Greet = Action.make("examples/Greet", {
+  payload: { name: Schema.String },
+  success: Schema.String
+})
+```
+
+`Action.make` builds pure data that travels anywhere; the code arrives separately in part 4. [Flows, actions, and plans](/docs/concepts/flows-actions-plans/) explains why declaration and implementation are separate, and the [flow API reference](/docs/reference/api/flow/) lists every option `Action.make` accepts.
+
+```text
+You should see: no output. Greet is a typed declaration; nothing runs until
+an implementation is attached in part 4.
+```
+
+## 3. Declare the flow
+
+A flow is the composite. Its `body` names the action with `.call` rather than calling it, because a body is planned before it runs. Add to `greeting.ts`:
+
+```ts title="greeting.ts"
+export const Greeting = Flow.make("examples/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  body: (payload) => Greet.call(payload)
+})
+```
+
+`Greet.call(payload)` records one plan node and executes nothing.
+
+```text
+You should see: no output. Greeting is a plan over one node, and a plan
+becomes a run only under an engine.
+```
+
+## 4. Attach the implementation
+
+`toLayer` attaches the code to the declared action, and `Interpreter.layer` turns the flow's plan into runs over the table those implementations file into. Add to `greeting.ts`:
+
+```ts title="greeting.ts"
+const GreetingLayer = Layer.mergeAll(
+  Greet.toLayer(({ name }) => Effect.succeed(`Hello, ${name}.`)),
+  Interpreter.layer(Greeting)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  // An action dispatch is recorded under a derived step identity, so the
+  // engine needs a Crypto even in memory.
+  Layer.provideMerge(NodeCrypto.layer)
+)
+```
+
+`FlowEngine.layerMemory` supplies an engine that keeps its state in the process: gone when the process exits, and enough for a first run.
+
+```text
+You should see: no output. The layer wires the implementation, the
+interpreter, and the engine together without running any of them.
+```
+
+## 5. Run on the in-memory engine
+
+Execute the flow under an explicit execution id and print the result. Add to `greeting.ts`:
+
+```ts title="greeting.ts"
+export const main: Effect.Effect<string> = Greeting.execute(
+  { name: "Ada" },
+  { executionId: "greeting-ada-1" }
+).pipe(
+  Effect.orDie,
+  Effect.provide(GreetingLayer)
+)
+
+Effect.runPromise(main).then(console.log)
+```
+
+`execute` fails typed when a payload does not satisfy the flow's schema; `Effect.orDie` is there because this payload is valid by construction. Run the program:
+
+```bash
+node greeting.ts
+```
+
+```text
+You should see: the program prints one line, the greeting result:
+Hello, Ada.
+```
+
+## 6. Run durably over SQLite
+
+The in-memory engine forgets everything at exit. To keep the run, swap the engine for `EngineStore.layer`, the durable engine that persists every action attempt and commits each lifecycle event in the same transaction as the state transition it describes. `NodeRuntime.layer` composes it over one SQLite file with the stores and sandbox it requires. Create `durable-layer.ts`:
+
+```ts title="durable-layer.ts"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import { Jj } from "@smthrs/kernel"
+import { Ownership } from "@smthrs/run-store"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { dirname } from "node:path"
+
+// The engine calls Jj for compensable snapshots. A stub that records
+// nothing keeps the wiring honest without requiring a jj binary.
+const stubJj = Layer.succeed(
+  Jj.Jj,
+  Jj.make({
+    snapshot: () => Effect.succeed({ changeId: "tutorial-snapshot" as never }),
+    restore: () => Effect.void,
+    diff: () => Effect.succeed(""),
+    workspaceAdd: () => Effect.void,
+    workspaceForget: () => Effect.void,
+    status: () => Effect.succeed("")
+  })
+)
+
+// A durable FlowEngine over the SQLite file at filename.
+export const durableEngine = (filename: string, hostId: string) =>
+  NodeRuntime.layer(
+    {
+      filename,
+      workspaceRoot: dirname(filename),
+      owner: { hostId },
+      isAlive: Ownership.sameHostPidProbe
+    },
+    StepBoundary.layer,
+    WorkspaceSandbox.layerFileSystem(),
+    Layer.empty
+  ).pipe(
+    Layer.provideMerge(stubJj),
+    Layer.provideMerge(NodeCrypto.layer),
+    Layer.provideMerge(NodeFileSystem.layer)
+  )
+```
+
+Keep this file; the later tutorials build their engines through it. Now create `run-durable.ts`, which runs the same `Greeting` flow durably and reads back the journal the run wrote:
+
+```ts title="run-durable.ts"
+import { Action, Interpreter } from "@smthrs/flow"
+import { Journal, type JournalEvent } from "@smthrs/journal"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { durableEngine } from "./durable-layer.ts"
+import { Greet, Greeting } from "./greeting.ts"
+
+const main = Effect.gen(function*() {
+  const result = yield* Greeting.execute({ name: "Ada" }, { executionId: "greeting-ada-2" })
+  const journal = yield* Journal.Journal
+  yield* journal.flush
+  const page = yield* journal.entries({ runId: "greeting-ada-2" as JournalEvent.RunId, limit: 200 })
+  return { result, eventTypes: page.entries.map((entry) => entry.eventType) }
+}).pipe(
+  Effect.provide(
+    Layer.mergeAll(
+      Greet.toLayer(({ name }) => Effect.succeed(`Hello, ${name}.`)),
+      Interpreter.layer(Greeting)
+    ).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(durableEngine("greeting.sqlite", "tutorial-host"))
+    )
+  ),
+  Effect.scoped,
+  Effect.orDie
+)
+
+Effect.runPromise(main).then(console.log)
+```
+
+```bash
+node run-durable.ts
+```
+
+Only the engine changed. The flow, the action, and the implementation are the ones from parts 2 to 4, which is the point of the authoring model: durability lives underneath the program, not inside it. [Durable execution](/docs/concepts/durable-execution/) covers what the engine records. To run the durable program again from scratch, delete `greeting.sqlite` or pick a different execution id.
+
+```text
+You should see: the program prints an object with result (Hello, Ada.) and
+eventTypes, one event type per journal entry the run committed. The file
+greeting.sqlite now exists on disk with the run's journal inside it.
+```
+
+## Summary
+
+You learned how to:
+
+- Declare an action with `Action.make` (tag, payload schema, success schema).
+- Declare a flow with `Flow.make`, whose body names the action with `.call`.
+- Attach the implementation with `toLayer` and `Interpreter.layer`.
+- Run a flow on `FlowEngine.layerMemory`.
+- Run the same flow durably with `EngineStore.layer` over SQLite and read back the journal it wrote.
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Crash and resume a run" href="/docs/tutorials/crash-and-resume/" description="Suspend a durable run, drop the engine, and resume without re-executing recorded work." />
+  <LinkCard title="Flows, actions, and plans" href="/docs/concepts/flows-actions-plans/" description="The two nouns of the authoring model and how a body becomes a run." />
+</CardGrid>

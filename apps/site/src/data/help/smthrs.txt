@@ -1,0 +1,46 @@
+DESCRIPTION
+  Plan, approve, and run durable flows
+
+USAGE
+  smithers <subcommand> [flags]
+
+FLAGS
+  --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY
+  --json                 Print the machine-readable document instead of the human rendering
+  --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
+  --quiet                Drop the banners and notices commands write to stderr
+  --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
+  --root string          Project root to act on, instead of walking up from the working directory
+
+GLOBAL FLAGS
+  --help, -h                                                          Show help information
+  --version, -v                                                       Show version information
+  --wizard                                                            Start wizard mode for a command
+  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+
+SUBCOMMANDS
+  plan               Render a flow plan and its complete approval payload
+  run                Run an approved plan payload, or resume a parked run
+  up                 Plan, approve, and run one flow; -d launches it detached
+  approve            Approve the complete serialized approval payload
+  deny               Deny the complete serialized approval payload
+  cancel             Cancel a durable run
+  signal             Deliver a durable JSON signal to a run
+  steer              Send a durable, attributed steering message to a run
+  ls                 List the flows discovered under this project
+  ps                 List durable runs
+  status, inspect    Show the diagnosis card for one run, or the run listing
+  logs               Read run events; --follow streams future events
+  output             Print one registered node output
+  down               Cancel every non-terminal run
+  serve              Host the control server for this project
+  init               Scaffold flows/<name>/flow.mdx and ignore .flows/
+  doctor             Report registry, database, runtime, and provider readiness
+  gc                 Delete terminal runs older than a threshold, with the rows they own
+  migrate            Convert a Smithers 0.x project to the 1.0 authoring model
+  memory             Read and write namespaced facts in the control database
+  claude             Claude Code plugin mirror protocol
+  mcp                Wire the Smithers MCP server into an agent
+  update             Check npm for a newer @smthrs/cli
+  bug                Report a bug with a run digest attached

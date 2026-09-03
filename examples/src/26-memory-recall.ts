@@ -19,7 +19,7 @@
  * argument threaded through every call. `WithMemory.withMemory(flow, policy)`
  * attaches it to the declaration instead, and every flow that declaration names
  * inherits the same one. `Flows.handlersFor(flow)` is what reads it back, which
- * is why {@link memorySource} binds the copy `withMemory` produced rather than
+ * is why `memorySource` binds the copy `withMemory` produced rather than
  * the bare export. Binding the bare declaration reaches the store with no
  * namespace, no budget, and no way to honour a refusal.
  *

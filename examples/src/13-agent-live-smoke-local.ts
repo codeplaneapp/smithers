@@ -1,9 +1,9 @@
 /**
  * A live smoke test against a fully local model: the same assembled
- * production agent stack as {@link liveOpenAiSmoke} (see `12-agent-live-smoke.ts`),
+ * production agent stack as `liveOpenAiSmoke` (see `12-agent-live-smoke.ts`),
  * run against Ollama over `Route.openaiChatCompatible` instead of a paid provider.
  *
- * This needs no API key, no billing, and no external network access — only
+ * This needs no API key, no billing, and no external network access: only
  * a local Ollama daemon with a model pulled (`ollama pull qwen2.5:7b`). It
  * exists because both real provider keys available in the authoring
  * environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) were out of credit,
@@ -48,8 +48,8 @@ export const executorLayer = RequestExecutor.layer.pipe(
 /**
  * A real `SeatResolver`: any `local:<modelId>` seat resolves to a live Ollama
  * route over its OpenAI-compatible Chat Completions endpoint. No credential
- * is required — Ollama ignores its `Authorization` header — so a fixed
- * non-empty placeholder satisfies {@link Auth.bearer}'s only invariant.
+ * is required (Ollama ignores its `Authorization` header), so a fixed
+ * non-empty placeholder satisfies `Auth.bearer`'s only invariant.
  *
  * @category layers
  * @since 0.1.0
@@ -97,7 +97,7 @@ export const liveLocalSeats = (baseUrl: string) =>
  * `temperature: 0` pins the seat to greedy decoding. Sampling was the whole
  * remaining flake: at the provider default the same prompt sometimes spent
  * all eight frames writing prose and never called `ctx.done`, and the step
- * failed with `model_failed`, "ended without a completed answer" — the
+ * failed with `model_failed`, "ended without a completed answer": the
  * last flake observed by the examples gate. Greedy decoding
  * answered 20 of 20 direct runs and 12 of 12 suite runs.
  */

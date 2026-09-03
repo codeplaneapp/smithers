@@ -6,7 +6,7 @@
  * through the full production agent harness, which wraps every call in a
  * sophisticated structured-completion convention meant for capable models
  * (GPT-4/Claude/Gemini-class). That convention is real production code,
- * working as designed — it is simply the wrong bar for a model small enough
+ * working as designed. It is simply the wrong bar for a model small enough
  * to run for free on a nearly-full local disk. What this session actually
  * built and fixed lives in `packages/smithers/agent/model` (the Chat Completions protocol,
  * the route constructors, the harness's cause-field serialization), and

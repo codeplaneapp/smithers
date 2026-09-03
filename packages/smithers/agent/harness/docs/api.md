@@ -9,7 +9,7 @@ production composition over the durable engine.
 
 The loop is cell-first. One frame is
 
-```
+```text
 model -> generated cell -> realm evaluation -> individually durable flow calls -> next transition
 ```
 
@@ -76,15 +76,15 @@ occupy.
 Three closed unions carry every failure a caller branches on. None of them is
 open-ended, and none of them is prose a consumer must parse.
 
-- `HarnessError.HarnessErrorCode` — the translation boundary's own failures.
+- `HarnessError.HarnessErrorCode`: the translation boundary's own failures.
   Folded into `@smthrs/agent`'s `AgentFailure` union, so a code that nothing
   raises is a promise this package cannot keep; the set holds only codes that
   are raised.
-- `Cell.CallFailureCode` — why one flow call did not succeed, as the cell reads
+- `Cell.CallFailureCode`: why one flow call did not succeed, as the cell reads
   it. A failed call **resolves** with `{ ok: false, error: { code, message, hint } }`
   rather than throwing, so the recovery branch the model already wrote still
   runs. `Cell.callFailureHint` names the one move that recovers each class.
-- `Sandbox.SandboxErrorCode` — why a realm could not run a cell at all, as
+- `Sandbox.SandboxErrorCode`: why a realm could not run a cell at all, as
   distinct from a cell that ran and failed.
 
 `StructuredOutput.StructuredOutputFailureCode` is the fourth, for the boundary

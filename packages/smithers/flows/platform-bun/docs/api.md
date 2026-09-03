@@ -42,9 +42,8 @@ Supported runtimes are Bun >=1.3.0 and Node.js >=22.19.0.
 ## Shell and HTTP
 
 There is no shell service, and no runtime detection either, because Bun's
-spawner _is_ the Node one. See [design decisions](/design-decisions) for why the
-old `Shell` wrapper and its hand-rolled `Bun.spawn` detection were deleted
-together.
+spawner _is_ the Node one. The old `Shell` wrapper and its hand-rolled
+`Bun.spawn` detection were deleted together.
 
 There is no HTTP service either. `BunHost` provides
 `@effect/platform-bun`'s fetch-backed `HttpClient` with

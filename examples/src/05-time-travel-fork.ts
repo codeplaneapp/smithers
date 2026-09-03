@@ -2,8 +2,8 @@
  * Fork a finished run at a journal frame and drive the copy.
  *
  * Forking is one call on one service: `yield* TimeTravel` and then
- * `fork(position)`. A position is a run id and a frame — the `(lineageId, seq)`
- * address in the journal — and nothing else. The child run id, the lineage
+ * `fork(position)`. A position is a run id and a frame, the `(lineageId, seq)`
+ * address in the journal, and nothing else. The child run id, the lineage
  * edge back to the parent, and the jj workspace the copy lands in are derived
  * inside the service; the parent is checked for liveness there too.
  *
@@ -74,8 +74,8 @@ const engineLayer = (filename: string, hostId: string) =>
 /**
  * The time-travel service over the same SQLite file the engine writes.
  *
- * `TimeTravel.layer` asks only for injectable contracts — the store, the
- * journal, the run store, the cache, and jj — so it merges straight onto the
+ * `TimeTravel.layer` asks only for injectable contracts (the store, the
+ * journal, the run store, the cache, and jj) so it merges straight onto the
  * engine composition. Building it also finishes or rolls back any rewind a
  * crash interrupted, which is why recovery never appears as a call below.
  */

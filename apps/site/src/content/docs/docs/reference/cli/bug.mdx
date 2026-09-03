@@ -1,0 +1,44 @@
+---
+title: "smthrs bug"
+description: "Report a bug with a run digest attached"
+---
+
+import { Code } from "@astrojs/starlight/components"
+import help from "../../../../../data/help/bug.txt?raw"
+
+## Synopsis
+
+```text
+smthrs bug <summary...> [--run <run-id>]
+```
+
+## Description
+
+`bug` posts a bug report to `https://bug.smithers.sh/api/bugs` without you pasting project state into a browser. The report carries your summary, the CLI version, the platform and Node version, this project's run listing, and, with `--run`, that run's event digest. Everything passes through the journal's shared redaction rules before it leaves the machine. It never attaches flow sources or arbitrary files: the only run detail is the digest. To post somewhere else, set `SMITHERS_BUG_ENDPOINT`.
+
+## Arguments
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `summary` | string (one or more words) | yes | The one-line summary; the words are joined with spaces. An empty summary exits 2. |
+
+## Flags
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--run <run-id>` | string | none | Attach this run's event digest: status, cause, turns, calls, refusals, and cost as the run's events record them. |
+
+## Output
+
+On success prints `{ "reported": true, "endpoint": ... }`. `--json` prints the same document in compact JSON. The post times out after 15 seconds; an endpoint that cannot be reached, or one that answers a non-OK status, exits 1.
+
+## Help output
+
+The flag list above is curated. This is what the binary prints, captured by `apps/site/scripts/gen-cli-data.mjs`.
+
+<Code code={help} lang="text" title="smthrs bug --help" />
+
+## See also
+
+- [`smthrs status`](/docs/reference/cli/status/): the diagnosis card computed from the same event digest.
+- [`smthrs doctor`](/docs/reference/cli/doctor/): check registry, database, runtime, and provider readiness before reporting.

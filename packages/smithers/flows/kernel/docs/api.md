@@ -211,7 +211,7 @@ layers. `@smthrs/kernel/test/TestHost` supplies the deterministic Node test
 bundle. `@smthrs/kernel/test/contract` registers the shared filesystem,
 process, Jj, and HTTP capability matrices for third-party host adapters.
 
-See [Hosts and capabilities](/concepts/hosts-and-capabilities) and the platform
+See [Capabilities and the host kernel](/docs/concepts/kernel/) and the platform
 bundles that satisfy these ports: [`@smthrs/platform-node`](/api/platform-node),
 [`@smthrs/platform-browser`](/api/platform-browser), and
 [`@smthrs/platform-bun`](/api/platform-bun).

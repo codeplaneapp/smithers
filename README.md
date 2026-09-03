@@ -41,7 +41,7 @@ pnpm add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platf
 
 Release candidates publish to the `next` dist-tag, so the `@next` suffix is
 required. `latest` still resolves the Smithers 0.x line. Install
-`@smthrs/cli@next` for the `smithers` command. Pin Effect to exactly
+`@smthrs/cli@next` for the `smthrs` command (`smithers` is an alias). Pin Effect to exactly
 `4.0.0-rc.108`: a project with two Effect instances is unsupported, because
 schema internals are not interoperable between them.
 
@@ -176,7 +176,7 @@ and the browser example is bundled by a real bundler.
 | `@smthrs/sync` | Read-only journal replication for followers |
 | `@smthrs/time-travel` | Replay, fork, rewind, compensation, and recovery protocols |
 | `@smthrs/agent` | Production agent loop on the durable engine: `AgentSession`, `AgentAction`, `CellPlugin` |
-| `@smthrs/cli` | The `smithers` executable and its `NodeControl` composition |
+| `@smthrs/cli` | The `smthrs` executable (alias `smithers`) and its `NodeControl` composition |
 | `@smthrs/control` | Control services, RPC schema, `ControlServer` and `ControlClient`, credentials |
 | `@smthrs/gateway` | Gateway wire schemas, projections, session tokens, and the `SuperviseRuntime` port |
 | `@smthrs/model` | Schema-first model protocols, routes, streaming, and seat resolution |
@@ -191,7 +191,7 @@ and testing packages this table omits.
 The release policy freezes this wording, and the README quotes it rather than
 summarizing it:
 
-Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`, `<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`, `runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smthrs` facade, no 0.x CLI verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or compatibility layer will be published. Flows are written against `@smthrs/flow` (`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`, `@smthrs/control`, and Effect `4.0.0-rc.108`, and run on Node.js 22.19.0 or later with local SQLite. Existing 0.x projects migrate their source with the `migrate-smithers-v1` workflow (`smithers migrate`), which rewrites workflows, imports, configuration, scripts, and docs and reports every construct it could not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not intended to be.
+Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`, `<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`, `runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smthrs` facade, no 0.x CLI verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or compatibility layer will be published. Flows are written against `@smthrs/flow` (`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`, `@smthrs/control`, and Effect `4.0.0-rc.108`, and run on Node.js 22.19.0 or later with local SQLite. Existing 0.x projects migrate their source with the `migrate-smithers-v1` workflow (`smthrs migrate`), which rewrites workflows, imports, configuration, scripts, and docs and reports every construct it could not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not intended to be.
 
 Storage in rc.0 is local SQLite only. PostgreSQL and PGlite are unsupported:
 `SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with

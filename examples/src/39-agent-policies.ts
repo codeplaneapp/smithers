@@ -14,7 +14,7 @@
  * 3. answers the correction with the schema-shaped JSON.
  *
  * Phase one builds an engine, runs until the park is durable, and is then
- * killed — fiber interrupted, engine scope closed, SQLite connection dropped.
+ * killed: fiber interrupted, engine scope closed, SQLite connection dropped.
  * Phase two opens a second engine over the same file and finishes the run. The
  * counters the summary reports are the contract:
  *

@@ -185,7 +185,7 @@ The tag key `@smthrs/jj/Jj` and the error `_tag` `@smthrs/jj/JjError` are
 durable identity: step keys digest the resolved service set, and `JjError`
 round-trips through the journal, so renaming either invalidates recorded runs.
 [packages/smithers/flows/jj/test/index.test.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/test/index.test.ts)
-pins both. See [step keys](/concepts/step-keys).
+pins both. See [Content addressing](/docs/concepts/content-addressing/).
 
 ## Browser support
 
@@ -199,5 +199,5 @@ do _not_ bundle, and that the reason is `node:child_process`.
 [`@smthrs/kernel`](/api/kernel) owns the closed service list and decorates `Jj`
 with capability checks, and [`@smthrs/time-travel`](/api/time-travel) uses it for
 workspace snapshot and restore. See also
-[hosts and capabilities](/concepts/hosts-and-capabilities) and
-[time travel](/concepts/time-travel).
+[Capabilities and the host kernel](/docs/concepts/kernel/) and
+[Time travel](/docs/concepts/time-travel/).

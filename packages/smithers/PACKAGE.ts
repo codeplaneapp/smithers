@@ -1,7 +1,8 @@
 /** Standard package targets plus package-owned documentation generation. */
 import { Smithers } from "@smthrs/targets"
+import { docsWriter, referenceStyle } from "../../PACKAGE.ts"
 
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   deps: [],
   cwd: "packages/smithers",
   tests: Smithers.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
@@ -19,6 +20,59 @@ const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage
  */
 const faults = Smithers.FaultSuite({ cwd: "packages/smithers" })
 
+// --- reference docs pipeline ----------------------------------------------
+const cliCwd = "packages/smithers"
+
+/**
+ * Everything the CLI reference writer may read: the command sources, README,
+ * package docs, and the manifest whose version the docs pin. The site's
+ * `//apps/site:cliData` generator lists this group in `data`, so a help
+ * string, a removed-command anchor, or the version moves the docs' key.
+ */
+const docsSources = Smithers.Filegroup({
+  srcs: [
+    Smithers.glob("src/**/*.ts"),
+    Smithers.file("README.md"),
+    Smithers.file("package.json"),
+    Smithers.glob("docs/*.md")
+  ],
+  cwd: cliCwd
+})
+
+/** The committed colocated CLI reference pages. Not ingested into apps/site yet; see apps/site/prompts/CLI-DIFF.md. */
+const referencePages = Smithers.Filegroup({ srcs: [Smithers.glob("docs/reference/cli/*.md")], cwd: cliCwd })
+
+/** One `docs/reference/cli/<verb>.md` page per shipped verb in src/Verb.ts; the writer reads the verb off its write-set path. */
+const verbPage = (verb: string) =>
+  Smithers.Agent.Diff({
+    agent: docsWriter,
+    prompt: Smithers.file("//apps/site/prompts/reference-cli-verb.md"),
+    data: [docsSources, referenceStyle],
+    changes: [`docs/reference/cli/${verb}.md`],
+    gates: [check],
+    maxRounds: 3
+  })
+
+const referenceCliPlan = verbPage("plan")
+const referenceCliRun = verbPage("run")
+const referenceCliUp = verbPage("up")
+// --- end reference docs pipeline ------------------------------------------
+
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, faults, fmt, lib, lint, test }
+  targets: {
+    check,
+    circular,
+    docs,
+    docsFiles,
+    faults,
+    fmt,
+    lib,
+    lint,
+    test,
+    docsSources,
+    referenceCliPlan,
+    referenceCliRun,
+    referenceCliUp,
+    referencePages
+  }
 })

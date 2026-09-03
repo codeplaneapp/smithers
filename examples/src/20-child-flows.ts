@@ -31,7 +31,7 @@
  * What `.child()` adds on top is IDENTITY. The interpreter derives a child's
  * execution id from the parent's id and the node's address, so a re-driven
  * parent lands on the child it already started. A tool call names its own id,
- * which is why {@link toolRunId} is a constant here: the handler owns the
+ * which is why `toolRunId` is a constant here: the handler owns the
  * at-most-once question that the boundary would otherwise answer for it.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"

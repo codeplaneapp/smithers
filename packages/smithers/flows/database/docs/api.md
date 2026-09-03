@@ -167,7 +167,7 @@ any service exists to configure.
 0.x PostgreSQL or PGlite deployment exports, `SMITHERS_TEST_PG_URL` and every
 `SMITHERS_POSTGRES_*` name, and `ignoredNotice(name)` is the line each one gets:
 
-```
+```text
 ignored: SMITHERS_POSTGRES_URL has no effect in 1.0.0-rc.0 (SQLite only)
 ```
 
@@ -219,11 +219,11 @@ layer ships here. There is no `PgDatabase` or `PGliteDatabase` layer, and the
 journal schema is SQLite-flavoured DDL, so a Postgres client wrapped by
 `DurableWriter.make` gets correct retry classification but not a runnable
 schema. Postgres and PGlite layers, and a dialect-parameterized migration
-ladder, are Planned: see [known limitations](/release/known-limitations).
+ladder, are Planned and do not ship in this release.
 :::
 
 The database service does not run domain migrations. Compose
 [`Journal.Migrations.layer`](/api/journal#migrations) before exposing journal
-stores. See [Assembling a durable engine](/guides/durable-engine) and the
+stores. See [Run durably over SQLite](/docs/tutorials/first-flow/#6-run-durably-over-sqlite) and the
 [`@smthrs/journal`](/api/journal), [`@smthrs/run-store`](/api/run-store), and
 [`@smthrs/step-cache`](/api/step-cache) references.

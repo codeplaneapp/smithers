@@ -93,7 +93,7 @@ export const Delegate = Flow.make("examples/Delegate", {
     )
 })
 
-/** What {@link main} reports back to the test. */
+/** What `main` reports back to the test. */
 export interface Summary {
   readonly result: ReadonlyArray<string>
   readonly authored: number

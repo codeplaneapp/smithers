@@ -19,7 +19,7 @@ The root holds the journal and its contracts, written against the driver-neutral
 `@smthrs/database` service, and it bundles for the browser (`pnpm run browser`).
 The test doubles bind a Node SQLite database and are therefore imported from
 `@smthrs/journal/test/TestJournal` and `@smthrs/journal/test/Notifying`. See
-[browser support](/architecture/browser-support).
+[platform support](/docs/reference/api/#platform-support).
 
 ## Operations
 
@@ -70,8 +70,8 @@ same schemas, so an identifier the writer refuses is refused on every read with
 `invalid_event` rather than answered with an empty page.
 
 :::warning
-Reads below a run's compaction floor fail with `compacted`. See
-[Checkpoints and compaction](/compaction).
+Reads below a run's compaction floor fail with `compacted`. See the
+[`@smthrs/journal` error codes](/docs/reference/errors/#smthrsjournal).
 :::
 
 ## Sequence allocation
@@ -271,8 +271,9 @@ durable writer over `DurableWriter`. Options are `capacity`, `overflow`, and the
 optional `batchSize`, `sourceEventCache`, `maxEntryBytes`, `redact`, and
 `compaction`.
 `compaction` is off by default: without it the journal never deletes an entry,
-and checkpointing stays a caller-driven `checkpoint` and `compact` call. See
-[Checkpoints and compaction](/compaction).
+and checkpointing stays a caller-driven `checkpoint` and `compact` call. A
+follower that meets the floor resyncs as [Run a read-only follower](/docs/guides/sync-followers/)
+describes.
 
 ## Migrations
 
@@ -306,6 +307,7 @@ database, take `@smthrs/engine-store/test/TestStores`. `Notifying.wrap` and
 `Notifying.layer` inject interstitial crash and fence-loss notifications around
 any Effect service.
 
-See [Journal semantics](/concepts/journal), [Concurrency](/concepts/concurrency),
-[Checkpoints and compaction](/compaction), and the
+See [Durable execution](/docs/concepts/durable-execution/),
+[Execution IDs and ownership](/docs/concepts/ownership/), the
+[`@smthrs/journal` error codes](/docs/reference/errors/#smthrsjournal), and the
 [`@smthrs/engine-store` reference](/api/engine-store).

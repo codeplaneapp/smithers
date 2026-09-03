@@ -9,7 +9,7 @@
  * A run parks by waiting. `WaitFor` is the system wait action: it annotates the
  * park as `event` with a wake token, awaits a `DurableDeferred`, and the engine
  * writes the waiting reason on the run row and releases the run. `execute`
- * returns while the run stays parked, which is the whole point — the run
+ * returns while the run stays parked, which is the whole point: the run
  * outlives the process that started it.
  *
  * Two runs, because a park means two different things depending on whether the
@@ -96,7 +96,7 @@ const supervisedRunId = "examples-supervised"
  * `wedged-node` is not one of the four conditions `defaultDetectors` covers, so
  * the policy brings its own: the field to read, the value that means the
  * condition holds, and the entries to read it on. Narrowing to the beat keeps
- * the heal record — which names the same health — from re-opening a condition
+ * the heal record, which names the same health, from re-opening a condition
  * the next beat closed.
  */
 const rules = (afterMs: number): Alerts.Policy => ({

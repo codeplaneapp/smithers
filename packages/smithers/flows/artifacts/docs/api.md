@@ -66,7 +66,7 @@ overrides.
 ## Sweep and backup exclusion
 
 `ArtifactSweep` is the host-local deletion surface used by
-[Artifact GC](/artifact-gc). `inventory` returns `BlobStat` values only for
+[Sweep unreferenced artifacts](/docs/guides/retention/#4-sweep-unreferenced-artifacts). `inventory` returns `BlobStat` values only for
 canonical fanout files whose modification time is measurable. It skips temp
 files, lock files, foreign paths, and entries that disappear during the scan.
 
@@ -183,7 +183,7 @@ corrupt and required repair. A successful local hit increments
 ## Package boundary
 
 The root uses Effect's `FileSystem` and `HttpClient` contracts and bundles for
-the browser. See [browser support](/architecture/browser-support). The package
+the browser. See [platform support](/docs/reference/api/#platform-support). The package
 owns no SQL tables and needs no migration.
 
 Reclaiming published blobs never happens as a side effect of a store call. The

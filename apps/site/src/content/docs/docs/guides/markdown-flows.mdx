@@ -1,0 +1,96 @@
+---
+title: "Write a markdown flow"
+description: "Scaffold a flow.mdx with smthrs init, write its frontmatter and prose instructions, and run it with smthrs up."
+sidebar:
+  order: 1
+---
+
+A markdown flow is one `flows/<name>/flow.mdx` file: frontmatter declares the run, and the prose body below it is the agent's instructions. This guide writes one and runs it.
+
+## Before you start
+
+- Install the CLI with `npm install --global @smthrs/cli@next`. Node 22.19.0 or later is required.
+- Set a provider credential. `smthrs doctor` lists the keys it reads: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`.
+
+## 1. Scaffold the flow
+
+```bash
+smthrs init review
+```
+
+The name is one path segment of letters, digits, `-`, and `_`; omit it to default to a slug of the project directory name. The scaffold writes `flows/review/flow.mdx`, creates the empty `.flows/` state directory the project's runs use, and in a git or jj repository appends `.flows/` to `.gitignore` once.
+
+To add another flow later, run `smthrs init <name>` again. An existing flow file is never overwritten.
+
+The scaffold's `model:` line comes from the first provider credential the environment sets, in the order `smthrs doctor` reports them: `ANTHROPIC_API_KEY` resolves `anthropic:claude-sonnet-4-5`, `OPENAI_API_KEY` resolves `openai:gpt-5.6-sol`, and `OPENROUTER_API_KEY` resolves `openrouter:anthropic/claude-sonnet-4.5`. With no credential set, the scaffold still declares the default and a frontmatter comment names the key to set, because a flow without a `model:` line is not launchable at all.
+
+## 2. Set the frontmatter
+
+A real flow's frontmatter declares the run:
+
+```md
+---
+name: "review"
+description: Reviews the uncommitted change in this repository and returns a verdict with the reasons behind it.
+capabilities: ["fs:read:**", "proc:spawn:*"]
+model: openai:gpt-5.6-sol
+budget:
+  tokens: 200000
+  milliseconds: 600000
+---
+```
+
+The keys:
+
+| Key | Meaning |
+| --- | --- |
+| `description` | Required. Discovery refuses a markdown flow whose description is missing or empty, and warns past 1024 characters. |
+| `model` | The seat the flow runs on, `<provider>:<model>`. Change the line to run somewhere else. |
+| `capabilities` | A string array bounding what the agent may do. Omit it and the flow runs under the conservative wildcard `["*"]`, with a discovery warning. |
+| `budget` | Optional `tokens` and `milliseconds` ceilings, each a positive safe integer. A malformed budget is ignored with a warning rather than tightened. |
+| `name` | What `smthrs init` writes. Project flows are named by directory path, so discovery ignores this line with a warning; rename the directory to rename the flow. |
+
+[The flow.mdx reference](/docs/reference/flow-mdx/) has the full key table.
+
+## 3. Write the body
+
+Everything below the frontmatter is the prompt the agent receives. Each `##` section is a step the agent performs in order, and the text under it is the instruction for that step:
+
+```md
+## Read the change
+
+Run `git diff --stat` and then `git diff` for the paths in scope through the
+`bash` tool; that is the only way to run a command here. Read enough of
+each changed file to understand the change in context. Do not call other flows.
+
+## Verdict
+
+Finish with one line, `approve` or `request-changes`, followed by at most five
+findings. Each finding names the file, the line, and the fix in one sentence.
+```
+
+Write instructions, not narration: name the tools the agent may use, the order of the phases, and the exact shape of the final answer. A markdown flow's whole input is one `args` string, appended verbatim after the body, so say in the prose what the arguments mean ("The appended arguments may narrow the review to a path"). Files beside `flow.mdx` are available to the agent as supporting resources, read relative to the flow directory and loaded only as needed.
+
+## 4. Run it
+
+```bash
+smthrs up review
+```
+
+`smthrs up` plans the flow, approves the plan for the run, and launches it, staying attached until the run settles and exiting with the run's terminal status. To pass arguments, supply the `args` field as JSON:
+
+```bash
+smthrs up review --data '{"args":"src/flows"}'
+```
+
+To iterate, edit `flow.mdx` and run `smthrs up` again. When a run misbehaves, `smthrs status <run-id>` diagnoses it, and `smthrs doctor` reports discovery warnings such as an unknown frontmatter key or a malformed budget.
+
+## Verify it worked
+
+- `smthrs ls` prints one item per discovered flow with its `flowId` and `description`; the scaffolded flow appears under its directory name, `review`.
+- `smthrs up review` prints an `Accepted` receipt whose `runId` names the run, and `smthrs status <run-id>` prints the run's diagnosis card.
+
+## See also
+
+- [Write a module flow](/docs/guides/module-flows/): the typed TypeScript authoring model, for when prose and one `args` string are not enough.
+- [Build your first agent flow](/docs/tutorials/first-agent-flow/): the guided tutorial version of this path.

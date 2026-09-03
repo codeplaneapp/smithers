@@ -22,7 +22,7 @@
  * code, so `"*"` is the truthful declaration and a narrower guess would be a
  * claim nobody can back. It is also not a decision the ADAPTER can make: what a
  * given server may do depends on which server you connected and why. So the
- * host makes it, in {@link granting} below, and the run's envelope names that
+ * host makes it, in `granting` below, and the run's envelope names that
  * grant rather than `*:*`. Connecting a server you trust and saying what you
  * trust it with are one decision, taken in one place.
  *

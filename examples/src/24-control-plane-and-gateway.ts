@@ -25,7 +25,7 @@
  * `examples/RemoteShip` flow its frontmatter delegates to.
  *
  * **One chain, not two halves.** `ControlExecutor` is the seam between the
- * plane and a real engine, and {@link executorLayer} below is the whole bridge:
+ * plane and a real engine, and `executorLayer` below is the whole bridge:
  * it resolves the approved plan's flow out of the registry, starts a durable
  * run under the run id the plane just minted, and mirrors what that run did
  * back onto the plane's row. So the run the client watches is the run the

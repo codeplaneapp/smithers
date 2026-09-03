@@ -1,11 +1,11 @@
 /**
  * A live smoke test against Gemini's OpenAI-compatible endpoint: the same
- * assembled production agent stack as {@link liveLocalSmoke} (see
+ * assembled production agent stack as `liveLocalSmoke` (see
  * `13-agent-live-smoke-local.ts`), run against a real hosted provider over
  * `Route.openaiChatCompatible` instead of a fully local one.
  *
  * Exists to get a witnessed, real, successful completion once a local model
- * proves too small to finish the harness's own convention — Gemini's free
+ * proves too small to finish the harness's own convention. Gemini's free
  * tier has a real per-minute rate limit but working quota, unlike the two
  * paid keys available in the authoring environment (`OPENAI_API_KEY`,
  * `ANTHROPIC_API_KEY`), both out of credit.

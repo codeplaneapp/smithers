@@ -1,6 +1,6 @@
 # @smthrs/cli
 
-Node command-line projection of the Smithers control plane. It turns `@smthrs/control` operations into the `smithers` executable and supplies the Node HTTP, WebSocket, and output layers used by the CLI host.
+Node command-line projection of the Smithers control plane. It turns `@smthrs/control` operations into the `smthrs` executable (with `smithers` as an alias) and supplies the Node HTTP, WebSocket, and output layers used by the CLI host.
 
 ```sh
 npm install @smthrs/cli
@@ -14,7 +14,7 @@ The root entry point exports the following namespaces; each is also available fr
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `Agents`            | `serverName`, `Agent`, `agents`, `find`, `launchCommand`, `Wired`, `addMcp`, `manualInstructions`                                                                                                                                                                                                                                                                                                                                                                                                                                            | The agent configurations `mcp add` writes the Smithers MCP server into.                                                |
 | `Application`       | `Config`, `Engine`, `engineMemory`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Selects the local or authenticated RPC-backed Control layer from transport-neutral configuration.                      |
-| `Bug`               | `defaultEndpoint`, `scrubText`, `scrub`, `Report`, `report`, `timeoutMs`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Scrubs and posts a `smithers bug` report.                                                                              |
+| `Bug`               | `defaultEndpoint`, `scrubText`, `scrub`, `Report`, `report`, `timeoutMs`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Scrubs and posts a `smthrs bug` report.                                                                              |
 | `ClaudeMirror`      | `contract`, `subscriptionTtlMs`, `subscriptionsPath`, `Subscription`, `readSubscriptions`, `subscribe`, `unsubscribe`, `MirrorNode`, `Frame`, `defaultMaxOutputChars`, `frame`, `terminalStatuses`, `isTerminal`, `Transition`, `notableKinds`, `transition`                                                                                                                                                                                                                                                                                 | The Claude Code plugin mirror protocol: subscriptions, frames, and status transitions.                                 |
 | `CliError`          | `UsageError`, `UnsupportedError`, `ResourceLimitError`, `RenderingError`, `CliError`, `exitCode`                                                                                                                                                                                                                                                                                                                                                                                                                                             | Typed CLI failures and their stable process exit codes.                                                                |
 | `CodexAuth`         | `refreshUrl`, `clientId`, `locate`, `Store`, `MakeOptions`, `make`                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Locates and refreshes the Codex credential store.                                                                      |
@@ -37,7 +37,7 @@ The root entry point exports the following namespaces; each is also available fr
 | `Update`            | `packageName`, `registryUrl`, `Status`, `isNewer`, `compare`, `render`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Compares the installed version with the registry's latest.                                                             |
 | `Verb`              | `Verb`, `shipped`, `subcommands`, `names`, `find`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The shipped verb catalog and lookup.                                                                                   |
 | `Version`           | `packageVersion`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | The version declared by the installed `@smthrs/cli` package metadata.                                                  |
-| `bin` / `smithers`  | side-effect entry point                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Runs `Command.cli`; the package also installs it as the `smithers` executable.                                         |
+| `bin` / `smthrs`    | side-effect entry point                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Runs `Command.cli`; the package also installs it as the `smthrs` executable, with `smithers` as an alias.                                         |
 
 ```ts
 import { Command, NodeControl, Version } from "@smthrs/cli"
@@ -68,7 +68,7 @@ Control servers bind `127.0.0.1` by default. See the [control-plane trust postur
 | `0`   | The command did what it was asked.                                                     |
 | `1`   | The command failed, or the run it reports settled `failed`.                            |
 | `2`   | The invocation was wrong. Retype the command; the message names the flag or argument.  |
-| `3`   | The run is parked at `waiting-approval`. Answer it with `smithers approve` and resume. |
+| `3`   | The run is parked at `waiting-approval`. Answer it with `smthrs approve` and resume. |
 | `130` | The run was cancelled or interrupted.                                                  |
 | `143` | The run was terminated.                                                                |
 
@@ -86,13 +86,13 @@ rc.0 reads a closed set of variables, all listed by `Environment.names`, with fo
 | `SMITHERS_BACKEND`                       | SQLite only. Any other value exits 1 with `unsupported_database`. |
 | `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` | How long `up -d` waits for its child to report admission.         |
 
-Provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) are read by the seat resolver, not by the CLI itself. `smithers doctor` reports which are present.
+Provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) are read by the seat resolver, not by the CLI itself. `smthrs doctor` reports which are present.
 
 ## MCP
 
-`smithers --mcp` serves the Smithers MCP server on stdio, so an agent drives runs through the same control plane the verbs do. `smithers mcp add <agent>` writes the server entry into an agent's configuration, and `smithers mcp` lists the agents it knows.
+`smthrs --mcp` serves the Smithers MCP server on stdio, so an agent drives runs through the same control plane the verbs do. `smthrs mcp add <agent>` writes the server entry into an agent's configuration, and `smthrs mcp` lists the agents it knows.
 
-The server answers a `{ ok, data?, error? }` envelope on every tool. Ten of the twenty-one 0.x tools answer `{ ok: false, error: { code: "unsupported" } }` in rc.0; `McpServer.unsupportedTools` names them and `McpServer.unsupportedReasons` says why. Reserved `system/*` flows are not listed and cannot be launched, matching `smithers up` and `smithers ls`.
+The server answers a `{ ok, data?, error? }` envelope on every tool. Ten of the twenty-one 0.x tools answer `{ ok: false, error: { code: "unsupported" } }` in rc.0; `McpServer.unsupportedTools` names them and `McpServer.unsupportedReasons` says why. Reserved `system/*` flows are not listed and cannot be launched, matching `smthrs up` and `smthrs ls`.
 
 Each MCP request and response frame is limited to 4 MiB. One MCP history result is limited to 10,000 events and 1 MiB. Crossing either boundary returns `RESOURCE_LIMIT`; an oversized input line is discarded incrementally before JSON decoding.
 
@@ -130,15 +130,15 @@ against a real provider:
 
    ```sh
    export ANTHROPIC_API_KEY=sk-ant-...
-   approval="$(smithers --json plan hello | jq -c '.approval')"
-   smithers --json approve "$approval" --scope run
-   smithers --json run "$approval"
-   smithers ps
-   smithers logs <run-id> --follow
+   approval="$(smthrs --json plan hello | jq -c '.approval')"
+   smthrs --json approve "$approval" --scope run
+   smthrs --json run "$approval"
+   smthrs ps
+   smthrs logs <run-id> --follow
    ```
 
-   `smithers run` prints the accepted receipt with the run id; `smithers ps` shows
+   `smthrs run` prints the accepted receipt with the run id; `smthrs ps` shows
    the durable run state. A run that asks for approval parks as
    `waiting-approval` and journals a `control.approval.requested` event whose
-   `payload` field is the exact argument for `smithers approve '<payload>'`;
-   `smithers run --resume <run-id>` then re-drives the parked execution.
+   `payload` field is the exact argument for `smthrs approve '<payload>'`;
+   `smthrs run --resume <run-id>` then re-drives the parked execution.

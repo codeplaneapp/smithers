@@ -345,6 +345,6 @@ default, because a monitor that healed by default would cancel a run the first
 time it looked at one. A remedy resets the stall count, so one stall produces
 one resume rather than one per beat. The loop stops early on a terminal run.
 
-See [Time travel](/concepts/time-travel),
-[Subflows](/concepts/subflows), and the
-[control-plane trust posture](/guides/control-plane-trust).
+See [Time travel](/docs/concepts/time-travel/),
+[Compose child flows](/docs/guides/child-flows/), and
+[Operate the control plane](/docs/guides/control-plane/).

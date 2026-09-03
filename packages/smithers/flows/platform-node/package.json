@@ -80,14 +80,18 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
+    "@smthrs/jj": "1.0.0-rc.0",
+    "@smthrs/kernel": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/platform-node-shared": "4.0.0-rc.108",
-    "@smthrs/jj": "1.0.0-rc.0",
-    "@smthrs/kernel": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/platform-node-shared": "4.0.0-rc.108",
     "@effect/vitest": "4.0.0-rc.108",
     "@eslint/js": "9.39.1",
     "@smthrs/journal": "1.0.0-rc.0",
@@ -100,6 +104,7 @@
     "eslint-plugin-import": "2.32.0",
     "eslint-plugin-jsdoc": "64.1.0",
     "eslint-plugin-unicorn": "61.0.2",
+    "effect": "4.0.0-rc.108",
     "madge": "8.0.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",

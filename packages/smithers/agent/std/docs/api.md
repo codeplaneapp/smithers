@@ -52,7 +52,7 @@ capped result says so in its own output: `truncated`, `<stream>Truncated`, or a
 Shell capture is bounded where it is read, not after: a command that prints
 gigabytes costs the bound rather than the whole of what it printed, and the
 `<stream>DroppedBytes` fields count what the process actually produced. Every
-caller-supplied command — `bash`, `test`, `shell_command` — passes a bound. The
+caller-supplied command (`bash`, `test`, `shell_command`) passes a bound. The
 internal `git` plumbing calls behind `Checkpoints` and `TestRun`'s baseline do
 not, because a listing read for its content is useless with its head missing.
 Those

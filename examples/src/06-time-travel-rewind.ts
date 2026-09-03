@@ -10,13 +10,13 @@
  * records an audit, assesses external effects recorded on the journal, restores
  * the workspace, and archives and truncates the suffix past the frame in one
  * transaction. The ownership claim, the audit id, and the compensation-handler
- * registry are wired inside the service — none of them appear here.
+ * registry are wired inside the service: none of them appear here.
  *
  * A position is a run id plus a frame `{ lineageId, seq }`, and `inspect` folds
  * only entries whose `meta.lineageId` matches. **Nothing below writes that
  * metadata.** The engine mints the lineage id from the run and stamps it on
  * every record it writes, so an ordinary run driven by the production
- * composition is inspectable as it stands — this example used to hand-author a
+ * composition is inspectable as it stands. This example used to hand-author a
  * journal with `meta: { lineageId }` on every entry precisely because it was
  * not.
  *
@@ -61,8 +61,8 @@ export const Settlement = DurableDeferred.make("examples/settlement", {
 const lineageId = FlowEngine.Lineage.root("ledger-1")
 
 /**
- * `TimeTravel.layer` asks only for injectable contracts — the store plus the
- * journal, run, cache, and jj services the engine already provides — so it
+ * `TimeTravel.layer` asks only for injectable contracts (the store plus the
+ * journal, run, cache, and jj services the engine already provides) so it
  * merges straight onto the engine composition. Building it also resolves any
  * rewind a crash left half-finished, which is why recovery never appears as a
  * call below.

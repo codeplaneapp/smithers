@@ -133,7 +133,7 @@ derisked plan does not fit its envelope.
 (`root` for the chain itself, or the leaf's plan path), a message, and an
 optional `cause`. `DelegationChain.make` throws one and `DelegationChain.run`
 fails with one. See
-[Delegation patterns](/api/patterns-delegation#delegationchain) for how the
+[Delegation patterns](./delegation.md#delegationchain) for how the
 chain climbs its tier ladder and what a repair looks like.
 
 | Code             | Path     | Cause                                                                                                     | Raised when                                                                                                                                  |
@@ -156,7 +156,7 @@ Members are ordered by priority, highest first, and declaration order breaks a
 tie so a plan built twice from one record is identical. A member that carries
 its own `Node.priority` keeps it; every other member inherits the container's.
 Priority is a scheduling hint and never enters key material, so raising it does
-not invalidate a cached step. See [Concurrency](/concepts/concurrency).
+not invalidate a cached step.
 
 `Bounded.run` follows `Effect.forEach`: the first failure interrupts the
 members still in flight.
@@ -233,7 +233,7 @@ completed step, so the unwind is LIFO and runs on interruption as well as on
 failure. A compensation that dies is recorded as a failed compensation rather
 than raised as a defect, so the residue still names it and the finalizers
 behind it still run. See
-[Failure and retry](/concepts/failure-and-retry#sagas).
+[Undo work with compensation](/docs/guides/compensation/).
 
 ## A worked release
 
@@ -262,6 +262,6 @@ The root exports each module as a namespace; every module is also importable as
 private.
 
 `@smthrs/core` supplies `Flow`, `Node`, and `Graph`. See
-[Flows and the action graph](/concepts/action-graph) for what a built
+[Flows, actions, and plans](/docs/concepts/flows-actions-plans/) for what a built
 graph means, and [`@smthrs/plan`](/api/plan) for the persisted form a graph
 compiles into.

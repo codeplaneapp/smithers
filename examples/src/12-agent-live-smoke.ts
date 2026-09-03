@@ -1,6 +1,6 @@
 /**
- * A live smoke test: the assembled production agent stack — the real cell
- * loop, the real durable engine, the real `AgentAction` machinery — run
+ * A live smoke test: the assembled production agent stack (the real cell
+ * loop, the real durable engine, the real `AgentAction` machinery) run
  * against a real model over the network with a real API key.
  *
  * Every example before this one scripts its model deliberately, so CI runs
@@ -110,7 +110,7 @@ const host = AgentAction.layerHost({
 /**
  * Builds the full live composition. Takes the API key explicitly rather than
  * reading `process.env` at module load, so importing this module never
- * throws in an environment with no key configured — only running {@link main}
+ * throws in an environment with no key configured. Only running `main`
  * does.
  *
  * @category layers

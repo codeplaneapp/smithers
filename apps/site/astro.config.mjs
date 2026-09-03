@@ -46,9 +46,42 @@ export default defineConfig({
         { icon: "github", label: "GitHub", href: "https://github.com/smithersai/smithers" }
       ],
       editLink: { baseUrl: "https://github.com/smithersai/smithers/edit/main/apps/site/src/content/docs/" },
+      // Every group below autogenerates from a directory under
+      // src/content/docs/docs/, so a new page appears as soon as it lands.
+      // Order inside a group comes from `sidebar.order` in the page's
+      // frontmatter, then the title. Only the root pages are listed by hand.
       sidebar: [
-        { label: "Get started", link: "/docs/" },
-        { label: "Intro", link: "/docs/intro" }
+        {
+          label: "Get started",
+          items: [
+            { label: "Overview", slug: "docs" },
+            { slug: "docs/installation" },
+            { slug: "docs/quickstart" }
+          ]
+        },
+        { label: "Tutorials", autogenerate: { directory: "docs/tutorials" } },
+        { label: "Guides", autogenerate: { directory: "docs/guides" } },
+        { label: "Concepts", autogenerate: { directory: "docs/concepts" } },
+        { label: "Examples", autogenerate: { directory: "docs/examples" }, collapsed: true },
+        {
+          label: "Reference",
+          collapsed: true,
+          items: [
+            { slug: "docs/reference/cli", label: "CLI overview" },
+            { label: "CLI verbs", autogenerate: { directory: "docs/reference/cli" }, collapsed: true },
+            { slug: "docs/reference/flow-mdx" },
+            { slug: "docs/reference/project-layout" },
+            { slug: "docs/reference/environment-variables" },
+            { slug: "docs/reference/errors" },
+            { slug: "docs/reference/mcp-tools" },
+            { slug: "docs/reference/http-api" },
+            { label: "Packages", autogenerate: { directory: "docs/reference/api" }, collapsed: true },
+            { label: "Build rules", autogenerate: { directory: "docs/reference/targets" }, collapsed: true },
+            { slug: "docs/reference/glossary" }
+          ]
+        },
+        { label: "Troubleshooting", autogenerate: { directory: "docs/troubleshooting" }, collapsed: true },
+        { label: "Migration", autogenerate: { directory: "docs/migration" }, collapsed: true }
       ]
     })
   ]

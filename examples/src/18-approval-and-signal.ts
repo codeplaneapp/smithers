@@ -14,7 +14,7 @@
  * afterwards.
  *
  * **A node approval gates something inside a run that already started.** The
- * {@link Clearance} step below registers a durable token against its own run
+ * `Clearance` step below registers a durable token against its own run
  * and parks the run under `approval` while that token is undecided. Nothing
  * outside the run asks for it. `Control.approve` refuses a token that was never
  * registered, so an operator can only decide a request a step actually made.
@@ -25,7 +25,7 @@
  * **A signal is a durable fact delivered to a run.** `Control.signal` records
  * it and deliberately resumes nothing: a signal says something happened, it
  * does not decide who runs next. Turning a recorded signal into a completed
- * wait point is the host's job, and {@link deliverSignals} below is that job at
+ * wait point is the host's job, and `deliverSignals` below is that job at
  * its smallest: read the signals the control plane admitted, and complete the
  * `WaitFor` wait point they name.
  *

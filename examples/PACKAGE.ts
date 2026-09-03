@@ -59,6 +59,15 @@ const suite = Smithers.Vitest({
   cwd
 })
 
+/**
+ * The examples as documentation: every program and the flow descriptors
+ * beside them, named as one target so the site's example pages
+ * (`//apps/site:examplesPages`) can list this group in `data`. A glob
+ * declared in apps/site never expands into this package, so the group is the
+ * edge that makes a page regenerate when its example changes.
+ */
+const docs = Smithers.Filegroup({ srcs: [sources, fixtures], cwd })
+
 export const Package = Smithers.Package({
-  targets: { check, suite }
+  targets: { check, suite, docs }
 })

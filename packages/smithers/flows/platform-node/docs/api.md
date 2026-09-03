@@ -20,9 +20,8 @@ There is no shell service. Running a command is Effect's `ChildProcess` /
 effect, and cancellation is fiber interruption, never an `AbortSignal`. There is
 no HTTP service either: an outgoing request is Effect's `HttpClient`, provided
 here as `NodeHttpClient.layerUndici`, which installs no redirect interceptor and
-so leaves every hop visible to [@smthrs/kernel](/api/kernel). See
-[design decisions](/design-decisions) for why the old `Shell` and
-`HttpTransport` wrappers were deleted.
+so leaves every hop visible to [@smthrs/kernel](/api/kernel). The old `Shell`
+and `HttpTransport` wrappers were deleted for the same reason.
 
 ## Requirements
 

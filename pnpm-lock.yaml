@@ -171,6 +171,81 @@ importers:
       '@astrojs/check':
         specifier: ^0.9.4
         version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
+      '@smthrs/agent':
+        specifier: workspace:*
+        version: link:../../packages/smithers/agent
+      '@smthrs/capability':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/capability
+      '@smthrs/database':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/database
+      '@smthrs/engine':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/engine
+      '@smthrs/engine-store':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/engine-store
+      '@smthrs/flow':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/flow
+      '@smthrs/flows':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows
+      '@smthrs/harness':
+        specifier: workspace:*
+        version: link:../../packages/smithers/agent/harness
+      '@smthrs/journal':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/journal
+      '@smthrs/kernel':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/kernel
+      '@smthrs/mcp':
+        specifier: workspace:*
+        version: link:../../packages/smithers/mcp
+      '@smthrs/memory':
+        specifier: workspace:*
+        version: link:../../packages/smithers/agent/memory
+      '@smthrs/model':
+        specifier: workspace:*
+        version: link:../../packages/smithers/agent/model
+      '@smthrs/observability':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/observability
+      '@smthrs/plan':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/plan
+      '@smthrs/registry':
+        specifier: workspace:*
+        version: link:../../packages/smithers/agent/registry
+      '@smthrs/run-store':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/run-store
+      '@smthrs/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/sandbox
+      '@smthrs/std':
+        specifier: workspace:*
+        version: link:../../packages/smithers/agent/std
+      '@smthrs/sync':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/sync
+      '@smthrs/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+      '@smthrs/time-travel':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/time-travel
+      effect:
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -654,6 +729,9 @@ importers:
 
   packages/smithers:
     dependencies:
+      '@clack/prompts':
+        specifier: 1.7.0
+        version: 1.7.0
       '@effect/platform-node':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))

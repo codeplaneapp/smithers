@@ -27,7 +27,7 @@ sockets, plus `POST /projections` and `POST /sync`.
 `POST /rpc` is deliberately not one of them. The control mount authenticates in
 band through `ControlRpcs.ControlAuth`, whose declared error is
 `ControlError.Unauthorized`, and that typed control error is the refusal
-[the control plane publishes](/guides/control-plane-trust). An edge `401`
+[the control plane publishes](/docs/guides/control-plane/). An edge `401`
 answered ahead of the mount, and `ControlClient` filters a non-2xx status, so
 every refusal reached a caller as a `TransportError`, the class
 `@smthrs/control` reserves for a request that failed _before_ a declared
@@ -206,7 +206,7 @@ discover stale runs, quota-due work, and stale claims, and how it would take a
 resume lease. This release ships `make`, `makeNoop`, and `layerNoop` only, and
 no production host installs it: recovery is a running engine process with the
 flow registered, reclaiming a run whose owner stopped renewing its heartbeat.
-See [known limitations](/release/known-limitations).
+That is a known limitation of this release.
 
 ## Sync
 
@@ -214,7 +214,7 @@ The package re-exports `@smthrs/sync`, so a gateway host gets the read-only
 journal replication protocol from the same import: `SyncClient`, `SyncServer`,
 `SyncProtocol`, `RunCatalog`, and the cursor types. Sync is read-only in both
 directions of the word: a follower cannot mutate a run, and it cannot resume
-one. See [sync](/concepts/sync).
+one. See [Sync and read-only followers](/docs/concepts/sync/).
 
 ## Declared but not served
 

@@ -9,7 +9,7 @@ const engine = EngineStore.layer({
 })
 ```
 
-This entry point bundles for the browser. The two host reads it once made directly, `process.pid` and `randomUUID` from `node:crypto`, enter through the [`OwnerIdentity`](#owneridentity) service.
+This entry point bundles for the browser. The two host reads it once made directly, `process.pid` and `randomUUID` from `node:crypto`, enter through the [`OwnerIdentity`](#bundles-for-the-browser) service.
 
 :::warning[Bundling is not running]
 The only `DurableWriter` backing shipped here is `node:sqlite`.
@@ -25,7 +25,7 @@ The only `DurableWriter` backing shipped here is `node:sqlite`.
 
 [src/EngineStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/EngineStore.ts)
 
-Required services: `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, Effect's `Crypto`, `DurableEngineState`, kernel `Jj`, `StepBoundary`, [`OwnerIdentity`](#owneridentity), and a `Scope`. [`WorkspaceSandbox`](#workspacesandbox) and its `EffectDispatcher` are optional; when present, `make` resolves them here and re-provides them onto the engine's own fiber, which does not carry the store's layer context.
+Required services: `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, Effect's `Crypto`, `DurableEngineState`, kernel `Jj`, `StepBoundary`, [`OwnerIdentity`](#bundles-for-the-browser), and a `Scope`. [`WorkspaceSandbox`](#workspacesandbox) and its `EffectDispatcher` are optional; when present, `make` resolves them here and re-provides them onto the engine's own fiber, which does not carry the store's layer context.
 
 `clockFireRetryPolicy` is optional and defaults to exponential from 100ms capped at 30s, forever, which is the same option shape as the engine's `suspendedRetryPolicy`.
 
@@ -35,7 +35,7 @@ This page is the public API reference for the journal-backed `FlowEngine` compos
 
 ### Bundles for the browser
 
-`@smthrs/engine-store` is a **browser entry point**, and the repository's browser gate treats it as one. The two host reads it once made directly, `process.pid` and `randomUUID` from `node:crypto`, moved behind the injectable `OwnerIdentity` service (`packages/smithers/flows/engine-store/src/OwnerIdentity.ts`), which closed issue #114: the default reads a process id off `globalThis` where the platform has one and draws an incarnation number from `Random` where it does not, and `layerConstant` pins the whole token. Everything it composes, `@smthrs/crypto`, `@smthrs/flow`, `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/database`, `@smthrs/kernel`, and `@smthrs/engine`, is browser-bundleable too. Bundling is still not running: the only `DurableWriter` backing shipped here is `node:sqlite`, so do not describe the durable engine as browser-_ready_ until a browser SQL client layer exists. `pnpm run browser` bundles this entry point and fails the build if it regresses. See [browser support](/architecture/browser-support).
+`@smthrs/engine-store` is a **browser entry point**, and the repository's browser gate treats it as one. The two host reads it once made directly, `process.pid` and `randomUUID` from `node:crypto`, moved behind the injectable `OwnerIdentity` service (`packages/smithers/flows/engine-store/src/OwnerIdentity.ts`), which closed issue #114: the default reads a process id off `globalThis` where the platform has one and draws an incarnation number from `Random` where it does not, and `layerConstant` pins the whole token. Everything it composes, `@smthrs/crypto`, `@smthrs/flow`, `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/database`, `@smthrs/kernel`, and `@smthrs/engine`, is browser-bundleable too. Bundling is still not running: the only `DurableWriter` backing shipped here is `node:sqlite`, so do not describe the durable engine as browser-_ready_ until a browser SQL client layer exists. `pnpm run browser` bundles this entry point and fails the build if it regresses. See [platform support](/docs/reference/api/#platform-support).
 
 ### `EngineStore`
 
@@ -147,7 +147,7 @@ interface Service {
 
 `makeMemory` is the deterministic, browser-safe conformance implementation (it seeds the whole tree, so an undeclared read is observable); `makeFileSystem` / `layerFileSystem` back the transaction with the kernel `FileSystem`, the kernel `Workspace` root, and `@smthrs/artifacts` for products too large to carry inline. Both are `makeHosted` over one `Host`, so the transaction, the diff, the violation check, and the provenance cannot drift between them.
 
-It is a **deterministic transaction model, not a security boundary**. A body reaching the host through a service the transaction does not seed is outside it; denying that ambient access is the VM/`SandboxProvider` story in [`@smthrs/sandbox`](/api/sandbox). The human diff-review gate is not implemented and a settled bundle is applied without it, which [Known limitations](/release/known-limitations) records, and the transaction's `FileSystem` surface is deliberately partial.
+It is a **deterministic transaction model, not a security boundary**. A body reaching the host through a service the transaction does not seed is outside it; denying that ambient access is the VM/`SandboxProvider` story in [`@smthrs/sandbox`](/api/sandbox). The human diff-review gate is not implemented and a settled bundle is applied without it (a known limitation of this release), and the transaction's `FileSystem` surface is deliberately partial.
 
 ### `PlanScheduler`
 
@@ -169,7 +169,7 @@ Skyframe's `AbstractParallelEvaluator` is the prior art, with two deliberate dev
 
 Each node settles as one of four outcomes, `built`, `clean` (the shared cache served it and nothing ran), `failed`, and `skipped` (its cone failed, or `stop-merge` stopped it), journaled as `node-settled`. Admission is the middle limit only: `concurrency.steps` caps leaf execution and `concurrency.agents` caps the agent subset within it. Both default to unbounded and both floor at one, because a cap of zero admits nothing and a round that admits nothing settles nothing. Ready work is ordered by declared `priority` plus one point per round waited, so priority changes latency without permitting starvation.
 
-Source paths, read by the plan, written by nothing in it, are measured **once** before the first dispatch and pinned for the whole run; produced paths are measured after their producer settles. That is the torn-run rule [Support matrix](/release/support-matrix) records: a rebase re-observes our own outputs, never the world.
+Source paths, read by the plan, written by nothing in it, are measured **once** before the first dispatch and pinned for the whole run; produced paths are measured after their producer settles. That is the torn-run rule: a rebase re-observes our own outputs, never the world.
 
 The runtime conflict strategies ride the plan's pair annotations. **delay/rebase** holds the dependents and re-executes against the newly recorded base, the re-measure re-keys, so it is a new attempt rather than a retry of one identity, journaled as `node-invalidated`, bounded by `rebaseLimit`. **stop/merge** stops the loser and appends a merge node to the _same_ plan as an ordinary elaboration, with no rebase budget of its own, because a lane that loses a landing race restarts or fails rather than rebasing. A conflict neither absorbs goes to [`Reconciliation`](#reconciliation).
 
@@ -227,7 +227,7 @@ The two-tier artifact protocol, and the seam a shared-cache composition injects 
 
 ### `ArtifactGc`
 
-Collection never runs automatically. `gc()` is an explicit verb, and the mark is fail-safe: a root row carrying boundary evidence this build cannot decode aborts the collection rather than contributing nothing. Attempt checkpoints are also live roots, with digest-shaped strings retained conservatively. See [Artifact GC](/artifact-gc) for the algorithm and its concurrency argument.
+Collection never runs automatically. `gc()` is an explicit verb, and the mark is fail-safe: a root row carrying boundary evidence this build cannot decode aborts the collection rather than contributing nothing. Attempt checkpoints are also live roots, with digest-shaped strings retained conservatively. See [Sweep unreferenced artifacts](/docs/guides/retention/#4-sweep-unreferenced-artifacts) for the algorithm and its concurrency argument.
 
 ### `CacheSync`
 
@@ -261,7 +261,7 @@ Replaying a succeeded attempt row also converges the cache: if a crash landed be
 
 A persisted `failed` attempt row replays by rethrowing the persisted domain failure, never by readmission, so `AttemptAdmissionRejected` marks only genuinely mid-flight (`running`) rows. The `Fail` errors were schema-encoded before persistence, so their `_tag` survives the JSON round trip and `RetryPolicy` non-retryable matching applies on replay (issue #59). The composition also implements the engine's `actionLatestAttempt` (attempt counter resumes from the persisted sequence) and degrades `actionRetryOrigin` to the earliest surviving attempt row when a retention job pruned attempt 1 (issue #69).
 
-See [Assembling a durable engine](/guides/durable-engine), [Implementation status](/release/support-matrix), and [Step keys](/concepts/step-keys).
+See [Run durably over SQLite](/docs/tutorials/first-flow/#6-run-durably-over-sqlite) and [Content addressing](/docs/concepts/content-addressing/).
 
 ### Stable errors
 

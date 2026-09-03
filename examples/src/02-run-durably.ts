@@ -38,8 +38,8 @@ export const Build = Flow.make("examples/Build", {
  *
  * DECIDED (2026-08-11, pending review): the target stays OUT of this
  * declaration and is stamped on by the caller. A sealed key is built from the
- * action name, its declared `idempotencyKey`, and its schemas — never from
- * the payload — so moving `target` in here would make two targets share one
+ * action name, its declared `idempotencyKey`, and its schemas (never from
+ * the payload), so moving `target` in here would make two targets share one
  * cache row. Inputs that vary per call belong in the calling step, or in an
  * `idempotencyKey` that names them.
  */

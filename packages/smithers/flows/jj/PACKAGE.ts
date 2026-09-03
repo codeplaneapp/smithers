@@ -1,7 +1,7 @@
 /** Standard package targets plus package-owned documentation generation. */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   deps: [],
   cwd: "packages/smithers/flows/jj",
   tests: Smithers.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
@@ -20,5 +20,5 @@ const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage
 const faults = Smithers.FaultSuite({ cwd: "packages/smithers/flows/jj" })
 
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, faults, fmt, lib, lint, test }
+  targets: { check, circular, docs, docsFiles, faults, fmt, lib, lint, test }
 })

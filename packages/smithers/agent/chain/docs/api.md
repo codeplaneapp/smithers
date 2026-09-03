@@ -46,8 +46,8 @@ export over `src/` is the same surface reached by subpath, so
 
 ## Composing a run
 
-`Chain.run` needs four services — `Journal`, `Catalog`, `Author`, and
-`ScriptRunner` — and picks up `Authorize` and `Steering` when they are
+`Chain.run` needs four services (`Journal`, `Catalog`, `Author`, and
+`ScriptRunner`) and picks up `Authorize` and `Steering` when they are
 mounted.
 
 ```ts
@@ -76,8 +76,8 @@ const terminal = await Effect.runPromise(
 )
 ```
 
-A catalog layer that itself needs the base services — `SubChains.make` is
-the one in this package — must be built over the SAME journal, author, and
+A catalog layer that itself needs the base services (`SubChains.make` is
+the one in this package) must be built over the SAME journal, author, and
 runner instances the chain runs on. `SubChains` captures those services at
 construction, so a catalog built over a second set of layers would run its
 children against a different journal than their parent.

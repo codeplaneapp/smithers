@@ -3,8 +3,8 @@
  *
  * An attached child needs nothing special: a flow that calls another flow and
  * waits for its value already runs inside a durable boundary, and the engine
- * cancels it if the parent exits. A DETACHED child is the other shape — start
- * it now, collect it later, possibly in another process — and it is a real run
+ * cancels it if the parent exits. A DETACHED child is the other shape (start
+ * it now, collect it later, possibly in another process) and it is a real run
  * of its own: its own row, its own claim, its own journal.
  *
  * The two phases below build separate engines over one SQLite file, which is
@@ -75,8 +75,8 @@ export interface Summary {
 /**
  * The control plane the child port steers through, over the engine's database.
  *
- * `EngineChildren` depends on exactly three services — the flow runtime, the
- * run store, and the control plane — so a host wires the control plane once
+ * `EngineChildren` depends on exactly three services (the flow runtime, the
+ * run store, and the control plane) so a host wires the control plane once
  * and gets `agent/send` with it. This example only spawns and collects, but
  * the dependency is real and is wired honestly rather than stubbed.
  */

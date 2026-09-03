@@ -99,7 +99,7 @@ The CI declaration has several deliberate operational constraints:
   because a suite that passes against a stub proves nothing about the product
   and this tier exists precisely to catch what unit suites cannot. Crash cases
   `SIGKILL` a real operating-system process and resume in a fresh one against a
-  SQLite file on disk; the served cases spawn `smithers serve` — the bin
+  SQLite file on disk; the served cases spawn `smthrs serve` — the bin
   `@smthrs/cli` declares — and cross a real socket; the time-travel cases drive
   a real Jujutsu workspace. Cross-process cases speak one protocol on stdout and
   nothing else: `SMITHERS_ENGINE_HANDSHAKE=<phase>:<nonce>` before any work
@@ -177,7 +177,7 @@ package sits inside `packages/smithers`, the CLI everything ships behind:
 
 ```
 packages/
-  smithers/                 @smthrs/cli — the `smithers` executable
+  smithers/                 @smthrs/cli — the `smthrs` executable (alias `smithers`)
     control/ gateway/ mcp/ notifications/ migrate/ create-app/
     flows/                  @smthrs/flows — the engine, and what it is made of
       flow/ engine/ engine-store/ journal/ run-store/ step-cache/ plan/

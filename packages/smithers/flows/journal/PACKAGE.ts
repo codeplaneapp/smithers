@@ -5,7 +5,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   deps: [],
   cwd: "packages/smithers/flows/journal",
   tests: Smithers.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
@@ -33,5 +33,5 @@ const durableIdentityGuard = Smithers.DurableIdentityGuard({ cwd: "packages/smit
 const faults = Smithers.FaultSuite({ cwd: "packages/smithers/flows/journal" })
 
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, durableIdentityGuard, faults, fmt, lib, lint, test }
+  targets: { check, circular, docs, docsFiles, durableIdentityGuard, faults, fmt, lib, lint, test }
 })

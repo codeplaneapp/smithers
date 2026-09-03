@@ -1,0 +1,30 @@
+---
+title: "Exit code 3: waiting-approval"
+description: "A run parked on an approval exits 3 by design; approve the payload, then resume."
+---
+
+## Exit code 3: waiting-approval
+
+```text
+$ smthrs run "$PLAN_PAYLOAD"
+{"_tag":"Parked", ...}
+$ echo $?
+3
+```
+
+**Cause.** The run parked on an approval. Exit 3 is designed, not a failure: `smthrs run` never approves, so a payload whose plan has no approval yet parks the run at `waiting-approval` and exits 3. A run can also ask for approval mid-flight; it journals a `control.approval.requested` event and parks the same way.
+
+**Fix.** Approve the payload from the park message, unchanged. For a plan-level ask it is the `approval` field of the `smthrs plan` card; for an in-run ask it is the `payload` field of the run's `control.approval.requested` event, and `smthrs status <run-id>` prints the ready-to-paste pair on its `Unblock` line:
+
+```bash
+smthrs approve '<approval>' --scope run
+smthrs run <run-id> --resume
+```
+
+A decision on an in-run ask restarts the parked run in the same `approve` call; `run --resume` re-drives it after any decision. In CI, treat exit 3 as its own branch rather than a failed run; [the CI guide](/docs/guides/ci/) shows the shape.
+
+**Verify.** `smthrs ps` no longer lists the run at `waiting-approval`; the resumed run drives on toward a terminal status.
+
+## Still stuck?
+
+Run `smthrs bug` with the symptom as the summary. [smthrs bug](/docs/reference/cli/bug/) posts the report with your CLI version, platform, and Node version attached, and everything passes through the journal's shared redaction rules before it leaves the machine. With `--run <run-id>`, it also attaches that run's event digest.

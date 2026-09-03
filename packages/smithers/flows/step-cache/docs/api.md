@@ -28,7 +28,7 @@ The root is written against the driver-neutral `@smthrs/database` service and
 bundles for the browser (`pnpm run browser`). The test double binds a Node
 SQLite database and is therefore imported from its own subpath. Migration
 implementation modules are not exported: only `Migrations.set` composes them.
-See [browser support](/architecture/browser-support).
+See [platform support](/docs/reference/api/#platform-support).
 
 ## The durable contract
 
@@ -85,7 +85,7 @@ a second run recording the same result is `ExistingSame` though its `meta`,
 `createdAtMs`, and run identity all differ, because `Conflict` is reserved for
 two runs disagreeing about what a step produced. Whether the insert
 conflicted and whether a fenced delete hit are read through
-[`DurableWriter.affectedRows`](/api/database#durablewriter) rather than a
+[`DurableWriter.affectedRows`](/api/database#affected-row-counts) rather than a
 driver-specific `changes` cast, so the outcomes hold on every backend (issue
 #134).
 

@@ -7,7 +7,7 @@
  * emits; the file exists to show the expansion, not to diverge from it.
  */
 import { Smithers } from "@smthrs/targets"
-import { rootInvariantsConfig, rootJSDocConfig } from "../../../../PACKAGE.ts"
+import { docsWriter, referenceStyle, rootInvariantsConfig, rootJSDocConfig } from "../../../../PACKAGE.ts"
 import { Package as planPackage } from "../plan/PACKAGE.ts"
 
 const plan = planPackage.lib
@@ -91,6 +91,43 @@ const circular = Smithers.NodeTest({
  */
 const bunTest = Smithers.BunSuite({ cwd })
 
+// --- reference docs pipeline ----------------------------------------------
+// The colocated reference page `docs/reference/flow.md` is written by an
+// agent from these sources and the shared style rubric, then ingested into
+// apps/site by `//apps/site:referenceIngest`. The committed page is the cache.
+
+/** Everything the reference writer may read: sources, README, package docs. */
+const docsSources = Smithers.Filegroup({
+  srcs: [sources, Smithers.file("README.md"), Smithers.glob("docs/*.md")],
+  cwd
+})
+
+/** The package documentation as a file group, the `docsFiles` target `StandardPackage` emits. */
+const docsFiles = Smithers.Filegroup({
+  srcs: [Smithers.glob("docs/**/*.md"), Smithers.file("README.md"), Smithers.file("package.json")],
+  cwd
+})
+
+/** The committed reference pages, as a set other packages depend on. */
+const referencePages = Smithers.Filegroup({ srcs: [Smithers.glob("docs/reference/*.md")], cwd })
+
+/** Every `ts` fence in the page compiles under strict tsc. */
+const referenceCodeBlocks = Smithers.Markdown.CodeBlocks({
+  file: Smithers.file("docs/reference/flow.md"),
+  lang: ["ts"]
+})
+
+/** Writes `docs/reference/flow.md`; run with `smithers-build target //packages/smithers/flows/flow:referenceDocs --write`. */
+const referenceDocs = Smithers.Agent.Diff({
+  agent: docsWriter,
+  prompt: Smithers.file("//apps/site/prompts/reference-package.md"),
+  data: [docsSources, referenceStyle],
+  changes: ["docs/reference/flow.md"],
+  gates: [referenceCodeBlocks, check],
+  maxRounds: 3
+})
+// --- end reference docs pipeline ------------------------------------------
+
 export const Package = Smithers.Package({
-  targets: { bunTest, check, circular, docs, fmt, lib, lint, test }
+  targets: { bunTest, check, circular, docs, docsFiles, fmt, lib, lint, test, docsSources, referenceCodeBlocks, referenceDocs, referencePages }
 })

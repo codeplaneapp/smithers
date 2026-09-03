@@ -1,0 +1,103 @@
+---
+title: "Write a module flow"
+description: "Define a typed flow in TypeScript with Action.make and Flow.make, attach implementations as layers, and run it on the in-memory engine."
+sidebar:
+  order: 2
+---
+
+A module flow is a `flow.ts` program: typed payload and success schemas, a planned body, and implementations attached separately as Effect layers. This guide writes the smallest complete one and runs it in memory.
+
+## Before you start
+
+- Node 22.19.0 or later.
+- The library packages, with Effect pinned exactly:
+
+```bash
+pnpm add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
+```
+
+## 1. Decide flow.ts beats flow.mdx
+
+Reach for a module flow when a markdown flow's shape costs you something:
+
+- **Typed payloads.** A markdown flow takes one `args` string. A module flow declares `payload` and `success` schemas, and `execute` fails typed when a payload does not satisfy the schema.
+- **Composition.** A body names other flows and actions with `.call`, `.child`, and `.to`, and the whole shape of a round is planned before its first action runs.
+- **Reusable actions.** An action's implementation attaches as a layer, so several flows can share one declaration.
+- **Host-driven delegates.** The CLI drives prompt flows. A flow whose body is a module is driven by the host program that registers its delegates, and when that host is your own program, a module flow is the only option.
+
+For a prompt an agent follows, stay with [markdown flows](/docs/guides/markdown-flows/).
+
+## 2. Declare the action
+
+`Action.make` declares the atom that does the work: schemas and a stable tag, no code.
+
+```ts
+import { Action } from "@smthrs/flow"
+import * as Schema from "effect/Schema"
+
+export const Greet = Action.make("examples/Greet", {
+  payload: { name: Schema.String },
+  success: Schema.String
+})
+```
+
+## 3. Declare the flow
+
+`Flow.make` declares the composite. Its `body` names the action rather than calling it: a body is planned, so `Greet.call(payload)` records one node and executes nothing.
+
+```ts
+import { Flow } from "@smthrs/flow"
+
+export const Greeting = Flow.make("examples/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  body: (payload) => Greet.call(payload)
+})
+```
+
+## 4. Attach implementations and run
+
+`toLayer` attaches the action's implementation, where the code can run. `Interpreter.layer` registers the flow and installs the handler that drives its body; a flow has no `toLayer` of its own. `FlowEngine.layerMemory` supplies an engine that keeps its state in the process, which is what tests use.
+
+```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+
+const GreetingLayer = Layer.mergeAll(
+  Greet.toLayer(({ name }) => Effect.succeed(`Hello, ${name}.`)),
+  Interpreter.layer(Greeting)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  Layer.provideMerge(NodeCrypto.layer)
+)
+
+export const main: Effect.Effect<string> = Greeting.execute(
+  { name: "Ada" },
+  { executionId: "greeting-ada-1" }
+).pipe(Effect.orDie, Effect.provide(GreetingLayer))
+```
+
+A flow that declares no `idempotencyKey` needs an explicit `executionId`. The engine needs a `Crypto` even in memory, because an action dispatch is recorded under a derived step identity; a Node program supplies `NodeCrypto.layer`, and a browser program supplies its own.
+
+## 5. Register it for discovery
+
+To make the flow visible to the project registry, place the module at `flows/<name>/flow.ts` and give the flow a literal `description` in its declaration. Discovery reads the metadata of the module's `Flow.make` or `Flow.agent` value statically, without evaluating the module, and names the flow by directory path: `flows/deploy/status/flow.ts` is the flow id `deploy/status`. A declared `name` is ignored with a warning, and a module whose description cannot be read statically is skipped with a warning, so `smthrs ls` shows only flows whose metadata parses.
+
+{/* verify: what makes a Flow.make value the one discovery reads (default export versus named export); the sources say "the default Flow.make or Flow.agent value" without pinning the export mechanics */}
+
+Listing is not driving. When you launch a module flow from the CLI, the run is accepted and then nothing takes it, because the CLI executor drives prompt flows: the host program that registers the flow's delegates is what drives it. Run the flow from that program, as step 4 does, or end the stranded run with `smthrs cancel <run-id>`.
+
+## Verify it worked
+
+- Running the program succeeds with the string `Hello, Ada.`.
+- A payload that does not satisfy the schema fails typed instead: `execute` raises a `SchemaError`.
+- With the module under `flows/`, `smthrs ls` lists the flow under its directory-derived id, and `smthrs doctor` reports no registry warnings for it.
+
+## See also
+
+- [Test flows](/docs/guides/testing-flows/): the in-memory engine inside a test harness.
+- [@smthrs/flow API reference](/docs/reference/api/flow/): Flow, Action, Interpreter, and the durable primitives.

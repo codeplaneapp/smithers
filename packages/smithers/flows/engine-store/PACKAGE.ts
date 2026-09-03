@@ -5,7 +5,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   deps: [],
   cwd: "packages/smithers/flows/engine-store"
 })
@@ -39,5 +39,5 @@ const disasterRecovery = Smithers.NodeTest({
 const durableIdentityGuard = Smithers.DurableIdentityGuard({ cwd: "packages/smithers/flows/engine-store" })
 
 export const Package = Smithers.Package({
-  targets: { check, circular, disasterRecovery, docs, durableIdentityGuard, fmt, lib, lint, test }
+  targets: { check, circular, disasterRecovery, docs, docsFiles, durableIdentityGuard, fmt, lib, lint, test }
 })
