@@ -294,6 +294,39 @@ describe("checkGenerator", () => {
     expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("hand edited\n")
   })
 
+  it("names the lines each side carries alone when the line count moved", async () => {
+    await generator(
+      `import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "// 2 entries\\none\\ntwo\\n")\n`
+    )
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "// 1 entries\none\n", "utf8")
+
+    expect((await failure(["out.txt"])).message).toBe(
+      "out.txt drifted from its generated form: 3 line(s) checked in, 4 regenerated; " +
+        "first difference at line 1: \"// 1 entries\" became \"// 2 entries\"; " +
+        "the generator adds \"// 2 entries\", \"two\"; the generator drops \"// 1 entries\""
+    )
+  })
+
+  it("names only the added lines when the checkout carries nothing the generator drops", async () => {
+    await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "one\\ntwo\\n")\n`)
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "one\n", "utf8")
+
+    expect((await failure(["out.txt"])).message).toBe(
+      "out.txt drifted from its generated form: 2 line(s) checked in, 3 regenerated; " +
+        "first difference at line 2: \"\" became \"two\"; the generator adds \"two\""
+    )
+  })
+
+  it("adds nothing when the line count moved but every line appears on both sides", async () => {
+    await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "one\\none\\n")\n`)
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "one\n", "utf8")
+
+    expect((await failure(["out.txt"])).message).toBe(
+      "out.txt drifted from its generated form: 2 line(s) checked in, 3 regenerated; " +
+        "first difference at line 2: \"\" became \"one\""
+    )
+  })
+
   it("fails and removes a declared output the checkout does not carry", async () => {
     await generator(`import { writeFileSync } from "node:fs"\nwriteFileSync("out.txt", "generated\\n")\n`)
 

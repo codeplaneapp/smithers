@@ -277,8 +277,35 @@ const driftMessage = (path: string, previous: OutputState, current: OutputState)
   const line = differing === -1 ? Math.min(checkedIn.length, regenerated.length) : differing
   return `${path} drifted from its generated form: ` +
     `${checkedIn.length} line(s) checked in, ${regenerated.length} regenerated; ` +
-    `first difference at line ${line + 1}: ${excerpt(checkedIn[line])} became ${excerpt(regenerated[line])}`
+    `first difference at line ${line + 1}: ${excerpt(checkedIn[line])} became ${excerpt(regenerated[line])}` +
+    driftMembership(checkedIn, regenerated)
 }
+
+/**
+ * The lines one side of a drift carries and the other does not, for an
+ * output whose line count moved.
+ *
+ * A generated inventory leads with a line that counts its entries, so the
+ * first differing line of a one-entry drift is that count, and the entry
+ * itself sits thousands of lines further down where nobody reads it out of a
+ * failure message. Naming a few lines from each side's difference puts the
+ * entry in the message. When the counts agree the positional excerpt already
+ * names the change, so nothing is added.
+ */
+const driftMembership = (checkedIn: ReadonlyArray<string>, regenerated: ReadonlyArray<string>): string => {
+  if (checkedIn.length === regenerated.length) return ""
+  const checkedInSet = new Set(checkedIn)
+  const regeneratedSet = new Set(regenerated)
+  const added = regenerated.filter((line) => !checkedInSet.has(line)).slice(0, maximumDriftMembershipLines)
+  const dropped = checkedIn.filter((line) => !regeneratedSet.has(line)).slice(0, maximumDriftMembershipLines)
+  const parts: Array<string> = []
+  if (added.length > 0) parts.push(`the generator adds ${added.map(excerpt).join(", ")}`)
+  if (dropped.length > 0) parts.push(`the generator drops ${dropped.map(excerpt).join(", ")}`)
+  return parts.length === 0 ? "" : `; ${parts.join("; ")}`
+}
+
+/** How many differing lines a drift message names from each side. */
+const maximumDriftMembershipLines = 4
 
 const absent: OutputState = { kind: "absent", bytes: undefined, mode: undefined }
 
