@@ -180,7 +180,7 @@ const withHome = async <A>(home: string, use: () => Promise<A>): Promise<A> => {
   }
 }
 
-describe("smithers steer", () => {
+describe("smthrs steer", () => {
   it("delivers the operator's message to a launched run and reports the receipt", async () => {
     const receipt = await run(
       Effect.gen(function*() {
@@ -208,7 +208,7 @@ describe("smithers steer", () => {
   })
 })
 
-describe("smithers down", () => {
+describe("smthrs down", () => {
   it("cancels every run that has not settled and reports one receipt each", async () => {
     const cancelled = await run(
       Effect.gen(function*() {
@@ -241,7 +241,7 @@ describe("smithers down", () => {
   })
 })
 
-describe("smithers init", () => {
+describe("smthrs init", () => {
   it("scaffolds a flow into the project and reports where it wrote", async () => {
     const root = project()
 
@@ -322,7 +322,7 @@ describe("the unlisted aliases", () => {
   })
 })
 
-describe("smithers claude node-wait", () => {
+describe("smthrs claude node-wait", () => {
   const settled: ReadonlyArray<ControlSchema.ControlEvent> = [
     event(1, "control.agent.cell-call-started", { flowName: "read", input: { path: "a.ts" } }),
     event(2, "control.agent.cell-call-settled", { flowName: "read", outcome: "success", value: "contents of a" })
@@ -366,7 +366,7 @@ describe("smithers claude node-wait", () => {
   })
 })
 
-describe("smithers claude monitor", () => {
+describe("smthrs claude monitor", () => {
   const transitions: ReadonlyArray<ControlSchema.ControlEvent> = [
     event(1, "control.run.started", null),
     event(2, "control.run.parked", { reason: "approval" }),
@@ -414,7 +414,7 @@ describe("smithers claude monitor", () => {
   })
 })
 
-describe("smithers mcp add", () => {
+describe("smthrs mcp add", () => {
   it("registers the MCP server in each agent's own config file", async () => {
     const home = project()
 
@@ -564,7 +564,7 @@ describe("the executor-handoff label on a listing", () => {
   })
 })
 
-describe("smithers logs --follow over an oversized event", () => {
+describe("smthrs logs --follow over an oversized event", () => {
   it("stops with a resource-limit failure instead of streaming a megabyte of one payload", async () => {
     const huge = event(1, "control.agent.cell-call-settled", { flowName: "read", value: "x".repeat(1_100_000) })
 

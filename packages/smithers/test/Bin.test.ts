@@ -248,7 +248,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     const result = run(["rewind", "run-1"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("smithers rewind was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain("smthrs rewind was removed in 1.0.0-rc.0")
     expect(result.stderr).toContain(`${Unsupported.migrationUrl}#rewind`)
   })
 
@@ -256,7 +256,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     const result = run(["worktrees", "prune"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("smithers worktrees prune was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain("smthrs worktrees prune was removed in 1.0.0-rc.0")
   })
 
   it("refuses a removed flag with exit 1 rather than the parser's exit 2", () => {
@@ -265,7 +265,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     const result = run(["steer", "run-1", "--message", "hello", "--takeover"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("smithers steer --takeover was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain("smthrs steer --takeover was removed in 1.0.0-rc.0")
   })
 
   it("refuses the plural `workflows`, which is the spelling the removed-command contract lists", () => {
@@ -276,7 +276,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     const result = run(["workflows"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("smithers workflows was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain("smthrs workflows was removed in 1.0.0-rc.0")
     expect(result.stderr).toContain(`${Unsupported.migrationUrl}#workflows`)
   })
 
@@ -289,10 +289,10 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     const stop = run(["gateway", "stop"])
 
     expect(status.status).toBe(1)
-    expect(status.stderr).toContain("smithers gateway status was removed in 1.0.0-rc.0")
+    expect(status.stderr).toContain("smthrs gateway status was removed in 1.0.0-rc.0")
     expect(status.stderr).toContain(`${Unsupported.migrationUrl}#gateway`)
     expect(stop.status).toBe(1)
-    expect(stop.stderr).toContain("smithers gateway stop was removed in 1.0.0-rc.0")
+    expect(stop.stderr).toContain("smthrs gateway stop was removed in 1.0.0-rc.0")
   })
 
   it("refuses `workflow run` under the packs reason and the singular spelling", () => {
@@ -303,7 +303,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     const result = run(["workflow", "path", "ship.tsx"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("smithers workflow path was removed in 1.0.0-rc.0")
+    expect(result.stderr).toContain("smthrs workflow path was removed in 1.0.0-rc.0")
     expect(result.stderr).toContain("JSX pack tooling is gone")
     expect(result.stderr).toContain(`${Unsupported.migrationUrl}#workflow`)
   })
@@ -382,13 +382,13 @@ describe("an invocation that never runs a command answers before the control pla
    * A removed verb refused file-free, and every other non-running invocation
    * did not.
    *
-   * `smithers lss` is a typo. The parser answers it with exit 2 and a
+   * `smthrs lss` is a typo. The parser answers it with exit 2 and a
    * did-you-mean list, and no handler ever runs, yet the process still built
    * `NodeControl.layer` on its way to the parse: it created `<cwd>/.flows/`
    * and opened `engine.db` and `control.db` before printing usage. The same
    * held for a one-token verb (`smithers "gateway status"`, the shape a shell
    * script produces when it quotes a whole command) and for an unrecognized
-   * flag on a real verb (`smithers ps --nope`).
+   * flag on a real verb (`smthrs ps --nope`).
    *
    * The rule is the same one the removed verbs got: an invocation that will
    * not run a real command touches no file. `bin.ts` now attaches the durable
@@ -402,7 +402,7 @@ describe("an invocation that never runs a command answers before the control pla
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(2)
-      expect(result.stderr).toContain("Unknown subcommand \"lss\" for \"smithers\"")
+      expect(result.stderr).toContain("Unknown subcommand \"lss\" for \"smthrs\"")
       expect(result.stdout).toContain("USAGE")
       expect(readdirSync(cwd)).toEqual([])
     })
@@ -414,7 +414,7 @@ describe("an invocation that never runs a command answers before the control pla
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(2)
-      expect(result.stderr).toContain("Unknown subcommand \"gateway status\" for \"smithers\"")
+      expect(result.stderr).toContain("Unknown subcommand \"gateway status\" for \"smthrs\"")
       expect(readdirSync(cwd)).toEqual([])
     })
   })
@@ -425,7 +425,7 @@ describe("an invocation that never runs a command answers before the control pla
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(2)
-      expect(result.stderr).toContain("Unrecognized flag: --nope in command smithers ps")
+      expect(result.stderr).toContain("Unrecognized flag: --nope in command smthrs ps")
       expect(readdirSync(cwd)).toEqual([])
     })
   })
@@ -489,7 +489,7 @@ describe("reserved system flow ids", processBudget, () => {
     const result = run(["plan", "system/replay", "--json"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("smithers plan system/replay")
+    expect(result.stderr).toContain("smthrs plan system/replay")
     expect(result.stderr).toContain("reserved system flow")
     expect(result.stdout).not.toContain("planId")
   })
@@ -498,7 +498,7 @@ describe("reserved system flow ids", processBudget, () => {
     const result = run(["up", "system/release", "--json"])
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("smithers up system/release")
+    expect(result.stderr).toContain("smthrs up system/release")
     expect(result.stdout).not.toContain("Accepted")
   })
 
@@ -698,15 +698,15 @@ describe("the signal exit codes", processBudget, () => {
 })
 
 describe("the smithers bin shim", processBudget, () => {
-  it("is the only binary the package declares, and ships in the tarball", () => {
+  it("declares smthrs and its smithers alias on one shim, and ships it in the tarball", () => {
     const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
       readonly bin?: Record<string, string>
       readonly files?: ReadonlyArray<string>
     }
 
-    // The imported `flows` bin is gone and `@smthrs/cli` owns the one
-    // user-facing name (the release policy).
-    expect(manifest.bin).toEqual({ smithers: "./bin/smithers.mjs" })
+    // The imported `flows` bin is gone. `smthrs` is the primary spelling and
+    // `smithers` stays as an alias; both names run the same shim.
+    expect(manifest.bin).toEqual({ smithers: "./bin/smithers.mjs", smthrs: "./bin/smithers.mjs" })
     expect(manifest.files).toContain("bin/**/*.mjs")
   })
 
@@ -960,9 +960,9 @@ describe("Smithers 0.x detection", processBudget, () => {
 
       expect(output).not.toContain("is not installed in this project")
       expect(output).not.toContain("Add it under flows/")
-      // The migration tool's own rendering: `smithers migrate <mode>: <root>`,
-      // or its own refusal, `smithers migrate: <reason>`.
-      expect(output).toMatch(/smithers migrate (plan|scan|apply):|smithers migrate: /)
+      // The migration tool's own rendering: `smthrs migrate <mode>: <root>`,
+      // or its own refusal, `smthrs migrate: <reason>`.
+      expect(output).toMatch(/smthrs migrate (plan|scan|apply):|smthrs migrate: /)
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -1055,7 +1055,7 @@ describe("the migrate verb's option surface", processBudget, () => {
       expect(output).not.toContain("Unrecognized flag")
       // The tool's own heading names the mode it ran in, so this is the mode
       // reaching the flow rather than the flag being parsed and dropped.
-      expect(output).toContain("smithers migrate scan:")
+      expect(output).toContain("smthrs migrate scan:")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -1071,7 +1071,7 @@ describe("the migrate verb's option surface", processBudget, () => {
       // Plan mode renders its own heading and exits 0; apply mode is the only
       // one the run-state gate parks. Reaching that park is the proof the mode
       // arrived, and 3 is the status `smithers-migrate` gives a park.
-      expect(output).not.toContain("smithers migrate plan:")
+      expect(output).not.toContain("smthrs migrate plan:")
       expect(result.status).toBe(3)
       expect(output).toContain("--acknowledge-run-state")
     } finally {
@@ -1081,7 +1081,7 @@ describe("the migrate verb's option surface", processBudget, () => {
 })
 
 /**
- * Which project `smithers migrate` converts.
+ * Which project `smthrs migrate` converts.
  *
  * The verb's default target used to be the rc.0 project root, whose walk
  * anchors on `.flows/`. A 0.x project has none, which is what makes it a 0.x
@@ -1147,7 +1147,7 @@ describe("the migrate verb's target", processBudget, () => {
  * status, and that promise only exists at the process
  * boundary: a script, a `pipeline-*.yml` step, or a sandbox `run-workflow.sh`
  * reads `$?`, not a receipt. The release validation measured the opposite:
- * `smithers up ci-fast --json` returned 0 in three seconds while `smithers ps`
+ * `smthrs up ci-fast --json` returned 0 in three seconds while `smthrs ps`
  * reported `failed`.
  *
  * The run below fails for real, with no provider and no network. The flow
@@ -1371,7 +1371,7 @@ describe("an attached launch's exit status", processBudget, () => {
   /**
    * The `--json` stdout contract for the verb the smoke caught breaking it.
    *
-   * `smithers up hello -d --json` wrote 1773 bytes to stdout and none to
+   * `smthrs up hello -d --json` wrote 1773 bytes to stdout and none to
    * stderr: a runtime `WARN` block first and the receipt last, so a pipeline
    * parsing the document read a syntax error. `bin.ts` provides
    * `Logger.LogToStderr` for exactly that; this holds the detached shape to it.
@@ -1413,19 +1413,19 @@ describe("an attached launch's exit status", processBudget, () => {
 })
 
 /**
- * The project `smithers init` scaffolds, launched exactly as it was written.
+ * The project `smthrs init` scaffolds, launched exactly as it was written.
  *
  * The release rehearsal ran the two commands the scaffold's own
- * doc comment promises: `smithers init hello`, then `smithers up hello` in
+ * doc comment promises: `smthrs init hello`, then `smthrs up hello` in
  * that directory. It got exit 1 with `Run run-1 was accepted but the
  * executor did not take it`, a `control.db` row still `accepted` under
  * `ownerId {pid: 0}`, an `engine.db` with no row at all, and
- * `smithers status run-1` answering forever. Only `smithers cancel` ended it.
+ * `smthrs status run-1` answering forever. Only `smthrs cancel` ended it.
  *
  * Nothing here stubs the seat: the scaffold is generated by the real binary
  * and launched by the real binary over real SQLite files.
  */
-describe("the smithers init scaffold, launched as written", processBudget, () => {
+describe("the smthrs init scaffold, launched as written", processBudget, () => {
   /** The provider credentials a scaffold reads, and the refusal reads back. */
   const seatVariables = [
     "ANTHROPIC_API_KEY",
@@ -1451,7 +1451,7 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
     return environment
   }
 
-  /** An empty repository: what an operator runs `smithers init` in. */
+  /** An empty repository: what an operator runs `smthrs init` in. */
   const stageEmptyProject = (): string => {
     const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
     mkdirSync(join(cwd, ".git"))
@@ -1511,7 +1511,7 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
       // The scaffold says which key chose the seat and where to see the rest,
       // as a YAML comment: the markdown body is the agent's instructions.
       expect(flow).toContain("OPENAI_API_KEY")
-      expect(flow).toContain("smithers doctor")
+      expect(flow).toContain("smthrs doctor")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -1539,7 +1539,7 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
 
       // The run the refusal is about is over, on disk, in the process that
       // refused it. Before this it stayed `accepted` under an owner with pid
-      // 0, and `smithers cancel` was the only way to end it.
+      // 0, and `smthrs cancel` was the only way to end it.
       const listed = smithers(cwd, ["ps", "--json"], environment)
       expect(listed.status).toBe(0)
       const runs = (JSON.parse(listed.stdout) as {
@@ -1607,7 +1607,7 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
 /**
  * The same two commands against a funded seat.
  *
- * This is the claim `smithers init`'s own doc comment makes: "`smithers up
+ * This is the claim `smthrs init`'s own doc comment makes: "`smthrs up
  * <name>` works in the directory `init` just created". The only way to
  * hold it is to run the scaffolded prompt on a real provider. It costs a real
  * agent run of three to four minutes, so it runs only where the ChatGPT seat
@@ -1617,7 +1617,7 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
 const chatgptSeat = process.env["SMITHERS_OPENAI_AUTH"] === "chatgpt" &&
   existsSync(CodexAuth.locate(process.env))
 
-describe.skipIf(!chatgptSeat)("the smithers init scaffold on a funded seat", { timeout: 900_000 }, () => {
+describe.skipIf(!chatgptSeat)("the smthrs init scaffold on a funded seat", { timeout: 900_000 }, () => {
   it("runs to completed, from `init` to a terminal row in both databases", () => {
     const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
     // A real repository, not a bare `.git` directory: the engine snapshots the
@@ -1663,10 +1663,10 @@ describe.skipIf(!chatgptSeat)("the smithers init scaffold on a funded seat", { t
 })
 
 /**
- * What `smithers signal` tells an operator when the run is parked on something
+ * What `smthrs signal` tells an operator when the run is parked on something
  * else.
  *
- * The release validation ran `smithers signal run-3 '{"name":"go", ...}'` against a
+ * The release validation ran `smthrs signal run-3 '{"name":"go", ...}'` against a
  * run parked on a 150 second timer. It exited 1 with `go: ` on stderr: the
  * refusal declared a `name` field, which shadows `Error.prototype.name`, and
  * declared no message, so `bin.ts` `report` printed the operator's own word
@@ -1678,7 +1678,7 @@ describe.skipIf(!chatgptSeat)("the smithers init scaffold on a funded seat", { t
  * `timer` and a deadline still ahead, on both the engine row and the control
  * summary.
  */
-describe("smithers signal against a run parked on something else", processBudget, () => {
+describe("smthrs signal against a run parked on something else", processBudget, () => {
   const parkOnTimer = (cwd: string, runId: string): void => {
     const wakeAtMs = Date.now() + 150_000
     const engine = new DatabaseSync(join(cwd, ".flows", "engine.db"))
@@ -1725,7 +1725,7 @@ describe("smithers signal against a run parked on something else", processBudget
       expect(signalled.status).toBe(1)
       expect(signalled.stderr.trimEnd()).toBe(
         `NoMatchingWait: no wait point named "go" is open on run ${runId}. ` +
-          `Read \`smithers status ${runId}\` to see what that run is waiting for.`
+          `Read \`smthrs status ${runId}\` to see what that run is waiting for.`
       )
       // Nothing was written where the document goes.
       expect(signalled.stdout).toBe("")

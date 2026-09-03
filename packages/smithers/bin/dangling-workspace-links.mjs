@@ -1,5 +1,5 @@
 /**
- * Why a source checkout's `smithers` suddenly cannot find its own packages.
+ * Why a source checkout's `smthrs` suddenly cannot find its own packages.
  *
  * A workspace-linked dependency (`node_modules/@smthrs/control`, say) is a
  * symlink into this repository. Something that rewrites those links to point
@@ -71,7 +71,7 @@ export const danglingWorkspaceLinkHint = (startDirectory) => {
     if (dangling.length > 0) {
       const shown = dangling.slice(0, shownLinks)
       const lines = [
-        `smithers: found ${dangling.length} dangling workspace link${
+        `smthrs: found ${dangling.length} dangling workspace link${
           dangling.length === 1 ? "" : "s"
         } under ${nodeModules}:`,
         ...shown.map(({ linkPath, target }) => `  ${linkPath} -> ${target} (target no longer exists)`)

@@ -1,5 +1,5 @@
 /**
- * `smithers serve`, and the bind it refuses.
+ * `smthrs serve`, and the bind it refuses.
  *
  * The failure this guards is silent: an unauthenticated control plane on a
  * laptop's LAN address can launch agents with the operator's credentials, and

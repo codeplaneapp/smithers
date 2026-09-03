@@ -1,5 +1,5 @@
 /**
- * One `smithers serve` process per gateway case, and the plumbing every case
+ * One `smthrs serve` process per gateway case, and the plumbing every case
  * repeats.
  *
  * Each case gets its own project root and its own server so that a case that
@@ -47,7 +47,7 @@ export const servedSuite = (label: string): ServedSuite => {
   let server: ServeProcess | undefined
 
   const current = (): ServeProcess => {
-    if (server === undefined) throw new Error(`${label}: smithers serve has not been started`)
+    if (server === undefined) throw new Error(`${label}: smthrs serve has not been started`)
     return server
   }
 

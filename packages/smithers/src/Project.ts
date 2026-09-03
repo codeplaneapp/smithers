@@ -1,9 +1,9 @@
 /**
- * Where a `smithers` invocation decides it is running.
+ * Where a `smthrs` invocation decides it is running.
  *
  * Every command that touches durable state resolves the same project root the
  * same way, because 0.x's most reported operational surprise was two commands
- * in one repository disagreeing about which database they meant (`smithers up`
+ * in one repository disagreeing about which database they meant (`smthrs up`
  * from a subdirectory writing a second store). The rule:
  *
  * 1. an explicit `--root`, resolved against the invocation directory;
@@ -96,7 +96,7 @@ export const root = (
 }
 
 /**
- * Resolves the 0.x project one `smithers migrate` invocation converts.
+ * Resolves the 0.x project one `smthrs migrate` invocation converts.
  *
  * This is deliberately not {@link root}. That walk anchors on `.flows/`, which
  * only an rc.0 project has, so a 0.x project without a `.git`/`.jj` marker of
@@ -165,8 +165,8 @@ export const flowsDirectory = (projectRoot: string): string => join(projectRoot,
  *
  * Unlike {@link legacyState} this does not stop at a directory that holds
  * `.flows/`. The informational notice is gated only on
- * "no `.flows/` beside it"; the refusal that `smithers migrate` and the
- * database listing that `smithers doctor` perform are not gated, and they
+ * "no `.flows/` beside it"; the refusal that `smthrs migrate` and the
+ * database listing that `smthrs doctor` perform are not gated, and they
  * must not be: the project an operator actually migrates is one that has
  * already run an rc.0 command, so it already has `.flows/`, and gating the
  * refusal there would answer "nothing to finish" for every real migration.
@@ -228,7 +228,7 @@ export const legacyState = (
 export const legacyNotice = (path: string): string =>
   `Found Smithers 0.x state at ${path}. 1.0.0-rc.0 does not load, resume, or migrate 0.x run databases. ` +
   `Finish, archive, or discard those runs with the 0.x CLI (bunx smthrs@0.35.0 ps), ` +
-  `then run "smithers migrate" to convert the project source. ` +
+  `then run "smthrs migrate" to convert the project source. ` +
   `See https://smithers.sh/migration/1.0#run-data`
 
 /**
@@ -260,7 +260,7 @@ export const LegacyState: Context.Reference<ReadonlyArray<string>> = Context.Ref
 )
 
 /**
- * The 0.x project `smithers migrate` converts when no path is given, as a
+ * The 0.x project `smthrs migrate` converts when no path is given, as a
  * service.
  *
  * Separate from {@link ProjectRoot} because the two answer different

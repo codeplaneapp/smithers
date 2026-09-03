@@ -133,7 +133,7 @@ const run = <A, E, R>(
     ) as Effect.Effect<A, E>
   )
 
-describe("smithers output", () => {
+describe("smthrs output", () => {
   it("projects every node of a run when no node is named", async () => {
     const nodes = await run(json(["--json", "output", "run-1"]), historyControl(calls)) as ReadonlyArray<
       { readonly nodeId: string; readonly outcome: string }
@@ -186,7 +186,7 @@ describe("smithers output", () => {
   })
 })
 
-describe("smithers claude", () => {
+describe("smthrs claude", () => {
   it("subscribes a session to a run, reports the count, and unsubscribes it again", async () => {
     const root = project()
 
@@ -225,7 +225,7 @@ describe("smithers claude", () => {
   })
 })
 
-describe("smithers bug", () => {
+describe("smthrs bug", () => {
   /** A real HTTP endpoint on a loopback port, and the requests it received. */
   const endpoint = async (status: number) => {
     const received: Array<unknown> = []

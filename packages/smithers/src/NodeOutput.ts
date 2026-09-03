@@ -1,5 +1,5 @@
 /**
- * The node-output projection `smithers output` and the MCP `get_node_detail`
+ * The node-output projection `smthrs output` and the MCP `get_node_detail`
  * tool both read.
  *
  * A run's journal records every flow call an agent made and how it settled.

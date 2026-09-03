@@ -207,7 +207,7 @@ describe("NodeControl.config", () => {
     const argv = process.argv
     const previous = process.env.SMITHERS_REMOTE
     try {
-      process.argv = [process.execPath, "smithers", "--credential=from-argv"]
+      process.argv = [process.execPath, "smthrs", "--credential=from-argv"]
       process.env.SMITHERS_REMOTE = "https://from-environment.test"
       const resolved = Effect.runSync(NodeControl.config)
       expect(resolved.remote).toBe("https://from-environment.test")
@@ -223,7 +223,7 @@ describe("NodeControl.config", () => {
   it("preserves a configuration usage error as a typed failure", async () => {
     const argv = process.argv
     try {
-      process.argv = [process.execPath, "smithers", "--remote", "nota", "ps"]
+      process.argv = [process.execPath, "smthrs", "--remote", "nota", "ps"]
       const exit = await Effect.runPromise(Effect.exit(NodeControl.config))
 
       // The entrypoint reports this one and exits 2. Letting the raw

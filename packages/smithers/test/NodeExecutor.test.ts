@@ -69,7 +69,7 @@ describe("NodeControl.seatResolver", () => {
       const executor = NodeControl.layerExecutor(registry, engine, root, {})
       // Building this layer migrates the durable engine, registers the agent
       // flow, starts the resume bridge, and migrates the memory store over the
-      // control database — the whole local `smithers run` composition, minus a
+      // control database — the whole local `smthrs run` composition, minus a
       // provider.
       const flowId = await Effect.runPromise(
         Effect.gen(function*() {

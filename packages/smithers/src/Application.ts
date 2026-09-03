@@ -47,7 +47,7 @@ export interface Config {
    */
   readonly root?: string | undefined
   /**
-   * The 0.x project `smithers migrate` converts when the operator names no
+   * The 0.x project `smthrs migrate` converts when the operator names no
    * path: `--root`, or the nearest ancestor holding 0.x state.
    *
    * Not {@link Config.root}. That one anchors on `.flows/`, which a 0.x

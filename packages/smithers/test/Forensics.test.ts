@@ -152,7 +152,7 @@ describe("Forensics.renderDiagnosis", () => {
     const card = Forensics.renderDiagnosis({ runId: "run-1", flowId: "fix" }, d)
     expect(card).toContain("Verdict   failed: TransportError: gone")
     expect(card).toContain("run-1 · fix")
-    expect(card).toContain("Next      smithers logs run-1")
+    expect(card).toContain("Next      smthrs logs run-1")
   })
 
   it("calls out a completed run that never attempted an edit", () => {
@@ -176,7 +176,7 @@ describe("Forensics.renderDiagnosis", () => {
     // The payload is quoted because it carries braces and quotes; the verbs,
     // the flag, and the run id are not, because a shell reads nothing in them.
     expect(card).toContain(
-      `Unblock   smithers approve '{"k":1}' --scope run && smithers run --resume run-1`
+      `Unblock   smthrs approve '{"k":1}' --scope run && smthrs run --resume run-1`
     )
   })
 
@@ -227,7 +227,7 @@ describe("Forensics.renderDiagnosis", () => {
   it("advertises the cancel line an operator would have typed", () => {
     const d: Forensics.Digest = { ...Forensics.digest([]), status: "pending" }
 
-    expect(Forensics.renderDiagnosis({ runId: "run-1" }, d)).toContain("smithers cancel run-1")
+    expect(Forensics.renderDiagnosis({ runId: "run-1" }, d)).toContain("smthrs cancel run-1")
   })
 
   it("lists the top refusals with counts, largest first", () => {

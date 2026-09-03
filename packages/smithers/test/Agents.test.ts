@@ -1,5 +1,5 @@
 /**
- * `smithers mcp add`.
+ * `smthrs mcp add`.
  *
  * The two things worth pinning: writing is additive and idempotent, so an
  * operator's own configuration survives, and the launch command registered is
@@ -198,9 +198,9 @@ describe("registering the MCP server", () => {
 
     // Without `--` the agent's own parser reads `--mcp` as one of its flags
     // and rejects the registration.
-    expect(instructions).toContain("claude mcp add smithers -- ")
+    expect(instructions).toContain("claude mcp add smthrs -- ")
     expect(instructions).toContain("\"mcpServers\"")
     expect(instructions).toContain("https://smithers.sh/integrations/mcp-server")
-    expect(Agents.manualInstructions()).toContain("codex mcp add smithers -- ")
+    expect(Agents.manualInstructions()).toContain("codex mcp add smthrs -- ")
   })
 })

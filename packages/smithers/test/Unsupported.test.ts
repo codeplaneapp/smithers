@@ -95,11 +95,11 @@ describe("the refusal `bin.ts` answers before the control plane boots", () => {
   )
 
   it("carries the sub-verb of a removed group, as the command tree does", () => {
-    expect(Unsupported.refusal(["agents", "add"])!.message).toContain("smithers agents add was removed")
-    expect(Unsupported.refusal(["worktrees", "prune", "extra"])!.message).toContain("smithers worktrees prune was")
+    expect(Unsupported.refusal(["agents", "add"])!.message).toContain("smthrs agents add was removed")
+    expect(Unsupported.refusal(["worktrees", "prune", "extra"])!.message).toContain("smthrs worktrees prune was")
     // A verb with no subcommands names itself whatever follows it, because
     // `Command.ts` reads the group's sub-verb and ignores a plain argument.
-    expect(Unsupported.refusal(["rewind", "run-1"])!.message).toContain("smithers rewind was removed")
+    expect(Unsupported.refusal(["rewind", "run-1"])!.message).toContain("smthrs rewind was removed")
   })
 
   it("leaves every surviving invocation to the command tree", () => {
@@ -123,7 +123,7 @@ describe("the refusal `bin.ts` answers before the control plane boots", () => {
 describe("every removed flag", () => {
   it("renders a removed root flag without an empty command segment", () => {
     expect(Unsupported.flagMessage({ parent: "", flag: "legacy", reason: "gone", anchor: "legacy" }))
-      .toContain("smithers --legacy was removed")
+      .toContain("smthrs --legacy was removed")
   })
 
   /** How each removed flag is spelled on its surviving parent command. */

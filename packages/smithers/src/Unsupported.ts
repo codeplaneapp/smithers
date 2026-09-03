@@ -4,7 +4,7 @@
  * A verb that 0.x had and rc.0 does not must fail with a sentence that names
  * the replacement, not with a usage error. `effect/unstable/cli` answers an
  * unknown subcommand with exit 2 and a "did you mean" list, which tells an
- * operator nothing about why `smithers rewind` stopped existing. So every
+ * operator nothing about why `smthrs rewind` stopped existing. So every
  * removed verb is registered as a hidden subcommand whose only behaviour is
  * to fail with {@link message}, and every removed flag is declared hidden on
  * the command that used to carry it.
@@ -45,10 +45,10 @@ export interface RemovedVerb {
 
 const timeTravel = "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred"
 const recovery = "the run driver's heartbeat sweep owns recovery"
-const uiHosting = "replaced by `smithers serve` and the Electrobun product UI; the terminal monitor is deleted"
+const uiHosting = "replaced by `smthrs serve`; the terminal monitor is deleted"
 const control = "not available; use `steer`, `signal`, `approve`, `deny`, `cancel`, `run --resume`"
 const plugins = "moved to the plugins repository or deferred"
-const packs = "JSX pack tooling is gone; `smithers migrate` replaces `upgrade`"
+const packs = "JSX pack tooling is gone; `smthrs migrate` replaces `upgrade`"
 const approvals = "approvals park the run; use `ps --status waiting-approval`, `approve`, and `deny`"
 const nodeDetail = "use `output`, `logs --json`, and the node-output projection"
 const jsx = "removed with the JSX inline workflow"
@@ -234,7 +234,7 @@ export const removedFlags: ReadonlyArray<RemovedFlag> = [
  * @since 1.0.0
  */
 export const message = (verb: string, reason: string, anchor: string = verb): string =>
-  `smithers ${verb} was removed in 1.0.0-rc.0: ${reason}. See ${migrationUrl}#${anchor}`
+  `smthrs ${verb} was removed in 1.0.0-rc.0: ${reason}. See ${migrationUrl}#${anchor}`
 
 /**
  * The removal sentence for one flag.
@@ -244,7 +244,7 @@ export const message = (verb: string, reason: string, anchor: string = verb): st
  */
 export const flagMessage = (removedFlag: RemovedFlag): string => {
   const command = removedFlag.parent === "" ? "" : `${removedFlag.parent} `
-  return `smithers ${command}--${removedFlag.flag} was removed in 1.0.0-rc.0: ${removedFlag.reason}. ` +
+  return `smthrs ${command}--${removedFlag.flag} was removed in 1.0.0-rc.0: ${removedFlag.reason}. ` +
     `See ${migrationUrl}#${removedFlag.anchor}`
 }
 
@@ -285,7 +285,7 @@ const survivingParents = new Set(["gateway", "workflow"])
  * `scripts/docs-removals.test.mjs` contended on those two SQLite files.
  *
  * The scan is deliberately narrow, the way `bin.ts` reads `--help` and
- * `--version`: it fires only for `smithers <verb> [<positional>...]`, and any
+ * `--version`: it fires only for `smthrs <verb> [<positional>...]`, and any
  * flag anywhere in the vector sends the invocation down the ordinary path.
  * A flag can take a value, a value can be spelled like a verb, and the
  * registered hidden commands in `Command.ts` are still the authority for every
@@ -339,8 +339,8 @@ export const isReservedFlow = (flowId: string): boolean => flowId.startsWith("sy
  */
 export const reservedFlowError = (verb: string, flowId: string): CliError.UnsupportedError =>
   new CliError.UnsupportedError({
-    message: `smithers ${verb} ${flowId}: ${flowId} is a reserved system flow id and carries no body in ` +
-      `1.0.0-rc.0, so a launch would park with nothing to run. Name a flow from \`smithers ls\`. ` +
+    message: `smthrs ${verb} ${flowId}: ${flowId} is a reserved system flow id and carries no body in ` +
+      `1.0.0-rc.0, so a launch would park with nothing to run. Name a flow from \`smthrs ls\`. ` +
       `See ${migrationUrl}#flows`
   })
 

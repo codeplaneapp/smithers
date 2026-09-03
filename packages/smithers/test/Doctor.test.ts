@@ -1,5 +1,5 @@
 /**
- * `smithers doctor`: every check, and the level it reports at.
+ * `smthrs doctor`: every check, and the level it reports at.
  *
  * The report is data so its outcome can be pinned without parsing prose. A
  * check that changed level silently is the failure mode this suite exists for:
@@ -129,7 +129,7 @@ describe("the report", () => {
     const report = Doctor.inspect({ root: project(), environment: {}, nodeVersion: "24.0.0" })
 
     expect(check(report, "registry")).toMatchObject({ level: "warn" })
-    expect(check(report, "registry")?.detail).toContain("smithers init")
+    expect(check(report, "registry")?.detail).toContain("smthrs init")
     expect(Doctor.failed(report)).toBe(false)
   })
 
@@ -379,7 +379,7 @@ describe("the report", () => {
     const rendered = Doctor.render(report)
 
     expect(rendered.split("\n")).toHaveLength(report.checks.length + 1)
-    expect(rendered).toContain("smithers doctor: /work")
+    expect(rendered).toContain("smthrs doctor: /work")
     expect(rendered).toContain("fail node:")
     expect(rendered).toContain("warn registry:")
     expect(rendered).toContain("ok   state:")

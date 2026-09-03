@@ -188,7 +188,7 @@ describe("the removed surface", () => {
     expect(gateway.subcommands).toEqual(["status", "stop"])
     expect(subcommandNames).toContain("gateway")
     expect(listed).not.toContain("gateway")
-    expect(Unsupported.verbError(gateway, "status").message).toContain("smithers gateway status was removed")
+    expect(Unsupported.verbError(gateway, "status").message).toContain("smthrs gateway status was removed")
     expect(Unsupported.verbError(gateway, "stop").message).toContain(`${Unsupported.migrationUrl}#gateway`)
   })
 
@@ -214,7 +214,7 @@ describe("the removed surface", () => {
     const worktrees = Unsupported.removedVerbs.find((verb) => verb.name === "worktrees")!
 
     expect(worktrees.subcommands).toEqual(["list", "prune"])
-    expect(Unsupported.verbError(worktrees, "prune").message).toContain("smithers worktrees prune was removed")
+    expect(Unsupported.verbError(worktrees, "prune").message).toContain("smthrs worktrees prune was removed")
     expect(Unsupported.verbError(worktrees, "prune").message).toContain("#worktrees")
   })
 

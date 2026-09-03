@@ -1,5 +1,5 @@
 /**
- * `smithers init`, and the repository ignore rule it adds.
+ * `smthrs init`, and the repository ignore rule it adds.
  *
  * The 0.x requirement carried forward (`apps/cli/tests/init-root-gitignore.test.js`
  * and `init.e2e.test.js`): run state must never reach a commit, the edit is
@@ -179,7 +179,7 @@ describe("the seat the scaffold writes", () => {
   })
 
   it("names a seat even when nothing resolves, so the launch refuses by naming its key", () => {
-    // `smithers up` on this scaffold answers `Set ANTHROPIC_API_KEY to run the
+    // `smthrs up` on this scaffold answers `Set ANTHROPIC_API_KEY to run the
     // anthropic:claude-sonnet-4-5 seat`. A scaffold with no `model:` line
     // answers nothing an operator can act on.
     expect(Init.defaultSeat({})).toEqual({
@@ -202,7 +202,7 @@ describe("the seat the scaffold writes", () => {
 
     expect(body).toContain("\nmodel: openai:gpt-5.6-sol\n")
     expect(body).toContain("OPENAI_API_KEY")
-    expect(body).toContain("smithers doctor")
+    expect(body).toContain("smthrs doctor")
     // The explanation is a YAML comment, not prose: every line of the body is
     // an instruction the agent is handed.
     const frontmatter = body.split("---")[1] ?? ""

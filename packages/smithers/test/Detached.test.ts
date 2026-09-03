@@ -1,5 +1,5 @@
 /**
- * `smithers up -d`, driven against real child processes.
+ * `smthrs up -d`, driven against real child processes.
  *
  * The 0.x requirements carried forward
  * (`apps/cli/tests/detached-launch-admission.e2e.test.js` and
@@ -25,7 +25,7 @@ const project = (): string => {
 }
 
 /**
- * A stand-in for the `smithers run` child: a script that behaves the way one
+ * A stand-in for the `smthrs run` child: a script that behaves the way one
  * behaves, without booting an engine. `entry` replaces the CLI entry point, so
  * `launch` still spawns a real detached process and still polls a real log.
  */
@@ -273,7 +273,7 @@ describe("terminating a child the host gave no process group", () => {
 
 describe("terminating on a host that has no process groups", () => {
   /**
-   * What `smithers up -d` ships to Windows. `process.kill(-pid, …)` is not a
+   * What `smthrs up -d` ships to Windows. `process.kill(-pid, …)` is not a
    * thing there, so the handle is the only reachable target, and the whole
    * containment claim is about the leader. The rest of this suite runs on POSIX
    * and can never enter that arm, so `platform` is passed rather than read: a

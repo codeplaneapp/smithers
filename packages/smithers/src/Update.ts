@@ -1,5 +1,5 @@
 /**
- * `smithers update`: is the installed CLI the current one?
+ * `smthrs update`: is the installed CLI the current one?
  *
  * The check is a plain registry read of `@smthrs/cli`'s dist-tags and nothing
  * else. rc.0 never installs anything on the operator's behalf: 0.x's

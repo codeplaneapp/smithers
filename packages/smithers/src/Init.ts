@@ -1,5 +1,5 @@
 /**
- * `smithers init`: the smallest project a flow can be run from.
+ * `smthrs init`: the smallest project a flow can be run from.
  *
  * rc.0 scaffolds one thing, a markdown flow at `flows/<name>/flow.mdx`, and
  * makes one edit, adding `.flows/` to the repository's ignore file. The 0.x
@@ -8,11 +8,11 @@
  * resolve from environment keys, and every side effect a command performs
  * without being asked is a side effect an operator has to undo.
  *
- * The one thing the scaffold reads from the host is its seat. `smithers up`
+ * The one thing the scaffold reads from the host is its seat. `smthrs up`
  * cannot run a prompt flow that declares none, so a scaffold without a
  * `model:` line is a scaffold that is not launchable, which is what rc.0 first
  * shipped (release rehearsal). {@link defaultSeat} chooses it from
- * the same environment keys `smithers doctor` reports.
+ * the same environment keys `smthrs doctor` reports.
  *
  * The ignore edit is idempotent and repository-scoped, carried over from the
  * 0.x `ensureRootGitignore` requirement: append once, never inside a
@@ -120,7 +120,7 @@ export const ensureIgnored = (root: string): IgnoreStatus => {
 
 /**
  * The seat `init` writes for each provider credential, in the order
- * `smithers doctor` reports them.
+ * `smthrs doctor` reports them.
  *
  * `CEREBRAS_API_KEY` is missing on purpose. `Doctor` names it a provider key
  * and `NodeControl.seatResolver` has no route for the provider, so a scaffold
@@ -149,16 +149,16 @@ export interface Seat {
 }
 
 /**
- * The seat `smithers init` writes into the scaffold.
+ * The seat `smthrs init` writes into the scaffold.
  *
  * rc.0 resolves seats from environment keys, so the scaffold's seat is chosen
- * from the same keys `smithers doctor` reports, in doctor's order. An `openai`
+ * from the same keys `smthrs doctor` reports, in doctor's order. An `openai`
  * seat is credentialed by `OPENAI_API_KEY` or by the ChatGPT session
  * `SMITHERS_OPENAI_AUTH=chatgpt` selects, exactly as `NodeControl.seatResolver`
  * reads them.
  *
  * A directory with no provider key still gets a `model:` line. A scaffold
- * without one is not launchable at all: `smithers up` on it answered `Run
+ * without one is not launchable at all: `smthrs up` on it answered `Run
  * run-1 was accepted but the executor did not take it` and left a run nothing
  * would ever drive (release rehearsal). With the line, the same
  * launch refuses by naming the key to set.
@@ -183,19 +183,19 @@ export const defaultSeat = (
 /** The YAML comment that says where the seat came from and how to replace it. */
 const seatNote = (seat: Seat): string =>
   seat.resolved
-    ? `# The model seat this flow runs on. \`smithers init\` chose it from
+    ? `# The model seat this flow runs on. \`smthrs init\` chose it from
 # ${seat.variable}, the first provider credential this environment sets. Change
-# the line to run somewhere else; \`smithers doctor\` lists the keys it reads.`
+# the line to run somewhere else; \`smthrs doctor\` lists the keys it reads.`
     : `# The model seat this flow runs on. No provider credential was set when
-# \`smithers init\` ran, so this is the default: set ${seat.variable}, or change
-# the line to a seat you have a key for. \`smithers doctor\` lists them.`
+# \`smthrs init\` ran, so this is the default: set ${seat.variable}, or change
+# the line to a seat you have a key for. \`smthrs doctor\` lists them.`
 
 /**
  * The scaffolded flow body.
  *
  * Markdown, not TypeScript: `flow.mdx` needs no build step, no import
  * resolution, and no dependency on the package layout of the project it lands
- * in, so `smithers up <name>` works in the directory `init` just created.
+ * in, so `smthrs up <name>` works in the directory `init` just created.
  *
  * The seat is a frontmatter comment rather than prose, because every line of
  * the markdown body below the frontmatter is an instruction the agent is
@@ -231,7 +231,7 @@ Run the project's tests and report what passed.
 `
 
 /**
- * What `smithers init` created.
+ * What `smthrs init` created.
  *
  * @category models
  * @since 1.0.0

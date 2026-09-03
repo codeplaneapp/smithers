@@ -1,7 +1,7 @@
 /**
- * The node-output projection `smithers output` and `get_node_detail` read.
+ * The node-output projection `smthrs output` and `get_node_detail` read.
  *
- * The requirement carried over from 0.x's `smithers output` and `node` verbs:
+ * The requirement carried over from 0.x's `smthrs output` and `node` verbs:
  * an operator asks what one step produced, by a name they can quote back, and
  * a run that died mid-call must still answer for the call it was in.
  */

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The `smithers` executable. It builds the CLI application, runs it on the Node
+ * The `smthrs` executable. It builds the CLI application, runs it on the Node
  * runtime, and maps a failed exit to a process exit code.
  *
  * @since 0.1.0
@@ -174,7 +174,7 @@ const main = Effect.gen(function*() {
   // `Effect.provide` around `Command.run` builds `NodeControl.layer` before
   // the parser reads a single token, so an invocation that never runs a
   // command still created `<cwd>/.flows/` and opened both databases: a typo
-  // (`smithers lss`), a one-token command line (`smithers "gateway status"`),
+  // (`smthrs lss`), a one-token command line (`smthrs "gateway status"`),
   // an unrecognized flag, a missing argument. `Command.provide` moves the
   // layer inside the handler the parse selects, which makes the command tree
   // itself the resolver — no second list of verbs to drift — and leaves every
@@ -194,7 +194,7 @@ const main = Effect.gen(function*() {
  * and its rendered cause, are logged by `@smthrs/agent` through the default
  * logger, which calls `console.log`. Under `--json` that put forty lines of
  * warning inside the one document an attached launch prints, so a pipeline
- * step parsing `smithers up <flow> --json` read a syntax error instead of the
+ * step parsing `smthrs up <flow> --json` read a syntax error instead of the
  * receipt it was promised (the release policy, the `up` row). `LogToStderr`
  * is the reference Effect provides for exactly this: keep stdout for protocol
  * output and send every built-in logger to `console.error`.
@@ -204,7 +204,7 @@ const main = Effect.gen(function*() {
  * to `Effect.logInfo` no longer reaches the operator's terminal, the
  * `--json` stderr stream, or `.flows/logs/<runId>.log` under a detached
  * launch (the release policy). The durable engine installs the same layer
- * beneath itself, and wrapping is idempotent, so a detached `smithers run`
+ * beneath itself, and wrapping is idempotent, so a detached `smthrs run`
  * pays the rules once.
  */
 NodeRuntime.runMain(

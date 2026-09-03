@@ -2,7 +2,7 @@
  * Read-only forensic projections of a run's journal events.
  *
  * The vault's Forensics concept fixes the CLI surface at exactly two
- * projections: `smithers logs` projects journal queries and `smithers status`
+ * projections: `smthrs logs` projects journal queries and `smthrs status`
  * projects the run summary and its gating cause. This module is the rendering
  * half of both: pure functions from the `ControlEvent` deltas that
  * `Control.watch` already serves, to a turn-by-turn transcript, a one-line
@@ -283,7 +283,7 @@ const shellCommand = (...arguments_: ReadonlyArray<string>): string => arguments
 
 /**
  * Renders the status card for one run: verdict, gating cause, activity
- * evidence, and the exact next commands. Reach for this in `smithers status` or
+ * evidence, and the exact next commands. Reach for this in `smthrs status` or
  * another read-only projection. Missing summaries render as unknown values,
  * and long evidence is clipped instead of throwing.
  *
@@ -321,8 +321,8 @@ export const renderDiagnosis = (
   }
   if (d.parkedApproval !== undefined) {
     lines.push(
-      `${label("Unblock")}${shellCommand("smithers", "approve", d.parkedApproval, "--scope", "run")} && ${
-        shellCommand("smithers", "run", "--resume", runId)
+      `${label("Unblock")}${shellCommand("smthrs", "approve", d.parkedApproval, "--scope", "run")} && ${
+        shellCommand("smthrs", "run", "--resume", runId)
       }`
     )
   }
@@ -331,11 +331,11 @@ export const renderDiagnosis = (
     // that drives the flow takes the run, or the run ends.
     lines.push(
       `${label("Unblock")}${
-        shellCommand("smithers", "cancel", runId)
+        shellCommand("smthrs", "cancel", runId)
       }    # or run the flow from the host program that registers it`
     )
   }
-  lines.push(`${label("Next")}${shellCommand("smithers", "logs", runId)}    # turn-by-turn transcript`)
+  lines.push(`${label("Next")}${shellCommand("smthrs", "logs", runId)}    # turn-by-turn transcript`)
   return lines.join("\n")
 }
 

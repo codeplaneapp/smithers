@@ -117,13 +117,13 @@ describe("smithers entrypoint", () => {
   it("reports success for a help request and a usage status for one with errors", () => {
     // `ShowHelp` with no errors is `--help`, which is a successful
     // invocation; with errors it is a rejected one.
-    expect(status(entrypoint, failure(new EffectCliError.ShowHelp({ commandPath: ["smithers"], errors: [] })))).toBe(0)
+    expect(status(entrypoint, failure(new EffectCliError.ShowHelp({ commandPath: ["smthrs"], errors: [] })))).toBe(0)
     expect(
       status(
         entrypoint,
         failure(
           new EffectCliError.ShowHelp({
-            commandPath: ["smithers"],
+            commandPath: ["smthrs"],
             errors: [new EffectCliError.UnrecognizedOption({ option: "--filter", suggestions: [] })]
           })
         )
@@ -209,7 +209,7 @@ describe("smithers entrypoint", () => {
     })
     try {
       process.chdir(project)
-      process.argv = [process.execPath, "smithers", "--version"]
+      process.argv = [process.execPath, "smthrs", "--version"]
       await Effect.runPromise(fresh.main)
     } finally {
       write.mockRestore()
@@ -233,7 +233,7 @@ describe("smithers entrypoint", () => {
       process.chdir(project)
       // No flag anywhere in the vector, which is the only way the document
       // scan runs off the end of the arguments and answers "not a document".
-      process.argv = [process.execPath, "smithers", "hijack"]
+      process.argv = [process.execPath, "smthrs", "hijack"]
       exit = await Effect.runPromiseExit(fresh.main)
     } finally {
       process.argv = argv
@@ -246,7 +246,7 @@ describe("smithers entrypoint", () => {
     expect(error).toBeInstanceOf(fresh.cliError.UnsupportedError)
     expect((error as InstanceType<typeof fresh.cliError.UnsupportedError>).message)
       .toBe(
-        "smithers hijack was removed in 1.0.0-rc.0: not available; use `steer`, `signal`, `approve`, " +
+        "smthrs hijack was removed in 1.0.0-rc.0: not available; use `steer`, `signal`, `approve`, " +
           "`deny`, `cancel`, `run --resume`. See https://smithers.sh/migration/1.0#hijack"
       )
     expect(status(fresh, exit)).toBe(1)
@@ -274,7 +274,7 @@ describe("smithers entrypoint", () => {
       // `HOME` that cannot reach it either.
       process.chdir(project)
       process.env.HOME = project
-      process.argv = [process.execPath, "smithers", "ls", "--json"]
+      process.argv = [process.execPath, "smthrs", "ls", "--json"]
       await Effect.runPromise(fresh.main)
     } finally {
       write.mockRestore()
@@ -313,7 +313,7 @@ describe("smithers entrypoint", () => {
     try {
       process.chdir(project)
       process.env.HOME = project
-      process.argv = [process.execPath, "smithers", "--mcp", "--read-only"]
+      process.argv = [process.execPath, "smthrs", "--mcp", "--read-only"]
       await Effect.runPromise(fresh.main)
     } finally {
       Object.defineProperty(process, "stdin", descriptor)
@@ -325,7 +325,7 @@ describe("smithers entrypoint", () => {
 
     // The mode still builds the durable composition the verbs use, which is
     // why an MCP client configured with a launch command sees the same runs
-    // `smithers ps` does.
+    // `smthrs ps` does.
     expect(existsSync(join(project, ".flows"))).toBe(true)
     rmSync(project, { recursive: true, force: true })
   }, 120_000)

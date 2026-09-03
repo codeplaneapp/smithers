@@ -1,11 +1,11 @@
 /**
- * Case 14 — `smithers serve` answers a real remote round trip.
+ * Case 14 — `smthrs serve` answers a real remote round trip.
  *
  * The whole point of the case is that nothing here shares a process with the
  * server: the plan, the approval, the launch, and the listing all cross a
  * socket to another operating-system process, are encoded and decoded by the
  * shipped RPC schemas, and land in a SQLite file this process never opens.
- * The server is the product's own command — `smithers serve`, spawned from the
+ * The server is the product's own command — `smthrs serve`, spawned from the
  * bin `@smthrs/cli` declares — so the composition, the authentication, and the
  * database location are the verb's decisions rather than the suite's.
  */
@@ -66,7 +66,7 @@ describe("case14 gateway RPC round trip", () => {
     expect(result.listed).toMatchObject({ _tag: "runs" })
   }, 180_000)
 
-  it("is answered by a separate `smithers serve` process, over its own database", async () => {
+  it("is answered by a separate `smthrs serve` process, over its own database", async () => {
     // The server is another process: it has its own pid, it is this suite's
     // child rather than this suite, and it is still alive after the round trip
     // above. Without these three the case could pass against a server built in

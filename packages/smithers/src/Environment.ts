@@ -1,5 +1,5 @@
 /**
- * The environment contract of the `smithers` command line.
+ * The environment contract of the `smthrs` command line.
  *
  * rc.0 reads a small, closed set of `SMITHERS_*` names.
  *
@@ -40,7 +40,7 @@ export const names: ReadonlyArray<Name> = [
   entry("TEST_CWD", "The repository's path inside that container"),
   entry("TEST_TIMEOUT_MS", "Wall-clock budget for one `test` invocation"),
   entry("BACKEND", "Database backend; only `sqlite` is supported"),
-  entry("BUG_ENDPOINT", "Where `smithers bug` posts its report"),
+  entry("BUG_ENDPOINT", "Where `smthrs bug` posts its report"),
   entry("JJ_PATH", "Explicit path to the jj binary"),
   entry("DETACHED_ADMISSION_TIMEOUT_MS", "How long `up -d` waits for the detached run's admission line"),
   entry("INSIDE_RUN", "Set on an agent process by the engine; keeps its 0.x meaning"),

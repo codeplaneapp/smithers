@@ -160,15 +160,15 @@ describe("one project, from init to gc", processBudget, () => {
    * The park is the contract; being unreadable was the defect.
    *
    * `up` on a module flow leaves a durable run at `accepted` that only
-   * `smithers cancel` ends, because the CLI's agent host runs prompt flows and
+   * `smthrs cancel` ends, because the CLI's agent host runs prompt flows and
    * a module flow's behaviour is registered in code by the host program that
    * declares its delegates (`examples/src/16-fan-out-fan-in.ts`,
    * `examples/src/24-control-plane-and-gateway.ts`). That is a real wait for a
    * real external executor, so the run stays. What an operator got instead of
    * an explanation was the bare word `pending` from `status`, no marker at all
    * from `ps`, and a launch sentence that blamed a missing provider key and
-   * sent them to `smithers doctor` — the one place with nothing to say about
-   * it, and a diagnosis `smithers init`'s seatless-prompt refusal already
+   * sent them to `smthrs doctor` — the one place with nothing to say about
+   * it, and a diagnosis `smthrs init`'s seatless-prompt refusal already
    * owns.
    */
   it("says what the pending run waits for and how to proceed", () => {
@@ -184,7 +184,7 @@ describe("one project, from init to gc", processBudget, () => {
 
     expect(card.status).toBe(0)
     expect(card.stdout).toContain("no executor took the run")
-    expect(card.stdout).toContain(`smithers cancel ${runId}`)
+    expect(card.stdout).toContain(`smthrs cancel ${runId}`)
 
     // And the launch that produced it said the same thing, in the log the
     // detached child wrote.
@@ -192,7 +192,7 @@ describe("one project, from init to gc", processBudget, () => {
 
     expect(log).toContain("no executor took it")
     expect(log).toContain("registers its delegates")
-    expect(log).not.toContain("smithers doctor")
+    expect(log).not.toContain("smthrs doctor")
   })
 
   it("streams the run's own control events", () => {

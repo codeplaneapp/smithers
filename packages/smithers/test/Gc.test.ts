@@ -1,5 +1,5 @@
 /**
- * `smithers gc`: the duration an operator types, and the databases the sweep
+ * `smthrs gc`: the duration an operator types, and the databases the sweep
  * runs against.
  *
  * The retention operation itself is tested in `@smthrs/engine-store`; what is

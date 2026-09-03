@@ -1,5 +1,5 @@
 /**
- * `smithers doctor`: the one command that answers "why did that not work?"
+ * `smthrs doctor`: the one command that answers "why did that not work?"
  * without running anything.
  *
  * Every check here is a thing an operator has been surprised by: a flow
@@ -171,7 +171,7 @@ const registry = (root: string, discoveredFlows: ReadonlyArray<DiscoveredFlow> |
     return {
       name: "registry",
       level: "warn",
-      detail: `no ${directory}; run \`smithers init\` to scaffold one`
+      detail: `no ${directory}; run \`smthrs init\` to scaffold one`
     }
   }
   const found = discoveredOnDisk(directory)
@@ -222,7 +222,7 @@ const providers = (environment: Environment.Source): Check => {
 export interface Options {
   readonly root: string
   /**
-   * The descriptors returned by the same control listing as `smithers ls`.
+   * The descriptors returned by the same control listing as `smthrs ls`.
    * When present, including as an empty list, this authoritative discovery
    * result replaces the filesystem fallback.
    */
@@ -327,7 +327,7 @@ const describeLegacyDatabase = (path: string): string => {
  */
 export const render = (report: Report): string =>
   [
-    `smithers doctor: ${report.root}`,
+    `smthrs doctor: ${report.root}`,
     ...report.checks.map((check) => `${symbol(check.level)} ${check.name}: ${check.detail}`)
   ].join("\n")
 

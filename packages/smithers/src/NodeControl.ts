@@ -540,7 +540,7 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  * describe them then commit against the same database.
  *
  * With a `registry`, the runtime knows every discovered flow as well as the
- * reserved system catalog, so `smithers plan <flow>` plans a project flow
+ * reserved system catalog, so `smthrs plan <flow>` plans a project flow
  * instead of failing `FlowNotFound`.
  *
  * Reach for this value at a Node composition root and reuse it. Database open,
@@ -1152,7 +1152,7 @@ export const layerOutput = Layer.succeed(
 /**
  * Provides the complete Node command-handler environment.
  *
- * This is the production layer for `smithers`. Local composition acquires one
+ * This is the production layer for `smthrs`. Local composition acquires one
  * durable engine and shares it across control, execution, memory, and serving;
  * open or migration failures terminate startup. Remote composition builds the
  * RPC client without opening a local control database.
@@ -1215,7 +1215,7 @@ export const layer = (applicationConfig: Application.Config) => {
       layerOutput,
       NodeServices.layer,
       project,
-      // `smithers memory` reads and writes the same durable store a run's
+      // `smthrs memory` reads and writes the same durable store a run's
       // `memory` flow does, over the same control database. A separate
       // connection would be a second writer to one SQLite file. A remote
       // invocation has no local database to be that store, so it gets the
@@ -1294,7 +1294,7 @@ const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryErro
  * the control database.
  *
  * A remote composition has no local database, so the store is the unavailable
- * one there: `smithers --remote ... memory set` must say the control plane
+ * one there: `smthrs --remote ... memory set` must say the control plane
  * owns memory rather than write a fact into a file the server never reads.
  * Local open and migration failures are startup defects, consistent with the
  * control runtime using the same store.

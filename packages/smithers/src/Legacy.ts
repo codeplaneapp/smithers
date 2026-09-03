@@ -2,7 +2,7 @@
  * Reading Smithers 0.x state without adopting it.
  *
  * rc.0 never loads, resumes, or migrates a 0.x run database. It does read one:
- * `smithers doctor` and `smithers migrate` both have to answer "does this
+ * `smthrs doctor` and `smthrs migrate` both have to answer "does this
  * project still hold runs that have not finished?", and the honest way to
  * answer is to open `smithers.db` and look.
  *
@@ -83,7 +83,7 @@ export const read = (path: string): Database => {
 }
 
 /**
- * The refusal `smithers migrate` prints when a project still holds runs the
+ * The refusal `smthrs migrate` prints when a project still holds runs the
  * 1.0 runtime cannot take over.
  *
  * @category constructors

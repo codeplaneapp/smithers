@@ -1,8 +1,8 @@
 /**
- * The `smithers --mcp` tool surface, its serve loop, and one real stdio round trip.
+ * The `smthrs --mcp` tool surface, its serve loop, and one real stdio round trip.
  *
  * The round trip runs `@smthrs/mcp`'s own client against a spawned
- * `smithers --mcp`, so the framing, the handshake, and the envelope are proven
+ * `smthrs --mcp`, so the framing, the handshake, and the envelope are proven
  * by the code that consumes them rather than by a reimplementation.
  */
 import { NodeServices } from "@effect/platform-node"
@@ -100,7 +100,7 @@ describe("the tool surface", () => {
 
     expect(raw).toHaveLength(Verb.shipped.length)
     expect(raw.map((tool) => tool.name)).toContain("cli_ps")
-    expect(raw.find((tool) => tool.name === "cli_ps")?.description).toContain("smithers ps")
+    expect(raw.find((tool) => tool.name === "cli_ps")?.description).toContain("smthrs ps")
     expect(McpServer.tools({ surface: "both", verbs: Verb.shipped })).toHaveLength(21 + Verb.shipped.length)
   })
 
@@ -421,7 +421,7 @@ describe("the envelope", () => {
   })
 
   it("answers the raw surface with the command to run", async () => {
-    expect(await call(find("cli_ps"))).toMatchObject({ ok: true, data: { command: "smithers ps" } })
+    expect(await call(find("cli_ps"))).toMatchObject({ ok: true, data: { command: "smthrs ps" } })
   })
 
   it("builds both envelope shapes", () => {
@@ -532,7 +532,7 @@ describe("what each tool answers on the path through", () => {
     expect(node.data).toMatchObject({ nodeId: "read#1", value: "contents of a" })
   })
 
-  it("explains a run with its status, digest, and the same card `smithers status` prints", async () => {
+  it("explains a run with its status, digest, and the same card `smthrs status` prints", async () => {
     const explained = await callWith(runControl(), find("explain_run"), { runId: "run-1" }) as {
       readonly data: { readonly runId: string; readonly status: string; readonly card: string }
     }

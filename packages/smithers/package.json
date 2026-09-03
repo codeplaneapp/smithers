@@ -40,7 +40,8 @@
     "./dist/cjs/Version.js"
   ],
   "bin": {
-    "smithers": "./bin/smithers.mjs"
+    "smithers": "./bin/smithers.mjs",
+    "smthrs": "./bin/smithers.mjs"
   },
   "exports": {
     "./package.json": "./package.json",
@@ -92,6 +93,7 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
+    "@clack/prompts": "1.7.0",
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/platform-node-shared": "4.0.0-rc.108",
     "@smthrs/agent": "1.0.0-rc.0",

@@ -12,7 +12,7 @@ if (typeof metadata.version !== "string") {
 /**
  * The version published in `@smthrs/cli` package metadata.
  *
- * This is what `smithers --version` prints and what `smithers update` compares
+ * This is what `smthrs --version` prints and what `smthrs update` compares
  * against the registry, so it is read from the shipped manifest rather than
  * from a constant a release could forget to bump.
  *

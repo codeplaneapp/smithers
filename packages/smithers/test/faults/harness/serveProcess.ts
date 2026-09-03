@@ -1,7 +1,7 @@
 /**
  * The served control plane, out of process, and the clients that talk to it.
  *
- * `startServe` runs the product's own `smithers serve` — the executable
+ * `startServe` runs the product's own `smthrs serve` — the executable
  * `@smthrs/cli` declares as its bin, resolved through Node, not a fixture that
  * re-composes the same layers. That distinction is the whole point of the
  * gateway family: a suite that builds the server itself proves that a
@@ -49,7 +49,7 @@ export const smithersBin: string = (() => {
   return resolve(dirname(manifest), bin)
 })()
 
-/** Where `smithers serve` keeps the control database for a project root. */
+/** Where `smthrs serve` keeps the control database for a project root. */
 const controlDatabase = (root: string): string => join(root, ".flows", "control.db")
 
 /** An unused loopback port, held only long enough to learn its number. */
@@ -94,7 +94,7 @@ const serving = async (port: number): Promise<boolean> => {
 }
 
 /**
- * A running `smithers serve`.
+ * A running `smthrs serve`.
  *
  * @since 1.0.0
  * @category models
@@ -132,7 +132,7 @@ export interface ServeOptions {
 }
 
 /**
- * Starts `smithers serve` against `root` and waits until it answers RPC.
+ * Starts `smthrs serve` against `root` and waits until it answers RPC.
  *
  * @since 1.0.0
  * @category constructors
@@ -144,7 +144,7 @@ export const startServe = async (root: string, options: ServeOptions = {}): Prom
   const argv = [smithersBin, "serve", "--root", root, "--port", String(port), "--credential", token]
   const process_ = spawn(process.execPath, argv, { stdio: ["ignore", "pipe", "pipe"], cwd: root })
   const pid = process_.pid
-  if (pid === undefined) throw new Error("smithers serve has no pid")
+  if (pid === undefined) throw new Error("smthrs serve has no pid")
 
   let stderr = ""
   let exited: number | null | undefined
@@ -164,12 +164,12 @@ export const startServe = async (root: string, options: ServeOptions = {}): Prom
   const deadline = Date.now() + timeoutMs
   for (;;) {
     if (exited !== undefined) {
-      throw new Error(`smithers serve exited with ${String(exited)} before it served\n${command}\n${stderr}`)
+      throw new Error(`smthrs serve exited with ${String(exited)} before it served\n${command}\n${stderr}`)
     }
     if (await serving(port)) break
     if (Date.now() >= deadline) {
       process_.kill("SIGKILL")
-      throw new Error(`smithers serve never answered on ${port} within ${timeoutMs}ms\n${command}\n${stderr}`)
+      throw new Error(`smthrs serve never answered on ${port} within ${timeoutMs}ms\n${command}\n${stderr}`)
     }
     await sleep(100)
   }

@@ -1,5 +1,5 @@
 /**
- * The command surface of `smithers` in 1.0.0-rc.0.
+ * The command surface of `smthrs` in 1.0.0-rc.0.
  *
  * At the import reference this module projected `SystemFlows.catalog`
  * directly, so eleven verbs existed only as bodiless reserved flows that

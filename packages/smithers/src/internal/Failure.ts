@@ -6,7 +6,7 @@
  * does, and says why: "every other renderer in the tree prints `message`, so a
  * refusal with none is a refusal with no reason". The rest have none, and the
  * executable's reporter printed the class name and a bare colon for them:
- * `smithers resume` against a run another process owns answered the whole line
+ * `smthrs resume` against a run another process owns answered the whole line
  * `ClaimLost: `, which names neither the run nor the stable `code` a script
  * must be able to grep for.
  *

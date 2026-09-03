@@ -1,5 +1,5 @@
 /**
- * `smithers serve`: the workspace gateway over HTTP, for the product UI and
+ * `smthrs serve`: the workspace gateway over HTTP, for the product UI and
  * for any client that is not this process.
  *
  * The assembly is `@smthrs/gateway`'s: the control plane on `/rpc`, the served
@@ -189,7 +189,7 @@ export const banner = (bind: Bind): string => {
   const socket = base.replace(/^http/, "ws")
   const width = Math.max(...mounts.map((mount) => mount.path.length))
   return [
-    `smithers serve listening on ${base}`,
+    `smthrs serve listening on ${base}`,
     ...mounts.map((mount) =>
       `  ${mount.path.padEnd(width)}  ${mount.protocol === "ws" ? socket : base}${mount.path}  ${mount.serves}`
     ),

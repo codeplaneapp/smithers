@@ -1,5 +1,5 @@
 /**
- * The `smithers claude ...` protocol the Claude Code plugin's `/workflows`
+ * The `smthrs claude ...` protocol the Claude Code plugin's `/workflows`
  * mirror consumes.
  *
  * The plugin does not read a database and does not know the control plane. It

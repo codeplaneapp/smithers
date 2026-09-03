@@ -1,5 +1,5 @@
 /**
- * `smithers --mcp`: the control plane as a Model Context Protocol server.
+ * `smthrs --mcp`: the control plane as a Model Context Protocol server.
  *
  * The protocol is newline-delimited JSON-RPC 2.0 over stdio, which is what
  * `@smthrs/mcp`'s own client speaks, so the round trip is testable in-process
@@ -140,7 +140,7 @@ const runIdArguments = Schema.Struct({
 })
 
 const runWorkflowArguments = Schema.Struct({
-  flowId: describedString("The flow to run, as `smithers ls` names it."),
+  flowId: describedString("The flow to run, as `smthrs ls` names it."),
   input: Schema.optionalKey(
     Schema.Record(Schema.String, Schema.Unknown).annotate({ description: "The flow's input." })
   )
@@ -178,7 +178,7 @@ const resolveApprovalArguments = Schema.Struct({
 
 const nodeDetailArguments = Schema.Struct({
   runId: describedString("The run to read."),
-  nodeId: describedString("The node, as `smithers output <run-id>` lists it.")
+  nodeId: describedString("The node, as `smthrs output <run-id>` lists it.")
 })
 
 const text = (value: unknown): string | undefined => typeof value === "string" ? value : undefined
@@ -569,13 +569,13 @@ export const rawTools = (
   verbs.map((verb) =>
     makeTool({
       name: `cli_${verb.name.replaceAll("-", "_")}`,
-      description: `${verb.help}. Run it as \`smithers ${verb.name}\`.`,
+      description: `${verb.help}. Run it as \`smthrs ${verb.name}\`.`,
       readOnly: true,
       schema: emptyArguments,
       call: () =>
         Effect.succeed(
           succeeded({
-            command: `smithers ${verb.name}`,
+            command: `smthrs ${verb.name}`,
             description: verb.help,
             note: "Run this from a shell; the semantic tools perform the control-plane operations directly."
           })

@@ -1,5 +1,5 @@
 /**
- * `smithers bug`: the scrubbing, which is the whole reason the command exists.
+ * `smthrs bug`: the scrubbing, which is the whole reason the command exists.
  *
  * Every rule here answers a way a credential actually reached a 0.x report.
  */

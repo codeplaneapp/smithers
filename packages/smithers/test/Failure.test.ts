@@ -22,7 +22,7 @@ describe("Failure.sentence", () => {
   })
 
   it("states the contract code and the run for a failure with no sentence", () => {
-    // The line `smithers resume` prints when a live peer owns the run. Before
+    // The line `smthrs resume` prints when a live peer owns the run. Before
     // this, the whole line was `ClaimLost: `, which named neither.
     expect(Failure.sentence(new ControlError.ClaimLost({ runId: "run-42" })))
       .toBe("claim_lost runId=run-42")

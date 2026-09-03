@@ -1,5 +1,5 @@
 /**
- * The `smithers` command tree.
+ * The `smthrs` command tree.
  *
  * Every verb in the shipped catalog is here with a handler, and every verb
  * and flag in the removed-command contract is here as a hidden refusal. Those two facts are the
@@ -83,7 +83,7 @@ const global = {
   backend: Flag.string("backend").pipe(Flag.optional, Flag.withHidden)
 }
 
-const rootCommand = Command.make("smithers").pipe(Command.withSharedFlags(global))
+const rootCommand = Command.make("smthrs").pipe(Command.withSharedFlags(global))
 
 const input = Argument.string("key=value").pipe(Argument.variadic())
 const data = Flag.string("data").pipe(Flag.optional)
@@ -330,7 +330,7 @@ const awaitOwnedRun = (
   Effect.gen(function*() {
     // A run that had already settled when the verb reached it has no
     // settlement event left to wait for, and the receipt carries the answer.
-    // Without this, `smithers run --resume <run-id>` against a run that
+    // Without this, `smthrs run --resume <run-id>` against a run that
     // settled `failed` printed `{"_tag":"Terminal","status":"failed"}` and
     // exited 0, because every receipt tag but `Accepted` reported nothing at
     // all (recorded by the cli-exit-code lane's verifier).
@@ -376,7 +376,7 @@ const declinedLaunch = (control: ControlService.Service, runId: string) =>
         `${summary?.status ?? "accepted"} with nothing running. This host drives prompt flows. A flow whose ` +
         `body is a module (\`flow.ts\`) is driven by the host program that registers its delegates, and a flow ` +
         `this project's registry does not hold belongs to another host: run the flow from that program, or end ` +
-        `the run with \`smithers cancel ${runId}\`. \`smithers status ${runId}\` shows what it waits for.`
+        `the run with \`smthrs cancel ${runId}\`. \`smthrs status ${runId}\` shows what it waits for.`
     })
   })
 
@@ -397,9 +397,9 @@ const wasDeclined = (settlement: string | undefined): boolean => settlement === 
  *
  * Until this existed, `runLaunch` failed only on `control.run.pending`, so a
  * `control.run.failed` settlement rendered the launch receipt and exited 0.
- * No caller of `smithers up` could read a red run from the exit code: the
- * release validation measured `smithers up ci-fast --json` returning 0 in
- * three seconds while `smithers ps` reported `failed`.
+ * No caller of `smthrs up` could read a red run from the exit code: the
+ * release validation measured `smthrs up ci-fast --json` returning 0 in
+ * three seconds while `smthrs ps` reported `failed`.
  */
 const settlementStatus = (settlement: string | undefined): number | undefined => {
   switch (settlement) {
@@ -423,7 +423,7 @@ const settlementStatus = (settlement: string | undefined): number | undefined =>
  * contract is that an attached launch prints its receipt, and a caller reads
  * `runId` from that document whatever the run then did. `bin.ts` hands a
  * successful exit whatever `process.exitCode` holds, which is how
- * `smithers migrate` reports its own status too.
+ * `smthrs migrate` reports its own status too.
  */
 const reportSettlement = (settlement: string | undefined) =>
   Effect.sync(() => {
@@ -594,7 +594,7 @@ const up = Command.make("up", upFlags, (config) =>
     if (config.detached && remote !== undefined) {
       return yield* Effect.fail(
         new CliError.UnsupportedError({
-          message: "up -d spawns a local executor; run `smithers up` attached against --remote"
+          message: "up -d spawns a local executor; run `smthrs up` attached against --remote"
         })
       )
     }
@@ -662,7 +662,7 @@ const approve = Command.make("approve", {
     const receipt = yield* control.approve({ ...payload, scope: config.scope })
     // A decision restarts the run it answers, in this call, on this process's
     // own executor. The decision therefore ends with
-    // a settled run, and the shell that ran `smithers approve` is entitled to
+    // a settled run, and the shell that ran `smthrs approve` is entitled to
     // read that run's status from `$?` exactly as `up` and `run` promise it.
     const settlement = yield* awaitOwnedRun(control, receipt, parkSequence)
     yield* render(receipt)
@@ -1076,7 +1076,7 @@ const init = Command.make("init", {
 /**
  * The migration tool's own flag set, declared on the verb.
  *
- * `smithers migrate` and `smithers-migrate` run the same entry, so they take
+ * `smthrs migrate` and `smithers-migrate` run the same entry, so they take
  * the same options. A verb that declared none of them could only ever plan:
  * `--apply` converts the project source,
  * and an operator who cannot type it has no way to reach the transformation.
@@ -1197,7 +1197,7 @@ const migrate = Command.make("migrate", {
       // instructions and leaves the project untouched. The two gates that park
       // for a decision exit 3, the way `smithers-migrate` and every parked
       // Smithers run report one.
-      const message = `smithers migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
+      const message = `smthrs migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
       if (error.code === "run-state-blocked" || error.code === "unsafe-blocked") {
         yield* Console.error(message)
         return yield* Effect.sync(() => {
@@ -1515,7 +1515,7 @@ const bug = Command.make("bug", {
     yield* guardGlobals
     const summary = config.summary.join(" ").trim()
     if (summary === "") {
-      return yield* Effect.fail(new CliError.UsageError({ message: "smithers bug needs a one-line summary" }))
+      return yield* Effect.fail(new CliError.UsageError({ message: "smthrs bug needs a one-line summary" }))
     }
     const control = yield* ControlService.Control
     const listed = yield* control.list({ _tag: "runs" })

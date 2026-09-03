@@ -1,5 +1,5 @@
 /**
- * `smithers gc`: the retention pass, over this project's databases.
+ * `smthrs gc`: the retention pass, over this project's databases.
  *
  * `@smthrs/engine-store`'s `Retention` owns what a pass deletes; this module
  * owns which files it runs against and how an operator spells the threshold.

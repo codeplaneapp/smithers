@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * The `smithers` executable.
+ * The `smthrs` executable (and its `smithers` alias).
  *
  * The shebang pins Node for every installation path — `npm install -g`, `npx`,
- * and `bun x --package @smthrs/cli smithers` — because the durable engine is
+ * and `bun x --package @smthrs/cli smthrs` — because the durable engine is
  * unsupported on Bun (the release policy). Bun honours the shebang unless
  * `--bun` is passed, and `--bun` execution of this CLI is unsupported.
  *
  * A published install ships `dist/esm/bin.js`, so the shim runs the built
  * entry. A source checkout has no `dist`, so it runs `src/bin.ts` through
  * Node's own type stripping — the same path `test/Bin.test.ts` executes. That
- * is what makes `pnpm exec smithers` run the working tree during development
+ * is what makes `pnpm exec smthrs` run the working tree during development
  * with no build step, which `scripts/check-local-smithers.mjs` requires.
  */
 import { existsSync } from "node:fs"

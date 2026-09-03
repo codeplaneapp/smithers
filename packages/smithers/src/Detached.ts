@@ -1,5 +1,5 @@
 /**
- * `smithers up -d`: launch a run in a process that outlives this one.
+ * `smthrs up -d`: launch a run in a process that outlives this one.
  *
  * The 0.x launcher's hard-won rule is carried over unchanged: a detached
  * launch returns only after the child has *proved* it persisted the run row,
@@ -23,7 +23,7 @@ import { join } from "node:path"
 import * as Project from "./Project.ts"
 
 /**
- * The environment name that tells a `smithers run` child it was launched
+ * The environment name that tells a `smthrs run` child it was launched
  * detached, and which nonce to stamp its admission line with.
  *
  * Internal parent-to-child handoff: never set it by hand.
@@ -355,7 +355,7 @@ export const launch = async (options: Options): Promise<Launched | Rejected> => 
             process.stderr.write(`${line}\n`)
           })
         notify(
-          `smithers: detached engine (pid ${child.pid ?? "unknown"}) is still booting after ${
+          `smthrs: detached engine (pid ${child.pid ?? "unknown"}) is still booting after ${
             Math.round(elapsedMs / 1000)
           }s; waiting up to ${Math.round(maxWaitMs / 1000)}s.`
         )

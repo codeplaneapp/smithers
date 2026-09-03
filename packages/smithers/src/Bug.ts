@@ -1,5 +1,5 @@
 /**
- * `smithers bug`: a report an operator can send without pasting their secrets
+ * `smthrs bug`: a report an operator can send without pasting their secrets
  * into a browser.
  *
  * The value of the command is that it collects the context a maintainer always

@@ -1,5 +1,5 @@
 /**
- * The `smithers claude ...` mirror protocol, contract 2.
+ * The `smthrs claude ...` mirror protocol, contract 2.
  *
  * Two shape changes from 0.x are asserted directly because the plugin pins the
  * contract number on them: `humanRequests` is gone (rc.0 has no question or

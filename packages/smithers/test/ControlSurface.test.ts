@@ -372,11 +372,11 @@ describe("Control surface", () => {
     expect(error).toBeInstanceOf(CliError.UnsupportedError)
     const message = (error as CliError.UnsupportedError).message
     // Restated in the cli-boot-hygiene lane: the sentence used to blame a
-    // missing seat and send the operator to `smithers doctor`, which has
+    // missing seat and send the operator to `smthrs doctor`, which has
     // nothing to say about a launch no executor drives.
     expect(message).toContain("no executor took it")
     expect(message).toContain("registers its delegates")
-    expect(message).toContain("smithers cancel run-1")
+    expect(message).toContain("smthrs cancel run-1")
     expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
   })
 
@@ -391,7 +391,7 @@ describe("Control surface", () => {
     // The attached-launch contract says an attached
     // launch exits with the terminal status code. Before this, `runLaunch`
     // failed only on `control.run.pending`: a run that settled `failed`
-    // rendered its receipt and exited 0, so no caller of `smithers up` could
+    // rendered its receipt and exited 0, so no caller of `smthrs up` could
     // read a red run from the exit code.
     const previous = process.exitCode
     try {

@@ -1,7 +1,7 @@
 /**
  * Wiring Smithers into the agents an operator already runs.
  *
- * `smithers mcp add` writes the stdio MCP server entry into an agent's own
+ * `smthrs mcp add` writes the stdio MCP server entry into an agent's own
  * configuration.
  *
  * rc.0 knows two agents, Claude Code and Codex, because those are the two the
@@ -83,7 +83,7 @@ export const find = (id: string): Agent | undefined => agents.find((agent) => ag
  */
 export const launchCommand = (
   execPath: string = process.execPath,
-  entry: string = process.argv[1] ?? "smithers"
+  entry: string = process.argv[1] ?? "smthrs"
 ): { readonly command: string; readonly args: ReadonlyArray<string> } => ({
   command: execPath,
   args: [entry, "--mcp"]

@@ -1,5 +1,5 @@
 /**
- * `smithers update`: the version comparison, without the network.
+ * `smthrs update`: the version comparison, without the network.
  *
  * The one thing this has to get right is that a release candidate is never
  * told to "upgrade" to an older stable release: an rc.0 install reading a
