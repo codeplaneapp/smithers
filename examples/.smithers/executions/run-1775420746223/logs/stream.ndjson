@@ -1,0 +1,3 @@
+{"type":"RunStarted","runId":"run-1775420746223","timestampMs":1775420756498}
+{"type":"FrameCommitted","runId":"run-1775420746223","frameNo":1,"xmlHash":"834e41ac2bfdf148a8900d78b68a2f853b7922541c06fb0c7542317b8b5be56a","timestampMs":1775420757277}
+{"type":"SnapshotCaptured","runId":"run-1775420746223","frameNo":1,"contentHash":"bb1eafaaba81535051d63e00a79774ae6c8d56a42e31162cfc88f44ed4c80fd8","timestampMs":1775420757277}

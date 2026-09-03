@@ -1,0 +1,5 @@
+{"type":"FrameCommitted","runId":"semantic-quick-waited","frameNo":91,"xmlHash":"74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b","timestampMs":1781078076681,"correlation":{"runId":"semantic-quick-waited","workflowName":"workflow"}}
+{"type":"SnapshotCaptured","runId":"semantic-quick-waited","frameNo":91,"contentHash":"34eceea94329045cf57806f026e34fa68df696d41512b3401627a38cdecc1a1d","timestampMs":1781078076681,"correlation":{"runId":"semantic-quick-waited","workflowName":"workflow"}}
+{"type":"FrameCommitted","runId":"semantic-quick-waited","frameNo":92,"xmlHash":"74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b","timestampMs":1781078076686,"correlation":{"runId":"semantic-quick-waited","workflowName":"workflow"}}
+{"type":"SnapshotCaptured","runId":"semantic-quick-waited","frameNo":92,"contentHash":"34eceea94329045cf57806f026e34fa68df696d41512b3401627a38cdecc1a1d","timestampMs":1781078076686,"correlation":{"runId":"semantic-quick-waited","workflowName":"workflow"}}
+{"type":"RunFinished","runId":"semantic-quick-waited","timestampMs":1781078077091,"correlation":{"runId":"semantic-quick-waited","workflowName":"workflow"}}

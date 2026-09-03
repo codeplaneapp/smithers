@@ -1,0 +1,6 @@
+{"type":"RunStarted","runId":"run-1775875774615","timestampMs":1775875775434,"correlation":{"runId":"run-1775875774615","workflowName":"workflow"}}
+{"type":"NodePending","runId":"run-1775875774615","nodeId":"split","iteration":0,"timestampMs":1775875775461,"correlation":{"runId":"run-1775875774615","workflowName":"fan-out-fan-in","nodeId":"split","iteration":0}}
+{"type":"NodePending","runId":"run-1775875774615","nodeId":"merge","iteration":0,"timestampMs":1775875775465,"correlation":{"runId":"run-1775875774615","workflowName":"fan-out-fan-in","nodeId":"merge","iteration":0}}
+{"type":"FrameCommitted","runId":"run-1775875774615","frameNo":1,"xmlHash":"b4ac25c1159e1b969c5e16ee2b3ed84b4fae8faf596c87aff381f93772eaddbb","timestampMs":1775875775470,"correlation":{"runId":"run-1775875774615","workflowName":"fan-out-fan-in"}}
+{"type":"SnapshotCaptured","runId":"run-1775875774615","frameNo":1,"contentHash":"da95cf072ef495b8dca1fb7a5cdffbcc61ded459fb798e390bbb17921938824c","timestampMs":1775875775470,"correlation":{"runId":"run-1775875774615","workflowName":"fan-out-fan-in"}}
+{"type":"NodeStarted","runId":"run-1775875774615","nodeId":"split","iteration":0,"attempt":1,"timestampMs":1775875775614,"correlation":{"runId":"run-1775875774615","workflowName":"fan-out-fan-in","attempt":1,"nodeId":"split","iteration":0}}

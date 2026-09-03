@@ -1,0 +1,9 @@
+{"type":"RunStarted","runId":"run-1774755330485","timestampMs":1774755330922}
+{"type":"FrameCommitted","runId":"run-1774755330485","frameNo":1,"xmlHash":"a0f6d0b86ebd6a77d5abf50b3a7aec48c1b02983ef35df16836d7de1b15fd169","timestampMs":1774755330934}
+{"type":"NodePending","runId":"run-1774755330485","nodeId":"review","iteration":0,"timestampMs":1774755330939}
+{"type":"NodePending","runId":"run-1774755330485","nodeId":"fix","iteration":0,"timestampMs":1774755330940}
+{"type":"NodePending","runId":"run-1774755330485","nodeId":"summary","iteration":0,"timestampMs":1774755330941}
+{"type":"NodeStarted","runId":"run-1774755330485","nodeId":"review","iteration":0,"attempt":1,"timestampMs":1774755330944}
+{"type":"NodeFailed","runId":"run-1774755330485","nodeId":"review","iteration":0,"attempt":1,"error":{"name":"AI_APICallError","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.","stack":"AI_APICallError: Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.\n    at <anonymous> (/Users/williamcory/smithers/node_modules/.bun/@ai-sdk+provider-utils@4.0.13+3c5d820c62823f0b/node_modules/@ai-sdk/provider-utils/dist/index.mjs:2379:18)\n    at processTicksAndRejections (native:7:39)"},"timestampMs":1774755331116}
+{"type":"FrameCommitted","runId":"run-1774755330485","frameNo":2,"xmlHash":"a0f6d0b86ebd6a77d5abf50b3a7aec48c1b02983ef35df16836d7de1b15fd169","timestampMs":1774755331122}
+{"type":"RunFailed","runId":"run-1774755330485","error":"Task(s) failed: review","timestampMs":1774755331125}

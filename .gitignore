@@ -89,15 +89,15 @@ worktrees/
 # to a pre-publication change would delete CAS blobs live cache rows reference.
 .flows/
 
-# 0.x Smithers pack and run store. `.smithers/` is the 0.x directory the
-# migration workflow reads in a consumer project; only focused package fixtures
-# track one in this repository.
-.smithers/
-# The repository's own UI plugin manifest (apps/ui/docs/LOCAL-APP.md "Plugin manifest") is source, not run state.
-!/.smithers/
+# `.smithers/` holds a workspace declaration (WORKSPACE.ts and its sibling
+# modules), which is source. Only run state written beside it is ignored.
 /.smithers/*
-!packages/build-cli/test/fixtures/force-spec/.smithers/
-packages/*/.smithers/
+!/.smithers/WORKSPACE.ts
+**/.smithers/*.db
+**/.smithers/*.db-*
+**/.smithers/runs/
+**/.smithers/executions/
+**/.smithers/cache/
 smithers.db
 smithers.db-shm
 smithers.db-wal
