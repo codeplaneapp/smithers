@@ -439,6 +439,22 @@ export interface PackageNode extends Planner.PlannedTarget {
     | { readonly template: string; readonly consts: Readonly<Record<string, string>>; readonly bunPath: string }
     | undefined
   readonly writeSet: ReadonlyArray<string>
+  /**
+   * Workspace-relative paths a rule discovered for itself that the spawned
+   * tool must be able to read.
+   *
+   * A rule whose work is named by import patterns rather than by `S.file`
+   * declarations — `Go.*` is the one today — has no declared inputs to derive
+   * a read set from, so it reports the closure it planned over here and the
+   * confinement admits exactly that.
+   */
+  readonly readSet: ReadonlyArray<string>
+  /**
+   * Absolute host paths outside the workspace the spawned tool reads. A git
+   * submodule whose `.gitmodules` url is a local repository is the one source
+   * today; the confinement binds each read-only.
+   */
+  readonly externalReads: ReadonlyArray<string>
   readonly outDirs: ReadonlyArray<string>
   readonly outFiles: ReadonlyArray<string>
   /** Consumer-scoped source substitutions applied only in a scratch workspace. */
@@ -1642,6 +1658,8 @@ const visit = async (
   let emit: PackageNode["emit"]
   let stdoutPath: string | undefined
   const writeSet: Array<string> = []
+  const readSet: Array<string> = []
+  const externalReads: Array<string> = []
   const outDirs: Array<string> = []
   const outFiles: Array<string> = []
   const members: Array<string> = []
@@ -1935,6 +1953,10 @@ const visit = async (
         }
         outDirs.push(...plannedGo.outDirs)
         writeSet.push(...plannedGo.writeSet)
+        // `go` resolves its own module and package graph from import paths, so
+        // the confinement has to admit the files the closure named or the
+        // toolchain cannot find its own `go.mod`.
+        readSet.push(...plannedGo.readSet)
         if (plannedGo.closureIdentity !== undefined) {
           toolchain.push({ tag: "GoClosure", value: plannedGo.closureIdentity })
         }
@@ -1958,6 +1980,7 @@ const visit = async (
     cwd = planned.cwd
     env = { ...planned.env }
     outDirs.push(...planned.outDirs)
+    writeSet.push(...planned.writeSet)
     argv = planned.argv === undefined ? undefined : [...planned.argv]
     if (planned.refusal !== undefined) noteRefusal(planned.refusal)
   }
@@ -2337,6 +2360,14 @@ const visit = async (
         ...submodulePlan.paths
       ]
       outDirs.push(...submodulePlan.paths)
+      // `git submodule update --init` registers each submodule in `.git/config`
+      // and keeps its object store under `.git/modules`, and it reads the
+      // superproject's index to learn the pinned gitlink, so the repository's
+      // own directory is what the checkout writes besides the worktree paths.
+      // The workspace's write-set guard still sees the worktree paths as the
+      // declared outputs; `.git` is the tool's bookkeeping.
+      writeSet.push(".git")
+      externalReads.push(...submodulePlan.sources)
       sandbox = { network: true }
       lane = { kind: "submodules", plan: submodulePlan }
       break
@@ -2496,6 +2527,23 @@ const visit = async (
             `S.HttpSecret(S.Secret(${JSON.stringify(required)}), [...])`
         )
       }
+    }
+  }
+  // A rule that drives the workspace package manager reads the declaration
+  // that names it — the manifest a corepack shim resolves the manager version
+  // from, and the lockfile and workspace file pnpm resolves the tree from.
+  // They are declared on the workspace, so they never reach this target's
+  // declared inputs and the confinement would hide them.
+  if (context.managerBinary !== undefined && argv?.[0] === context.managerBinary) {
+    readSet.push(...managerFilesOf(context.index.workspace))
+    // pnpm 11 verifies the dependency tree before `run` and `exec` and installs
+    // when it disagrees. A keyed, confined check would then reach the registry
+    // and rewrite `node_modules` as a side effect of running `tsc`. Installing
+    // is the `Npm.NodeModules` resource's business; a consumer of it never
+    // installs. The setting lives only in `pnpm-workspace.yaml`, so `--config.`
+    // is the one spelling that reaches pnpm from here.
+    if (context.managerBinary === "pnpm" && (argv[1] === "exec" || argv[1] === "run")) {
+      argv = [argv[0], "--config.verifyDepsBeforeRun=false", ...argv.slice(1)]
     }
   }
   if (attrMember(attrs, "approval") === "required") {
@@ -2742,6 +2790,8 @@ const visit = async (
     absoluteEnv,
     bunTemplate,
     writeSet,
+    readSet,
+    externalReads,
     outDirs,
     outFiles,
     overlays,
@@ -2815,6 +2865,29 @@ const rootMode = (rule: string, options: RunOptions): Mode => {
   if (options.write === true || options.fix === true) return "write"
   if (options.verb === "run") return "write"
   return "check"
+}
+
+/**
+ * The workspace-relative files the package manager itself opens before it runs
+ * anything: the manifest that names it, the lockfile it validates against, and
+ * the workspace file that bounds the tree.
+ *
+ * The declaration lives on the workspace, not on the target, so it never
+ * reaches a consumer's declared inputs. Without it a confined `pnpm exec tsc`
+ * dies reading `package.json` — the manifest is what a corepack shim resolves
+ * the manager version from, and what pnpm resolves the workspace root from.
+ */
+const managerFilesOf = (workspace: PackageIndexModule.PackageIndex["workspace"]): ReadonlyArray<string> => {
+  const manager = workspace.packageManager as
+    | { readonly manifest?: unknown; readonly lockfile?: unknown; readonly workspaces?: unknown }
+    | undefined
+  if (manager === undefined) return []
+  const paths: Array<string> = []
+  for (const candidate of [manager.manifest, manager.lockfile, manager.workspaces]) {
+    const path = (candidate as { readonly path?: unknown } | undefined)?.path
+    if (typeof path === "string" && path !== "") paths.push(Input.resolvePath("", path))
+  }
+  return paths
 }
 
 const managerBinaryOf = (workspace: PackageIndexModule.PackageIndex["workspace"]): string | undefined => {
@@ -2973,8 +3046,10 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
  * The confinement one package node runs under.
  *
  * The read set is what the content key covers: the node's expanded declared
- * inputs, the declared outputs of every transitive dependency, the
- * `node_modules` trees above the working directory, and the cache
+ * inputs, the closure a rule planned for itself (`Go.*` names its work with
+ * import patterns, so `go.mod` and the compiler inputs arrive that way), the
+ * declared outputs of every transitive dependency, the `node_modules` trees
+ * above the working directory, and the cache
  * directory's scratch and fetch store. The write set is the node's declared
  * outputs, its declared `changes`, its clean targets, a cargo crate's
  * `target` directory, and the cache directory with the result cache itself
@@ -2991,6 +3066,7 @@ const sandboxRequest = (
   for (const input of node.declaredInputs) {
     for (const file of input.files) reads.add(file.path)
   }
+  for (const path of node.readSet) reads.add(path)
   const seen = new Set<string>()
   const stack = [...node.dependencies]
   while (stack.length > 0) {
@@ -3037,6 +3113,7 @@ const sandboxRequest = (
     reads: [...reads],
     writes: [...writes],
     readOnly: [`${cacheDirectory}/cache`],
+    externalReads: node.externalReads,
     services: node.serviceDeps.length > 0
   }
 }

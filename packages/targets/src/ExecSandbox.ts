@@ -34,6 +34,7 @@
  * @since 0.1.0
  */
 import * as NodeFs from "node:fs"
+import * as NodeOs from "node:os"
 import * as NodePath from "node:path"
 import type * as Attr from "./Attr.ts"
 import type * as WorkspaceDeclaration from "./WorkspaceDeclaration.ts"
@@ -69,6 +70,13 @@ export interface Request {
   readonly reads: ReadonlyArray<string>
   readonly writes: ReadonlyArray<string>
   readonly readOnly?: ReadonlyArray<string> | undefined
+  /**
+   * Absolute host paths outside the workspace the tool reads: a git
+   * submodule's local source repository, for one. Bound read-only where the
+   * mechanism would otherwise hide them; a path that does not exist, or that
+   * sits inside the workspace, is dropped.
+   */
+  readonly externalReads?: ReadonlyArray<string> | undefined
   /** The consumer reaches services on the loopback interface. */
   readonly services?: boolean | undefined
 }
@@ -94,6 +102,13 @@ export interface Host {
    * its own entry, which is correct and merely long.
    */
   readonly entries?: ((directory: string) => ReadonlyArray<string> | undefined) | undefined
+  /**
+   * Where a path's bytes actually live once every symbolic link on it is
+   * followed, or `undefined` when the host cannot say. A host that omits it
+   * binds declared paths where they sit, which is right everywhere a link's
+   * target stays visible.
+   */
+  readonly realpath?: ((path: string) => string | undefined) | undefined
   readonly uid: number | undefined
   readonly gid: number | undefined
 }
@@ -170,6 +185,21 @@ export interface Plan {
   readonly readDenies: ReadonlyArray<string>
   readonly writes: ReadonlyArray<string>
   readonly readOnly: ReadonlyArray<string>
+  /**
+   * Where a declared read's bytes actually live when the path reaches them
+   * through a symbolic link that leaves the workspace.
+   *
+   * Bubblewrap needs them because it replaces `/tmp` with a private tmpfs, so
+   * a link into the host's `/tmp` (the scratch tree's `node_modules`, which
+   * points back at the real workspace) resolves to nothing inside the sandbox.
+   * Binding the real location read-only makes the link resolve to the same
+   * bytes the host sees, which is what declaring the read asked for. Docker
+   * mounts them for the same reason: the image supplies everything outside
+   * the workspace, and these paths are on the host. Seatbelt leaves the host
+   * filesystem in place and needs no second spelling. The request's own
+   * `externalReads` land here too.
+   */
+  readonly externalReads: ReadonlyArray<string>
   /** A host directory the run may scribble in; created by the caller, removed after. */
   readonly tmp: string
   readonly uid: number | undefined
@@ -228,6 +258,13 @@ export const host = (env: Readonly<Record<string, string | undefined>> = process
     entries: (directory) => {
       try {
         return NodeFs.readdirSync(directory)
+      } catch {
+        return undefined
+      }
+    },
+    realpath: (path) => {
+      try {
+        return NodeFs.realpathSync(path)
       } catch {
         return undefined
       }
@@ -433,9 +470,23 @@ export const plan = (
     return insideRoot(root, absolute) ? absolute : undefined
   }
   const declared: Array<string> = []
+  // A declared read that is a link out of the workspace is admitted at both
+  // spellings: the path the tool opens, and the place the bytes live. Only
+  // bubblewrap renders the second one, because only bubblewrap hides the
+  // host's `/tmp` (the scratch tree's `node_modules` points back at the real
+  // workspace, and a fixture workspace under `os.tmpdir()` points nowhere
+  // else); seatbelt and docker leave the host filesystem in place.
+  const externalReads: Array<string> = []
   for (const relative of request.reads) {
     const absolute = anchor(relative)
-    if (absolute !== undefined && hostFacts.exists(absolute)) declared.push(absolute)
+    if (absolute === undefined || !hostFacts.exists(absolute)) continue
+    declared.push(absolute)
+    const real = hostFacts.realpath?.(absolute)
+    if (real !== undefined && real !== absolute && !insideRoot(root, real)) externalReads.push(real)
+  }
+  for (const path of request.externalReads ?? []) {
+    if (!NodePath.isAbsolute(path) || insideRoot(root, path) || !hostFacts.exists(path)) continue
+    externalReads.push(hostFacts.realpath?.(path) ?? path)
   }
   // A write names a directory the tool may fill. A declared output that is a
   // file, existing or not yet, opens its parent: a file cannot be bound
@@ -467,6 +518,7 @@ export const plan = (
     readDenies: collapse(folded.denies),
     writes: collapse(writes),
     readOnly: collapse(readOnly),
+    externalReads: collapse(externalReads),
     tmp: location.tmp,
     uid: hostFacts.uid,
     gid: hostFacts.gid
@@ -474,17 +526,47 @@ export const plan = (
 }
 
 /**
+ * Where corepack keeps the package-manager binaries it manages, resolved the
+ * way corepack itself resolves it from a host environment.
+ *
+ * A `pnpm`, `yarn`, or `npm` on `PATH` is often corepack's shim, and the
+ * program it execs lives in this directory, not on `PATH`. Redirecting `HOME`
+ * and `XDG_CACHE_HOME` to the private tmp moves that directory out from under
+ * the shim, which then tries to re-download the package manager from the
+ * registry — and a confined run has no network, so every rule that drives the
+ * package manager fails with a connect error that names the registry rather
+ * than the missing cache.
+ */
+const corepackHome = (env: Readonly<Record<string, string | undefined>>, home: string): string => {
+  const declared = env["COREPACK_HOME"]
+  if (declared !== undefined && declared !== "") return declared
+  const base = env["XDG_CACHE_HOME"] ?? env["LOCALAPPDATA"] ??
+    NodePath.join(home, process.platform === "win32" ? "AppData/Local" : ".cache")
+  return NodePath.join(base, "node", "corepack")
+}
+
+/**
  * Environment the confined process receives on top of the tool environment:
  * a private temporary directory and home, so nothing a tool caches lands in
  * the real home or the shared temp directory.
  *
+ * `COREPACK_HOME` is the one host cache kept: it holds the package-manager
+ * program a corepack shim execs, the run may only read it (the mechanisms
+ * deny writes outside the workspace), and without it a confined `pnpm` is a
+ * shim with nothing to run.
+ *
  * @category rendering
  * @since 0.1.0
  */
-export const environment = (confinement: Plan): Readonly<Record<string, string>> => {
+export const environment = (
+  confinement: Plan,
+  hostEnv: Readonly<Record<string, string | undefined>> = process.env,
+  hostHome: string = NodeOs.homedir()
+): Readonly<Record<string, string>> => {
   const tmp = confinement.mechanism._tag === "seatbelt" ? confinement.tmp : "/tmp"
   const home = NodePath.posix.join(toPosix(tmp), "home")
   return {
+    COREPACK_HOME: corepackHome(hostEnv, hostHome),
     HOME: home,
     TMPDIR: tmp,
     TMP: tmp,
@@ -529,6 +611,10 @@ export const bubblewrap = (
     "--tmpfs",
     confinement.workspaceRoot
   ]
+  // The target of a link that leaves the workspace is bound first, so the
+  // link a declared read then binds resolves to the same bytes the host sees
+  // even when `/tmp` above the target has just become a private tmpfs.
+  for (const real of confinement.externalReads) out.push("--ro-bind", real, real)
   for (const read of confinement.reads) out.push("--ro-bind", read, read)
   for (const write of confinement.writes) out.push("--bind", write, write)
   for (const closed of confinement.readOnly) {
@@ -651,6 +737,9 @@ export const docker = (
   ]
   if (confinement.uid !== undefined && confinement.gid !== undefined) {
     out.push("--user", `${confinement.uid}:${confinement.gid}`)
+  }
+  for (const real of confinement.externalReads) {
+    out.push("--mount", `type=bind,src=${real},dst=${toPosix(real)},readonly`)
   }
   for (const read of confinement.reads) out.push("--mount", `type=bind,src=${read},dst=${toPosix(read)},readonly`)
   for (const write of confinement.writes) out.push("--mount", `type=bind,src=${write},dst=${toPosix(write)}`)

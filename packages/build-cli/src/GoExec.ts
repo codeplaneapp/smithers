@@ -44,11 +44,37 @@ export interface Planned {
   readonly env: Readonly<Record<string, string>>
   readonly outDirs: ReadonlyArray<string>
   readonly writeSet: ReadonlyArray<string>
+  /**
+   * The workspace-relative files the spawned toolchain reads: the module
+   * authority (`go.mod`, `go.sum`) plus every compiler input `go list`
+   * reports for the selected packages.
+   *
+   * A `Go.*` rule names its work with import patterns, not with `S.file`
+   * declarations, so the target has no declared inputs and the confinement
+   * would otherwise hide the module from its own compiler. The read set is
+   * the same closure the key is computed over, which keeps "what the sandbox
+   * admits" and "what the key covers" one answer rather than two.
+   */
+  readonly readSet: ReadonlyArray<string>
   readonly closureIdentity?: unknown
 }
 
 const toolchain = (workspace: WorkspaceDeclaration.WorkspaceDeclaration): Go.ToolchainDeclaration | undefined =>
   workspace.toolchains?.find((entry): entry is Go.ToolchainDeclaration => entry._tag === "GoToolchain")
+
+/**
+ * The workspace-relative module authority every `go` invocation opens before
+ * it can resolve a single import path: the declared `go.mod` and `go.sum`.
+ *
+ * The toolchain declares them on the workspace, not on the target, so they
+ * never reach a target's declared inputs and a confined `go` would answer
+ * "go.mod file not found in current directory or any parent directory".
+ */
+const moduleFiles = (context: Context): ReadonlyArray<string> => {
+  const declaration = toolchain(context.workspace)
+  if (declaration === undefined) return []
+  return [declaration.mod, declaration.sum].map((input) => Input.resolvePath("", input.path))
+}
 
 const moduleDirectory = (context: Context): string => {
   const declaration = toolchain(context.workspace)
@@ -321,12 +347,26 @@ const selectedPackages = async (
   return rows.flatMap((row) => row.ImportPath === undefined ? [] : [row.ImportPath])
 }
 
+/**
+ * One package selection's key material plus the workspace-relative files it
+ * was computed over.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Closure {
+  /** The value the target key records for this selection. */
+  readonly identity: unknown
+  /** Workspace-relative paths of the compiler inputs that live in the tree. */
+  readonly files: ReadonlyArray<string>
+}
+
 const closure = async (
   packages: ReadonlyArray<string>,
   context: Context,
   goPath: string,
   env: Readonly<Record<string, string>>
-): Promise<unknown> => {
+): Promise<Closure> => {
   const rows = await listed(goPath, moduleDirectory(context), packages, true, env)
   // Key → absolute path. In-workspace files key on their workspace-relative
   // path. A module a `replace` directive points at a local directory outside
@@ -356,11 +396,15 @@ const closure = async (
     }
   }
   const digests: Array<readonly [string, string]> = []
+  // A `replace:` key names a module directory outside the workspace, so only
+  // the in-tree spelling is a path the confinement can admit.
+  const inTree: Array<string> = []
   for (const key of [...files.keys()].sort(Text.byCodeUnit)) {
     const bytes = await Fs.readFile(files.get(key)!)
     digests.push([key, Text.sha256Hex(bytes)])
+    if (!key.startsWith("replace:")) inTree.push(key)
   }
-  return { packages: [...packages].sort(), files: digests }
+  return { identity: { packages: [...packages].sort(), files: digests }, files: inTree }
 }
 
 /**
@@ -449,9 +493,17 @@ export const planRule = async (
 ): Promise<Planned> => {
   const env = environment(context, attrs)
   const listEnv = graphEnvironment(context, attrs)
+  const authority = moduleFiles(context)
   if (rule === "Go.Packages") {
     const packages = await selectedPackages(attrs["pkgs"], context, goPath, listEnv)
-    return { env, outDirs: [], writeSet: [], closureIdentity: await closure(packages, context, goPath, listEnv) }
+    const graph = await closure(packages, context, goPath, listEnv)
+    return {
+      env,
+      outDirs: [],
+      writeSet: [],
+      readSet: [...authority, ...graph.files],
+      closureIdentity: graph.identity
+    }
   }
   if (rule === "Go.ModDownload") {
     const outDirs = (attrs["outDirs"] as ReadonlyArray<string>).map((path) =>
@@ -461,7 +513,8 @@ export const planRule = async (
       argv: [goPath, "mod", "download"],
       env: { ...env, GOMODCACHE: NodePath.join(context.root, outDirs[0] ?? ".gomodcache") },
       outDirs,
-      writeSet: []
+      writeSet: [],
+      readSet: authority
     }
   }
   if (rule === "Go.Binary") {
@@ -471,14 +524,30 @@ export const planRule = async (
     for (const [name, value] of Object.entries((attrs["stamp"] as Record<string, unknown> | undefined) ?? {})) {
       flags.push("-X", `${name}=${StampExec.token(name, value)}`)
     }
-    const argv = [goPath, "build", "-o", out, ...(flags.length === 0 ? [] : ["-ldflags", flags.join(" ")]), pkg]
+    // `go build` stamps the repository's commit and dirty flag into a main
+    // package by default. That state is not key material here, so the same key
+    // would serve a binary stamped from another commit; and the confinement
+    // admits the declared closure, not `.git`, so the toolchain's own probe
+    // fails the build outright. Version information enters through the declared
+    // `stamp` attr, which does key, and is the only stamping this rule allows.
+    const argv = [
+      goPath,
+      "build",
+      "-buildvcs=false",
+      "-o",
+      out,
+      ...(flags.length === 0 ? [] : ["-ldflags", flags.join(" ")]),
+      pkg
+    ]
     const packages = await selectedPackages([pkg], { ...context, packagePath: "" }, goPath, listEnv)
+    const graph = await closure(packages, context, goPath, listEnv)
     return {
       argv,
       env,
       outDirs: [NodePath.dirname(out)],
       writeSet: [],
-      closureIdentity: await closure(packages, context, goPath, listEnv)
+      readSet: [...authority, ...graph.files],
+      closureIdentity: graph.identity
     }
   }
   if (rule === "Go.Test") {
@@ -492,7 +561,8 @@ export const planRule = async (
         refusal: "host binary \"gotestsum\" is not present on PATH (required by S.Go.Test({ runner: \"gotestsum\" }))",
         env,
         outDirs: [],
-        writeSet: []
+        writeSet: [],
+        readSet: []
       }
     }
     const testFlags = [
@@ -506,7 +576,15 @@ export const planRule = async (
     const argv = gotestsum === undefined
       ? [goPath, "test", ...testFlags]
       : [gotestsum, "--", ...testFlags]
-    return { argv, env, outDirs: [], writeSet: [], closureIdentity: await closure(packages, context, goPath, listEnv) }
+    const graph = await closure(packages, context, goPath, listEnv)
+    return {
+      argv,
+      env,
+      outDirs: [],
+      writeSet: [],
+      readSet: [...authority, ...graph.files],
+      closureIdentity: graph.identity
+    }
   }
   if (rule === "Go.Lint") {
     const pkgs = (attrs["pkgs"] as ReadonlyArray<string>).map((entry) => anchor(entry, context.packagePath))
@@ -527,11 +605,13 @@ export const planRule = async (
       ],
       env,
       outDirs: [],
-      writeSet: changes
+      writeSet: changes,
+      readSet: [...authority, config]
     }
   }
   if (rule === "Go.Generate") {
     const packages = await selectedPackages(attrs["pkgs"], context, goPath, listEnv)
+    const graph = await closure(packages, context, goPath, listEnv)
     return {
       argv: [goPath, "generate", ...packages],
       env,
@@ -539,12 +619,14 @@ export const planRule = async (
       writeSet: ((attrs["changes"] as ReadonlyArray<string>) ?? []).map((entry) =>
         Input.resolvePath(context.packagePath, entry)
       ),
-      closureIdentity: await closure(packages, context, goPath, listEnv)
+      readSet: [...authority, ...graph.files],
+      closureIdentity: graph.identity
     }
   }
   if (rule === "Go.Fuzz") {
     const pkg = anchor(String(attrs["pkg"]), context.packagePath)
     const packages = await selectedPackages([pkg], { ...context, packagePath: "" }, goPath, listEnv)
+    const graph = await closure(packages, context, goPath, listEnv)
     return {
       argv: [
         goPath,
@@ -558,8 +640,9 @@ export const planRule = async (
       env,
       outDirs: [],
       writeSet: [],
-      closureIdentity: await closure(packages, context, goPath, listEnv)
+      readSet: [...authority, ...graph.files],
+      closureIdentity: graph.identity
     }
   }
-  return { env, outDirs: [], writeSet: [] }
+  return { env, outDirs: [], writeSet: [], readSet: authority }
 }

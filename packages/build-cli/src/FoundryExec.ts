@@ -14,6 +14,7 @@
 import type * as Foundry from "@smthrs/targets/Foundry"
 import * as Input from "@smthrs/targets/Input"
 import type * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
+import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import * as PackageTree from "./PackageTree.ts"
@@ -141,6 +142,16 @@ export interface Plan {
   readonly cwd: string
   readonly env: Readonly<Record<string, string>>
   readonly outDirs: ReadonlyArray<string>
+  /**
+   * Workspace-relative directories forge writes on its own account: the
+   * compiler cache (`cache_path`, when caching is on) and the artifact
+   * directory (`out`). Neither is a declared output of the rule (`Foundry.Test`
+   * declares none, and a `Foundry.Build` may name a different `outDirs`), so
+   * the confinement learns them here, from `forge config` itself, which is
+   * what resolves the profile, the environment, and the config file the same
+   * way the build will.
+   */
+  readonly writeSet: ReadonlyArray<string>
   readonly toolchain: unknown
   readonly refusal?: string | undefined
 }
@@ -181,7 +192,7 @@ export const plan = async (options: {
     pinned
   }
   const cwd = options.packagePath || "."
-  if (!resolved.ok) return { cwd, env: {}, outDirs: [], toolchain, refusal: resolved.refusal }
+  if (!resolved.ok) return { cwd, env: {}, outDirs: [], writeSet: [], toolchain, refusal: resolved.refusal }
   const attrs = options.attrs as {
     readonly profile?: string
     readonly skip?: ReadonlyArray<string>
@@ -204,5 +215,59 @@ export const plan = async (options: {
   const outDirs = options.rule === "Foundry.Build"
     ? (attrs.outDirs ?? []).map((dir) => Input.resolvePath(options.packagePath, dir))
     : []
-  return { argv, cwd, env, outDirs, toolchain }
+  if (options.rule === "Foundry.Fmt") return { argv, cwd, env, outDirs, writeSet: [], toolchain }
+  const projectRoot = configAuthority === null
+    ? options.packagePath
+    : (NodePath.posix.dirname(configAuthority.path) === "." ? "" : NodePath.posix.dirname(configAuthority.path))
+  const forgeConfig = await effectiveConfig(
+    resolved.path,
+    NodePath.join(options.root, ...cwd.split("/").filter((segment) => segment !== ".")),
+    configAuthority === null ? undefined : argv[argv.indexOf("--config-path") + 1],
+    { ...options.environment, ...env }
+  )
+  if (typeof forgeConfig === "string") {
+    return { argv, cwd, env, outDirs, writeSet: [], toolchain, refusal: forgeConfig }
+  }
+  const writeSet = [forgeConfig.out, ...(forgeConfig.cache ? [forgeConfig.cachePath] : [])].map((directory) =>
+    Input.resolvePath(projectRoot, directory)
+  )
+  return { argv, cwd, env, outDirs, writeSet, toolchain }
+}
+
+/**
+ * The directories forge will write, as forge itself resolves them: `out` and
+ * `cache_path` after the profile, `FOUNDRY_*` overrides, and the config file
+ * are applied. Relative values are relative to the project root, which is
+ * the config file's directory. A string is the refusal to report when forge
+ * cannot read its own configuration, which is the same failure the build
+ * would then print.
+ */
+const effectiveConfig = async (
+  forge: string,
+  cwd: string,
+  configPath: string | undefined,
+  environment: Readonly<Record<string, string | undefined>>
+): Promise<{ readonly out: string; readonly cachePath: string; readonly cache: boolean } | string> => {
+  const args = ["config", "--json", ...(configPath === undefined ? [] : ["--config-path", configPath])]
+  const raw = await new Promise<string>((resolve, reject) => {
+    NodeChildProcess.execFile(forge, args, { cwd, env: environment, maxBuffer: 16 * 1024 * 1024 }, (
+      error,
+      stdout,
+      stderr
+    ) => {
+      if (error !== null) reject(new Error(stderr.trim() || error.message))
+      else resolve(stdout)
+    })
+  }).catch((cause: unknown) => cause instanceof Error ? cause : new Error(String(cause)))
+  if (raw instanceof Error) return `forge config failed: ${raw.message}`
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return "forge config did not print JSON"
+  }
+  const record = parsed as { readonly out?: unknown; readonly cache_path?: unknown; readonly cache?: unknown }
+  const out = typeof record.out === "string" && record.out !== "" ? record.out : "out"
+  const cachePath = typeof record.cache_path === "string" && record.cache_path !== "" ? record.cache_path : "cache"
+  return { out, cachePath, cache: record.cache !== false }
 }

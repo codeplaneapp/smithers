@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { makeCli } from "../src/Cli.ts"
 
 const rulesModule = NodePath.resolve(import.meta.dirname, "../../targets/src/Smithers.ts")
+const configModule = NodePath.resolve(import.meta.dirname, "../../targets/src/Config.ts")
 
 let roots: Array<string>
 
@@ -68,6 +69,11 @@ const workspace = async (tokenEnv: string): Promise<string> => {
  * A workspace declaring the read/write pair and one cacheable target, so a run
  * both pulls from the declared endpoint and publishes to it. The endpoint is
  * never dialled: the case stubs `fetch`, which is the transport's only exit.
+ *
+ * The workspace declares a sandbox because publication requires one: a result
+ * produced outside an enforced confinement is evidence for this machine only
+ * and never reaches the shared tier (`Executor.ts`), so an unconfined fixture
+ * would pull and never publish.
  */
 const cachingWorkspace = async (
   options: { readonly smuggleCredentialNames?: boolean } = {}
@@ -79,7 +85,9 @@ const cachingWorkspace = async (
   await write(
     root,
     "BUILD.ts",
-    `import { file, RemoteCache, Secret, ToolBuild } from "${rulesModule}"\n` +
+    `import { Workspace } from "${configModule}"\n` +
+      `import { file, RemoteCache, Secret, ToolBuild } from "${rulesModule}"\n` +
+      `export const config = Workspace({ cacheDirectory: ".flows", sandbox: { network: false } })\n` +
       `export const remoteCache = RemoteCache.make({\n` +
       `  endpoint: "https://cache.example.invalid",\n` +
       `  read: Secret("READ_CACHE_TOKEN"),\n` +

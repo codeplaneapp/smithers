@@ -36,7 +36,53 @@ export interface Gitlink {
 export interface Plan {
   readonly paths: ReadonlyArray<string>
   readonly gitlinks: ReadonlyArray<Gitlink>
+  /**
+   * Absolute host directories the selected submodules clone from when their
+   * `.gitmodules` url names a local repository (an absolute path or a
+   * `file://` url). A confined `git submodule update` has to be able to read
+   * them; a remote url needs the network the rule already asks for.
+   */
+  readonly sources: ReadonlyArray<string>
   readonly refusal?: string | undefined
+}
+
+/**
+ * The host directory a submodule url names when it is local, else undefined.
+ * Relative urls resolve against the superproject's remote, not the
+ * filesystem, so they are left to git.
+ */
+const localSource = (url: string): string | undefined => {
+  if (url.startsWith("file://")) return decodeURIComponent(url.slice("file://".length))
+  return NodePath.isAbsolute(url) ? url : undefined
+}
+
+/** `.gitmodules` entries as workspace-relative path to url. */
+const configEntries = async (
+  root: string,
+  config: string
+): Promise<ReadonlyMap<string, string | undefined>> => {
+  // A workspace whose selected paths came from the index rather than from a
+  // config file (`Git.Submodule`) may have no `.gitmodules` at all; that is
+  // no entries, not a failure. A file that exists but cannot be read is one.
+  const present = await Fs.access(NodePath.join(root, ...config.split("/"))).then(() => true, () => false)
+  if (!present) return new Map()
+  const raw = await PackageTree.runGit(root, ["config", "-z", "--file", config, "--list"])
+  const directory = NodePath.posix.dirname(config) === "." ? "" : NodePath.posix.dirname(config)
+  const paths = new Map<string, string>()
+  const urls = new Map<string, string>()
+  for (const record of raw.split("\0")) {
+    const newline = record.indexOf("\n")
+    if (newline < 0) continue
+    const key = record.slice(0, newline)
+    const value = record.slice(newline + 1)
+    const match = /^submodule\.(.*)\.(path|url)$/i.exec(key)
+    if (match === null || value === "") continue
+    if (match[2]!.toLowerCase() === "path") paths.set(match[1]!, Input.resolvePath(directory, value))
+    else urls.set(match[1]!, value)
+  }
+  const entries = new Map<string, string | undefined>()
+  for (const [name, path] of paths) entries.set(path, urls.get(name))
+  return entries
 }
 
 const configPaths = async (root: string, config: string): Promise<ReadonlyArray<string>> => {
@@ -115,6 +161,7 @@ export const plan = async (
       return {
         paths,
         gitlinks: [],
+        sources: [],
         refusal: `Git.Submodules paths ${JSON.stringify(options.attrs.paths)} match no entries in ${config}`
       }
     }
@@ -124,7 +171,12 @@ export const plan = async (
   for (const path of [...new Set(paths)].sort()) {
     const sha = await pinnedSha(options.root, path)
     if (sha === undefined) {
-      return { paths, gitlinks, refusal: `Git submodule ${path} has no stage-0 gitlink in the repository index` }
+      return {
+        paths,
+        gitlinks,
+        sources: [],
+        refusal: `Git submodule ${path} has no stage-0 gitlink in the repository index`
+      }
     }
     const link = await stateOf(options.root, path, sha)
     gitlinks.push(link)
@@ -132,6 +184,7 @@ export const plan = async (
       return {
         paths,
         gitlinks,
+        sources: [],
         refusal: link.head === sha && link.dirty === true
           ? `Git submodule ${path} worktree has changes relative to pinned gitlink ${sha}`
           : `Git submodule ${path} worktree HEAD ${
@@ -140,7 +193,19 @@ export const plan = async (
       }
     }
   }
-  return { paths: [...new Set(paths)].sort(), gitlinks }
+  const entries = await configEntries(
+    options.root,
+    options.rule === "Git.Submodules"
+      ? Input.resolvePath(options.packagePath, options.attrs.config.path)
+      : ".gitmodules"
+  )
+  const sources: Array<string> = []
+  for (const path of paths) {
+    const url = entries.get(path)
+    const source = url === undefined ? undefined : localSource(url)
+    if (source !== undefined && !sources.includes(source)) sources.push(source)
+  }
+  return { paths: [...new Set(paths)].sort(), gitlinks, sources: sources.sort() }
 }
 
 /** Whether every selected checkout is populated at its pinned SHA.

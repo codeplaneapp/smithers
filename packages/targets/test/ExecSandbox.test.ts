@@ -129,6 +129,30 @@ describe("plan", () => {
     expect(plan.reads).toEqual(["/work/ws/src"])
   })
 
+  it("records where a read that links out of the workspace really lives, and nothing for the rest", () => {
+    const linked: ExecSandbox.Host = {
+      ...linux,
+      realpath: (path) => path === "/work/ws/node_modules" ? "/tmp/real-ws/node_modules" : path
+    }
+    expect(planned(linked).externalReads).toEqual(["/tmp/real-ws/node_modules"])
+    expect(planned(linux).externalReads).toEqual([])
+    const inside: ExecSandbox.Host = {
+      ...linux,
+      realpath: (path) => path === "/work/ws/node_modules" ? "/work/ws/.store/node_modules" : path
+    }
+    expect(planned(inside).externalReads).toEqual([])
+  })
+
+  it("admits a requested external read only when it is absolute, outside the root, and present", () => {
+    const present = host("linux", { bwrap: "/usr/bin/bwrap" }, ["/work/ws/src/a.ts", "/srv/git/one"], [
+      "/work/ws/node_modules"
+    ])
+    const plan = planned(present, {
+      externalReads: ["/srv/git/one", "/srv/git/missing", "/work/ws/src/a.ts", "relative/path"]
+    })
+    expect(plan.externalReads).toEqual(["/srv/git/one"])
+  })
+
   it("returns nothing for an opted-out policy and the refusal for an unenforceable host", () => {
     expect(
       ExecSandbox.plan({ ...request, policy: "none" }, { workspaceRoot: root, cwd: root, tmp: "/t" }, linux)
@@ -153,6 +177,19 @@ describe("bubblewrap argv", () => {
     expect(text).toContain("--chdir /work/ws/pkg")
     expect(argv.slice(-2)).toEqual(["node", "build.js"])
     expect(argv.indexOf("--remount-ro")).toBeGreaterThan(argv.lastIndexOf("--bind"))
+  })
+
+  it("binds a linked read's real location before the link itself", () => {
+    const linked: ExecSandbox.Host = {
+      ...linux,
+      realpath: (path) => path === "/work/ws/node_modules" ? "/tmp/real-ws/node_modules" : path
+    }
+    const argv = ExecSandbox.bubblewrap(planned(linked), ["node", "build.js"])
+    const text = argv.join(" ")
+    expect(text).toContain("--ro-bind /tmp/real-ws/node_modules /tmp/real-ws/node_modules")
+    expect(text).toContain("--ro-bind /work/ws/node_modules /work/ws/node_modules")
+    expect(argv.indexOf("/tmp/real-ws/node_modules")).toBeLessThan(argv.indexOf("/work/ws/node_modules"))
+    expect(argv.indexOf("/tmp/real-ws/node_modules")).toBeGreaterThan(argv.indexOf("/tmp"))
   })
 
   it("re-closes a read-only subtree under a writable directory", () => {
@@ -305,6 +342,15 @@ describe("seatbelt profile", () => {
 })
 
 describe("docker argv", () => {
+  it("mounts an external read at its host path, read-only", () => {
+    const plan = planned(
+      host("win32", { docker: "docker" }, ["/work/ws/src/a.ts", "/srv/git/one"], ["/work/ws/node_modules"]),
+      { mechanism: Sandbox.Docker({ image: "node:22" }), externalReads: ["/srv/git/one"] }
+    )
+    const text = ExecSandbox.docker(plan, ["node"], {}).join(" ")
+    expect(text).toContain("--mount type=bind,src=/srv/git/one,dst=/srv/git/one,readonly")
+  })
+
   it("mounts the declared set at its host paths, closes the network, and maps the user", () => {
     const plan = planned(
       host("win32", { docker: "docker" }, ["/work/ws/src/a.ts"], ["/work/ws/node_modules", "/work/ws/dist"]),
@@ -345,6 +391,18 @@ describe("wrap and environment", () => {
     expect(bubblewrap.env["TMPDIR"]).toBe("/tmp")
     expect(bubblewrap.env["HOME"]).toBe("/tmp/home")
     expect(bubblewrap.env["XDG_CACHE_HOME"]).toBe("/tmp/cache")
+  })
+
+  it("keeps corepack's binary cache where the host has it, so a shim still finds its package manager", () => {
+    const plan = planned(linux)
+    expect(ExecSandbox.environment(plan, {}, "/home/dev")["COREPACK_HOME"]).toBe("/home/dev/.cache/node/corepack")
+    expect(ExecSandbox.environment(plan, { XDG_CACHE_HOME: "/var/cache/dev" }, "/home/dev")["COREPACK_HOME"]).toBe(
+      "/var/cache/dev/node/corepack"
+    )
+    expect(ExecSandbox.environment(plan, { COREPACK_HOME: "/opt/corepack" }, "/home/dev")["COREPACK_HOME"]).toBe(
+      "/opt/corepack"
+    )
+    expect(ExecSandbox.environment(plan)["COREPACK_HOME"]).not.toBe("/tmp/cache/node/corepack")
   })
 })
 

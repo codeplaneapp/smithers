@@ -45,18 +45,48 @@ keep is not made.
 
 ## Sandboxing
 
-A target may declare `sandbox: { network: false }` or
-`sandbox: { network: "loopback" }`. Enforcement is `sandbox-exec`, which exists
-only on macOS. **On every other platform, Linux included, a declared sandbox is
-not enforced**: the target runs with unrestricted egress, the run emits a
-warning naming the target, and `--plan` reports `sandboxEnforced: false` beside
-the declaration.
+A target may declare `sandbox: { network: false }`, `sandbox: { network: "loopback" }`,
+or `sandbox: { network: true }`; a workspace may name the mechanism with
+`S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`. With no mechanism
+declared the platform picks one: bubblewrap on Linux (`bwrap` on `PATH`),
+seatbelt on macOS (`/usr/bin/sandbox-exec`), and a refusal elsewhere, because
+Windows has no user-level process sandbox and Docker needs an image only the
+workspace can name. A confined request with no mechanism available fails
+closed: the run refuses the target, and `--plan` reports the refusal beside
+the declaration. A result produced outside an enforced confinement is
+evidence for this machine only and never reaches the shared cache tier.
 
-That matters because CI runs on Linux and macOS is the developer machine, so the
-platform where isolation matters most is the one without it. Cache keys are safe
-either way: the package-mode key material includes the platform and the
-architecture, so a Linux-produced unsandboxed result can never be served to a
-macOS run.
+Every mechanism hides the workspace and admits exactly the read set, and lets
+the tool write exactly the write set. The read set is what the content key
+covers, plus the paths a rule discovers for itself:
+
+- the target's expanded declared inputs, the declared outputs of every
+  transitive dependency, and a `Filegroup` dependency's files;
+- the `node_modules` trees above the working directory, and the cache
+  directory's scratch and fetch store;
+- what a rule plans over: a `Go.*` rule's `go.mod`, `go.sum`, and the compiler
+  inputs `go list` reports, because the rule names its work with import
+  patterns rather than `S.file` declarations;
+- what the package manager opens before it runs anything: the manifest, the
+  lockfile, and the workspace file, when a rule drives `pnpm`;
+- where a declared read really lives when the path reaches it through a link
+  that leaves the workspace, such as a scratch tree's `node_modules`, which
+  bubblewrap and Docker bind read-only because their `/tmp` is private;
+- a git submodule's local source repository, when its `.gitmodules` url is an
+  absolute path or a `file://` url.
+
+The write set is the declared outputs, the declared `changes`, the clean
+targets, and what a tool writes on its own account: a cargo crate's `target`
+directory, a `Foundry.Build` or `Foundry.Test` rule's `out` and `cache_path`
+as `forge config` resolves them, and `.git` for a submodule checkout.
+
+The confined process gets a private temporary directory and home, so nothing
+a tool caches lands in the real home or the shared temp directory. One host
+cache stays visible: `COREPACK_HOME`, because a `pnpm` on `PATH` is often
+corepack's shim and the program it execs lives there.
+
+Cache keys carry the platform and the architecture, so a result produced on
+one platform is never served to another.
 
 ## Services
 
