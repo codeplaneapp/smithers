@@ -33,18 +33,25 @@ describe("canary.yml stays inert until deployment ownership moves", () => {
 });
 
 describe("apps-deploy.yml names apps this workspace still has", () => {
-  /** The `name` -> declared scripts of every manifest under `apps/`. */
+  /**
+   * The `name` -> declared scripts of every manifest the deploy may gate on:
+   * the apps, plus the contract package they share (`@smthrs/rpc`, which
+   * moved from `apps/shared` to `packages/rpc` and still guards the deploy).
+   */
   function appScripts(): Map<string, Set<string>> {
     const apps = new Map<string, Set<string>>();
-    for (const entry of readdirSync(appsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      let manifest: { name?: string; scripts?: Record<string, string> };
-      try {
-        manifest = JSON.parse(readFileSync(`${appsDir}${entry.name}/package.json`, "utf8"));
-      } catch {
-        continue; // Not a package directory.
+    const roots = [appsDir, fileURLToPath(new URL("../../../../packages/", import.meta.url))];
+    for (const root of roots) {
+      for (const entry of readdirSync(root, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        let manifest: { name?: string; scripts?: Record<string, string> };
+        try {
+          manifest = JSON.parse(readFileSync(`${root}${entry.name}/package.json`, "utf8"));
+        } catch {
+          continue; // Not a package directory.
+        }
+        if (manifest.name) apps.set(manifest.name, new Set(Object.keys(manifest.scripts ?? {})));
       }
-      if (manifest.name) apps.set(manifest.name, new Set(Object.keys(manifest.scripts ?? {})));
     }
     return apps;
   }
@@ -64,7 +71,17 @@ describe("apps-deploy.yml names apps this workspace still has", () => {
     // name nothing matches is a no-op that exits 0, so a stale filter here
     // would let the deploy skip the gate it believes it ran and ship anyway.
     const pairs = gatedPairs();
-    expect(pairs.length).toBeGreaterThanOrEqual(8);
+    // The exact roster, not a floor: a floor let the gate silently shrink when
+    // apps left the tree, and it read as "eight or more" long after only three
+    // remained. Dropping or adding a gated app is a decision this line records.
+    expect(pairs).toEqual([
+      "smithers-ui:typecheck",
+      "smithers-server:typecheck",
+      "@smthrs/rpc:typecheck",
+      "smithers-ui:test",
+      "smithers-server:test",
+      "@smthrs/rpc:test"
+    ]);
     const apps = appScripts();
     const broken = pairs.filter((pair) => {
       const [name, script] = pair.split(":");
