@@ -158,10 +158,11 @@ The compatibility promise is quoted in full in
 
 <!-- commits:1.0.0-rc.0 -->
 
-1229 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1230 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **release:** generate the changelog and cut a release from the target graph ([c75210a153](https://github.com/smithersai/smithers/commit/c75210a153bbe637791e5c48447b68012cd709ec))
 - **ui:** connect Linear and GitHub sync as first-class actions ([8d7e2c97a6](https://github.com/smithersai/smithers/commit/8d7e2c97a620af624e05121982dc2fffbfb2f3a7))
 - **ui:** forward the product API from the local host and remember open repos ([4d335b3aac](https://github.com/smithersai/smithers/commit/4d335b3aaca76f2e8c147d87a4cae29020fdf2c7))
 - **shared:** carry GitHub provenance on the issues card contract ([b40bbedda6](https://github.com/smithersai/smithers/commit/b40bbedda67170e498345483ca7a4c06da99c150))
