@@ -107,6 +107,12 @@ describe("selection", () => {
     expect(ExecSandbox.isUnenforceable(selected)).toBe(true)
     if (ExecSandbox.isUnenforceable(selected)) expect(selected.mechanism).toBe("bubblewrap")
   })
+
+  it("refuses macOS when the system seatbelt executable is missing", () => {
+    const selected = ExecSandbox.select(request, host("darwin"))
+    expect(ExecSandbox.isUnenforceable(selected)).toBe(true)
+    if (ExecSandbox.isUnenforceable(selected)) expect(selected.missing).toBe("/usr/bin/sandbox-exec")
+  })
 })
 
 describe("plan", () => {

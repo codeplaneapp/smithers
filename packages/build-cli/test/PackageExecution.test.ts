@@ -1366,11 +1366,27 @@ describe("target body execution", () => {
     ]
     try {
       commitAll(root)
-      await Fs.symlink(
-        NodePath.resolve(import.meta.dirname, "../node_modules"),
-        NodePath.join(root, "node_modules"),
-        "dir"
-      )
+      const dependencies = NodePath.resolve(import.meta.dirname, "../node_modules")
+      await Fs.mkdir(NodePath.join(root, "node_modules"))
+      for (const name of await Fs.readdir(dependencies)) {
+        if (name === ".bin") continue
+        if (name.startsWith("@")) {
+          await Fs.mkdir(NodePath.join(root, "node_modules", name))
+          for (const scoped of await Fs.readdir(NodePath.join(dependencies, name))) {
+            await Fs.symlink(
+              await Fs.realpath(NodePath.join(dependencies, name, scoped)),
+              NodePath.join(root, "node_modules", name, scoped),
+              "dir"
+            )
+          }
+        } else {
+          await Fs.symlink(
+            await Fs.realpath(NodePath.join(dependencies, name)),
+            NodePath.join(root, "node_modules", name),
+            "dir"
+          )
+        }
+      }
       for (
         const args of [
           ["test", "//:nodeTest"],
@@ -1395,7 +1411,7 @@ describe("target body execution", () => {
       const cached = await serve(root, ["docs", "//:docs"])
       expect(cached.exitCode, `${cached.output}\n${cached.logs}`).toBe(0)
       expect(cached.output).toContain("hit: 1")
-      await Fs.unlink(NodePath.join(root, "node_modules"))
+      await Fs.rm(NodePath.join(root, "node_modules"), { recursive: true, force: true })
       await write(
         root,
         "package.json",

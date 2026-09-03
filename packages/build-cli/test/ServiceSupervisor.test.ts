@@ -232,7 +232,7 @@ describe("spec validation", () => {
       const acquisition = run(Effect.scoped(Effect.gen(function*() {
         const supervisor = yield* ServiceSupervisor.make
         const handle = yield* supervisor.acquire(caller)
-        yield* Effect.sleep(100)
+        yield* Effect.tryPromise(() => waitFor(() => Promise.resolve(handle.outputTail().includes("validated")), 5_000))
         return handle.outputTail()
       })))
       await waitFor(() => Fs.access(marker).then(() => true, () => false), 5_000)

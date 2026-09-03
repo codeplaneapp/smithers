@@ -26,6 +26,7 @@ const test = Smithers.Vitest({
 
 const docsPages = Smithers.Generate({
   script: Smithers.file("//packages/errors/scripts/docs.mjs"),
+  deps: [Smithers.Target.subtree("//packages/...", "lib")],
   data: [
     Smithers.file("//packages/errors/docs/Manifest.ts"),
     Smithers.file("//packages/errors/scripts/docs-lib.ts"),

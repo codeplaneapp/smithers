@@ -174,7 +174,7 @@ export const StandardPackage = (options: Options): StandardTargets => {
   const circular = NodeTest({
     runtime: options.packageManager.runtime,
     runner: entrypoint(options.circularScript ?? Input.file("scripts/circular.mjs")),
-    srcs: [sources],
+    srcs: [sources, tsconfig],
     deps: [],
     cwd
   })

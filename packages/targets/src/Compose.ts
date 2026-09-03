@@ -175,6 +175,7 @@ export const GenerateAttrs = Schema.Struct({
   secrets: Schema.optional(Attr.Secrets),
   sandbox: Schema.optional(Attr.Sandbox),
   stdout: Schema.optional(Schema.NonEmptyString),
+  deps: Schema.optional(Schema.Array(Target.Dependency)),
   data: Schema.optional(Attr.Data),
   changes: Schema.optional(Schema.Array(Schema.NonEmptyString)),
   mode: GeneratedFile.Mode

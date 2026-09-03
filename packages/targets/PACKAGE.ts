@@ -82,6 +82,7 @@ const docs = Smithers.DocsParity({
  */
 const docsPages = Smithers.Generate({
   script: Smithers.file("//packages/targets/scripts/docs.mjs"),
+  deps: [Smithers.Target.subtree("//packages/...", "lib")],
   data: [
     Smithers.file("//packages/targets/docs/Manifest.ts"),
     Smithers.file("//packages/targets/package.json"),

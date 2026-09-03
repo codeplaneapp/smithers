@@ -23,6 +23,7 @@ const circular = standard.circular
 
 const docsPages = Smithers.Generate({
   script: Smithers.file("//packages/engine/scripts/docs.mjs"),
+  deps: [Smithers.Target.subtree("//packages/...", "lib")],
   data: [
     Smithers.file("//packages/engine/docs/Manifest.ts"),
     Smithers.glob("//packages/engine/src/**/*.ts"),

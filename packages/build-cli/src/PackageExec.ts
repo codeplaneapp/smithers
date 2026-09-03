@@ -1643,6 +1643,11 @@ const visit = async (
     if (plannedFetch.refusal !== undefined) noteRefusal(plannedFetch.refusal)
   }
 
+  if (rule === "TsBuild") {
+    const outDir = attrMember(attrs, "outDir")
+    if (typeof outDir === "string") outDirs.push(Input.resolvePath(packagePath, outDir))
+  }
+
   const changes = attrMember(attrs, "changes")
   if (Array.isArray(changes)) {
     for (const pattern of changes) {
@@ -2486,8 +2491,9 @@ const visit = async (
   // from, and the lockfile and workspace file pnpm resolves the tree from.
   // They are declared on the workspace, so they never reach this target's
   // declared inputs and the confinement would hide them.
-  if (context.managerBinary !== undefined && argv?.[0] === context.managerBinary) {
+  if (context.managerBinary !== undefined && argv !== undefined) {
     readSet.push(...managerFilesOf(context.index.workspace))
+    if (packagePath !== "") readSet.push(`${packagePath}/package.json`)
     // pnpm 11 verifies the dependency tree before `run` and `exec` and installs
     // when it disagrees. A keyed, confined check would then reach the registry
     // and rewrite `node_modules` as a side effect of running `tsc`. Installing
@@ -2495,7 +2501,7 @@ const visit = async (
     // installs. The setting lives only in `pnpm-workspace.yaml`, so `--config.`
     // is the one spelling that reaches pnpm from here.
     if (context.managerBinary === "pnpm" && (argv[1] === "exec" || argv[1] === "run")) {
-      argv = [argv[0], "--config.verifyDepsBeforeRun=false", ...argv.slice(1)]
+      argv = [argv[0]!, "--config.verifyDepsBeforeRun=false", ...argv.slice(1)]
     }
   }
   if (attrMember(attrs, "approval") === "required") {
@@ -2832,9 +2838,20 @@ const managerFilesOf = (workspace: PackageIndexModule.PackageIndex["workspace"])
   const manager = workspace.packageManager as
     | { readonly manifest?: unknown; readonly lockfile?: unknown; readonly workspaces?: unknown }
     | undefined
-  if (manager === undefined) return []
-  const paths: Array<string> = []
-  for (const candidate of [manager.manifest, manager.lockfile, manager.workspaces]) {
+  const nodeModules = workspace.nodeModules as
+    | { readonly packageJson?: unknown; readonly workspaces?: unknown }
+    | undefined
+  if (manager === undefined && nodeModules === undefined) return []
+  const paths: Array<string> = ["package.json"]
+  for (
+    const candidate of [
+      manager?.manifest,
+      manager?.lockfile,
+      manager?.workspaces,
+      nodeModules?.packageJson,
+      nodeModules?.workspaces
+    ]
+  ) {
     const path = (candidate as { readonly path?: unknown } | undefined)?.path
     if (typeof path === "string" && path !== "") paths.push(Input.resolvePath("", path))
   }
@@ -3018,6 +3035,10 @@ const sandboxRequest = (
   cacheDirectory: string
 ): ExecSandbox.Request => {
   const reads = new Set<string>()
+  for (const path of managerFilesOf(workspace)) reads.add(path)
+  // Tools run from their declaring package and may inspect the directory
+  // itself while opening explicitly declared children (Corepack and rm do).
+  if (node.packagePath !== "") reads.add(node.packagePath)
   for (const input of node.declaredInputs) {
     for (const file of input.files) reads.add(file.path)
   }
@@ -3067,6 +3088,9 @@ const sandboxRequest = (
     writes.add(node.packagePath === "" ? "target" : `${node.packagePath}/target`)
     for (const path of node.lane.outFiles) writes.add(NodePath.posix.dirname(path))
   }
+  // Replacing or cleaning a declared output first inspects its current tree.
+  // A writable output therefore also has to be readable by the same action.
+  for (const path of writes) reads.add(path)
   return {
     policy: node.sandbox,
     mechanism: workspace.sandboxes?.sandboxes["default"],

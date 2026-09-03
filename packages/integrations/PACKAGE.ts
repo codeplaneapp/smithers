@@ -20,6 +20,7 @@ const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage
 
 const docsPages = Smithers.Generate({
   script: Smithers.file("//packages/integrations/scripts/docs.mjs"),
+  deps: [Smithers.Target.subtree("//packages/...", "lib")],
   data: [
     Smithers.file("//packages/integrations/docs/Manifest.ts"),
     Smithers.glob("//packages/integrations/src/**/*.ts"),

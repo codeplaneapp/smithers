@@ -11,6 +11,7 @@ const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage
 /** Generates the site API page from this package's source and prose. */
 const docsPages = Smithers.Generate({
   script: Smithers.file("//packages/flows/scripts/docs.mjs"),
+  deps: [Smithers.Target.subtree("//packages/...", "lib")],
   data: [
     Smithers.file("//packages/flows/docs/Manifest.ts"),
     Smithers.glob("//packages/flows/src/**/*.ts"),
