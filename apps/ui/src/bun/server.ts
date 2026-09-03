@@ -238,6 +238,23 @@ const classifyCloudWsRefusal = async (
 
 export type WsSocket = ServerWebSocket<WsSocketData>
 
+/*
+ * Close codes a Bun server cannot put on the wire. 1005 and 1006 are
+ * unsendable by the protocol, but Bun also rewrites 1001 "going away" to
+ * 1000 — verified on Bun 1.3.14 and 1.4.0, Linux and macOS alike. 1000 is
+ * exactly the renderer's "session closed, never redial"
+ * (mainview/state/CloudTerminalClient.ts), so a bridge that closed 1001
+ * silently told every terminal to give up instead of to reconnect.
+ */
+const UNSENDABLE_CLOSE_CODES: ReadonlySet<number> = new Set([1001, 1005, 1006])
+
+/** Ends a renderer's socket so the code it reads carries the meaning the caller sent. */
+const closeRenderer = (socket: WsSocket, code: number, reason: string): void => {
+  // An abnormal close is what the renderer reconnects on, so a going-away drop arrives as one.
+  if (UNSENDABLE_CLOSE_CODES.has(code)) socket.terminate()
+  else socket.close(code, closeReasonOf(reason))
+}
+
 /** A client frame other than subscribe/unsubscribe, dispatched by its `type`. */
 export type WsMessageHandler = (message: Readonly<Record<string, unknown>>, socket: WsSocket) => void
 
@@ -660,7 +677,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     for (const socket of [...cloudBridges]) {
       cloudBridges.delete(socket)
       try {
-        socket.close(code, reason)
+        closeRenderer(socket, code, reason)
       } catch {
         // Already gone; its close handler released the upstream.
       }
@@ -929,9 +946,8 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         const end = (code: number, reason: string): void => {
           cloudBridges.delete(socket)
           try {
-            // 1005/1006 cannot be sent in a close frame; the renderer learns of an abnormal drop by getting one.
-            if (code === 1005 || code === 1006) socket.terminate()
-            else socket.close(code, closeReasonOf(reason))
+            // 1001/1005/1006 cannot be relayed as a code; the renderer learns of an abnormal drop by getting one.
+            closeRenderer(socket, code, reason)
           } catch {
             // The renderer's socket already left; the bridge is done either way.
           }

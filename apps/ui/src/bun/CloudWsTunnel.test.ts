@@ -340,6 +340,31 @@ describe("the workspace terminal tunnel", () => {
     }
   })
 
+  /*
+   * A going-away drop must never read as a clean close. Bun's server rewrites
+   * 1001 to 1000 instead of sending it (1005 and 1006 likewise), and 1000 is
+   * the renderer's "session closed, never redial"
+   * (mainview/state/CloudTerminalClient.ts), so every bridge the local app
+   * ends on its way out has to reach the renderer as the abnormal close it is.
+   */
+  test("the local app shutting down ends the bridge abnormally, never as a clean 1000", async () => {
+    const record = newRecord()
+    const upstream = startUpstream(record, [])
+    const local = await startLocal(upstream)
+    try {
+      const { opened, closed } = connect(local, TERMINAL_PATH, { protocol: local.websocketProtocol })
+      expect(await opened).toBe(true)
+      await waitFor(() => record.live === 1)
+      await local.stop()
+      const end = await closed
+      expect(end.code).not.toBe(1000)
+      expect([1001, 1006]).toContain(end.code)
+    } finally {
+      await local.stop()
+      upstream.stop(true)
+    }
+  })
+
   test("an upstream that drops after the handshake ends the renderer's socket", async () => {
     const record = newRecord()
     const upstream = startUpstream(record, [])

@@ -1,6 +1,7 @@
 /* The cloud-workspace terminal transport against a real WebSocket server. */
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test"
 import { createCloudTerminalClient, pageCloudSocketUrl } from "./CloudTerminalClient"
+import type { CloudTerminalClient } from "./CloudTerminalClient"
 
 // Real sockets on a loaded CI runner: the per-test ceiling follows the wait helper's.
 setDefaultTimeout(60_000)
@@ -15,9 +16,17 @@ interface Harness {
   readonly stop: () => void
 }
 
+/*
+ * A Bun server cannot put 1001, 1005 or 1006 on the wire: `close(1001, …)`
+ * arrives at the client as 1000 (verified on Bun 1.3.14 and 1.4.0, Linux and
+ * macOS alike), which is the client's "session closed, never redial". So the
+ * reconnect path is driven the way a real drop reaches a renderer — by
+ * `terminate()`, the abnormal 1006 close — and the tunnel translates plue's
+ * 1001 into exactly that (src/bun/server.ts, `closeRenderer`).
+ */
 interface ServeOptions {
   /** What the server does to each socket as it opens (close it with a code, say). */
-  readonly onOpen?: (socket: { close: (code?: number, reason?: string) => void }) => void
+  readonly onOpen?: (socket: { close: (code?: number, reason?: string) => void; terminate: () => void }) => void
 }
 
 const harnesses: Array<Harness> = []
@@ -25,7 +34,9 @@ const harnesses: Array<Harness> = []
 const serve = (options: ServeOptions = {}): Harness => {
   const seen: Array<string | Buffer> = []
   const protocols: Array<string | null> = []
-  const open = new Set<{ send: (data: string | ArrayBuffer) => void; close: (code?: number, reason?: string) => void }>()
+  const open = new Set<
+    { send: (data: string | ArrayBuffer) => void; close: (code?: number, reason?: string) => void; terminate: () => void }
+  >()
   const server = Bun.serve({
     port: 0,
     fetch: (request, self) => {
@@ -72,17 +83,31 @@ const until = async (predicate: () => boolean, timeoutMs = 30_000): Promise<void
   }
 }
 
+/*
+ * Every client this file makes, disposed after the test whether or not it got
+ * that far. A test that throws before its own `dispose()` used to leave a
+ * client redialing a dead port for the rest of `bun test src` — 165 files of
+ * background churn out of one failed wait.
+ */
+const clients: Array<CloudTerminalClient> = []
+
 afterEach(() => {
+  for (const terminal of clients.splice(0)) terminal.dispose()
   for (const harness of harnesses.splice(0)) harness.stop()
 })
 
+const track = (terminal: CloudTerminalClient): CloudTerminalClient => {
+  clients.push(terminal)
+  return terminal
+}
+
 const client = (server: Harness, reconnectMs = 20, extra: { readonly maxReconnectMs?: number; readonly maxReconnectsPerMinute?: number } = {}) =>
-  createCloudTerminalClient({
+  track(createCloudTerminalClient({
     socketUrl: () => server.url,
     socketProtocol: () => "smithers.local.test",
     reconnectMs,
     ...extra
-  })
+  }))
 
 const text = (frame: string | Buffer): string => typeof frame === "string" ? frame : new TextDecoder().decode(frame)
 
@@ -122,14 +147,38 @@ test("keystrokes sent before the socket opens flush on open", async () => {
   terminal.dispose()
 })
 
+/*
+ * The terminal's first fit runs in the same tick as the attach, before any
+ * socket can be open. The control frame used to be dropped there, so a cloud
+ * session stayed at the upstream's default geometry until the human resized
+ * the window — and on a slow runner the same race swallowed the resize the
+ * test above sends, timing it out at the wait's own ceiling.
+ */
+test("the fit sent before the socket opens flushes on open, still as the control frame", async () => {
+  const server = serve()
+  const terminal = client(server)
+  terminal.attach("will/smithers", "sess-1", { onOutput: () => {} })
+  // Same tick as the attach: the socket cannot be open yet.
+  terminal.resize("sess-1", 120, 40)
+  // A second fit supersedes the first rather than stacking behind it.
+  terminal.resize("sess-1", 100, 30)
+  terminal.input("sess-1", "ls\r")
+  await until(() => server.seen.length >= 2)
+  await Bun.sleep(50)
+  expect(server.seen.map(text)).toEqual([JSON.stringify({ type: "resize", cols: 100, rows: 30 }), "ls\r"])
+  expect(typeof server.seen[0]).toBe("string")
+  expect(typeof server.seen[1]).not.toBe("string")
+  terminal.dispose()
+})
+
 test("a closed socket reconnects while an attachment lives", async () => {
   const first = serve()
   let url = first.url
-  const terminal = createCloudTerminalClient({
+  const terminal = track(createCloudTerminalClient({
     socketUrl: () => url,
     socketProtocol: () => "smithers.local.test",
     reconnectMs: 20
-  })
+  }))
   const output: Array<string> = []
   terminal.attach("will/smithers", "sess-1", { onOutput: (data) => output.push(data) })
   await until(() => first.protocols.length === 1)
@@ -175,8 +224,8 @@ test("detaching while the socket is still connecting aborts it and never redials
 })
 
 test("a drop the server forces while nobody listens never redials either", async () => {
-  // The server closes the socket the instant it opens (a 1001 "too slow" drop) — a redial would loop.
-  const server = serve({ onOpen: (socket) => socket.close(1001, "terminal client too slow") })
+  // The server drops the socket the instant it opens (the abnormal 1006 a "too slow" close reaches the renderer as) — a redial would loop.
+  const server = serve({ onOpen: (socket) => socket.terminate() })
   const terminal = client(server, 10)
   const detach = terminal.attach("will/smithers", "sess-1", { onOutput: () => {} })
   await until(() => server.protocols.length >= 1)
@@ -238,8 +287,8 @@ test("1011 retries once, then is final", async () => {
   terminal.dispose()
 })
 
-test("1001 reconnects with a doubling backoff capped at maxReconnectMs", async () => {
-  const server = serve({ onOpen: (socket) => socket.close(1001, "terminal client too slow") })
+test("an abnormal drop reconnects with a doubling backoff capped at maxReconnectMs", async () => {
+  const server = serve({ onOpen: (socket) => socket.terminate() })
   const terminal = client(server, 25, { maxReconnectMs: 100, maxReconnectsPerMinute: 100 })
   terminal.attach("will/smithers", "sess-1", { onOutput: () => {} })
   await until(() => server.protocols.length >= 2)
@@ -251,7 +300,7 @@ test("1001 reconnects with a doubling backoff capped at maxReconnectMs", async (
 })
 
 test("reconnect dials across every session stay under the per-minute budget", async () => {
-  const server = serve({ onOpen: (socket) => socket.close(1001, "terminal client too slow") })
+  const server = serve({ onOpen: (socket) => socket.terminate() })
   const terminal = client(server, 5, { maxReconnectMs: 5, maxReconnectsPerMinute: 2 })
   terminal.attach("will/smithers", "sess-1", { onOutput: () => {} })
   terminal.attach("will/smithers", "sess-2", { onOutput: () => {} })

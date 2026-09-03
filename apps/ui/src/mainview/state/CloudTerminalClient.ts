@@ -5,8 +5,8 @@ import { CLOUD_WS_ROUTE_PREFIX } from "smithers-shared/LocalApp"
  * workspace session, through the Bun tunnel at `/api/cloud-ws/` (the local
  * session capability rides the subprotocol, the bearer never reaches the
  * renderer), to plue's terminal socket — binary frames are stdin/stdout,
- * a text JSON frame resizes. Mirrors PtyClient's stance: keystrokes sent
- * before the socket opens are queued, and the socket reconnects while
+ * a text JSON frame resizes. Mirrors PtyClient's stance: keystrokes and the
+ * terminal's fit sent before the socket opens are queued, and the socket reconnects while
  * attachments exist — and only while they exist: detaching the last one
  * closes the socket for good, and a refusal never redials.
  */
@@ -20,7 +20,7 @@ export interface CloudTerminalClient {
   readonly attach: (repo: string, sessionId: string, attachment: CloudTerminalAttachment) => () => void
   /** Text the user typed, forwarded to the session's stdin as a binary frame. */
   readonly input: (sessionId: string, data: string) => void
-  /** A resize control frame; a failure is swallowed (the next fit retries). */
+  /** A resize control frame; sent before the socket opens it waits with the keystrokes. */
   readonly resize: (sessionId: string, cols: number, rows: number) => void
   /** Close every socket and forget every attachment. */
   readonly dispose: () => void
@@ -48,6 +48,15 @@ export interface CloudTerminalClientOptions {
 
 /** Frames queued per session before its socket opens. */
 const MAX_PENDING = 256
+
+/**
+ * A frame written before the socket opened. Its kind survives the wait: stdin
+ * goes out binary, a resize goes out as the text control frame, and flushing
+ * cannot turn one into the other.
+ */
+type PendingFrame =
+  | { readonly kind: "input"; readonly data: string }
+  | { readonly kind: "control"; readonly frame: string }
 
 const DEFAULT_RECONNECT_MS = 1000
 const DEFAULT_MAX_RECONNECT_MS = 30_000
@@ -87,7 +96,7 @@ export const pageCloudSocketUrl = (repo: string, sessionId: string): string | un
 interface Connection {
   socket: WebSocket | undefined
   readonly listeners: Set<CloudTerminalAttachment>
-  readonly pending: Array<string>
+  readonly pending: Array<PendingFrame>
   reconnect: ReturnType<typeof setTimeout> | undefined
   /** Reconnects since the last healthy open; drives the backoff exponent. */
   attempts: number
@@ -176,7 +185,9 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
     opened.onopen = () => {
       if (conn.socket !== opened) return
       openedAt = Date.now()
-      for (const text of conn.pending) opened.send(new TextEncoder().encode(text))
+      for (const frame of conn.pending) {
+        opened.send(frame.kind === "input" ? new TextEncoder().encode(frame.data) : frame.frame)
+      }
       conn.pending.length = 0
     }
     opened.onmessage = (event: MessageEvent) => {
@@ -262,16 +273,29 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
       socket.send(new TextEncoder().encode(data))
       return
     }
-    if (entry.conn.pending.length < MAX_PENDING) entry.conn.pending.push(data)
+    if (entry.conn.pending.length < MAX_PENDING) entry.conn.pending.push({ kind: "input", data })
     else ensureSocket(sessionId, entry)
   }
 
   const resize: CloudTerminalClient["resize"] = (sessionId, cols, rows) => {
     const entry = connections.get(sessionId)
-    const socket = entry?.conn.socket
+    if (entry === undefined) return
+    const frame = JSON.stringify({ type: "resize", cols, rows })
+    const socket = entry.conn.socket
     if (socket !== undefined && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "resize", cols, rows }))
+      socket.send(frame)
+      return
     }
+    /*
+     * The terminal's first fit runs before the socket opens. Dropping it left
+     * the session at the upstream's default geometry until the human resized
+     * the window by hand, so the control frame waits beside the keystrokes.
+     * Only the newest size means anything: an already queued resize is
+     * replaced where it stands rather than stacked behind the next one.
+     */
+    const queued = entry.conn.pending.findIndex((pending) => pending.kind === "control")
+    if (queued >= 0) entry.conn.pending[queued] = { kind: "control", frame }
+    else if (entry.conn.pending.length < MAX_PENDING) entry.conn.pending.push({ kind: "control", frame })
   }
 
   const dispose = (): void => {
