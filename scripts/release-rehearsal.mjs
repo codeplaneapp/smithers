@@ -376,6 +376,8 @@ export const localEquivalents = {
   "pnpm/action-setup": "pnpm on PATH",
   "actions/setup-node": "the Node and registry pin applied to PATH by --node",
   "oven-sh/setup-bun": "bun on PATH",
+  "actions/setup-go": "the Go toolchain already installed on PATH",
+  "foundry-rs/foundry-toolchain": "forge and anvil already installed on PATH",
   "taiki-e/install-action": "the tool already installed on PATH"
 }
 

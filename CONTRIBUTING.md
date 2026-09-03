@@ -35,8 +35,8 @@ The cost is that one edit lands in several places. If you change:
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm-workspace.yaml` package membership      | `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` (the coverage-universe policy pin); lockfile inputs are derived automatically. Nesting a package inside another has its own recipe below                                                    |
 | root `package.json` scripts                   | `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` (the aggregator roster)                                                                                                          |
-| root `PACKAGE.ts` CI jobs, steps, or triggers | the generated `.github/workflows/ci.yml` (`pnpm exec smithers-build build '//:ci'` with `mode: "write"`), and `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` (source-text pins) |
-| `.github/workflows/release.yml`               | the same suite, plus `scripts/release-rehearsal.test.mjs`                                                                                                                              |
+| root `PACKAGE.ts` CI jobs, steps, or triggers | the generated `.github/workflows/ci.yml` (`pnpm exec smithers-build build '//:ci'` with `mode: "write"`), `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` (source-text pins), and the hand-written `.github/workflows/release.yml`, which copies the required `test` job's toolchain and gate steps verbatim |
+| `.github/workflows/release.yml`               | the same suite, plus `scripts/release-rehearsal.test.mjs` and `scripts/pack-release.test.mjs`, which compares the release workflow's steps against the generated `ci.yml`               |
 | `CHANGELOG.md` release sections               | nothing by hand inside a `<!-- commits:… -->` block — `pnpm exec smithers-build run '//:changelog'` writes it and `lint '//:changelog'` drift-checks it. See “Cutting a release”         |
 
 Miss one and CI reports a generated file as a hand edit, which is exactly
@@ -270,6 +270,15 @@ the changelog section; the tag is what publishes. Pushing a `v*` tag starts
 packs the 40-name publish set, smoke-tests the tarballs, and publishes to npm.
 npm versions are immutable, so everything that can be proved before the push
 is proved before the push.
+
+"Every gate" is literal: the release workflow installs the toolchain the
+required CI `test` job installs — ripgrep, bubblewrap, Go, Foundry, the
+containerd image store — and then runs that job's `smithers-build` steps plus
+the fault matrix, copied verbatim out of the generated `ci.yml`. It is
+hand-written, so `scripts/pack-release.test.mjs` compares the two files and
+fails when the copy goes stale. Bumping a toolchain pin in the root
+`PACKAGE.ts` therefore means regenerating `ci.yml` and copying the changed
+step into `release.yml` in the same commit.
 
 The order is bump → changelog → commit → tag → push the tag → `release.yml`
 publishes.

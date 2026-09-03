@@ -51,7 +51,29 @@ jobs:
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.11
         with:
-          args: .github/workflows/ci.yml .github/workflows/release.yml
+          args: ".github/workflows/ci.yml .github/workflows/release.yml .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/pr-review.yml"
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.0
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.1
+      - name: Enable the containerd image store
+        run: |
+          if command -v docker >/dev/null 2>&1 && [ "$(uname -s)" = Linux ] \
+            && [ "$(docker info --format '{{.Driver}}' 2>/dev/null)" != overlayfs ]; then
+            if [ -f /etc/docker/daemon.json ]; then
+              merged="$(jq '.features["containerd-snapshotter"] = true' /etc/docker/daemon.json)"
+            else
+              merged='{ "features": { "containerd-snapshotter": true } }'
+            fi
+            printf '%s\n' "$merged" | sudo tee /etc/docker/daemon.json >/dev/null
+            sudo systemctl restart docker
+            docker info --format 'docker storage driver: {{.Driver}}'
+          fi
+        shell: bash
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
@@ -68,6 +90,19 @@ jobs:
           tool: jj-cli@0.39.0
       - name: Initialize colocated jj repository
         run: jj git init --colocate
+      - name: Install ripgrep
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ripgrep@14.1.1
+      - name: Install system packages
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends 'bubblewrap'
+            if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            fi
+          fi
+        shell: bash
       - name: Validate release tag
         run: |
           case "$RELEASE_TAG" in
@@ -111,30 +146,109 @@ jobs:
       # version whose changelog says nothing about it.
       - name: Release changelog section
         run: node scripts/generate-changelog.mjs --check --version "$RELEASE_VERSION"
-      - name: Typecheck all workspaces
-        run: pnpm run check
-      - name: Test all workspaces
-        run: pnpm test
-      - name: Lint all workspaces
-        run: pnpm run lint
-      - name: Circular-dependency guard
-        run: pnpm run circular
-      # The gate roster here must stay a superset of ci.yml's. The browser
-      # guard and the release manifest unit test are the two that used to run
-      # only on the pull-request path, so a re-tag or a hotfix tag could
-      # publish without them. scripts/pack-release.test.mjs asserts that.
-      - name: Browser bundle guard
-        run: pnpm run browser
-      - name: Release manifest unit test
-        run: node --test scripts/pack-release.test.mjs
-      - name: Release rehearsal unit test
-        run: node --test scripts/release-rehearsal.test.mjs
-      - name: Release version coherence
-        run: node --test scripts/set-release-version.test.mjs
+      # The gate roster below is the required CI `test` job, copied verbatim
+      # from the generated .github/workflows/ci.yml, plus the fault matrix the
+      # required `e2e-faults` job runs. A release that drove the recursive
+      # per-package scripts instead proved a different thing than CI proves,
+      # and drifted: those runners need none of the toolchain above, so the
+      # 1.0.0-rc.0 dry run reached the std package's ripgrep conformance suite
+      # on a runner with no rg binary and failed 25 cases. pack-release.test.mjs
+      # compares these blocks against ci.yml, so the copy cannot go stale in
+      # silence, and the toolchain block above is a one-line copy per bump.
+      - name: Workspace targets
+        run: pnpm exec smithers-build ci '//packages/...' --jobs 2
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Script gates
+        run: pnpm exec smithers-build test '//scripts/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: JSDoc rule harness
+        run: pnpm exec smithers-build test '//:jsdocRules'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: "Agent eval suite (offline, baseline-gated)"
+        run: pnpm exec smithers-build test '//evals/agent:test'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Agent eval typecheck
+        run: pnpm exec smithers-build build '//evals/agent:check'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: "Authoring eval dataset (offline)"
+        run: pnpm exec smithers-build test '//evals/authoring:test'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Authoring eval typecheck
+        run: pnpm exec smithers-build build '//evals/authoring:check'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: SWE-bench rig typecheck
+        run: pnpm exec smithers-build build '//evals/swebench:check'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Review app and workers
+        run: pnpm exec smithers-build ci '//apps/review/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Bug worker
+        run: pnpm exec smithers-build ci '//apps/bug-worker/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Status site
+        run: pnpm exec smithers-build ci '//apps/status-site/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Site
+        run: pnpm exec smithers-build ci '//apps/site/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: "Review eval suite (offline, baseline-gated)"
+        run: pnpm exec smithers-build test '//evals/review-seeded-bugs/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Review eval typecheck
+        run: pnpm exec smithers-build build '//evals/review-seeded-bugs:check'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Generated workflow drift
+        run: pnpm exec smithers-build lint '//:ci'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Fault matrix
+        run: pnpm exec smithers-build test '//packages/...:faults' --jobs 1
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      # Release-only gates. Neither is in the required CI roster: the
+      # disaster-recovery suite is a pinned target rather than part of its
+      # package's `ci`, and the version-coherence suite is named here so a
+      # rehearsal can run it alone.
       - name: Disaster-recovery script test
         run: pnpm exec smithers-build test '//packages/smithers/flows/engine-store:disasterRecovery'
-      - name: Test-pin register guard
-        run: node --test scripts/check-test-pins.test.mjs
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Release version coherence
+        run: pnpm exec smithers-build test '//scripts:releaseVersion'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Build all workspaces from clean artifacts
         run: |
           find packages -type d -name dist -prune -exec rm -rf {} +

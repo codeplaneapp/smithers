@@ -21,17 +21,45 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workflow = (name) => readFileSync(join(repoRoot, ".github", "workflows", name), "utf8")
 
 /**
- * Extracts the commands a workflow runs as gates: `pnpm run <script>`,
- * `pnpm test`, and the release scripts driven directly through node.
+ * The step blocks of one job, as text.
+ *
+ * Both workflows indent identically — jobs at two spaces, `steps:` at four,
+ * the step list at six — because release.yml's toolchain and gate blocks are
+ * copied out of the generated ci.yml. That is what lets the drift cases below
+ * compare text instead of a parse: a block that is byte-identical in both
+ * files is the same step, and one that is not is drift.
+ *
+ * Comments and blank lines are dropped from both sides, so prose written above
+ * a copied step in the hand-written file does not read as a difference.
  */
-const gateCommands = (source) =>
-  new Set(
-    [
-      ...source.matchAll(/\bpnpm run [a-z][a-z:-]*/g),
-      ...source.matchAll(/\bpnpm test\b/g),
-      ...source.matchAll(/\bnode (?:--test )?scripts\/[\w.-]+\.mjs/g)
-    ].map((match) => match[0])
-  )
+const jobSteps = (source, job) => {
+  const lines = source.split("\n").filter((line) => line.trim() !== "" && !/^\s*#/.test(line))
+  const start = lines.indexOf(`  ${job}:`)
+  assert.notEqual(start, -1, `${job} is not a job in this workflow`)
+  const end = lines.findIndex((line, index) => index > start && /^ {2}\S/.test(line))
+  const body = lines.slice(start, end === -1 ? lines.length : end)
+  const stepsAt = body.indexOf("    steps:")
+  assert.notEqual(stepsAt, -1, `${job} declares no steps`)
+  const blocks = []
+  for (const line of body.slice(stepsAt + 1)) {
+    if (line.startsWith("      - ")) blocks.push([line])
+    else if (line.startsWith("        ") && blocks.length > 0) blocks.at(-1).push(line)
+    else break
+  }
+  assert.ok(blocks.length > 0, `${job} declares no steps`)
+  return blocks.map((block) => block.join("\n"))
+}
+
+/** Every build-graph invocation these steps make, in order. */
+const graphCommands = (steps) =>
+  steps.flatMap((step) => [...step.matchAll(/pnpm exec smithers-build [^\n]+/g)].map((match) => match[0]))
+
+/** The recursive per-package script runners the target graph replaced. */
+const scriptRunners = (source) =>
+  [...source.matchAll(/\bpnpm (?:run [a-z][a-z:-]*|test)\b/g)].map((match) => match[0])
+
+/** The `with:` entries of one step, which a copy may extend but not contradict. */
+const withEntries = (step) => step.split("\n").filter((line) => line.startsWith("          "))
 
 test("publicationManifest replaces source exports without mutating the input", () => {
   const manifest = {
@@ -196,10 +224,85 @@ test("release.yml publishes exactly the packed workspaces, in the packed order",
 })
 
 test("every gate in ci.yml also runs in release.yml", () => {
-  const missing = [...gateCommands(workflow("ci.yml"))]
-    .filter((gate) => !gateCommands(workflow("release.yml")).has(gate))
+  // ci.yml states its gates as build-graph invocations, so this reads those
+  // rather than the `pnpm run <script>` strings the graph replaced. The old
+  // form of this case matched only script runners, which ci.yml stopped using;
+  // it went vacuous, and the release workflow then drifted onto `pnpm test`
+  // undetected until the 1.0.0-rc.0 dry run failed on @smthrs/std.
+  const ci = workflow("ci.yml")
 
-  assert.deepEqual(missing, [])
+  // The roster is pinned so a new CI job forces a decision here instead of
+  // silently landing outside the release's proof. The four jobs release.yml
+  // does not mirror: `browser` runs `//scripts:browserContract`, which
+  // `//scripts/...` already covers; `packages` runs `test '//packages/...'`,
+  // which `ci '//packages/...'` already covers; `apps-e2e` needs the runner's
+  // Chrome and `rust`/`wasm-repro` need a Rust toolchain, and neither belongs
+  // on a publication job.
+  const jobs = [...ci.slice(ci.indexOf("\njobs:\n")).matchAll(/^ {2}([a-z][\w-]*):$/gm)].map((match) => match[1])
+  assert.deepEqual(jobs, [
+    "test",
+    "apps-e2e",
+    "rust",
+    "wasm-repro",
+    "e2e-faults",
+    "browser",
+    "packages",
+    "review-lints"
+  ])
+
+  const mirrored = ["test", "e2e-faults"]
+  const expected = mirrored.flatMap((job) => graphCommands(jobSteps(ci, job)))
+  const actual = new Set(graphCommands(jobSteps(workflow("release.yml"), "publish")))
+
+  assert.ok(expected.length > 15, `${expected.length} gates is too few to be the required CI roster`)
+  assert.deepEqual(expected.filter((gate) => !actual.has(gate)), [])
+})
+
+test("every toolchain step in ci.yml's required test job also runs in release.yml", () => {
+  // The gate above proves the release runs the same commands. This proves the
+  // release gives them the same machine. ci.yml installs ripgrep, bubblewrap,
+  // Go, Foundry, and the containerd image store from the `CiToolchain.Needs`
+  // declaration in the root PACKAGE.ts; release.yml is hand-written and copies
+  // the rendered steps. Comparing the rendered text is what keeps a toolchain
+  // bump a one-line copy: the generator moves ci.yml, and this fails until
+  // release.yml carries the same bytes.
+  const ciSteps = jobSteps(workflow("ci.yml"), "test")
+  const releaseSource = workflow("release.yml")
+  const releaseSteps = jobSteps(releaseSource, "publish")
+  const declared = new Set(releaseSteps)
+
+  // Two steps the release deliberately extends rather than copies: it checks
+  // out the full history the changelog gate reads, and it points npm at the
+  // registry it publishes to. Their `with:` entries are checked below instead,
+  // so a version bump inside one still has to reach this file.
+  const extended = ["      - uses: actions/checkout@v4", "      - uses: actions/setup-node@v4"]
+  const toolchain = ciSteps.filter((step) => !step.includes("smithers-build"))
+  const missing = toolchain
+    .filter((step) => !extended.some((first) => step.startsWith(first)))
+    .filter((step) => !declared.has(step))
+
+  assert.ok(toolchain.length > 5, `${toolchain.length} steps is too few to be the CI toolchain`)
+  assert.deepEqual(missing, [], "these ci.yml toolchain steps are missing from release.yml")
+
+  for (const first of extended) {
+    const source = toolchain.find((step) => step.startsWith(first))
+    const copy = releaseSteps.find((step) => step.startsWith(first))
+    assert.ok(source !== undefined, `ci.yml has no ${first.trim()} step`)
+    assert.ok(copy !== undefined, `release.yml has no ${first.trim()} step`)
+    assert.deepEqual(
+      withEntries(source).filter((entry) => !withEntries(copy).includes(entry)),
+      [],
+      `release.yml's ${first.trim()} step drops a pin ci.yml declares`
+    )
+  }
+})
+
+test("release.yml drives the target graph, never a recursive package script", () => {
+  // `pnpm test` and its siblings run each package's own script, which needs
+  // none of the toolchain the graph's targets declare. That is the shape of
+  // the drift the two cases above exist to catch, stated once more as a ban.
+  assert.deepEqual(scriptRunners(workflow("release.yml")), [])
+  assert.deepEqual(scriptRunners(workflow("ci.yml")), [])
 })
 
 test("dependencyOrder is a topological order with an alphabetical tiebreak", () => {

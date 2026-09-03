@@ -155,6 +155,38 @@ test("every gate runs on both paths; only publication is conditional", () => {
   ])
 })
 
+test("the driver reads the toolchain steps copied out of ci.yml", () => {
+  // The copied blocks are the first shapes in this file that pair a `|` block
+  // scalar with a later `shell:` key, and the first `with:` maps the driver
+  // has to read on a step it does not execute. A reader that mis-parsed one
+  // would report the release as green while skipping a step.
+  const containerd = step("Enable the containerd image store")
+  assert.equal(containerd.shell, "bash")
+  assert.match(containerd.run, /^if command -v docker /)
+  const systemPackages = step("Install system packages")
+  assert.equal(systemPackages.shell, "bash")
+  assert.match(systemPackages.run, /--no-install-recommends 'bubblewrap'/)
+  assert.equal(step("Install ripgrep").with.tool, "ripgrep@14.1.1")
+  assert.equal(step("Install Go").with["go-version"], "1.26.0")
+  assert.equal(step("Install Foundry").with.version, "v1.8.1")
+})
+
+test("the toolchain the gates need is installed before the first gate", () => {
+  const names = release.jobs.publish.steps.map((candidate) => candidate.name ?? candidate.uses)
+  const firstGate = names.indexOf("Workspace targets")
+  assert.notEqual(firstGate, -1, "release.yml no longer runs the workspace target graph")
+  for (const name of ["Install Go", "Install Foundry", "Install ripgrep", "Install system packages"]) {
+    const index = names.indexOf(name)
+    assert.notEqual(index, -1, `release.yml does not install ${name.replace("Install ", "")}`)
+    assert.ok(index < firstGate, `${name} must run before the first gate`)
+  }
+  // actions/setup-go prepends its own bin directories to PATH and displaces
+  // the shim corepack put there, which killed every nested `pnpm` the build
+  // tool spawned. The package manager's setup therefore has to come after it,
+  // which is the order GithubCiGen renders and this file copies.
+  assert.ok(names.indexOf("Install Go") < names.indexOf("pnpm/action-setup@v6"))
+})
+
 test("the rehearsal driver documents a local equivalent for every action the release uses", () => {
   const undocumented = release.jobs.publish.steps
     .filter((candidate) => candidate.uses !== undefined)

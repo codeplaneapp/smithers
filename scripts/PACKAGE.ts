@@ -40,7 +40,14 @@ const packDirectory = "dist/release-packs"
  */
 const packManifest = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//scripts/pack-release.test.mjs")]),
-  srcs: sources,
+  // Both workflows are inputs: the suite compares the release workflow's gate
+  // and toolchain steps against the generated CI workflow's, so an edit to
+  // either one has to re-run this gate rather than read a cached pass.
+  srcs: [
+    ...sources,
+    Smithers.file("//.github/workflows/ci.yml"),
+    Smithers.file("//.github/workflows/release.yml")
+  ],
   deps: []
 })
 
