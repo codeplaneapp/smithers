@@ -325,14 +325,24 @@ const fakeCli = (faults: CliFaults = {}) => {
           unref: Effect.succeed(Effect.void)
         })
       }
-      const child = yield* local.spawn(ChildProcess.make("sh", ["-c", remote], { cwd: root }))
+      // `exec 2>&1` is the pseudo-terminal, modelled where the plugin has one:
+      // at the file descriptor. A Session Manager session gives the guest ONE
+      // output channel, so the kernel orders standard error against standard
+      // output and the exit sentinel the transport frames on is always last.
+      // Reading two host pipes and merging the two streams in userspace does
+      // not reproduce that — the merge emits in whatever order two reader
+      // fibers happen to be scheduled, so a loaded machine could deliver
+      // `to-stderr` AFTER the sentinel, where `unframe` correctly discards it
+      // as session footer, and the conformance suite saw a command's standard
+      // error vanish. One descriptor, one order, no race.
+      const child = yield* local.spawn(ChildProcess.make("sh", ["-c", `exec 2>&1\n${remote}`], { cwd: root }))
       const banner = faults.noBanner === true
         ? Stream.empty
         : Stream.make(encoder.encode(`\r\nStarting session with SessionId: ${sessionId}\r\n`))
       const footer = Stream.make(encoder.encode(`\r\n\r\nExiting session with sessionId: ${sessionId}.\r\n`))
       const guestResult = faults.guestResult?.(remote)
       const merged = guestResult === undefined
-        ? Stream.merge(child.stdout, child.stderr).pipe(
+        ? child.stdout.pipe(
           Stream.map(crlf),
           Stream.map((bytes) =>
             faults.dropSentinel === true

@@ -11,6 +11,7 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { ContainerSandbox, MicrosandboxSandbox } from "@smthrs/sandbox"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
@@ -106,25 +107,76 @@ describe.skipIf(!engineAvailable)("SandboxedFlow inside a real container", () =>
   )
 })
 
-// The microVM gate is the one `RealMicrosandbox.integration.test.ts` states:
-// a runnable platform binary, and on Linux a readable and writable `/dev/kvm`,
-// because a hosted runner installs the CLI while providing no virtualization.
-const installed = spawnSync("microsandbox", ["--version"], { stdio: "ignore" }).status === 0
-const virtualized = process.platform !== "linux" || ((): boolean => {
-  try {
-    accessSync("/dev/kvm", constants.R_OK | constants.W_OK)
-    return true
-  } catch {
-    return false
-  }
-})()
-const microvmAvailable = installed && virtualized
 const microvmSession = `flows-sandboxed-microvm-${process.pid}-${Date.now()}`
 const microvmBudget = 900_000
+const microvmProbeBudget = 300_000
+
+/**
+ * Why this host cannot boot a microVM, or `undefined` when it can. The gate is
+ * the one `@smthrs/sandbox`'s `RealMicrosandbox.integration.test.ts` states, and
+ * for the same reason: a runnable platform binary is not the capability, so
+ * each platform is asked for its hypervisor — `/dev/kvm` on Linux,
+ * Hypervisor.framework on macOS, where `kern.hv_vmm_present` also says whether
+ * this machine is itself a guest whose Virtualization Framework host gives it no
+ * nested virtualization — and a host that answers yes to all of them boots one
+ * microVM to prove it. libkrun's `VmSetup(VmCreate)` is the hypervisor refusing
+ * to create a VM; that exact refusal names the missing capability and skips,
+ * while any other failure leaves the suite to run and report it.
+ */
+const microvmUnbootable = async (): Promise<string | undefined> => {
+  if (spawnSync("microsandbox", ["--version"], { stdio: "ignore" }).status !== 0) {
+    return "the microsandbox platform binary does not run here"
+  }
+  if (process.platform === "linux") {
+    try {
+      accessSync("/dev/kvm", constants.R_OK | constants.W_OK)
+    } catch {
+      return "this Linux host exposes no /dev/kvm this process may read and write"
+    }
+  } else if (process.platform === "darwin") {
+    const sysctl = (name: string): string | undefined => {
+      const read = spawnSync("sysctl", ["-n", name], { encoding: "utf8" })
+      return read.status === 0 ? read.stdout.trim() : undefined
+    }
+    if (sysctl("kern.hv_support") !== "1") {
+      return "this macOS host reports no Hypervisor.framework support (kern.hv_support)"
+    }
+    if (sysctl("kern.hv_vmm_present") === "1") {
+      return "this macOS host is itself a guest (kern.hv_vmm_present), and Apple's Virtualization Framework"
+        + " gives its guests no nested virtualization"
+    }
+  } else {
+    return `microsandbox reaches no hypervisor on ${process.platform}`
+  }
+  const refusal = await Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(
+        MicrosandboxSandbox.make({
+          sdk: Microsandbox,
+          image: "oven/bun:1",
+          pullPolicy: "if-missing",
+          maxDurationSecs: 120,
+          idleTimeoutSecs: 60
+        }).acquire(`${microvmSession}-probe`),
+        () => Effect.void
+      )
+    ).pipe(
+      Effect.timeoutOption(microvmProbeBudget),
+      Effect.as(undefined),
+      Effect.catchCause((cause) => Effect.succeed(Cause.pretty(cause)))
+    )
+  )
+  return refusal !== undefined && refusal.includes("VmSetup(VmCreate)")
+    ? "this host's hypervisor refused to create a VM (VmSetup(VmCreate)): it provides no nested virtualization"
+    : undefined
+}
+
+const microvmMissing = await microvmUnbootable()
+const microvmAvailable = microvmMissing === undefined
 
 describe.skipIf(microvmAvailable)("SandboxedFlow inside a real microVM", () => {
-  it("is skipped because this machine cannot boot a microVM", () => {
-    expect(installed && virtualized).toBe(false)
+  it(`is skipped because ${microvmMissing ?? "this machine can boot a microVM"}`, () => {
+    expect(microvmMissing).toEqual(expect.any(String))
   })
 })
 

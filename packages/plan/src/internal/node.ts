@@ -447,20 +447,46 @@ interface CloneFrame {
   readonly output: Record<string, unknown> | Array<unknown>
   readonly descriptors: PropertyDescriptorMap
   readonly keys: ReadonlyArray<string> | undefined
-  readonly path: ReadonlyArray<string>
+  readonly path: ClonePath
   index: number
 }
 
-const payloadError = (path: ReadonlyArray<string>, reason: string): GraphBuildError =>
-  new GraphBuildError({
+/**
+ * Where the walk stands, as a link to its parent rather than a copy of the
+ * whole path. Payload depth is bounded only by the caller, and copying the
+ * path at each member made a clone cost memory quadratic in that depth: a
+ * 20,000-deep payload held 20,000 live frames whose paths together ran to
+ * hundreds of millions of entries, several gigabytes, for a result that is
+ * linear. The path is read only to name a member in a refusal, so it stays a
+ * chain here and is flattened at the throw.
+ *
+ * `undefined` is the root, whose path is empty.
+ *
+ * @since 0.1.0
+ * @private
+ */
+type ClonePath = { readonly parent: ClonePath; readonly key: string } | undefined
+
+/** The chain read outwards, root first: the array the refusals report. */
+const clonePath = (path: ClonePath): ReadonlyArray<string> => {
+  const keys: Array<string> = []
+  for (let current = path; current !== undefined; current = current.parent) keys.push(current.key)
+  return keys.reverse()
+}
+
+const payloadError = (at: ClonePath, reason: string): GraphBuildError => {
+  const path = clonePath(at)
+  return new GraphBuildError({
     code: "invalid_payload",
     node: "payload",
     path,
     message: `Plan payload at ${path.length === 0 ? "$" : `$.${path.join(".")}`} ${reason}`
   })
+}
 
-const cyclicPayloadError = (path: ReadonlyArray<string>): GraphBuildError =>
-  new GraphBuildError({
+const cyclicPayloadError = (at: ClonePath): GraphBuildError => {
+  const path = clonePath(at)
+  return new GraphBuildError({
     code: "cyclic_payload",
     node: "payload",
     path,
@@ -468,6 +494,7 @@ const cyclicPayloadError = (path: ReadonlyArray<string>): GraphBuildError =>
       path.length === 0 ? "$" : `$.${path.join(".")}`
     } has a toJSON method that returns itself`
   })
+}
 
 const inheritedDataProperty = (
   value: object,
@@ -508,7 +535,7 @@ export const value = (
   const enter = (
     initial: unknown,
     place: (member: unknown | typeof missing) => void,
-    path: ReadonlyArray<string>
+    path: ClonePath
   ): void => {
     let current = initial
     const replacements: Array<object> = []
@@ -579,7 +606,7 @@ export const value = (
   }
   enter(input, (member) => {
     result = member === missing ? undefined : member
-  }, [])
+  }, undefined)
   while (frames.length > 0) {
     const frame = frames[frames.length - 1]!
     if (frame.index >= (frame.keys ?? frame.source as ReadonlyArray<unknown>).length) {
@@ -592,15 +619,15 @@ export const value = (
       const members = frame.output as Array<unknown>
       const descriptor = frame.descriptors[String(position)]
       if (descriptor !== undefined && !("value" in descriptor)) {
-        throw payloadError([...frame.path, String(position)], "is an accessor")
+        throw payloadError({ parent: frame.path, key: String(position) }, "is an accessor")
       }
       enter(descriptor === undefined ? undefined : descriptor.value, (member) => {
         members.push(member === missing ? null : member)
-      }, [...frame.path, String(position)])
+      }, { parent: frame.path, key: String(position) })
     } else {
       const key = frame.keys[position]!
       const descriptor = frame.descriptors[key]!
-      if (!("value" in descriptor)) throw payloadError([...frame.path, key], "is an accessor")
+      if (!("value" in descriptor)) throw payloadError({ parent: frame.path, key }, "is an accessor")
       enter(descriptor.value, (member) => {
         if (member === missing) return
         Object.defineProperty(frame.output, key, {
@@ -609,7 +636,7 @@ export const value = (
           value: member,
           writable: true
         })
-      }, [...frame.path, key])
+      }, { parent: frame.path, key })
     }
   }
   return result
