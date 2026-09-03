@@ -371,3 +371,152 @@ describe("run", () => {
     expect(Buffer.from(stderr).toString("utf8")).toBe("err")
   })
 })
+
+/**
+ * The Windows half of the spawn: which file a bare command name names, and how
+ * a batch shim reaches `cmd.exe`.
+ *
+ * `windows-latest` failed 61 of 67 package targets with `spawn pnpm ENOENT`
+ * because pnpm installs as `pnpm.cmd` and libuv's own PATH walk appends only
+ * `.com` and `.exe`. Nothing below needs a Windows host: `platform` and `env`
+ * are parameters, and the fixture directory holds a real batch shim.
+ *
+ * Fixtures spell an extension in the same case as the `PATHEXT` entry that
+ * finds it wherever the resolved path is asserted verbatim, so the assertion
+ * reads the same on a case-sensitive and a case-insensitive filesystem. The
+ * one test that deliberately mismatches the case says so.
+ */
+describe("windows executable resolution", () => {
+  let bin: string
+  const comspec = "C:\\WINDOWS\\system32\\cmd.exe"
+
+  beforeEach(async () => {
+    bin = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-winpath-")))
+  })
+
+  afterEach(async () => {
+    await Fs.rm(bin, { recursive: true, force: true })
+  })
+
+  const shim = async (name: string): Promise<string> => {
+    const path = NodePath.join(bin, name)
+    await Fs.writeFile(path, "@echo off\n", { mode: 0o755 })
+    return path
+  }
+
+  it("finds a PATHEXT extension libuv's own walk never appends", async () => {
+    const shimPath = await shim("pnpm.CMD")
+    expect(Exec.findOnPath("pnpm", { PATH: bin, PATHEXT: ".COM;.EXE;.BAT;.CMD" }, { platform: "win32" }))
+      .toBe(shimPath)
+  })
+
+  it("prefers the earlier PATHEXT entry and keeps PATH order", async () => {
+    const second = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-winpath2-")))
+    try {
+      await shim("tool.CMD")
+      await shim("tool.EXE")
+      await Fs.writeFile(NodePath.join(second, "tool.EXE"), "MZ", { mode: 0o755 })
+      expect(Exec.findAllOnPath("tool", { PATH: `${bin};${second}`, PATHEXT: ".EXE;.CMD" }, { platform: "win32" }))
+        .toEqual([NodePath.join(bin, "tool.EXE"), NodePath.join(second, "tool.EXE")])
+    } finally {
+      await Fs.rm(second, { recursive: true, force: true })
+    }
+  })
+
+  it("tries a spelled-out extension first, and falls back to the default extension list", async () => {
+    await shim("runner.py")
+    expect(Exec.findOnPath("runner.py", { PATH: bin }, { platform: "win32" }))
+      .toBe(NodePath.join(bin, "runner.py"))
+    await shim("other.EXE")
+    expect(Exec.findOnPath("other", { PATH: bin, PATHEXT: "  " }, { platform: "win32" }))
+      .toBe(NodePath.join(bin, "other.EXE"))
+  })
+
+  /** Windows folds both the command name and the extension; the lookup must too. */
+  it("matches an extension whose case differs from PATHEXT's, and skips an unreadable directory", async () => {
+    await shim("pnpm.cmd")
+    const found = Exec.findOnPath(
+      "PNPM",
+      { Path: `${NodePath.join(bin, "missing")};${bin}` },
+      { platform: "win32" }
+    )
+    expect(found === undefined ? undefined : NodePath.dirname(found)).toBe(bin)
+    expect(found?.toLowerCase()).toBe(NodePath.join(bin, "pnpm.cmd").toLowerCase())
+  })
+
+  it("routes a batch shim through ComSpec with a verbatim, quoted line", async () => {
+    const shimPath = await shim("pnpm.CMD")
+    expect(
+      Exec.spawnShape(["pnpm", "exec", "vitest", "run", "a b"], {
+        platform: "win32",
+        env: { PATH: bin, PATHEXT: ".COM;.EXE;.BAT;.CMD", ComSpec: comspec }
+      })
+    ).toEqual({
+      file: comspec,
+      args: ["/d", "/s", "/c", `""${shimPath}" "exec" "vitest" "run" "a b""`],
+      windowsVerbatimArguments: true
+    })
+  })
+
+  it("reads ComSpec case-insensitively and defaults it", () => {
+    expect(Exec.spawnShape(["x.cmd"], { platform: "win32", env: { COMSPEC: "X:\\cmd.exe" } }).file)
+      .toBe("X:\\cmd.exe")
+    expect(Exec.spawnShape(["x.cmd"], { platform: "win32", env: {} }).file).toBe("cmd.exe")
+  })
+
+  it("doubles only a trailing backslash run, which would escape the closing quote", () => {
+    expect(Exec.spawnShape(["x.cmd", "C:\\dir\\", "C:\\a\\b"], { platform: "win32", env: {} }).args[3])
+      .toBe(`""x.cmd" "C:\\dir\\\\" "C:\\a\\b""`)
+  })
+
+  it("refuses an argument cmd.exe cannot carry, naming it", () => {
+    for (const argument of ["say \"hi\"", "100%DONE%", "one\nline", "trailing\r"]) {
+      expect(() => Exec.spawnShape(["x.cmd", argument], { platform: "win32", env: {} }))
+        .toThrow(/cannot reach a Windows \.cmd shim/)
+    }
+  })
+
+  it("spawns a resolved image directly, and leaves an unresolvable name to the host", async () => {
+    await Fs.writeFile(NodePath.join(bin, "node.EXE"), "MZ", { mode: 0o755 })
+    const environment = { PATH: bin, PATHEXT: ".COM;.EXE;.BAT;.CMD", ComSpec: comspec }
+    expect(Exec.spawnShape(["node", "-e", "0"], { platform: "win32", env: environment })).toEqual({
+      file: NodePath.join(bin, "node.EXE"),
+      args: ["-e", "0"],
+      windowsVerbatimArguments: false
+    })
+    expect(Exec.spawnShape(["absent-tool"], { platform: "win32", env: environment })).toEqual({
+      file: "absent-tool",
+      args: [],
+      windowsVerbatimArguments: false
+    })
+    expect(Exec.spawnShape(["C:\\tools\\thing.exe", "--flag"], { platform: "win32", env: environment }).file)
+      .toBe("C:\\tools\\thing.exe")
+  })
+
+  it("leaves POSIX exactly as it was: argv[0] verbatim, one candidate name, no PATHEXT", async () => {
+    const shimPath = await shim("pnpm.CMD")
+    const environment = { PATH: bin, PATHEXT: ".COM;.EXE;.BAT;.CMD" }
+    expect(Exec.findOnPath("pnpm", environment, { platform: "linux" })).toBeUndefined()
+    expect(Exec.findAllOnPath("pnpm.CMD", environment, { platform: "linux" })).toEqual([shimPath])
+    expect(Exec.spawnShape(["pnpm", "exec", "vitest"], { platform: "linux", env: environment })).toEqual({
+      file: "pnpm",
+      args: ["exec", "vitest"],
+      windowsVerbatimArguments: false
+    })
+  })
+
+  it("reads the ambient platform and environment when neither is given", async () => {
+    const shimPath = await shim("host-tool")
+    const previous = process.env["PATH"]
+    process.env["PATH"] = bin
+    try {
+      expect(Exec.findOnPath("host-tool")).toBe(process.platform === "win32" ? undefined : shimPath)
+      expect(Exec.findAllOnPath("host-tool")).toEqual(process.platform === "win32" ? [] : [shimPath])
+    } finally {
+      if (previous === undefined) delete process.env["PATH"]
+      else process.env["PATH"] = previous
+    }
+    expect(Exec.spawnShape([process.execPath, "-e", "0"]))
+      .toEqual({ file: process.execPath, args: ["-e", "0"], windowsVerbatimArguments: false })
+  })
+})

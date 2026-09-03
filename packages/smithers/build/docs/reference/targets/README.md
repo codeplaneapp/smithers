@@ -78,6 +78,7 @@ exists for future additions and is unused. See
 | Target                       | Kinds  | Cacheable | Status   | Summary                                                |
 | ---------------------------- | ------ | --------- | -------- | ------------------------------------------------------ |
 | [DocsParity](docs-parity.md) | `docs` | Always    | Executes | Requires a substantive README beside a package's code. |
+| [Markdown.CodeBlocks](markdown-code-blocks.md) | `build`, `test` | Always | Executes | Compiles a page's fenced code blocks; `title=` fences concatenate into files, `fragment` fences are skipped. |
 
 `PackageJson` uses separate targets for checking and source-tree writes.
 `GithubCiGen` maps its `lint` verb to the drift-check form. See [Verb-effective attrs](../../concepts/targets.md#verb-effective-attrs).

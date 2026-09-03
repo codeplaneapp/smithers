@@ -115,6 +115,52 @@ export const Package = S.Package({ targets: { hello: S.Shell.Run({ command: "tru
     expect(logs).toContain("//:hello  ran")
   })
 
+  it("reports drift for a Generate target whose write set lies inside a nested package", async () => {
+    // A write set is package-relative, so a generator declared in
+    // packages/site names files under packages/site. The check compares the
+    // real and scratch trees over those paths; a package-scoped expansion from
+    // the workspace root stops at packages/site/PACKAGE.ts and compares
+    // nothing, which turned every nested generator's lint into a vacuous pass.
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+export const Package = S.Package({ targets: {} })
+`
+    )
+    await write(
+      root,
+      "packages/site/PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const gen = S.Generate({ script: S.file("gen.mjs"), data: [S.file("source.txt")], changes: ["out.txt"] })
+export const Package = S.Package({ targets: { gen } })
+`
+    )
+    await write(
+      root,
+      "packages/site/gen.mjs",
+      `import { readFileSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+const here = dirname(fileURLToPath(import.meta.url))
+writeFileSync(join(here, "out.txt"), readFileSync(join(here, "source.txt"), "utf8"))
+`
+    )
+    await write(root, "packages/site/source.txt", "a")
+    await write(root, "packages/site/out.txt", "a")
+    commitAll(root)
+    const green = await serve(root, ["//packages/site:gen"])
+    expect(green.exitCode).toBe(0)
+    await write(root, "packages/site/source.txt", "b")
+    const red = await serve(root, ["//packages/site:gen"])
+    expect(red.logs).toContain("drift in declared write-set")
+    expect(red.exitCode).toBe(1)
+    // Check mode never touches the real tree.
+    expect(await Fs.readFile(NodePath.join(root, "packages/site/out.txt"), "utf8")).toBe("a")
+  })
+
   it("defaults a Diff target to check mode, applies with --write, and leaves check green after", async () => {
     const root = await temporaryWorkspace()
     await write(root, "WORKSPACE.ts", workspaceModule())

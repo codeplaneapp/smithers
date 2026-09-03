@@ -677,6 +677,238 @@ export const resolveWorkspacePath = (workspaceRoot: string, value: string): stri
 }
 
 /**
+ * The extensions Windows appends to a bare command name when the host sets no
+ * `PATHEXT`, in the order `cmd.exe` tries them.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultPathExtensions = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WSF;.MSC"
+
+/**
+ * The extensions `CreateProcess` cannot launch: a batch file is script text
+ * that only `cmd.exe` knows how to run.
+ *
+ * libuv searches `PATH` for a bare command name itself, but its walk appends
+ * only `.com` and `.exe` — deliberately, because the other `PATHEXT` entries
+ * are not executable images. That is the whole of the Windows defect: pnpm
+ * installs as `pnpm.cmd`, the walk finds no `pnpm.exe`, and every rule that
+ * spelled `["pnpm", "exec", …]` died with `spawn pnpm ENOENT`.
+ */
+const cmdInterpretedExtensions: ReadonlySet<string> = new Set([".BAT", ".CMD"])
+
+/**
+ * Reads one environment value the way Windows does: by folded name.
+ *
+ * `process.env` already folds on a Windows host, but a record handed in by a
+ * caller — a resolved Nix closure, a test — does not, and `Path` beside
+ * `PATH` is what a real Windows environment block holds.
+ */
+const windowsEnvironmentValue = (
+  environment: Readonly<Record<string, string | undefined>>,
+  name: string
+): string | undefined => {
+  const folded = name.toUpperCase()
+  const found = Object.keys(environment).find((entry) => entry.toUpperCase() === folded)
+  return found === undefined ? undefined : environment[found]
+}
+
+/** The file names one Windows command may have, in the order the host tries them. */
+const executableNames = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>>
+): ReadonlyArray<string> => {
+  const declared = windowsEnvironmentValue(environment, "PATHEXT")
+  const extensions = (declared === undefined || declared.trim() === "" ? defaultPathExtensions : declared)
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "")
+  // A command that already spells an extension is tried as written first, the
+  // way `cmd.exe` does; only then are the `PATHEXT` extensions appended.
+  const names = NodePath.extname(name) === "" ? [] : [name]
+  for (const extension of extensions) names.push(`${name}${extension}`)
+  return [...new Set(names)]
+}
+
+/** Whether one directory entry is a file this host would run. */
+const isExecutableFile = (candidate: string): boolean => {
+  try {
+    NodeFs.accessSync(candidate, NodeFs.constants.X_OK)
+    return NodeFs.statSync(candidate).isFile()
+  } catch {
+    return false
+  }
+}
+
+/** The POSIX search, unchanged: one candidate name, matched exactly. */
+const findAllOnPosixPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>>
+): ReadonlyArray<string> => {
+  const found: Array<string> = []
+  const environmentPath = environment["PATH"] ?? ""
+  for (const entry of environmentPath.split(NodePath.delimiter)) {
+    if (entry === "") continue
+    const candidate = NodePath.join(entry, name)
+    if (isExecutableFile(candidate) && !found.includes(candidate)) found.push(candidate)
+  }
+  return found
+}
+
+/**
+ * The Windows search: `PATHEXT` candidates matched case-insensitively.
+ *
+ * The directory is listed rather than probed name by name because Windows
+ * folds case in both halves of the answer — pnpm ships `pnpm.cmd` while the
+ * default `PATHEXT` spells `.CMD` — and a probe would depend on the host
+ * filesystem's own folding to agree. Listing gives the same answer on every
+ * filesystem, which is what lets a POSIX host compute this at all.
+ */
+const findAllOnWindowsPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>>
+): ReadonlyArray<string> => {
+  const found: Array<string> = []
+  const environmentPath = windowsEnvironmentValue(environment, "PATH") ?? ""
+  const names = executableNames(name, environment)
+  for (const entry of environmentPath.split(";")) {
+    if (entry === "") continue
+    let listing: ReadonlyArray<string>
+    try {
+      listing = NodeFs.readdirSync(entry)
+    } catch {
+      continue
+    }
+    // NTFS preserves case and refuses two entries that differ only in it, so
+    // one folded name has one directory entry on any host that can be Windows.
+    const byFoldedName = new Map<string, string>()
+    for (const file of listing) byFoldedName.set(file.toUpperCase(), file)
+    for (const candidate of names) {
+      const actual = byFoldedName.get(candidate.toUpperCase())
+      if (actual === undefined) continue
+      const path = NodePath.join(entry, actual)
+      if (!isExecutableFile(path)) continue
+      if (!found.includes(path)) found.push(path)
+      break
+    }
+  }
+  return found
+}
+
+/**
+ * Every `PATH` entry holding an executable named `name`, in `PATH` order.
+ *
+ * `platform` and `environment` are parameters rather than ambient reads so a
+ * POSIX host can compute the Windows answer, which is the only way this is
+ * testable off Windows. POSIX behaviour is unchanged: one candidate name,
+ * matched exactly, no `PATHEXT` and no folding.
+ *
+ * @category tools
+ * @since 0.1.0
+ */
+export const findAllOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  options?: { readonly platform?: NodeJS.Platform | undefined }
+): ReadonlyArray<string> =>
+  (options?.platform ?? process.platform) === "win32"
+    ? findAllOnWindowsPath(name, environment)
+    : findAllOnPosixPath(name, environment)
+
+/**
+ * The absolute path of one executable on `PATH`, or undefined.
+ *
+ * @category tools
+ * @since 0.1.0
+ */
+export const findOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  options?: { readonly platform?: NodeJS.Platform | undefined }
+): string | undefined => findAllOnPath(name, environment, options)[0]
+
+/**
+ * The file, arguments, and Windows quoting mode one argv spawns with.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface SpawnShape {
+  /** The executable image handed to `CreateProcess` or `execvp`. */
+  readonly file: string
+  /** The arguments handed alongside it. */
+  readonly args: ReadonlyArray<string>
+  /** Whether the host must pass the command line through unquoted. */
+  readonly windowsVerbatimArguments: boolean
+}
+
+/**
+ * Characters no `cmd.exe` command line can carry faithfully.
+ *
+ * A quote toggles cmd's own quoting state before the target program's parser
+ * ever sees it, `%` is expanded inside quotes as well as outside, and a line
+ * break ends the command. There is no escape for any of them inside the
+ * quoted region a batch shim needs, so an argument holding one is refused by
+ * name rather than silently executed as something else.
+ */
+const unencodableForCmd = /["%\r\n]/
+
+/** Quotes one argument for the CRT parser inside a `cmd.exe` command line. */
+const quoteForCmd = (value: string): string => {
+  if (unencodableForCmd.test(value)) {
+    throw new TypeError(
+      `argument ${JSON.stringify(value)} cannot reach a Windows .cmd shim: ` +
+        "a quote, percent sign, or line break has no faithful encoding through cmd.exe"
+    )
+  }
+  // Backslashes are only special before a quote, so only a trailing run — the
+  // run that would escape the closing quote — has to be doubled.
+  return `"${value.replace(/(\\*)$/, "$1$1")}"`
+}
+
+/**
+ * The spawn one argv needs on this host.
+ *
+ * POSIX spawns `argv[0]` exactly as declared, which is what every host did
+ * before Windows was in the matrix. Windows resolves a bare command name on
+ * the child's own `PATH` first, so a `PATHEXT` extension libuv does not walk
+ * is found, and routes a batch shim through `ComSpec` — Node has refused to
+ * spawn `.bat` and `.cmd` without a shell since the v18 hardening, and a
+ * shell that quotes for us is a shell that decides our quoting. The line is
+ * built here instead: every argument is quoted for the CRT parser, the whole
+ * line is wrapped for `/s`, and the host is told to pass it through verbatim.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const spawnShape = (
+  argv: readonly [string, ...Array<string>],
+  options?: {
+    readonly platform?: NodeJS.Platform | undefined
+    readonly env?: Readonly<Record<string, string | undefined>> | undefined
+  }
+): SpawnShape => {
+  const [executable, ...args] = argv
+  const platform = options?.platform ?? process.platform
+  if (platform !== "win32") return { file: executable, args, windowsVerbatimArguments: false }
+  const environment = options?.env ?? process.env
+  const located = /[\\/:]/.test(executable)
+    ? executable
+    // An unresolvable name stays as declared so the host still reports the
+    // `ENOENT` naming the command, rather than a second, invented diagnostic.
+    : findOnPath(executable, environment, { platform }) ?? executable
+  if (!cmdInterpretedExtensions.has(NodePath.extname(located).toUpperCase())) {
+    return { file: located, args, windowsVerbatimArguments: false }
+  }
+  const line = [located, ...args].map(quoteForCmd).join(" ")
+  return {
+    file: windowsEnvironmentValue(environment, "ComSpec") ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `"${line}"`],
+    windowsVerbatimArguments: true
+  }
+}
+
+/**
  * Bounded head and tail of one decoded stream.
  *
  * The decoder is per stream and stateful. `Buffer.toString("utf8")` on each
@@ -766,7 +998,11 @@ const killTree = (child: NodeChildProcess.ChildProcess): void => {
   }
 }
 
-/** Spawns argv in the resolved directory, never through a shell. */
+/**
+ * Spawns argv in the resolved directory through the shape {@link spawnShape}
+ * settles: the declared executable itself everywhere except a Windows batch
+ * shim, which only `cmd.exe` can run.
+ */
 const spawnTool = (
   cwd: string,
   payload: Payload,
@@ -777,15 +1013,18 @@ const spawnTool = (
   base?: ToolEnvironment | undefined
 ): Effect.Effect<Spawned, ExecError> =>
   Effect.callback<Spawned, ExecError>((resume) => {
-    const [executable, ...args] = payload.argv
     const env = toolEnvironment(payload.env, sensitiveEnv, secretEnv, base)
     let child: NodeChildProcess.ChildProcess
     try {
-      child = NodeChildProcess.spawn(executable, args, {
+      // Resolved against the environment the child itself gets, so a declared
+      // Nix closure's PATH answers rather than the host's.
+      const shape = spawnShape(payload.argv, { env })
+      child = NodeChildProcess.spawn(shape.file, [...shape.args], {
         cwd,
         detached: true,
         env,
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsVerbatimArguments: shape.windowsVerbatimArguments
       })
     } catch (cause) {
       resume(Effect.fail(

@@ -64,6 +64,7 @@ import { collectTargets } from "./internal/Attrs.ts"
 import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
+import * as MarkdownCodeBlocks from "./MarkdownCodeBlocks.ts"
 import * as MemoryBackend from "./MemoryBackend.ts"
 import * as NixExec from "./NixExec.ts"
 import * as OverlayExec from "./OverlayExec.ts"
@@ -286,7 +287,13 @@ export type LaneData =
     readonly text?: string
   }
   | { readonly kind: "submodules"; readonly plan: GitSubmoduleExec.Plan }
-  | { readonly kind: "markdown-code-blocks"; readonly file: string; readonly languages: ReadonlyArray<string> }
+  | {
+    readonly kind: "markdown-code-blocks"
+    readonly file: string
+    readonly languages: ReadonlyArray<string>
+    /** Pages whose titled fences are written beside the page's files, never compiled on their own. */
+    readonly context: ReadonlyArray<string>
+  }
   | { readonly kind: "published"; readonly manifestPath: string }
   | { readonly kind: "api-compat" }
   | { readonly kind: "overlay" }
@@ -2373,7 +2380,8 @@ const visit = async (
       lane = {
         kind: "markdown-code-blocks",
         file: Input.resolvePath(packagePath, codeAttrs.file.path),
-        languages: [...codeAttrs.lang]
+        languages: [...codeAttrs.lang],
+        context: (codeAttrs.context ?? []).map((page) => Input.resolvePath(packagePath, page.path))
       }
       argv = [
         context.managerBinary,
@@ -2386,7 +2394,23 @@ const visit = async (
         "--module",
         "Node16",
         "--moduleResolution",
-        "Node16"
+        "Node16",
+        // A workspace package whose `exports` point at `.ts` sources imports
+        // its siblings with explicit `.ts` extensions; without this flag every
+        // such file the block reaches fails TS5097 before the block is judged.
+        "--allowImportingTsExtensions",
+        // The options the workspace packages compile under, since a block that
+        // imports a package also compiles the package: Node globals, the newest
+        // lib the packages target, and the optional-property strictness Effect
+        // Schema's types require. Without them the package's own sources fail
+        // before the block is judged.
+        "--target",
+        "es2024",
+        "--lib",
+        "es2024,dom",
+        "--types",
+        "node",
+        "--exactOptionalPropertyTypes"
       ]
       break
     }
@@ -2556,8 +2580,12 @@ const visit = async (
     } else {
       const states: Array<unknown> = []
       for (const pattern of writeSet) {
+        // A write set is not an input glob over the declaring package: its
+        // paths are the generator's own wherever they live, so a nested
+        // package's PACKAGE.ts must not bound the expansion to nothing.
         const matches = await Input.expandGlob(context.root, "", pattern, {
           cacheDirectory: context.cacheDirectory,
+          packageScoped: false,
           repositoryBoundaries: Object.values(context.index.workspace.repos ?? {}).map((repo) => repo.path),
           signal: context.signal
         })
@@ -3854,13 +3882,19 @@ export const execute = async (
         }
       }
       const drift: Array<string> = []
+      // The write set is root-relative and lives wherever the generator's
+      // package is. Package scoping would stop the expansion at that
+      // package's PACKAGE.ts and compare nothing, so every nested
+      // generator's check would pass vacuously.
       for (const pattern of node.writeSet) {
         const realFiles = await Input.expandGlob(root, "", pattern, {
           cacheDirectory,
+          packageScoped: false,
           signal: options.signal
         })
         const scratchFiles = await Input.expandGlob(scratch, "", pattern, {
           cacheDirectory,
+          packageScoped: false,
           signal: options.signal
         })
         const paths = [...new Set([...realFiles, ...scratchFiles])].sort()
@@ -4762,35 +4796,64 @@ export const execute = async (
           if (node.lane?.kind !== "markdown-code-blocks") return fail("Markdown.CodeBlocks planned no source")
           const cached = await cacheGet(node)
           if (cached !== undefined) return green("hit")
-          const markdown = await Fs.readFile(NodePath.join(root, ...node.lane.file.split("/")), "utf8")
-          const language = node.lane.languages.flatMap((entry) => {
-            const normalized = entry.toLowerCase()
-            if (normalized === "ts") return ["ts", "typescript"]
-            if (normalized === "js") return ["js", "javascript"]
-            return [entry]
-          }).map((entry) => entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")
-          const pattern = new RegExp("^\\s*```(?:" + language + ")\\s*\\n([\\s\\S]*?)^\\s*```\\s*$", "gmi")
-          const blocks = [...markdown.matchAll(pattern)].map((match) => match[1] ?? "")
-          if (blocks.length === 0) {
-            return fail(`no ${node.lane.languages.join("/")} code blocks found in ${node.lane.file}`)
+          const lane = node.lane
+          const readPage = async (page: string) =>
+            MarkdownCodeBlocks.extract(await Fs.readFile(NodePath.join(root, ...page.split("/")), "utf8"), lane.languages)
+          let extracted: MarkdownCodeBlocks.Extracted
+          let contextFiles: Array<MarkdownCodeBlocks.ExtractedFile>
+          try {
+            extracted = await readPage(lane.file)
+            // A context page contributes only its titled files: they are the
+            // project a later page continues, not blocks this target judges.
+            contextFiles = (await Promise.all(lane.context.map(readPage))).flatMap((page) =>
+              page.files.filter((file) => !/^block-\d+\.ts$/.test(file.path))
+            )
+          } catch (error) {
+            return fail(`${lane.file}: ${error instanceof Error ? error.message : String(error)}`)
           }
+          if (extracted.blocks === 0) {
+            return fail(`no ${lane.languages.join("/")} code blocks found in ${lane.file}`)
+          }
+          // The blocks compile from inside the declaring package, not from the
+          // workspace cache directory: `tsc --ignoreConfig` resolves a bare
+          // specifier by walking up from the file, so a block that imports the
+          // package's own dependencies, or the package itself by name through
+          // its `exports`, only resolves when the scratch file sits below the
+          // package's `package.json` and `node_modules`.
           const directory = NodePath.join(
             root,
-            ...cacheDirectory.split("/"),
-            "tmp",
+            ...node.packagePath.split("/").filter((segment) => segment !== "" && segment !== "."),
+            "node_modules",
+            ".cache",
+            "smithers-build",
             `markdown-${node.keyPreview.slice(0, 16)}`
           )
+          // A stale scratch file from an earlier extraction could satisfy an
+          // import the page no longer writes, so the directory starts empty.
+          await Fs.rm(directory, { recursive: true, force: true })
           await Fs.mkdir(directory, { recursive: true })
           const files: Array<string> = []
-          for (const [index, block] of blocks.entries()) {
-            const file = NodePath.join(directory, `block-${index}.ts`)
-            await Fs.writeFile(file, block, "utf8")
-            files.push(posix(NodePath.relative(root, file)))
+          // Context files first, so the page's own titled file wins a name both write.
+          for (const file of contextFiles) {
+            const path = NodePath.join(directory, ...file.path.split("/"))
+            await Fs.mkdir(NodePath.dirname(path), { recursive: true })
+            await Fs.writeFile(path, file.content, "utf8")
           }
-          const checked = await spawnNode({ ...node, argv: [...(node.argv ?? []), ...files] }, root, signal)
-          if (!checked.ok) return fail(checked.error ?? "Markdown code-block parse failed")
-          log(`${node.label}  checked ${blocks.length} fenced code block(s)`)
-          await cachePut(node, { kind: "markdown-code-blocks", count: blocks.length })
+          for (const file of extracted.files) {
+            const path = NodePath.join(directory, ...file.path.split("/"))
+            await Fs.mkdir(NodePath.dirname(path), { recursive: true })
+            await Fs.writeFile(path, file.content, "utf8")
+            files.push(posix(NodePath.relative(root, path)))
+          }
+          if (files.length > 0) {
+            const checked = await spawnNode({ ...node, argv: [...(node.argv ?? []), ...files] }, root, signal)
+            if (!checked.ok) return fail(checked.error ?? "Markdown code-block parse failed")
+          }
+          log(
+            `${node.label}  checked ${extracted.blocks} fenced code block(s): ${extracted.standalone} standalone, ` +
+              `${extracted.titled} file(s), ${extracted.fragments} fragment(s) skipped`
+          )
+          await cachePut(node, { kind: "markdown-code-blocks", count: extracted.blocks })
           return green("ran")
         }
         case "Npm.Published": {

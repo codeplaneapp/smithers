@@ -76,12 +76,19 @@ export const Overlay = overlayDefinition
 
 /** Attrs for Markdown fenced code extraction.
  *
+ * `file` is the page whose fences compile. `context` lists other pages whose
+ * titled fences are written beside this page's files before compiling, for a
+ * page that continues another page's project (`import "./engine.ts"` where a
+ * previous tutorial created `engine.ts`). Context fences are inputs, not
+ * blocks: they are never judged on their own, only reached through imports.
+ *
  * @category targets
  * @since 0.1.0
  */
 export const CodeBlocksAttrs = Schema.Struct({
   file: Input.File,
-  lang: Schema.Array(Schema.NonEmptyString)
+  lang: Schema.Array(Schema.NonEmptyString),
+  context: Schema.optional(Schema.Array(Input.File))
 })
 const codeBlocksDefinition = Target.make("Markdown.CodeBlocks", {
   attrs: CodeBlocksAttrs,
@@ -90,6 +97,22 @@ const codeBlocksDefinition = Target.make("Markdown.CodeBlocks", {
   implementation: () => Target.notImplemented("Markdown.CodeBlocks")
 })
 /** Extracts and validates fenced source blocks from one Markdown file.
+ *
+ * Every fence in one of `lang` becomes a scratch file under the declaring
+ * package and compiles with `tsc --strict`. The fence's info string steers
+ * how:
+ *
+ * - `title="<path>"` (Expressive Code syntax) names the file the fence is or
+ *   extends. Fences on one page with the same title concatenate in document
+ *   order into one file at that relative path, so a tutorial that grows
+ *   `greeting.ts` across three fences compiles as one module and another
+ *   titled fence's `import "./greeting.ts"` resolves. A directory-qualified
+ *   title (`src/greeting.ts`) lands at that path.
+ * - `fragment` marks a fence that is not a compilable unit (the middle of a
+ *   function, an edit to an earlier declaration). The lane skips it and
+ *   counts it in the report. Use it sparingly: a skipped fence can teach an
+ *   API that does not ship.
+ * - An untitled fence compiles standalone as `block-N.ts`.
  *
  * @category targets
  * @since 0.1.0

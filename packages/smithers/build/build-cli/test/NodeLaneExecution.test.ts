@@ -112,6 +112,46 @@ const fixture = async (): Promise<string> => {
   await write(root, "overlay/base.txt", "base")
   await write(root, "overlay/replacement.txt", "replacement")
   await write(root, "README.md", "```ts\nconst answer: number = 42\n```\n")
+  await write(
+    root,
+    "docs/PACKAGE.ts",
+    `import { Smithers as S } from "@smthrs/targets"
+const markdown = S.Markdown.CodeBlocks({ file: S.file("README.md"), lang: ["ts"] })
+const tutorial = S.Markdown.CodeBlocks({ file: S.file("tutorial.md"), lang: ["ts"], context: [S.file("engine.md")] })
+export const Package = S.Package({ targets: { markdown, tutorial } })
+`
+  )
+  await write(
+    root,
+    "docs/README.md",
+    "```ts\nimport { answer } from \"docs-fixture\"\nexport const twice: number = answer * 2\n```\n"
+  )
+  // A tutorial page: one file grown across two titled fences, a fragment the
+  // lane skips, and a second titled file in a subdirectory that imports the
+  // first and a file the context page declares.
+  await write(
+    root,
+    "docs/tutorial.md",
+    [
+      "```ts title=\"greeting.ts\"",
+      "import { answer } from \"docs-fixture\"",
+      "export const greet = answer",
+      "```",
+      "```ts fragment",
+      "    return greet",
+      "```",
+      "```ts title=\"greeting.ts\"",
+      "export const twice = greet * 2",
+      "```",
+      "```ts title=\"src/run.ts\"",
+      "import { engine } from \"../engine.ts\"",
+      "import { twice } from \"../greeting.ts\"",
+      "console.log(twice, engine)",
+      "```",
+      ""
+    ].join("\n")
+  )
+  await write(root, "docs/engine.md", "```ts title=\"engine.ts\"\nexport const engine = \"docs-fixture\"\n```\n")
   await write(root, "changeset.json", "{}")
   await write(
     root,
@@ -123,7 +163,31 @@ const fixture = async (): Promise<string> => {
   await write(root, "version.txt", "old")
   for (
     const [name, body] of [
-      ["tsc", "#!/bin/sh\nexit 0\n"],
+      [
+        "tsc",
+        // The block file is the last argument. A block that names the nested
+        // package (`docs-fixture`) has to sit below `docs/`, every other block
+        // below the root package, or the compiler could not resolve a bare
+        // specifier the block imports. Tool runs execute in a scratch copy, so
+        // the check lives in the fake rather than in a file the test reads back.
+        [
+          "#!/bin/sh",
+          "for last; do :; done",
+          "case \"$*\" in *engine.ts*) echo \"fake tsc: context file compiled as a block: $*\" >&2; exit 1 ;; esac",
+          "case \"$last\" in",
+          "  docs/node_modules/.cache/smithers-build/markdown-*/src/run.ts)",
+          "    dir=$(dirname \"$(dirname \"$last\")\")",
+          "    grep -q 'export const greet' \"$dir/greeting.ts\" && grep -q 'export const twice' \"$dir/greeting.ts\" &&",
+          "      grep -q docs-fixture \"$dir/engine.ts\" && ! grep -rq 'return greet' \"$dir\" && exit 0",
+          "    echo \"fake tsc: tutorial scratch files wrong in $dir\" >&2; exit 1 ;;",
+          "  docs/node_modules/.cache/smithers-build/markdown-*/block-0.ts) grep -q docs-fixture \"$last\" && exit 0 ;;",
+          "  node_modules/.cache/smithers-build/markdown-*/block-0.ts) grep -q docs-fixture \"$last\" || exit 0 ;;",
+          "esac",
+          "echo \"fake tsc: block outside its package: $last\" >&2",
+          "exit 1",
+          ""
+        ].join("\n")
+      ],
       ["size-limit", "#!/bin/sh\nexit 0\n"],
       ["changeset", "#!/bin/sh\nprintf next > version.txt\n"]
     ] as const
@@ -193,6 +257,22 @@ describe("Node lane package execution", () => {
     expect(packHit.exitCode).toBe(0)
     expect(packHit.logs).toContain("//:pack  hit")
     expect((await Fs.stat(tarball)).isFile()).toBe(true)
+  })
+
+  it("compiles Markdown blocks from inside the declaring package", async () => {
+    const root = await fixture()
+    const result = await serve(root, ["//docs:markdown"])
+    expect(result.logs).not.toContain("block outside its package")
+    expect(result.exitCode).toBe(0)
+    expect(result.logs).toContain("checked 1 fenced code block")
+  })
+
+  it("concatenates titled Markdown fences into files, writes context pages beside them, and skips fragments", async () => {
+    const root = await fixture()
+    const result = await serve(root, ["//docs:tutorial"])
+    expect(result.logs).not.toContain("fake tsc")
+    expect(result.exitCode).toBe(0)
+    expect(result.logs).toContain("checked 4 fenced code block(s): 0 standalone, 2 file(s), 1 fragment(s) skipped")
   })
 
   it("checks Markdown blocks and size budgets with cache hits", async () => {

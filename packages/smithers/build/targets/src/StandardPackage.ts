@@ -6,6 +6,7 @@
 import { DocsParity } from "./DocsParity.ts"
 import { Dprint } from "./Dprint.ts"
 import { EsLint } from "./EsLint.ts"
+import { Filegroup } from "./Filegroup.ts"
 import * as Input from "./Input.ts"
 import { entrypoint, NodeTest } from "./NodeTest.ts"
 import type * as PackageManager from "./PackageManager.ts"
@@ -71,11 +72,18 @@ export interface StandardTargets {
   readonly fmt: ReturnType<typeof Dprint>
   readonly docs: ReturnType<typeof DocsParity>
   readonly circular: ReturnType<typeof NodeTest>
+  /**
+   * The package's documentation as a file group: `docs/**\/*.md`, the README,
+   * and `package.json`. It joins no verb; a generator elsewhere in the
+   * workspace that reads a package's docs lists this target in its `data`,
+   * which is the one way an input glob may reach across a package boundary.
+   */
+  readonly docsFiles: ReturnType<typeof Filegroup>
 }
 
 /**
  * Expands one conventional package into `lib`, `check`, `test`, `lint`,
- * `fmt`, and `docs` targets.
+ * `fmt`, `docs`, `circular`, and `docsFiles` targets.
  *
  * Defaults follow the Smithers repository layout: sources in `src`, tests in
  * `test`, the package `build` program over the package `tsconfig.json`, the
@@ -93,8 +101,12 @@ export interface StandardTargets {
  * workspace dependencies through their built declarations. `docs` is the
  * documentation-parity target over the package README. It participates in
  * the `docs` verb alone; the aggregate `ci` command plans that verb alongside
- * build, test, and lint. Callers can override any shared input without
- * replacing the macro.
+ * build, test, and lint. `docsFiles` is the package's documentation named as
+ * a `Filegroup` (`docs/**\/*.md`, the README, `package.json`); it joins no
+ * verb and exists so a generator in another package, such as the site's API
+ * page sync, can depend on the docs by label instead of through a glob that
+ * package scoping expands to nothing. Callers can override any shared input
+ * without replacing the macro.
  *
  * @category macros
  * @since 0.1.0
@@ -167,9 +179,14 @@ export const StandardPackage = (options: Options): StandardTargets => {
     fix: false,
     cwd
   })
+  const readme = options.readme ?? Input.file("README.md")
   const docs = DocsParity({
-    readme: options.readme ?? Input.file("README.md"),
+    readme,
     deps: [],
+    cwd
+  })
+  const docsFiles = Filegroup({
+    srcs: [Input.glob("docs/**/*.md"), readme, Input.file("package.json")],
     cwd
   })
   const circular = NodeTest({
@@ -181,5 +198,5 @@ export const StandardPackage = (options: Options): StandardTargets => {
     deps: [],
     cwd
   })
-  return { lib, check, test, lint, fmt, docs, circular }
+  return { lib, check, test, lint, fmt, docs, circular, docsFiles }
 }

@@ -10,6 +10,7 @@
  *
  * @since 0.1.0
  */
+import * as Exec from "@smthrs/targets/Exec"
 import * as NodeChildProcess from "node:child_process"
 import { createHash, randomBytes } from "node:crypto"
 import * as NodeFs from "node:fs"
@@ -78,14 +79,20 @@ export const digestFileBytes = async (path: string): Promise<string> => (await d
  * Searches the host PATH for one executable, returning its absolute path or
  * undefined.
  *
+ * The lookup is the exec boundary's own: plan-time tool resolution and the
+ * spawn must agree about which file a bare command name is, or a Windows host
+ * refuses a manager the spawn would have found. `options.platform` is there so
+ * a POSIX host can ask for the Windows answer.
+ *
  * @category tools
  * @since 0.1.0
  */
 export const findOnPath = (
   name: string,
-  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
+  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment(),
+  options?: { readonly platform?: NodeJS.Platform | undefined }
 ): string | undefined => {
-  return findAllOnPath(name, environment)[0]
+  return findAllOnPath(name, environment, options)[0]
 }
 
 /**
@@ -96,22 +103,9 @@ export const findOnPath = (
  */
 export const findAllOnPath = (
   name: string,
-  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
-): ReadonlyArray<string> => {
-  const found: Array<string> = []
-  const environmentPath = environment["PATH"] ?? ""
-  for (const entry of environmentPath.split(NodePath.delimiter)) {
-    if (entry === "") continue
-    const candidate = NodePath.join(entry, name)
-    try {
-      NodeFs.accessSync(candidate, NodeFs.constants.X_OK)
-      if (NodeFs.statSync(candidate).isFile() && !found.includes(candidate)) found.push(candidate)
-    } catch {
-      continue
-    }
-  }
-  return found
-}
+  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment(),
+  options?: { readonly platform?: NodeJS.Platform | undefined }
+): ReadonlyArray<string> => Exec.findAllOnPath(name, environment, options)
 
 /**
  * One completed `--version` probe: bounded output plus the exit code.
@@ -157,6 +151,11 @@ export const probeVersion = (
 /**
  * Runs one bounded tool identity/readiness command.
  *
+ * The probe goes through the exec boundary's spawn shape, so a resolved
+ * Windows batch shim is identified the same way it is run. Probing
+ * `pnpm.cmd` directly would throw: Node has refused to spawn `.bat` and
+ * `.cmd` without a shell since the v18 hardening.
+ *
  * @category tools
  * @since 0.1.0
  */
@@ -169,12 +168,17 @@ export const probeCommand = (
   }
 ): Promise<Probe> =>
   new Promise((resolve) => {
+    const shape = Exec.spawnShape(
+      [path, ...args],
+      options?.environment === undefined ? {} : { env: options.environment }
+    )
     NodeChildProcess.execFile(
-      path,
-      [...args],
+      shape.file,
+      [...shape.args],
       {
         timeout: 10_000,
         maxBuffer: 1 << 20,
+        ...(shape.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
         ...(options?.environment === undefined ? {} : { env: { ...options.environment } })
       },
