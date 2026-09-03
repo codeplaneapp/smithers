@@ -1,0 +1,239 @@
+---
+title: "Intro"
+description: "Get started with Smithers"
+slug: "docs/intro"
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components"
+
+Smithers is a durable workflow framework where you configure workflows using simple TypeScript configuration files. It's available as a web app, a native app, and an agent skill that plugs into the agents you already use.
+
+<img class="light:sl-hidden" src="/media/ui-dark.gif" alt="The Smithers web and native app in dark mode showing a workflow run" />
+<img class="dark:sl-hidden" src="/media/ui-light.gif" alt="The Smithers web and native app in light mode showing a workflow run" />
+
+Let's get started.
+
+## Create your first workflow
+
+Smithers workflows live with your code. They are reviewed, versioned, and tested with it. Start with a small workflow that reads a request, does the work, and checks its result.
+
+<Tabs>
+  <TabItem label="Ask your agent">
+
+  ```text
+  Use Smithers to create a workflow named change. It should read the request,
+  make a focused change, run the relevant tests, and report what passed.
+  ```
+
+  </TabItem>
+  <TabItem label="Code">
+
+  ```md
+  ---
+  name: "change"
+  description: "Make and verify a focused code change."
+  model: anthropic:claude-sonnet-4-5
+  ---
+
+  # Change
+
+  ## Read the request
+
+  Summarize what was asked for and identify the files involved.
+
+  ## Do the work
+
+  Make the smallest complete change.
+
+  ## Check the work
+
+  Run the relevant tests and report what passed.
+  ```
+
+  </TabItem>
+</Tabs>
+
+Run it from your project:
+
+```bash
+smthrs up change
+```
+
+Every step is journaled as it finishes. If the process or machine stops, Smithers resumes from the last recorded result instead of starting the agent's work again.
+
+## Add a dependable test loop
+
+Smithers can combine ordinary test commands with agentic review. Inputs are content-addressed, so unchanged tests reuse their recorded result and changed files rerun only the work that depends on them.
+
+<Tabs>
+  <TabItem label="Ask your agent">
+
+  ```text
+  Add a Smithers target for this app's React files. Run ESLint when those files
+  change, and add a second check that rejects useEffect. Make the source
+  filegroup an explicit dependency of both checks.
+  ```
+
+  </TabItem>
+  <TabItem label="Code">
+
+  ```ts
+  import { Smithers as S } from "smithers"
+
+  const reactFiles = S.Filegroup({
+    srcs: S.glob(["apps/ui/src/**/*.tsx"])
+  })
+
+  const eslint = S.Shell.Test({
+    bin: S.NodeModule.Bin("eslint"),
+    args: ["apps/ui/src"],
+    data: [reactFiles]
+  })
+
+  const noUseEffect = S.Shell.Test({
+    command: "! grep -rl useEffect apps/ui/src --include='*.tsx'",
+    data: [reactFiles]
+  })
+
+  export const Package = S.Package({
+    targets: { reactFiles, eslint, noUseEffect }
+  })
+  ```
+
+  </TabItem>
+</Tabs>
+
+The source filegroup connects both checks to the files they inspect. Smithers reruns them when those inputs change and otherwise returns the recorded result.
+
+## Add asynchronous code review
+
+Smithers treats code review as a purely asynchronous process. It flags code that has not been reviewed, as well as code that depends on other unreviewed code. Code can also be explicitly marked as not requiring review.
+
+Smithers ships with opinionated review workflows, but it is easy to customize your own. In this example, a capable Claude agent understands each new issue or pull request and marks important work before a cheaper Luna agent labels it and routes it to the best reviewer. Bugs require a minimal reproduction. Maintainer comments can update the skills used by future reviews. A pull request becomes ready for review only when every required step and dependency review has completed.
+
+<Tabs>
+  <TabItem label="Ask your agent">
+
+  ```text
+  Add an asynchronous GitHub review workflow. Use Claude Fable through
+  claude -p to understand new issues, pull requests, and maintainer comments.
+  It must mark important work before a cheap Luna agent labels and routes it.
+  Require a minimal reproduction for bugs, let maintainer feedback improve our
+  review skills, and mark a PR ready only after its workflows and dependencies
+  have been reviewed. Allow an explicit no-review exemption.
+  ```
+
+  </TabItem>
+  <TabItem label="Code">
+
+  ```ts
+  import { Smithers as S } from "smithers"
+
+  const understand = S.Agent.ClaudeCode({
+    command: "claude -p",
+    model: "claude-fable-5-1"
+  })
+
+  const route = S.Agent.Codex({ model: "gpt-5.6-luna" })
+
+  export const review = S.GitHub.CodeReview({
+    events: ["issues.opened", "pull_request.opened", "issue_comment.created"],
+    process: S.Agent.Task({
+      agent: understand,
+      prompt: "Understand this work and mark it important when warranted."
+    }),
+    route: S.Agent.Classify({
+      agent: route,
+      after: "process",
+      labels: ["bug", "feature", "docs", "dependencies"],
+      reviewers: S.GitHub.reviewers()
+    }),
+    when: {
+      bug: S.Workflow.run("minimal-reproduction", {
+        unless: S.GitHub.hasMinimalReproduction()
+      }),
+      maintainerComment: S.Agent.Task({
+        agent: understand,
+        prompt: "Apply the feedback and update review skills when appropriate.",
+        capabilities: ["workflows:run", "skills:write"]
+      })
+    },
+    readyForReview: S.Gate.all([
+      S.GitHub.requiredWorkflowsPassed(),
+      S.GitHub.dependenciesReviewed(),
+      S.GitHub.reviewedOrExempt()
+    ])
+  })
+  ```
+
+  </TabItem>
+</Tabs>
+
+## Keep agent instructions current
+
+Good wikis, workflows, and skills can make an agent faster, prevent common mistakes, and make tasks cheaper. But these artifacts drift as the codebase changes.
+
+Smithers treats them as files with dependencies. Whenever those dependencies change, Smithers knows the files must be reconsidered alongside the rest of your build and test graph. Instead of hardcoding an `AGENTS.md` that will eventually describe an outdated package structure, generate it from the packages themselves.
+
+<Tabs>
+  <TabItem label="Ask your agent">
+
+  ```text
+  Generate our root AGENTS.md with Smithers. It should explain every package,
+  what it owns, and which packages it depends on. Make it depend on a filegroup
+  containing packages/* so Smithers reconsiders the document whenever the
+  package structure changes.
+  ```
+
+  </TabItem>
+  <TabItem label="Code">
+
+  ```ts
+  import { Smithers as S } from "smithers"
+
+  const packages = S.Filegroup({
+    srcs: S.glob(["packages/*/**"])
+  })
+
+  const agentsMd = S.Agent.Diff({
+    agent: S.Agents.default,
+    prompt: S.file("//prompts/generate-agents-md.md"),
+    data: [packages],
+    changes: ["AGENTS.md"]
+  })
+
+  export const Package = S.Package({
+    targets: { packages, agentsMd }
+  })
+  ```
+
+  </TabItem>
+</Tabs>
+
+The `packages` filegroup tracks every package under `packages/*`. Its output is an input to `agentsMd`, so adding, removing, or changing a package invalidates the previous result. The instructions agents receive stay connected to the code they describe instead of depending on someone remembering to update them.
+
+## Use Smithers
+
+Once your workflows exist, your agent can run them for you. You can also use the same commands directly in a terminal.
+
+<Tabs>
+  <TabItem label="Ask your agent">
+
+  ```text
+  List the Smithers workflows in this project, run the relevant workflow for
+  my current change, and show me its status when it finishes.
+  ```
+
+  </TabItem>
+  <TabItem label="Code">
+
+  ```bash
+  smthrs ls
+  smthrs up change
+  smthrs ps
+  ```
+
+  </TabItem>
+</Tabs>
+
+You now have workflows that make agents faster, safer, and cheaper—and a durable record of what they did. Open the web or native app to inspect runs, approvals, results, and the dependency graph as the work progresses.

@@ -1,0 +1,29 @@
+---
+import Base from "../layouts/Base.astro"
+import HeroStage from "../components/HeroStage.astro"
+
+/*
+ * The whole page. Nothing below the hero: the tape is the pitch.
+ */
+const title = "Smithers"
+const description =
+  "Build smart workflows for your codebase. Enable agents to work smarter, faster, and cheaper."
+---
+
+<Base title={title} description={description} header={false} footer={false}>
+  <main class="wrap hero">
+    <h1>The agentic workflow framework</h1>
+    <p class="sub">
+      Build smart workflows for your codebase. Enable agents to work smarter, faster, and cheaper.
+    </p>
+    <div class="actions">
+      <a class="btn primary" href="https://flows.smithers.sh">
+        Try Smithers
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 8h9m-4-4 4 4-4 4" /></svg>
+      </a>
+      <a class="btn" href="/docs/">Documentation</a>
+      <a class="btn ghost" href="/demo/">Get a demo</a>
+    </div>
+  </main>
+  <HeroStage />
+</Base>

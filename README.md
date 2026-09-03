@@ -183,8 +183,8 @@ and the browser example is bundled by a real bundler.
 | `@smthrs/memory` | Durable cross-run facts, history, notes, and recall |
 | `@smthrs/observability` | OTLP wiring, `JournalLogger`, metrics |
 
-`docs/pages/package-structure.mdx` lists every package, including the private
-build and testing packages this table omits.
+`apps/site/src/content/docs` lists every package, including the private build
+and testing packages this table omits.
 
 ## Compatibility
 
@@ -199,8 +199,11 @@ Storage in rc.0 is local SQLite only. PostgreSQL and PGlite are unsupported:
 
 ## Documentation
 
-Full documentation lives at [smithers.sh](https://smithers.sh). The pages are
-under [`docs/pages`](docs/pages); `pnpm exec vocs dev` serves the site locally.
+Full documentation lives at [smithers.sh](https://smithers.sh), an Astro site
+under [`apps/site`](apps/site); `pnpm --filter @smithers/site dev` serves it
+locally. The page tree under
+[`apps/site/src/content/docs`](apps/site/src/content/docs) is the documentation
+source.
 
 `CONTRIBUTING.md` covers the build system, the target graph, and the gates.
 
