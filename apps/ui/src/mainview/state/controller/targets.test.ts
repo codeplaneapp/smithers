@@ -174,7 +174,7 @@ test("target.select reads the target's facts once through the graph route and ke
   const graph = {
     repoId: "repo-1",
     nodes: [
-      { label: "//:check", package: "//", name: "check", rule: "Shell.Test", kinds: ["test"], private: false, plan: { cacheable: true, key: "k".repeat(64) }, source: { file: "BUILD.ts", line: 4 } },
+      { label: "//:check", package: "//", name: "check", rule: "Shell.Test", kinds: ["test"], private: false, plan: { cacheable: true, key: "k".repeat(64) }, source: { file: "legacy declaration", line: 4 } },
       { label: "//:lint", package: "//", name: "lint", rule: "Shell.Test", kinds: ["lint"], private: false }
     ],
     edges: [{ from: "//:check", to: "//:lint", kind: "deps" }],
@@ -189,7 +189,7 @@ test("target.select reads the target's facts once through the graph route and ke
     status: "done",
     deps: ["//:lint"],
     rdeps: [],
-    node: { source: { file: "BUILD.ts", line: 4 }, plan: { cacheable: true } }
+    node: { source: { file: "legacy declaration", line: 4 }, plan: { cacheable: true } }
   })
   // A second selection of the same label is a view change only — no second read.
   await controller.selectTarget("repo-1", "//:check")
@@ -280,7 +280,7 @@ test("a star lands in app-starred-targets keyed by the repository path and mirro
       name: "repo",
       git: null,
       warnings: [],
-      smithers: { detected: true, workspaceFile: null, declarationFiles: ["BUILD.ts"], reason: "ok", workspaces: [{ path: ".", title: "repo" }] }
+      smithers: { detected: true, workspaceFile: null, declarationFiles: ["legacy declaration"], reason: "ok", workspaces: [{ path: ".", title: "repo" }] }
     }]
   })
   expect(controller.starTarget("repo-1", "//:lint", true)).toBeUndefined()
@@ -436,7 +436,7 @@ const openedRepo = (id: string, detected: boolean) => ({
     detected,
     workspaceFile: detected ? "WORKSPACE.ts" : null,
     declarationFiles: [],
-    reason: detected ? "1 workspace detected" : "no WORKSPACE.ts or smthrs BUILD.ts",
+    reason: detected ? "1 workspace detected" : "no WORKSPACE.ts or smthrs legacy declaration",
     workspaces: [{ path: ".", title: id }]
   }
 })
@@ -491,7 +491,7 @@ test("target.list names the missing repository, the missing workspace, or loads 
   const controller = createTargetsController(ctx, { nextOrdinal: () => 1, loadRepos: async () => {}, runs: { attach: () => () => {}, dispose: () => {} } })
   expect(await controller.listTargets()).toBe("Open a repository first — there are no targets to list.")
   store.dispatch({ type: "repos.loaded", actor: "system", repos: [openedRepo("plain", false)] })
-  expect(await controller.listTargets()).toBe("acme/plain has no Smithers workspace (no WORKSPACE.ts or smthrs BUILD.ts).")
+  expect(await controller.listTargets()).toBe("acme/plain has no Smithers workspace (no WORKSPACE.ts or smthrs legacy declaration).")
   expect(await controller.listTargets("nope")).toBe("No open repository has id nope.")
   store.dispatch({ type: "repos.loaded", actor: "system", repos: [openedRepo("plain", false), openedRepo("built", true)] })
   // "acme/built" sorts before "acme/plain": the store names it active when both load at once.

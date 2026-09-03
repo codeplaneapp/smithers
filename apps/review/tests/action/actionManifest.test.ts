@@ -29,7 +29,7 @@ describe("review action manifest", () => {
   test("pins bun and node to the runtimes the workspace gates run on", () => {
     // The action installs this repository's workspace and then runs its
     // TypeScript sources directly, so its interpreters are the workspace's own
-    // (BUILD.ts: Node 22.19.0, Bun 1.3.14). A looser or older pin runs the
+    // (legacy declaration: Node 22.19.0, Bun 1.3.14). A looser or older pin runs the
     // review on a runtime no gate in this repository ever exercised — the Node
     // resolution contract in tests/nodeRuntimeResolution.test.ts is exactly the
     // kind of thing that differs between them.

@@ -181,7 +181,7 @@ export const declaredOutputs = (target: string, value: DeclaredOutputs): Declare
 export interface KindView {
   readonly attrs: unknown
   readonly dependencies: ReadonlyArray<AnyTarget>
-  /** Workspace targets selected without importing their BUILD.ts modules. */
+  /** Workspace targets selected without importing their legacy declaration modules. */
   readonly dependencySelectors: ReadonlyArray<DependencySelector>
   readonly inputs: ReadonlyArray<Input.Declared>
   readonly cacheable: boolean
@@ -232,7 +232,7 @@ export interface Metadata {
 }
 
 /**
- * A Flow returned by a target invocation and exported from a BUILD.ts file.
+ * A Flow returned by a target invocation and exported from a legacy declaration file.
  *
  * @category models
  * @since 0.1.0
@@ -265,8 +265,8 @@ export const Target = Schema.declare<AnyTarget>(
   (value): value is AnyTarget => isTarget(value),
   {
     identifier: "smithers-build/Target",
-    title: "BUILD.ts target reference",
-    description: "A direct import of another BUILD.ts target"
+    title: "legacy declaration target reference",
+    description: "A direct import of another legacy declaration target"
   }
 )
 
@@ -276,7 +276,7 @@ const dependencyTargetPattern = /^[A-Za-z0-9_@+=,.-]+$/
 /**
  * A graph dependency selected from every package below one workspace subtree.
  *
- * This is the graph-native form for aggregate BUILD.ts targets whose
+ * This is the graph-native form for aggregate legacy declaration targets whose
  * dependencies include synthesized packages and therefore cannot be imported
  * as target objects. Selection is intentionally narrow: a recursive package
  * pattern plus one exact exported target name.
@@ -385,6 +385,14 @@ export const notImplemented = (
   NotImplementedAction.call({ target })
 
 /**
+ * Shared placeholder for catalog rules executed by the package executor.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const catalogNotImplemented = () => notImplemented("catalog target")
+
+/**
  * Declares one tool run through the shared {@link Exec.Exec} action.
  *
  * Target implementations call this in their pure plan-time bodies to record an
@@ -398,7 +406,7 @@ export const runTool = (
 ): Node.Node<Exec.Result, Exec.ExecError, Action.Requirement<"smithers-build/exec">> => Exec.Exec.call(payload)
 
 /**
- * Checks whether a value is a BUILD.ts target.
+ * Checks whether a value is a legacy declaration target.
  *
  * @category guards
  * @since 0.1.0
@@ -622,8 +630,8 @@ export interface Definition<
  * Declaration-site context passed to a target implementation.
  *
  * `packageDirectory` is the absolute directory containing the declaring
- * BUILD.ts file. It is undefined only when a target was constructed outside a
- * BUILD.ts module.
+ * legacy declaration file. It is undefined only when a target was constructed outside a
+ * legacy declaration module.
  *
  * @category models
  * @since 0.1.0
@@ -898,7 +906,7 @@ const freezeView = (view: KindView): KindView => {
 }
 
 /**
- * The BUILD.ts call site a declaration was written at.
+ * The legacy declaration call site a declaration was written at.
  *
  * `path` alone identifies the declaring package. `line` and `column` are
  * reported back to the author when a declaration is rejected, and are absent
@@ -924,11 +932,11 @@ const sourceSite = (): SourceSite | undefined => {
     } catch {
       continue
     }
-    // BUILD.ts is the legacy authoring surface; PACKAGE.ts and WORKSPACE.ts
-    // are the routed one. The site is diagnostic context only — package-mode
+    // legacy declaration is the legacy authoring surface; PACKAGE.ts and WORKSPACE.ts
+    // are the routed one. The site is diagnostic context only — build-system
     // labels come exclusively from the package index, never from this stack.
     const basename = NodePath.basename(file)
-    if (basename !== "BUILD.ts" && basename !== "PACKAGE.ts" && basename !== "WORKSPACE.ts") continue
+    if (basename !== "PACKAGE.ts" && basename !== "WORKSPACE.ts") continue
     const positive = (value: unknown): number | undefined =>
       typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined
     return { path: NodePath.resolve(file), line: positive(site.lineNumber), column: positive(site.columnNumber) }
@@ -1078,7 +1086,7 @@ export const make = <
   })).digest("hex")
   const definition = (attrsInput: Attrs["~type.make.in"]) => {
     // Resolved before the attrs are constructed so a rejection can name the
-    // BUILD.ts line the author has to edit.
+    // legacy declaration line the author has to edit.
     const site = sourceSite()
     let attrs: Attrs["Type"]
     try {

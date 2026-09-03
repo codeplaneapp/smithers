@@ -14,7 +14,7 @@ import * as Target from "./Target.ts"
 
 /**
  * Attributes for {@link JsrPublish}. `dryRun` defaults to true, so a real
- * publish is always an explicit opt-out in BUILD.ts.
+ * publish is always an explicit opt-out in legacy declaration.
  *
  * @category schemas
  * @since 0.1.0

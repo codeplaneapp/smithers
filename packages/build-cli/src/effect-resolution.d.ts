@@ -25,7 +25,7 @@ export declare const installEffectResolution: () => void
 export declare const importDeclarationModule: (url: string, parentURL: string) => Promise<unknown>
 
 /**
- * Marks one admitted BUILD.ts URL for ES-module evaluation.
+ * Marks one admitted declaration URL for ES-module evaluation.
  *
  * @category loading
  * @since 0.1.0

@@ -3,7 +3,7 @@
  *
  * `//:newPackage` writes the smallest tree a workspace default target can pick
  * up: a manifest, a tsconfig, one source file, one test, and a README. It
- * deliberately writes NO `BUILD.ts`. A standard package needs none — the root
+ * deliberately writes NO `legacy declaration`. A standard package needs none — the root
  * default target synthesizes its `lib`, `test`, `lint`, and manifest targets from
  * the directory alone — and scaffolding one would opt the new package out of
  * exactly the defaults it was created to follow.
@@ -205,7 +205,7 @@ export const boilerplate = (
     ],
     [
       "README.md",
-      `# ${name}\n\nCreated by \`smithers-build run //:newPackage --name ${name}\`.\n\nThis package has no BUILD.ts: the workspace default target synthesizes its\ntargets from this directory.\n`
+      `# ${name}\n\nCreated by \`smithers-build run //:newPackage --name ${name}\`.\n\nThis package has no legacy declaration: the workspace default target synthesizes its\ntargets from this directory.\n`
     ]
   ]
 }
@@ -439,7 +439,7 @@ export type Attrs = typeof Attrs.Type
  * ```
  *
  * A scoped name maps to an unscoped directory, so `@smthrs/widget` creates
- * `packages/widget`. Nothing in the created tree is a `BUILD.ts`; the workspace
+ * `packages/widget`. Nothing in the created tree is a `legacy declaration`; the workspace
  * default target takes it from there.
  *
  * @category targets

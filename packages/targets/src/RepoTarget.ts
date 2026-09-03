@@ -2,7 +2,7 @@
  * Cross-repository target declarations for opaque local Smithers workspaces.
  *
  * The declaration records a child repository and an absolute child label.
- * The package-mode loader resolves its kinds and refusal state by querying the
+ * The build-system loader resolves its kinds and refusal state by querying the
  * child CLI; execution remains a child CLI process rather than merging graphs.
  *
  * @since 0.1.0

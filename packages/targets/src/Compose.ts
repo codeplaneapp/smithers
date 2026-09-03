@@ -422,7 +422,7 @@ const walkOutputDirectory = async (
  *
  * The expansion is not package scoped. `changes` is a write set, not an input
  * glob: a root declaration that names `packages/cli/generated.ts` owns that
- * path even though `packages/cli/BUILD.ts` makes the directory its own
+ * path even though `packages/cli/legacy declaration` makes the directory its own
  * package. Scoping it would expand to nothing, so the check would snapshot
  * nothing, compare nothing, and leave the generator's rewrite in the tree
  * while reporting success.
@@ -627,7 +627,7 @@ const restoreOutputs = async (
  * restores each one before it settles, so a `lint` run leaves the working tree
  * as it found it, whether the generator succeeded, drifted, or failed. A
  * generator that writes outside its declared `changes` is outside the
- * contract, exactly as it is under package mode's enforced write set.
+ * contract, exactly as it is under the build system's enforced write set.
  *
  * @category effects
  * @since 0.1.0
@@ -728,14 +728,14 @@ const generateDefinition = Target.make("Generate", {
   attrs: GenerateAttrs,
   kinds: ["run", "lint"],
   // The three failures this target reports: the generator exited non-zero, a
-  // declared output drifted, or the declaration is one no BUILD.ts workspace
+  // declared output drifted, or the declaration is one no legacy declaration workspace
   // can run. Declaring them keeps a drift report a target failure rather than
   // a flow body failing outside its schema.
   error: Schema.Union([Exec.ExecError, GeneratedFile.DriftError, Target.NotImplemented]),
   // The script and bin forms plan the shared exec node: the generator runs
   // under the workspace runtime (script) or the referenced tool (bin), and
   // the package executor brackets the spawn with write-set enforcement in
-  // write mode or a scratch-copy drift check in check mode. A BUILD.ts
+  // write mode or a scratch-copy drift check in check mode. A legacy declaration
   // workspace has no package executor to bracket it, so `check` plans
   // {@link GenerateCheck} instead: the same spawn, with the declared outputs
   // compared and restored around it. The emit form plans no process at all —
@@ -756,7 +756,7 @@ const generateDefinition = Target.make("Generate", {
     const changes = attrs.changes ?? []
     if (attrs.mode !== "check") {
       return changes.length === 0
-        ? Target.notImplemented("Generate stdout form in a BUILD.ts workspace")
+        ? Target.notImplemented("Generate stdout form in a legacy declaration workspace")
         : Target.runTool(payload)
     }
     return changes.length === 0
@@ -768,8 +768,8 @@ const generateDefinition = Target.make("Generate", {
 /**
  * Refuses a process form that names none of the paths it writes.
  *
- * `changes` and `stdout` are the write set: package mode confines the spawn to
- * it and reverts everything else, and a BUILD.ts workspace compares and
+ * `changes` and `stdout` are the write set: the build system confines the spawn to
+ * it and reverts everything else, and a legacy declaration workspace compares and
  * restores exactly the `changes` paths under the `lint` verb. A script, bin,
  * or command form that declares neither is confined by nothing, so it is
  * rejected where it is written rather than checked against an empty set. The
@@ -1192,7 +1192,7 @@ const testDefinition = Target.make("Test", {
     Action.Requirement<"smithers-build/not-implemented"> | Action.Requirement<"smithers-build/files-difference">
   > => {
     if (attrs.expect._tag === "FilesDigest") {
-      return Target.notImplemented("Test: Files.digest comparison is executed by package mode")
+      return Target.notImplemented("Test: Files.digest comparison is executed by the build system")
     }
     if (attrs.toBe !== "empty") {
       return Target.notImplemented("Test: a file-set difference can only compare to empty")

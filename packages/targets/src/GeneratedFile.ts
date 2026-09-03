@@ -1,6 +1,6 @@
 /**
  * The shared write-file and check-file actions used by every target that
- * generates a checked-in file from BUILD.ts attrs.
+ * generates a checked-in file from legacy declaration attrs.
  *
  * This module used to also carry `PackageJsonGen`, a target that rendered a
  * manifest out of a fixed attrs struct. {@link PackageJson.PackageJson}

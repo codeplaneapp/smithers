@@ -1,5 +1,5 @@
 /**
- * `S.Fetch` through the package-mode CLI: a PACKAGE.ts that declares a
+ * `S.Fetch` through the build-system CLI: a PACKAGE.ts that declares a
  * digest-pinned remote file (mirroring force's `//data:schemaPinned`) loads,
  * plans, downloads through a local HTTP fixture, verifies its sha256, and
  * restores its declared output from CAS. The WORKSPACE.ts carries the split
@@ -475,10 +475,10 @@ describe("fetch failures name the endpoint without its credentials", () => {
   })
 })
 
-describe("the declared remote cache reaches package mode", () => {
+describe("the declared remote cache reaches the build system", () => {
   /**
    * `WorkspaceDeclaration.CacheDeclaration` schema-validates `remote` as a real
-   * `RemoteCache`, and package mode used to drop it: both `openCache` calls
+   * `RemoteCache`, and the build system used to drop it: both `openCache` calls
    * passed no endpoint and no credentials, so a workspace declaring a shared
    * cache ran local-only with no warning, no refusal, and nothing in the plan.
    */
@@ -491,8 +491,8 @@ describe("the declared remote cache reaches package mode", () => {
 
   /**
    * Resolving the credentials is half the contract; withholding them is the
-   * other half. `Executor` passes `credentialEnvNames(...)` to every BUILD-mode
-   * target spawn, and package mode resolved the same credentials and then
+   * other half. `Executor` passes `credentialEnvNames(...)` to every old-executor
+   * target spawn, and the build system resolved the same credentials and then
    * passed nothing, so a `WORKSPACE.ts` name such as `FIXTURE_CACHE_READ_TOKEN`
    * stayed readable by every tool the graph ran.
    */
@@ -526,14 +526,14 @@ export const Package = S.Package({ targets: { credentialProbe } })
   )
 })
 
-describe("package-mode failures report why, not that", () => {
+describe("build-system failures report why, not that", () => {
   /**
    * `SchemaError` and the `Data.TaggedError` family define `message` as a
    * prototype accessor. `Diagnostic.message` reads own data properties only —
    * the right posture at a boundary handed an arbitrary value — so every such
    * failure rendered as the caller's fallback and the reason was lost.
    * `Diagnostic.describe` exists for exactly that, and had one call site in the
-   * whole package: BUILD mode's executor.
+   * whole package: the old executor's executor.
    */
   it("carries an Effect schema failure out of a declaration module", async () => {
     const root = await temporaryWorkspace()

@@ -1,15 +1,15 @@
 /**
- * Declared JavaScript runtime for BUILD.ts targets.
+ * Declared JavaScript runtime for legacy declaration targets.
  *
  * A runtime declaration names which interpreter a workspace runs its tools
  * under, and the version it requires. It is inert data: the constructors
- * perform no I/O, so BUILD.ts evaluation stays pure.
+ * perform no I/O, so legacy declaration evaluation stays pure.
  *
  * The declaration exists because the interpreter is key material. `node -e`
  * and `bun -e` do not evaluate the same program, and two Node versions do not
  * produce the same `tsc` output. Before this module every target spelled `node`
  * into its own argv, which made the interpreter an undeclared ambient fact
- * that no key covered and no BUILD.ts file could change.
+ * that no key covered and no legacy declaration file could change.
  *
  * The declaration is a discriminated union, one variant per supported
  * interpreter, discriminated by `name`. Each variant hardcodes its own name and
@@ -57,7 +57,7 @@ export const maximumExecutableLength = 256
  *
  * The single entry matches the root `package.json` `engines.node`. A workspace
  * that wants another floor adds it here, which is the point: the set of
- * requirements a BUILD.ts file may write is reviewed, not free text.
+ * requirements a legacy declaration file may write is reviewed, not free text.
  *
  * @category schemas
  * @since 0.1.0
@@ -248,7 +248,7 @@ export const isBunDeclaration: (value: unknown) => value is BunDeclaration = Sch
 /**
  * Declares Node as the workspace runtime.
  *
- * The BUILD.ts form (`{ version: ">=22.19.0" }`, one of the reviewed
+ * The legacy declaration form (`{ version: ">=22.19.0" }`, one of the reviewed
  * {@link NodeVersion} requirements) keeps returning the classic
  * {@link NodeRuntime}. The WORKSPACE.ts forms — an exclusive
  * `{ manifest }` | `{ version }` union with a free-form version string —
@@ -337,7 +337,7 @@ export const Bun = (options: Options<BunVersion>): BunRuntime => {
     throw new Error(`unsupported Bun runtime requirement: ${version}`)
   }
   // PACKAGE.ts modules are transpiled rather than typechecked while loading.
-  // Preserve the reviewed BUILD.ts signature while admitting their exact
+  // Preserve the reviewed legacy declaration signature while admitting their exact
   // runtime pins as inert declarations, just as Node does.
   return BunDeclaration.make({ version, executable }) as never
 }

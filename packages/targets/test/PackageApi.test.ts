@@ -140,7 +140,7 @@ describe("S.Agents and S.Flags reference surfaces", () => {
 })
 
 describe("Runtime.Node and PackageManager.Yarn forms", () => {
-  it("keeps the BUILD.ts literal form and adds the exclusive union", () => {
+  it("keeps the legacy declaration literal form and adds the exclusive union", () => {
     const classic = Runtime.Node({ version: ">=22.19.0" })
     expect(Runtime.isRuntime(classic)).toBe(true)
     const pinned = Runtime.Node({ version: "26" })
@@ -280,5 +280,6 @@ describe("construct-only implementations", () => {
     // The plan-time body records the shared NotImplemented action; executing
     // it without a real implementation layer fails with the typed error.
     expect(Target.notImplemented("Shell.Run")).toBeDefined()
+    expect(Target.catalogNotImplemented()).toBeDefined()
   })
 })

@@ -1,10 +1,10 @@
 /**
- * Declared package manager for BUILD.ts targets.
+ * Declared package manager for legacy declaration targets.
  *
  * A package-manager declaration names which manager a workspace installs and
  * runs tools with, the version it requires, and the runtime that manager runs
  * under. It is inert data: the constructors validate and perform no I/O, so
- * BUILD.ts evaluation stays pure.
+ * legacy declaration evaluation stays pure.
  *
  * Before this module every target spelled `["pnpm", "exec", ...]` into its own
  * argv. That made the manager an undeclared constant of the target catalog: a
@@ -18,7 +18,7 @@
  * the versions the workspace supports, so a declaration that names one manager
  * and requires a version the workspace does not support does not typecheck.
  * The Bun variant additionally types its `runtime` as the Bun runtime, so a Bun
- * manager declared against a Node runtime is not a value a BUILD.ts file can
+ * manager declared against a Node runtime is not a value a legacy declaration file can
  * write. The variant list is deliberately short — pnpm and Bun are what this
  * workspace pins and exercises — and it grows the same way the version lists
  * do: by review.
@@ -63,9 +63,9 @@ export const maximumExecutableLength = 256
 /**
  * Schema for the pnpm versions this workspace supports.
  *
- * The single entry is the version the root BUILD.ts pins. A workspace that
+ * The single entry is the version the root legacy declaration pins. A workspace that
  * wants another pin adds it here, which is the point: the set of versions a
- * BUILD.ts file may write is reviewed, not free text.
+ * legacy declaration file may write is reviewed, not free text.
  *
  * @category schemas
  * @since 0.1.0
@@ -207,7 +207,7 @@ export interface PnpmWorkspaceOptions {
  * Two forms, one per era. The WORKSPACE.ts form mirrors {@link Yarn}:
  * `{ manifest, lockfile, version?, audit?, workspaces? }`, no `runtime` —
  * the Workspace declares the runtime once and the manager reads it from
- * there. The BUILD.ts form keeps `{ version, runtime }` for BUILD.ts users.
+ * there. The legacy declaration form keeps `{ version, runtime }` for legacy declaration users.
  *
  * @example
  * ```ts
@@ -255,7 +255,7 @@ export function Pnpm(
  *
  * Bun is its own runtime, so this constructor takes no separate version: the
  * manager version is the runtime version, and declaring them apart would let a
- * BUILD.ts file state two versions of one program.
+ * legacy declaration file state two versions of one program.
  *
  * @example
  * ```ts
@@ -295,7 +295,7 @@ export const YarnAudit = Schema.Struct({
 /**
  * Schema for the WORKSPACE.ts Yarn package-manager declaration.
  *
- * Unlike the BUILD.ts variants above, the Artsy workspace form pins the
+ * Unlike the legacy declaration variants above, the Artsy workspace form pins the
  * manager through the repository's own manifest and lockfile rather than an
  * enumerated version, so its identity is content, not a version literal.
  *

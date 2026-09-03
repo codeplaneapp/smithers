@@ -124,6 +124,7 @@ describe("Workspace sandbox options", () => {
       default: WorkspaceDeclaration.Sandbox.Docker({ image: "node:22" })
     })
     expect(Config.Workspace({ sandboxes }).sandboxes).toBe(sandboxes)
+    expect(() => Config.Workspace({ sandboxes: null as never })).toThrow(/S\.Sandboxes/)
     expect(() => Config.Workspace({ sandboxes: { default: "docker" } as never })).toThrow(/S\.Sandboxes/)
     expect(() => Config.Workspace({ sandbox: "always" as never })).toThrow(/sandbox/)
     expect(() => Config.Workspace({ sandbox: { network: "all" } as never })).toThrow(/sandbox/)

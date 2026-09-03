@@ -9,7 +9,7 @@
  * declared {@link Runtime}, the Rust install by {@link RustToolchain.install},
  * the target invocation by {@link PackageManager.exec} over the CLI verb.
  *
- * That is the whole point of the rewrite this module went through. A BUILD.ts
+ * That is the whole point of the rewrite this module went through. A legacy declaration
  * file that spells `run: "node --test scripts/pack-release.test.mjs"` has put a
  * gate outside the build graph: it is not planned, not keyed, not cached, not
  * addressable, and not runnable locally by the same name CI uses. Bazel's answer
@@ -175,7 +175,7 @@ export const maximumTimeoutMinutes = 360
  * the second one: the advisory bit is carried in an `include:` row beside the
  * runner label, and the job renders `continue-on-error: ${{ matrix.advisory }}`
  * once. Promoting a platform from advisory to required is then one boolean in
- * BUILD.ts, and {@link validateJobs} checks the promotion rather than trusting
+ * legacy declaration, and {@link validateJobs} checks the promotion rather than trusting
  * it.
  *
  * @category schemas
@@ -370,7 +370,7 @@ export type Attrs = typeof Attrs.Type
  * The pinned action references the generator emits.
  *
  * They are constants of the implementation, not attrs. An action reference is
- * an argv by another name: a BUILD.ts file that could name one could name any
+ * an argv by another name: a legacy declaration file that could name one could name any
  * program the runner will fetch and execute, which is the surface this module
  * exists to close.
  *
@@ -1329,12 +1329,12 @@ export const render = (attrs: Attrs): string => {
 }
 
 /**
- * Generates the GitHub Actions CI workflow from BUILD.ts attrs.
+ * Generates the GitHub Actions CI workflow from legacy declaration attrs.
  *
  * The workflow is a generated root file, on the same terms as `tsconfig.json`:
- * BUILD.ts is the only description of the pipeline, `write` renders it, and
+ * legacy declaration is the only description of the pipeline, `write` renders it, and
  * `check` — the default — fails on drift. A pipeline that lives in two places,
- * a BUILD.ts declaration and a hand-maintained YAML file, is two descriptions
+ * a legacy declaration declaration and a hand-maintained YAML file, is two descriptions
  * of one thing, free to disagree.
  *
  * Every step the workflow carries is derived, never authored. A job declares

@@ -57,7 +57,7 @@ const repo: Repo = {
   smithers: {
     detected: true,
     workspaceFile: "smithers.workspace.ts",
-    declarationFiles: ["BUILD.ts"],
+    declarationFiles: ["legacy declaration"],
     reason: "workspace file present",
     workspaces: [{ path: ".", title: "smithers" }]
   }

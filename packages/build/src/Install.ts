@@ -47,7 +47,7 @@
  *   belongs to the runtime rather than to a struct passed between steps.
  *
  * Two consequences follow. The flow no longer trampolines: the manager arrives
- * in the payload as a plan-time declaration from BUILD.ts, so one round records
+ * in the payload as a plan-time declaration from legacy declaration, so one round records
  * measure, exactly one fetch, and link. And the cross-round recheck is gone
  * with the second round, replaced by `verify`, which compares the host against
  * what the workspace declared rather than against an earlier measurement of the
@@ -277,7 +277,7 @@ export const Link = Action.make("smithers-build/install/link", {
 /**
  * The install payload.
  *
- * `manager` is the manager the workspace declared in BUILD.ts. It is a
+ * `manager` is the manager the workspace declared in legacy declaration. It is a
  * plan-time value, which is what lets one round select exactly one fetch
  * action; the previous design had to measure the manager first and hand off to
  * a second round to do the same job. The project root is the engine's working

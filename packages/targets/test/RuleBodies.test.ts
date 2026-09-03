@@ -381,6 +381,12 @@ describe("generated-file rules", () => {
   })
 
   it("PnpmWorkspace checks the checked-in file from the workspace root", () => {
+    const target = PnpmWorkspaceFile.PnpmWorkspace({
+      packageManager,
+      packages: ["packages/*"],
+      mode: "write"
+    })
+    expect((Target.metadata(target).forKind("lint").attrs as { mode: string }).mode).toBe("check")
     const call = plannedCalls(PnpmWorkspaceFile.PnpmWorkspace({
       packageManager,
       packages: ["packages/*"],
@@ -458,7 +464,7 @@ describe("Shell bodies", () => {
     expect(bare.slice(1)).toEqual(["x.ts"])
   })
 
-  it("carries the declared secrets and the package-mode timeout on every shell exec", () => {
+  it("carries the declared secrets and the build-system timeout on every shell exec", () => {
     const call = plannedCalls(S.Shell.Build({
       command: "true",
       outDirs: ["dist"],

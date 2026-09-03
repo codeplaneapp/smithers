@@ -51,7 +51,7 @@ export const PublishAttrs = Schema.Struct({
 const publishDefinition = Target.make("Changesets.Publish", {
   attrs: PublishAttrs,
   kinds: ["run"],
-  implementation: () => Target.notImplemented("Changesets.Publish")
+  implementation: Target.catalogNotImplemented
 })
 
 /** Publishes a changesets release train after fresh gates.

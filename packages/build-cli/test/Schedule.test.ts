@@ -6,9 +6,8 @@
  * path are all observed at exact points rather than after a sleep.
  */
 import { describe, expect, it } from "vitest"
-import { execute, resolveJobs, schedule } from "../src/Executor.ts"
+import { resolveJobs, schedule } from "../src/Executor.ts"
 import type * as Planner from "../src/Planner.ts"
-import type { Workspace } from "../src/Workspace.ts"
 
 /** A planned target reduced to the two fields the scheduler reads. */
 const target = (
@@ -68,24 +67,6 @@ describe("resolveJobs", () => {
     ["a fraction", 1.5]
   ])("refuses %s", (_name, jobs) => {
     expect(() => resolveJobs(jobs)).toThrow(/jobs must be a positive integer/)
-  })
-
-  /**
-   * The regression: `Math.max(1, NaN)` is `NaN`, so the dispatch loop's
-   * `active < jobs` was false on the first iteration. Nothing ran, nothing
-   * failed, and `execute` reported a green summary for a run that never
-   * happened.
-   */
-  it("fails execute before anything runs instead of reporting a false green", async () => {
-    const workspace = { root: "/nonexistent", cacheDirectory: ".flows" } as unknown as Workspace
-    await expect(execute({
-      workspace,
-      verb: "build",
-      pattern: "//...",
-      targets: [target("//:a")],
-      jobs: Number.NaN,
-      log: () => {}
-    })).rejects.toThrow(/jobs must be a positive integer/)
   })
 })
 

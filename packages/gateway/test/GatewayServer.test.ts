@@ -30,7 +30,7 @@ import { Unavailable } from "@smthrs/control/ControlError"
 import type { ApprovalPayload, PlanCard } from "@smthrs/control/ControlSchema"
 import { SyncAuth as SyncAuthTag } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
-import { Effect, Layer, type Scope, Stream } from "effect"
+import { Effect, Fiber, Layer, type Scope, Stream } from "effect"
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { createServer } from "node:http"
@@ -1071,6 +1071,17 @@ describe("the Watch keepalive", () => {
       expect(beats[0]?.runId).toBeUndefined()
       expect(beats[0]?.payload).toBeNull()
     }).pipe(Effect.provide(kept)))
+
+  test("passes source events through a followed watch", () =>
+    Effect.gen(function*() {
+      const control = yield* Control
+      const watching = yield* Stream.runCollect(Stream.take(control.watch({ follow: true }), 1)).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* control.plan({ flowId: "system/test", input: {} })
+      const events = yield* Fiber.join(watching)
+      expect(events.length).toBe(1)
+      expect(events[0]?.kind).not.toBe(GatewayServer.watchHeartbeatKind)
+    }).pipe(Effect.provide(GatewayServer.layerKeepAlive(60_000).pipe(Layer.provideMerge(stack())))))
 })
 
 describe("gateway bind policy", () => {

@@ -103,7 +103,7 @@ describe("Cargo overload discrimination", () => {
     expect(Cargo.Clippy()).toEqual({ name: "clippy", allTargets: true, locked: true, denyWarnings: true })
   })
 
-  it("still builds the package-mode target when a selector is named", () => {
+  it("still builds the build-system target when a selector is named", () => {
     expect(Target.isTarget(Cargo.Clippy({ workspace: true, offline: true, data: [] }) as never)).toBe(true)
     expect(Target.isTarget(Cargo.Test({ package: "aomi-sdk", noRun: true, data: [] }) as never)).toBe(true)
   })

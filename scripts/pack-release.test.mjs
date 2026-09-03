@@ -107,7 +107,7 @@ test("workspaces covers every non-private engine and agent package under package
   assert.deepEqual([...releaseGroups].sort(), ["agent", "engine"])
   assert.deepEqual([...workspaces].sort(), published.sort())
   // Every tooling package is private. The build graph, its CLI, the typed
-  // BUILD.ts rules, and the hosted cache deployment are workspace machinery,
+  // legacy declaration rules, and the hosted cache deployment are workspace machinery,
   // not a supported install (rc-contract.md section 3.2).
   const tooling = manifests.filter(([, manifest]) => manifest.smthrs?.group === "tooling")
   assert.ok(tooling.length > 0)

@@ -177,7 +177,7 @@ export const scriptInterpreterToken = (path: string): string =>
   /\.(?:sh|bash)$/.test(path) ? "/bin/sh" : Exec.runtimeBinToken
 
 /**
- * Wall-clock bound for one package-mode tool process.
+ * Wall-clock bound for one build-system tool process.
  *
  * Package-mode targets include multi-minute compiles (tsc, relay-compiler
  * over a production tree), so the bound is deliberately far above the

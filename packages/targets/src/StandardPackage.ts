@@ -19,7 +19,7 @@ import { Vitest } from "./Vitest.ts"
  *
  * `cwd` is the workspace-relative package directory every emitted target's
  * tool runs in. It defaults to the workspace root, so a package-level
- * BUILD.ts passes its own directory, for example `packages/plan`.
+ * legacy declaration passes its own directory, for example `packages/plan`.
  *
  * @category models
  * @since 0.1.0

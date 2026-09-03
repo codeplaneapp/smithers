@@ -1,9 +1,8 @@
 /**
  * The command surface's remaining branches, driven through the real CLI:
  * PACKAGE.ts `deps()` and `--input` parsing, `--cache-dir`, `--plan` and
- * `--mermaid` under a human renderer, a red run without an exit hook, and
- * the BUILD.ts paths (`docs`, `ci`, the bare-label refusal, `gitHooks`,
- * and the human tree and table).
+ * `--mermaid` under a human renderer, a red run without an exit hook,
+ * `gitHooks`, and the human tree and table.
  */
 import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
@@ -68,27 +67,6 @@ export const Package = S.Package({ targets: { good, bad, pair, all, docs } })
   git(root, "init", "-q")
   git(root, "add", "-A")
   git(root, "-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-qm", "init")
-  return root
-}
-
-const targetsModule = NodePath.resolve(import.meta.dirname, "../../targets/src/Smithers.ts")
-const configModule = NodePath.resolve(import.meta.dirname, "../../targets/src/Config.ts")
-
-/** A BUILD.ts workspace with one ToolBuild, as the read-only CLI suite uses. */
-const buildFixture = async (): Promise<string> => {
-  const root = await temporary("smthrs-cli-branches-build-")
-  await write(root, "input.txt", "input\n")
-  await write(
-    root,
-    "BUILD.ts",
-    `import { file, ToolBuild } from ${JSON.stringify(targetsModule)}\n` +
-      `import { Workspace } from ${JSON.stringify(configModule)}\n` +
-      `export const workspace = Workspace({ cacheDirectory: "state/cache", gitignored: false })\n` +
-      `export const build = ToolBuild({\n` +
-      `  tool: "node", command: "node", args: ["--version"],\n` +
-      `  inputs: [file("//input.txt")], outputs: [], deps: [], env: {}, cache: false, cwd: "."\n` +
-      `})\n`
-  )
   return root
 }
 
@@ -220,54 +198,5 @@ describe("PACKAGE.ts branches", () => {
     expect(planned.envelope).toContain("verb: ci")
     expect(planned.envelope).toContain("label: \"//:docs\"")
     expect(planned.envelope).not.toContain("rule:")
-  })
-})
-
-describe("BUILD.ts branches", () => {
-  it("refuses the bare-label form and gitHooks without a WORKSPACE.ts", async () => {
-    const root = await buildFixture()
-    const bare = await serve(root, ["//:build"], false)
-    expect(bare.exitCode).toBe(1)
-    expect(bare.envelope).toContain("this workspace has no WORKSPACE.ts")
-    const hooks = await serve(root, ["gitHooks"], false)
-    expect(hooks.exitCode).toBe(1)
-    expect(hooks.envelope).toContain("this workspace has no WORKSPACE.ts")
-  })
-
-  it("plans ci over the verbs the target supports and executes it", async () => {
-    const root = await buildFixture()
-    const planned = await serve(root, ["ci", "//:build", "--plan"], false)
-    expect(planned.exitCode).toBe(0)
-    expect(planned.envelope).toContain("verb: ci")
-    pretendTTY(true)
-    const ran = await serve(root, ["ci", "//:build", "--ui", "stream"], true)
-    expect(ran.exitCode).toBe(0)
-    expect(ran.envelope).toBe("")
-    expect(ran.stderr).toContain("✓ //:build")
-    expect(ran.stderr).toContain("Tasks: 1 ran, 1 total")
-  })
-
-  it("refuses docs for a target without a documentation kind and runs build with a name", async () => {
-    const root = await buildFixture()
-    const docs = await serve(root, ["docs", "//:build"], false)
-    expect(docs.exitCode).toBe(1)
-    expect(docs.envelope).toContain("docs_failed")
-    const named = await serve(root, ["run", "//:build", "--name", "widget", "--ui", "plain"], false)
-    expect([0, 1]).toContain(named.exitCode)
-  })
-
-  it("renders the human tree and table, and the mermaid envelope", async () => {
-    const root = await buildFixture()
-    pretendTTY(true)
-    const tree = await serve(root, ["graph", "//:build", "--ui", "tty"], true)
-    expect(tree.exitCode).toBe(0)
-    expect(tree.stdout).toBe("//:build (ToolBuild)\n")
-    const table = await serve(root, ["query", "//:build", "--ui", "tty"], true)
-    expect(table.stdout.split("\n")[0]).toBe("LABEL     TARGET     KINDS")
-    expect(table.stdout).toContain("//:build  ToolBuild  build")
-    const mermaid = await serve(root, ["graph", "//:build", "--mermaid", "--ui", "tty"], true)
-    expect(mermaid.stdout).toBe("")
-    expect(mermaid.envelope).toContain("format: mermaid")
-    expect(mermaid.envelope).toContain("flowchart LR")
   })
 })

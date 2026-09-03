@@ -1,7 +1,7 @@
 /**
- * The `Smithers` namespace: the whole BUILD.ts authoring surface.
+ * The `Smithers` namespace: the whole legacy declaration authoring surface.
  *
- * A BUILD.ts file imports this namespace once and reaches everything through
+ * A legacy declaration file imports this namespace once and reaches everything through
  * it, so the import line never changes as a workspace grows:
  *
  * ```ts
@@ -254,7 +254,7 @@ export {
  * Declared JavaScript runtimes and the argv they run programs with.
  *
  * The name is both the namespace the constructors live under and the type they
- * return, so a BUILD.ts file writes `Runtime.Node({ … })` and annotates the
+ * return, so a legacy declaration file writes `Runtime.Node({ … })` and annotates the
  * result `Runtime`. The module's remaining types are reachable at
  * `@smthrs/targets/Runtime`.
  *
@@ -276,7 +276,7 @@ export type Runtime = RuntimeModule.Runtime
  * writes.
  *
  * The name is both the namespace the constructors live under and the type they
- * return, so a BUILD.ts file writes `PackageManager.Pnpm({ … })` and annotates
+ * return, so a legacy declaration file writes `PackageManager.Pnpm({ … })` and annotates
  * the result `PackageManager`. The module's remaining types are reachable at
  * `@smthrs/targets/PackageManager`.
  *
@@ -297,7 +297,7 @@ export type PackageManager = PackageManagerModule.PackageManager
  * The CLI verbs a generated pipeline may run across a target graph.
  *
  * The name is both the namespace the verb values live under and the type they
- * have, so a BUILD.ts file writes `{ verb: Verb.Ci, pattern: "//packages/..." }`
+ * have, so a legacy declaration file writes `{ verb: Verb.Ci, pattern: "//packages/..." }`
  * and annotates the result `Verb`. The module's remaining types are reachable
  * at `@smthrs/targets/Verb`.
  *
@@ -318,7 +318,7 @@ export type Verb = VerbModule.Verb
  * Declared Rust toolchains and the argv they install and run cargo with.
  *
  * The name is both the namespace the constructors live under and the type they
- * return, so a BUILD.ts file writes `RustToolchain.Pinned({})` and annotates the
+ * return, so a legacy declaration file writes `RustToolchain.Pinned({})` and annotates the
  * result `RustToolchain`.
  *
  * @category namespace exports
@@ -364,10 +364,10 @@ export type Rust = RustToolchainModule.ToolchainDeclaration
  * whose crate selector — `workspace: true`, `package: "<name>"`, or
  * `crates: <set>` — says which crates it runs over.
  *
- * BUILD.ts: the check constructors the legacy `Smithers.CargoLint` and
+ * legacy declaration: the check constructors the legacy `Smithers.CargoLint` and
  * `Smithers.CargoTest` targets take as an attr. `Cargo.Fmt()`,
  * `Cargo.Clippy()`, and `Cargo.Test()` still return those check values; a call
- * that names a crate selector returns the package-mode target instead.
+ * that names a crate selector returns the build-system target instead.
  *
  * @category namespace exports
  * @since 0.1.0
@@ -378,7 +378,7 @@ export const Cargo = CargoModule
  * What one generated CI job requires before its targets run.
  *
  * The name is both the namespace the constructors live under and the type
- * `Needs` returns, so a BUILD.ts file writes `CiToolchain.Needs({ … })` and
+ * `Needs` returns, so a legacy declaration file writes `CiToolchain.Needs({ … })` and
  * annotates the result `CiToolchain`.
  *
  * @category namespace exports

@@ -140,7 +140,7 @@ describe("ImportClosure", () => {
   it("anchors direct sources at the declaration context supplied by the caller", () => {
     expect(Compose.closureEntrySources(
       [Input.file("index.ts"), Input.glob("src/**/*.ts")],
-      { sourceFile: "/workspace/packages/app/BUILD.ts", packageDirectory: "/workspace/packages/app" }
+      { sourceFile: "/workspace/packages/app/legacy declaration", packageDirectory: "/workspace/packages/app" }
     )).toEqual([
       { base: "/workspace/packages/app", source: Input.file("index.ts") },
       { base: "/workspace/packages/app", source: Input.glob("src/**/*.ts") }
@@ -204,7 +204,7 @@ describe("file-set checks", () => {
     })
   })
 
-  it("leaves digest and manifest comparisons to package mode", () => {
+  it("leaves digest and manifest comparisons to the build system", () => {
     const digest = Compose.Test({ expect: Compose.Files.digest(left), toBe: "empty" })
     const manifest = Compose.Test({
       expect: Compose.Files.difference(left, right),
@@ -212,7 +212,7 @@ describe("file-set checks", () => {
     })
 
     expect(plannedCalls(digest)[0]?.payload).toEqual({
-      target: "Test: Files.digest comparison is executed by package mode"
+      target: "Test: Files.digest comparison is executed by the build system"
     })
     expect(plannedCalls(manifest)[0]?.payload).toEqual({
       target: "Test: a file-set difference can only compare to empty"

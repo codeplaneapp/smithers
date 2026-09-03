@@ -99705,7 +99705,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99743,7 +99743,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99768,7 +99768,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99793,7 +99793,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99818,7 +99818,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99843,7 +99843,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99868,7 +99868,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99893,7 +99893,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99931,7 +99931,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99956,7 +99956,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -99991,7 +99991,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100016,7 +100016,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100041,7 +100041,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100066,7 +100066,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100091,7 +100091,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100116,7 +100116,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100151,7 +100151,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100159,7 +100159,7 @@
    ],
    "row": 91
   },
-  "packages/vcs/tests/jj-package-mode.test.js": {
+  "packages/vcs/tests/jj-build-system.test.js": {
    "action": "git mv -> legacy/",
    "disposition": "migrate",
    "path": [
@@ -100176,7 +100176,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100201,7 +100201,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100226,7 +100226,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100251,7 +100251,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100276,7 +100276,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100301,7 +100301,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -100326,7 +100326,7 @@
     "packages/vcs/tests/jj-workspace-stale-recovery.test.js",
     "packages/vcs/tests/jj-eacces-and-fallbacks.test.js",
     "packages/vcs/tests/jj-snapshot-parse.test.js",
-    "packages/vcs/tests/jj-package-mode.test.js",
+    "packages/vcs/tests/jj-build-system.test.js",
     "packages/vcs/tests/jj-real-repo.test.js",
     "packages/vcs/tests/resolve-jj-binary.test.js",
     "packages/vcs/tests/vcs-tooling-status.test.js",
@@ -102031,7 +102031,7 @@
    "action": "copy from flows",
    "row": 442
   },
-  "BUILD.ts": {
+  "legacy declaration": {
    "action": "copy from flows",
    "row": 438
   },
@@ -102099,7 +102099,7 @@
    "action": "copy from flows",
    "row": 423
   },
-  "apps/server/BUILD.ts": {
+  "apps/server/legacy declaration": {
    "action": "copy from flows",
    "row": 423
   },
@@ -102251,7 +102251,7 @@
    "action": "copy from flows",
    "row": 423
   },
-  "apps/shared/BUILD.ts": {
+  "apps/shared/legacy declaration": {
    "action": "copy from flows",
    "row": 424
   },
@@ -102339,7 +102339,7 @@
    "action": "copy from flows",
    "row": 424
   },
-  "apps/tui/BUILD.ts": {
+  "apps/tui/legacy declaration": {
    "action": "copy from flows",
    "row": 425
   },
@@ -102455,7 +102455,7 @@
    "action": "copy from flows",
    "row": 422
   },
-  "apps/ui/BUILD.ts": {
+  "apps/ui/legacy declaration": {
    "action": "copy from flows",
    "row": 422
   },
@@ -103779,11 +103779,11 @@
    "action": "copy from flows",
    "row": 422
   },
-  "ci/BUILD.ts": {
+  "ci/legacy declaration": {
    "action": "copy from flows",
    "row": 437
   },
-  "crates/flows-jj/BUILD.ts": {
+  "crates/flows-jj/legacy declaration": {
    "action": "copy from flows",
    "row": 432
   },
@@ -104219,7 +104219,7 @@
    "action": "copy from flows",
    "row": 442
   },
-  "evals/agent/BUILD.ts": {
+  "evals/agent/legacy declaration": {
    "action": "copy from flows",
    "row": 428
   },
@@ -104247,7 +104247,7 @@
    "action": "copy from flows",
    "row": 428
   },
-  "evals/authoring/BUILD.ts": {
+  "evals/authoring/legacy declaration": {
    "action": "copy from flows",
    "row": 429
   },
@@ -104271,7 +104271,7 @@
    "action": "copy from flows",
    "row": 430
   },
-  "evals/swebench/BUILD.ts": {
+  "evals/swebench/legacy declaration": {
    "action": "copy from flows",
    "row": 430
   },
@@ -104935,7 +104935,7 @@
    "action": "copy from flows",
    "row": 430
   },
-  "examples/BUILD.ts": {
+  "examples/legacy declaration": {
    "action": "copy from flows",
    "row": 427
   },
@@ -105151,7 +105151,7 @@
    "action": "copy from flows",
    "row": 431
   },
-  "lint/BUILD.ts": {
+  "lint/legacy declaration": {
    "action": "copy from flows",
    "row": 437
   },
@@ -105447,7 +105447,7 @@
    "action": "copy from flows",
    "row": 380
   },
-  "packages/build-cli/BUILD.ts": {
+  "packages/build-cli/legacy declaration": {
    "action": "copy from flows",
    "row": 416
   },
@@ -106083,7 +106083,7 @@
    "action": "copy from flows",
    "row": 415
   },
-  "packages/build/BUILD.ts": {
+  "packages/build/legacy declaration": {
    "action": "copy from flows",
    "row": 415
   },
@@ -106343,7 +106343,7 @@
    "action": "copy from flows",
    "row": 415
   },
-  "packages/build/infra/BUILD.ts": {
+  "packages/build/infra/legacy declaration": {
    "action": "copy from flows",
    "row": 418
   },
@@ -108147,7 +108147,7 @@
    "action": "copy from flows",
    "row": 374
   },
-  "packages/engine/BUILD.ts": {
+  "packages/engine/legacy declaration": {
    "action": "copy from flows",
    "row": 373
   },
@@ -108479,7 +108479,7 @@
    "action": "copy from flows",
    "row": 411
   },
-  "packages/flow/BUILD.ts": {
+  "packages/flow/legacy declaration": {
    "action": "copy from flows",
    "row": 372
   },
@@ -110863,7 +110863,7 @@
    "action": "copy from flows",
    "row": 405
   },
-  "packages/plan/BUILD.ts": {
+  "packages/plan/legacy declaration": {
    "action": "copy from flows",
    "row": 379
   },
@@ -112731,7 +112731,7 @@
    "action": "copy from flows",
    "row": 393
   },
-  "packages/targets/BUILD.ts": {
+  "packages/targets/legacy declaration": {
    "action": "copy from flows",
    "row": 417
   },
@@ -113867,7 +113867,7 @@
    "action": "copy from flows",
    "row": 433
   },
-  "scripts/BUILD.ts": {
+  "scripts/legacy declaration": {
    "action": "copy from flows",
    "row": 435
   },
@@ -122739,7 +122739,7 @@
     "row": 93
    }
   ],
-  "packages/vcs/tests/jj-package-mode.test.js": [
+  "packages/vcs/tests/jj-build-system.test.js": [
    {
     "disposition": "delete",
     "glob": "packages/vcs/**",

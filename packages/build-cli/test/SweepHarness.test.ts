@@ -117,7 +117,7 @@ describe("outcome classifier", () => {
     const { classified } = observed(
       1,
       "",
-      "NotImplemented: run does not execute PACKAGE.ts targets yet; query and graph are the package-mode surface"
+      "NotImplemented: run does not execute PACKAGE.ts targets yet; query and graph are the build-system surface"
     )
     expect(classified.outcome).toBe("not-implemented")
   })

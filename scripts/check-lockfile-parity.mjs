@@ -4,7 +4,7 @@
  * The repository requires a manifest change to refresh both lockfiles, but
  * nothing enforced it: every CI job installs with pnpm, so `pnpm-lock.yaml` is
  * proved by `--frozen-lockfile` on every run while `bun.lock` is never read.
- * Bun still runs `apps/*`, the `ci/BUILD.ts` matrix, and `evals/agent`, so a
+ * Bun still runs `apps/*`, the `ci/legacy declaration` matrix, and `evals/agent`, so a
  * stale entry there resolves a real package at the wrong version, and it does
  * so only on the Bun surfaces. `packages/fs` reached rc.0 still asking for
  * `@smthrs/core@0.1.0` that way.

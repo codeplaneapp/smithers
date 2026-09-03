@@ -9,7 +9,7 @@
  * whatever is actually installed must name it and nothing else.
  *
  * The gate reads `bun.lock` as well as `pnpm-lock.yaml` because Bun runs
- * `apps/*`, the `ci/BUILD.ts` matrix, and `evals/agent`.
+ * `apps/*`, the `ci/legacy declaration` matrix, and `evals/agent`.
  *
  * Run it with `pnpm exec smithers-build test '//scripts:effectVersion'`, or directly
  * with `node scripts/check-single-effect-version.mjs`.

@@ -212,7 +212,7 @@ export const packageManagerEnvironment = (
 /**
  * The toolchain one target declared.
  *
- * A target's attrs carry the manager and runtime declarations from BUILD.ts.
+ * A target's attrs carry the manager and runtime declarations.
  * This is the shape the CLI needs out of them to build the two layers.
  *
  * @category models
@@ -263,7 +263,7 @@ const runtimeNames = new Set(["node", "bun"])
  * Extracts the toolchain a target declared, falling back to
  * {@link defaultToolchain}.
  *
- * BUILD.ts is a trust boundary, so every field is read as an own data property
+ * A declaration is a trust boundary, so every field is read as an own data property
  * and validated. A malformed declaration yields the default rather than a
  * crash: the target's own attrs schema already rejected anything malformed, and
  * this reader runs on the far side of that check.
@@ -516,7 +516,7 @@ export const runInstall = async (
     readonly signal?: AbortSignal | undefined
     /**
      * The toolchain the workspace declared. The `install` verb runs one target
-     * that BUILD.ts may not have declared at all, so the caller passes what it
+     * that the workspace may not have declared at all, so the caller passes what it
      * read; omitting it accepts whatever the host has.
      */
     readonly toolchain?: Toolchain | undefined

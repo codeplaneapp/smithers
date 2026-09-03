@@ -73,8 +73,7 @@ const declarationAt = async (absolute: string): Promise<boolean> => {
  * The nearest ancestor of `start` that holds a workspace declaration, or
  * undefined when no ancestor does.
  *
- * The presence probe is deliberately cheap — an `lstat` per candidate — and
- * decides only which mode the CLI runs in; {@link discover} re-admits the
+ * The presence probe is deliberately cheap; {@link discover} re-admits the
  * file under the full SafeFs policy.
  *
  * @category discovery
@@ -172,12 +171,12 @@ const walkDirectory = async (walk: Walk, relative: string): Promise<void> => {
   // inventory: `walk.found` is sorted by the caller, so discovery order never
   // escapes this function.
   const directories: Array<string> = []
-  if (entries.some((child) => child.name === "PACKAGE.ts") && entries.some((child) => child.name === "BUILD.ts")) {
-    const where = relative === "" ? "the workspace root" : `//${relative}`
+  if (entries.some((child) => child.name === "BUILD.ts")) {
+    const path = relative === "" ? "BUILD.ts" : `${relative}/BUILD.ts`
     throw new PackageError(
       "duplicate_package_path",
-      `${where} holds both PACKAGE.ts and BUILD.ts; keep PACKAGE.ts and delete BUILD.ts`,
-      { path: relative === "" ? "PACKAGE.ts" : `${relative}/PACKAGE.ts` }
+      `unsupported declaration ${path}; delete it and declare targets in PACKAGE.ts`,
+      { path }
     )
   }
   const nestedMarker = entries.find((child) =>

@@ -1,12 +1,11 @@
 /**
- * BUILD target queries.
+ * Target query result models and rendering.
  *
  * @since 0.1.0
  */
-import * as Target from "@smthrs/targets/Target"
+import type * as Target from "@smthrs/targets/Target"
 import * as Ansi from "./Ansi.ts"
-import * as Planner from "./Planner.ts"
-import type * as Workspace from "./Workspace.ts"
+import type * as Planner from "./Planner.ts"
 
 /**
  * Result of a bare label or pattern query.
@@ -22,11 +21,7 @@ export interface Listing {
     readonly target: string
     readonly kinds: ReadonlyArray<Target.Kind>
     /**
-     * Why a package-mode `Repo.Target` row resolved to nothing, when it did.
-     *
-     * Package mode has always attached this to the JSON envelope; the row type
-     * did not carry it, so {@link text} could not show it and a person reading
-     * the terminal saw a refused repository as an ordinary row.
+     * Why a `Repo.Target` row resolved to nothing, when it did.
      */
     readonly refusal?: string | undefined
   }>
@@ -74,41 +69,6 @@ export interface PackageOwners {
   >
   readonly agentPolicy: string
   readonly upstream: ReadonlyArray<string>
-}
-
-/**
- * Evaluates a bare label/pattern listing or `deps(label)`.
- *
- * @category querying
- * @since 0.1.0
- * @slop
- */
-export const run = async (
-  workspace: Workspace.Workspace,
-  expression: string
-): Promise<Listing | Dependencies> => {
-  const dependencyMatch = expression.match(/^deps\((.+)\)$/)
-  if (dependencyMatch?.[1] !== undefined) {
-    const pattern = dependencyMatch[1].trim()
-    const plan = await Planner.make(workspace, "query", pattern)
-    if (plan.roots.length !== 1) throw new Error("deps() requires one exact or default target")
-    const root = plan.roots[0]!
-    return {
-      query: expression,
-      root,
-      dependencies: plan.targets.map((target) => target.label).filter((label) => label !== root),
-      edges: plan.edges
-    }
-  }
-  const targets = await workspace.targets(expression)
-  return {
-    query: expression,
-    targets: await Promise.all(targets.map(async (target) => ({
-      label: await workspace.label(target),
-      target: Target.metadata(target).target,
-      kinds: Target.metadata(target).kinds
-    })))
-  }
 }
 
 const kindColor: Record<string, keyof Ansi.Palette> = {

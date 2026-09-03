@@ -148,7 +148,7 @@ const commandsOf = (node: PackageExec.PackageNode): ReadonlyArray<ReadonlyArray<
 
 const hasCargo = PackageTree.findOnPath("cargo") !== undefined
 
-describe.skipIf(!hasCargo)("cargo package-mode planning", () => {
+describe.skipIf(!hasCargo)("cargo build-system planning", () => {
   it("plans every cargo rule with no refusal and the resolved cargo executable", async () => {
     const root = await fixture()
     const planned = await planOf(root, "//...")

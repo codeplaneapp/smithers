@@ -110,7 +110,7 @@ const apiCompatDefinition = Target.make("Api.Compat", {
   attrs: ApiCompatAttrs,
   kinds: ["test"],
   cache: true,
-  implementation: () => Target.notImplemented("Api.Compat")
+  implementation: Target.catalogNotImplemented
 })
 /** Checks that a declaration delta is covered by the manifest version.
  *

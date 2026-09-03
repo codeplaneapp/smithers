@@ -17,7 +17,7 @@ import { currentSandboxHost, probePolicy, wrapSandbox } from "./Sandbox"
 export type SmithersDetection = Repo["smithers"]
 
 const WORKSPACE_FILES = ["WORKSPACE.ts", ".smithers/WORKSPACE.ts"] as const
-const ROOT_DECLARATION_FILES = ["WORKSPACE.ts", ".smithers/WORKSPACE.ts", "BUILD.ts"] as const
+const ROOT_DECLARATION_FILES = ["WORKSPACE.ts", ".smithers/WORKSPACE.ts", "legacy declaration"] as const
 const SKIPPED_DIRS = new Set(["node_modules", ".git", ".flows", "dist", "build"])
 /** The workspace discovery walk skips the manifest dir too, so `.smithers` itself is never reported as a workspace. */
 const WORKSPACE_SKIPPED_DIRS = new Set([...SKIPPED_DIRS, "target", ".smithers"])
@@ -49,14 +49,14 @@ const importsSmthrs = (path: string): boolean => {
 }
 
 /*
- * Every PACKAGE.ts — and, below the root, every BUILD.ts — skipping the
- * vendored and generated trees. A BUILD.ts-rooted checkout declares its
- * targets in `packages/x/BUILD.ts`; leaving those out meant `target.source.open`
+ * Every PACKAGE.ts — and, below the root, every legacy declaration — skipping the
+ * vendored and generated trees. A legacy declaration-rooted checkout declares its
+ * targets in `packages/x/legacy declaration`; leaving those out meant `target.source.open`
  * refused every package target's declaration ("must be one of the
  * repository's declaration files") while the targets card listed them all.
- * The root's own BUILD.ts is a root declaration file, listed by its caller.
+ * The root's own legacy declaration is a root declaration file, listed by its caller.
  */
-const DECLARATION_BASENAMES = new Set(["PACKAGE.ts", "BUILD.ts"])
+const DECLARATION_BASENAMES = new Set(["PACKAGE.ts", "legacy declaration"])
 const packageFiles = (root: string): Array<string> => {
   const found: Array<string> = []
   const walk = (dir: string, depth: number): void => {
@@ -71,7 +71,7 @@ const packageFiles = (root: string): Array<string> => {
       const path = join(dir, entry.name)
       if (entry.isDirectory()) {
         if (!SKIPPED_DIRS.has(entry.name)) walk(path, depth + 1)
-      } else if (DECLARATION_BASENAMES.has(entry.name) && entry.isFile() && !(depth === 0 && entry.name === "BUILD.ts")) {
+      } else if (DECLARATION_BASENAMES.has(entry.name) && entry.isFile() && !(depth === 0 && entry.name === "legacy declaration")) {
         found.push(path)
       }
     }
@@ -84,17 +84,17 @@ const packageFiles = (root: string): Array<string> => {
 const workspaceFileOf = (dir: string): string | null => WORKSPACE_FILES.find((file) => isFile(join(dir, file))) ?? null
 
 /*
- * The root-level `BUILD.ts` authoring surface. `smithers-build query //...`
- * loads a checkout rooted on BUILD.ts (this repository is one), so the UI must
+ * The root-level `legacy declaration` authoring surface. `smithers-build query //...`
+ * loads a checkout rooted on legacy declaration (this repository is one), so the UI must
  * count it as the root workspace too: refusing it left the Smithers checkout
  * itself opening with "no WORKSPACE.ts" and no targets card. Only the ROOT
- * qualifies — a package's BUILD.ts below it is a target file the root loads,
+ * qualifies — a package's legacy declaration below it is a target file the root loads,
  * never a workspace of its own — and only when it imports the smthrs surface,
- * so an unrelated BUILD.ts (Bazel's, say) stays undetected.
+ * so an unrelated legacy declaration (Bazel's, say) stays undetected.
  */
 const rootBuildFileOf = (root: string): string | null => {
-  const file = join(root, "BUILD.ts")
-  return isFile(file) && importsSmthrs(file) ? "BUILD.ts" : null
+  const file = join(root, "legacy declaration")
+  return isFile(file) && importsSmthrs(file) ? "legacy declaration" : null
 }
 
 const childDirs = (dir: string): Array<string> => {
@@ -142,7 +142,7 @@ export const detectSmithers = (root: string): SmithersDetection => {
       detected: false,
       workspaceFile: null,
       declarationFiles: [],
-      reason: "no WORKSPACE.ts or smthrs BUILD.ts",
+      reason: "no WORKSPACE.ts or smthrs legacy declaration",
       workspaces
     }
   }

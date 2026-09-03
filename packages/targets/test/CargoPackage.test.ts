@@ -1,5 +1,5 @@
 /**
- * The package-mode cargo surface: `S.Cargo.Fetch/Build/Test/Clippy/Fmt/Doc`
+ * The build-system cargo surface: `S.Cargo.Fetch/Build/Test/Clippy/Fmt/Doc`
  * and the `S.Cargo.AppSet` crate set.
  *
  * The flags that make a check a gate live in the target, not at the call site,
@@ -219,7 +219,7 @@ describe("Cargo.Test", () => {
 })
 
 describe("Cargo.Nextest and Cargo.Deny", () => {
-  it("renders their package-mode commands", () => {
+  it("renders their build-system commands", () => {
     expect(args(Cargo.Nextest({ workspace: true, locked: true, data: [] })))
       .toEqual(["nextest", "run", "--workspace", "--locked"])
     expect(args(Cargo.Deny({ config: Input.file("//deny.toml"), data: [] })))

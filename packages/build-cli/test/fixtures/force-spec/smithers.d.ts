@@ -1,10 +1,10 @@
 // Ambient declarations for the Smithers build API used by WORKSPACE.ts and
-// BUILD.ts. Those files are design-partner code: they define the API through
+// target declarations. Those files are design-partner code: they define the API through
 // usage, and the @smthrs packages are implemented afterwards to match. Every
 // surface is therefore permissively typed; real types replace this file when
 // the packages ship.
 //
-// WORKSPACE.ts and BUILD.ts sit outside tsconfig.json's include set, so each
+// WORKSPACE.ts and PACKAGE.ts sit outside tsconfig.json's include set, so each
 // pulls this file in with a `/// <reference path="./smithers.d.ts" />`
 // directive.
 

@@ -261,7 +261,7 @@ export interface TargetRunner {
     readonly repo: string
     readonly workspace: string
     readonly label: string
-    /** The target's kinds from the snapshot; the first one is the verb a BUILD.ts workspace runs it with. */
+    /** The target's kinds from the snapshot; the first one is the verb a legacy declaration workspace runs it with. */
     readonly kinds?: ReadonlyArray<string>
     /** A pattern run: `<verb> <pattern> --ui plain`; `label` is then ignored for argv and reads `<verb> <pattern>`. */
     readonly verb?: string
@@ -300,9 +300,9 @@ const VERB_BY_KIND: Readonly<Record<string, string>> = { build: "build", test: "
 /**
  * The argv that executes one target in a workspace.
  *
- * Two authoring surfaces, two forms. A WORKSPACE.ts (package-mode) workspace
+ * Two authoring surfaces, two forms. A WORKSPACE.ts (build-system) workspace
  * runs the bare-label form, `smithers-build <label>`, whose verb the target's
- * flavor implies. A BUILD.ts-rooted workspace has no WORKSPACE.ts and the CLI
+ * flavor implies. A legacy declaration-rooted workspace has no WORKSPACE.ts and the CLI
  * refuses that form there ("the bare-label form executes PACKAGE.ts targets;
  * this workspace has no WORKSPACE.ts"), so it runs `smithers-build <verb>
  * <label>` with the verb from the target's first kind. `--ui plain` goes on
@@ -332,7 +332,7 @@ export const patternRunArgv = (verb: string, pattern: string): Array<string> => 
 /**
  * The argv that PLANS one target (`--plan --format json`), under the same
  * two-form rule as `runArgv`: the bare label in a WORKSPACE.ts workspace, the
- * verb-led form in a BUILD.ts one — where the bare form is refused with the
+ * verb-led form in a legacy declaration one — where the bare form is refused with the
  * same "no WORKSPACE.ts" answer the runner used to get.
  */
 export const planArgv = (

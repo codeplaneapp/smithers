@@ -1,5 +1,5 @@
 /**
- * The reporter hooks inside the package-mode executor: one `begin` naming
+ * The reporter hooks inside the build-system executor: one `begin` naming
  * every planned node, a `targetStarted` for each node that actually enters
  * the scheduler and none for a node blocked by a failed dependency, one
  * `targetFinished` per node, and the summary last. A `log` sink alone still

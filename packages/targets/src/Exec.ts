@@ -967,7 +967,7 @@ const withSecretEnvironment = <A, E>(
  *
  * This shared implementation backs both sealed and irreversible exec actions.
  * It strips the remote-cache credential after merging the payload environment,
- * so a BUILD.ts declaration cannot add the credential back to a child.
+ * so a legacy declaration declaration cannot add the credential back to a child.
  *
  * @category execution
  * @since 0.1.0

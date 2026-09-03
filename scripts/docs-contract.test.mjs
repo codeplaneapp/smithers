@@ -182,7 +182,10 @@ test("the count survives a package joining the release", () => {
       `### 3.1 Published at 1.0.0-rc.0 (${declared} names)`,
       `### 3.1 Published at 1.0.0-rc.0 (${declared + 1} names)`
     )
-    .replace("| `@smthrs/model` |", "| `@smthrs/new` | A new one. | no claim |\n| `@smthrs/model` |")
+    .replace(
+      /^(\|\s*`@smthrs\/model`\s*\|)/m,
+      "| `@smthrs/new` | A new one. | no claim |\n$1"
+    )
   assert.equal(publishedPackageCount(grown), declared + 1)
   assert.equal(publishedPackages(grown).length, declared + 1)
 })

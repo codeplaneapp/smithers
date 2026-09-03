@@ -2,7 +2,7 @@
  * Cargo gates as declared targets.
  *
  * The three checks a Rust workspace gates on — `cargo fmt --check`,
- * `cargo clippy`, and `cargo test` — were shell strings in a BUILD.ts file
+ * `cargo clippy`, and `cargo test` — were shell strings in a legacy declaration file
  * until this module existed. Each is now a declaration whose argv the
  * implementation renders, on the same terms as every other target: the flags
  * that make a check a gate rather than a fixer live here, not at the call site.
@@ -134,10 +134,10 @@ const clippyCheck = (options: {
     denyWarnings: options.denyWarnings ?? true
   })
 
-/** The option names the BUILD-era clippy gate reads; every other key is package-mode. */
+/** The option names the BUILD-era clippy gate reads; every other key is build-system. */
 const clippyCheckOptions = ["allTargets", "locked", "denyWarnings"] as const
 
-/** The option names the BUILD-era test gate reads; every other key is package-mode. */
+/** The option names the BUILD-era test gate reads; every other key is build-system. */
 const testCheckOptions = ["locked"] as const
 
 /** Declares the BUILD-era `cargo test` gate; see {@link Test}. */
@@ -325,10 +325,10 @@ export type CrateSelection =
   | { readonly _tag: "Package"; readonly name: string }
   | { readonly _tag: "Manifest"; readonly path: string }
 
-/** The three ways a package-mode cargo declaration may name its crates. */
+/** The three ways a build-system cargo declaration may name its crates. */
 const crateSelectors = ["workspace", "package", "crates"] as const
 
-/** The crate-selector fields every package-mode cargo rule shares. */
+/** The crate-selector fields every build-system cargo rule shares. */
 const selectorFields = {
   /** The whole cargo workspace: `--workspace`. */
   workspace: Schema.optional(Schema.Literal(true)),
@@ -338,7 +338,7 @@ const selectorFields = {
   crates: Schema.optional(CrateSet)
 } as const
 
-/** The edge and confinement fields every package-mode cargo rule shares. */
+/** The edge and confinement fields every build-system cargo rule shares. */
 const cargoShared = {
   data: Schema.optional(Attr.Data),
   env: Schema.optional(Attr.Env),
@@ -392,7 +392,7 @@ export const FetchAttrs = Schema.Struct({
 export type FetchAttrs = typeof FetchAttrs.Type
 
 /**
- * Attrs for the package-mode {@link Build}.
+ * Attrs for the build-system {@link Build}.
  *
  * @category schemas
  * @since 0.1.0
@@ -416,7 +416,7 @@ export const BuildAttrs = Schema.Struct({
 })
 
 /**
- * Attrs for the package-mode {@link Build}.
+ * Attrs for the build-system {@link Build}.
  *
  * @category models
  * @since 0.1.0
@@ -424,7 +424,7 @@ export const BuildAttrs = Schema.Struct({
 export type BuildAttrs = typeof BuildAttrs.Type
 
 /**
- * Attrs for the package-mode {@link Test}.
+ * Attrs for the build-system {@link Test}.
  *
  * @category schemas
  * @since 0.1.0
@@ -442,7 +442,7 @@ export const PackageTestAttrs = Schema.Struct({
 })
 
 /**
- * Attrs for the package-mode {@link Test}.
+ * Attrs for the build-system {@link Test}.
  *
  * @category models
  * @since 0.1.0
@@ -469,7 +469,7 @@ export const DenyAttrs = Schema.Struct({
 })
 
 /**
- * Attrs for the package-mode {@link Clippy}.
+ * Attrs for the build-system {@link Clippy}.
  *
  * @category schemas
  * @since 0.1.0
@@ -486,7 +486,7 @@ export const PackageClippyAttrs = Schema.Struct({
 })
 
 /**
- * Attrs for the package-mode {@link Clippy}.
+ * Attrs for the build-system {@link Clippy}.
  *
  * @category models
  * @since 0.1.0
@@ -494,7 +494,7 @@ export const PackageClippyAttrs = Schema.Struct({
 export type PackageClippyAttrs = typeof PackageClippyAttrs.Type
 
 /**
- * Attrs for the package-mode {@link Fmt}.
+ * Attrs for the build-system {@link Fmt}.
  *
  * There is no `locked` or `offline` field: rustfmt reads sources and never
  * resolves a dependency, so it is the one cargo rule with no edge on the fetch
@@ -514,7 +514,7 @@ export const FmtAttrs = Schema.Struct({
 })
 
 /**
- * Attrs for the package-mode {@link Fmt}.
+ * Attrs for the build-system {@link Fmt}.
  *
  * @category models
  * @since 0.1.0
@@ -564,7 +564,7 @@ export const AppSetAttrs = Schema.Struct({
 export type AppSetAttrs = typeof AppSetAttrs.Type
 
 /**
- * The rule id every package-mode cargo target reports.
+ * The rule id every build-system cargo target reports.
  *
  * @category constants
  * @since 0.1.0
@@ -582,7 +582,7 @@ export const packageRules = [
 ] as const
 
 /**
- * One package-mode cargo rule id.
+ * One build-system cargo rule id.
  *
  * @category models
  * @since 0.1.0
@@ -709,7 +709,7 @@ export const packageArgs = (
     case "Cargo.Deny":
       return ["deny", "--config", (values["config"] as Input.File).path, "check"]
     default:
-      throw new Error(`${rule} is not a package-mode cargo rule`)
+      throw new Error(`${rule} is not a build-system cargo rule`)
   }
 }
 
@@ -963,20 +963,20 @@ const requireOneSelector = (id: string, attrs: unknown, selectors: ReadonlyArray
   }
 }
 
-/** Whether an argument selects the package-mode target rather than a BUILD-era check. */
+/** Whether an argument selects the build-system target rather than a BUILD-era check. */
 const namesCrates = (attrs: unknown): boolean =>
   typeof attrs === "object" && attrs !== null &&
   crateSelectors.some((selector) => (attrs as Record<string, unknown>)[selector] !== undefined)
 
 /**
- * Refuses a package-mode declaration that names no crate selector.
+ * Refuses a build-system declaration that names no crate selector.
  *
  * Every selector field is optional, so the overload cannot be chosen by shape
- * alone: `Cargo.Clippy({ offline: true })` is admitted against the package-mode
+ * alone: `Cargo.Clippy({ offline: true })` is admitted against the build-system
  * signature and would otherwise fall through to the BUILD-era check, which
  * reads none of those keys and invents its own defaults. Any key the check
- * form does not itself define therefore has to be a package-mode key, and a
- * package-mode declaration owes exactly one selector.
+ * form does not itself define therefore has to be a build-system key, and a
+ * build-system declaration owes exactly one selector.
  */
 const requireSelectorForPackageKeys = (
   id: string,
@@ -1034,13 +1034,13 @@ const packageFmtDefinition = Target.make("Cargo.Fmt", {
 const docDefinition = Target.make("Cargo.Doc", {
   attrs: DocAttrs,
   kinds: ["build", "docs"],
-  implementation: () => Target.notImplemented("Cargo.Doc")
+  implementation: Target.catalogNotImplemented
 })
 
 const appSetDefinition = Target.make("Cargo.AppSet", {
   attrs: AppSetAttrs,
   kinds: [],
-  implementation: () => Target.notImplemented("Cargo.AppSet")
+  implementation: Target.catalogNotImplemented
 })
 
 /**
@@ -1147,10 +1147,10 @@ export const isAppSet = (value: unknown): value is Target.AnyTarget =>
 // ---------------------------------------------------------------------------
 
 // `Fmt`, `Clippy`, and `Test` name both a BUILD-era check value — the attr the
-// legacy `CargoLint`/`CargoTest` targets take — and a package-mode target.
-// Keeping one name for each is deliberate: a repository migrating from BUILD.ts
+// legacy `CargoLint`/`CargoTest` targets take — and a build-system target.
+// Keeping one name for each is deliberate: a repository migrating from legacy declaration
 // to PACKAGE.ts does not rename its cargo gates on the way. The two forms are
-// told apart by the crate selector, which every package-mode declaration must
+// told apart by the crate selector, which every build-system declaration must
 // name and no BUILD-era call ever passes: `Cargo.Clippy()` and
 // `Cargo.Clippy({ locked: false })` are checks, and
 // `Cargo.Clippy({ workspace: true, ... })` is a target. `Cargo.Fmt` takes no
@@ -1169,9 +1169,9 @@ function fmtRule(
 
 /**
  * The `cargo fmt` gate: a BUILD-era check value when called bare, and the
- * package-mode target when called with a crate selector.
+ * build-system target when called with a crate selector.
  *
- * The package-mode form checks by default and applies under `--write`/`--fix`,
+ * The build-system form checks by default and applies under `--write`/`--fix`,
  * confined to the declared `changes` write set. It is the one cargo rule with
  * no `locked`/`offline` attrs, because rustfmt never resolves a dependency.
  *
@@ -1208,7 +1208,7 @@ function clippyRule(attrs?: unknown): ClippyCheck | ReturnType<typeof packageCli
 
 /**
  * The `cargo clippy` gate: a BUILD-era check value without a crate selector,
- * and the package-mode target with one.
+ * and the build-system target with one.
  *
  * @example
  * ```ts
@@ -1235,7 +1235,7 @@ function testRule(attrs?: unknown): TestCheck | ReturnType<typeof packageTestDef
 
 /**
  * The `cargo test` gate: a BUILD-era check value without a crate selector, and
- * the package-mode target with one.
+ * the build-system target with one.
  *
  * @example
  * ```ts

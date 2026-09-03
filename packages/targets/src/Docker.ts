@@ -116,8 +116,8 @@ const serviceDefinition = Target.make("Docker.Service", {
  *
  * `@smthrs/build-cli` still derives its own output directory for these two
  * rules, so the path the executor writes is not yet this one. Until that
- * import lands, this is the declared path the planner reads in BUILD mode and
- * the two disagree in package mode.
+ * import lands, this is the declared path the planner reads in the old executor and
+ * the two disagree in the build system.
  *
  * @category accessors
  * @since 0.1.0

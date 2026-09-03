@@ -1,7 +1,7 @@
 /**
- * Declared filesystem and repository inputs for BUILD.ts targets.
+ * Declared filesystem and repository inputs for build targets.
  *
- * Constructors in this module only create values, so BUILD.ts evaluation
+ * Constructors in this module only create values, so declaration evaluation
  * remains pure. The planner calls {@link expandGlob}, {@link digestFile}, and
  * {@link digestFiles} during discovery to turn declarations into content
  * digests.
@@ -422,7 +422,7 @@ const staticPrefix = (pattern: string): string => {
 const inputNoun = "declared input"
 const ignoreNoun = ".gitignore"
 const directoryNoun = "declared input directory"
-const declarationFileNames = ["PACKAGE.ts", "BUILD.ts"] as const
+const declarationFileNames = ["PACKAGE.ts"] as const
 
 const insideEnteredRepository = (scan: Scan, relative: string): boolean => {
   for (const boundary of scan.enteredRepositories) {
@@ -758,9 +758,9 @@ const walk = async (
  * expansion of an unchanged tree is deterministic.
  *
  * Globs are package scoped, as they are in Bazel. The walk never descends
- * into a subdirectory that holds a BUILD.ts file, so a pattern declared in
+ * into a subdirectory that holds a PACKAGE.ts file, so a pattern declared in
  * `packages/flow` matches `packages/flow/src/index.ts` but not
- * `packages/flow/examples/index.ts` once `packages/flow/examples/BUILD.ts`
+ * `packages/flow/examples/index.ts` once `packages/flow/examples/PACKAGE.ts`
  * exists. The boundary applies even when a pattern's static prefix starts at
  * or below the subpackage: glob expansion cannot bypass Bazel package scope
  * by avoiding the filesystem walk through the marker directory. A `//` prefix
@@ -802,7 +802,7 @@ export const expandGlob = async (
     /** Opaque child repositories that broad globs must not descend into. */
     readonly repositoryBoundaries?: ReadonlyArray<string> | undefined
     /**
-     * Whether a nested `BUILD.ts` bounds the expansion. Defaults to `true`,
+     * Whether a nested `PACKAGE.ts` bounds the expansion. Defaults to `true`,
      * which is what a declared input glob means. A declared write set is not
      * a glob over the declaring package, so the generated-output check passes
      * `false`: the paths a generator names are its own wherever they live.
@@ -871,7 +871,7 @@ export const expandGlob = async (
  * Lists every file a workspace owns, without consulting git.
  *
  * This is the same walk {@link expandGlob} performs, with the package boundary
- * removed: workspace discovery has to see every `BUILD.ts`, so it cannot stop
+ * removed: workspace discovery has to see every `PACKAGE.ts`, so it cannot stop
  * at the first one. Everything else is identical, which is the point — the
  * fallback listing and a glob agree on which `.gitignore` files apply, which
  * symbolic links name workspace content, which directories are confined to the

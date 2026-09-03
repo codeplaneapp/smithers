@@ -124,7 +124,7 @@ describe("Runtime.makeNoop", () => {
    * The double used to collapse the third outcome into the second, so it
    * reported `unsatisfied` and the sentence "this host runs node 24.9.0, and
    * the workspace declares ^24.0.0" for a host that does satisfy `^24.0.0`.
-   * That sends an operator to upgrade Node when the BUILD.ts declaration is
+   * That sends an operator to upgrade Node when the legacy declaration declaration is
    * what needs fixing, and it makes the two codes indistinguishable in every
    * composition that asserts the refusal path through the double.
    */

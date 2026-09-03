@@ -1,5 +1,5 @@
 /**
- * Consumer-scoped source overlays for package-mode execution.
+ * Consumer-scoped source overlays for build-system execution.
  *
  * Overlay declarations stay inert file-set values. A consumer whose `data`
  * closure reaches one receives the replacement files in a scratch workspace,

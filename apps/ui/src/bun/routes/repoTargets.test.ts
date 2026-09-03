@@ -122,7 +122,7 @@ describe("/api/repo/*", () => {
     const plain = await post("/api/repo/open", { path: plainDir })
     expect(((await plain.json()) as { repo: { smithers: { detected: boolean; reason: string } } }).repo.smithers).toMatchObject({
       detected: false,
-      reason: "no WORKSPACE.ts or smthrs BUILD.ts"
+      reason: "no WORKSPACE.ts or smthrs legacy declaration"
     })
 
     const listed = ReposResponseSchema.parse(await (await get("/api/repos")).json())
@@ -271,7 +271,7 @@ describe("/api/targets/run revalidates against the target's own graph when the w
     brokenDist = await mkdtemp(join(tmpdir(), "smithers-l3-broken-dist-"))
     await writeFile(join(brokenDist, "index.html"), "<!doctype html><title>Smithers</title>")
     brokenRepo = await realpath(await mkdtemp(join(tmpdir(), "smithers-l3-broken-repo-")))
-    await writeFile(join(brokenRepo, "BUILD.ts"), "import { Smithers as S } from \"@smthrs/targets\"\n")
+    await writeFile(join(brokenRepo, "legacy declaration"), "import { Smithers as S } from \"@smthrs/targets\"\n")
     const cli = join(brokenDist, "fake-cli.js")
     await writeFile(
       cli,

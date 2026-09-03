@@ -15,7 +15,7 @@ import * as Shell from "../src/Shell.ts"
 import * as Target from "../src/Target.ts"
 import { packageManager } from "./toolchain.ts"
 
-describe("Alchemy-style BUILD.ts constructors", () => {
+describe("Alchemy-style declaration constructors", () => {
   it("validates declared inputs at construction", () => {
     expect(() => Input.file("")).toThrow()
     expect(Input.file("package.json")).toEqual({ _tag: "File", path: "package.json" })
@@ -34,7 +34,7 @@ describe("Alchemy-style BUILD.ts constructors", () => {
     expect(isPackageDefaults(declaration)).toBe(true)
     expect(declaration.directories).toEqual({ _tag: "Glob", pattern: "packages/*", exclude: [] })
     expect(declaration.marker).toBe("package.json")
-    expect(declaration.unless).toBe("BUILD.ts")
+    expect(declaration.unless).toBe("PACKAGE.ts")
     expect(declaration.attrs).toEqual({})
   })
 
@@ -56,7 +56,7 @@ describe("Alchemy-style BUILD.ts constructors", () => {
       [PackageDefaultsTypeId]: PackageDefaultsTypeId,
       directories: { _tag: "Glob", pattern: "packages/*", exclude: [42] },
       marker: "package.json",
-      unless: "BUILD.ts",
+      unless: "PACKAGE.ts",
       macro: () => ({}),
       attrs: {}
     })).toBe(false)

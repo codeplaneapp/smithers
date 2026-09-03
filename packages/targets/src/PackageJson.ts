@@ -1,5 +1,5 @@
 /**
- * BUILD.ts as the source of truth for `package.json`.
+ * legacy declaration as the source of truth for `package.json`.
  *
  * A package declares one value:
  *
@@ -20,7 +20,7 @@
  * {@link targets}.
  *
  * This subsumes the former `PackageJsonGen` target, whose attrs restated in
- * BUILD.ts what the build targets already knew: the entry points, the output
+ * legacy declaration what the build targets already knew: the entry points, the output
  * layout, and the commands. Nothing here is restated. Entry points are derived
  * from the publish target's own attrs, and a script's command is derived from
  * the label the workspace resolves for the target it names.
@@ -55,7 +55,7 @@ import * as Target from "./Target.ts"
  * The SPDX identifiers a package may declare, `MIT` by default.
  *
  * The union is deliberately the common set rather than the full SPDX list: a
- * literal union is what turns a typo into a type error on the BUILD.ts line
+ * literal union is what turns a typo into a type error on the legacy declaration line
  * that made it. A repository needing an identifier outside this set declares
  * it through `fields` and accepts that it is unvalidated.
  *
@@ -1120,7 +1120,7 @@ export const PackageJsonCheck = Target.make("PackageJsonCheck", {
 })
 
 /**
- * Rewrites a package manifest from its BUILD.ts declaration.
+ * Rewrites a package manifest from its legacy declaration declaration.
  *
  * This is the `run` half of the pair. It mutates the source tree, so it
  * participates in the `run` verb alone — `build`, `test`, `lint`, and `ci` do
@@ -1345,7 +1345,7 @@ const copyPublish = (value: unknown): Declaration["publish"] => {
  * npm name, the manager-owned fields nothing may generate, and the entry points
  * derived from the publish target's own attrs. What needs the workspace — a
  * script target's label — is resolved by {@link targets} when the index loads
- * the BUILD.ts file, which is still analysis time and still has no execution
+ * the legacy declaration file, which is still analysis time and still has no execution
  * value in reach.
  *
  * @category constructors
@@ -1414,7 +1414,7 @@ export const PackageJson = (options: Options): Declaration => {
 }
 
 /**
- * Checks whether a BUILD.ts export is a package manifest declaration.
+ * Checks whether a legacy declaration export is a package manifest declaration.
  *
  * @category guards
  * @since 0.1.0

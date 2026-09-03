@@ -7,7 +7,7 @@
  *
  * Two paths, both on Web Crypto and no `node:` builtin, which is what would
  * let the same code run under Bun and a Cloudflare Worker. Only Node is
- * verified: this package is in neither the Bun matrix in `ci/BUILD.ts` nor the
+ * verified: this package is in neither the Bun matrix in `ci/legacy declaration` nor the
  * browser-contract list in `scripts/browser-check.mjs`, and the Ed25519
  * `importKey` is the call most likely to differ between engines, which is why
  * this module has an `UNSUPPORTED` branch at all.

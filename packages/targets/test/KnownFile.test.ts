@@ -19,9 +19,9 @@ afterEach(async () => {
 describe("known-file discovery", () => {
   it("emits workspace-absolute and package-local spellings, never a `..` spelling", () => {
     const discovery = KnownFile.knownFileDiscovery([
-      "BUILD.ts",
+      "PACKAGE.ts",
       "root.txt",
-      "pkg/BUILD.ts",
+      "pkg/PACKAGE.ts",
       "pkg/local.txt"
     ])
     expect(discovery.packageDirectories).toEqual(["", "pkg"])
@@ -39,8 +39,8 @@ describe("known-file discovery", () => {
   it("uses the input walk's nested ignores and host-state exclusions", async () => {
     await Fs.mkdir(NodePath.join(root, "pkg", "node_modules"), { recursive: true })
     await Fs.mkdir(NodePath.join(root, ".flows"), { recursive: true })
-    await Fs.writeFile(NodePath.join(root, "BUILD.ts"), "")
-    await Fs.writeFile(NodePath.join(root, "pkg", "BUILD.ts"), "")
+    await Fs.writeFile(NodePath.join(root, "PACKAGE.ts"), "")
+    await Fs.writeFile(NodePath.join(root, "pkg", "PACKAGE.ts"), "")
     await Fs.writeFile(NodePath.join(root, "pkg", ".gitignore"), "ignored.txt\n")
     await Fs.writeFile(NodePath.join(root, "pkg", "kept.txt"), "kept")
     await Fs.writeFile(NodePath.join(root, "pkg", "ignored.txt"), "ignored")
@@ -55,7 +55,7 @@ describe("known-file discovery", () => {
   })
 
   it("stops at an initialized nested repository instead of listing its files", async () => {
-    await Fs.writeFile(NodePath.join(root, "BUILD.ts"), "")
+    await Fs.writeFile(NodePath.join(root, "PACKAGE.ts"), "")
     await Fs.mkdir(NodePath.join(root, "vendor", "submodule", "src"), { recursive: true })
     // An initialized submodule carries `.git` as a gitfile, a vendored clone
     // carries it as a directory; both are repositories of their own.
@@ -77,7 +77,7 @@ describe("known-file discovery", () => {
   })
 
   it("stops at every path .gitmodules declares, initialized or not", async () => {
-    await Fs.writeFile(NodePath.join(root, "BUILD.ts"), "")
+    await Fs.writeFile(NodePath.join(root, "PACKAGE.ts"), "")
     await Fs.writeFile(
       NodePath.join(root, ".gitmodules"),
       `[submodule "vendor/jj"]\n\tpath = vendor/jj\n\turl = https://example.invalid/jj.git\n`
@@ -94,7 +94,7 @@ describe("known-file discovery", () => {
 
 describe("known-file generated declarations", () => {
   it("writes atomically and reports drift through GeneratedFile", async () => {
-    await Fs.writeFile(NodePath.join(root, "BUILD.ts"), "")
+    await Fs.writeFile(NodePath.join(root, "PACKAGE.ts"), "")
     await Fs.writeFile(NodePath.join(root, "good.txt"), "good")
     await Effect.runPromise(KnownFile.writeKnownFileDeclaration(root))
     await expect(Effect.runPromise(KnownFile.checkKnownFileDeclaration(root))).resolves.toBeUndefined()
@@ -124,7 +124,7 @@ describe("Smithers.file compile-time opt-in", () => {
     if (generated) {
       await Fs.writeFile(
         registry,
-        KnownFile.renderKnownFileDeclaration(KnownFile.knownFileDiscovery(["BUILD.ts", "good.txt"]))
+        KnownFile.renderKnownFileDeclaration(KnownFile.knownFileDiscovery(["PACKAGE.ts", "good.txt"]))
       )
     }
     await Fs.writeFile(

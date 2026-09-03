@@ -22,8 +22,18 @@ const documentedMessages = () => {
 }
 
 /** Every sentence the guide publishes inside a code fence, however the block is introduced. */
-const publishedSentences = () =>
-  new Set([...guide.matchAll(/^```\n([\s\S]*?)\n```$/gm)].flatMap((match) => match[1].split("\n")))
+const publishedSentences = () => {
+  const sentences = new Set()
+  let fenced = false
+  for (const line of guide.split("\n")) {
+    if (/^```/.test(line)) {
+      fenced = !fenced
+    } else if (fenced) {
+      sentences.add(line)
+    }
+  }
+  return sentences
+}
 
 /** The `### <name>` headings a `#<name>` link in a refusal resolves to. */
 const guideAnchors = () => new Set([...guide.matchAll(/^###\s+(\S+)\s*$/gm)].map((match) => match[1]))

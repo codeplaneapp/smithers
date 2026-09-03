@@ -448,7 +448,7 @@ export interface RunOptions {
    * `SMITHERS_CACHE_URL`; both were schema-validated and then dropped, so a
    * workspace that declared a shared cache ran local-only with no warning and
    * no line in the plan. The CLI resolves it once and hands it here, exactly
-   * as it does for BUILD.ts execution.
+   * as it does for every target execution.
    */
   readonly remoteCache?: Workspace.RemoteCacheAccess | undefined
   readonly verb: PackageVerb
@@ -3088,9 +3088,6 @@ const sandboxRequest = (
     writes.add(node.packagePath === "" ? "target" : `${node.packagePath}/target`)
     for (const path of node.lane.outFiles) writes.add(NodePath.posix.dirname(path))
   }
-  // Replacing or cleaning a declared output first inspects its current tree.
-  // A writable output therefore also has to be readable by the same action.
-  for (const path of writes) reads.add(path)
   return {
     policy: node.sandbox,
     mechanism: workspace.sandboxes?.sandboxes["default"],
@@ -3182,7 +3179,7 @@ export const execute = async (
     warn: reporter.warn
   })
   // The environment names that carry this workspace's remote-cache tokens.
-  // BUILD.ts execution withholds them from every target subprocess (Executor.ts);
+  // Target execution withholds them from every target subprocess;
   // PACKAGE.ts execution resolved the same credentials and then handed children a
   // clone of `process.env`, so a declared `MY_CACHE_TOKEN` stayed readable by
   // every tool and agent the graph spawned.

@@ -43,7 +43,7 @@ const temporaryEntries = async (): Promise<ReadonlyArray<string>> =>
     .filter((entry) => entry.startsWith(".smthrs-scaffold-"))
 
 describe("scaffold", () => {
-  it("creates a package a default target can pick up, with no BUILD.ts", async () => {
+  it("creates a package a default target can pick up, with no legacy declaration", async () => {
     const report = await run("@smthrs/widget")
     expect(report.directory).toBe("packages/widget")
     expect(report.files).toEqual([
@@ -53,7 +53,7 @@ describe("scaffold", () => {
       "packages/widget/test/index.test.ts",
       "packages/widget/README.md"
     ])
-    expect(await Fs.readdir(NodePath.join(root, "packages/widget"))).not.toContain("BUILD.ts")
+    expect(await Fs.readdir(NodePath.join(root, "packages/widget"))).not.toContain("legacy declaration")
   })
 
   it("writes a manifest carrying the template fields", async () => {

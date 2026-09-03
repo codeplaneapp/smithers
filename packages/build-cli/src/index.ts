@@ -8,7 +8,7 @@
  * integration test injects, the target executors it invokes on their own, the
  * planner and the renderers it reads results through, and the workspace
  * loader it opens a tree with. The planner internals, the cache, and the
- * package-mode execution engine are reached through those, so they are left to
+ * build-system execution engine are reached through those, so they are left to
  * the wildcard rather than listed twice.
  *
  * @since 0.1.0

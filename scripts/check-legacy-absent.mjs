@@ -3,7 +3,7 @@
  *
  * `legacy/` holds the Smithers 0.x sources that Phase 4 lanes port from. It is
  * outside the pnpm workspace, outside the root TypeScript program, outside
- * every BUILD.ts inventory, and outside every walk that honors `.gitignore`
+ * every legacy declaration inventory, and outside every walk that honors `.gitignore`
  * (`legacy/.gitignore` ignores its own contents). Nothing live may import it.
  *
  * The directory is deliberately temporary: PLAN.md Phase 7 requires that only

@@ -43,7 +43,7 @@ import * as Runtime from "./Runtime.ts"
  * Schema for the supported package managers.
  *
  * The set matches the declared `PackageManager` union in `@smthrs/targets`:
- * a manager this service can measure is a manager a BUILD.ts file can declare.
+ * a manager this service can measure is a manager a legacy declaration file can declare.
  *
  * @category models
  * @since 0.1.0

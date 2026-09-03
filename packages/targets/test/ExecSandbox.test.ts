@@ -487,5 +487,8 @@ describe("host", () => {
     if (node !== undefined) expect(NodePath.isAbsolute(node)).toBe(true)
     expect(real.exists(process.execPath)).toBe(true)
     expect(real.isDirectory(NodePath.dirname(process.execPath))).toBe(true)
+    expect(real.isDirectory("/definitely/not/a/real/directory")).toBe(false)
+    expect(real.entries?.("/definitely/not/a/real/directory")).toBeUndefined()
+    expect(real.realpath?.("/definitely/not/a/real/path")).toBeUndefined()
   })
 })

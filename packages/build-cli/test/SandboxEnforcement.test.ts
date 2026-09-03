@@ -132,7 +132,7 @@ export const Package = S.Package({ targets: { undeclared, declared } })
       /sandbox: secret\.txt is outside the declared read set|Operation not permitted|No such file/
     )
     const admitted = await serve(root, ["//:declared"])
-    expect(admitted.exitCode).toBe(0)
+    expect(admitted.exitCode, admitted.logs).toBe(0)
   })
 
   it("denies an undeclared write and admits a declared output directory", async () => {
@@ -285,7 +285,7 @@ export const Package = S.Package({ targets: { declared, undeclared, egress } })
     )
     commitAll(root)
     const admitted = await serve(root, ["//:declared"])
-    expect(admitted.exitCode).toBe(0)
+    expect(admitted.exitCode, admitted.logs).toBe(0)
     const refused = await serve(root, ["//:undeclared"])
     expect(refused.exitCode).toBe(1)
     const closed = await serve(root, ["//:egress"])

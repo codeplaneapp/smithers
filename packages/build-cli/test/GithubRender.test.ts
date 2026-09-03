@@ -58,7 +58,7 @@ const normalizeYaml = (value: unknown): unknown => {
   return value
 }
 
-/** Parses one workflow while omitting its display name, which package mode derives from its file name. */
+/** Parses one workflow while omitting its display name, which the build system derives from its file name. */
 const comparableWorkflow = (source: string): unknown => {
   const parsed = yaml.parse(source)
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -103,7 +103,7 @@ const temporaryRoot = async (): Promise<string> =>
   tracked(Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-github-render-"))))
 
 /**
- * A committed package-mode workspace whose only target answers to `//:build`,
+ * A committed build-system workspace whose only target answers to `//:build`,
  * so a rendered job command can be planned by the real CLI.
  */
 const parseableWorkspace = async (): Promise<string> => {
@@ -227,7 +227,7 @@ describe("force-spec CI generation goldens", () => {
 })
 
 describe("steps-form fixture", () => {
-  it("loads package mode and renders the expected workflow YAML", async () => {
+  it("loads the build system and renders the expected workflow YAML", async () => {
     const rendered = await renderSteps()
     expect(rendered.files.map((file) => file.path)).toEqual(["workflows/manual.yml"])
     const golden = await Fs.readFile(NodePath.join(goldenRoot, "workflows/manual.yml"), "utf8")

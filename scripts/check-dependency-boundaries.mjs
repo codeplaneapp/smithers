@@ -131,7 +131,7 @@ export function collectSourceFiles(dir, out, nestedPackageDirs) {
     // Build-graph declarations belong to the root workspace, not the package
     // they sit in: the build CLI loads them from the repository root against
     // the root install. `collectGraphFiles` gives them to the root package.
-    if (entry === "BUILD.ts" || entry === "PACKAGE.ts") continue;
+    if (entry === "legacy declaration" || entry === "PACKAGE.ts") continue;
     if (sourceExtensions.has(extname(entry))) out.push(child);
   }
 }
@@ -140,8 +140,8 @@ export function collectSourceFiles(dir, out, nestedPackageDirs) {
  * Collects every build-graph declaration in the tree, so the root workspace
  * checks them against the root manifest.
  *
- * The build CLI loads every `BUILD.ts` from the repository root against the
- * root install, which is why `apps/server/BUILD.ts` may import
+ * The build CLI loads every `legacy declaration` from the repository root against the
+ * root install, which is why `apps/server/legacy declaration` may import
  * `@smthrs/targets` without `apps/server` declaring it. Declarations inside a
  * scaffolding template describe the app the template generates, not this
  * repository, so a directory holding a manifest that is not a workspace member
@@ -173,7 +173,7 @@ export function collectGraphFiles(dir, memberDirs, out) {
       collectGraphFiles(child, memberDirs, out);
       continue;
     }
-    if (entry === "BUILD.ts" || entry === "PACKAGE.ts") out.push(child);
+    if (entry === "legacy declaration" || entry === "PACKAGE.ts") out.push(child);
   }
 }
 
@@ -306,7 +306,7 @@ function dependencyNames(manifest, section) {
  * package scripts, and build-graph declarations. Such a file may use
  * `devDependencies`; a shipped source file may not.
  *
- * `BUILD.ts` is a declaration the build CLI loads with the root install, and
+ * `legacy declaration` is a declaration the build CLI loads with the root install, and
  * no tarball contains one.
  *
  * @param {string} file
@@ -320,7 +320,7 @@ function isDevOnlyFile(file) {
     parts.includes("__tests__") ||
     parts.includes("__type-tests__") ||
     parts.includes("scripts") ||
-    base === "BUILD.ts" ||
+    base === "legacy declaration" ||
     base.includes(".test.") ||
     base.includes(".spec.") ||
     base.endsWith(".config.ts") ||

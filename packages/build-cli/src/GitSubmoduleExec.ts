@@ -1,5 +1,5 @@
 /**
- * Gitlink-keyed submodule planning for package-mode execution.
+ * Gitlink-keyed submodule planning for build-system execution.
  *
  * The git index is the version authority. `.gitmodules` selects paths, globs
  * are expanded before execution, and populated worktrees must already match

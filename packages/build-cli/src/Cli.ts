@@ -17,7 +17,6 @@ import * as Ansi from "./Ansi.ts"
 import { normalizePublishNamespace } from "./Cache.ts"
 import * as CreateApp from "./CreateApp.ts"
 import * as Diagnostic from "./Diagnostic.ts"
-import { declaredToolchain, runInstall } from "./engine.ts"
 import * as Executor from "./Executor.ts"
 import * as GitHooks from "./GitHooks.ts"
 import * as GraphOutput from "./GraphOutput.ts"
@@ -30,23 +29,12 @@ import * as Planner from "./Planner.ts"
 import * as Query from "./Query.ts"
 import * as RepoResolution from "./RepoResolution.ts"
 import * as Reporter from "./Reporter.ts"
-import {
-  credentialEnvNames,
-  ensureGitignored,
-  type RemoteCacheAccess,
-  remoteCacheOf,
-  resolveConfig,
-  type ResolvedConfig,
-  type ResolvedRemoteCache,
-  resolveInstallAttrs,
-  resolveRemoteCache,
-  Workspace
-} from "./Workspace.ts"
+import { type RemoteCacheAccess, remoteCacheOf, type ResolvedRemoteCache } from "./Workspace.ts"
 
 const workspaceOption = z.object({
-  workspace: z.string().default(process.cwd()).describe("Workspace root containing BUILD.ts files"),
+  workspace: z.string().default(process.cwd()).describe("Directory inside a workspace containing WORKSPACE.ts"),
   cacheDir: z.string().optional().describe(
-    "Workspace-relative cache directory; overrides the root BUILD.ts declaration and .flows"
+    "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration"
   )
 })
 
@@ -100,7 +88,7 @@ interface ExecutionFlags extends WorkspaceFlags {
 }
 
 /**
- * Process-scoped configuration captured before BUILD.ts evaluation.
+ * Process-scoped configuration captured before declaration evaluation.
  *
  * `stdout` and `stderr` default to the process streams; tests inject
  * in-memory terminals. `exit` records the exit code of a failure a
@@ -128,14 +116,6 @@ export interface RuntimeConfig {
   readonly exit?: ((code: number) => void) | undefined
 }
 
-interface PreparedWorkspace {
-  readonly root: string
-  readonly cacheDirectory: string
-  readonly sandbox: ResolvedConfig["sandbox"]
-  readonly sandboxes: ResolvedConfig["sandboxes"]
-  readonly remoteCache?: RemoteCacheAccess | undefined
-}
-
 /** The slice of an incur command context the presentation helpers read. */
 interface Presentation {
   readonly agent: boolean
@@ -157,7 +137,7 @@ const environmentOf = (config: RuntimeConfig): Ansi.Environment => config.enviro
  * The trust domain this process publishes cache results into.
  *
  * Which domain a job belongs to is a property of the job, not of the workspace
- * it builds, so it comes from the environment rather than from BUILD.ts. An
+ * it builds, so it comes from the environment rather than target declarations. An
  * unset value means the trusted domain, which is what a post-merge build has.
  */
 const publishNamespaceOf = (config: RuntimeConfig): string | undefined => {
@@ -234,7 +214,7 @@ const present = <A>(
 /**
  * Binds a resolved remote cache to the readers that fetch its credentials.
  *
- * Shared by both declaration loaders. BUILD.ts reaches it through
+ * Shared remote-cache credential resolution.
  * {@link prepare}; WORKSPACE.ts builds the same access directly, which used
  * to be schema-validated and then dropped, so a workspace declaring a remote
  * cache ran local-only with no warning and no line in the plan.
@@ -287,78 +267,22 @@ const remoteCacheAccess = (
 }
 
 /**
- * Says once per process that the cache came from the jjhub remote rather
- * than a declaration, and how to make that permanent.
- */
-const discoveryNoted = new Set<string>()
-const noteDiscoveredCache = (remoteCache: ResolvedRemoteCache, runtime: RuntimeConfig): void => {
-  if (remoteCache.discovered === undefined || discoveryNoted.has(remoteCache.endpoint)) return
-  discoveryNoted.add(remoteCache.endpoint)
-  terminalsOf(runtime).stderr.write(
-    `smthrs: using the jjhub build cache for ${remoteCache.discovered.repo} (no declaration; anonymous reads, ` +
-      `SMITHERS_CACHE_TOKEN publishes). Run \`smithers cache connect\` to commit a read token.\n`
-  )
-}
-
-const prepare = async (
-  flags: WorkspaceFlags,
-  runtime: RuntimeConfig = {},
-  writeState = true
-): Promise<PreparedWorkspace> => {
-  runtime.signal?.throwIfAborted()
-  const root = NodePath.resolve(flags.workspace)
-  const config = await resolveConfig(root, flags.cacheDir)
-  runtime.signal?.throwIfAborted()
-  const remoteCache = await resolveRemoteCache(root, runtime.cacheUrl, { environment: environmentOf(runtime) })
-  if (remoteCache !== undefined) noteDiscoveredCache(remoteCache, runtime)
-  const preparedRemote = remoteCacheAccess(remoteCache, runtime)
-  if (writeState && config.gitignored) await ensureGitignored(root, config.cacheDirectory)
-  runtime.signal?.throwIfAborted()
-  const base = {
-    root,
-    cacheDirectory: config.cacheDirectory,
-    sandbox: config.sandbox,
-    sandboxes: config.sandboxes
-  }
-  return preparedRemote === undefined ? base : { ...base, remoteCache: preparedRemote }
-}
-
-/** Opens the workspace index under the resolved cache directory. */
-const openWorkspace = async (
-  flags: WorkspaceFlags,
-  runtime: RuntimeConfig = {},
-  writeState = true
-): Promise<{ readonly workspace: Workspace; readonly remoteCache: PreparedWorkspace["remoteCache"] }> => {
-  const prepared = await prepare(flags, runtime, writeState)
-  return {
-    workspace: await Workspace.make(prepared.root, process.cwd(), {
-      cacheDirectory: prepared.cacheDirectory,
-      sandbox: prepared.sandbox,
-      sandboxes: prepared.sandboxes,
-      signal: runtime.signal
-    }),
-    remoteCache: prepared.remoteCache
-  }
-}
-
-/**
- * Opens the PACKAGE.ts index when the resolved workspace uses WORKSPACE.ts:
- * the nearest ancestor of the workspace flag holding `.smithers/WORKSPACE.ts`
- * or a root `WORKSPACE.ts` decides. A BUILD.ts workspace has neither and
- * returns undefined, so BUILD.ts loading is untouched.
+ * Opens the target index rooted by the nearest WORKSPACE.ts declaration.
  */
 const openPackageIndex = async (
   flags: WorkspaceFlags,
   runtime: RuntimeConfig = {}
-): Promise<PackageIndex.PackageIndex | undefined> => {
+): Promise<PackageIndex.PackageIndex> => {
   runtime.signal?.throwIfAborted()
   const root = await PackageDiscovery.findWorkspaceRoot(NodePath.resolve(flags.workspace))
-  if (root === undefined) return undefined
+  if (root === undefined) {
+    throw new Error("not a workspace; create .smithers/WORKSPACE.ts")
+  }
   // Evaluate the one root declaration before walking: both its cache and its
   // opaque child repositories are discovery boundaries. The full graph load
   // imports the same module instance together with the admitted Packages.
   const workspaceFile = await PackageDiscovery.workspaceFileOf(root)
-  if (workspaceFile === undefined) return undefined
+  if (workspaceFile === undefined) throw new Error("not a workspace; create .smithers/WORKSPACE.ts")
   const workspace = await PackageLoader.loadWorkspaceDeclaration(root, workspaceFile)
   const cacheDirectory = flags.cacheDir === undefined
     ? workspace.cache.directory
@@ -372,7 +296,7 @@ const openPackageIndex = async (
   return PackageIndex.PackageIndex.make(loaded, process.cwd())
 }
 
-/** PACKAGE.ts `query`: the same listing shape BUILD.ts prints. */
+/** Evaluates a query against the target index. */
 const packageQuery = async (
   index: PackageIndex.PackageIndex,
   expression: string
@@ -545,9 +469,7 @@ const parseInputs = (entries: ReadonlyArray<string> | undefined): Readonly<Recor
 }
 
 /**
- * Runs one execution verb through the PACKAGE.ts executor when the
- * resolved workspace is a PACKAGE.ts workspace, or returns undefined so the
- * caller falls through to BUILD.ts loading.
+ * Runs one execution verb through the build executor.
  */
 const runPackageVerb = async (
   verb: PackageExec.PackageVerb,
@@ -555,14 +477,13 @@ const runPackageVerb = async (
   flags: ExecutionFlags & ModeFlags,
   config: RuntimeConfig,
   reporter: Reporter.Reporter
-): Promise<Executor.Summary | PackageExec.PlanReport | undefined> => {
+): Promise<Executor.Summary | PackageExec.PlanReport> => {
   const index = await openPackageIndex(flags, config)
-  if (index === undefined) return undefined
   const cacheDirectory = flags.cacheDir === undefined
     ? index.workspace.cache.directory
     : Config.normalizeCacheDirectory(flags.cacheDir)
   // The WORKSPACE.ts declaration and SMITHERS_CACHE_URL both reach execution
-  // here, under the same precedence BUILD.ts applies.
+  // here, under the workspace declaration's precedence.
   const remoteCache = remoteCacheAccess(
     remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
     config
@@ -601,9 +522,6 @@ const runGitHooks = async (
   | { readonly mode: "install"; readonly installed: ReadonlyArray<string> }
 > => {
   const index = await openPackageIndex(flags, config)
-  if (index === undefined) {
-    throw new Error("gitHooks renders PACKAGE.ts workspace bindings; this workspace has no WORKSPACE.ts")
-  }
   const bindings = GitHooks.resolveHookLabels(index.workspace, index)
   const rendered = GitHooks.render(bindings)
   if (flags.write) {
@@ -622,23 +540,7 @@ const runVerb = async (
   config: RuntimeConfig,
   reporter: Reporter.Reporter
 ): Promise<Planner.Plan | Executor.Summary | PackageExec.PlanReport> => {
-  const packaged = await runPackageVerb(verb, pattern, flags, config, reporter)
-  if (packaged !== undefined) return packaged
-  const { remoteCache, workspace } = await openWorkspace(flags, config, !flags.plan)
-  const plan = await Planner.make(workspace, verb, pattern)
-  if (flags.plan) return plan
-  return Executor.execute({
-    workspace,
-    verb,
-    pattern,
-    targets: plan.targets,
-    jobs: flags.jobs,
-    readCache: flags.cache,
-    remoteCache,
-    signal: config.signal,
-    packageName: "name" in flags && typeof flags.name === "string" ? flags.name : undefined,
-    reporter
-  })
+  return runPackageVerb(verb, pattern, flags, config, reporter)
 }
 
 /**
@@ -663,7 +565,7 @@ const runCi = async (
   reporter: Reporter.Reporter
 ): Promise<CiPlan | Executor.Summary> => {
   const index = await openPackageIndex(flags, config)
-  if (index !== undefined) {
+  {
     const cacheDirectory = flags.cacheDir === undefined
       ? index.workspace.cache.directory
       : Config.normalizeCacheDirectory(flags.cacheDir)
@@ -729,34 +631,6 @@ const runCi = async (
       }
     )
   }
-  const { remoteCache, workspace } = await openWorkspace(flags, config, !flags.plan)
-  const plans: Array<Planner.Plan> = []
-  const refusals: Array<unknown> = []
-  for (const kind of ciKinds) {
-    try {
-      plans.push(await Planner.make(workspace, kind, pattern))
-    } catch (cause) {
-      // An exact label that does not participate in one of the CI kinds is
-      // fine as long as it participates in another; any other planning error
-      // is real and propagates.
-      if (cause instanceof Planner.UnsupportedVerbError && cause.verb === kind) refusals.push(cause)
-      else throw cause
-    }
-  }
-  if (plans.length === 0) throw refusals[0] ?? new Error(`no targets selected by ${pattern}`)
-  const merged = Executor.mergePlans(plans)
-  if (flags.plan) return { verb: "ci", pattern, ...merged }
-  return Executor.execute({
-    workspace,
-    verb: "ci",
-    pattern,
-    targets: merged.targets,
-    jobs: flags.jobs,
-    readCache: flags.cache,
-    remoteCache,
-    signal: config.signal,
-    reporter
-  })
 }
 
 /** Every outcome an execution command can return before settling. */
@@ -846,46 +720,34 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       async run(context) {
         try {
           const index = await openPackageIndex(context.options, config)
-          if (index !== undefined) {
-            const installs = index.targets().filter((row) =>
-              row.packagePath === "" && Target.metadata(row.target).target === "Install"
+          const installs = index.targets().filter((row) =>
+            row.packagePath === "" && Target.metadata(row.target).target === "Install"
+          )
+          if (installs.length !== 1) {
+            throw new Error(
+              installs.length === 0
+                ? "the root PACKAGE.ts declares no Install target"
+                : "the root PACKAGE.ts declares more than one Install target"
             )
-            if (installs.length !== 1) {
-              throw new Error(
-                installs.length === 0
-                  ? "the root PACKAGE.ts declares no Install target"
-                  : "the root PACKAGE.ts declares more than one Install target"
-              )
-            }
-            const cacheDirectory = context.options.cacheDir === undefined
-              ? index.workspace.cache.directory
-              : Config.normalizeCacheDirectory(context.options.cacheDir)
-            const remoteCache = remoteCacheAccess(
-              remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
-              config
-            )
-            const summary = await PackageExec.run({
-              index,
-              cacheDirectory,
-              ...(remoteCache === undefined ? {} : { remoteCache }),
-              verb: "run",
-              pattern: installs[0]!.label,
-              environment: config.environment,
-              signal: config.signal
-            })
-            if ("ok" in summary && !summary.ok) throw new Error(failureMessage(summary))
-            return summary
           }
-          const prepared = await prepare(context.options, config)
-          return await runInstall(prepared.root, {
-            cacheDirectory: prepared.cacheDirectory,
-            // runInstall is a library entry point with no workspace discovery, so the CLI reads attrs here.
-            toolchain: declaredToolchain(await resolveInstallAttrs(prepared.root)),
-            sensitiveEnvironment: prepared.remoteCache === undefined
-              ? []
-              : credentialEnvNames(prepared.remoteCache.credentials),
+          const cacheDirectory = context.options.cacheDir === undefined
+            ? index.workspace.cache.directory
+            : Config.normalizeCacheDirectory(context.options.cacheDir)
+          const remoteCache = remoteCacheAccess(
+            remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
+            config
+          )
+          const summary = await PackageExec.run({
+            index,
+            cacheDirectory,
+            ...(remoteCache === undefined ? {} : { remoteCache }),
+            verb: "run",
+            pattern: installs[0]!.label,
+            environment: config.environment,
             signal: config.signal
           })
+          if ("ok" in summary && !summary.ok) throw new Error(failureMessage(summary))
+          return summary
         } catch (cause) {
           return context.error({
             code: "install_failed",
@@ -1002,9 +864,6 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       run: (context) =>
         executeCommand(context, config, "target_failed", async (reporter) => {
           const outcome = await runPackageVerb("auto", context.args.pattern, context.options, config, reporter)
-          if (outcome === undefined) {
-            throw new Error("the bare-label form executes PACKAGE.ts targets; this workspace has no WORKSPACE.ts")
-          }
           return outcome
         })
     })
@@ -1058,13 +917,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       async run(context) {
         try {
           const index = await openPackageIndex(context.options, config)
-          let result: Query.Listing | Query.Dependencies | Query.Dependents | Query.PackageOwners
-          if (index !== undefined) {
-            result = await packageQuery(index, context.args.expr)
-          } else {
-            const { workspace } = await openWorkspace(context.options, config, false)
-            result = await Query.run(workspace, context.args.expr)
-          }
+          const result = await packageQuery(index, context.args.expr)
           return present(context, config, result, (style) => Query.text(result, style))
         } catch (cause) {
           return context.error({ code: "query_failed", exitCode: 1, message: Diagnostic.describe(cause) })
@@ -1085,9 +938,6 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       async run(context) {
         try {
           const index = await openPackageIndex(context.options, config)
-          if (index === undefined) {
-            throw new Error("owners reads PACKAGE.ts owners declarations; this workspace has no WORKSPACE.ts")
-          }
           const paths = [...(context.args.paths ?? [])]
           if (context.options.diff !== undefined) {
             paths.push(...await Owners.changedPaths(index.root, context.options.diff))
@@ -1110,26 +960,10 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       async run(context) {
         try {
           const index = await openPackageIndex(context.options, config)
-          if (index !== undefined) {
-            const { data, edges, rows } = await packageGraph(index, context.args.pattern, context.options.mermaid)
-            // Mermaid is meant for a file or a renderer, never a terminal.
-            if (context.options.mermaid) return data
-            return present(context, config, data, (style) => GraphOutput.packageText(rows, edges, style))
-          }
-          const { workspace } = await openWorkspace(context.options, config, false)
-          const plan = await Planner.make(workspace, "graph", context.args.pattern)
-          const data = {
-            pattern: context.args.pattern,
-            format: context.options.mermaid ? "mermaid" : "text",
-            graph: context.options.mermaid ? GraphOutput.mermaid(plan) : GraphOutput.text(plan),
-            roots: plan.roots,
-            targets: plan.targets.map((target) => ({ label: target.label, target: target.target })),
-            edges: plan.edges,
-            warnings: plan.warnings
-          }
+          const { data, edges, rows } = await packageGraph(index, context.args.pattern, context.options.mermaid)
           // Mermaid is meant for a file or a renderer, never a terminal.
           if (context.options.mermaid) return data
-          return present(context, config, data, (style) => GraphOutput.text(plan, style))
+          return present(context, config, data, (style) => GraphOutput.packageText(rows, edges, style))
         } catch (cause) {
           return context.error({ code: "graph_failed", exitCode: 1, message: Diagnostic.describe(cause) })
         }

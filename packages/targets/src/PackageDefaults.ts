@@ -20,7 +20,7 @@ import * as Target from "./Target.ts"
 export const TypeId: unique symbol = Symbol.for("smithers-build/PackageDefaults") as never
 
 /**
- * A macro the planner may apply to a directory without its own BUILD.ts file.
+ * A macro the planner may apply to a directory without its own legacy declaration file.
  *
  * The declared `attrs` value is passed as the macro's argument. Every target
  * in the returned record becomes a synthesized named export.
@@ -32,11 +32,11 @@ export type Macro = (attrs: never) => object
 
 /**
  * A pure declaration of targets the planner synthesizes for directories
- * without their own BUILD.ts file.
+ * without their own legacy declaration file.
  *
  * The planner matches `directories` against workspace directories that contain
  * the `marker` file and lack the `unless` file, then applies the macro to
- * every match. Declare workspace-wide defaults in the root BUILD.ts file; the
+ * every match. Declare workspace-wide defaults in the root legacy declaration file; the
  * planner loads it before it synthesizes anything.
  *
  * @category models
@@ -61,7 +61,7 @@ export interface Options {
   readonly directories: string | Input.Glob
   /** @default "package.json" */
   readonly marker?: string | undefined
-  /** @default "BUILD.ts" */
+  /** @default "PACKAGE.ts" */
   readonly unless?: string | undefined
   readonly macro: Macro
   /** @default {} */
@@ -73,7 +73,7 @@ const Marker = Schema.NonEmptyString.pipe(
 )
 
 const Unless = Schema.NonEmptyString.pipe(
-  Schema.withConstructorDefault(Effect.succeed("BUILD.ts"))
+  Schema.withConstructorDefault(Effect.succeed("PACKAGE.ts"))
 )
 
 const DefaultAttrs = Schema.Record(Schema.String, Schema.Unknown).pipe(
@@ -109,7 +109,7 @@ export const make = (options: Options): PackageDefaults => {
 }
 
 /**
- * Declares pure workspace defaults using the BUILD.ts calling convention.
+ * Declares pure workspace defaults using the legacy declaration calling convention.
  *
  * A string `directories` value is lifted to {@link Input.glob}. Construction
  * validates the declaration and performs no I/O.
@@ -161,7 +161,7 @@ const isStringArray = (value: unknown): value is ReadonlyArray<string> => {
 }
 
 /**
- * Checks whether a BUILD.ts export is a default-target declaration.
+ * Checks whether a legacy declaration export is a default-target declaration.
  *
  * @category guards
  * @since 0.1.0
@@ -183,7 +183,7 @@ export const isPackageDefaults = (value: unknown): value is PackageDefaults => {
 /**
  * Checks whether one workspace directory matches a declaration's glob.
  *
- * `declaringPackage` is the package path of the BUILD.ts file that exported
+ * `declaringPackage` is the package path of the legacy declaration file that exported
  * the declaration; the glob and its excludes resolve relative to it.
  *
  * @category synthesis

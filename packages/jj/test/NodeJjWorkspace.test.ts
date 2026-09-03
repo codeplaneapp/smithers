@@ -11,7 +11,7 @@
  * workspace behind.
  *
  * Dropped from the 0.x set, with reasons: the bundled `jj` platform packages
- * (`jj-package-mode`, the bundled branch of `resolve-jj-binary`) have no rc.0
+ * (`jj-build-system`, the bundled branch of `resolve-jj-binary`) have no rc.0
  * counterpart, because rc.0 vendors no `jj` binaries; `find-vcs-root` and
  * `vcs-tooling-status` covered a git resolver and a `SMITHERS_GIT_PATH`
  * override that rc.0 does not have, and their jj half is `Jj.root` plus

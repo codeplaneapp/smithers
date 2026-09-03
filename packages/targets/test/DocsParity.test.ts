@@ -3,9 +3,10 @@ import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
-import * as Executor from "../../build-cli/src/Executor.ts"
-import * as Planner from "../../build-cli/src/Planner.ts"
-import { Workspace } from "../../build-cli/src/Workspace.ts"
+import * as PackageDiscovery from "../../build-cli/src/PackageDiscovery.ts"
+import * as PackageExec from "../../build-cli/src/PackageExec.ts"
+import { PackageIndex } from "../../build-cli/src/PackageIndex.ts"
+import * as PackageLoader from "../../build-cli/src/PackageLoader.ts"
 import * as DocsParity from "../src/DocsParity.ts"
 import { StandardPackage } from "../src/StandardPackage.ts"
 import * as Target from "../src/Target.ts"
@@ -218,16 +219,29 @@ describe("DocsParity execution", () => {
       await Fs.writeFile(path, text, "utf8")
     }
     try {
-      await write("BUILD.ts", "export const root = 1\n")
-      await write("package.json", `${JSON.stringify({ name: "fixture", private: true })}\n`)
       const rulesModule = NodePath.resolve(import.meta.dirname, "../src/Smithers.ts")
+      await write(
+        ".smithers/WORKSPACE.ts",
+        `import * as S from "${rulesModule}"\n` +
+          `const packageJson = S.file("//package.json")\n` +
+          `export const Workspace = S.Workspace("fixture", {\n` +
+          `  repository: "git+https://example.invalid/fixture.git",\n` +
+          `  cache: S.Cache({ directory: ".flows" }),\n` +
+          `  runtime: S.Runtime.Node({ version: "26" }),\n` +
+          `  packageManager: S.PackageManager.Yarn({ manifest: packageJson, lockfile: S.file("//yarn.lock") }),\n` +
+          `  nodeModules: S.Npm.NodeModules({ packageJson })\n` +
+          `})\n`
+      )
+      await write("package.json", `${JSON.stringify({ name: "fixture", private: true })}\n`)
+      await write("yarn.lock", "# yarn lockfile v1\n")
       for (const name of ["complete", "stub"]) {
         await write(
-          `packages/${name}/BUILD.ts`,
-          `import { PackageManager, Runtime, StandardPackage } from "${rulesModule}"\n` +
-            `const runtime = Runtime.Node({ version: ">=22.19.0" })\n` +
-            `const packageManager = PackageManager.Pnpm({ version: "11.21.0", runtime })\n` +
-            `export const { docs } = StandardPackage({ packageManager, deps: [], cwd: "packages/${name}" })\n`
+          `packages/${name}/PACKAGE.ts`,
+          `import * as S from "${rulesModule}"\n` +
+            `const runtime = S.Runtime.Node({ version: ">=22.19.0" })\n` +
+            `const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })\n` +
+            `const { docs } = S.StandardPackage({ packageManager, deps: [], cwd: "packages/${name}" })\n` +
+            `export const Package = S.Package({ targets: { docs } })\n`
         )
       }
       await write(
@@ -238,32 +252,19 @@ describe("DocsParity execution", () => {
       )
       await write("packages/stub/README.md", "# stub\n\n[reference]: https://example.com/not-prose\n")
 
-      let workspace: Awaited<ReturnType<typeof Workspace.make>>
-      let plan: Awaited<ReturnType<typeof Planner.make>>
-      try {
-        workspace = await Workspace.make(root, root, { cacheDirectory: ".flows" })
-        plan = await Planner.make(workspace, "docs", "//...")
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : String(cause)
-        throw new Error(`docs planning rejected: ${message}`)
-      }
-      let summary: Awaited<ReturnType<typeof Executor.execute>>
-      try {
-        summary = await Executor.execute({
-          workspace,
-          verb: "docs",
-          pattern: "//...",
-          targets: plan.targets,
-          jobs: 2,
-          readCache: false,
-          log: () => {}
-        })
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : String(cause)
-        throw new Error(`docs execution rejected instead of reporting a target failure: ${message}`)
-      }
+      const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
+      const summary = await PackageExec.run({
+        index: PackageIndex.make(loaded, root),
+        cacheDirectory: ".flows",
+        verb: "docs",
+        pattern: "//...",
+        jobs: 2,
+        readCache: false,
+        log: () => {}
+      })
 
-      expect(summary.ok).toBe(false)
+      expect("ok" in summary && summary.ok).toBe(false)
+      if (!("results" in summary)) throw new Error("docs execution returned a plan")
       expect(summary.results.find((entry) => entry.label === "//packages/complete:docs")?.status).toBe("ran")
       expect(summary.results.find((entry) => entry.label === "//packages/stub:docs")?.status).toBe("failed")
     } finally {

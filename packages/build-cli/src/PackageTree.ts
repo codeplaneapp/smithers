@@ -1,5 +1,5 @@
 /**
- * Host filesystem mechanics for package-mode execution: PATH lookup and
+ * Host filesystem mechanics for build-system execution: PATH lookup and
  * version probes for tool references, the content-addressed artifact store
  * behind `Shell.Build` outDirs, git-based write-set snapshots with
  * out-of-set revert, and scratch copies for check-mode drift runs.

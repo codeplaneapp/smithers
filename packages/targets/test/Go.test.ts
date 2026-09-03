@@ -12,6 +12,10 @@ const go = S.Go.Toolchain({
 })
 
 describe("S.Go", () => {
+  it("rejects a non-object toolchain declaration", () => {
+    expect(() => S.Go.Toolchain(null as never)).toThrow(/options must be an object/)
+  })
+
   it("constructs the workspace toolchain and tool references", () => {
     expect(go._tag).toBe("GoToolchain")
     expect(S.Go.bin).toEqual({ _tag: "GoBin" })

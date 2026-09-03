@@ -121,7 +121,7 @@ export const foldPlan = (nodes: ReadonlyArray<GraphNode>, envelopes: ReadonlyArr
 }
 
 const SKIPPED_DIRS = [".git", ".flows", "node_modules", "dist", "build"]
-const DECLARATION_FILES = ["PACKAGE.ts", "WORKSPACE.ts", "BUILD.ts"]
+const DECLARATION_FILES = ["PACKAGE.ts", "WORKSPACE.ts"]
 
 /** The declaration set of a workspace: a content digest plus each labeled const's declaration site. */
 export interface DeclarationSet {
@@ -173,7 +173,7 @@ const declarationSet = async (repo: string): Promise<DeclarationSet> => {
     if (text === undefined) continue
     const file = relative(repo, path).split(sep).join("/")
     hash.update(file).update("\0").update(text).update("\0")
-    if (path.endsWith("PACKAGE.ts") || path.endsWith("BUILD.ts")) {
+    if (path.endsWith("PACKAGE.ts")) {
       const packageDir = dirname(file) === "." ? "" : dirname(file)
       for (const match of text.matchAll(/^[\t ]*(?:export[\t ]+)?const[\t ]+([A-Za-z_$][\w$]*)[\t ]*=/gm)) {
         const line = text.slice(0, match.index).split("\n").length
@@ -359,7 +359,7 @@ export const queryTargetGraph = async (options: TargetGraphOptions): Promise<Tar
   if (options.plan === true) {
     /*
      * Named labels plan in the workspace's own form (`planArgv`: verb-led on
-     * a BUILD.ts checkout, bare on a WORKSPACE.ts one); the whole `//...`
+     * a nested declaration checkout, bare on a workspace one); the whole `//...`
      * keeps the bare form, which is the only one the CLI plans a pattern in.
      */
     const kindsOf = new Map(nodes.map((entry) => [entry.label, entry.kinds]))

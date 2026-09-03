@@ -20,10 +20,7 @@ export default defineConfig({
       reportsDirectory: join(tmpdir(), `flows-build-cli-coverage-${process.pid}`),
       include: ["src/**"],
       // The floors are the measured coverage rounded down, an honest ratchet
-      // raised as tests accrete toward the workspace's 100% norm, never
-      // lowered. They were set once in 2026-08 and left where they were set,
-      // clearing the branch floor by under a point while the uncovered surface
-      // sat in the code that spawns processes and writes files.
+      // raised as tests accrete toward the workspace's 100% norm.
       thresholds: {
         branches: 76,
         functions: 89,

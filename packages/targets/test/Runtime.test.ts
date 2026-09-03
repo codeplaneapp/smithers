@@ -38,7 +38,7 @@ describe("Runtime declarations", () => {
     expect(versions).toEqual([">=22.19.0", ">=1.3.0"])
   })
 
-  it("routes versions outside the BUILD.ts enumeration to the WORKSPACE.ts declaration", () => {
+  it("routes versions outside the legacy declaration enumeration to the WORKSPACE.ts declaration", () => {
     // The reviewed enumeration still selects the classic NodeRuntime; any
     // other version string is the WORKSPACE.ts form and returns the inert
     // NodeDeclaration instead of a runtime the BUILD-era service could

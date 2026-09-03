@@ -1,9 +1,8 @@
 /**
  * The shared runtime for executing a target declaration's own Effect body.
  *
- * Specialized package-executor rules may use native implementations, while
- * every other target settles through this exact stack. The BUILD.ts executor
- * also uses it until that loader is removed.
+ * Specialized rules may use native implementations, while every other target
+ * settles through this exact stack.
  *
  * @since 0.1.0
  */

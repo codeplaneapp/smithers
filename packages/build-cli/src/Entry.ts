@@ -42,7 +42,7 @@ export interface Host {
 
 /**
  * Runs one invocation against a host. The cache URL and token are read once
- * and removed from the host environment before any BUILD.ts evaluates, so no
+ * and removed from the host environment before any declaration evaluates, so no
  * workspace module can read them. A signal aborts every running target and
  * the process exits 1 whatever the command was about to report.
  *

@@ -1,11 +1,11 @@
 /**
- * BUILD.ts target authoring, macros, and catalog.
+ * legacy declaration target authoring, macros, and catalog.
  *
  * @since 0.1.0
  */
 
 /**
- * The whole BUILD.ts authoring surface, under one namespace.
+ * The whole legacy declaration authoring surface, under one namespace.
  *
  * @category namespace exports
  * @since 0.1.0

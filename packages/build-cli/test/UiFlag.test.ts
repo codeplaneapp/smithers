@@ -28,7 +28,7 @@ const write = async (root: string, relative: string, text: string): Promise<void
 const git = (root: string, ...args: ReadonlyArray<string>): string =>
   NodeChildProcess.execFileSync("git", ["-C", root, ...args], { encoding: "utf8" })
 
-/** A committed package-mode workspace with one green and one red Shell test. */
+/** A committed build-system workspace with one green and one red Shell test. */
 const fixture = async (): Promise<string> => {
   const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-ui-flag-")))
   temporaryDirectories.push(root)

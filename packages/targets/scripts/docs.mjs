@@ -154,7 +154,7 @@ if (unreadable.length > 0) {
   throw new Error(`rules with unreadable kinds: ${unreadable.map((rule) => rule.id).join(", ")}`)
 }
 // A rule id identifies a rule, which is the premise the whole catalog rests
-// on: a BUILD.ts author writes one, the package executor dispatches on one,
+// on: a legacy declaration author writes one, the package executor dispatches on one,
 // and the planner keys on one. Two declarations under one id make the table
 // emit two rows for the same name and leave whichever one the namespace
 // happens to export as the one an author can actually reach.

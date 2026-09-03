@@ -55,7 +55,7 @@ interface TargetGrant {
   readonly id: string
   readonly label: string
   readonly workspace: string
-  /** The snapshot's kinds: a BUILD.ts workspace runs the target with the verb its first kind names. */
+  /** The snapshot's kinds: a legacy declaration workspace runs the target with the verb its first kind names. */
   readonly kinds: ReadonlyArray<string>
 }
 

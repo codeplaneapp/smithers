@@ -3,13 +3,13 @@
  *
  * A pipeline declaration names verbs, not target kinds: `smithers-build test '//...'`
  * is one command a CI job runs, the same verb-and-pattern shape Bazel's own CI
- * uses for `bazel test //...`. Before this module a BUILD.ts file named them
+ * uses for `bazel test //...`. Before this module a legacy declaration file named them
  * with bare strings, so the authoring surface was four quoted words whose
  * spelling nothing checked at the call site and whose meaning the attr name did
  * not explain.
  *
  * This module gives each verb a value. `Verb.Build`, `Verb.Test`, `Verb.Lint`,
- * and `Verb.Docs` are declarations a BUILD.ts file references by name, so a
+ * and `Verb.Docs` are declarations a legacy declaration file references by name, so a
  * misspelling is an unresolved identifier rather than a string the renderer
  * rejects at plan time.
  *

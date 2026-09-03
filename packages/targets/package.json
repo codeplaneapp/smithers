@@ -7,7 +7,7 @@
     "group": "tooling"
   },
   "private": true,
-  "description": "Typed BUILD.ts rules and macros for smithers build",
+  "description": "Typed legacy declaration rules and macros for smithers build",
   "engines": {
     "node": ">=22.19.0"
   },

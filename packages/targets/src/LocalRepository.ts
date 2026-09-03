@@ -1,5 +1,5 @@
 /**
- * Opaque child-workspace declarations for package-mode repositories.
+ * Opaque child-workspace declarations for build-system repositories.
  *
  * A local repository is inert workspace data. The package loader validates
  * its directory and workspace marker before discovery, then treats the tree
