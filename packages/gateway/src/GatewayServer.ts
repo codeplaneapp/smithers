@@ -254,13 +254,33 @@ export const layerSyncHttp = Layer.mergeAll(
 export const rpcPaths: ReadonlyArray<string> = ["/rpc", "/projections", "/sync"]
 
 /**
- * RPC paths whose upgrade/request must pass edge authentication.
+ * RPC paths whose upgrade or request must pass edge authentication.
+ *
+ * `POST /rpc` is deliberately not one of them. The control mount authenticates
+ * in band through `@smthrs/control` `ControlRpcs.ControlAuth`, whose declared
+ * error is `ControlError.Unauthorized`, and that typed control error is the
+ * refusal the control plane publishes: "Missing, malformed, empty, and
+ * incorrect credentials all return the same typed `Unauthorized` control
+ * error" (`docs/pages/guides/control-plane-trust.md`). An edge 401 answered
+ * ahead of the mount, and `ControlClient` filters a non-2xx status, so every
+ * refusal reached a caller as a `TransportError`, the one error class
+ * `@smthrs/control` reserves for a request that failed *before* a declared
+ * control response reached it. It also made the gateway refuse a call
+ * differently from `NodeControl.layerServer` hosting the very same
+ * `ControlRpcs`. The body limit below still applies to `/rpc`, so an
+ * unauthenticated caller buys one bounded body read and nothing else.
+ *
+ * The `/rpc/ws` upgrade stays here. A socket is a resource the server holds
+ * open, the RPC middleware can only refuse frames on a socket that already
+ * exists, and a refused handshake has no RPC channel to answer a typed error
+ * on, so its refusal is a transport fact either way.
  *
  * @category constants
  * @since 1.0.0
  */
 export const protectedPaths: ReadonlyArray<string> = [
-  ...rpcPaths,
+  "/projections",
+  "/sync",
   "/rpc/ws",
   "/projections/ws",
   "/sync/ws"
@@ -277,8 +297,8 @@ export const protectedPaths: ReadonlyArray<string> = [
  * `/RPC`, `/./rpc`, and `/foo/../rpc` reach the `/rpc` handler, while
  * `/rpc%2f`, `/rpc%3Bp`, `/%2frpc`, and `/rpc%20` do not. This is not only
  * about crafted aliases: `@smthrs/control` `ControlClient`'s HTTP protocol
- * posts every call to `/rpc/`, so a literal comparison skipped the credential
- * check and the body limit on the path the product's own client uses.
+ * posts every call to `/rpc/`, so a literal comparison skipped the body limit
+ * on the path the product's own client uses.
  *
  * Each segment is therefore taken without its `;` parameter, empty segments are
  * dropped, and what is left is decoded with `decodeURI` and compared without

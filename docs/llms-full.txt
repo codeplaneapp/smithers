@@ -3501,6 +3501,13 @@ RPC payload. The `--credential` value can still be visible to local process
 inspection and shell history, so this flag is suitable for the private alpha,
 not a final secret-input interface.
 
+The one refusal that is not a control error is the WebSocket handshake. A
+gateway refuses an uncredentialed upgrade on `/rpc/ws` with `401` before the
+socket exists, because there is no RPC channel yet to carry a typed error and
+an open socket is a resource the server would be holding for an unauthenticated
+caller. Every unary procedure answers with `Unauthorized`, and so does every
+frame on a socket that was admitted.
+
 ### Authorization limit
 
 There is no separate run-owner policy in the alpha. The unused `NotOwner`
@@ -8635,8 +8642,24 @@ a socket.
 | `GET /health`       | JSON               | `GatewayServer.Health`                          |
 
 `GatewayServer.rpcPaths` is the three `POST` mounts that carry RPC request
-messages. `GatewayServer.protectedPaths` adds the three sockets: every path in
-it passes edge authentication before a body is read or an upgrade is answered.
+messages. `GatewayServer.protectedPaths` is the paths that pass edge
+authentication before a body is read or an upgrade is answered: the three
+sockets, plus `POST /projections` and `POST /sync`.
+
+`POST /rpc` is deliberately not one of them. The control mount authenticates in
+band through `ControlRpcs.ControlAuth`, whose declared error is
+`ControlError.Unauthorized`, and that typed control error is the refusal
+the control plane publishes. An edge `401`
+answered ahead of the mount, and `ControlClient` filters a non-2xx status, so
+every refusal reached a caller as a `TransportError`, the class
+`@smthrs/control` reserves for a request that failed _before_ a declared
+control response reached it. The gateway also refused a call differently from
+`NodeControl.layerServer` hosting the same `ControlRpcs`. The body limit
+still applies to `/rpc`, so an unauthenticated caller buys one bounded body
+read and nothing else. The `/rpc/ws` upgrade stays edge-authenticated: a socket
+is a resource the server holds open, the RPC middleware can only refuse frames
+on a socket that already exists, and a refused handshake has no RPC channel to
+answer a typed error on.
 
 A request target is classified the way the router will resolve it, not by its
 literal spelling. The router reaches `/rpc` from `/%72pc`,
@@ -8646,8 +8669,8 @@ parameter, drops empty segments, decodes the rest with `decodeURI`, and
 compares without regard to case. A reserved character left encoded stays
 encoded, so `/rpc%2f` is a different path here exactly as it is to the router.
 This matters for more than aliases: `ControlClient`'s HTTP protocol posts every
-call to `/rpc/`, which a literal comparison did not recognize, so the credential
-check and the body limit were skipped on the path the product's own client uses.
+call to `/rpc/`, which a literal comparison did not recognize, so the body
+limit was skipped on the path the product's own client uses.
 
 `GET /health` is deliberately unauthenticated. A supervisor decides whether to
 keep or replace a gateway process by asking which workspace it belongs to, and
@@ -8896,7 +8919,7 @@ service for tests that need the port without a host.
 | `GatewayServer.layerProjectionsHttp`       | const        | layers       | Mounts the gateway's projections on `POST /projections` and `/projections/ws`.                                                |
 | `GatewayServer.layerSyncHttp`              | const        | layers       | Mounts the sync read path on `POST /sync` and `/sync/ws`.                                                                     |
 | `GatewayServer.rpcPaths`                   | const        | constants    | The POST mounts that carry RPC request messages and nothing else.                                                             |
-| `GatewayServer.protectedPaths`             | const        | constants    | RPC paths whose upgrade/request must pass edge authentication.                                                                |
+| `GatewayServer.protectedPaths`             | const        | constants    | RPC paths whose upgrade or request must pass edge authentication.                                                             |
 | `GatewayServer.routedPath`                 | const        | constructors | The mount a request target reaches, spelled the way `rpcPaths` and `protectedPaths` spell it.                                 |
 | `GatewayServer.defaultMaxRequestBodyBytes` | const        | constants    | Default maximum request body accepted by an RPC mount (one MiB).                                                              |
 | `GatewayServer.IngressOptions`             | interface    | models       | Ingress policy enforced before an RPC transport parses a request.                                                             |

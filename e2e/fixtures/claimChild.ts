@@ -89,13 +89,21 @@ const setup = Effect.gen(function*() {
   // Parked and unowned: the state a run is left in when its driver is gone.
   //
   // `Control.pause` is gone at rc.0 (rc-contract sections 4.2 and 5.2), so the
-  // park is written through the runtime the way a driver writes its own: take
-  // the fence this process holds because it launched the run, then move the
-  // row to `parked`, which `SqlControlRuntime`'s `storeStatus` projects onto
-  // the store's `suspended`. The `flows_runs` CHECK constraint clears the
-  // owner columns for every status but `running`, so that one write both
-  // parks the run and releases it, which is the state a swept run is in.
+  // park is written through the runtime the way a driver writes its own: claim
+  // the run, then move the row to `parked`, which `SqlControlRuntime`'s
+  // `storeStatus` projects onto the store's `suspended`. The `flows_runs`
+  // CHECK constraint clears the owner columns for every status but `running`,
+  // so that one write both parks the run and releases it, which is the state a
+  // swept run is in.
+  //
+  // The claim has to be taken rather than assumed. This composition's executor
+  // is the no-op one, so `ControlExecutor.launch` answers `pending` and
+  // `Control.run` takes its `releasePending` branch, which writes the run back
+  // as `accepted` with its owner columns already cleared. Nothing holds the
+  // fence by the time the launch returns, and `claimFence` on its own answers
+  // `ClaimLost`.
   const runtime = yield* ControlRuntime.ControlRuntime
+  yield* runtime.resume(receipt.runId)
   const fence = yield* runtime.claimFence(receipt.runId)
   yield* runtime.writeStatus(receipt.runId, fence, "parked")
   return receipt.runId

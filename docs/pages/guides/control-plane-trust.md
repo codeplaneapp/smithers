@@ -57,6 +57,13 @@ RPC payload. The `--credential` value can still be visible to local process
 inspection and shell history, so this flag is suitable for the private alpha,
 not a final secret-input interface.
 
+The one refusal that is not a control error is the WebSocket handshake. A
+gateway refuses an uncredentialed upgrade on `/rpc/ws` with `401` before the
+socket exists, because there is no RPC channel yet to carry a typed error and
+an open socket is a resource the server would be holding for an unauthenticated
+caller. Every unary procedure answers with `Unauthorized`, and so does every
+frame on a socket that was admitted.
+
 ## Authorization limit
 
 There is no separate run-owner policy in the alpha. The unused `NotOwner`

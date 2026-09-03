@@ -20,8 +20,24 @@ a socket.
 | `GET /health`       | JSON               | `GatewayServer.Health`                          |
 
 `GatewayServer.rpcPaths` is the three `POST` mounts that carry RPC request
-messages. `GatewayServer.protectedPaths` adds the three sockets: every path in
-it passes edge authentication before a body is read or an upgrade is answered.
+messages. `GatewayServer.protectedPaths` is the paths that pass edge
+authentication before a body is read or an upgrade is answered: the three
+sockets, plus `POST /projections` and `POST /sync`.
+
+`POST /rpc` is deliberately not one of them. The control mount authenticates in
+band through `ControlRpcs.ControlAuth`, whose declared error is
+`ControlError.Unauthorized`, and that typed control error is the refusal
+[the control plane publishes](/guides/control-plane-trust). An edge `401`
+answered ahead of the mount, and `ControlClient` filters a non-2xx status, so
+every refusal reached a caller as a `TransportError`, the class
+`@smthrs/control` reserves for a request that failed _before_ a declared
+control response reached it. The gateway also refused a call differently from
+`NodeControl.layerServer` hosting the same `ControlRpcs`. The body limit
+still applies to `/rpc`, so an unauthenticated caller buys one bounded body
+read and nothing else. The `/rpc/ws` upgrade stays edge-authenticated: a socket
+is a resource the server holds open, the RPC middleware can only refuse frames
+on a socket that already exists, and a refused handshake has no RPC channel to
+answer a typed error on.
 
 A request target is classified the way the router will resolve it, not by its
 literal spelling. The router reaches `/rpc` from `/%72pc`,
@@ -31,8 +47,8 @@ parameter, drops empty segments, decodes the rest with `decodeURI`, and
 compares without regard to case. A reserved character left encoded stays
 encoded, so `/rpc%2f` is a different path here exactly as it is to the router.
 This matters for more than aliases: `ControlClient`'s HTTP protocol posts every
-call to `/rpc/`, which a literal comparison did not recognize, so the credential
-check and the body limit were skipped on the path the product's own client uses.
+call to `/rpc/`, which a literal comparison did not recognize, so the body
+limit was skipped on the path the product's own client uses.
 
 `GET /health` is deliberately unauthenticated. A supervisor decides whether to
 keep or replace a gateway process by asking which workspace it belongs to, and

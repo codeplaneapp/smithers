@@ -363,7 +363,12 @@ describe("classifying a request target the way the router will", () => {
     "/rpc%20",
     "/ rpc"
   ])("keeps %s off the mounts, as the router does", (target) => {
-    expect(GatewayServer.protectedPaths).not.toContain(GatewayServer.routedPath(target))
+    // Both lists, because the guard reads both: `protectedPaths` decides the
+    // credential check and `rpcPaths` decides the body limit, and a spelling
+    // that named either would be treated as a mount.
+    const resolved = GatewayServer.routedPath(target)
+    expect(GatewayServer.protectedPaths).not.toContain(resolved)
+    expect(GatewayServer.rpcPaths).not.toContain(resolved)
   })
 
   it("leaves an invalid escape as written rather than refusing to classify", () => {
@@ -531,8 +536,12 @@ describe("the assembled gateway over a real loopback bind", () => {
   test("authenticates before inspecting an oversized body", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
+      // `/projections`, not `/rpc`: the control mount answers its own typed
+      // `Unauthorized` in band (see `protectedPaths`), so the edge-first
+      // ordering this pins is only observable on a mount the edge still
+      // authenticates.
       const response = yield* Effect.promise(() =>
-        fetch(`${url}/rpc`, {
+        fetch(`${url}/projections`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: "x".repeat(256)
@@ -547,17 +556,17 @@ describe("the assembled gateway over a real loopback bind", () => {
       maxRequestBodyBytes: 64
     }))))
 
-  test("authenticates router-equivalent aliases before reading or upgrading", () =>
+  test("applies the body limit to every router-equivalent spelling of /rpc", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
-      const body = "{}"
-      // Every spelling here reaches the `/rpc` handler: the router decodes
-      // percent escapes, drops a `;` parameter, ignores empty segments, and
-      // matches without regard to case. The guard has to classify a request
-      // the way the router will, or an alias walks past the credential check
-      // and the body limit and is answered by the mount itself.
+      const body = "x".repeat(256)
+      // `/rpc` is authenticated in band, so the guard's classification of it
+      // is what the body limit rides on. Every spelling here reaches the
+      // `/rpc` handler, and one the guard failed to recognise would carry an
+      // unbounded body to the mount.
       for (
         const target of [
+          "/rpc",
           "/%72pc",
           "/rpc;transport-parameter",
           "/rpc/",
@@ -566,6 +575,44 @@ describe("the assembled gateway over a real loopback bind", () => {
           "/rpc//",
           "/RPC",
           "/rpc;p/"
+        ]
+      ) {
+        const response = yield* Effect.promise(() =>
+          raw(`${url}${target}`, [
+            `POST ${target} HTTP/1.1`,
+            "Authorization: Bearer edge-secret",
+            "Content-Type: application/json",
+            `Content-Length: ${body.length}`
+          ], body)
+        )
+        expect([target, response.status]).toEqual([target, 413])
+      }
+    }).pipe(Effect.provide(served({
+      host: "127.0.0.1",
+      port: 0,
+      credential: "edge-secret",
+      maxRequestBodyBytes: 64
+    }))))
+
+  test("authenticates router-equivalent aliases before reading or upgrading", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const body = "{}"
+      // Every spelling here reaches the `/projections` handler: the router
+      // decodes percent escapes, drops a `;` parameter, ignores empty
+      // segments, and matches without regard to case. The guard has to
+      // classify a request the way the router will, or an alias walks past the
+      // credential check and is answered by the mount itself.
+      for (
+        const target of [
+          "/%70rojections",
+          "/projections;transport-parameter",
+          "/projections/",
+          "//projections",
+          "///projections",
+          "/projections//",
+          "/PROJECTIONS",
+          "/projections;p/"
         ]
       ) {
         const response = yield* Effect.promise(() =>
@@ -1176,33 +1223,40 @@ describe("gateway credential policy", () => {
   /** The path `ControlClient`'s HTTP protocol actually posts a call to. */
   const clientRpcPath = "/rpc/"
 
-  test("refuses an unauthenticated call at the edge and accepts the configured credential", () =>
+  test("refuses an unauthenticated control call in band and accepts the configured credential", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
-      const body = `${JSON.stringify({ _tag: "Request", id: 1, tag: "List", payload: {}, headers: [] })}\n`
+      // A payload the `List` procedure can actually decode: an edge 401 used
+      // to answer before anything looked at it, so `payload: {}` passed here
+      // while dying inside the mount on `ListRequest`.
+      const body = `${
+        JSON.stringify({ _tag: "Request", id: 1, tag: "List", payload: { _tag: "runs" }, headers: [] })
+      }\n`
       const call = (credential: string | undefined) =>
-        raw(`${url}${clientRpcPath}`, [
-          `POST ${clientRpcPath} HTTP/1.1`,
-          "Content-Type: application/json",
-          `Content-Length: ${new TextEncoder().encode(body).byteLength}`,
-          ...(credential === undefined ? [] : [`Authorization: Bearer ${credential}`])
-        ], body)
+        Effect.promise(async () => {
+          const response = await fetch(`${url}${clientRpcPath}`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...(credential === undefined ? {} : { authorization: `Bearer ${credential}` })
+            },
+            body
+          })
+          return { status: response.status, body: await response.text() }
+        })
 
-      // Fail closed at the edge, on the path the client really uses. The
-      // guard used to compare the raw pathname, so `/rpc/` matched no entry
-      // of `protectedPaths` and every `ControlClient` call reached the mount
-      // with neither the credential check nor the body limit applied; only
-      // the RPC middleware behind it refused the call, after reading the
-      // whole body.
-      const none = yield* Effect.promise(() => call(undefined))
-      const wrong = yield* Effect.promise(() => call("alpha-secre"))
+      // Fail closed, on the path the client really uses, and fail closed in
+      // the control plane's own vocabulary. `ControlRpcs.ControlAuth` declares
+      // `Unauthorized` as its error, and the trust-posture guide promises that
+      // a missing and a wrong credential both return that typed control error;
+      // an edge 401 here reached `ControlClient` as a `TransportError`
+      // instead, which is the class reserved for a request that never got a
+      // declared control response at all.
+      const none = yield* call(undefined)
+      const wrong = yield* call("alpha-secre")
       for (const [name, response] of [["none", none], ["wrong", wrong]] as const) {
-        expect([name, response.status]).toEqual([name, 401])
-        expect([name, JSON.parse(response.body) as unknown]).toEqual([name, {
-          _tag: "flows/gateway/GatewayError",
-          code: "unauthorized",
-          message: "A valid bearer credential is required"
-        }])
+        expect([name, response.status]).toEqual([name, 200])
+        expect([name, response.body.includes("/control/Unauthorized")]).toEqual([name, true])
       }
 
       // The configured credential still travels the same path and is served.
@@ -1214,16 +1268,19 @@ describe("gateway credential policy", () => {
   test("refuses a wrong credential the same way it refuses none", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
-      const refused = yield* Effect.flip(
-        Effect.flatMap(Control, (control) => control.plan({ flowId: "system/test", input: {} })).pipe(
-          Effect.provide(client(url, "alpha-secre"))
+      const refusal = (credential: string | undefined) =>
+        Effect.flip(
+          Effect.flatMap(Control, (control) => control.plan({ flowId: "system/test", input: {} })).pipe(
+            Effect.provide(client(url, credential))
+          )
         )
-      )
-      // The edge answers 401 before the RPC layer sees the call, so the
-      // Effect client reports the refusal as a transport failure rather than
-      // as the mount's own `Unauthorized`. The status and the typed body a
-      // caller reads are asserted above.
-      expect(refused._tag).toBe("/control/TransportError")
+      // The refusal a caller reads is the mount's own typed `Unauthorized`,
+      // not a transport failure standing in for it, and a wrong credential
+      // reads exactly like none.
+      const wrong = yield* refusal("alpha-secre")
+      const none = yield* refusal(undefined)
+      expect(wrong._tag).toBe("/control/Unauthorized")
+      expect(none._tag).toBe("/control/Unauthorized")
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "alpha-secret" }))))
 })
 
@@ -1232,9 +1289,9 @@ describe("gateway error vocabulary", () => {
     Effect.gen(function*() {
       const url = yield* baseUrl
       const projections = yield* Projections
-      const postCode = (body: string, credential?: string | undefined) =>
+      const postCode = (body: string, credential?: string | undefined, path = "/rpc") =>
         Effect.promise(async () => {
-          const response = await fetch(`${url}/rpc`, {
+          const response = await fetch(`${url}${path}`, {
             method: "POST",
             headers: {
               ...(credential === undefined ? {} : { authorization: `Bearer ${credential}` }),
@@ -1274,7 +1331,9 @@ describe("gateway error vocabulary", () => {
           "bind_failed",
           Effect.sync(() => NodeGateway.bindRefusal({ host: "0.0.0.0", port: 0 })?.code)
         ],
-        ["unauthorized", postCode("{}")],
+        // `/projections`, because `/rpc` is authenticated in band and answers
+        // `@smthrs/control`'s typed `Unauthorized` rather than this code.
+        ["unauthorized", postCode("{}", undefined, "/projections")],
         ["malformed_request", postCode("{}", "edge-secret")],
         ["request_too_large", postCode("x".repeat(256), "edge-secret")],
         [
