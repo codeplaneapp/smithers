@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodeNet from "node:net"
@@ -37,6 +37,52 @@ const withoutOnPath = async <A>(binary: string, body: () => Promise<A>): Promise
     .join(NodePath.delimiter)
   try {
     return await body()
+  } finally {
+    process.env["PATH"] = original
+  }
+}
+
+/** What a stub `docker` answers the three probes `resolveDocker` makes with. */
+interface StubEngine {
+  /** What `docker info` prints, and the code it exits with. */
+  readonly info?: { readonly output: string; readonly exitCode: number } | undefined
+  /** The `docker-container` builder `buildx ls` lists, if it lists one. */
+  readonly builder?: string | undefined
+}
+
+/**
+ * Runs `body` with a stub `docker` first on PATH, and hands it the stub's path.
+ *
+ * `DockerExec` reaches its argv construction only through `resolveDocker`, so
+ * a host without Docker reaches none of it: the spec cases below opened with
+ * `if (!docker.ok) return` and therefore asserted nothing at all on
+ * `macos-latest`, where no engine exists. The stub answers `--version`,
+ * `docker info`, and `buildx ls`, and refuses everything else, so these cases
+ * exercise the argv this module builds and never a daemon's behaviour. What a
+ * real engine does with that argv is the suite above, which skips when no
+ * engine answers.
+ */
+const withDockerStub = async <A>(engine: StubEngine, body: (dockerPath: string) => Promise<A>): Promise<A> => {
+  const directory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-docker-stub-"))
+  temporaryDirectories.push(directory)
+  const dockerPath = NodePath.join(directory, "docker")
+  const builderLine = engine.builder === undefined ? "" : `${engine.builder}   docker-container`
+  await Fs.writeFile(
+    dockerPath,
+    `#!/bin/sh
+case "$1" in
+  --version) echo 'Docker version 0.0.0-stub, build stub' ;;
+  info) echo '${engine.info?.output ?? "0.0.0-stub"}'; exit ${engine.info?.exitCode ?? 0} ;;
+  buildx) printf '%s\\n' 'NAME/NODE DRIVER/ENDPOINT STATUS' '${builderLine}' ;;
+  *) echo "stub docker was asked for $*" >&2; exit 97 ;;
+esac
+`,
+    { mode: 0o755 }
+  )
+  const original = process.env["PATH"] ?? ""
+  process.env["PATH"] = `${directory}${NodePath.delimiter}${original}`
+  try {
+    return await body(dockerPath)
   } finally {
     process.env["PATH"] = original
   }
@@ -180,7 +226,26 @@ export const Package = S.Package({ targets: { artifacts, srcs } })
   }, 120_000)
 })
 
-describe.sequential("Docker package execution", () => {
+/**
+ * Whether a container engine answers on this host, probed once at module load.
+ *
+ * `macos-latest` runners ship no Docker, so the cases below that build an OCI
+ * archive, supervise a container, and plan a push against the real CLI cannot
+ * run there. They asserted the daemon's presence implicitly and turned its
+ * absence into three red cases reading `host binary "docker" is not present on
+ * PATH`, which says nothing about this package. The probe is `docker info`
+ * rather than a PATH lookup because `DockerExec.resolveDocker` refuses a CLI
+ * whose daemon is silent too, so a host with the binary and no daemon has to
+ * skip for the same reason.
+ */
+const engineAvailable = spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0
+if (!engineAvailable) {
+  console.warn(
+    "Docker package execution tests SKIPPED: no container engine answered `docker info` on this host"
+  )
+}
+
+describe.skipIf(!engineAvailable).sequential("Docker package execution", () => {
   it("builds an OCI archive through CAS and restores it on a cache hit", async () => {
     const root = await workspace()
     const built = await serve(root, ["//:dockerBuild"])
@@ -243,31 +308,293 @@ describe("Docker service spec", () => {
    * loopback-only: the HTTP readiness probe targets 127.0.0.1.
    */
   it("publishes declared ports on loopback only", async () => {
-    const docker = await DockerExec.resolveDocker()
-    if (!docker.ok) return
-    const spec = await DockerExec.serviceSpec({
-      label: "//:dockerPorts",
-      cwd: process.cwd(),
-      attrs: { image: "alpine", ports: { "5432": 15_432, "6379": 16_379 } } as never
+    await withDockerStub({}, async () => {
+      const spec = await DockerExec.serviceSpec({
+        label: "//:dockerPorts",
+        cwd: process.cwd(),
+        attrs: { image: "alpine", ports: { "5432": 15_432, "6379": 16_379 } } as never
+      })
+      if ("error" in spec) throw new Error(spec.error)
+      const published = spec.argv.filter((entry, index) => spec.argv[index - 1] === "-p")
+      expect(published).toEqual(["127.0.0.1:15432:5432", "127.0.0.1:16379:6379"])
     })
-    if ("error" in spec) throw new Error(spec.error)
-    const published = spec.argv.filter((entry, index) => spec.argv[index - 1] === "-p")
-    expect(published).toEqual(["127.0.0.1:15432:5432", "127.0.0.1:16379:6379"])
   })
 
   it("removes its own stale container before running and after stopping", async () => {
-    const docker = await DockerExec.resolveDocker()
-    if (!docker.ok) return
-    const spec = await DockerExec.serviceSpec({
-      label: "//:dockerService",
-      cwd: process.cwd(),
-      attrs: { image: "alpine", command: ["sleep", "60"] } as never
+    await withDockerStub({}, async (docker) => {
+      const spec = await DockerExec.serviceSpec({
+        label: "//:dockerService",
+        cwd: process.cwd(),
+        attrs: { image: "alpine", command: ["sleep", "60"] } as never
+      })
+      if ("error" in spec) throw new Error(spec.error)
+      const name = DockerExec.containerName("//:dockerService")
+      expect(spec.argv.slice(1, 5)).toEqual(["run", "--rm", "--name", name])
+      expect(spec.argv.at(-3)).toBe("alpine")
+      expect(spec.argv.slice(-2)).toEqual(["sleep", "60"])
+      expect(spec.prepare).toEqual([[docker, "rm", "-f", name]])
+      expect(spec.cleanup).toEqual([[docker, "rm", "-f", name]])
     })
-    if ("error" in spec) throw new Error(spec.error)
-    const name = DockerExec.containerName("//:dockerService")
-    expect(spec.argv.slice(1, 5)).toEqual(["run", "--rm", "--name", name])
-    expect(spec.prepare).toEqual([[docker.path, "rm", "-f", name]])
-    expect(spec.cleanup).toEqual([[docker.path, "rm", "-f", name]])
+  })
+
+  it("orders env and volumes, tags the image, and routes readiness and init through docker exec", async () => {
+    await withDockerStub({}, async (docker) => {
+      const spec = await DockerExec.serviceSpec({
+        label: "//:dockerService",
+        cwd: "/workspace",
+        attrs: {
+          image: "postgres",
+          tag: "16",
+          env: { PGUSER: "smithers", PGDATA: "/data" },
+          volumes: { "/host/second": "/second", "/host/first": "/first" },
+          readiness: { exec: ["pg_isready"], timeout: "60s" },
+          init: [["psql", "-c", "select 1"]],
+          health: { exec: ["pg_isready"], interval: "5s" },
+          stop: { signal: "SIGTERM", grace: "3s" }
+        } as never
+      })
+      if ("error" in spec) throw new Error(spec.error)
+      const name = DockerExec.containerName("//:dockerService")
+      // Both tables are emitted in key order, not declaration order, so one
+      // table written two ways plans one argv.
+      expect(spec.argv.slice(5)).toEqual([
+        "-e",
+        "PGDATA=/data",
+        "-e",
+        "PGUSER=smithers",
+        "-v",
+        "/host/first:/first",
+        "-v",
+        "/host/second:/second",
+        "postgres:16"
+      ])
+      expect(spec.readiness).toEqual({ exec: [docker, "exec", name, "pg_isready"], timeout: "60s" })
+      expect(spec.init).toEqual([[docker, "exec", name, "psql", "-c", "select 1"]])
+      expect(spec.health).toEqual({ exec: ["pg_isready"], interval: "5s" })
+      expect(spec.stop).toEqual({ signal: "SIGTERM", grace: "3s" })
+      expect(spec.cwd).toBe("/workspace")
+    })
+  })
+
+  it("passes an HTTP readiness probe through without wrapping it in docker exec", async () => {
+    await withDockerStub({}, async () => {
+      const spec = await DockerExec.serviceSpec({
+        label: "//:dockerHttp",
+        cwd: process.cwd(),
+        attrs: { image: "nginx", readiness: { http: "http://127.0.0.1:8080/health", timeout: "30s" } } as never
+      })
+      if ("error" in spec) throw new Error(spec.error)
+      expect(spec.readiness).toEqual({ http: "http://127.0.0.1:8080/health", timeout: "30s" })
+      expect(spec.init).toEqual([])
+    })
+  })
+
+  it("carries the resolver's refusal when the CLI is present and its daemon is not", async () => {
+    const silent = { image: "alpine" } as never
+    await withDockerStub({ info: { output: "Cannot connect to the Docker daemon", exitCode: 1 } }, async () => {
+      const spec = await DockerExec.serviceSpec({ label: "//:dockerService", cwd: process.cwd(), attrs: silent })
+      expect(spec).toEqual({
+        error: "docker daemon did not answer \"docker info\": Cannot connect to the Docker daemon"
+      })
+    })
+    // A daemon that says nothing at all still has to name why: the exit code
+    // is the only fact left, and an empty refusal would read as no refusal.
+    await withDockerStub({ info: { output: "", exitCode: 7 } }, async () => {
+      const spec = await DockerExec.serviceSpec({ label: "//:dockerService", cwd: process.cwd(), attrs: silent })
+      expect(spec).toEqual({ error: "docker daemon did not answer \"docker info\": exit 7" })
+    })
+  })
+})
+
+describe("Docker build, bake, and push plans", () => {
+  it("plans buildx against the resolved builder with platforms and ordered build args", async () => {
+    await withDockerStub({ builder: "stub-builder" }, async (docker) => {
+      const built = await DockerExec.plan({
+        rule: "Docker.Build",
+        packagePath: "apps/img",
+        attrs: {
+          dockerfile: { path: "Dockerfile" },
+          context: ".",
+          platforms: ["linux/amd64", "linux/arm64"],
+          buildArgs: { RELEASE: true, ALPHA: "one", BUILD: 7 }
+        } as never
+      })
+      expect(built.refusal).toBeUndefined()
+      expect(built.outDirs).toEqual(["apps/img/docker-image"])
+      expect(built.argv).toEqual([
+        docker,
+        "buildx",
+        "build",
+        "--builder",
+        "stub-builder",
+        "--file",
+        "apps/img/Dockerfile",
+        "--platform",
+        "linux/amd64,linux/arm64",
+        "--build-arg",
+        "ALPHA=one",
+        "--build-arg",
+        "BUILD=7",
+        "--build-arg",
+        "RELEASE=true",
+        "--output",
+        "type=oci,dest=apps/img/docker-image/image.tar",
+        "apps/img"
+      ])
+
+      const baked = await DockerExec.plan({
+        rule: "Docker.Bake",
+        packagePath: "apps/img",
+        attrs: { config: { path: "docker-bake.hcl" }, target: "web/app" } as never
+      })
+      // The target names the output directory, so the one character a path
+      // cannot carry is replaced rather than dropped.
+      expect(baked.outDirs).toEqual(["apps/img/docker-image-web-app"])
+      expect(baked.argv).toEqual([
+        docker,
+        "buildx",
+        "bake",
+        "--builder",
+        "stub-builder",
+        "--file",
+        "apps/img/docker-bake.hcl",
+        "--set",
+        "web/app.output=type=oci,dest=apps/img/docker-image-web-app/image.tar",
+        "web/app"
+      ])
+    })
+  })
+
+  it("omits the builder flag when buildx lists none, and creates the archive's parent", async () => {
+    await withDockerStub({}, async (docker) => {
+      const built = await DockerExec.plan({
+        rule: "Docker.Build",
+        packagePath: "",
+        attrs: { dockerfile: { path: "Dockerfile" }, context: ".", platforms: [] } as never
+      })
+      expect(built.argv).toEqual([
+        docker,
+        "buildx",
+        "build",
+        "--file",
+        "Dockerfile",
+        "--output",
+        "type=oci,dest=docker-image/image.tar",
+        "."
+      ])
+
+      const baked = await DockerExec.plan({
+        rule: "Docker.Bake",
+        packagePath: "",
+        attrs: { config: { path: "docker-bake.hcl" }, target: "fixture" } as never
+      })
+      expect(baked.argv).toEqual([
+        docker,
+        "buildx",
+        "bake",
+        "--file",
+        "docker-bake.hcl",
+        "--set",
+        "fixture.output=type=oci,dest=docker-image-fixture/image.tar",
+        "fixture"
+      ])
+
+      // `--output type=oci,dest=...` writes a file, so docker needs the
+      // directory to exist before it runs.
+      const root = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-docker-out-"))
+      temporaryDirectories.push(root)
+      await DockerExec.prepareOutputs(root, [...built.outDirs, ...baked.outDirs])
+      expect(existsSync(NodePath.join(root, "docker-image"))).toBe(true)
+      expect(existsSync(NodePath.join(root, "docker-image-fixture"))).toBe(true)
+    })
+  })
+
+  it("defers a stamped build arg to execution and refuses one that never resolves", async () => {
+    await withDockerStub({}, async () => {
+      const stamped = await DockerExec.plan({
+        rule: "Docker.Build",
+        packagePath: "",
+        attrs: {
+          dockerfile: { path: "Dockerfile" },
+          context: ".",
+          buildArgs: { VERSION: { _tag: "Stamp", name: "git-sha" } }
+        } as never
+      })
+      const argument = stamped.argv?.[stamped.argv.indexOf("--build-arg") + 1] ?? ""
+      expect(argument.startsWith("VERSION={smthrs:stamp:")).toBe(true)
+      const encoded = argument.slice("VERSION={smthrs:stamp:".length, -1)
+      expect(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"))).toEqual({
+        name: "docker-tag",
+        value: { _tag: "Stamp", name: "git-sha" }
+      })
+
+      const refused = await DockerExec.plan({
+        rule: "Docker.Build",
+        packagePath: "",
+        attrs: {
+          dockerfile: { path: "Dockerfile" },
+          context: ".",
+          buildArgs: { OPAQUE: { registry: "example.invalid" } }
+        } as never
+      })
+      expect(refused.argv).toBeUndefined()
+      expect(refused.refusal).toBe("Docker.Build buildArgs.OPAQUE must resolve to a string before execution")
+    })
+  })
+
+  it("plans one push argument per tag and refuses a tag that never resolves", async () => {
+    await withDockerStub({}, async (docker) => {
+      const planned = await DockerExec.plan({
+        rule: "Docker.Push",
+        packagePath: "apps/img",
+        attrs: { registry: "registry.example.invalid", name: "fixture", tags: ["latest", 7] } as never
+      })
+      expect(planned.outDirs).toEqual([])
+      expect(planned.argv).toEqual([
+        docker,
+        "push",
+        "registry.example.invalid/fixture:latest",
+        "registry.example.invalid/fixture:7"
+      ])
+
+      const refused = await DockerExec.plan({
+        rule: "Docker.Push",
+        packagePath: "apps/img",
+        attrs: { registry: "registry.example.invalid", name: "fixture", tags: [{ unresolved: true }] } as never
+      })
+      expect(refused.argv).toBeUndefined()
+      expect(refused.refusal).toBe("Docker.Push tags must resolve to strings before execution")
+    })
+  })
+
+  /**
+   * The refusal `macos-latest` produces. Every entry point has to name the
+   * absent binary rather than plan an argv around `undefined`, and the message
+   * is the one the skipped suite above reported three times when it asserted a
+   * daemon it never arranged.
+   */
+  it("names the absent binary in every entry point when docker is not on PATH", async () => {
+    await withoutOnPath("docker", async () => {
+      const absent = "host binary \"docker\" is not present on PATH"
+      const tool = await DockerExec.resolveDocker()
+      expect(tool).toEqual({ ok: false, refusal: absent, identity: { tag: "Docker", absent: true } })
+
+      const built = await DockerExec.plan({
+        rule: "Docker.Build",
+        packagePath: "apps/img",
+        attrs: { dockerfile: { path: "Dockerfile" }, context: "." } as never
+      })
+      expect(built.argv).toBeUndefined()
+      expect(built.outDirs).toEqual([])
+      expect(built.refusal).toBe(absent)
+
+      const spec = await DockerExec.serviceSpec({
+        label: "//:dockerService",
+        cwd: process.cwd(),
+        attrs: { image: "alpine" } as never
+      })
+      expect(spec).toEqual({ error: absent })
+    })
   })
 })
 
