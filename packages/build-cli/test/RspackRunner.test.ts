@@ -21,11 +21,12 @@ import { resolveGraph, runBuild } from "../src/RspackRunner.ts"
 const fixture = NodePath.join(import.meta.dirname, "fixtures", "rsbuild-mini")
 
 /**
- * A node_modules tree that provides @rsbuild/core. The default is the force
- * reference checkout used by the routing-spine proofs; any workspace with
- * rsbuild installed works.
+ * A node_modules tree that provides @rsbuild/core. The default is this
+ * package's own, which declares `@rsbuild/core` as a dev dependency for
+ * exactly this suite, so the end-to-end cases run on every host including
+ * CI; `SMTHRS_RSBUILD_MODULES` points them at another workspace's tree.
  */
-const modulesSource = process.env["SMTHRS_RSBUILD_MODULES"] ?? "/Users/williamcory/artsy/force/node_modules"
+const modulesSource = process.env["SMTHRS_RSBUILD_MODULES"] ?? NodePath.join(import.meta.dirname, "..", "node_modules")
 const rsbuildAvailable = existsSync(NodePath.join(modulesSource, "@rsbuild", "core"))
 if (!rsbuildAvailable) {
   console.warn(
