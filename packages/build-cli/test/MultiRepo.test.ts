@@ -155,7 +155,11 @@ describe("opaque local repositories", () => {
     const execution = await runCli(child, ["//:test"])
     expect(execution.exitCode).toBe(0)
     expect(`${execution.stdout}\n${execution.stderr}`).toContain("//:test")
-  }, 30_000)
+    // Two cold CLI processes, each loading the whole build graph. Measured at
+    // 20 s on an idle developer machine and past 30 s on a two-core hosted
+    // runner sharing itself with the rest of the package. The budget clears
+    // the observed cost several times over and still bounds a hang.
+  }, 180_000)
 
   it("lists child kinds and renders the external repository edge", async () => {
     const root = await workspace()
@@ -171,7 +175,9 @@ describe("opaque local repositories", () => {
     const plan = await serveCli(root, ["//:childTest", "--plan"])
     expect(plan.exitCode).toBe(0)
     expect(`${plan.stdout}\n${plan.stderr}`).toContain("pattern: \"//:test\"")
-  }, 60_000)
+    // Three cold CLI processes; 31 s on an idle developer machine, past 60 s
+    // on a two-core hosted runner. Same reasoning as the case above.
+  }, 240_000)
 
   it("executes a parent suite through the child and hits cache on the second clean run", async () => {
     const root = await workspace()

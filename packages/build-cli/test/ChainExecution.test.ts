@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from "vitest"
 import * as AnvilExec from "../src/AnvilExec.ts"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import * as DockerExec from "../src/DockerExec.ts"
+import * as PackageTree from "../src/PackageTree.ts"
 
 const fixture = NodePath.resolve(import.meta.dirname, "fixtures/chain-exec")
 const temporaryDirectories: Array<string> = []
@@ -180,7 +181,11 @@ export const Package = S.Package({ targets: { artifacts, srcs } })
   }, 120_000)
 })
 
-describe.sequential("Docker package execution", () => {
+/** A runner without a docker daemon cannot build, serve, or push at all; the refusal path is its own test. */
+const hasDocker = PackageTree.findOnPath("docker") !== undefined
+const dockerSuite = hasDocker ? describe.sequential : describe.skip
+
+dockerSuite("Docker package execution", () => {
   it("builds an OCI archive through CAS and restores it on a cache hit", async () => {
     const root = await workspace()
     const built = await serve(root, ["//:dockerBuild"])
