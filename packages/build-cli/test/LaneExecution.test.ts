@@ -440,11 +440,12 @@ describe("bundler build key template", () => {
 })
 
 /**
- * A node_modules tree that provides @rsbuild/core; the e2e snapshot of the
- * force workspace by default. Without one the bundler dispatch cases skip
- * loudly rather than faking green.
+ * A node_modules tree that provides @rsbuild/core; this package's own by
+ * default, which declares `@rsbuild/core` as a dev dependency for the rspack
+ * suites. Without one the bundler dispatch cases skip loudly rather than
+ * faking green; `SMTHRS_RSBUILD_MODULES` points them at another tree.
  */
-const modulesSource = process.env["SMTHRS_RSBUILD_MODULES"] ?? "/Users/williamcory/artsy-e2e/force/node_modules"
+const modulesSource = process.env["SMTHRS_RSBUILD_MODULES"] ?? NodePath.join(import.meta.dirname, "..", "node_modules")
 const rsbuildAvailable = existsSync(NodePath.join(modulesSource, "@rsbuild", "core"))
 if (!rsbuildAvailable) {
   console.warn(

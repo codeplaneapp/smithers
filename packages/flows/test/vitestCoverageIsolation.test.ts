@@ -416,6 +416,7 @@ describe("vitest coverage isolation conformance", () => {
       [
         "allowBuilds:",
         "  \"@journeyapps/wa-sqlite\": false",
+        "  core-js: false",
         "  dprint: false",
         "  es5-ext: false",
         "  esbuild: false",
