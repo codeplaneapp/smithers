@@ -4,7 +4,7 @@ Runs ESLint over declared source sets with a flat config.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const lint = Smithers.EsLint({
   packageManager,
@@ -72,7 +72,7 @@ Collected from the attrs: every declaration in `sources`, plus every entry in
 `StandardPackage` lints the source glob only, not tests. Its flat config declares
 no coverage for test files, and ESLint 9 fails on a pattern whose matches are all
 unconfigured. A package whose config does cover tests can pass both globs, as
-`packages/flow/BUILD.ts` does.
+`packages/flow/PACKAGE.ts` does.
 
 ## See also
 

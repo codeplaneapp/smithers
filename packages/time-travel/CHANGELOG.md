@@ -42,7 +42,7 @@
 - Startup recovery reports a `Busy` outcome for an audit whose run another live
   process holds, and writes nothing, so the audit stays recoverable instead of
   being closed on the strength of a race.
-- Colocated documentation: `docs/` plus `Package.ts`, `BUILD.ts`, and
+- Colocated documentation: `docs/` plus `docs/Manifest.ts`, `PACKAGE.ts`, and
   `scripts/docs.mjs` generate `docs/pages/api/time-travel.md` and the surface
   region of `docs/pages/concepts/time-travel.md`, and drift fails CI.
 

@@ -191,7 +191,7 @@ describe("Install", () => {
   })
 })
 
-describe("the checked-in root files match what BUILD.ts declares", () => {
+describe("the checked-in root files match what PACKAGE.ts declares", () => {
   // These are the drift checks `smithers-build lint` runs. Keeping them here means a
   // change to a generator, or a hand edit to a generated file, fails in this
   // package's own suite rather than only in a workspace-wide run.
@@ -206,14 +206,14 @@ describe("the checked-in root files match what BUILD.ts declares", () => {
       },
       include: [
         "known-files.d.ts",
-        "BUILD.ts",
-        "apps/*/BUILD.ts",
-        "ci/BUILD.ts",
-        "crates/*/BUILD.ts",
-        "evals/*/BUILD.ts",
-        "lint/BUILD.ts",
-        "scripts/BUILD.ts",
-        "packages/*/BUILD.ts",
+        "PACKAGE.ts",
+        "apps/*/PACKAGE.ts",
+        "ci/PACKAGE.ts",
+        "crates/*/PACKAGE.ts",
+        "evals/*/PACKAGE.ts",
+        "lint/PACKAGE.ts",
+        "scripts/PACKAGE.ts",
+        "packages/*/PACKAGE.ts",
         "packages/*/src/**/*",
         "packages/*/test/**/*",
         "packages/storage/*/src/**/*",
@@ -222,7 +222,7 @@ describe("the checked-in root files match what BUILD.ts declares", () => {
       ],
       // `legacy/**` is the Smithers 0.x source tree the 1.0 Phase 4 lanes port
       // from. It is outside the pnpm workspace and no live module imports it,
-      // so it must not enter the root TypeScript program. Root `BUILD.ts`
+      // so it must not enter the root TypeScript program. Root `PACKAGE.ts`
       // declares it; this literal is the drift check on that declaration and
       // moves with it.
       exclude: ["**/dist/**", "legacy/**", "packages/coding-agent/examples/extensions/gondolin/**"]

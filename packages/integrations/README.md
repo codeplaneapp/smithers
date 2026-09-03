@@ -130,7 +130,7 @@ nothing at all, and the token is a 32-bit namespace rather than a secret.
 `InitData` verifies Mini App `initData` on both the HMAC and Ed25519 paths,
 using Web Crypto and no `node:` builtin. That is what would let the same code
 run under Bun and a Cloudflare Worker, but nothing here proves it: this package
-is in neither the Bun matrix in `ci/BUILD.ts` nor the browser-contract list in
+is in neither the Bun matrix in `ci/PACKAGE.ts` nor the browser-contract list in
 `scripts/browser-check.mjs`. Read it as Node, verified, and everything else as
 untested.
 
@@ -215,7 +215,7 @@ node packages/integrations/scripts/docs.mjs           # write the page
 node packages/integrations/scripts/docs.mjs --check   # report drift, exit 1
 ```
 
-`BUILD.ts` declares the same thing as a `Smithers.Generate` target, so the
+`PACKAGE.ts` declares the same thing as a `Smithers.Generate` target, so the
 workspace `ci` step drift-checks it.
 
 ## Commands

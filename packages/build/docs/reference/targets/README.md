@@ -70,8 +70,8 @@ exists for future additions and is unused. See
 | [SortPackageJson](sort-package-json.md)   | `build`, `lint` | Never                  | Executes                | Validates or rewrites `package.json` key ordering.                           |
 | [PackageJson](package-json-gen.md)        | `lint` / `run`  | Check only             | Executes                | Expands a typed manifest declaration into check, write, and refresh targets. |
 | [GithubCiGen](github-ci-gen.md)           | `build`, `lint` | Effective `check` mode | Executes                | Generates the GitHub Actions CI workflow from declared jobs and targets.     |
-| [Owners.Codeowners](owners-codeowners.md) | `build`, `lint` | Never                  | Executes (package mode) | Generates `.github/CODEOWNERS` from every package's `owners` declaration.    |
-| [Owners.Tree](owners-tree.md)             | `build`, `lint` | Never                  | Executes (package mode) | Generates the per-directory `OWNERS` tree in the landing-gate format.        |
+| [Owners.Codeowners](owners-codeowners.md) | `build`, `lint` | Never                  | Executes (build system) | Generates `.github/CODEOWNERS` from every package's `owners` declaration.    |
+| [Owners.Tree](owners-tree.md)             | `build`, `lint` | Never                  | Executes (build system) | Generates the per-directory `OWNERS` tree in the landing-gate format.        |
 
 ## Documentation
 

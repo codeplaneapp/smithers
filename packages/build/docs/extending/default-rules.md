@@ -1,11 +1,11 @@
 # Default targets
 
-A default target synthesizes targets for directories that have no `BUILD.ts` of
+A default target synthesizes targets for directories that have no `PACKAGE.ts` of
 their own. It is how one declaration covers every conventional package in a
 workspace.
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
@@ -19,7 +19,7 @@ export const packageDefaults = Smithers.PackageDefaults({
 ```
 
 Every directory under `packages/` that contains a `package.json` and no
-`BUILD.ts` now exports `lib`, `test`, and `lint`.
+`PACKAGE.ts` now exports `lib`, `test`, and `lint`.
 
 ## Options
 
@@ -27,15 +27,15 @@ Every directory under `packages/` that contains a `package.json` and no
 | ------------- | ------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `directories` | `string \| Input.Glob`    | required         | Which directories the declaration covers. A string lifts to `glob(string)` and resolves against the declaring package. |
 | `marker`      | `string`                  | `"package.json"` | A file that must exist in a directory for it to be eligible.                                                           |
-| `unless`      | `string`                  | `"BUILD.ts"`     | A file that, if present, makes the directory ineligible.                                                               |
+| `unless`      | `string`                  | `"PACKAGE.ts"`   | A file that, if present, makes the directory ineligible.                                                               |
 | `macro`       | `(attrs) => object`       | required         | Called once per eligible directory.                                                                                    |
 | `attrs`       | `Record<string, unknown>` | `{}`             | Passed to the macro, over a `cwd` default. Supply the toolchain here: `attrs: { packageManager }`.                     |
 
 `PackageDefaults` validates and lifts the declaration while performing no I/O.
 
-The declaration is a `BUILD.ts` export, so it is discovered the same way targets
+The declaration is a `PACKAGE.ts` export, so it is discovered the same way targets
 are. It is not a target and gets no label. Declare workspace-wide defaults in the
-root `BUILD.ts`; the workspace loads that file before it synthesizes anything.
+root `PACKAGE.ts`; the workspace loads that file before it synthesizes anything.
 
 ## Eligibility
 
@@ -47,7 +47,7 @@ A directory is eligible for a declaration when all three hold:
    glob.
 
 Both the pattern and its excludes resolve against the package path of the
-`BUILD.ts` that exported the declaration, so a declaration in the root uses
+`PACKAGE.ts` that exported the declaration, so a declaration in the root uses
 workspace-relative patterns. Matching uses `minimatch` with `dot: true`, against
 the directory path itself, not its contents.
 
@@ -84,21 +84,21 @@ one target value registered under two labels fails the command.
 Synthesized targets participate in patterns the same way exported ones do.
 
 - `//packages/greeter:lib` resolves through synthesis when that directory has no
-  `BUILD.ts`.
+  `PACKAGE.ts`.
 - `//packages/greeter` picks its default through the usual `lib`, `nodeModules`,
   basename, `default`, sole-export search.
 - `//packages/...` includes every eligible directory in the subtree.
 
-An exact label for a package that has neither a `BUILD.ts` nor a matching
+An exact label for a package that has neither a `PACKAGE.ts` nor a matching
 declaration fails with
-`package //<path> has no BUILD.ts and matches no default target`.
+`package //<path> has no PACKAGE.ts and matches no default target`.
 
 ## Opting out
 
-Write a `BUILD.ts`. The `unless` file defaults to `BUILD.ts`, so the directory
+Write a `PACKAGE.ts`. The `unless` file defaults to `PACKAGE.ts`, so the directory
 stops being eligible the moment it has one, and its explicit targets take over.
 That is the intended upgrade path: start with a default target, and write a real
-`BUILD.ts` for the packages that need something different.
+`PACKAGE.ts` for the packages that need something different.
 
 ## Limitation: no edges
 
@@ -107,13 +107,13 @@ that value is `{ packageManager }`, so every synthesized package runs the
 declared toolchain but has no dependency edges, even when its `package.json`
 names workspace siblings.
 
-A synthesized package that needs edges gets a real `BUILD.ts`:
+A synthesized package that needs edges gets a real `PACKAGE.ts`:
 
 ```ts
-// packages/engine/BUILD.ts
+// packages/engine/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
-import { lib as flow } from "../flow/BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
+import { lib as flow } from "../flow/PACKAGE.ts"
 
 export const { lib, test, lint } = Smithers.StandardPackage({
   packageManager,

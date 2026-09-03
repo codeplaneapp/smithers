@@ -32,7 +32,7 @@ formatting and dprint's table alignment would fight it forever.
 `README.md` was hand-maintained and had drifted by seven whole modules and more
 than thirty exports, which is the defect this arrangement removes.
 
-`Package.ts` declares that target as data. It also records the one surface this
+`docs/Manifest.ts` declares that target as data. It also records the one surface this
 package does not yet own: `docs/pages/api/harness.md` on the documentation site.
 That page needs a sidebar entry in the hand-written `vocs.config.ts` before it
 can exist, because `check-docs.mjs` fails any published page the sidebar does

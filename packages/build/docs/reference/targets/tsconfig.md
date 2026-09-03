@@ -19,7 +19,7 @@ export const tsconfig = Smithers.Tsconfig({
 
 A `tsconfig.json` decides what the compiler reads and what it emits, which
 makes it part of the build definition. Leaving it hand-maintained next to a
-BUILD.ts file that declares the same sources means two descriptions of one
+PACKAGE.ts file that declares the same sources means two descriptions of one
 thing, free to disagree.
 
 ## Attributes

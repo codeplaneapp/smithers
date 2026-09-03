@@ -1,6 +1,6 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own every
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own every
 published sentence about `@smthrs/model`. `docs/reference.md` is a generated
 output and is never hand-edited.
 
@@ -22,7 +22,7 @@ Two rules the generator enforces:
 `docs/reference.md` is not yet published as `docs/pages/api/model.md`. A site
 page must be listed in the sidebar of the hand-written `vocs.config.ts` before
 `scripts/check-docs.mjs` will accept it, and that file is outside what this
-package generates. `Package.ts` records the entry to add and the support-matrix
+package generates. `docs/Manifest.ts` records the entry to add and the support-matrix
 link that should land with it.
 
 After editing package sources or `api.md`, run from the repository root:

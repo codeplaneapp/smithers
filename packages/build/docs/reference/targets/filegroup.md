@@ -19,10 +19,10 @@ export const wireInputs = Smithers.Filegroup({
 
 ## Attributes
 
-| Name   | Type                                               | Default  | Description                                                                                                                                                        |
-| ------ | -------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `srcs` | `Array<Input.File \| Input.Glob \| Target.Target>` | required | The files, globs, and targets the group names, in read order.                                                                                                      |
-| `cwd`  | `string`                                           | `"."`    | Package directory the declared paths and patterns resolve from. The default means the declaring BUILD.ts package; an explicit non-dot value is workspace relative. |
+| Name   | Type                                               | Default  | Description                                                                                                                                                          |
+| ------ | -------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `srcs` | `Array<Input.File \| Input.Glob \| Target.Target>` | required | The files, globs, and targets the group names, in read order.                                                                                                        |
+| `cwd`  | `string`                                           | `"."`    | Package directory the declared paths and patterns resolve from. The default means the declaring PACKAGE.ts package; an explicit non-dot value is workspace relative. |
 
 ## Composition
 
@@ -53,7 +53,7 @@ Declared files and globs inside `srcs` are collected by `Target.make` as ordinar
 declared inputs. Nested groups become dependencies.
 
 Globs are package scoped, as they are in Bazel: expansion never descends into a
-subdirectory holding a `BUILD.ts` file. See
+subdirectory holding a `PACKAGE.ts` file. See
 [Glob expansion](../../concepts/inputs.md#glob-expansion). That target applies to
 every glob in every target, not only to groups.
 

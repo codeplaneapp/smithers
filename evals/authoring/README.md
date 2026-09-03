@@ -7,11 +7,11 @@ first-class build-system targets, so none of them is a copy-paste shell command.
 
 ## Layout
 
-| Path                    | What it is                                                          |
-| ----------------------- | ------------------------------------------------------------------ |
-| `data/pilot-sft.jsonl`  | The pilot SFT dataset: 10 OpenAI chat-format rows.                  |
-| `validate.ts`           | Dataset validator. Exit code is the verdict; no external deps.      |
-| `BUILD.ts`              | The targets below.                                                  |
+| Path                   | What it is                                                     |
+| ---------------------- | -------------------------------------------------------------- |
+| `data/pilot-sft.jsonl` | The pilot SFT dataset: 10 OpenAI chat-format rows.             |
+| `validate.ts`          | Dataset validator. Exit code is the verdict; no external deps. |
+| `PACKAGE.ts`           | The targets below.                                             |
 
 ## Targets
 

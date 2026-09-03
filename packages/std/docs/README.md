@@ -1,6 +1,6 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
 contract for `@smthrs/std`. Nothing here is hand-maintained twice.
 
 - `api.md` is the prose body of the reference: the limits every handler applies,
@@ -21,7 +21,7 @@ contract for `@smthrs/std`. Nothing here is hand-maintained twice.
 There is no `docs/pages/api/std.md`. The site page needs a sidebar entry in the
 hand-written `vocs.config.ts` before it can exist, because `check-docs` fails a
 published page the sidebar does not list, and that file belongs to no single
-package. `Package.ts` records the target and the blocker in its `site` field.
+package. `docs/Manifest.ts` records the target and the blocker in its `site` field.
 `@smthrs/mcp` and `@smthrs/testing` record the same arrangement for the same
 reason.
 

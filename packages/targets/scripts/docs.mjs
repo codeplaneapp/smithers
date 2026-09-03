@@ -14,16 +14,16 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const repositoryRoot = dirname(dirname(packageRoot))
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"))
-if (manifest.name !== Package.name) {
-  throw new Error("targets docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) {
+  throw new Error("targets docs: Manifest.ts and package.json names differ")
 }
-const sourceDirectory = join(packageRoot, Package.rules.source)
-const generated = join(repositoryRoot, Package.rules.target)
+const sourceDirectory = join(packageRoot, Manifest.rules.source)
+const generated = join(repositoryRoot, Manifest.rules.target)
 
 /** Every `Target.make(` call in one module, matched or not. */
 const declarationCount = (text) => text.split("Target.make(").length - 1

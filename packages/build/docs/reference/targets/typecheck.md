@@ -4,7 +4,7 @@ Checks a package with `tsc --noEmit` or TypeScript build mode.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const typecheck = Smithers.Typecheck({
   packageManager,

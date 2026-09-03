@@ -1,7 +1,7 @@
 # GithubCiGen
 
 Generates the GitHub Actions CI workflow from declared jobs. The workflow is a
-generated root file on the same terms as `tsconfig.json`: BUILD.ts is the only
+generated root file on the same terms as `tsconfig.json`: PACKAGE.ts is the only
 description of the pipeline, `write` renders it, and `check` — the default —
 fails on drift. By contrast, `pnpm-workspace.yaml` is a hand-written planner
 input because pnpm may add settings outside the target schema.
@@ -50,7 +50,7 @@ export const ci = Smithers.GithubCiGen({
 })
 ```
 
-## Package mode: `Github.Workflow`
+## Build system: `Github.Workflow`
 
 `PACKAGE.ts` workspaces declare a file set rather than the BUILD-era job table.
 `Github.Workflow` describes one workflow, `Github.Setup` describes the shared
@@ -94,7 +94,7 @@ const github = Smithers.Github.CiGen({
 })
 ```
 
-The package-mode workflow attributes are:
+The build-system workflow attributes are:
 
 | Name          | Type                         | Default           | Description                                                                                                                                                 |
 | ------------- | ---------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -120,7 +120,7 @@ prelude for target-derived jobs only. A workflow using `setup` also makes
 `actions/setup/**` beside `workflows/**`. Check and write refuse a rendered file
 outside that set.
 
-### Package-mode triggers
+### Build-system triggers
 
 | Name               | Type                                           | Description                                                                        |
 | ------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -150,7 +150,7 @@ also declare `options`.
 | `workingDirectory` | `string`                  | Working directory for a `run` step, rendered as GitHub's `working-directory`.           |
 
 The raw form exists to migrate an established GitHub job without changing its
-step structure or scripts. It is a package-mode escape hatch; the BUILD-era
+step structure or scripts. It is a build-system escape hatch; the BUILD-era
 `GithubCiGen` contract below still admits only target invocations and derives
 every command.
 

@@ -1,11 +1,11 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and public JSDoc in `src/` own the published
 contract for `@smthrs/keys`. Generated pages under `docs/pages` are outputs.
 
 `scripts/docs.mjs` builds `docs/pages/api/keys.md`, injects package-owned
 contract and testing fragments into broader pages, and verifies the references
-declared by `Package.ts` still point readers to `/api/keys`.
+declared by `docs/Manifest.ts` still point readers to `/api/keys`.
 
 The `//packages/keys:docsPages` target writes or drift-checks those outputs.
 After editing, run:

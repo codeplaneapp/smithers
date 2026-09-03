@@ -13,7 +13,7 @@ An export reaches the reference table by carrying an `@category` tag. An
 untagged export is silently absent from the page, which is the one failure mode
 to watch for when adding a public name.
 
-The `//packages/step-cache:docsPages` target in `BUILD.ts` runs the same
+The `//packages/step-cache:docsPages` target in `PACKAGE.ts` runs the same
 script: `smithers-build run` writes, `smithers-build lint` reports drift, and
 CI runs the lint form through the workspace `ci` step. `scripts/check-docs.mjs`
 discovers this generator by path and runs its `--check` form as well.

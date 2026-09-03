@@ -15,7 +15,7 @@ before choosing one.
 
 ## The CLI result cache remote tier
 
-The root `BUILD.ts` declares the HTTPS endpoint without carrying a credential:
+The root `PACKAGE.ts` declares the HTTPS endpoint without carrying a credential:
 
 ```ts
 import { Smithers } from "@smthrs/targets"
@@ -27,7 +27,7 @@ export const remoteCache = Smithers.RemoteCache.make({
 
 `token` is a `Secret` declaration and defaults to `Secret("SMITHERS_CACHE_TOKEN")`.
 It may name another environment variable, but the bearer-token value must only
-arrive through that variable; never put it in `BUILD.ts`.
+arrive through that variable; never put it in `PACKAGE.ts`.
 
 ### Read and write credentials
 
@@ -60,7 +60,7 @@ access at all. Every tool the CLI
 spawns gets an environment with `SMITHERS_CACHE_URL` and the declared token
 variable removed, so a target's own commands never see the credential. The
 `smithers-build` process itself clears the two default names from its own environment
-before it loads any `BUILD.ts` file. It does not delete any other variable from
+before it loads any `PACKAGE.ts` file. It does not delete any other variable from
 the environment it was given, because the programmatic API runs inside a
 caller's process and must not corrupt it.
 
@@ -318,7 +318,7 @@ The CLI result cache publishes to the shared tier only what an enforced
 confinement produced. `CacheStore.put` takes `shared: false` and both
 surfaces pass it whenever the run was not confined: the target opted out with
 `sandbox: "none"`, the workspace declared `S.Sandbox.None()`, or the
-`BUILD.ts` workspace never declared a policy. Such a result is evidence for
+`PACKAGE.ts` workspace never declared a policy. Such a result is evidence for
 the machine that produced it and stays in `<cacheDirectory>/cache`. A
 confined run (see [Hermeticity](../concepts/actions-and-boundaries.md#hermeticity))
 publishes as before.

@@ -47,7 +47,7 @@ The result contains the created directory and these paths:
 - `test/index.test.ts`;
 - `README.md`.
 
-No `BUILD.ts` is written. The root default target synthesizes normal package
+No `PACKAGE.ts` is written. The root default target synthesizes normal package
 targets from the new directory.
 
 ## Channels and status

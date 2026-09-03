@@ -30,7 +30,7 @@
   `Projection.Subscribe`, and same-named type aliases for every public selector
   and frame schema, so a client decodes rows and resumes a subscription instead
   of casting and re-reading.
-- Added package-owned documentation: `docs/`, `Package.ts`, and a `BUILD.ts`
+- Added package-owned documentation: `docs/`, `docs/Manifest.ts`, and a `PACKAGE.ts`
   `docsPages` target that writes and drift-checks `docs/pages/api/gateway.md`.
 
 ### Changed

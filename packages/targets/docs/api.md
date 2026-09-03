@@ -1,6 +1,6 @@
 # The module surface
 
-`@smthrs/targets` is the pure authoring surface a `BUILD.ts` or `PACKAGE.ts`
+`@smthrs/targets` is the pure authoring surface a `PACKAGE.ts` or `PACKAGE.ts`
 file writes against. Nothing here reads the filesystem or starts a process: a
 target call validates its attrs, records its declared inputs and dependencies,
 and returns a Flow with planner metadata attached. Execution belongs to
@@ -73,7 +73,7 @@ unset is refused later, at the transport boundary.
 default, `--write` applies, and check mode restores the declared write set
 including file type and permissions), `Suite`, `Alias`, `Materialize`, and
 `Files.Test`. `StandardPackage` and `PackageDefaults` assemble the conventional
-per-package target set, and `Smithers` is the single namespace a BUILD.ts file
+per-package target set, and `Smithers` is the single namespace a PACKAGE.ts file
 imports.
 
 See [`rules.md`](./rules.md) for the generated inventory of every rule.

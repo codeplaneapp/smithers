@@ -5,7 +5,7 @@ Builds a JavaScript distribution for a TypeScript package with `tsc -p` or
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const lib = Smithers.TsBuild({
   packageManager,

@@ -21,23 +21,23 @@ example set against a moved tree (20 commits, all outside `examples/`).
 
 ## Environment
 
-| Item | Value |
-| --- | --- |
-| Host | macOS 26.2 (build 25C56), Darwin 25.2.0, arm64 |
-| Date | 2026-08-31 11:59:37 to 12:05:49 UTC (2026-08-31 04:59 to 05:05 PT) |
-| Checkout | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-4` (written `<clean-checkout-4>` below), the shared clone recorded in `00-clean-install.md` |
-| HEAD | `cd14388ed782aac6e5f5b23d66c8fa9dc01dd6ba` on `v1/rc0-migration`, equal to `v1/rc0-migration` in `/Users/williamcory/smithers`; `git status --porcelain` empty before and after every run; submodule `vendor/jj` at `47589ada70` with a clean working tree |
-| Install | the frozen `corepack pnpm install --frozen-lockfile` recorded in `00-clean-install.md`; no build step (workspace `exports` point at `src/`, for example `packages/flow/package.json:37`) |
-| git | 2.50.1 (Apple Git-155) |
-| Node | v24.18.0 (rc-contract section 1 floor `>=22.19.0`) |
-| corepack / pnpm | 0.35.0 / 11.21.0 (from `packageManager: pnpm@11.21.0`) |
-| Bun | 1.4.0 (`1.4.0-canary.1`); not used by this gate, the examples suite is Node-only (`examples/BUILD.ts`, `ci/BUILD.ts`) |
-| jj | 0.39.0 |
-| Ollama | 0.17.7, daemon live on `http://localhost:11434`; pulled: `qwen2.5:7b`, `qwen2.5:3b`, `qwen2.5-coder:1.5b` |
-| Credentials in the shell | `OPENAI_API_KEY` set (seat has no credits), `GEMINI_API_KEY` set (working), `ANTHROPIC_API_KEY` unset |
-| Docker | daemon down; not needed by any example |
-| Free disk | 12 GiB |
-| Host load | load average 11.62 at the start, 92.25 at its peak during run 2, 49.00 at the end. Two other Phase 7 gates were executing in `<clean-checkout-4>` at the same time (the `e2e/` fault suite, PID 81046, and the `packages/flows` vitest suite, PID 89252). The examples write only under per-test temp directories, so they share no state with those suites. |
+| Item                     | Value                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Host                     | macOS 26.2 (build 25C56), Darwin 25.2.0, arm64                                                                                                                                                                                                                                                                                                               |
+| Date                     | 2026-08-31 11:59:37 to 12:05:49 UTC (2026-08-31 04:59 to 05:05 PT)                                                                                                                                                                                                                                                                                           |
+| Checkout                 | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-4` (written `<clean-checkout-4>` below), the shared clone recorded in `00-clean-install.md`                                                                                                                                   |
+| HEAD                     | `cd14388ed782aac6e5f5b23d66c8fa9dc01dd6ba` on `v1/rc0-migration`, equal to `v1/rc0-migration` in `/Users/williamcory/smithers`; `git status --porcelain` empty before and after every run; submodule `vendor/jj` at `47589ada70` with a clean working tree                                                                                                   |
+| Install                  | the frozen `corepack pnpm install --frozen-lockfile` recorded in `00-clean-install.md`; no build step (workspace `exports` point at `src/`, for example `packages/flow/package.json:37`)                                                                                                                                                                     |
+| git                      | 2.50.1 (Apple Git-155)                                                                                                                                                                                                                                                                                                                                       |
+| Node                     | v24.18.0 (rc-contract section 1 floor `>=22.19.0`)                                                                                                                                                                                                                                                                                                           |
+| corepack / pnpm          | 0.35.0 / 11.21.0 (from `packageManager: pnpm@11.21.0`)                                                                                                                                                                                                                                                                                                       |
+| Bun                      | 1.4.0 (`1.4.0-canary.1`); not used by this gate, the examples suite is Node-only (`examples/PACKAGE.ts`, `ci/PACKAGE.ts`)                                                                                                                                                                                                                                    |
+| jj                       | 0.39.0                                                                                                                                                                                                                                                                                                                                                       |
+| Ollama                   | 0.17.7, daemon live on `http://localhost:11434`; pulled: `qwen2.5:7b`, `qwen2.5:3b`, `qwen2.5-coder:1.5b`                                                                                                                                                                                                                                                    |
+| Credentials in the shell | `OPENAI_API_KEY` set (seat has no credits), `GEMINI_API_KEY` set (working), `ANTHROPIC_API_KEY` unset                                                                                                                                                                                                                                                        |
+| Docker                   | daemon down; not needed by any example                                                                                                                                                                                                                                                                                                                       |
+| Free disk                | 12 GiB                                                                                                                                                                                                                                                                                                                                                       |
+| Host load                | load average 11.62 at the start, 92.25 at its peak during run 2, 49.00 at the end. Two other Phase 7 gates were executing in `<clean-checkout-4>` at the same time (the `e2e/` fault suite, PID 81046, and the `packages/flows` vitest suite, PID 89252). The examples write only under per-test temp directories, so they share no state with those suites. |
 
 `SMITHERS_HOME` was unset in the calling shell and additionally stripped
 (`env -u SMITHERS_HOME`) from every command.
@@ -55,7 +55,7 @@ The published example set is `examples/src/*.ts`: 38 numbered scripts, the
 shared helper `durable-layer.ts`, and the two on-disk flow projects
 `16-project/flows/gate/flow.ts` and `24-project/flows/ship/flow.mdx`.
 `docs/pages/examples.md` names `pnpm run test:examples` as the way to run
-them, and `examples/BUILD.ts` states the rule ("the tests are what keep them
+them, and `examples/PACKAGE.ts` states the rule ("the tests are what keep them
 runnable"): 34 test files import and execute 36 of the scripts, and the two
 project directories are read off disk by examples 16 and 24. Examples 13, 14,
 and 15 also carry `import.meta.url` self-run blocks; 14 and 15 have no test
@@ -97,9 +97,9 @@ cd <clean-checkout-4> && env -u SMITHERS_HOME -u OPENAI_API_KEY corepack pnpm --
 Exit 0. Started 12:01:13 UTC, finished 12:02:09 UTC. Final lines:
 
 ```
- Test Files  33 passed | 1 skipped (34)
-      Tests  58 passed | 1 skipped (59)
-   Duration  54.37s (transform 73.89s, setup 0ms, import 169.02s, tests 69.70s, environment 3ms)
+Test Files  33 passed | 1 skipped (34)
+     Tests  58 passed | 1 skipped (59)
+  Duration  54.37s (transform 73.89s, setup 0ms, import 169.02s, tests 69.70s, environment 3ms)
 ```
 
 The verbose listing names every one of the 58 tests green; `12` is the one
@@ -143,12 +143,12 @@ compiles under the workspace `tsconfig.json` (`strict`,
 Run from `<clean-checkout-4>/examples` with `env -u SMITHERS_HOME node src/<file>`
 (Node 24 type stripping; the self-run block fires on direct execution).
 
-| Script | Exit | Wall time | Final output |
-| --- | --- | --- | --- |
-| `13-agent-live-smoke-local.ts`, run 1 (local Ollama, `qwen2.5:7b`) | 0 | 6 s | `RESULT: {"answer":"Paris"}` |
-| `13-agent-live-smoke-local.ts`, run 2 | 0 | 7 s | `RESULT: {"answer":"Paris"}` |
-| `14-agent-live-smoke-gemini.ts` (real Gemini OpenAI-compatible endpoint, `GEMINI_API_KEY`) | 0 | 4 s | `RESULT: {"answer":"Paris"}` |
-| `15-model-layer-smoke.ts` (local Ollama, default `qwen2.5-coder:1.5b`) | 0 | 7 s | `ANSWER: Paris` |
+| Script                                                                                     | Exit | Wall time | Final output                 |
+| ------------------------------------------------------------------------------------------ | ---- | --------- | ---------------------------- |
+| `13-agent-live-smoke-local.ts`, run 1 (local Ollama, `qwen2.5:7b`)                         | 0    | 6 s       | `RESULT: {"answer":"Paris"}` |
+| `13-agent-live-smoke-local.ts`, run 2                                                      | 0    | 7 s       | `RESULT: {"answer":"Paris"}` |
+| `14-agent-live-smoke-gemini.ts` (real Gemini OpenAI-compatible endpoint, `GEMINI_API_KEY`) | 0    | 4 s       | `RESULT: {"answer":"Paris"}` |
+| `15-model-layer-smoke.ts` (local Ollama, default `qwen2.5-coder:1.5b`)                     | 0    | 7 s       | `ANSWER: Paris`              |
 
 ### 6. Direct runs of the two helper programs
 
@@ -184,45 +184,45 @@ in `run6-direct-load-all.log`.
 
 Test counts and timings are from the verbose run (section 2).
 
-| Example script | Executor | Result |
-| --- | --- | --- |
-| 01-define-and-run | test 01 (1 test) | PASS |
-| 02-run-durably | test 02 (1) | PASS |
-| 03-crash-and-resume | test 03 (1) | PASS |
-| 04-retry-policy | test 04 (2) | PASS |
-| 05-time-travel-fork | test 05 (1) | PASS |
-| 06-time-travel-rewind | test 06 (1) | PASS |
-| 07-sync-follower | test 07 (1) | PASS |
-| 08-host-adapters | test 08 (1) | PASS |
-| 09-browser-use | test 09 (2, includes the esbuild browser-bundle check) | PASS |
-| 10-telemetry-export | test 10 (1) | PASS |
-| 11-agent-step | test 11 (1) | PASS |
-| 12-agent-live-smoke | test 12 (1, live OpenAI) | ENV-SKIP: fails with the key present because the seat has no credits (baseline 2.1); skips cleanly without the key |
-| 13-agent-live-smoke-local | test 13 (1, three decodes against `qwen2.5:7b`) and two direct runs | PASS |
-| 14-agent-live-smoke-gemini | direct run (real hosted provider) | PASS |
-| 15-model-layer-smoke | direct run (real local model) | PASS |
-| 16-fan-out-fan-in + 16-project/ | test 16 (4) | PASS |
-| 17-review-loop | test 17 (3) | PASS |
-| 18-approval-and-signal | test 18 (1) | PASS |
-| 19-cancel-and-child-cleanup | test 19 (2, kills a real process group) | PASS |
-| 20-child-flows | test 20 (1) | PASS |
-| 21-cache-and-compensation | test 21 (3) | PASS |
-| 22-mcp-server + 22-mcp-tools | test 22 (2; spawns 22-mcp-server as a real MCP process) and a direct stdio run of the server | PASS |
-| 24-control-plane-and-gateway + 24-project/ | test 24 (1, loopback control server) | PASS |
-| 25-agent-tools-in-sandbox | test 25 (1) | PASS |
-| 26-memory-recall | test 26 (2) | PASS |
-| 30-failure-control | test 30 (2) | PASS |
-| 31-bounded-loops | test 31 (7) | PASS |
-| 32-intervene | test 32 (5) | PASS |
-| 33-delegation-trellis | test 33 (2) | PASS |
-| 34-human-task | test 34-human-task (1) | PASS |
-| 34-poll | test 34-poll (1, restart across an armed clock) | PASS |
-| 35-remote-cache | test 35 (2) | PASS |
-| 36-detached-children | test 36 (1) | PASS |
-| 37-host-containment + 37-host-containment-host | test 37 (1; spawns the host helper and reaps its process group) and a direct kill-and-reap run of the helper | PASS |
-| 38-monitor-and-alert | test 38 (1) | PASS |
-| 39-agent-policies | test 39 (1) | PASS |
-| durable-layer (shared helper) | imported by the persistence examples above; evaluates directly | PASS by exercise |
+| Example script                                 | Executor                                                                                                     | Result                                                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| 01-define-and-run                              | test 01 (1 test)                                                                                             | PASS                                                                                                               |
+| 02-run-durably                                 | test 02 (1)                                                                                                  | PASS                                                                                                               |
+| 03-crash-and-resume                            | test 03 (1)                                                                                                  | PASS                                                                                                               |
+| 04-retry-policy                                | test 04 (2)                                                                                                  | PASS                                                                                                               |
+| 05-time-travel-fork                            | test 05 (1)                                                                                                  | PASS                                                                                                               |
+| 06-time-travel-rewind                          | test 06 (1)                                                                                                  | PASS                                                                                                               |
+| 07-sync-follower                               | test 07 (1)                                                                                                  | PASS                                                                                                               |
+| 08-host-adapters                               | test 08 (1)                                                                                                  | PASS                                                                                                               |
+| 09-browser-use                                 | test 09 (2, includes the esbuild browser-bundle check)                                                       | PASS                                                                                                               |
+| 10-telemetry-export                            | test 10 (1)                                                                                                  | PASS                                                                                                               |
+| 11-agent-step                                  | test 11 (1)                                                                                                  | PASS                                                                                                               |
+| 12-agent-live-smoke                            | test 12 (1, live OpenAI)                                                                                     | ENV-SKIP: fails with the key present because the seat has no credits (baseline 2.1); skips cleanly without the key |
+| 13-agent-live-smoke-local                      | test 13 (1, three decodes against `qwen2.5:7b`) and two direct runs                                          | PASS                                                                                                               |
+| 14-agent-live-smoke-gemini                     | direct run (real hosted provider)                                                                            | PASS                                                                                                               |
+| 15-model-layer-smoke                           | direct run (real local model)                                                                                | PASS                                                                                                               |
+| 16-fan-out-fan-in + 16-project/                | test 16 (4)                                                                                                  | PASS                                                                                                               |
+| 17-review-loop                                 | test 17 (3)                                                                                                  | PASS                                                                                                               |
+| 18-approval-and-signal                         | test 18 (1)                                                                                                  | PASS                                                                                                               |
+| 19-cancel-and-child-cleanup                    | test 19 (2, kills a real process group)                                                                      | PASS                                                                                                               |
+| 20-child-flows                                 | test 20 (1)                                                                                                  | PASS                                                                                                               |
+| 21-cache-and-compensation                      | test 21 (3)                                                                                                  | PASS                                                                                                               |
+| 22-mcp-server + 22-mcp-tools                   | test 22 (2; spawns 22-mcp-server as a real MCP process) and a direct stdio run of the server                 | PASS                                                                                                               |
+| 24-control-plane-and-gateway + 24-project/     | test 24 (1, loopback control server)                                                                         | PASS                                                                                                               |
+| 25-agent-tools-in-sandbox                      | test 25 (1)                                                                                                  | PASS                                                                                                               |
+| 26-memory-recall                               | test 26 (2)                                                                                                  | PASS                                                                                                               |
+| 30-failure-control                             | test 30 (2)                                                                                                  | PASS                                                                                                               |
+| 31-bounded-loops                               | test 31 (7)                                                                                                  | PASS                                                                                                               |
+| 32-intervene                                   | test 32 (5)                                                                                                  | PASS                                                                                                               |
+| 33-delegation-trellis                          | test 33 (2)                                                                                                  | PASS                                                                                                               |
+| 34-human-task                                  | test 34-human-task (1)                                                                                       | PASS                                                                                                               |
+| 34-poll                                        | test 34-poll (1, restart across an armed clock)                                                              | PASS                                                                                                               |
+| 35-remote-cache                                | test 35 (2)                                                                                                  | PASS                                                                                                               |
+| 36-detached-children                           | test 36 (1)                                                                                                  | PASS                                                                                                               |
+| 37-host-containment + 37-host-containment-host | test 37 (1; spawns the host helper and reaps its process group) and a direct kill-and-reap run of the helper | PASS                                                                                                               |
+| 38-monitor-and-alert                           | test 38 (1)                                                                                                  | PASS                                                                                                               |
+| 39-agent-policies                              | test 39 (1)                                                                                                  | PASS                                                                                                               |
+| durable-layer (shared helper)                  | imported by the persistence examples above; evaluates directly                                               | PASS by exercise                                                                                                   |
 
 Numbers 23 and 27 to 29 do not exist in the published set; the gaps are
 numbering gaps, not missing files.

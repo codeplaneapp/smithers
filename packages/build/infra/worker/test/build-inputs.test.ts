@@ -24,7 +24,7 @@ const filesUnder = async (directory: string): Promise<ReadonlyArray<string>> => 
 
 const arrayBody = (source: string, pattern: RegExp, name: string): string => {
   const match = pattern.exec(source)
-  if (match?.[1] === undefined) throw new Error(`BUILD.ts does not expose a readable ${name} array`)
+  if (match?.[1] === undefined) throw new Error(`PACKAGE.ts does not expose a readable ${name} array`)
   return match[1]
 }
 
@@ -73,10 +73,10 @@ const relative = (path: string): string => NodePath.relative(infraRoot, path).sp
 
 describe("build target inputs", () => {
   it("covers every migration, suite test, and gate configuration", async () => {
-    // Importing BUILD.ts executes the repository target graph. This text-level
+    // Importing PACKAGE.ts executes the repository target graph. This text-level
     // check stands in for unavailable target-key inspection by matching every
     // concrete input against the declarations that contribute to the key.
-    const build = await Fs.readFile(fileURLToPath(new URL("../../BUILD.ts", import.meta.url).href), "utf8")
+    const build = await Fs.readFile(fileURLToPath(new URL("../../PACKAGE.ts", import.meta.url).href), "utf8")
     const sourceDeclarations = declarationsIn(
       arrayBody(build, /const sources = \[([\s\S]*?)\n\]/, "sources")
     )
@@ -101,7 +101,7 @@ describe("build target inputs", () => {
       expect(testDeclarations.some((declaration) => covers(declaration, path)), `${path} is not a test input`)
         .toBe(true)
     }
-    for (const path of ["BUILD.ts", "vitest.config.ts"]) {
+    for (const path of ["PACKAGE.ts", "vitest.config.ts"]) {
       expect(sourceDeclarations.some((declaration) => covers(declaration, path)), `${path} is not a source input`)
         .toBe(true)
     }

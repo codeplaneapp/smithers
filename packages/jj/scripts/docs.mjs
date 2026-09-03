@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -89,7 +89,7 @@ const exportedDocs = (source) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("jj docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("jj docs: Manifest.ts and package.json names differ")
 
 const sourcesOf = (entry) => {
   const absolute = join(packageRoot, entry.source)
@@ -107,18 +107,18 @@ const table = (entries) =>
     ...entries.map((entry) => `| \`${entry.name}\` (${entry.declaration}) | ${entry.category} | ${entry.summary} |`)
   ].join("\n")
 
-const barrelEntry = Package.entryPoints.find((entry) => entry.barrel === true)
+const barrelEntry = Manifest.entryPoints.find((entry) => entry.barrel === true)
 if (barrelEntry === undefined) throw new Error("jj docs: no barrel entry point declared")
 
 const entryPointTable = [
   "| Import | Source | Platform |",
   "| --- | --- | --- |",
-  ...Package.entryPoints.map((entry) =>
+  ...Manifest.entryPoints.map((entry) =>
     `| \`${entry.import}\` | [${entry.source}](https://github.com/smithersai/smithers/blob/main/packages/jj/${entry.source}) | ${entry.platform} |`
   )
 ].join("\n")
 
-const sections = Package.entryPoints.map((entry) => {
+const sections = Manifest.entryPoints.map((entry) => {
   const entries = sourcesOf(entry).flatMap((source) => exportedDocs(read(source)))
   if (entries.length === 0) throw new Error(`jj docs: ${entry.import} documents no exports with @category`)
   return `### \`${entry.import}\`\n\n${table(entries)}`
@@ -134,7 +134,7 @@ description: "${manifest.description}."
 
 ${paragraphs(moduleDoc(read(join(packageRoot, barrelEntry.source)), barrelEntry.source))}
 
-${read(join(packageRoot, Package.api.source)).trim()}
+${read(join(packageRoot, Manifest.api.source)).trim()}
 
 ## Entry points
 
@@ -148,13 +148,13 @@ ${entryPointTable}
 ${sections}
 `
 
-const outputs = new Map([[Package.api.target, apiPage]])
+const outputs = new Map([[Manifest.api.target, apiPage]])
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/jj")) {
-    failures.push(`${path}: must reference ${Package.name} and /api/jj`)
+  if (!content.includes(Manifest.name) || !content.includes("/api/jj")) {
+    failures.push(`${path}: must reference ${Manifest.name} and /api/jj`)
   }
 }
 for (const [path, content] of outputs) {

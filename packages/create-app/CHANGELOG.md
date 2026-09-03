@@ -11,7 +11,7 @@ section here the way there is in a published package's changelog.
 
 - Added `@smthrs/create-app`, its application templates, and the `create-app`
   scaffold command exposed by `@smthrs/build-cli`.
-- Added `BUILD.ts`, so the package's lint, check, test, circular, and build
+- Added `PACKAGE.ts`, so the package's lint, check, test, circular, and build
   gates run in CI rather than only by hand.
 - Added package-owned documentation under `docs/`: the routing grammar and the
   body of the API page this package will publish if it ever stops being

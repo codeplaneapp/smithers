@@ -52,11 +52,11 @@ plus a paragraph naming the whole-suite command that measures coverage. Green:
 
 Each fixed command proven live (load 3.4):
 
-| Command | Exit | Result |
-| --- | --- | --- |
-| GitHub, token from `gh auth token` | 0 | `Tests 4 passed (4)`, 1.89 s |
-| Linear, ambient `LINEAR_API_KEY` | 0 | `Tests 4 passed (4)`, 1.27 s |
-| Telegram, both token names stripped with `env -u` | 0 | `Test Files 1 skipped (1)`, `Tests 3 skipped (3)` |
+| Command                                           | Exit | Result                                            |
+| ------------------------------------------------- | ---- | ------------------------------------------------- |
+| GitHub, token from `gh auth token`                | 0    | `Tests 4 passed (4)`, 1.89 s                      |
+| Linear, ambient `LINEAR_API_KEY`                  | 0    | `Tests 4 passed (4)`, 1.27 s                      |
+| Telegram, both token names stripped with `env -u` | 0    | `Test Files 1 skipped (1)`, `Tests 3 skipped (3)` |
 
 Telegram stays ENV-SKIP: `TELEGRAM_BOT_TOKEN` and `SMITHERS_TELEGRAM_BOT_TOKEN`
 are unset on this host (the gate's own sweep of the environment, the macOS
@@ -225,28 +225,28 @@ table rows, and the three pinned counts.
 
 Load from `uptime` immediately before each block.
 
-| Gate | Load | Result |
-| --- | ---: | --- |
-| `corepack pnpm install --frozen-lockfile --offline` | 11.85 | exit 0 |
-| `pnpm run browser` | 3.15 | exit 0, `browser contract holds: 28 browser entry points, 7 Node-only.` |
-| `node scripts/check-docs.mjs` | 4.08 | exit 0, 15 checks, `the browser tables and counts match the 28 entry points the gate bundles` |
-| `node scripts/check-llms.mjs` | 4.08 | exit 0, `12 documentation artifact(s) are current` |
-| `node --test scripts/pack-release.test.mjs` | 4.08 | `tests 16, pass 16, fail 0` |
-| `node --test scripts/repo-contract/*.test.mjs` | 4.08 | `tests 27, pass 27, fail 0` |
-| `node --test` over the seven docs unit suites | 4.08 | `tests 101, pass 101, fail 0` |
-| `pnpm --filter @smthrs/integrations test -- --run` with `GITHUB_TOKEN` | 4.62 | exit 0, `Test Files 18 passed, 1 skipped`, `Tests 313 passed, 3 skipped`, coverage 98.81/94.02/98.6/99.2 over thresholds 98/94/98/99 |
-| `pnpm --dir packages/{integrations,memory,smthrs-deprecation} run check` | 4.71 | exit 0 each |
-| `pnpm --dir packages/{integrations,memory,smthrs-deprecation} run lint` | 4.71 | exit 0 each |
-| `pnpm --dir examples run check` | 5.00 | exit 0 |
-| `pnpm --dir examples exec vitest run test/09-browser-use.test.ts` | 5.00 | exit 0, `Tests 2 passed (2)` |
-| `pnpm run test:jsdoc` | 5.00 | `tests 5, pass 5, fail 0` |
-| `smithers-build lint '//:knownFiles'` | 8.83 | `ok: true` |
-| `smithers-build test '//scripts:packManifest'` | 8.83 | `ok: true`, 1 ran 0 failed |
-| `smithers-build test '//scripts:browserContract'` | 8.83 | `ok: true`, 1 ran 0 failed (2.6 s) |
-| `smithers-build test '//scripts:docs'` | 8.83 | `ok: true`, 1 ran 0 failed (40.3 s) |
-| `smithers-build test '//scripts:llms'` | 8.83 | `ok: true`, 1 ran 0 failed |
-| `smithers-build test '//scripts:docsUnit'` | 5.00 | `ok: true`, 1 ran 0 failed (91.0 s) |
-| `git status --short` after every gate | 11.30 | 0 lines |
+| Gate                                                                     |  Load | Result                                                                                                                               |
+| ------------------------------------------------------------------------ | ----: | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `corepack pnpm install --frozen-lockfile --offline`                      | 11.85 | exit 0                                                                                                                               |
+| `pnpm run browser`                                                       |  3.15 | exit 0, `browser contract holds: 28 browser entry points, 7 Node-only.`                                                              |
+| `node scripts/check-docs.mjs`                                            |  4.08 | exit 0, 15 checks, `the browser tables and counts match the 28 entry points the gate bundles`                                        |
+| `node scripts/check-llms.mjs`                                            |  4.08 | exit 0, `12 documentation artifact(s) are current`                                                                                   |
+| `node --test scripts/pack-release.test.mjs`                              |  4.08 | `tests 16, pass 16, fail 0`                                                                                                          |
+| `node --test scripts/repo-contract/*.test.mjs`                           |  4.08 | `tests 27, pass 27, fail 0`                                                                                                          |
+| `node --test` over the seven docs unit suites                            |  4.08 | `tests 101, pass 101, fail 0`                                                                                                        |
+| `pnpm --filter @smthrs/integrations test -- --run` with `GITHUB_TOKEN`   |  4.62 | exit 0, `Test Files 18 passed, 1 skipped`, `Tests 313 passed, 3 skipped`, coverage 98.81/94.02/98.6/99.2 over thresholds 98/94/98/99 |
+| `pnpm --dir packages/{integrations,memory,smthrs-deprecation} run check` |  4.71 | exit 0 each                                                                                                                          |
+| `pnpm --dir packages/{integrations,memory,smthrs-deprecation} run lint`  |  4.71 | exit 0 each                                                                                                                          |
+| `pnpm --dir examples run check`                                          |  5.00 | exit 0                                                                                                                               |
+| `pnpm --dir examples exec vitest run test/09-browser-use.test.ts`        |  5.00 | exit 0, `Tests 2 passed (2)`                                                                                                         |
+| `pnpm run test:jsdoc`                                                    |  5.00 | `tests 5, pass 5, fail 0`                                                                                                            |
+| `smithers-build lint '//:knownFiles'`                                    |  8.83 | `ok: true`                                                                                                                           |
+| `smithers-build test '//scripts:packManifest'`                           |  8.83 | `ok: true`, 1 ran 0 failed                                                                                                           |
+| `smithers-build test '//scripts:browserContract'`                        |  8.83 | `ok: true`, 1 ran 0 failed (2.6 s)                                                                                                   |
+| `smithers-build test '//scripts:docs'`                                   |  8.83 | `ok: true`, 1 ran 0 failed (40.3 s)                                                                                                  |
+| `smithers-build test '//scripts:llms'`                                   |  8.83 | `ok: true`, 1 ran 0 failed                                                                                                           |
+| `smithers-build test '//scripts:docsUnit'`                               |  5.00 | `ok: true`, 1 ran 0 failed (91.0 s)                                                                                                  |
+| `git status --short` after every gate                                    | 11.30 | 0 lines                                                                                                                              |
 
 `known-files.d.ts` regenerated with `node scripts/generate-known-files.mjs` (4667
 to 4669 entries, the two new files) and the llms bundles with `node
@@ -263,10 +263,10 @@ only, which this lane does not touch.
 2. `packages/keys/src/README.md` is a source file that no `files` glob packs, the
    same shape as the memory `.sql` files. `packages/keys/package.json` is outside
    this lane's paths, so it is reported rather than changed.
-3. `packages/integrations` has no `BUILD.ts`, so `smithers-build ci
+3. `packages/integrations` has no `PACKAGE.ts`, so `smithers-build ci
    '//packages/...'` never runs its suite; only the recursive `pnpm test` does.
    The L1 pin therefore holds under `pnpm test` and not under CI. Giving the
-   package a BUILD.ts is a structural change (it regenerates `tsconfig.json`,
+   package a PACKAGE.ts is a structural change (it regenerates `tsconfig.json`,
    `ci.yml`, and `known-files.d.ts`) and belongs to whoever owns that decision.
 4. `//scripts:docsUnit` passes at `f63809382b`, so the run-3 blocker B1 is closed
    on this base.

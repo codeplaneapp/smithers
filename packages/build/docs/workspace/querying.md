@@ -25,8 +25,8 @@ targets:
     kinds: [build]
 ```
 
-Only the `BUILD.ts` modules the pattern selects are evaluated. `//packages/...`
-loads every `BUILD.ts` under `packages/`; `//packages/flow:lib` loads one.
+Only the `PACKAGE.ts` modules the pattern selects are evaluated. `//packages/...`
+loads every `PACKAGE.ts` under `packages/`; `//packages/flow:lib` loads one.
 
 An exact label selects one target, so listing a package prints its default
 target, not everything it exports:
@@ -83,7 +83,7 @@ smithers-build query 'rdeps(//lib:srcs)'
   //data:build
 ```
 
-Package mode only. The JSON form is `{query, root, dependents}`.
+Build system only. The JSON form is `{query, root, dependents}`.
 
 ## owners()
 
@@ -101,7 +101,7 @@ smithers-build query 'owners(//lib:srcs)'
   team:platform             approve  inherited from //
 ```
 
-Package mode only. For the owners of individual paths, and for a diff, use
+Build system only. For the owners of individual paths, and for a diff, use
 the [owners command](../reference/cli.md#owners). See
 [Ownership](../concepts/ownership.md).
 
@@ -157,7 +157,7 @@ The command's structured result also carries `roots`, a flat `targets` list of
 | `:target`      | An export of the package containing the current directory |
 
 Recursive patterns also include targets synthesized by default targets for
-directories without a `BUILD.ts`. See
+directories without a `PACKAGE.ts`. See
 [Workspace structure](structure.md#default-target-synthesis).
 
 ## Output format

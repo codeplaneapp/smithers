@@ -97,6 +97,7 @@ describe("child-process containment conformance", () => {
     ],
     ...[
       "AgentSession.ts",
+      "FoundryExec.ts",
       "GitCommit.ts",
       "GoExec.ts",
       "MemoryBackend.ts",

@@ -40,10 +40,10 @@ the package is private and every consumer of it is in this workspace; a
 published dual ESM/CJS map is what a `publishConfig` would carry, and this
 package has none.
 
-## BUILD.ts imports
+## PACKAGE.ts imports
 
 The Smithers workspace root declares `"@smthrs/targets": "workspace:*"` and
-`"@smthrs/build-cli": "workspace:*"` as devDependencies. `BUILD.ts` files
+`"@smthrs/build-cli": "workspace:*"` as devDependencies. `PACKAGE.ts` files
 import the rule catalog by bare specifier: `import { ... } from
 "@smthrs/targets"`, and `pnpm exec smithers-build` resolves the build CLI's
 workspace bin.

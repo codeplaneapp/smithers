@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, posix } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -88,10 +88,10 @@ const collect = (relative, prefix, seen) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("engine docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("engine docs: Manifest.ts and package.json names differ")
 // The engine projects no fragments into shared pages yet. Declaring one
 // without teaching this generator to inject it would silently do nothing.
-if (Package.snippets.length > 0) throw new Error("engine docs: snippet projection is not implemented")
+if (Manifest.snippets.length > 0) throw new Error("engine docs: snippet projection is not implemented")
 
 const barrel = readModule("index.ts")
 const exports = collect("index.ts", "", new Set())
@@ -113,20 +113,20 @@ description: "${manifest.description}."
 
 ${paragraphs(moduleDoc(barrel))}
 
-${read(join(packageRoot, Package.api.source)).trim()}
+${read(join(packageRoot, Manifest.api.source)).trim()}
 
 ## Exports
 
 ${table}
 `
 
-const outputs = new Map([[Package.api.target, apiPage]])
+const outputs = new Map([[Manifest.api.target, apiPage]])
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
   if (!/@smthrs\/engine(?![\w-])/.test(content) || !/\/api\/engine(?![\w-])/.test(content)) {
-    failures.push(`${path}: must reference ${Package.name} and /api/engine`)
+    failures.push(`${path}: must reference ${Manifest.name} and /api/engine`)
   }
 }
 for (const [path, content] of outputs) {

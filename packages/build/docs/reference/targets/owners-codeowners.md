@@ -58,7 +58,7 @@ Team references stay unexpanded.
 
 ## Verbs and cacheability
 
-`build` and `lint`. Package mode plans the check form unless `--write` is
+`build` and `lint`. Build system plans the check form unless `--write` is
 passed, and never replays a result: the render reads the whole package index
 and the current file, so the check is the cache.
 

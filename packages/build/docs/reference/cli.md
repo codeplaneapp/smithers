@@ -23,7 +23,7 @@ Every command except `create-app` accepts these.
 
 | Option        | Alias | Type   | Default                       | Description                                                                                                           |
 | ------------- | ----- | ------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `--workspace` | `-w`  | string | the process working directory | Workspace root containing `BUILD.ts` files                                                                            |
+| `--workspace` | `-w`  | string | the process working directory | Workspace root containing `PACKAGE.ts` files                                                                          |
 | `--cache-dir` |       | string | unset                         | Workspace-relative cache directory. Overrides the root declaration; `install` requires the result to remain `.flows`. |
 
 `build`, `test`, `lint`, `docs`, `run`, `target`, and `ci` also accept:
@@ -50,9 +50,9 @@ selection rules and what each renderer draws.
 Every command does the same three things before its own work.
 
 1. Resolve the workspace root from `--workspace`.
-2. Resolve the cache directory: `--cache-dir`, then the root `BUILD.ts` `Workspace`
+2. Resolve the cache directory: `--cache-dir`, then the root `PACKAGE.ts` `Workspace`
    declaration, then `.flows`. Resolving the declaration evaluates the root
-   `BUILD.ts` if one exists.
+   `PACKAGE.ts` if one exists.
 3. If the declaration sets `gitignored: true`, ensure the root `.gitignore`
    carries an entry for the resolved directory.
 
@@ -233,10 +233,10 @@ irreversible-exec layer reports a target failure with `unresolved_action`.
 
 ## target
 
-Executes one package-mode label under the verb its rule flavour implies — the
+Executes one build-system label under the verb its rule flavour implies — the
 bare-label form. An argv whose first token starts with `//` or `:` is rewritten
 to `target <label>`, so `smithers-build //packages/flow:lint` is the same
-invocation. It requires a `WORKSPACE.ts` workspace and refuses a `BUILD.ts`
+invocation. It requires a `WORKSPACE.ts` workspace and refuses a `PACKAGE.ts`
 workspace.
 
 ```sh
@@ -246,7 +246,7 @@ smithers-build //packages/flow:lint
 
 | Argument | Description          |
 | -------- | -------------------- |
-| `label`  | A package-mode label |
+| `label`  | A build-system label |
 
 In addition to the common execution options, `target` accepts:
 
@@ -261,8 +261,8 @@ In addition to the common execution options, `target` accepts:
 Failure codes: `target_failed` for planning errors, `targets_failed` for failed
 targets. Exit code 1 for both.
 
-See `packages/build-cli/docs/package-mode.md` for `WORKSPACE.ts` discovery and
-the verbs package mode supports.
+See `packages/build-cli/docs/build-system.md` for `WORKSPACE.ts` discovery and
+the verbs build system supports.
 
 ---
 
@@ -297,7 +297,7 @@ The drift message names each offending file with its status and suggests
 ## owners
 
 Resolves the owners, their reasons, and the agent policy for workspace paths,
-or for the paths a diff touches. Package mode only; a BUILD.ts workspace has
+or for the paths a diff touches. Build system only; a PACKAGE.ts workspace has
 no owners declarations. Never executes.
 
 ```sh
@@ -402,7 +402,7 @@ A bare label or pattern returns:
 whose dependency closure reaches the root. `owners(label)` returns
 `{query, package, owners, agentPolicy, upstream}` for the package holding
 the label: its resolved owners with reasons, the policy for its directory,
-and the packages it depends on. Both are package mode only and take one
+and the packages it depends on. Both are build system only and take one
 exact or default target.
 
 Failure: error code `query_failed`, exit code 1.

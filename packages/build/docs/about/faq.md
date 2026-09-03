@@ -1,6 +1,6 @@
 # FAQ
 
-## Is `BUILD.ts` really just TypeScript?
+## Is `PACKAGE.ts` really just TypeScript?
 
 Yes. The CLI imports it through the programmatic `tsx` loader with
 `tsconfig: false`. Every named export is inspected. Exports that are targets
@@ -10,7 +10,7 @@ workspace configuration, and everything else is ignored.
 One constraint follows from the loader. `tsconfig: false` means no tsconfig is
 read, so compiler options declared in the workspace do not apply: a `paths` alias
 does not resolve, and a relative import names the real file, extension included,
-as in `import { lib } from "../plan/BUILD.ts"`.
+as in `import { lib } from "../plan/PACKAGE.ts"`.
 
 ## Can a target call read the filesystem?
 
@@ -24,7 +24,7 @@ planner expands and digests them during discovery. See
 Import it.
 
 ```ts
-import { lib as plan } from "../plan/BUILD.ts"
+import { lib as plan } from "../plan/PACKAGE.ts"
 
 export const lib = TsBuild({ packageManager, deps: [plan] /* ... */ })
 ```
@@ -57,7 +57,7 @@ with an `unresolved_action` refusal. The per-target status is on each page under
 ## Are actions sandboxed?
 
 Yes, where a policy asks for it. On the `PACKAGE.ts` surface every target is
-confined unless it declares `sandbox: "none"`; on the `BUILD.ts` surface the
+confined unless it declares `sandbox: "none"`; on the `PACKAGE.ts` surface the
 root `Workspace({ sandbox: {} })` declaration confines every tool-running
 target. The mechanism is bubblewrap on Linux, seatbelt on macOS, and Docker
 where the workspace declares an image. A confined tool reads only its declared

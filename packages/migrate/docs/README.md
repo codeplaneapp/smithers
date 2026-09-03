@@ -21,7 +21,7 @@ node packages/migrate/scripts/docs.mjs           # write
 node packages/migrate/scripts/docs.mjs --check   # fail on drift
 ```
 
-`BUILD.ts` declares that script as a `Generate` target, so
+`PACKAGE.ts` declares that script as a `Generate` target, so
 `smithers-build run` writes the page and `smithers-build lint` drift-checks it
 inside the ordinary `smithers-build ci '//packages/...'` run.
 

@@ -6,11 +6,11 @@ import { Workspace } from "../src/Workspace.ts"
 
 /**
  * The repository root this package sits in. The guard runs against the real
- * checkout on purpose: the committed BUILD.ts files are executable
+ * checkout on purpose: the committed PACKAGE.ts files are executable
  * declarations, and a targets-API change that invalidates one of them must fail
  * here rather than at the next `smithers-build` invocation. This is the rot that
  * actually happened once — `entries` became `file()` objects and three
- * checked-in BUILD.ts files kept the string form for weeks because nothing
+ * checked-in PACKAGE.ts files kept the string form for weeks because nothing
  * loaded them.
  */
 const repositoryRoot = NodePath.resolve(
@@ -20,8 +20,8 @@ const repositoryRoot = NodePath.resolve(
   ".."
 )
 
-describe("committed BUILD.ts files", () => {
-  it("every committed BUILD.ts loads and all of its declarations construct", async () => {
+describe("committed PACKAGE.ts files", () => {
+  it("every committed PACKAGE.ts loads and all of its declarations construct", async () => {
     const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
     expect(workspace.buildFiles.length).toBeGreaterThan(0)
     for (const file of workspace.buildFiles) {
@@ -39,7 +39,7 @@ describe("committed BUILD.ts files", () => {
     // suite reported a cache hit on the previous result: a stale green over
     // changed behaviour, which is the one thing a result cache must never do.
     const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
-    const module = await workspace.loadBuild("packages/build-cli/BUILD.ts")
+    const module = await workspace.loadBuild("packages/build-cli/PACKAGE.ts")
     const target = module.targets.get("test")
     expect(target).toBeDefined()
     const files = (await workspace.expandInputs(target!)).flatMap((input) => input.files.map((file) => file.path))
@@ -47,14 +47,14 @@ describe("committed BUILD.ts files", () => {
     expect(files).toContain("packages/build-cli/test/fixtures/github-render/workflows/ci.yml")
   })
 
-  it("the standard-package BUILD.ts files declare six package-local targets", async () => {
+  it("the standard-package PACKAGE.ts files declare six package-local targets", async () => {
     const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
     for (
       const file of [
-        "packages/engine/BUILD.ts",
-        "packages/flow/BUILD.ts",
-        "packages/plan/BUILD.ts",
-        "packages/build/BUILD.ts"
+        "packages/engine/PACKAGE.ts",
+        "packages/flow/PACKAGE.ts",
+        "packages/plan/PACKAGE.ts",
+        "packages/build/PACKAGE.ts"
       ]
     ) {
       const module = await workspace.loadBuild(file)

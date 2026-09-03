@@ -24,8 +24,8 @@ which is frozen for this candidate. A row here and a row there are the same row.
 
 | Runtime | Status | Minimum |
 | --- | --- | --- |
-| Node.js | Supported. The only durable execution target. | `>=22.19.0` (every `packages/*/package.json` `engines.node`; root `BUILD.ts:12` `Smithers.Runtime.Node({ version: ">=22.19.0" })`; CI pins `22.19.0`). |
-| Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (`BUILD.ts:15`); CI pins `1.3.14`. |
+| Node.js | Supported. The only durable execution target. | `>=22.19.0` (every `packages/*/package.json` `engines.node`; root `PACKAGE.ts:12` `Smithers.Runtime.Node({ version: ">=22.19.0" })`; CI pins `22.19.0`). |
+| Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (`PACKAGE.ts:15`); CI pins `1.3.14`. |
 | Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
 | Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
 | macOS | Supported for development and the Phase 7 manual smoke; the `packages` CI matrix runs the package suites on `macos-latest` as an advisory row. | arm64 and x64. |

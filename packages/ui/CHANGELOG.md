@@ -122,7 +122,7 @@ Everything below landed on top of the imported 0.x kit.
 
 ### Gates
 
-- `BUILD.ts` declares `//packages/ui:check` (a `tsc --noEmit` typecheck) beside
+- `PACKAGE.ts` declares `//packages/ui:check` (a `tsc --noEmit` typecheck) beside
   `//packages/ui:unitTests`, and `package.json` gained the matching `check`
   script, so root `pnpm run check` no longer skips the package. The tsconfig
   named `bun-types` while `@types/bun` was installed, so `tsc -p` had never been
@@ -142,5 +142,5 @@ Everything below landed on top of the imported 0.x kit.
   gate noticed, because `scripts/check-ui-architecture.mjs` had been the only
   checker of this package's documentation claims.
 - This package still runs `bun test` rather than the 1.0 vitest baseline, and
-  declares no eslint or dprint target. `BUILD.ts` records why; the Phase 4 UI
+  declares no eslint or dprint target. `PACKAGE.ts` records why; the Phase 4 UI
   port is what moves it.

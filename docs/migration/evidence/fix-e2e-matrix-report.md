@@ -47,7 +47,7 @@ Behavior test: `e2e/ci/matrixIsWired.test.ts`, "the fault matrix is wired to a
 gate", five cells: the workspace roster (exact block pin), the root manifest
 roster, `e2e/node_modules/.bin/vitest` exists, and the two CI steps.
 
-Fix: `pnpm-workspace.yaml:4` gains `  - "e2e"`, and `package.json` `workspaces`
+Fix: `pnpm-workspace.yaml:4` gains `- "e2e"`, and `package.json` `workspaces`
 gains `"e2e"` in the same position. Both are required, not one:
 `scripts/repo-contract/test-script-wiring.test.mjs` asserts the two rosters are
 identical ("a member in one and not the other is installed but never tested, or
@@ -67,7 +67,7 @@ Done in 587ms using pnpm v11.21.0
 ```
 
 `tsconfig.json` and `known-files.d.ts` did not change: the root `Smithers.Tsconfig`
-`include` list in `BUILD.ts` names its directories literally and does not read
+`include` list in `PACKAGE.ts` names its directories literally and does not read
 workspace membership, and `e2e` is not one of them (`e2e/tsconfig.json` is its
 own program, driven by `//e2e:check`). Pin moved in the same commit:
 `packages/flows/test/vitestCoverageIsolation.test.ts`, "pins the root workspaces
@@ -87,12 +87,12 @@ $ corepack pnpm exec smithers-build test '//e2e:faults'
 ```
 
 The two failures on that first real run were case 22 (the required red gate) and
-case 06 (item 4 below). No change to `e2e/BUILD.ts`, the vitest binary
+case 06 (item 4 below). No change to `e2e/PACKAGE.ts`, the vitest binary
 resolution, or the child-runner protocol was needed.
 
 ## Item 3: CI selects it
 
-Two steps, both generated from the root `BUILD.ts`:
+Two steps, both generated from the root `PACKAGE.ts`:
 
 - `pnpm exec smithers-build build '//e2e:check'` in the required `test` job.
 - `pnpm exec smithers-build test '//e2e:faults'` in a new `e2e-faults` job,
@@ -109,21 +109,21 @@ AssertionError: expected 'name: CI\non:\n  push:\n    branches:…' to match /^\
 Two deviations from the spec, both deliberate and both flagged for the
 orchestrator:
 
-1. **The edit is in the root `BUILD.ts`, not `ci/BUILD.ts`.** `ci/BUILD.ts` is
+1. **The edit is in the root `PACKAGE.ts`, not `ci/PACKAGE.ts`.** `ci/PACKAGE.ts` is
    the Bun runtime-compatibility matrix (`//ci/...`, run by the `bun` job) and
    its own header records why the storage packages are excluded from Bun;
-   `e2e/BUILD.ts` says the matrix "stays on the Node lane" for the same reason.
+   `e2e/PACKAGE.ts` says the matrix "stays on the Node lane" for the same reason.
    Putting `//e2e:faults` there would have run the crash cases under Bun, where
    `NodeDatabase.layer` refuses to open a database. The CI job and step
-   declarations live in the root `BUILD.ts`, and that is where the selection went.
-   Root `BUILD.ts` is outside the lane's owned paths.
+   declarations live in the root `PACKAGE.ts`, and that is where the selection went.
+   Root `PACKAGE.ts` is outside the lane's owned paths.
 2. **The matrix job is advisory (`continueOnError`), not required.** Case 22's
    log half is a required gate that rc.0 cannot pass: `e2e/README.md` and
    `scripts/repo-contract/fault-skips.test.mjs` both state that it must stay in
    the matrix as a plain failing test, and that suite refuses `.only`, `.todo`,
    `.skip`, and `.fails` on it. A required job would therefore be red on every
    commit for a defect no commit introduced. The `//e2e:check` half is required,
-   because it is deterministic and green. The root `BUILD.ts` comment and
+   because it is deterministic and green. The root `PACKAGE.ts` comment and
    `e2e/README.md` both name the condition for promotion: drop `continueOnError`
    and add `e2e-faults` to `requiredJobs` when the Phase 5 redacting logger lands
    and the durable-park defect closes. `docs/migration/rc-contract.md` section on
@@ -139,6 +139,7 @@ than writing), then restored to `"check"`. Drift check:
 $ corepack pnpm exec smithers-build lint '//:ci'
 ok: true
 ```
+
 exit 0.
 
 ## Item 4: the 18-case matrix at the lane HEAD
@@ -155,26 +156,26 @@ $ corepack pnpm exec smithers-build test '//e2e:faults'
 Load 20.20 at the start, 19.95 at the end. No case was rerun in isolation for
 flake: every case that passed, passed on all three full runs.
 
-| Case | File | Status | Classification |
-| --- | --- | --- | --- |
-| 01 | kill-engine-mid-action | PASS (1 test, 32.2s) | — |
-| 02 | kill-sandbox-engine-alive | PASS (1) | — |
-| 03 | restart-waiting-approval | PASS (1) | — |
-| 04 | restart-waiting-event | PASS (1) | — |
-| 05 | restart-waiting-timer | PASS (1, 6.8s) | — |
-| 06 | concurrent-resume-vs-sweep | PASS (2) | Was FAIL. Harness defect, fixed by this lane. |
-| 08 | inspector-never-idle | PASS (1) | — |
-| 09 | reconnect-durable-cursor | PASS (1) | — |
-| 11 | frame-scrub-view-only | PASS (1) | — |
-| 12 | rewind-reverts-vcs | PASS (1) | Ran, did not skip: jj 0.39.0 on PATH. |
-| 14 | gateway-rpc-roundtrip | PASS (2) | — |
-| 15 | ws-drop-reconnect | PASS (1) | — |
-| 16 | n5-subscribers-bounded-memory | PASS (1) | Inside the 128 MB RSS growth budget. |
-| 21 | jj-pointer-integrity | PASS (2) | Ran, did not skip. |
-| 22 | secret-never-in-journal | 1 PASS, 1 FAIL | Required red gate, product defect, owned by the Phase 5 redaction deliverable. Left failing. |
-| 25 | approval-scope-denial | PASS (5) | — |
-| 31 | real-engine-kill-resume | PASS (1, 32.6s) | — |
-| 32 | checkpoint-kill-resume | PASS (2) | — |
+| Case | File                          | Status               | Classification                                                                               |
+| ---- | ----------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
+| 01   | kill-engine-mid-action        | PASS (1 test, 32.2s) | —                                                                                            |
+| 02   | kill-sandbox-engine-alive     | PASS (1)             | —                                                                                            |
+| 03   | restart-waiting-approval      | PASS (1)             | —                                                                                            |
+| 04   | restart-waiting-event         | PASS (1)             | —                                                                                            |
+| 05   | restart-waiting-timer         | PASS (1, 6.8s)       | —                                                                                            |
+| 06   | concurrent-resume-vs-sweep    | PASS (2)             | Was FAIL. Harness defect, fixed by this lane.                                                |
+| 08   | inspector-never-idle          | PASS (1)             | —                                                                                            |
+| 09   | reconnect-durable-cursor      | PASS (1)             | —                                                                                            |
+| 11   | frame-scrub-view-only         | PASS (1)             | —                                                                                            |
+| 12   | rewind-reverts-vcs            | PASS (1)             | Ran, did not skip: jj 0.39.0 on PATH.                                                        |
+| 14   | gateway-rpc-roundtrip         | PASS (2)             | —                                                                                            |
+| 15   | ws-drop-reconnect             | PASS (1)             | —                                                                                            |
+| 16   | n5-subscribers-bounded-memory | PASS (1)             | Inside the 128 MB RSS growth budget.                                                         |
+| 21   | jj-pointer-integrity          | PASS (2)             | Ran, did not skip.                                                                           |
+| 22   | secret-never-in-journal       | 1 PASS, 1 FAIL       | Required red gate, product defect, owned by the Phase 5 redaction deliverable. Left failing. |
+| 25   | approval-scope-denial         | PASS (5)             | —                                                                                            |
+| 31   | real-engine-kill-resume       | PASS (1, 32.6s)      | —                                                                                            |
+| 32   | checkpoint-kill-resume        | PASS (2)             | —                                                                                            |
 
 Harness and runner suites in the same run, all green: `killProcess` (6),
 `dropWebSocket` (5), `freezeSqliteLock` (2), `skewClock` (4), `stallSandbox` (3),
@@ -185,7 +186,7 @@ Harness and runner suites in the same run, all green: `killProcess` (6),
 Confirmed at the source line, `e2e/fixtures/claimChild.ts:90`:
 
 ```
-  yield* control.pause({ runId: receipt.runId, idempotencyKey: `pause:${receipt.runId}` })
+yield* control.pause({ runId: receipt.runId, idempotencyKey: `pause:${receipt.runId}` })
 ```
 
 `Control.Service` (`packages/control/src/Control.ts:151-183`) has no `pause`: rc.0
@@ -220,9 +221,9 @@ Fix, `e2e/fixtures/claimChild.ts:89-100`: the setup process launched the run, so
 it holds the fence. It takes the fence and writes `parked`.
 
 ```ts
-const runtime = yield* ControlRuntime.ControlRuntime
-const fence = yield* runtime.claimFence(receipt.runId)
-yield* runtime.writeStatus(receipt.runId, fence, "parked")
+const runtime = yield * ControlRuntime.ControlRuntime
+const fence = yield * runtime.claimFence(receipt.runId)
+yield * runtime.writeStatus(receipt.runId, fence, "parked")
 ```
 
 `SqlControlRuntime`'s `storeStatus` maps `parked` onto the store's `suspended`,
@@ -297,19 +298,19 @@ required. The "Running" section now names `pnpm exec smithers-build test
 Load is read before each. Machine was busy throughout (other sessions); the
 guard's threshold of 40 was never crossed.
 
-| Gate | Command | Result | Load at start |
-| --- | --- | --- | --- |
-| Frozen offline install | `corepack pnpm install --frozen-lockfile --offline` | Done in 587ms, "Already up to date" | 22.66 |
-| e2e typecheck | `corepack pnpm exec smithers-build build '//e2e:check'` | ran 10.7s, ok: true | 22.66 |
-| e2e matrix | `corepack pnpm exec smithers-build test '//e2e:faults'` | 25 of 26 files, 65 of 66 tests; the one failure is case 22's required red gate | 20.20 |
-| Workflow drift | `corepack pnpm exec smithers-build lint '//:ci'` | ok: true, exit 0 | 22.66 |
-| Touched package | `corepack pnpm exec smithers-build ci '//packages/flows'` | 7 targets ran, 0 failed (fmt, lint, lib, check, circular, test, docs) | 14.02 |
-| Repo contract | `node --test "scripts/repo-contract/*.test.mjs"` | 25 pass, 0 fail | 18.31 |
-| Effect version | `node scripts/check-single-effect-version.mjs` | effect@4.0.0-rc.108 everywhere (63 sources), exit 0 | 18.31 |
-| Root program | `corepack pnpm exec tsc -p tsconfig.json --noEmit` | 1741 error lines with and without this lane's `BUILD.ts` change; none names `BUILD.ts` or `e2e/` | 18.31 |
-| Script gates | `corepack pnpm exec smithers-build test '//scripts/...'` | 16 ran, 3 failed, 1 skipped. All three are pre-existing, see below | 15.04 |
+| Gate                   | Command                                                   | Result                                                                                               | Load at start |
+| ---------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------- |
+| Frozen offline install | `corepack pnpm install --frozen-lockfile --offline`       | Done in 587ms, "Already up to date"                                                                  | 22.66         |
+| e2e typecheck          | `corepack pnpm exec smithers-build build '//e2e:check'`   | ran 10.7s, ok: true                                                                                  | 22.66         |
+| e2e matrix             | `corepack pnpm exec smithers-build test '//e2e:faults'`   | 25 of 26 files, 65 of 66 tests; the one failure is case 22's required red gate                       | 20.20         |
+| Workflow drift         | `corepack pnpm exec smithers-build lint '//:ci'`          | ok: true, exit 0                                                                                     | 22.66         |
+| Touched package        | `corepack pnpm exec smithers-build ci '//packages/flows'` | 7 targets ran, 0 failed (fmt, lint, lib, check, circular, test, docs)                                | 14.02         |
+| Repo contract          | `node --test "scripts/repo-contract/*.test.mjs"`          | 25 pass, 0 fail                                                                                      | 18.31         |
+| Effect version         | `node scripts/check-single-effect-version.mjs`            | effect@4.0.0-rc.108 everywhere (63 sources), exit 0                                                  | 18.31         |
+| Root program           | `corepack pnpm exec tsc -p tsconfig.json --noEmit`        | 1741 error lines with and without this lane's `PACKAGE.ts` change; none names `PACKAGE.ts` or `e2e/` | 18.31         |
+| Script gates           | `corepack pnpm exec smithers-build test '//scripts/...'`  | 16 ran, 3 failed, 1 skipped. All three are pre-existing, see below                                   | 15.04         |
 
-`e2e` declares no `Lint` or `Format` target in `e2e/BUILD.ts` and ships no
+`e2e` declares no `Lint` or `Format` target in `e2e/PACKAGE.ts` and ships no
 `eslint.config.js` or `dprint.json` of its own, so there is no lint gate to run
 for the files this lane touched under `e2e/`. That is a smaller gap than B6 and
 is left for the orchestrator to place.
@@ -331,11 +332,11 @@ is left for the orchestrator to place.
 
 ## Red checks recorded this round
 
-| Test | Verbatim red line | Fix |
-| --- | --- | --- |
-| `e2e/ci/matrixIsWired.test.ts` > gives the matrix its own vitest binary | `[ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL] Command "vitest" not found` (and `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vitest' imported from .../vitest.config.ts.timestamp-....mjs`) | `pnpm-workspace.yaml`, `package.json` workspaces, both lockfiles |
-| `e2e/ci/matrixIsWired.test.ts` > selects the matrix from the generated CI workflow | `AssertionError: expected 'name: CI\non:\n  push:\n    branches:…' to match /^\s*run: pnpm exec smithers-build te…/` | root `BUILD.ts` `e2e-faults` job, regenerated `.github/workflows/ci.yml` |
-| `e2e/faults/case06-concurrent-resume-vs-sweep.test.ts` > admits one control plane to the claim and refuses the other with ClaimLost | `Error: claim child exited with 1` / `Cause([Die(TypeError: yield* (intermediate value)(intermediate value) is not iterable)])`; and `fixtures/claimChild.ts(90,18): error TS2339: Property 'pause' does not exist on type 'Service'.` | `e2e/fixtures/claimChild.ts:89-100` |
+| Test                                                                                                                                | Verbatim red line                                                                                                                                                                                                                      | Fix                                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `e2e/ci/matrixIsWired.test.ts` > gives the matrix its own vitest binary                                                             | `[ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL] Command "vitest" not found` (and `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'vitest' imported from .../vitest.config.ts.timestamp-....mjs`)                                              | `pnpm-workspace.yaml`, `package.json` workspaces, both lockfiles           |
+| `e2e/ci/matrixIsWired.test.ts` > selects the matrix from the generated CI workflow                                                  | `AssertionError: expected 'name: CI\non:\n  push:\n    branches:…' to match /^\s*run: pnpm exec smithers-build te…/`                                                                                                                   | root `PACKAGE.ts` `e2e-faults` job, regenerated `.github/workflows/ci.yml` |
+| `e2e/faults/case06-concurrent-resume-vs-sweep.test.ts` > admits one control plane to the claim and refuses the other with ClaimLost | `Error: claim child exited with 1` / `Cause([Die(TypeError: yield* (intermediate value)(intermediate value) is not iterable)])`; and `fixtures/claimChild.ts(90,18): error TS2339: Property 'pause' does not exist on type 'Service'.` | `e2e/fixtures/claimChild.ts:89-100`                                        |
 
 ## For the orchestrator
 
@@ -422,7 +423,7 @@ not move. Round 1's claim is corrected here rather than edited in place.
 Confirmed at the source. `e2e/package.json` before the fix:
 
 ```
-    "test": "vitest run",
+"test": "vitest run",
 ```
 
 and `e2e` is now a member of the recursive fan-out:
@@ -503,8 +504,8 @@ Confirmed at the source. `e2e/harness/serveProcess.ts:45-50` resolves the bin ou
 of the CLI's manifest and cases 14 and 15 spawn it:
 
 ```ts
-  const manifest = createRequire(import.meta.url).resolve("@smthrs/cli/package.json")
-  const bin = (JSON.parse(readFileSync(manifest, "utf8")) as { readonly bin: Record<string, string> }).bin.smithers
+const manifest = createRequire(import.meta.url).resolve("@smthrs/cli/package.json")
+const bin = (JSON.parse(readFileSync(manifest, "utf8")) as { readonly bin: Record<string, string> }).bin.smithers
 ```
 
 Fix: `e2e/fault-gaps.md`, row `03, 05, 31`. "every case injects `SIGKILL` and none
@@ -516,12 +517,12 @@ Documentation only, no red run.
 ## Finding 5 (minor): out-of-lane edits need an orchestrator ruling
 
 Nothing to fix in the tree. The lane's owned paths, which the verifier did not
-have, cover `e2e/**`, `pnpm-workspace.yaml`, both lockfiles, `ci/BUILD.ts`, the
+have, cover `e2e/**`, `pnpm-workspace.yaml`, both lockfiles, `ci/PACKAGE.ts`, the
 regenerated `.github/workflows/ci.yml`, the `packages/flows` pins, and the
 regenerated `tsconfig.json` and `known-files.d.ts`. Two round-1 edits sit outside
 that list and stay flagged: root `package.json` `workspaces` (forced by the
-roster-identity contract in `test-script-wiring.test.mjs`) and root `BUILD.ts`
-(the only place CI jobs are declared; `ci/BUILD.ts` is the Bun matrix, and the
+roster-identity contract in `test-script-wiring.test.mjs`) and root `PACKAGE.ts`
+(the only place CI jobs are declared; `ci/PACKAGE.ts` is the Bun matrix, and the
 crash cases cannot run under Bun). The rc-contract §9 CI-lanes row still names
 neither `e2e-faults` nor the `//e2e:check` step; §9 already pre-authorizes `e2e`
 workspace membership. That row is a frozen file this lane does not own.
@@ -530,18 +531,18 @@ workspace membership. That row is a frozen file this lane does not own.
 
 Load is read before each.
 
-| Gate | Command | Result | Load at start |
-| --- | --- | --- | --- |
-| Frozen offline install | `corepack pnpm install --frozen-lockfile --offline` | exit 0, "Done in 27m 29.8s" (four lanes installing at once) | 5.63 |
-| e2e typecheck (script) | `corepack pnpm -C e2e run check` | exit 0, no diagnostics | 19.66 |
-| e2e typecheck (target) | `corepack pnpm exec smithers-build build '//e2e:check'` | ran 6.1s, ok: true | 19.66 |
-| e2e root fan-out slice | `corepack pnpm -C e2e run test` | 8 files, 40 tests, all passed, 5.84s and 8.41s on two runs | 19.89 |
-| e2e matrix | `corepack pnpm exec smithers-build test '//e2e:faults'` | 25 of 26 files, 66 of 67 tests, 122.29s; the one failure is case 22's required red gate | 20.79 |
-| Workflow drift | `corepack pnpm exec smithers-build lint '//:ci'` | ok: true, exit 0 | 18.67 |
-| Repo contract | `node --test "scripts/repo-contract/*.test.mjs"` | 25 pass, 0 fail | 19.89 |
-| Effect version | `node scripts/check-single-effect-version.mjs` | effect@4.0.0-rc.108 everywhere (63 sources), exit 0 | 19.89 |
-| Root program | `corepack pnpm exec tsc -p tsconfig.json --noEmit` | 1741 error lines, the same count round 1 recorded; 0 of them name `known-files.d.ts` or `e2e/` | 26.45 |
-| known-files generator | `node scripts/generate-known-files.mjs` twice | first run writes the 4 lines, second writes nothing | 19.66 |
+| Gate                   | Command                                                 | Result                                                                                         | Load at start |
+| ---------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------- |
+| Frozen offline install | `corepack pnpm install --frozen-lockfile --offline`     | exit 0, "Done in 27m 29.8s" (four lanes installing at once)                                    | 5.63          |
+| e2e typecheck (script) | `corepack pnpm -C e2e run check`                        | exit 0, no diagnostics                                                                         | 19.66         |
+| e2e typecheck (target) | `corepack pnpm exec smithers-build build '//e2e:check'` | ran 6.1s, ok: true                                                                             | 19.66         |
+| e2e root fan-out slice | `corepack pnpm -C e2e run test`                         | 8 files, 40 tests, all passed, 5.84s and 8.41s on two runs                                     | 19.89         |
+| e2e matrix             | `corepack pnpm exec smithers-build test '//e2e:faults'` | 25 of 26 files, 66 of 67 tests, 122.29s; the one failure is case 22's required red gate        | 20.79         |
+| Workflow drift         | `corepack pnpm exec smithers-build lint '//:ci'`        | ok: true, exit 0                                                                               | 18.67         |
+| Repo contract          | `node --test "scripts/repo-contract/*.test.mjs"`        | 25 pass, 0 fail                                                                                | 19.89         |
+| Effect version         | `node scripts/check-single-effect-version.mjs`          | effect@4.0.0-rc.108 everywhere (63 sources), exit 0                                            | 19.89         |
+| Root program           | `corepack pnpm exec tsc -p tsconfig.json --noEmit`      | 1741 error lines, the same count round 1 recorded; 0 of them name `known-files.d.ts` or `e2e/` | 26.45         |
+| known-files generator  | `node scripts/generate-known-files.mjs` twice           | first run writes the 4 lines, second writes nothing                                            | 19.66         |
 
 The matrix run's only failure, unchanged from round 1:
 
@@ -556,16 +557,16 @@ not a suite. No suite was rerun for flake; every suite passed first time.
 
 ## Red checks recorded this round
 
-| Test | Verbatim red line | Fix |
-| --- | --- | --- |
-| `e2e/ci/matrixIsWired.test.ts` > keeps the fault cases out of the root test fan-out | `AssertionError: expected [ …(18) ] to deeply equal []` | `e2e/package.json:9`, `"test": "vitest run ci/ harness/"` |
-| `known-files.d.ts` drift, via `node scripts/generate-known-files.mjs` (no runnable gate: `//:knownFiles` fails with `spawn {smthrs:tool:{"_tag":"RuntimeBin"}} ENOENT`) | `-// The 4598 workspace files below…` / `+      \| "//e2e/ci/matrixIsWired.test.ts"` | `known-files.d.ts`, regenerated |
+| Test                                                                                                                                                                    | Verbatim red line                                                                    | Fix                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| `e2e/ci/matrixIsWired.test.ts` > keeps the fault cases out of the root test fan-out                                                                                     | `AssertionError: expected [ …(18) ] to deeply equal []`                              | `e2e/package.json:9`, `"test": "vitest run ci/ harness/"` |
+| `known-files.d.ts` drift, via `node scripts/generate-known-files.mjs` (no runnable gate: `//:knownFiles` fails with `spawn {smthrs:tool:{"_tag":"RuntimeBin"}} ENOENT`) | `-// The 4598 workspace files below…` / `+      \| "//e2e/ci/matrixIsWired.test.ts"` | `known-files.d.ts`, regenerated                           |
 
 ## For the orchestrator
 
 1. rc-contract §9's CI-lanes row still lists neither `e2e-faults` (advisory) nor
    the `//e2e:check` step in the required `test` job. Frozen file, not owned here.
-2. Root `package.json` and root `BUILD.ts` are edited by round 1 and are outside
+2. Root `package.json` and root `PACKAGE.ts` are edited by round 1 and are outside
    this lane's owned paths. Both edits are forced by repo contracts, named above.
 3. `//:knownFiles` cannot run: its argv holds an unresolved
    `{smthrs:tool:{"_tag":"RuntimeBin"}}` placeholder. Until the known-files lane

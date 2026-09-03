@@ -20,7 +20,7 @@ anything structural:
 - `docs/migration/phase2-baseline.md` — the post-import gate baseline.
 
 `legacy/` holds 0.x sources that later phases port from. It is excluded from
-the workspace, `tsconfig.json`, eslint, vitest, and every BUILD.ts inventory,
+the workspace, `tsconfig.json`, eslint, vitest, and every PACKAGE.ts inventory,
 and live code must never import it. `pnpm run check:legacy-absent` is the
 Phase 7 gate that fails while the directory exists.
 
@@ -52,8 +52,8 @@ Hosts and adapters:
 Build system and repository surfaces:
 
 - `packages/{build,build-cli,targets}` and `packages/build/infra` — the target graph, its CLI, and the hosted cache Worker.
-- `BUILD.ts`, `ci/BUILD.ts`, `lint/BUILD.ts`, `scripts/BUILD.ts`, `apps/*/BUILD.ts`, `packages/*/BUILD.ts` — target declarations.
-- `scripts/` — release, gate, and operator scripts, each declared in `scripts/BUILD.ts`.
+- `PACKAGE.ts`, `ci/PACKAGE.ts`, `lint/PACKAGE.ts`, `scripts/PACKAGE.ts`, `apps/*/PACKAGE.ts`, `packages/*/PACKAGE.ts` — target declarations.
+- `scripts/` — release, gate, and operator scripts, each declared in `scripts/PACKAGE.ts`.
 - `apps/{ui,server,shared,tui}` — the product UI, its Worker, shared code, and the terminal UI.
 - `apps/{bug-worker,status-site}` — deployed operational endpoints.
 - `examples/`, `evals/`, `factory/` — runnable documentation programs, eval suites, factory queue.
@@ -89,19 +89,19 @@ needs no build step.
 
 ## Invariants
 
-- `BUILD.ts` declares targets, never commands. A gate becomes a target in the
+- `PACKAGE.ts` declares targets, never commands. A gate becomes a target in the
   package that owns it before CI can run it. `CONTRIBUTING.md` has the full rule.
-- Root files generated from `BUILD.ts` (`tsconfig.json`, `.github/workflows/ci.yml`,
+- Root files generated from `PACKAGE.ts` (`tsconfig.json`, `.github/workflows/ci.yml`,
   `known-files.d.ts`) are regenerated, never hand-edited, and their pins in
   `packages/flows/test/vitestCoverageIsolation.test.ts` change in the same commit.
   `pnpm-workspace.yaml` is the exception: pnpm owns it and it is hand-written.
 - Exactly one `effect` version resolves across every manifest and both
   lockfiles: `4.0.0-rc.108`. `scripts/check-single-effect-version.mjs` enforces it.
 - Dependency and package-manifest changes refresh both `pnpm-lock.yaml` and
-  `bun.lock` in the same commit. Bun runs `apps/*`, the `ci/BUILD.ts` matrix,
+  `bun.lock` in the same commit. Bun runs `apps/*`, the `ci/PACKAGE.ts` matrix,
   and `evals/agent`.
 - The durable engine runs on Node.js >= 22.19.0 with local SQLite. Bun covers
-  only the matrix in `ci/BUILD.ts`. PostgreSQL and PGlite are unsupported.
+  only the matrix in `ci/PACKAGE.ts`. PostgreSQL and PGlite are unsupported.
 - Product code and end-to-end tests use real backends and real data, never
   mocked behavior.
 - Use `jj st` / `jj diff` for working-copy truth where a jj workspace exists.

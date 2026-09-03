@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -11,7 +11,7 @@ const repoRoot = join(packageRoot, "..", "..")
 const read = (path) => readFileSync(path, "utf8")
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("smthrs docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("smthrs docs: Manifest.ts and package.json names differ")
 
 const entry = read(join(packageRoot, "src", "index.ts"))
 const noticeArray = /const notice: string = \[([\s\S]*?)\]\.join\("\\n"\)/.exec(entry)?.[1] ?? ""
@@ -52,17 +52,17 @@ const replaceRegion = (source, name, body) => {
 }
 
 const outputs = new Map()
-for (const snippet of Package.snippets) {
+for (const snippet of Manifest.snippets) {
   const current = outputs.get(snippet.target) ?? read(join(repoRoot, snippet.target))
   outputs.set(snippet.target, replaceRegion(current, snippet.region, read(join(packageRoot, snippet.source))))
 }
 
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   if (!read(join(repoRoot, path)).includes("smthrs")) failures.push(`${path}: must reference smthrs`)
 }
 // The em-dash rule covers what this package writes, not the whole page it
 // writes into: the rest of the migration guide belongs to other owners.
-for (const snippet of Package.snippets) {
+for (const snippet of Manifest.snippets) {
   if (read(join(packageRoot, snippet.source)).includes("—")) {
     failures.push(`${snippet.source}: package-owned content contains an em-dash`)
   }

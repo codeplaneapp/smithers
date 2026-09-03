@@ -17,7 +17,7 @@ remote tier of the same read-through store.
 
 ## Zero configuration in a jjhub checkout
 
-When the root `BUILD.ts` declares no remote cache and `SMITHERS_CACHE_URL` is
+When the root `PACKAGE.ts` declares no remote cache and `SMITHERS_CACHE_URL` is
 unset, `smithers-build` looks at the workspace's git remotes (the colocated
 `.git/config`, then the jj git backend's config) for a jjhub host and uses
 that repository's cache endpoint. Reads go out anonymously, which a public
@@ -41,7 +41,7 @@ smithers cache connect
 ```
 
 mints a public read token for the repository and writes one line into the
-root `BUILD.ts`, after the imports:
+root `PACKAGE.ts`, after the imports:
 
 ```ts
 export const remoteCache = Smithers.RemoteCache.jjhub({ repo: "acme/app", publicReadToken: "smithers_cachero_…" })
@@ -56,7 +56,7 @@ nothing more. This is the posture of an Nx read-only access token.
 
 `Smithers.RemoteCache.make` accepts the same `publicReadToken` option for a
 non-jjhub endpoint that enforces the same split. The literal is the only
-credential that may appear in `BUILD.ts`: any string that is not a public read
+credential that may appear in `PACKAGE.ts`: any string that is not a public read
 token is refused at declaration time, so a personal token pasted by mistake
 never lands in a committed file.
 
@@ -78,7 +78,7 @@ a placeholder, and `SMITHERS_CACHE_URL` already names the repository cache.
 ## Generated CI
 
 `GithubCiGen` needs no cache secret for reads when the root declaration
-carries a public read token, because the workflow evaluates `BUILD.ts` and
+carries a public read token, because the workflow evaluates `PACKAGE.ts` and
 finds the literal there. Declare `cacheWriteTokenSecret` and mark the trunk
 jobs `publishesToCache: true` for publication; the read credential is the
 committed token, the write credential is a repository secret rendered only

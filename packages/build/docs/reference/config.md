@@ -1,10 +1,10 @@
 # Workspace reference
 
-`Workspace` is the workspace configuration declaration the root `BUILD.ts` file
+`Workspace` is the workspace configuration declaration the root `PACKAGE.ts` file
 exports. It is inert: `Workspace` validates its options and performs no I/O.
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
@@ -12,7 +12,7 @@ export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored:
 
 Import the callable from the package root. The `Config` module subpath is an
 internal CLI surface for normalization and declaration recognition, not a
-`BUILD.ts` authoring namespace.
+`PACKAGE.ts` authoring namespace.
 
 ## Options
 
@@ -88,7 +88,7 @@ absolute and cannot escape the workspace.
 
 `resolveConfig(root, override)` runs before every command.
 
-1. If the workspace root has a `BUILD.ts` file, it is imported.
+1. If the workspace root has a `PACKAGE.ts` file, it is imported.
 2. The module namespace is scanned in ascending export-name order, and the first
    export that passes `isWorkspace` is the declaration. If there is none, the
    defaults apply.
@@ -99,7 +99,7 @@ The export name does not matter. `config`, `workspaceConfig`, and `settings` all
 work. Exporting two `Workspace` values is not an error; the first in name order
 wins.
 
-`BUILD.ts` module imports are cached by absolute path, so resolving the config
+`PACKAGE.ts` module imports are cached by absolute path, so resolving the config
 and loading the root package's targets evaluate the module once.
 
 ## The gitignore policy

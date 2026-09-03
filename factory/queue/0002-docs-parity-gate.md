@@ -7,7 +7,7 @@ priority: p0
 # Docs parity gate as a smithers build rule
 
 Implement the parity gate from the "Colocated Docs" spec as a smithers build
-rule wired into `BUILD.ts`, so package documentation is a declared build input
+rule wired into `PACKAGE.ts`, so package documentation is a declared build input
 and doc drift is a cache miss.
 
 - A `DocsParity` rule per package: README.md present and non-trivial, every
@@ -46,7 +46,7 @@ Failing parity at landing time, from the rule's own policy over
 - `packages/keys` — 64 prose characters, below the 120 floor
 
 Every other package passes. `packages/engine`, `packages/flow`, and
-`packages/plan` have explicit `BUILD.ts` files that destructure
+`packages/plan` have explicit `PACKAGE.ts` files that destructure
 `{ lib, test, lint }`, so they gain a `docs` target only once those three
 lines also destructure `docs`; all three already pass the policy.
 

@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { expect } from "vitest"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url))
 const sourceDirectory = join(packageRoot, "src")
@@ -34,8 +34,8 @@ const headings = (markdown: string): ReadonlyArray<string> =>
 // A fragment on a package-owned page is checked against the package source of
 // that page, because the generated page is an output of that source.
 const ownedSources = new Map<string, string>([
-  [Package.api.target, Package.api.source],
-  ...Package.pages.map((page): [string, string] => [page.target, page.source])
+  [Manifest.api.target, Manifest.api.source],
+  ...Manifest.pages.map((page): [string, string] => [page.target, page.source])
 ])
 
 describe("published JSDoc links", () => {

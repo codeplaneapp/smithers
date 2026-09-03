@@ -1,11 +1,11 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
 contract for `@smthrs/core`. Generated pages under `docs/pages` are outputs.
 
 `scripts/docs.mjs` builds `docs/pages/api/core.md` from the barrel and module
 JSDoc plus `docs/api.md`, and verifies the reference list declared by
-`Package.ts`.
+`docs/Manifest.ts`.
 
 The `//packages/core:docsPages` target writes or drift-checks that output.
 After editing, run:

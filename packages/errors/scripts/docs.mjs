@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 import {
   ERROR_REFERENCE_URL,
   smithersErrorCodes,
@@ -26,10 +26,10 @@ const repoRoot = join(packageRoot, "..", "..")
 const read = (path) => readFileSync(path, "utf8")
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("errors docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("errors docs: Manifest.ts and package.json names differ")
 const route = new URL(ERROR_REFERENCE_URL).pathname
-if (Package.api.target !== `docs/pages${route}.md`) {
-  throw new Error("errors docs: ERROR_REFERENCE_URL and Package.api.target differ")
+if (Manifest.api.target !== `docs/pages${route}.md`) {
+  throw new Error("errors docs: ERROR_REFERENCE_URL and Manifest.api.target differ")
 }
 
 const codeRows = smithersErrorCodes.map((code) => {
@@ -89,9 +89,9 @@ const exportsTable = markdownTable(
   ])
 )
 
-let reference = read(join(packageRoot, Package.api.source)).trim()
-reference = replaceRegion(reference, "error-codes", codesTable, Package.api.target)
-reference = replaceRegion(reference, "error-exports", exportsTable, Package.api.target)
+let reference = read(join(packageRoot, Manifest.api.source)).trim()
+reference = replaceRegion(reference, "error-codes", codesTable, Manifest.api.target)
+reference = replaceRegion(reference, "error-exports", exportsTable, Manifest.api.target)
 reference = reference.replace(/^<!-- dprint-ignore-(?:start|end) -->\n?/gm, "")
 const apiPage = `---
 description: "${manifest.description}."
@@ -104,8 +104,8 @@ description: "${manifest.description}."
 ${reference.trim()}
 `
 
-const outputs = new Map([[Package.api.target, apiPage]])
-for (const snippet of Package.snippets) {
+const outputs = new Map([[Manifest.api.target, apiPage]])
+for (const snippet of Manifest.snippets) {
   const path = snippet.target.startsWith("docs/pages/") ? snippet.target : `packages/errors/${snippet.target}`
   const current = outputs.get(path) ?? read(join(repoRoot, path))
   const body = snippet.region === "error-codes" ? codesTable : snippet.region === "error-exports" ? exportsTable : undefined
@@ -114,7 +114,7 @@ for (const snippet of Package.snippets) {
 }
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
   if (!content.includes(route)) failures.push(`${path}: must reference ${route}`)
 }

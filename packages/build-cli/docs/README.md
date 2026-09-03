@@ -8,7 +8,7 @@ Every published sentence about this package has one source inside the package.
 - **Behaviour prose** lives here, in `packages/build-cli/docs/`, one file per
   subject:
   - [`cli.md`](./cli.md) — every command, its arguments, and its options.
-  - [`package-mode.md`](./package-mode.md) — PACKAGE.ts / WORKSPACE.ts
+  - [`build-system.md`](./build-system.md) — PACKAGE.ts / WORKSPACE.ts
     discovery, which verbs it supports, and what it refuses.
   - [`caching.md`](./caching.md) — the cache directory, the content-addressed
     store, and the remote cache's endpoint and credentials.
@@ -18,7 +18,7 @@ Every published sentence about this package has one source inside the package.
 - **The one-line summary** is `package.json`'s `description`.
 
 `README.md` is the entry point and links here; it repeats no detail these files
-own. The package's `docs` target (`Smithers.DocsParity` in `BUILD.ts`) keeps the
+own. The package's `docs` target (`Smithers.DocsParity` in `PACKAGE.ts`) keeps the
 README present and substantive and re-keys the package when it changes.
 
 This package is `private: true` and publishes nothing, so it has no page under

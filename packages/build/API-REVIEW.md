@@ -2,12 +2,12 @@
 
 ## Read in this order
 
-1. `BUILD.ts` shows the declared toolchain, the declared secrets, the
+1. `PACKAGE.ts` shows the declared toolchain, the declared secrets, the
    generated root files, the real install target, shared root inputs, and the
    workspace default-rule declaration.
-2. `packages/engine/BUILD.ts` shows `StandardPackage` plus one extra
-   policy target. `packages/flow/BUILD.ts` shows the same package
-   longhand. `packages/plan/BUILD.ts` shows the bare macro.
+2. `packages/engine/PACKAGE.ts` shows `StandardPackage` plus one extra
+   policy target. `packages/flow/PACKAGE.ts` shows the same package
+   longhand. `packages/plan/PACKAGE.ts` shows the bare macro.
 3. `packages/targets/src/StandardPackage.ts` expands a conventional package into `lib`,
    `test`, and `lint`.
 4. `packages/targets/src/Target.ts` defines `Target.make`. Attrs are an Effect Struct schema.
@@ -16,15 +16,15 @@
 5. `packages/targets/src/TsBuild.ts` is a representative catalog rule.
    `packages/targets/src/LlmLint.ts` shows a git diff as declared key material.
 6. `packages/targets/src/Config.ts` is the inert workspace configuration declaration the
-   root BUILD.ts file exports.
+   root PACKAGE.ts file exports.
 7. `packages/build-cli/src/Cli.ts` defines the incur verbs. `packages/build-cli/src/Workspace.ts` handles lazy
-   BUILD.ts loading and cache-directory resolution. `packages/build-cli/src/Planner.ts`
+   PACKAGE.ts loading and cache-directory resolution. `packages/build-cli/src/Planner.ts`
    constructs the target graph and key preview. `packages/build-cli/src/engine.ts` isolates
    install-runtime assumptions.
 
 ## Workspace configuration
 
-The root BUILD.ts file may export one `Workspace({ cacheDirectory,
+The root PACKAGE.ts file may export one `Workspace({ cacheDirectory,
 gitignored })` value. It is inert: the constructor validates and performs no
 I/O. Every command resolves the cache directory as `--cache-dir`, then the
 declaration, then `.flows`, and applies the declared gitignore policy before
@@ -38,12 +38,12 @@ boundaries; configurable store placement is future work.
 
 ## Labels
 
-Labels come only from a BUILD.ts path and named export.
+Labels come only from a PACKAGE.ts path and named export.
 
 - `//path/to/pkg:target` addresses one named export.
 - `//path/to/pkg` selects the package default. The current convention tries
   `lib`, `nodeModules`, the package basename, `default`, then a sole export.
-- `//...` selects every discovered BUILD.ts target.
+- `//...` selects every discovered PACKAGE.ts target.
 - `//path/...` selects a subtree.
 - `:target` selects an export in the current package.
 - The root install target is `//:nodeModules` and `//` selects it by default.
@@ -110,10 +110,10 @@ the engine refuses with `ConcurrentKeylessDispatch`. `captureOutputs` takes
 the producing step's planned result for this reason.
 
 Default-rule target synthesis is implemented. A directory that matches the
-declaration's glob, contains the marker file, and lacks a BUILD.ts file
+declaration's glob, contains the marker file, and lacks a PACKAGE.ts file
 synthesizes the macro's targets, and the macro receives `cwd: <directory>`
 beneath its declared attrs. Every tool-running rule has a `cwd` attr
-defaulting to the workspace root; package-level BUILD.ts targets pass their
+defaulting to the workspace root; package-level PACKAGE.ts targets pass their
 own package directory.
 
 Release targets carry planner-level verb gates. npm and JSR publication, plus
@@ -141,7 +141,7 @@ build, test, and lint set, and otherwise emits one command per declared kind.
    differ. The executor works around it with a fresh runtime per target.
    Decide whether the loader should bind a path-derived Flow tag after
    export discovery or whether target identity should remain outside Flow.
-2. A rule call cannot know its export name. Metadata captures the BUILD.ts
+2. A rule call cannot know its export name. Metadata captures the PACKAGE.ts
    call-site path from the stack so the lazy loader can find a direct imported
    dependency without evaluating unrelated modules. Decide whether this hint
    is acceptable or whether the runtime needs a loader-owned module registry.
@@ -159,7 +159,7 @@ build, test, and lint set, and otherwise emits one command per declared kind.
    resolved Layers.
 6. Source distributions use a JavaScript bin bootstrap plus tsx to evaluate
    TypeScript. Decide whether the published CLI ships compiled JavaScript while
-   retaining tsx only for BUILD.ts evaluation.
+   retaining tsx only for PACKAGE.ts evaluation.
 
 ## Install-package seam
 
@@ -172,5 +172,5 @@ CLI-side runtime assumptions stay confined to
 
 The duplication that used to sit here is gone. The rule declares the lockfile,
 `.npmrc`, and root manifest as its own inputs, and the Flow no longer measures
-the manager it runs under: the manager is the BUILD.ts declaration, and the
+the manager it runs under: the manager is the PACKAGE.ts declaration, and the
 services hold the host to it.

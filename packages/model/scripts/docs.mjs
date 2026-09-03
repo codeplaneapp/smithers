@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -73,7 +73,7 @@ const exportedDocs = (source) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("model docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("model docs: Manifest.ts and package.json names differ")
 
 const barrel = read(join(packageRoot, "src", "index.ts"))
 const namespaces = [...barrel.matchAll(/export \* as (\w+) from "\.\/(\w+)\.ts"/g)].map((match) => ({
@@ -113,7 +113,7 @@ description: "${manifest.description}."
 
 ${unemdash(paragraphs(moduleDoc(barrel, "index")))}
 
-${unemdash(read(join(packageRoot, Package.api.source)).trim())}
+${unemdash(read(join(packageRoot, Manifest.api.source)).trim())}
 
 ## Exports
 
@@ -143,19 +143,19 @@ const replaceRegion = (source, name, body) => {
 }
 
 const outputs = new Map([
-  [Package.api.target, apiPage],
-  [Package.reference.target, apiPage]
+  [Manifest.api.target, apiPage],
+  [Manifest.reference.target, apiPage]
 ])
-for (const region of Package.regions) {
+for (const region of Manifest.regions) {
   const absolute = join(repoRoot, region.target)
   outputs.set(region.target, replaceRegion(read(absolute), region.region, readmeBlock))
 }
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/model")) {
-    failures.push(`${path}: must reference ${Package.name} and /api/model`)
+  if (!content.includes(Manifest.name) || !content.includes("/api/model")) {
+    failures.push(`${path}: must reference ${Manifest.name} and /api/model`)
   }
 }
 for (const [path, content] of outputs) {

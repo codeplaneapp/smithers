@@ -32,7 +32,7 @@ push to run it. Steps 3 and 5 gate the tag and the publish on
 The redaction decision this step used to carry is closed, not pending. The
 section 5.2 deliverable landed `@smthrs/journal` `RedactedLogger`, both halves
 of `e2e/faults/case22-secret-never-in-journal.test.ts` are green on the real
-binary with no edit to the test, and root `BUILD.ts` drops `continueOnError`
+binary with no edit to the test, and root `PACKAGE.ts` drops `continueOnError`
 and lists `e2e-faults` in `requiredJobs`. Contract section 5 records it as
 shipped on both paths. Nothing about it needs deciding before publishing.
 
@@ -121,13 +121,13 @@ package cannot join or leave the train unnoticed.
 
 ### Measured on 2026-08-31 at `cd14388ed7`, in `migration/clean-checkout-4`
 
-| Command | Exit | Output |
-| --- | --- | --- |
-| `node scripts/set-release-version.mjs --check 1.0.0-rc.0` | 0 | `63 workspace manifests and 1 versioned source are at 1.0.0-rc.0.` |
-| `node scripts/check-single-effect-version.mjs` | 0 | `check-single-effect-version: effect@4.0.0-rc.108 everywhere (63 sources)` |
-| `node scripts/check-npm-dedupe.mjs` | 0 | `ok: effect@4.0.0-rc.108 (single copy)`, `ok: 3 optional peers absent from default install`, `resolved package count: 97 (budget 925)` |
-| `node scripts/pack-release.mjs --names \| wc -l` | 0 | `40`, in the order section 6 lists |
-| `git status --porcelain` | 0 | empty |
+| Command                                                   | Exit | Output                                                                                                                                 |
+| --------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `node scripts/set-release-version.mjs --check 1.0.0-rc.0` | 0    | `63 workspace manifests and 1 versioned source are at 1.0.0-rc.0.`                                                                     |
+| `node scripts/check-single-effect-version.mjs`            | 0    | `check-single-effect-version: effect@4.0.0-rc.108 everywhere (63 sources)`                                                             |
+| `node scripts/check-npm-dedupe.mjs`                       | 0    | `ok: effect@4.0.0-rc.108 (single copy)`, `ok: 3 optional peers absent from default install`, `resolved package count: 97 (budget 925)` |
+| `node scripts/pack-release.mjs --names \| wc -l`          | 0    | `40`, in the order section 6 lists                                                                                                     |
+| `git status --porcelain`                                  | 0    | empty                                                                                                                                  |
 
 The frozen offline installs for both package managers are the clean-install
 gate, which passes.
@@ -227,48 +227,48 @@ computes, so no package publishes before something it depends on. The workflow
 reads it from the pack manifest rather than a hand-kept list. Reproduce it with
 `node scripts/pack-release.mjs --names`.
 
-| # | Package |
-| --- | --- |
-| 1 | `@smthrs/canonical` |
-| 2 | `@smthrs/capability` |
-| 3 | `@smthrs/crypto` |
-| 4 | `@smthrs/artifacts` |
-| 5 | `@smthrs/core` |
-| 6 | `@smthrs/database` |
-| 7 | `@smthrs/jj` |
-| 8 | `@smthrs/journal` |
-| 9 | `@smthrs/keys` |
-| 10 | `@smthrs/migrate` |
-| 11 | `@smthrs/notifications` |
-| 12 | `@smthrs/observability` |
-| 13 | `@smthrs/patterns` |
-| 14 | `@smthrs/plan` |
-| 15 | `@smthrs/flow` |
-| 16 | `@smthrs/engine` |
-| 17 | `@smthrs/plugin` |
-| 18 | `@smthrs/run-store` |
-| 19 | `smthrs` |
-| 20 | `@smthrs/step-cache` |
-| 21 | `@smthrs/sync` |
-| 22 | `@smthrs/kernel` |
-| 23 | `@smthrs/engine-store` |
-| 24 | `@smthrs/model` |
-| 25 | `@smthrs/memory` |
+| #  | Package                    |
+| -- | -------------------------- |
+| 1  | `@smthrs/canonical`        |
+| 2  | `@smthrs/capability`       |
+| 3  | `@smthrs/crypto`           |
+| 4  | `@smthrs/artifacts`        |
+| 5  | `@smthrs/core`             |
+| 6  | `@smthrs/database`         |
+| 7  | `@smthrs/jj`               |
+| 8  | `@smthrs/journal`          |
+| 9  | `@smthrs/keys`             |
+| 10 | `@smthrs/migrate`          |
+| 11 | `@smthrs/notifications`    |
+| 12 | `@smthrs/observability`    |
+| 13 | `@smthrs/patterns`         |
+| 14 | `@smthrs/plan`             |
+| 15 | `@smthrs/flow`             |
+| 16 | `@smthrs/engine`           |
+| 17 | `@smthrs/plugin`           |
+| 18 | `@smthrs/run-store`        |
+| 19 | `smthrs`                   |
+| 20 | `@smthrs/step-cache`       |
+| 21 | `@smthrs/sync`             |
+| 22 | `@smthrs/kernel`           |
+| 23 | `@smthrs/engine-store`     |
+| 24 | `@smthrs/model`            |
+| 25 | `@smthrs/memory`           |
 | 26 | `@smthrs/platform-browser` |
-| 27 | `@smthrs/platform-node` |
-| 28 | `@smthrs/platform-bun` |
-| 29 | `@smthrs/registry` |
-| 30 | `@smthrs/control` |
-| 31 | `@smthrs/gateway` |
-| 32 | `@smthrs/harness` |
-| 33 | `@smthrs/mcp` |
-| 34 | `@smthrs/sandbox` |
-| 35 | `@smthrs/std` |
-| 36 | `@smthrs/agent` |
-| 37 | `@smthrs/testing` |
-| 38 | `@smthrs/time-travel` |
-| 39 | `@smthrs/flows` |
-| 40 | `@smthrs/cli` |
+| 27 | `@smthrs/platform-node`    |
+| 28 | `@smthrs/platform-bun`     |
+| 29 | `@smthrs/registry`         |
+| 30 | `@smthrs/control`          |
+| 31 | `@smthrs/gateway`          |
+| 32 | `@smthrs/harness`          |
+| 33 | `@smthrs/mcp`              |
+| 34 | `@smthrs/sandbox`          |
+| 35 | `@smthrs/std`              |
+| 36 | `@smthrs/agent`            |
+| 37 | `@smthrs/testing`          |
+| 38 | `@smthrs/time-travel`      |
+| 39 | `@smthrs/flows`            |
+| 40 | `@smthrs/cli`              |
 
 All 40 carry version `1.0.0-rc.0`, `publishConfig.tag: "next"`, and
 `publishConfig.exports` pointing at `dist/esm` and `dist/cjs`.

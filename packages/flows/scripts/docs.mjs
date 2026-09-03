@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -77,10 +77,10 @@ const nodeTable = exportTable("NodeRuntime")
 const sandboxedTable = exportTable("SandboxedFlow")
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("flows docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("flows docs: Manifest.ts and package.json names differ")
 const narrative = replaceMarker(
   replaceMarker(
-    replaceMarker(read(join(packageRoot, Package.api.source)), "namespaces", namespaceTable),
+    replaceMarker(read(join(packageRoot, Manifest.api.source)), "namespaces", namespaceTable),
     "node-runtime",
     nodeTable
   ),
@@ -93,20 +93,20 @@ const output = `---\ndescription: "${manifest.description}."\n---\n\n`
   + "\n"
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repositoryRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/flows")) {
-    failures.push(`${path}: must reference ${Package.name} and /api/flows`)
+  if (!content.includes(Manifest.name) || !content.includes("/api/flows")) {
+    failures.push(`${path}: must reference ${Manifest.name} and /api/flows`)
   }
 }
-if (output.includes("—")) failures.push(`${Package.api.target}: generated content contains an em-dash`)
+if (output.includes("—")) failures.push(`${Manifest.api.target}: generated content contains an em-dash`)
 
-const target = join(repositoryRoot, Package.api.target)
+const target = join(repositoryRoot, Manifest.api.target)
 const drifted = read(target) !== output
-if (drifted && check) failures.push(`${Package.api.target}: drifted; run node packages/flows/scripts/docs.mjs`)
+if (drifted && check) failures.push(`${Manifest.api.target}: drifted; run node packages/flows/scripts/docs.mjs`)
 else if (drifted) {
   writeFileSync(target, output)
-  console.log(`wrote ${Package.api.target}`)
+  console.log(`wrote ${Manifest.api.target}`)
 }
 
 if (failures.length > 0) {

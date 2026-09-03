@@ -18,7 +18,7 @@ node packages/flow/scripts/docs.mjs          # write the page
 node packages/flow/scripts/docs.mjs --check  # fail when the committed page has drifted
 ```
 
-`BUILD.ts` declares the same script as the `docsPages` target, so
+`PACKAGE.ts` declares the same script as the `docsPages` target, so
 `smithers-build run //packages/flow:docsPages` writes the page and
 `smithers-build lint //packages/flow:docsPages` drift-checks it. The recursive
 CI pattern `smithers-build ci '//packages/...'` includes the lint form, so a
@@ -36,7 +36,7 @@ Two rules the generator enforces:
 
 Fragments projected into shared pages work the way `packages/crypto/docs`
 projects `contract.md` into `docs/pages/architecture.md`: a region marker in the
-target page and one entry in `Package.ts` `snippets`. `docs/testing.md` is the
+target page and one entry in `docs/Manifest.ts` `snippets`. `docs/testing.md` is the
 one this package publishes today, into `docs/pages/api-tests.md`.
 
 That page's inventory table is shared with every package and dprint aligns its

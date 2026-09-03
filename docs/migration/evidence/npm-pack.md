@@ -8,13 +8,13 @@ Date: 2026-08-31. Commit: `341c8fa87e2dadbe80d0f0d3258dae112a7d03d3` (`v1/rc0-mi
 
 ## Environment
 
-| Tool | Version |
-| --- | --- |
-| macOS | Darwin 25.2.0, arm64 |
-| node | v24.18.0 (smthrs load probe repeated under v22.19.0, the `engines` floor) |
-| pnpm | 11.21.0 (`corepack pnpm`) |
-| npm | 11.16.0 (dry-run cross-check inside the inspection) |
-| bun | 1.4.0 (not used by this gate) |
+| Tool  | Version                                                                   |
+| ----- | ------------------------------------------------------------------------- |
+| macOS | Darwin 25.2.0, arm64                                                      |
+| node  | v24.18.0 (smthrs load probe repeated under v22.19.0, the `engines` floor) |
+| pnpm  | 11.21.0 (`corepack pnpm`)                                                 |
+| npm   | 11.16.0 (dry-run cross-check inside the inspection)                       |
+| bun   | 1.4.0 (not used by this gate)                                             |
 
 Machine load: 3.4 (1-minute average) when the gate started, 17.5 during the inspection while other agents worked; both under the serial-steps threshold of 40.
 
@@ -42,15 +42,15 @@ No concurrent process touched this clone; `git status --short` printed nothing a
 
 ## Commands and results
 
-| Step | Command (cwd = private clone) | Window (UTC) | Exit | Final output |
-| --- | --- | ---: | ---: | --- |
-| 0 | `git checkout --detach 341c8fa87e` + `corepack pnpm install --frozen-lockfile --offline --ignore-scripts` | 16:17 | 0 | `Already up to date`, 64 workspace projects |
-| 1 | `node --test scripts/pack-release.test.mjs` | 16:17 | 0 | `tests 16`, `pass 16`, `fail 0` (12 at the superseded run; the four new tests pin this gate's two headline fixes) |
-| 2 | `corepack pnpm -r --no-bail --if-present --filter=<each of the 40 names> run build` | 16:17:38 to 16:18:28 | 0 | 40 lines `build: Done`, zero `error`/`failed` lines |
-| 3 | `node scripts/pack-release.mjs <scratch>/npm-pack/release-packs` | 16:18:33 to 16:19:07 | 0 | 40 `.tgz` + `manifest.json` (40 entries, all `1.0.0-rc.0`), 9.2 MB total |
-| 4 | `node <scratch>/npm-pack/inspect.mjs <clone> <packs> inspect-r2.json` | 16:19:41 to 16:23:04 | 0 | `packages=40 violations=0` |
-| 5 | `node scripts/pack-release.mjs <scratch>/npm-pack/release-packs-2`, then `shasum -a 256` on both runs | 16:23 | 0 | 40/40 tarballs byte-identical across the two pack runs; `manifest.json` identical |
-| 6 | `git status --short \| wc -l` after build and both packs | 16:24 | 0 | `0` |
+| Step | Command (cwd = private clone)                                                                             |         Window (UTC) | Exit | Final output                                                                                                      |
+| ---- | --------------------------------------------------------------------------------------------------------- | -------------------: | ---: | ----------------------------------------------------------------------------------------------------------------- |
+| 0    | `git checkout --detach 341c8fa87e` + `corepack pnpm install --frozen-lockfile --offline --ignore-scripts` |                16:17 |    0 | `Already up to date`, 64 workspace projects                                                                       |
+| 1    | `node --test scripts/pack-release.test.mjs`                                                               |                16:17 |    0 | `tests 16`, `pass 16`, `fail 0` (12 at the superseded run; the four new tests pin this gate's two headline fixes) |
+| 2    | `corepack pnpm -r --no-bail --if-present --filter=<each of the 40 names> run build`                       | 16:17:38 to 16:18:28 |    0 | 40 lines `build: Done`, zero `error`/`failed` lines                                                               |
+| 3    | `node scripts/pack-release.mjs <scratch>/npm-pack/release-packs`                                          | 16:18:33 to 16:19:07 |    0 | 40 `.tgz` + `manifest.json` (40 entries, all `1.0.0-rc.0`), 9.2 MB total                                          |
+| 4    | `node <scratch>/npm-pack/inspect.mjs <clone> <packs> inspect-r2.json`                                     | 16:19:41 to 16:23:04 |    0 | `packages=40 violations=0`                                                                                        |
+| 5    | `node scripts/pack-release.mjs <scratch>/npm-pack/release-packs-2`, then `shasum -a 256` on both runs     |                16:23 |    0 | 40/40 tarballs byte-identical across the two pack runs; `manifest.json` identical                                 |
+| 6    | `git status --short \| wc -l` after build and both packs                                                  |                16:24 |    0 | `0`                                                                                                               |
 
 The build filter list is `node scripts/pack-release.mjs --names`, which prints the 40 names in publication order (`canonical, capability, crypto, artifacts, core, database, jj, journal, keys, migrate, notifications, observability, patterns, plan, flow, engine, plugin, run-store, smthrs, step-cache, sync, kernel, engine-store, model, memory, platform-browser, platform-node, platform-bun, registry, control, gateway, harness, mcp, sandbox, std, agent, testing, time-travel, flows, cli`). `pack-release.mjs` refuses to run unless the non-private `{engine, agent}` manifests equal exactly those 40 names, and it asserts `dist/esm/*.js`, `dist/esm/*.d.ts`, and `dist/cjs/*.js` for every `src/**/*.ts` before packing.
 
@@ -60,7 +60,7 @@ The build filter list is `node scripts/pack-release.mjs --names`, which prints t
 
 1. `package.json`, `LICENSE`, `README.md` present.
 2. At least one `src/**/*.ts`, `dist/esm/*.js`, `dist/esm/*.d.ts`, `dist/cjs/*.js`; and for every `src/**/*.ts` in the tarball, its `dist/esm/<m>.js`, `dist/esm/<m>.d.ts`, and `dist/cjs/<m>.js` are also in the tarball.
-3. No entry matches `package/test/`, `node_modules/`, `legacy/`, `*.tsbuildinfo`, `coverage/`, `.smithers/`, `*.test.*`, `vitest.config.*`, `tsconfig*.json`, `BUILD.ts`, `scripts/build.mjs`, `.env*`, `.git*`.
+3. No entry matches `package/test/`, `node_modules/`, `legacy/`, `*.tsbuildinfo`, `coverage/`, `.smithers/`, `*.test.*`, `vitest.config.*`, `tsconfig*.json`, `PACKAGE.ts`, `scripts/build.mjs`, `.env*`, `.git*`.
 4. The packed `package.json` has `version` `1.0.0-rc.0`, no `private`, `publishConfig.tag` `rc`, no `publishConfig.exports`, and `exports` byte-equal to the source manifest's `publishConfig.exports`; no `workspace:` range survives in any dependency field; `effect` is pinned `4.0.0-rc.108` outside `devDependencies`.
 5. Every literal (non-wildcard) `exports` target and every `bin` target exists in the tarball.
 6. Package-specific requirements: migrations (`journal`, `engine-store`, `run-store`, `step-cache`, `plan`) present in `src/migrations`, `dist/esm/migrations`, and `dist/cjs/migrations` with equal counts; `jj` ships `wasm/flows_jj.wasm` and `THIRD_PARTY_NOTICES.md`; `cli` ships `bin/smithers.mjs`, `bin/dangling-workspace-links.mjs` (imported by the shim), `docs/llms.txt`, `docs/llms-full.txt`, `docs/SKILL.md`, `dist/esm/bin.js`; `migrate` ships its `bin` target `dist/esm/flow/bin.js`; `engine` ships `THIRD_PARTY_NOTICES.md` and `VENDOR.md`; `flow` ships `THIRD_PARTY_NOTICES.md`.
@@ -86,13 +86,13 @@ Raw confirmations from `tar` on the packed tarballs:
 
 Exactly the five tarballs whose inputs changed differ from the `cd14388ed7` hashes; the other 35 are byte-identical:
 
-| Tarball | Why it changed |
-| --- | --- |
-| `smthrs-1.0.0-rc.0.tgz` | packs `dist/cjs/package.json` |
-| `smthrs-memory-1.0.0-rc.0.tgz` | packs the three `.sql` reference copies |
-| `smthrs-agent-1.0.0-rc.0.tgz` | wave 8 `AgentSession` settle-failed fix |
-| `smthrs-control-1.0.0-rc.0.tgz` | wave 8 `ControlLive` settle-failed fix |
-| `smthrs-cli-1.0.0-rc.0.tgz` | wave 7 refuse-before-boot, wave 8 init scaffold, refreshed `docs/llms-full.txt` and README |
+| Tarball                         | Why it changed                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `smthrs-1.0.0-rc.0.tgz`         | packs `dist/cjs/package.json`                                                              |
+| `smthrs-memory-1.0.0-rc.0.tgz`  | packs the three `.sql` reference copies                                                    |
+| `smthrs-agent-1.0.0-rc.0.tgz`   | wave 8 `AgentSession` settle-failed fix                                                    |
+| `smthrs-control-1.0.0-rc.0.tgz` | wave 8 `ControlLive` settle-failed fix                                                     |
+| `smthrs-cli-1.0.0-rc.0.tgz`     | wave 7 refuse-before-boot, wave 8 init scaffold, refreshed `docs/llms-full.txt` and README |
 
 ## Observations (none blocks the gate)
 
@@ -106,48 +106,48 @@ Exactly the five tarballs whose inputs changed differ from the `cd14388ed7` hash
 
 Columns: bytes, entries in the tarball, `src/**/*.ts` count, `dist/esm/*.js`, `dist/esm/*.d.ts`, `dist/cjs/*.js`.
 
-| Package | Tarball | Bytes | Files | src .ts | esm .js | esm .d.ts | cjs .js | Problems | Notes |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| `@smthrs/canonical` | `smthrs-canonical-1.0.0-rc.0.tgz` | 9724 | 25 | 3 | 3 | 3 | 3 | none | devDependencies kept (15) |
-| `@smthrs/capability` | `smthrs-capability-1.0.0-rc.0.tgz` | 29676 | 26 | 3 | 3 | 3 | 3 | none | devDependencies kept (16) |
-| `@smthrs/crypto` | `smthrs-crypto-1.0.0-rc.0.tgz` | 5923 | 19 | 2 | 2 | 2 | 2 | none | devDependencies kept (17) |
-| `@smthrs/artifacts` | `smthrs-artifacts-1.0.0-rc.0.tgz` | 102759 | 54 | 7 | 7 | 7 | 7 | none | devDependencies kept (17) |
-| `@smthrs/core` | `smthrs-core-1.0.0-rc.0.tgz` | 124738 | 96 | 13 | 13 | 13 | 13 | none | devDependencies kept (17) |
-| `@smthrs/database` | `smthrs-database-1.0.0-rc.0.tgz` | 87950 | 82 | 11 | 11 | 11 | 11 | none | devDependencies kept (16); src/test helpers 2 (public via ./*) |
-| `@smthrs/jj` | `smthrs-jj-1.0.0-rc.0.tgz` | 1459918 | 63 | 8 | 8 | 8 | 8 | none | devDependencies kept (16); wasm bytes 4740823 |
-| `@smthrs/journal` | `smthrs-journal-1.0.0-rc.0.tgz` | 150862 | 96 | 13 | 13 | 13 | 13 | none | devDependencies kept (16); migrations src/esm/cjs 2/2/2; src/test helpers 2 (public via ./*) |
-| `@smthrs/keys` | `smthrs-keys-1.0.0-rc.0.tgz` | 6237 | 20 | 2 | 2 | 2 | 2 | none | devDependencies kept (17) |
-| `@smthrs/migrate` | `smthrs-migrate-1.0.0-rc.0.tgz` | 796432 | 222 | 31 | 31 | 31 | 31 | none | devDependencies kept (15) |
-| `@smthrs/notifications` | `smthrs-notifications-1.0.0-rc.0.tgz` | 67390 | 60 | 8 | 8 | 8 | 8 | none | devDependencies kept (17) |
-| `@smthrs/observability` | `smthrs-observability-1.0.0-rc.0.tgz` | 28119 | 67 | 9 | 9 | 9 | 9 | none | devDependencies kept (16) |
-| `@smthrs/patterns` | `smthrs-patterns-1.0.0-rc.0.tgz` | 254684 | 215 | 30 | 30 | 30 | 30 | none | devDependencies kept (17) |
-| `@smthrs/plan` | `smthrs-plan-1.0.0-rc.0.tgz` | 189349 | 103 | 14 | 14 | 14 | 14 | none | devDependencies kept (17); migrations src/esm/cjs 1/1/1 |
-| `@smthrs/flow` | `smthrs-flow-1.0.0-rc.0.tgz` | 403190 | 335 | 47 | 47 | 47 | 47 | none | devDependencies kept (17) |
-| `@smthrs/engine` | `smthrs-engine-1.0.0-rc.0.tgz` | 118776 | 91 | 12 | 12 | 12 | 12 | none | devDependencies kept (19) |
-| `@smthrs/plugin` | `smthrs-plugin-1.0.0-rc.0.tgz` | 38601 | 61 | 8 | 8 | 8 | 8 | none | devDependencies kept (16) |
-| `@smthrs/run-store` | `smthrs-run-store-1.0.0-rc.0.tgz` | 128667 | 75 | 10 | 10 | 10 | 10 | none | devDependencies kept (16); migrations src/esm/cjs 2/2/2; src/test helpers 1 (public via ./*) |
-| `smthrs` | `smthrs-1.0.0-rc.0.tgz` | 4270 | 12 | 1 | 1 | 1 | 1 | none | devDependencies kept (14) |
-| `@smthrs/step-cache` | `smthrs-step-cache-1.0.0-rc.0.tgz` | 58910 | 61 | 8 | 8 | 8 | 8 | none | devDependencies kept (16); migrations src/esm/cjs 1/1/1; src/test helpers 1 (public via ./*) |
-| `@smthrs/sync` | `smthrs-sync-1.0.0-rc.0.tgz` | 170819 | 152 | 21 | 21 | 21 | 21 | none | devDependencies kept (16); src/test helpers 2 (public via ./*) |
-| `@smthrs/kernel` | `smthrs-kernel-1.0.0-rc.0.tgz` | 192436 | 138 | 19 | 19 | 19 | 19 | none | devDependencies kept (16); src/test helpers 3 (public via ./*) |
-| `@smthrs/engine-store` | `smthrs-engine-store-1.0.0-rc.0.tgz` | 942122 | 292 | 41 | 41 | 41 | 41 | none | devDependencies kept (21); migrations src/esm/cjs 2/2/2; src/test helpers 1 (public via ./*) |
-| `@smthrs/model` | `smthrs-model-1.0.0-rc.0.tgz` | 243119 | 138 | 19 | 19 | 19 | 19 | none | devDependencies kept (16) |
-| `@smthrs/memory` | `smthrs-memory-1.0.0-rc.0.tgz` | 152459 | 120 | 16 | 16 | 16 | 16 | none | devDependencies kept (16); reference .sql files packed: 3/3; src/test helpers 1 (public via ./*) |
-| `@smthrs/platform-browser` | `smthrs-platform-browser-1.0.0-rc.0.tgz` | 47688 | 124 | 17 | 17 | 17 | 17 | none | devDependencies kept (16) |
-| `@smthrs/platform-node` | `smthrs-platform-node-1.0.0-rc.0.tgz` | 111552 | 40 | 5 | 5 | 5 | 5 | none | devDependencies kept (17) |
-| `@smthrs/platform-bun` | `smthrs-platform-bun-1.0.0-rc.0.tgz` | 9778 | 26 | 3 | 3 | 3 | 3 | none | devDependencies kept (17) |
-| `@smthrs/registry` | `smthrs-registry-1.0.0-rc.0.tgz` | 187407 | 96 | 13 | 13 | 13 | 13 | none | devDependencies kept (21) |
-| `@smthrs/control` | `smthrs-control-1.0.0-rc.0.tgz` | 336217 | 180 | 25 | 25 | 25 | 25 | none | devDependencies kept (21); src/test helpers 1 (public via ./*) |
-| `@smthrs/gateway` | `smthrs-gateway-1.0.0-rc.0.tgz` | 99391 | 82 | 11 | 11 | 11 | 11 | none | devDependencies kept (22); src/test helpers 1 (public via ./*) |
-| `@smthrs/harness` | `smthrs-harness-1.0.0-rc.0.tgz` | 759969 | 222 | 31 | 31 | 31 | 31 | none | devDependencies kept (18) |
-| `@smthrs/mcp` | `smthrs-mcp-1.0.0-rc.0.tgz` | 31051 | 47 | 6 | 6 | 6 | 6 | none | devDependencies kept (18) |
-| `@smthrs/sandbox` | `smthrs-sandbox-1.0.0-rc.0.tgz` | 75641 | 250 | 35 | 35 | 35 | 35 | none | devDependencies kept (16) |
-| `@smthrs/std` | `smthrs-std-1.0.0-rc.0.tgz` | 397341 | 313 | 44 | 44 | 44 | 44 | none | devDependencies kept (17) |
-| `@smthrs/agent` | `smthrs-agent-1.0.0-rc.0.tgz` | 480457 | 145 | 20 | 20 | 20 | 20 | none | devDependencies kept (18) |
-| `@smthrs/testing` | `smthrs-testing-1.0.0-rc.0.tgz` | 286517 | 194 | 27 | 27 | 27 | 27 | none | devDependencies kept (17) |
-| `@smthrs/time-travel` | `smthrs-time-travel-1.0.0-rc.0.tgz` | 231839 | 131 | 18 | 18 | 18 | 18 | none | devDependencies kept (22) |
-| `@smthrs/flows` | `smthrs-flows-1.0.0-rc.0.tgz` | 45321 | 26 | 3 | 3 | 3 | 3 | none | devDependencies kept (16) |
-| `@smthrs/cli` | `smthrs-cli-1.0.0-rc.0.tgz` | 717510 | 206 | 28 | 28 | 28 | 28 | none | devDependencies kept (16) |
+| Package                    | Tarball                                  |   Bytes | Files | src .ts | esm .js | esm .d.ts | cjs .js | Problems | Notes                                                                                            |
+| -------------------------- | ---------------------------------------- | ------: | ----: | ------: | ------: | --------: | ------: | -------- | ------------------------------------------------------------------------------------------------ |
+| `@smthrs/canonical`        | `smthrs-canonical-1.0.0-rc.0.tgz`        |    9724 |    25 |       3 |       3 |         3 |       3 | none     | devDependencies kept (15)                                                                        |
+| `@smthrs/capability`       | `smthrs-capability-1.0.0-rc.0.tgz`       |   29676 |    26 |       3 |       3 |         3 |       3 | none     | devDependencies kept (16)                                                                        |
+| `@smthrs/crypto`           | `smthrs-crypto-1.0.0-rc.0.tgz`           |    5923 |    19 |       2 |       2 |         2 |       2 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/artifacts`        | `smthrs-artifacts-1.0.0-rc.0.tgz`        |  102759 |    54 |       7 |       7 |         7 |       7 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/core`             | `smthrs-core-1.0.0-rc.0.tgz`             |  124738 |    96 |      13 |      13 |        13 |      13 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/database`         | `smthrs-database-1.0.0-rc.0.tgz`         |   87950 |    82 |      11 |      11 |        11 |      11 | none     | devDependencies kept (16); src/test helpers 2 (public via ./*)                                   |
+| `@smthrs/jj`               | `smthrs-jj-1.0.0-rc.0.tgz`               | 1459918 |    63 |       8 |       8 |         8 |       8 | none     | devDependencies kept (16); wasm bytes 4740823                                                    |
+| `@smthrs/journal`          | `smthrs-journal-1.0.0-rc.0.tgz`          |  150862 |    96 |      13 |      13 |        13 |      13 | none     | devDependencies kept (16); migrations src/esm/cjs 2/2/2; src/test helpers 2 (public via ./*)     |
+| `@smthrs/keys`             | `smthrs-keys-1.0.0-rc.0.tgz`             |    6237 |    20 |       2 |       2 |         2 |       2 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/migrate`          | `smthrs-migrate-1.0.0-rc.0.tgz`          |  796432 |   222 |      31 |      31 |        31 |      31 | none     | devDependencies kept (15)                                                                        |
+| `@smthrs/notifications`    | `smthrs-notifications-1.0.0-rc.0.tgz`    |   67390 |    60 |       8 |       8 |         8 |       8 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/observability`    | `smthrs-observability-1.0.0-rc.0.tgz`    |   28119 |    67 |       9 |       9 |         9 |       9 | none     | devDependencies kept (16)                                                                        |
+| `@smthrs/patterns`         | `smthrs-patterns-1.0.0-rc.0.tgz`         |  254684 |   215 |      30 |      30 |        30 |      30 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/plan`             | `smthrs-plan-1.0.0-rc.0.tgz`             |  189349 |   103 |      14 |      14 |        14 |      14 | none     | devDependencies kept (17); migrations src/esm/cjs 1/1/1                                          |
+| `@smthrs/flow`             | `smthrs-flow-1.0.0-rc.0.tgz`             |  403190 |   335 |      47 |      47 |        47 |      47 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/engine`           | `smthrs-engine-1.0.0-rc.0.tgz`           |  118776 |    91 |      12 |      12 |        12 |      12 | none     | devDependencies kept (19)                                                                        |
+| `@smthrs/plugin`           | `smthrs-plugin-1.0.0-rc.0.tgz`           |   38601 |    61 |       8 |       8 |         8 |       8 | none     | devDependencies kept (16)                                                                        |
+| `@smthrs/run-store`        | `smthrs-run-store-1.0.0-rc.0.tgz`        |  128667 |    75 |      10 |      10 |        10 |      10 | none     | devDependencies kept (16); migrations src/esm/cjs 2/2/2; src/test helpers 1 (public via ./*)     |
+| `smthrs`                   | `smthrs-1.0.0-rc.0.tgz`                  |    4270 |    12 |       1 |       1 |         1 |       1 | none     | devDependencies kept (14)                                                                        |
+| `@smthrs/step-cache`       | `smthrs-step-cache-1.0.0-rc.0.tgz`       |   58910 |    61 |       8 |       8 |         8 |       8 | none     | devDependencies kept (16); migrations src/esm/cjs 1/1/1; src/test helpers 1 (public via ./*)     |
+| `@smthrs/sync`             | `smthrs-sync-1.0.0-rc.0.tgz`             |  170819 |   152 |      21 |      21 |        21 |      21 | none     | devDependencies kept (16); src/test helpers 2 (public via ./*)                                   |
+| `@smthrs/kernel`           | `smthrs-kernel-1.0.0-rc.0.tgz`           |  192436 |   138 |      19 |      19 |        19 |      19 | none     | devDependencies kept (16); src/test helpers 3 (public via ./*)                                   |
+| `@smthrs/engine-store`     | `smthrs-engine-store-1.0.0-rc.0.tgz`     |  942122 |   292 |      41 |      41 |        41 |      41 | none     | devDependencies kept (21); migrations src/esm/cjs 2/2/2; src/test helpers 1 (public via ./*)     |
+| `@smthrs/model`            | `smthrs-model-1.0.0-rc.0.tgz`            |  243119 |   138 |      19 |      19 |        19 |      19 | none     | devDependencies kept (16)                                                                        |
+| `@smthrs/memory`           | `smthrs-memory-1.0.0-rc.0.tgz`           |  152459 |   120 |      16 |      16 |        16 |      16 | none     | devDependencies kept (16); reference .sql files packed: 3/3; src/test helpers 1 (public via ./*) |
+| `@smthrs/platform-browser` | `smthrs-platform-browser-1.0.0-rc.0.tgz` |   47688 |   124 |      17 |      17 |        17 |      17 | none     | devDependencies kept (16)                                                                        |
+| `@smthrs/platform-node`    | `smthrs-platform-node-1.0.0-rc.0.tgz`    |  111552 |    40 |       5 |       5 |         5 |       5 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/platform-bun`     | `smthrs-platform-bun-1.0.0-rc.0.tgz`     |    9778 |    26 |       3 |       3 |         3 |       3 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/registry`         | `smthrs-registry-1.0.0-rc.0.tgz`         |  187407 |    96 |      13 |      13 |        13 |      13 | none     | devDependencies kept (21)                                                                        |
+| `@smthrs/control`          | `smthrs-control-1.0.0-rc.0.tgz`          |  336217 |   180 |      25 |      25 |        25 |      25 | none     | devDependencies kept (21); src/test helpers 1 (public via ./*)                                   |
+| `@smthrs/gateway`          | `smthrs-gateway-1.0.0-rc.0.tgz`          |   99391 |    82 |      11 |      11 |        11 |      11 | none     | devDependencies kept (22); src/test helpers 1 (public via ./*)                                   |
+| `@smthrs/harness`          | `smthrs-harness-1.0.0-rc.0.tgz`          |  759969 |   222 |      31 |      31 |        31 |      31 | none     | devDependencies kept (18)                                                                        |
+| `@smthrs/mcp`              | `smthrs-mcp-1.0.0-rc.0.tgz`              |   31051 |    47 |       6 |       6 |         6 |       6 | none     | devDependencies kept (18)                                                                        |
+| `@smthrs/sandbox`          | `smthrs-sandbox-1.0.0-rc.0.tgz`          |   75641 |   250 |      35 |      35 |        35 |      35 | none     | devDependencies kept (16)                                                                        |
+| `@smthrs/std`              | `smthrs-std-1.0.0-rc.0.tgz`              |  397341 |   313 |      44 |      44 |        44 |      44 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/agent`            | `smthrs-agent-1.0.0-rc.0.tgz`            |  480457 |   145 |      20 |      20 |        20 |      20 | none     | devDependencies kept (18)                                                                        |
+| `@smthrs/testing`          | `smthrs-testing-1.0.0-rc.0.tgz`          |  286517 |   194 |      27 |      27 |        27 |      27 | none     | devDependencies kept (17)                                                                        |
+| `@smthrs/time-travel`      | `smthrs-time-travel-1.0.0-rc.0.tgz`      |  231839 |   131 |      18 |      18 |        18 |      18 | none     | devDependencies kept (22)                                                                        |
+| `@smthrs/flows`            | `smthrs-flows-1.0.0-rc.0.tgz`            |   45321 |    26 |       3 |       3 |         3 |       3 | none     | devDependencies kept (16)                                                                        |
+| `@smthrs/cli`              | `smthrs-cli-1.0.0-rc.0.tgz`              |  717510 |   206 |      28 |      28 |        28 |      28 | none     | devDependencies kept (16)                                                                        |
 
 packages=40 violations=0
 

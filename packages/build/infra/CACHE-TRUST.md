@@ -70,7 +70,7 @@ a publishing job in a workflow with no push branches, and a gate that only a
 publishing job would satisfy (its guard means GitHub skips it on every pull
 request, so it proves nothing).
 
-What remains is the adoption in the root `BUILD.ts`, which today declares
+What remains is the adoption in the root `PACKAGE.ts`, which today declares
 `cacheToken = Smithers.Secret("SMITHERS_CACHE_TOKEN")` and passes it as
 `cacheTokenSecret`, the shared-credential posture. The change: declare
 `cacheWriteToken = Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")`, rename
@@ -80,7 +80,7 @@ below.
 
 Landing that adoption regenerates `.github/workflows/ci.yml`. The workflow is a
 generated root file whose drift is gated, so the regenerated file belongs in
-the same commit as the `GithubCiGen` and `BUILD.ts` edits:
+the same commit as the `GithubCiGen` and `PACKAGE.ts` edits:
 
 ```sh
 pnpm exec smithers-build build '//:ci'
@@ -90,7 +90,7 @@ pnpm exec smithers-build lint '//:ci'
 Today the repository declares no `RemoteCache.make(...)` at all: it uses the
 `SMITHERS_CACHE_URL` override with the default `SMITHERS_CACHE_TOKEN`, which
 resolves to the shared-credential posture. Declaring the split in the root
-`BUILD.ts` is what makes the client send two different credentials:
+`PACKAGE.ts` is what makes the client send two different credentials:
 
 ```ts
 export const remoteCache = Smithers.RemoteCache.make({
@@ -119,7 +119,7 @@ this order:
 2. **Add the repository secrets.** Add `SMITHERS_CACHE_READ_TOKEN` holding the
    newly minted read token and `SMITHERS_CACHE_WRITE_TOKEN` holding the current
    value to the GitHub repository.
-3. **Land the root `BUILD.ts` adoption** above, so pull-request jobs stop
+3. **Land the root `PACKAGE.ts` adoption** above, so pull-request jobs stop
    receiving the write credential.
 4. **Rotate.** Only now generate a new write credential, redeploy the Worker
    with the new `SMITHERS_CACHE_WRITE_TOKEN` and the unchanged read token, and
@@ -149,7 +149,7 @@ The jjhub-hosted cache makes the read credential a committed literal: a
 per-repository `smithers_cachero_…` token that can only read that
 repository's cache. That is the reader posture above taken to its conclusion.
 A reader is untrusted and the read credential is public within the
-organization already; publishing it in `BUILD.ts` changes who can see it, not
+organization already; publishing it in `PACKAGE.ts` changes who can see it, not
 what it can do. The server enforces the same split (`403` on every `PUT` and
 `DELETE` before the body is read), the token is refused on any other
 repository, and the general token loader never accepts its shape, so a leak

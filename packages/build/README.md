@@ -2,7 +2,7 @@
 
 `@smthrs/build` is a Bazel-style build orchestrator for TypeScript
 workspaces.
-`BUILD.ts` files are ordinary TypeScript modules whose named exports are
+`PACKAGE.ts` files are ordinary TypeScript modules whose named exports are
 targets. Rules declare inputs, outputs, capabilities, cacheability, and the
 flow that implements the target; imports between build files form dependency
 edges.
@@ -35,7 +35,7 @@ Installation is one round of three actions:
    host platform are not content; they come from the `PackageManager` and
    `Runtime` services, which hold the host to what the workspace declared.
 2. A manager-specific `fetch` populates `.flows/store/<manager>`. The manager
-   is a plan-time declaration from BUILD.ts, so the body selects exactly one
+   is a plan-time declaration from PACKAGE.ts, so the body selects exactly one
    fetch without a second round.
 3. `link` reconciles `node_modules` from that store.
 
@@ -71,7 +71,7 @@ custom workspace-relative cache directory.
 
 ## Cache directory
 
-The root `BUILD.ts` may declare where target results and rule scratch files
+The root `PACKAGE.ts` may declare where target results and rule scratch files
 live:
 
 ```ts
@@ -114,7 +114,7 @@ export const remoteCache = Smithers.RemoteCache.make({
 ```
 
 A bearer value must arrive through an environment variable and never enters
-`BUILD.ts`, a target key, or a stored entry. `SMITHERS_CACHE_URL` can override
+`PACKAGE.ts`, a target key, or a stored entry. `SMITHERS_CACHE_URL` can override
 the declared HTTPS endpoint for one process. See
 [remote caching](docs/workspace/remote-caching.md) for which job gets which
 credential, and `infra/CACHE-TRUST.md` for the trust model the split exists to

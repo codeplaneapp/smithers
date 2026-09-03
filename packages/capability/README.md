@@ -99,6 +99,6 @@ log lines.
 
 ## Documentation
 
-`docs/` in this package, `Package.ts`, and the JSDoc in `src/` are the source
+`docs/` in this package, `docs/Manifest.ts`, and the JSDoc in `src/` are the source
 for the published page. `node packages/capability/scripts/docs.mjs` regenerates
 it and `--check` reports drift.

@@ -17,7 +17,7 @@ here has to resolve, and nothing in the package may name the unscoped
 `smthrs` specifier.
 
 There is no page for this package under `docs/pages`, and there is no docs
-generator target in `BUILD.ts`. `@smthrs/ui` is `private: true` at
+generator target in `PACKAGE.ts`. `@smthrs/ui` is `private: true` at
 `1.0.0-rc.0` (`docs/migration/disposition-ledger.md`, row `packages/ui`,
 disposition `keep`): it has no registry consumer, so publishing an API page for
 it on the documentation site would describe a package nobody can install. When

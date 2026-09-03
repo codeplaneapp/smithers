@@ -13,7 +13,7 @@ the same `migration/clean-checkout-4`.
 
 Every command exits 0: typecheck for all 59 workspace members with a `check`
 script, dprint plus eslint for all 51 members with a `lint` script, the same
-lint targets through the `BUILD.ts` graph (106 targets, 0 failed), the three
+lint targets through the `PACKAGE.ts` graph (106 targets, 0 failed), the three
 root generated-file drift targets (`//:ci`, `//:tsconfig`, `//:knownFiles`),
 the `known-files.d.ts` regeneration idempotency check, and `test:jsdoc`.
 `git status --porcelain` was empty before the first command and after every
@@ -21,23 +21,23 @@ command.
 
 ## Environment
 
-| Item | Value |
-| --- | --- |
-| Host | macOS 26.2 (build 25C56), Darwin 25.2.0, arm64, 16 cores, 64 GiB |
-| Date | 2026-08-31 16:17 to 16:26 UTC (2026-08-31 09:17 to 09:26 PDT) |
-| git | 2.50.1 (Apple Git-155) |
-| Node | v24.18.0 (`/Users/williamcory/.nvm/versions/node/v24.18.0/bin/node`); rc-contract floor `>=22.19.0`, CI pins 22.19.0 |
-| corepack | 0.35.0 |
-| pnpm | 11.21.0, selected by corepack from `packageManager: pnpm@11.21.0` |
-| Bun | 1.4.0. Not used by this gate. |
-| typescript (resolved in the checkout) | 6.0.3 |
-| eslint / typescript-eslint | 9.39.1 / 8.65.0 |
-| eslint-plugin-jsdoc / unicorn / import | 64.1.0 / 61.0.2 / 2.32.0 |
-| dprint | 0.55.2 (51 per-package `dprint.json`: `indentWidth 2`, `lineWidth 120`, ASI, double quotes, no trailing commas) |
-| @effect/language-service (tsc plugin) | 0.87.1 |
-| electrobun (`apps/ui`) | 2.0.1 |
-| Free disk | 12 GiB after the run |
-| Host load | 3.37 at task start, 6.07 at driver start, 40.72 at the end of the typecheck step, 40.06 at driver end (1-minute averages from `vm.loadavg`, recorded per step in `driver.log`) |
+| Item                                   | Value                                                                                                                                                                          |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Host                                   | macOS 26.2 (build 25C56), Darwin 25.2.0, arm64, 16 cores, 64 GiB                                                                                                               |
+| Date                                   | 2026-08-31 16:17 to 16:26 UTC (2026-08-31 09:17 to 09:26 PDT)                                                                                                                  |
+| git                                    | 2.50.1 (Apple Git-155)                                                                                                                                                         |
+| Node                                   | v24.18.0 (`/Users/williamcory/.nvm/versions/node/v24.18.0/bin/node`); rc-contract floor `>=22.19.0`, CI pins 22.19.0                                                           |
+| corepack                               | 0.35.0                                                                                                                                                                         |
+| pnpm                                   | 11.21.0, selected by corepack from `packageManager: pnpm@11.21.0`                                                                                                              |
+| Bun                                    | 1.4.0. Not used by this gate.                                                                                                                                                  |
+| typescript (resolved in the checkout)  | 6.0.3                                                                                                                                                                          |
+| eslint / typescript-eslint             | 9.39.1 / 8.65.0                                                                                                                                                                |
+| eslint-plugin-jsdoc / unicorn / import | 64.1.0 / 61.0.2 / 2.32.0                                                                                                                                                       |
+| dprint                                 | 0.55.2 (51 per-package `dprint.json`: `indentWidth 2`, `lineWidth 120`, ASI, double quotes, no trailing commas)                                                                |
+| @effect/language-service (tsc plugin)  | 0.87.1                                                                                                                                                                         |
+| electrobun (`apps/ui`)                 | 2.0.1                                                                                                                                                                          |
+| Free disk                              | 12 GiB after the run                                                                                                                                                           |
+| Host load                              | 3.37 at task start, 6.07 at driver start, 40.72 at the end of the typecheck step, 40.06 at driver end (1-minute averages from `vm.loadavg`, recorded per step in `driver.log`) |
 
 `SMITHERS_HOME` was unset in the shell and additionally stripped from every
 pnpm, node, and smithers-build invocation with `env -u SMITHERS_HOME`.
@@ -102,9 +102,9 @@ the `cd14388ed7` and `163fdf4bf5` runs used. `projection.json` (sha256
 `6fcd6e741ade98add0fbc6d49ac0219072744a7a20444a8cd8398b45f394f571`) pins
 `electrobun 2.0.1`, `macos/arm64`.
 
-| Command (in `<clean-checkout-4>/apps/ui`) | Exit | Result |
-| --- | --- | --- |
-| `env -u SMITHERS_HOME node scripts/ensure-devkit.mjs` | 0 | No output; `devkitIsFresh` accepts the copied projection against the installed `electrobun@2.0.1`; root `git status --porcelain` stays empty (`00-ensure-devkit.log`) |
+| Command (in `<clean-checkout-4>/apps/ui`)             | Exit | Result                                                                                                                                                                |
+| ----------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `env -u SMITHERS_HOME node scripts/ensure-devkit.mjs` | 0    | No output; `devkitIsFresh` accepts the copied projection against the installed `electrobun@2.0.1`; root `git status --porcelain` stays empty (`00-ensure-devkit.log`) |
 
 This is toolchain state, not repository content, and it changes no tracked
 file. The source tree was read, not written.
@@ -127,20 +127,20 @@ skips:
 
 `check` script variants observed in `01-pnpm-check.log`:
 
-| Count | Script | Members |
-| --- | --- | --- |
-| 51 | `tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit` | every `packages/*` with a `check` script except `packages/build/infra` |
-| 3 | `tsc --noEmit` | `apps/server`, `apps/shared`, `apps/tui` |
-| 2 | `tsc -p tsconfig.json --noEmit` | `e2e`, `examples` |
-| 1 | `tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit` | `apps/review` |
-| 1 | `tsc -b tsconfig.json --force` | `packages/build/infra` |
-| 1 | `node scripts/ensure-devkit.mjs && tsc --noEmit` | `apps/ui` |
+| Count | Script                                                                | Members                                                                |
+| ----- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| 51    | `tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit`          | every `packages/*` with a `check` script except `packages/build/infra` |
+| 3     | `tsc --noEmit`                                                        | `apps/server`, `apps/shared`, `apps/tui`                               |
+| 2     | `tsc -p tsconfig.json --noEmit`                                       | `e2e`, `examples`                                                      |
+| 1     | `tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit` | `apps/review`                                                          |
+| 1     | `tsc -b tsconfig.json --force`                                        | `packages/build/infra`                                                 |
+| 1     | `node scripts/ensure-devkit.mjs && tsc --noEmit`                      | `apps/ui`                                                              |
 
 `lint` script variants observed in `02-pnpm-lint.log`: 50 members run
 `eslint src --max-warnings=0 && dprint check`; `packages/build` runs
 `eslint src infra terraform/modules/cache/service --max-warnings=0 && dprint check`.
 
-The `BUILD.ts` graph is exercised as well, because rc-contract section 9 names
+The `PACKAGE.ts` graph is exercised as well, because rc-contract section 9 names
 it as the CI entry point: `smithers-build lint '//packages/...'` runs the
 `Dprint` and `EsLint` targets `PackageDefaults` synthesizes for every package,
 plus `//packages/engine:dependencyPolicy`, and the three root `lint` targets
@@ -154,17 +154,17 @@ All commands ran from `<clean-checkout-4>` through a sequential driver
 line count, and `vm.loadavg` per step). Each command's stdout and stderr is in
 the named log; its exit code is in the matching `.exit` file.
 
-| # | Command | Exit | Wall | Final output lines |
-| --- | --- | --- | --- | --- |
-| 1 | `env -u SMITHERS_HOME corepack pnpm -r --no-bail --if-present run check` | 0 | 200 s | `Scope: 63 of 64 workspace projects`; 59 `<member> check: Done` lines; zero lines other than the `check$` echo and `check: Done` per member (`01-pnpm-check.log`, 119 lines) |
-| 2 | `env -u SMITHERS_HOME corepack pnpm -r --no-bail --if-present run lint` | 0 | 178 s | `Scope: 63 of 64 workspace projects`; 51 `<member> lint: Done` lines; one benign note, described below (`02-pnpm-lint.log`, 104 lines) |
-| 3 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//:ci' --ui plain` | 0 | 6 s | `1 targets: 0 hit, 1 ran, 0 failed, 0 skipped (62ms)`; `ok: true` (`03-smithers-build-lint-ci.log`) |
-| 4 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//:tsconfig' --ui plain` | 0 | 2 s | `1 targets: 0 hit, 1 ran, 0 failed, 0 skipped (19ms)`; `ok: true` (`04-smithers-build-lint-tsconfig.log`) |
-| 5 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//:knownFiles' --ui plain` | 0 | 4 s | `1 targets: 0 hit, 1 ran, 0 failed, 0 skipped (1.0s)`; `ok: true` (`05-smithers-build-lint-knownFiles.log`) |
-| 6 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//packages/...' --ui plain` | 0 | 60 s | `106 targets: 0 hit, 106 ran, 0 failed, 0 skipped (55.8s)`; `ok: true`; rows: 51 `Dprint`, 51 `EsLint`, 1 `DepsLint` (`//packages/engine:dependencyPolicy`), 3 `TsBuild` (`//packages/{plan,flow,engine}:lib`, the `dependencyPolicy` deps) (`06-smithers-build-lint-packages.log`) |
-| 7 | `env -u SMITHERS_HOME node scripts/generate-known-files.mjs`, then `git status --short known-files.d.ts` and `git diff --quiet -- known-files.d.ts` | 0 | 1 s | Generator exit 0. Blob before and after the rewrite: `c8e74a6dca257b199894761ad2e83830368273f3`, equal to `HEAD:known-files.d.ts`; 11450 lines before and after; line 2 reads `// The 4677 workspace files below follow the same .gitignore and host-state rules as globs.`; `git status --short` prints nothing; `git diff --quiet` exits 0 (`07-generate-known-files-idempotency.log`) |
-| 8 | `env -u SMITHERS_HOME corepack pnpm run test:jsdoc` | 0 | 1 s | `tests 5`, `pass 5`, `fail 0`, `cancelled 0`, `skipped 0` (`08-pnpm-test-jsdoc.log`) |
-| 9 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build query '//...' --ui plain` | 0 | 1 s | `targets[446]` (reference listing of every label the graph declares at this commit; unchanged from `cd14388ed7`) (`09-smithers-build-query.txt`) |
+| # | Command                                                                                                                                             | Exit | Wall  | Final output lines                                                                                                                                                                                                                                                                                                                                                                       |
+| - | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | `env -u SMITHERS_HOME corepack pnpm -r --no-bail --if-present run check`                                                                            | 0    | 200 s | `Scope: 63 of 64 workspace projects`; 59 `<member> check: Done` lines; zero lines other than the `check$` echo and `check: Done` per member (`01-pnpm-check.log`, 119 lines)                                                                                                                                                                                                             |
+| 2 | `env -u SMITHERS_HOME corepack pnpm -r --no-bail --if-present run lint`                                                                             | 0    | 178 s | `Scope: 63 of 64 workspace projects`; 51 `<member> lint: Done` lines; one benign note, described below (`02-pnpm-lint.log`, 104 lines)                                                                                                                                                                                                                                                   |
+| 3 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//:ci' --ui plain`                                                                    | 0    | 6 s   | `1 targets: 0 hit, 1 ran, 0 failed, 0 skipped (62ms)`; `ok: true` (`03-smithers-build-lint-ci.log`)                                                                                                                                                                                                                                                                                      |
+| 4 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//:tsconfig' --ui plain`                                                              | 0    | 2 s   | `1 targets: 0 hit, 1 ran, 0 failed, 0 skipped (19ms)`; `ok: true` (`04-smithers-build-lint-tsconfig.log`)                                                                                                                                                                                                                                                                                |
+| 5 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//:knownFiles' --ui plain`                                                            | 0    | 4 s   | `1 targets: 0 hit, 1 ran, 0 failed, 0 skipped (1.0s)`; `ok: true` (`05-smithers-build-lint-knownFiles.log`)                                                                                                                                                                                                                                                                              |
+| 6 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build lint '//packages/...' --ui plain`                                                           | 0    | 60 s  | `106 targets: 0 hit, 106 ran, 0 failed, 0 skipped (55.8s)`; `ok: true`; rows: 51 `Dprint`, 51 `EsLint`, 1 `DepsLint` (`//packages/engine:dependencyPolicy`), 3 `TsBuild` (`//packages/{plan,flow,engine}:lib`, the `dependencyPolicy` deps) (`06-smithers-build-lint-packages.log`)                                                                                                      |
+| 7 | `env -u SMITHERS_HOME node scripts/generate-known-files.mjs`, then `git status --short known-files.d.ts` and `git diff --quiet -- known-files.d.ts` | 0    | 1 s   | Generator exit 0. Blob before and after the rewrite: `c8e74a6dca257b199894761ad2e83830368273f3`, equal to `HEAD:known-files.d.ts`; 11450 lines before and after; line 2 reads `// The 4677 workspace files below follow the same .gitignore and host-state rules as globs.`; `git status --short` prints nothing; `git diff --quiet` exits 0 (`07-generate-known-files-idempotency.log`) |
+| 8 | `env -u SMITHERS_HOME corepack pnpm run test:jsdoc`                                                                                                 | 0    | 1 s   | `tests 5`, `pass 5`, `fail 0`, `cancelled 0`, `skipped 0` (`08-pnpm-test-jsdoc.log`)                                                                                                                                                                                                                                                                                                     |
+| 9 | `env -u SMITHERS_HOME corepack pnpm exec smithers-build query '//...' --ui plain`                                                                   | 0    | 1 s   | `targets[446]` (reference listing of every label the graph declares at this commit; unchanged from `cd14388ed7`) (`09-smithers-build-query.txt`)                                                                                                                                                                                                                                         |
 
 Typechecked (59): apps/review apps/server apps/shared apps/tui apps/ui e2e
 examples packages/agent packages/artifacts packages/build packages/build-cli
@@ -185,8 +185,7 @@ Linted (51): every `packages/*` directory above except `packages/build/infra`,
 `packages/ui`, `packages/ui-styleguide`.
 
 The one line in command 2 that is neither a `lint$` echo nor a `lint: Done`
-is `packages/build lint: Multiple projects found, consider using a single
-`tsconfig` with `references` to speed up, or use `noWarnOnMultipleProjects` to
+is `packages/build lint: Multiple projects found, consider using a single`tsconfig`with`references`to speed up, or use`noWarnOnMultipleProjects`to
 suppress this warning`. It is the typescript-eslint projectService performance
 note for a package that lints three tsconfig roots, not an eslint rule
 warning; the package exits 0 under `--max-warnings=0`. The same note was
@@ -245,7 +244,7 @@ outlives its shell). The superseded runs' logs are in
 ## Verdict
 
 PASS. From the clean checkout at `341c8fa87e`: typecheck 59 of 59, eslint plus
-dprint 51 of 51 through pnpm and 106 of 106 lint targets through the `BUILD.ts`
+dprint 51 of 51 through pnpm and 106 of 106 lint targets through the `PACKAGE.ts`
 graph, `//:ci`, `//:tsconfig`, `//:knownFiles`, the `known-files.d.ts`
 regeneration idempotency check, and `test:jsdoc` all exit 0 with a clean tree
 after every step. No blockers remain for this gate.

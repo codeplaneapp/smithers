@@ -1,6 +1,6 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
 contract for `@smthrs/sandbox`. Generated pages under `docs/pages`, and the
 marked regions of the package `README.md`, are outputs.
 
@@ -14,7 +14,7 @@ marked regions of the package `README.md`, are outputs.
   each export.
 
 `scripts/docs.mjs` builds those outputs and verifies that the reference pages
-declared by `Package.ts` still point readers at `/api/sandbox`.
+declared by `docs/Manifest.ts` still point readers at `/api/sandbox`.
 
 The `//packages/sandbox:docsPages` target writes or drift-checks them. After
 editing, run from the repository root:

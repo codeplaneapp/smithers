@@ -3,7 +3,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -106,8 +106,8 @@ const exportedDocs = (source) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) {
-  throw new Error("database docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) {
+  throw new Error("database docs: Manifest.ts and package.json names differ")
 }
 
 const failures = []
@@ -115,9 +115,9 @@ const failures = []
 const sourceLink = (relative) =>
   `https://github.com/smithersai/smithers/blob/main/packages/database/${relative}`
 
-for (const entry of [...Package.entries, ...Package.modules]) {
+for (const entry of [...Manifest.entries, ...Manifest.modules]) {
   if (!existsSync(join(packageRoot, entry.source))) {
-    failures.push(`${entry.source}: declared in Package.ts but the file does not exist`)
+    failures.push(`${entry.source}: declared in Manifest.ts but the file does not exist`)
   }
 }
 
@@ -128,7 +128,7 @@ for (const entry of [...Package.entries, ...Package.modules]) {
  * without appearing in the generated entry-point table. `src/internal/**` is
  * excluded because the export map maps `./internal/*` to `null`.
  */
-const publishedSources = new Set(Package.entries.map((entry) => entry.source))
+const publishedSources = new Set(Manifest.entries.map((entry) => entry.source))
 const walkSources = (relative) =>
   readdirSync(join(packageRoot, relative), { withFileTypes: true }).flatMap((dirent) =>
     dirent.isDirectory()
@@ -139,14 +139,14 @@ const walkSources = (relative) =>
   )
 for (const source of walkSources("src")) {
   if (!publishedSources.has(source)) {
-    failures.push(`${source}: published by the ./* export map but missing from Package.ts entries`)
+    failures.push(`${source}: published by the ./* export map but missing from Manifest.ts entries`)
   }
 }
 
 const entryTable = [
   "| Import | Source | Platform |",
   "| --- | --- | --- |",
-  ...Package.entries.map((entry) =>
+  ...Manifest.entries.map((entry) =>
     `| \`${entry.specifier}\` | [${entry.source}](${sourceLink(entry.source)}) | ${entry.platform} |`
   )
 ].join("\n")
@@ -174,7 +174,7 @@ ${table}
 `
 }
 
-const sections = Package.modules.map(moduleSection).join("\n")
+const sections = Manifest.modules.map(moduleSection).join("\n")
 
 const barrel = read(join(packageRoot, "src", "index.ts"))
 
@@ -185,7 +185,7 @@ const barrel = read(join(packageRoot, "src", "index.ts"))
  */
 const intro = paragraphs(moduleDoc(barrel, "src/index.ts"))
   .split("\n\n")
-  .filter((block, index) => !(index === 0 && block.startsWith(Package.name)))
+  .filter((block, index) => !(index === 0 && block.startsWith(Manifest.name)))
   .join("\n\n")
 
 const apiPage = `---
@@ -202,19 +202,19 @@ ${intro}
 
 ${entryTable}
 
-${read(join(packageRoot, Package.api.source)).trim()}
+${read(join(packageRoot, Manifest.api.source)).trim()}
 
 ## Exports
 
 ${sections.trim()}
 `
 
-const outputs = new Map([[Package.api.target, apiPage]])
+const outputs = new Map([[Manifest.api.target, apiPage]])
 
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/database")) {
-    failures.push(`${path}: must reference ${Package.name} and /api/database`)
+  if (!content.includes(Manifest.name) || !content.includes("/api/database")) {
+    failures.push(`${path}: must reference ${Manifest.name} and /api/database`)
   }
 }
 for (const [path, content] of outputs) {
