@@ -60,7 +60,7 @@ Calling a target is pure. In order:
    deduplicated, and `kinds` is deduplicated too.
 5. `cacheable` is resolved: a boolean, or the result of `cache(attrs)`, defaulting
    to `true`.
-6. `sourceFile` is captured by scanning the construction stack for a `BUILD.ts`
+6. `sourceFile` is captured by scanning the construction stack for a `PACKAGE.ts`
    frame.
 
 No filesystem read, no process spawn, and no await happens anywhere in that
@@ -123,7 +123,7 @@ attrs to the flow.
 
 ## Export discovery
 
-A target becomes addressable when a `BUILD.ts` file exports it under a name.
+A target becomes addressable when a `PACKAGE.ts` file exports it under a name.
 Discovery walks the module namespace in ascending export-name order and sorts
 each export into one of three buckets:
 
@@ -134,7 +134,7 @@ each export into one of three buckets:
 | A `Workspace` declaration       | Read by configuration resolution                |
 
 Everything else is ignored, including a `file()` value exported for other
-`BUILD.ts` files to import.
+`PACKAGE.ts` files to import.
 
 Exporting one target value under two names fails with
 `one target value is exported under both <a> and <b>`. A target call is what

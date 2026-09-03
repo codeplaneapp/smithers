@@ -6,11 +6,11 @@ Worktree `migration/wt/release-hygiene`, branch `phase7/release-hygiene`, base
 `d7c5a3e503`. Node v24.18.0, corepack pnpm 11.21.0, bun 1.4.0, macOS arm64.
 Three commits, no rebase, no other worktree touched.
 
-| Commit | Subject |
-| --- | --- |
+| Commit       | Subject                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------- |
 | `050a30f89f` | `fix(testing)`: vitest and `@effect/vitest` become optional peers; the gate becomes a target |
-| `688bc1bc2a` | `docs(release)`: the terminal credential-redaction limitation R-12 leaves shipped |
-| `bd6c011ff7` | `docs(contract)`: section 9's stale counts, and the citation gate that missed them |
+| `688bc1bc2a` | `docs(release)`: the terminal credential-redaction limitation R-12 leaves shipped            |
+| `bd6c011ff7` | `docs(contract)`: section 9's stale counts, and the citation gate that missed them           |
 
 Both lockfiles moved, in the first commit.
 
@@ -23,13 +23,13 @@ Both lockfiles moved, in the first commit.
 `packages/testing/package.json` before the fix:
 
 ```json
-  "dependencies": {
-    "@effect/vitest": "4.0.0-rc.108",
-    ...
-  },
-  "peerDependencies": {
-    "vitest": "^4.1.0"
-  },
+"dependencies": {
+  "@effect/vitest": "4.0.0-rc.108",
+  ...
+},
+"peerDependencies": {
+  "vitest": "^4.1.0"
+},
 ```
 
 `@smthrs/kernel` declares `vitest` optional (`peerDependenciesMeta`), so
@@ -122,7 +122,7 @@ single-copy half stayed green throughout.
   `bun.lock` (`bun install --lockfile-only`, 5 lines: the dependency drops, the
   peer and an `optionalPeers` array appear), same commit.
 - `scripts/check-npm-dedupe.mjs`: the fixture resolver is exported.
-- `scripts/BUILD.ts`: `npmDedupe` (the script, as `Smithers.entrypoint`) and
+- `scripts/PACKAGE.ts`: `npmDedupe` (the script, as `Smithers.entrypoint`) and
   `npmDedupeUnit` (the node:test suite), both `NodeTest`, both uncacheable
   because the resolution reads registry metadata.
 - `packages/flows/test/vitestCoverageIsolation.test.ts`: the comment beside the
@@ -238,12 +238,12 @@ The journal half of the same file passes. Nothing in this lane touches
 
 Four readings in section 9 disagreed with the tree:
 
-| Reading | Was | Is |
-| --- | --- | --- |
-| Release tooling row | "equals the 39 names in §3.1" | 40; section 3.1's own heading says 40 and `publishedPackages` has 40 |
-| Release tooling row | `pack-release.test.mjs:104-107` | the roster assertion is at `101-106` |
-| Workspace row | "`examples`, `apps/*`, plus `e2e` when the rewritten suite lands (widen the pin at `vitestCoverageIsolation.test.ts:277-290`)" | `e2e` landed; the workspace globs are `packages/*`, `packages/build/infra`, `e2e`, `examples`, `apps/*` and the pin is at `297-344` |
-| Exception 2 | root-scripts pin at `vitestCoverageIsolation.test.ts:354-364` | `378-452` |
+| Reading             | Was                                                                                                                            | Is                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Release tooling row | "equals the 39 names in §3.1"                                                                                                  | 40; section 3.1's own heading says 40 and `publishedPackages` has 40                                                                |
+| Release tooling row | `pack-release.test.mjs:104-107`                                                                                                | the roster assertion is at `101-106`                                                                                                |
+| Workspace row       | "`examples`, `apps/*`, plus `e2e` when the rewritten suite lands (widen the pin at `vitestCoverageIsolation.test.ts:277-290`)" | `e2e` landed; the workspace globs are `packages/*`, `packages/build/infra`, `e2e`, `examples`, `apps/*` and the pin is at `297-344` |
+| Exception 2         | root-scripts pin at `vitestCoverageIsolation.test.ts:354-364`                                                                  | `378-452`                                                                                                                           |
 
 The CI-lanes row listed the required `test` job with five of its twelve
 `smithers-build` steps missing: `ci '//apps/review'`, `ci '//apps/bug-worker'`,
@@ -305,32 +305,32 @@ GREEN after correcting section 9: `check-docs` exit 0, 27 of 27 cells in
 Load is read before each. The guard's threshold of 40 was never approached, so
 no suite ran at reduced worker count and none was rerun for flake.
 
-| Gate | Command | Result | Load at start |
-| --- | --- | --- | --- |
-| Frozen offline install | `corepack pnpm install --frozen-lockfile --offline` | exit 0, "Done in 2m 56s" | 9.65 |
-| Lockfile refresh | `corepack pnpm install --offline` | exit 0, 3 lines moved in `pnpm-lock.yaml` | 5.51 |
-| Bun lockfile | `bun install --lockfile-only` | exit 0, "Saved bun.lock (2177 packages)" | 7.33 |
-| npm dedupe gate | `node scripts/check-npm-dedupe.mjs` | exit 0, single-copy effect, 3 optional peers absent, 97 packages | 7.42 |
-| npm dedupe target | `smithers-build test '//scripts:npmDedupe'` | ok: true, 3.3 s | 7.64 |
-| npm dedupe pins | `smithers-build test '//scripts:npmDedupeUnit'` | ok: true, 3.2 s | 7.27 |
-| All script gates | `smithers-build test '//scripts/...'` | 22 targets, 20 ran, 1 failed, 1 skipped; the failure is `//scripts:releasePack` on an unbuilt tree, see below | 2.62 |
-| Repo contract | `node --test "scripts/repo-contract/*.test.mjs"` | 25 pass before the extension, 27 after, 0 fail | 6.96 |
-| Docs gate | `node scripts/check-docs.mjs` | exit 0, 16 checks | 4.77 |
-| llms bundles | `node scripts/check-llms.mjs` | exit 0, 12 artifacts current | 4.77 |
-| Dependency boundaries | `node scripts/check-dependency-boundaries.mjs` | exit 0, 63 packages | 6.96 |
-| Effect version | `node scripts/check-single-effect-version.mjs` | exit 0, `effect@4.0.0-rc.108` everywhere (63 sources) | 6.96 |
-| Workflow drift | `smithers-build lint '//:ci'` | ok: true, exit 0 | 7.42 and 10.21 |
-| Known-file drift | `smithers-build lint '//:knownFiles'` | ok: true, exit 0 | 10.21 |
-| `packages/testing` | `smithers-build ci '//packages/testing'` | 7 of 7 targets ran, 0 failed | 9.08 |
-| `packages/create-app` | `smithers-build ci '//packages/create-app'` | 7 of 7, 0 failed | 8.14 |
-| `packages/evals` | `smithers-build ci '//packages/evals'` | 7 of 7, 0 failed | 8.14 |
-| `packages/chain` | `smithers-build ci '//packages/chain'` | 7 of 7, 0 failed | 8.14 |
-| `packages/flows` | `smithers-build ci '//packages/flows'` | 7 of 7, 0 failed | 6.46 |
-| `packages/agent` | `smithers-build ci '//packages/agent'` | 7 of 7, 0 failed | 6.28 |
-| Coverage-isolation pins | `pnpm -C packages/flows exec vitest run test/vitestCoverageIsolation.test.ts` | 264 of 264 tests passed (the single-file run's coverage threshold error is an artifact of running one file, not a regression) | 10.88 |
-| Fault matrix | `smithers-build test '//e2e:faults'` | 25 of 26 files, 66 of 67 tests, 102.5 s; the one failure is case 22's required red gate, unchanged | 4.79 |
-| Frozen re-verify | `corepack pnpm install --frozen-lockfile --offline` | exit 0, "Already up to date", 330 ms | 5.12 |
-| Bun frozen re-verify | `bun install --frozen-lockfile --offline --lockfile-only` | exit 0, lockfile byte-identical (clean `git status`) | 5.12 |
+| Gate                    | Command                                                                       | Result                                                                                                                        | Load at start  |
+| ----------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| Frozen offline install  | `corepack pnpm install --frozen-lockfile --offline`                           | exit 0, "Done in 2m 56s"                                                                                                      | 9.65           |
+| Lockfile refresh        | `corepack pnpm install --offline`                                             | exit 0, 3 lines moved in `pnpm-lock.yaml`                                                                                     | 5.51           |
+| Bun lockfile            | `bun install --lockfile-only`                                                 | exit 0, "Saved bun.lock (2177 packages)"                                                                                      | 7.33           |
+| npm dedupe gate         | `node scripts/check-npm-dedupe.mjs`                                           | exit 0, single-copy effect, 3 optional peers absent, 97 packages                                                              | 7.42           |
+| npm dedupe target       | `smithers-build test '//scripts:npmDedupe'`                                   | ok: true, 3.3 s                                                                                                               | 7.64           |
+| npm dedupe pins         | `smithers-build test '//scripts:npmDedupeUnit'`                               | ok: true, 3.2 s                                                                                                               | 7.27           |
+| All script gates        | `smithers-build test '//scripts/...'`                                         | 22 targets, 20 ran, 1 failed, 1 skipped; the failure is `//scripts:releasePack` on an unbuilt tree, see below                 | 2.62           |
+| Repo contract           | `node --test "scripts/repo-contract/*.test.mjs"`                              | 25 pass before the extension, 27 after, 0 fail                                                                                | 6.96           |
+| Docs gate               | `node scripts/check-docs.mjs`                                                 | exit 0, 16 checks                                                                                                             | 4.77           |
+| llms bundles            | `node scripts/check-llms.mjs`                                                 | exit 0, 12 artifacts current                                                                                                  | 4.77           |
+| Dependency boundaries   | `node scripts/check-dependency-boundaries.mjs`                                | exit 0, 63 packages                                                                                                           | 6.96           |
+| Effect version          | `node scripts/check-single-effect-version.mjs`                                | exit 0, `effect@4.0.0-rc.108` everywhere (63 sources)                                                                         | 6.96           |
+| Workflow drift          | `smithers-build lint '//:ci'`                                                 | ok: true, exit 0                                                                                                              | 7.42 and 10.21 |
+| Known-file drift        | `smithers-build lint '//:knownFiles'`                                         | ok: true, exit 0                                                                                                              | 10.21          |
+| `packages/testing`      | `smithers-build ci '//packages/testing'`                                      | 7 of 7 targets ran, 0 failed                                                                                                  | 9.08           |
+| `packages/create-app`   | `smithers-build ci '//packages/create-app'`                                   | 7 of 7, 0 failed                                                                                                              | 8.14           |
+| `packages/evals`        | `smithers-build ci '//packages/evals'`                                        | 7 of 7, 0 failed                                                                                                              | 8.14           |
+| `packages/chain`        | `smithers-build ci '//packages/chain'`                                        | 7 of 7, 0 failed                                                                                                              | 8.14           |
+| `packages/flows`        | `smithers-build ci '//packages/flows'`                                        | 7 of 7, 0 failed                                                                                                              | 6.46           |
+| `packages/agent`        | `smithers-build ci '//packages/agent'`                                        | 7 of 7, 0 failed                                                                                                              | 6.28           |
+| Coverage-isolation pins | `pnpm -C packages/flows exec vitest run test/vitestCoverageIsolation.test.ts` | 264 of 264 tests passed (the single-file run's coverage threshold error is an artifact of running one file, not a regression) | 10.88          |
+| Fault matrix            | `smithers-build test '//e2e:faults'`                                          | 25 of 26 files, 66 of 67 tests, 102.5 s; the one failure is case 22's required red gate, unchanged                            | 4.79           |
+| Frozen re-verify        | `corepack pnpm install --frozen-lockfile --offline`                           | exit 0, "Already up to date", 330 ms                                                                                          | 5.12           |
+| Bun frozen re-verify    | `bun install --frozen-lockfile --offline --lockfile-only`                     | exit 0, lockfile byte-identical (clean `git status`)                                                                          | 5.12           |
 
 ### The one failing target, and why it is not this lane's
 

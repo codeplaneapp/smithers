@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -66,13 +66,13 @@ const exportedDocs = (source) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("step-cache docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("step-cache docs: Manifest.ts and package.json names differ")
 
 const barrel = read(join(packageRoot, "src", "index.ts"))
 const namespaces = [...barrel.matchAll(/export \* as (\w+) from "\.\/(\w+)\.ts"/g)].map((match) => ({
   namespace: match[1],
   source: `src/${match[2]}.ts`,
-  specifier: `${Package.name}/${match[2]}`,
+  specifier: `${Manifest.name}/${match[2]}`,
   platform: "any"
 }))
 
@@ -94,7 +94,7 @@ const section = (entry) => {
 ${table(exports)}`
 }
 
-const sections = [...namespaces, ...Package.subpaths].map(section).join("\n\n")
+const sections = [...namespaces, ...Manifest.subpaths].map(section).join("\n\n")
 
 const apiPage = `---
 description: "${manifest.description}."
@@ -106,7 +106,7 @@ description: "${manifest.description}."
 
 ${moduleDoc(barrel)}
 
-${read(join(packageRoot, Package.api.source)).trim()}
+${read(join(packageRoot, Manifest.api.source)).trim()}
 
 ## Exports
 
@@ -116,13 +116,13 @@ subpath, except the Node-only test layer, which has only its subpath.
 ${sections}
 `
 
-const outputs = new Map([[Package.api.target, apiPage]])
+const outputs = new Map([[Manifest.api.target, apiPage]])
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/step-cache")) {
-    failures.push(`${path}: must reference ${Package.name} and /api/step-cache`)
+  if (!content.includes(Manifest.name) || !content.includes("/api/step-cache")) {
+    failures.push(`${path}: must reference ${Manifest.name} and /api/step-cache`)
   }
 }
 for (const [path, content] of outputs) {

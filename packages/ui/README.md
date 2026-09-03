@@ -18,7 +18,7 @@ root; every component also self-injects the composed sheet plus its lane CSS
 fragment as a fallback. All classes are namespaced `sui-*`.
 
 ```tsx
-import { SmithersUiStyles, Button, StatusPill } from "@smthrs/ui";
+import { Button, SmithersUiStyles, StatusPill } from "@smthrs/ui"
 ```
 
 ## Families
@@ -79,7 +79,7 @@ pnpm --filter @smthrs/ui test    # bun test tests
 pnpm --filter @smthrs/ui run check    # tsc -p tsconfig.json --noEmit
 ```
 
-Both are declared in `BUILD.ts` as `//packages/ui:unitTests` and
+Both are declared in `PACKAGE.ts` as `//packages/ui:unitTests` and
 `//packages/ui:check`. This package does not run vitest, coverage thresholds,
-eslint or dprint: `BUILD.ts` records why, and the Phase 4 UI port is what moves
+eslint or dprint: `PACKAGE.ts` records why, and the Phase 4 UI port is what moves
 it onto the 1.0 tooling baseline.

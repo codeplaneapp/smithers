@@ -4,14 +4,14 @@ smithers build orchestrates builds for TypeScript workspaces. It borrows Bazel's
 a workspace is a set of packages, a package declares targets, a target names its
 inputs and its dependencies, and a verb selects a set of targets to run.
 
-The difference is the authoring language. A `BUILD.ts` file is a plain TypeScript
+The difference is the authoring language. A `PACKAGE.ts` file is a plain TypeScript
 module. Its named exports are targets. There is no new configuration dialect, no
 Starlark, and no JSON pipeline file.
 
 ```ts
-// packages/flow/BUILD.ts
+// packages/flow/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const { lib, test, lint } = Smithers.StandardPackage({
   packageManager,
@@ -50,9 +50,9 @@ See [Targets and targets](../concepts/targets.md) and
 
 |                   | smithers build                                                                                                         | Bazel                                               | Turborepo                                      | nx                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------- | ------------------------------------------ |
-| Build file        | `BUILD.ts`, plain TypeScript                                                                                           | `BUILD.bazel`, Starlark                             | `turbo.json` plus package scripts              | `project.json` plus plugins                |
+| Build file        | `PACKAGE.ts`, plain TypeScript                                                                                         | `BUILD.bazel`, Starlark                             | `turbo.json` plus package scripts              | `project.json` plus plugins                |
 | Unit of work      | Target: a target call exported by name                                                                                 | Target: a target call with a `name` attribute       | Task: a package script                         | Target: an executor invocation             |
-| Dependency edges  | Direct `import` between `BUILD.ts` files                                                                               | `deps` attribute holding label strings              | Inferred from `package.json` plus `dependsOn`  | Inferred from imports plus explicit config |
+| Dependency edges  | Direct `import` between `PACKAGE.ts` files                                                                             | `deps` attribute holding label strings              | Inferred from `package.json` plus `dependsOn`  | Inferred from imports plus explicit config |
 | Input declaration | `file()`, `glob()`, `gitDiff()`                                                                                        | `srcs`, `glob()`                                    | Package directory hashing, `inputs` globs      | Named input sets                           |
 | Sandboxing        | Per-action: bubblewrap on Linux, seatbelt on macOS, Docker where declared; reads and writes scoped to the declared set | Per-action sandbox                                  | None                                           | None                                       |
 | Cache key         | sha256 over target id, canonicalized attrs, input digests, and dependency keys                                         | Action digest over declared inputs and command line | Hash over package files, dependencies, and env | Hash over inputs and project graph         |
@@ -68,13 +68,13 @@ rather than running it unconfined. See
 
 ## The three packages
 
-| Package             | Source                    | What it holds                                                                                                                                |
-| ------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@smthrs/build`     | `packages/build/src/`     | Dependency installation as flows. Exports `Install` and `PackageManager`.                                                                    |
-| `@smthrs/targets`   | `packages/targets/src/`   | The `BUILD.ts` authoring surface: `Target.make`, `Input`, `Workspace`, `PackageDefaults`, `Exec`, `StandardPackage`, and the target catalog. |
-| `@smthrs/build-cli` | `packages/build-cli/src/` | The `smithers-build` CLI: workspace discovery, the planner, the executor, the cache, and query and graph output.                             |
+| Package             | Source                    | What it holds                                                                                                                                  |
+| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@smthrs/build`     | `packages/build/src/`     | Dependency installation as flows. Exports `Install` and `PackageManager`.                                                                      |
+| `@smthrs/targets`   | `packages/targets/src/`   | The `PACKAGE.ts` authoring surface: `Target.make`, `Input`, `Workspace`, `PackageDefaults`, `Exec`, `StandardPackage`, and the target catalog. |
+| `@smthrs/build-cli` | `packages/build-cli/src/` | The `smithers-build` CLI: workspace discovery, the planner, the executor, the cache, and query and graph output.                               |
 
 ## Next
 
 - [Install smithers build in a workspace](../getting-started/install.md)
-- [Write your first BUILD.ts](../getting-started/first-build.md)
+- [Write your first PACKAGE.ts](../getting-started/first-build.md)

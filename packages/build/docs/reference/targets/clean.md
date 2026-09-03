@@ -4,7 +4,7 @@ Deletes explicitly declared generated paths.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { runtime } from "../../BUILD.ts"
+import { runtime } from "../../PACKAGE.ts"
 
 export const clean = Smithers.Clean({
   runtime,
@@ -47,7 +47,7 @@ Each path is normalized and checked at plan time. These are refused with
 - `.`, which would delete the directory itself.
 - `..`, or anything normalizing to a `../` prefix.
 
-The check happens during `BUILD.ts` evaluation, so an invalid path fails every
+The check happens during `PACKAGE.ts` evaluation, so an invalid path fails every
 command, not just execution.
 
 ## Inputs

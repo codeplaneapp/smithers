@@ -20,7 +20,7 @@ bypasses cache reads, and `--jobs` bounds concurrency. `install` runs the
 install Flow under the declared package manager.
 
 Two authoring surfaces are supported and discovery picks between them: a
-workspace of `BUILD.ts` modules, or the routed `WORKSPACE.ts` plus one
+workspace of `PACKAGE.ts` modules, or the routed `WORKSPACE.ts` plus one
 `PACKAGE.ts` per package. Both go through the same planner, the same cache, and
 the same execution boundary.
 
@@ -32,7 +32,7 @@ binary, not a library anyone installs.
 Prose lives beside the code it describes, in [`docs/`](./docs/README.md):
 
 - [Commands](./docs/cli.md) — every command, argument, and option.
-- [Package mode](./docs/package-mode.md) — `WORKSPACE.ts` and `PACKAGE.ts`
+- [Build system](./docs/build-system.md) — `WORKSPACE.ts` and `PACKAGE.ts`
   discovery, the verbs it supports, and what it refuses.
 - [Caching](./docs/caching.md) — the cache directory, the content-addressed
   store, and the remote cache's endpoint, credentials, and trust domain.

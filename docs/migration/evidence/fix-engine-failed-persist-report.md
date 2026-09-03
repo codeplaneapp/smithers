@@ -13,16 +13,16 @@ base `41bfdcb06f`. Two commits, no lockfile change.
 round's settlement through the flow's own codec and made a rejection fatal:
 
 ```ts
-    const encodeResult = (
-      flow: Flow.Any,
-      result: Flow.Result<unknown, unknown>
-    ): Effect.Effect<unknown> =>
-      Schema.encodeEffect(
-        Schema.toCodecJson(Flow.Result({
-          success: flow.successSchema,
-          error: flow.errorSchema
-        }))
-      )(result).pipe(Effect.orDie) as Effect.Effect<unknown>
+const encodeResult = (
+  flow: Flow.Any,
+  result: Flow.Result<unknown, unknown>
+): Effect.Effect<unknown> =>
+  Schema.encodeEffect(
+    Schema.toCodecJson(Flow.Result({
+      success: flow.successSchema,
+      error: flow.errorSchema
+    }))
+  )(result).pipe(Effect.orDie) as Effect.Effect<unknown>
 ```
 
 `packages/agent/src/AgentSession.ts:553` declares the flow every agent run is:
@@ -134,13 +134,13 @@ degraded path cannot raise — and the caller is told to settle `failed` through
 `RunDriver.ts:1204` now delegates to it, and `RunDriver.ts:1758` reads the note:
 
 ```ts
-            const status: RunStore.RunStatus = encodedResult.note !== undefined
-              ? "failed"
-              : result._tag === "Suspended"
-              ? "suspended"
-              : Exit.isSuccess(result.exit)
-              ? "completed"
-              : "failed"
+const status: RunStore.RunStatus = encodedResult.note !== undefined
+  ? "failed"
+  : result._tag === "Suspended"
+  ? "suspended"
+  : Exit.isSuccess(result.exit)
+  ? "completed"
+  : "failed"
 ```
 
 Fail closed: a settlement the codec rejected reaches a terminal row in this
@@ -155,14 +155,14 @@ the next process re-executes. The other three `encodeResult` call sites
 pre-fix `encode` (the `Effect.orDie` expression above), log
 `fix-engine-failed-persist-logs/01-red-exitencoding.log`, 6 failed / 12 passed:
 
-| Case | Verbatim red line |
-| --- | --- |
-| `a `Fail` cause carrying a typed error the codec rejects > still answers bytes, and projects the tag, code, message, and nested cause` | `SchemaError: Expected JSON value` / `  at ["exit"]["cause"][0]["error"]` |
-| `… > writes bytes the poll path can decode back` | same |
-| `a cause mixing a typed failure, a defect, and an interrupt > projects every reason in order` | same |
-| `… > projects an interrupt with no fiber id without inventing one` | same |
-| `a success value the codec rejects > settles as a failed `Complete` carrying the projected value` | `SchemaError: Expected JSON value` / `  at ["exit"]["value"]` |
-| `a handoff whose payload the codec rejects > keeps the handoff shape so the lineage stays readable` | `SchemaError: Expected Flow.Complete` / `Expected JSON value` / `  at ["payload"]` |
+| Case                                                                                                                                 | Verbatim red line                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `a`Fail`cause carrying a typed error the codec rejects > still answers bytes, and projects the tag, code, message, and nested cause` | `SchemaError: Expected JSON value` / `at ["exit"]["cause"][0]["error"]`          |
+| `… > writes bytes the poll path can decode back`                                                                                     | same                                                                             |
+| `a cause mixing a typed failure, a defect, and an interrupt > projects every reason in order`                                        | same                                                                             |
+| `… > projects an interrupt with no fiber id without inventing one`                                                                   | same                                                                             |
+| `a success value the codec rejects > settles as a failed`Complete`carrying the projected value`                                      | `SchemaError: Expected JSON value` / `at ["exit"]["value"]`                      |
+| `a handoff whose payload the codec rejects > keeps the handoff shape so the lineage stays readable`                                  | `SchemaError: Expected Flow.Complete` / `Expected JSON value` / `at ["payload"]` |
 
 The remaining twelve are the shapes that must NOT change: a settlement the codec
 accepts encodes through it with no note (including `Exit.die(new Error(...))`,
@@ -204,15 +204,15 @@ Searched `Effect.orDie` around `encodeResult`, `encodeState`, and
 `Schema.encodeEffect` in `packages/engine-store/src/internal` and
 `packages/agent/src`.
 
-| Site | Guards a terminal transition? | Disposition |
-| --- | --- | --- |
-| `RunDriver.ts:1202` `encodeResult` | yes, all four settlement paths | fixed, above |
-| `RunDriver.ts:414` `encodeState` | yes, every transition | pinned, see below |
-| `RunDriver.ts:1225` `normalizePayload` | the handing-off round's `completed` transition | out of the named class (a payload, not an Exit/Cause); recorded below |
-| `RunDriver.ts:1989` `ensureRun` payload encode | no — run creation; a defect there means no row was created, which strands nothing | no change |
-| `packages/agent/src/FlowEngineLike.ts:998` `Schema.encodeSync(ModelRequest)` | no — step-key material for the digest | no change |
-| `packages/agent/src/AgentSession.ts:793`, `:1232`, `EngineChildren.ts:302,304` | no — approval completion, status read, child state decode | no change |
-| `ActionPersistence.ts` | no — `Fail` errors are already schema-encoded by `Action.executeEncoded` (`ActionPersistence.ts:422`), outside this package | no change |
+| Site                                                                           | Guards a terminal transition?                                                                                               | Disposition                                                           |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `RunDriver.ts:1202` `encodeResult`                                             | yes, all four settlement paths                                                                                              | fixed, above                                                          |
+| `RunDriver.ts:414` `encodeState`                                               | yes, every transition                                                                                                       | pinned, see below                                                     |
+| `RunDriver.ts:1225` `normalizePayload`                                         | the handing-off round's `completed` transition                                                                              | out of the named class (a payload, not an Exit/Cause); recorded below |
+| `RunDriver.ts:1989` `ensureRun` payload encode                                 | no — run creation; a defect there means no row was created, which strands nothing                                           | no change                                                             |
+| `packages/agent/src/FlowEngineLike.ts:998` `Schema.encodeSync(ModelRequest)`   | no — step-key material for the digest                                                                                       | no change                                                             |
+| `packages/agent/src/AgentSession.ts:793`, `:1232`, `EngineChildren.ts:302,304` | no — approval completion, status read, child state decode                                                                   | no change                                                             |
+| `ActionPersistence.ts`                                                         | no — `Fail` errors are already schema-encoded by `Action.executeEncoded` (`ActionPersistence.ts:422`), outside this package | no change                                                             |
 
 `encodeState` is a real second instance of the class and it is now pinned rather
 than rewritten, because after the fix nothing reachable can make it fail. A
@@ -225,7 +225,7 @@ is JSON by construction — `payload` was JSON-encoded at creation and read back
 through `JSON.parse`, and `result` is now either the flow's own JSON encoding or
 the projection — so the two cases in `ExitEncoding.test.ts >
 the state a terminal transition writes` pin exactly that: a projected settlement
-survives `encodeState`, and so does the projection of a *circular* failure.
+survives `encodeState`, and so does the projection of a _circular_ failure.
 
 `normalizePayload` remains an `Effect.orDie` that can strand a handing-off round
 `running` if a target flow's payload codec rejects the handoff payload. It is a
@@ -245,26 +245,26 @@ The six named pins, run explicitly (load 4.74):
 Every command from the worktree root's package directories, `corepack pnpm`
 install `--frozen-lockfile --offline` (exit 0, no lockfile change).
 
-| Package | Command | Load at start | Result |
-| --- | --- | --- | --- |
-| engine-store | `eslint src --max-warnings=0`, `dprint check`, `tsc -b`, `tsc -p tsconfig.test.json --noEmit`, `scripts/circular.mjs` | 2.72 | all exit 0 |
-| engine-store | `vitest run` (coverage enforced) | 2.72 | 102 files, 821 tests passed; statements 100% (3566/3566), branches 100% (1786/1786), functions 100% (933/933), lines 100% (3232/3232) |
-| agent | `eslint src --max-warnings=0`, `dprint check`, `tsc -b`, `tsc -p tsconfig.test.json --noEmit`, `scripts/circular.mjs` | 2.80 | all exit 0 |
-| agent | `vitest run` (coverage enforced) | 5.02 | 29 files, 424 tests passed; statements 100% (1256/1256), branches 100% (583/583), functions 100% (426/426), lines 100% (1131/1131) |
-| control | `tsc -b`, `vitest run` | 3.91 | 27 files, 229 tests passed |
-| time-travel | `tsc -b`, `vitest run` | 7.68 | 34 files, 312 tests passed |
-| cli | `tsc -b`, `vitest run` | 6.61 | 36 files, 608 tests passed |
-| gateway | `tsc -b`, `vitest run` | 5.29 | 10 files, 94 tests passed |
-| flows | `tsc -b`, `vitest run` (after the known-files regeneration) | 3.77 | 12 files, 403 tests passed |
-| registry | `tsc -b`, `vitest run` | 3.75 | 15 files, 319 tests passed |
-| create-app | `tsc -b`, `vitest run` | 3.75 | 8 files, 93 tests passed |
-| apps/review | `tsc -p tsconfig.json --noEmit`, `bun test tests` | 4.01 | 569 pass, 1 skip, 0 fail across 69 files |
+| Package      | Command                                                                                                               | Load at start | Result                                                                                                                                |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| engine-store | `eslint src --max-warnings=0`, `dprint check`, `tsc -b`, `tsc -p tsconfig.test.json --noEmit`, `scripts/circular.mjs` | 2.72          | all exit 0                                                                                                                            |
+| engine-store | `vitest run` (coverage enforced)                                                                                      | 2.72          | 102 files, 821 tests passed; statements 100% (3566/3566), branches 100% (1786/1786), functions 100% (933/933), lines 100% (3232/3232) |
+| agent        | `eslint src --max-warnings=0`, `dprint check`, `tsc -b`, `tsc -p tsconfig.test.json --noEmit`, `scripts/circular.mjs` | 2.80          | all exit 0                                                                                                                            |
+| agent        | `vitest run` (coverage enforced)                                                                                      | 5.02          | 29 files, 424 tests passed; statements 100% (1256/1256), branches 100% (583/583), functions 100% (426/426), lines 100% (1131/1131)    |
+| control      | `tsc -b`, `vitest run`                                                                                                | 3.91          | 27 files, 229 tests passed                                                                                                            |
+| time-travel  | `tsc -b`, `vitest run`                                                                                                | 7.68          | 34 files, 312 tests passed                                                                                                            |
+| cli          | `tsc -b`, `vitest run`                                                                                                | 6.61          | 36 files, 608 tests passed                                                                                                            |
+| gateway      | `tsc -b`, `vitest run`                                                                                                | 5.29          | 10 files, 94 tests passed                                                                                                             |
+| flows        | `tsc -b`, `vitest run` (after the known-files regeneration)                                                           | 3.77          | 12 files, 403 tests passed                                                                                                            |
+| registry     | `tsc -b`, `vitest run`                                                                                                | 3.75          | 15 files, 319 tests passed                                                                                                            |
+| create-app   | `tsc -b`, `vitest run`                                                                                                | 3.75          | 8 files, 93 tests passed                                                                                                              |
+| apps/review  | `tsc -p tsconfig.json --noEmit`, `bun test tests`                                                                     | 4.01          | 569 pass, 1 skip, 0 fail across 69 files                                                                                              |
 
 Load stayed between 1.9 and 7.7 throughout, below the 40 guard, so every suite
 ran at its configured worker count and no suite needed an isolated rerun.
 
 `known-files.d.ts` was regenerated with `node scripts/generate-known-files.mjs`
-(4654 → 4658 workspace files) in its own commit; no `BUILD.ts` changed, so
+(4654 → 4658 workspace files) in its own commit; no `PACKAGE.ts` changed, so
 `tsconfig.json` and `.github/workflows/ci.yml` are untouched, and the new module
 adds no coverage-ignore directive, so the `packages/flows`
 `vitestCoverageIsolation` allowlist is unchanged.

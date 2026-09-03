@@ -20,7 +20,7 @@ The target name is unchanged, and what it does is not. It used to run the instal
 flow; installing is now the [Install](./install.md) target's job. This target owns
 the workspace _definition_ file, which decides which directories are packages,
 which dependencies may run install scripts, and how workspace links resolve.
-All three are build definition, so they belong in BUILD.ts rather than in a
+All three are build definition, so they belong in PACKAGE.ts rather than in a
 second file free to disagree with it.
 
 ## Attributes
@@ -34,7 +34,7 @@ second file free to disagree with it.
 | `mode`                  | `"write" \| "check"`      | `"check"` | Write the file, or verify the checked-in copy |
 
 A manager that is not pnpm is refused at construction, not at execution: a
-BUILD.ts file that declares npm and then asks for a pnpm workspace definition
+PACKAGE.ts file that declares npm and then asks for a pnpm workspace definition
 is wrong when it is written, and reporting it then names the line to edit.
 
 Package entries are plain strings, not `Input.glob` declarations. A generator's
@@ -47,7 +47,7 @@ glob patterns and `*` is YAML's alias sigil. Mapping keys are quoted only when
 YAML would otherwise read them as another type, so `dprint` stays bare while
 `"@journeyapps/wa-sqlite"` and `"no"` are quoted.
 
-`allowBuilds` entries are sorted by name, so reordering a BUILD.ts literal is
+`allowBuilds` entries are sorted by name, so reordering a PACKAGE.ts literal is
 not reported as drift.
 
 ## Status

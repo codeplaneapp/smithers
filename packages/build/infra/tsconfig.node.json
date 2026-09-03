@@ -7,7 +7,7 @@
     ]
   },
   "include": [
-    "BUILD.ts",
+    "PACKAGE.ts",
     "alchemy.run.ts",
     "deployment.ts",
     "scripts/**/*.ts",

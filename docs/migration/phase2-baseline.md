@@ -13,26 +13,26 @@ classification tables below. Host: macOS arm64, Node 24.18.0, Bun
 
 ## 1. Commands and results
 
-| Command | Exit | Final line |
-| --- | --- | --- |
-| `corepack pnpm install --frozen-lockfile --offline` | 0 | `Already up to date` (58 workspace projects) |
-| `bun install --frozen-lockfile --offline --lockfile-only` | 0 | `Saved bun.lock (2174 packages)`; byte-identical across three consecutive runs |
-| `corepack pnpm -r --no-bail --if-present run check` | 0 | 53 packages, `packages/build-cli check: Done` |
-| `corepack pnpm -r --no-bail --if-present run test` | 1 | `Summary: 2 fails, 55 passes` |
-| `corepack pnpm -r --no-bail --if-present run lint` | 0 | every package `Done` |
-| `corepack pnpm -r --no-bail --if-present run build` | 0 | every package `Done` |
-| `corepack pnpm run test:jsdoc` | 0 | `pass 5 / fail 0` |
-| `corepack pnpm run browser` | 0 | `browser contract holds: 28 browser entry points, 7 Node-only` |
-| `node scripts/check-single-effect-version.mjs` | 0 | `effect@4.0.0-rc.108 everywhere (58 sources)` |
-| `node scripts/check-dependency-boundaries.mjs` | 0 | `Dependency boundary check passed for 58 package(s).` |
-| `node scripts/check-local-smithers.mjs` | 0 | `internal scripts run the Smithers working tree` |
-| `node scripts/check-npm-dedupe.mjs` | 1 | `effect resolves to 24 copie(s) at 4.0.0-rc.108, 4.0.0-rc.112` |
-| `node scripts/check-legacy-absent.mjs` | 1 | 947 files remain under `legacy/` (expected until Phase 4 ends) |
-| `pnpm exec smthrs lint '//:ci'` | 0 | generated workflow matches the checked-in file |
-| `pnpm exec smthrs lint '//:tsconfig'` | 0 | generated tsconfig matches the checked-in file |
-| `pnpm exec smthrs build '//packages/...'` | 0 | 99 targets, 0 failed |
-| `pnpm exec smthrs ci '//packages/...' --jobs 4` | 1 | 334 targets, 1 failed (`//packages/build-cli:test`, Docker) |
-| `pnpm exec smthrs test '//scripts/...'` | 1 | 12 targets, 2 failed |
+| Command                                                   | Exit | Final line                                                                     |
+| --------------------------------------------------------- | ---- | ------------------------------------------------------------------------------ |
+| `corepack pnpm install --frozen-lockfile --offline`       | 0    | `Already up to date` (58 workspace projects)                                   |
+| `bun install --frozen-lockfile --offline --lockfile-only` | 0    | `Saved bun.lock (2174 packages)`; byte-identical across three consecutive runs |
+| `corepack pnpm -r --no-bail --if-present run check`       | 0    | 53 packages, `packages/build-cli check: Done`                                  |
+| `corepack pnpm -r --no-bail --if-present run test`        | 1    | `Summary: 2 fails, 55 passes`                                                  |
+| `corepack pnpm -r --no-bail --if-present run lint`        | 0    | every package `Done`                                                           |
+| `corepack pnpm -r --no-bail --if-present run build`       | 0    | every package `Done`                                                           |
+| `corepack pnpm run test:jsdoc`                            | 0    | `pass 5 / fail 0`                                                              |
+| `corepack pnpm run browser`                               | 0    | `browser contract holds: 28 browser entry points, 7 Node-only`                 |
+| `node scripts/check-single-effect-version.mjs`            | 0    | `effect@4.0.0-rc.108 everywhere (58 sources)`                                  |
+| `node scripts/check-dependency-boundaries.mjs`            | 0    | `Dependency boundary check passed for 58 package(s).`                          |
+| `node scripts/check-local-smithers.mjs`                   | 0    | `internal scripts run the Smithers working tree`                               |
+| `node scripts/check-npm-dedupe.mjs`                       | 1    | `effect resolves to 24 copie(s) at 4.0.0-rc.108, 4.0.0-rc.112`                 |
+| `node scripts/check-legacy-absent.mjs`                    | 1    | 947 files remain under `legacy/` (expected until Phase 4 ends)                 |
+| `pnpm exec smthrs lint '//:ci'`                           | 0    | generated workflow matches the checked-in file                                 |
+| `pnpm exec smthrs lint '//:tsconfig'`                     | 0    | generated tsconfig matches the checked-in file                                 |
+| `pnpm exec smthrs build '//packages/...'`                 | 0    | 99 targets, 0 failed                                                           |
+| `pnpm exec smthrs ci '//packages/...' --jobs 4`           | 1    | 334 targets, 1 failed (`//packages/build-cli:test`, Docker)                    |
+| `pnpm exec smthrs test '//scripts/...'`                   | 1    | 12 targets, 2 failed                                                           |
 
 Every number in this table is a Phase 2 snapshot at `b8af974334`, not a current
 reading. Two things have moved since: Phase 3 renamed the build CLI's bin from
@@ -51,19 +51,19 @@ across `examples`, `packages/build/infra`, `engine`, `jj`, `testing`, and
 
 ### 2.1 `pnpm -r run test` (2 packages)
 
-| Package | Failing tests | Classification |
-| --- | --- | --- |
-| `examples` | 1 of 14: `12-agent-live-smoke > runs the assembled agent stack against a real OpenAI seat` | **Environmental.** The seat returns `You have no credits remaining`. Named in the reference baseline. `11-agent-step` now passes, so the reference's two-test entry has shrunk to one. |
-| `packages/build-cli` | 3 of 813, all in `test/ChainExecution.test.ts` `Docker package execution` | **Environmental.** `docker info` exits 1 on this host; the CLI is installed but no daemon runs. Named in the reference baseline. |
+| Package              | Failing tests                                                                              | Classification                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `examples`           | 1 of 14: `12-agent-live-smoke > runs the assembled agent stack against a real OpenAI seat` | **Environmental.** The seat returns `You have no credits remaining`. Named in the reference baseline. `11-agent-step` now passes, so the reference's two-test entry has shrunk to one. |
+| `packages/build-cli` | 3 of 813, all in `test/ChainExecution.test.ts` `Docker package execution`                  | **Environmental.** `docker info` exits 1 on this host; the CLI is installed but no daemon runs. Named in the reference baseline.                                                       |
 
 Nothing else fails. `packages/sync`'s `ServerSoak`, listed as nondeterministic in
 the reference, passed on every run here.
 
 ### 2.2 `smthrs test '//scripts/...'` (2 targets)
 
-| Target | Failure | Classification |
-| --- | --- | --- |
-| `//scripts:releaseVersion` | `apps/ui: dependencies.@smthrs/ui is 0.33.0, expected 0.1.0` | **Pre-existing, deferred with evidence.** See section 5. |
+| Target                      | Failure                                                                                                                                               | Classification                                                                                                                                                                                                                                                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `//scripts:releaseVersion`  | `apps/ui: dependencies.@smthrs/ui is 0.33.0, expected 0.1.0`                                                                                          | **Pre-existing, deferred with evidence.** See section 5.                                                                                                                                                                                                                                                             |
 | `//scripts:testPinRegister` | `packages/create-app/template/aomi/test/tevm.test.ts:215` `describe.skip("layerTevm against a mainnet fork")` is not in the "Surviving pins" register | **Imported content.** The file arrived with the catch-up commit and is unmodified here. rc-contract section 9 states one documented pin; the catch-up added a second. Fix: a row in `docs/alpha-notes.md` "Surviving pins" plus its rationale paragraph, owned by ledger row DOC-5 (`docs/alpha-notes.md`, phase 3). |
 
 `//scripts:releasePack` and `//scripts:releaseSmoke` also fail until the
@@ -84,11 +84,11 @@ the missing esbuild step to the `lib` target.
 Three suites went red because the reconciliation changed what the imported
 tooling walks. All three are fixed in this change and pass.
 
-| Suite | Cause | Fix |
-| --- | --- | --- |
-| `packages/targets` `GeneratedRootFiles` | Root `BUILD.ts` gained `legacy/**` in `exclude`; the drift check restates the declaration as a literal. | The literal now carries `legacy/**` with the reason. |
-| `packages/flows` `vitestCoverageIsolation` (10 tests) | The universe is every `packages/*` directory with a `package.json`. The two retained 0.x UI kits carry 0.x tooling and satisfy none of the flows shape. | A named `zeroXUiKits` carve-out, deleted by the Phase 4 UI port. |
-| `packages/observability` `NoConsole` | The guard walks every `packages/*/src` and found `packages/ui/src/sandbox/WebPreview.tsx`. | The same two names, skipped, with the reason: the guard's subject is engine source that must log through `@smthrs/observability`. |
+| Suite                                                 | Cause                                                                                                                                                   | Fix                                                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/targets` `GeneratedRootFiles`               | Root `PACKAGE.ts` gained `legacy/**` in `exclude`; the drift check restates the declaration as a literal.                                               | The literal now carries `legacy/**` with the reason.                                                                              |
+| `packages/flows` `vitestCoverageIsolation` (10 tests) | The universe is every `packages/*` directory with a `package.json`. The two retained 0.x UI kits carry 0.x tooling and satisfy none of the flows shape. | A named `zeroXUiKits` carve-out, deleted by the Phase 4 UI port.                                                                  |
+| `packages/observability` `NoConsole`                  | The guard walks every `packages/*/src` and found `packages/ui/src/sandbox/WebPreview.tsx`.                                                              | The same two names, skipped, with the reason: the guard's subject is engine source that must log through `@smthrs/observability`. |
 
 ## 3. Retained 0.x packages under `packages/`
 
@@ -102,9 +102,9 @@ that inventory in four places. Two are the conformance carve-outs in section
 - Root `packageDefaults` synthesized a `StandardPackage` (tsc library build,
   vitest at 100% coverage, eslint, dprint) for each. `ui-styleguide` has no
   `tsconfig.json` and `ui` types against an uninstalled `bun-types`, so
-  `smthrs build '//packages/...'` failed on both. Each now ships a `BUILD.ts`
+  `smthrs build '//packages/...'` failed on both. Each now ships a `PACKAGE.ts`
   declaring the one target it can honor, its existing `bun test tests` suite.
-  A directory holding a `BUILD.ts` opts out of the synthesis, which is the
+  A directory holding a `PACKAGE.ts` opts out of the synthesis, which is the
   sanctioned mechanism. Both suites pass: 904 tests in `ui`, 53 in
   `ui-styleguide`.
 - `packages/ui` declared `build` (tsup) and `typecheck` (`bun-types`) scripts
@@ -123,15 +123,15 @@ that inventory in four places. Two are the conformance carve-outs in section
 `legacy/` holds 947 tracked source files that later phases port from. It is
 excluded from every walk the tooling performs:
 
-| Walk | Mechanism |
-| --- | --- |
-| pnpm workspace | never a member of `pnpm-workspace.yaml` |
-| root TypeScript program | `legacy/**` in root `BUILD.ts` `exclude`, rendered into `tsconfig.json` |
+| Walk                                                                   | Mechanism                                                                                                            |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| pnpm workspace                                                         | never a member of `pnpm-workspace.yaml`                                                                              |
+| root TypeScript program                                                | `legacy/**` in root `PACKAGE.ts` `exclude`, rendered into `tsconfig.json`                                            |
 | `@smthrs/targets` declared-input scan, eslint, vitest, dprint, ripgrep | `legacy/.gitignore` (`*` with `!.gitignore`); `known-files.d.ts` lists one path under `legacy/`, its own ignore file |
-| `check-single-effect-version` | `SKIPPED_DIRECTORIES` |
-| `check-dependency-boundaries` | `ignoredDirs` |
-| `check-local-smithers` | ignore list |
-| Docker build context | `.dockerignore` |
+| `check-single-effect-version`                                          | `SKIPPED_DIRECTORIES`                                                                                                |
+| `check-dependency-boundaries`                                          | `ignoredDirs`                                                                                                        |
+| `check-local-smithers`                                                 | ignore list                                                                                                          |
+| Docker build context                                                   | `.dockerignore`                                                                                                      |
 
 `pnpm run check:legacy-absent` (`scripts/check-legacy-absent.mjs`) is the Phase 7
 gate. It fails while any file other than `legacy/.gitignore` remains, which is

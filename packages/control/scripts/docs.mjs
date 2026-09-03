@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -83,7 +83,7 @@ const replaceRegion = (source, name, body) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("control docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("control docs: Manifest.ts and package.json names differ")
 
 const barrel = read(join(packageRoot, "src", "index.ts"))
 const modules = [...barrel.matchAll(/export \* as (\w+) from "\.\/([\w/]+)\.ts"/g)]
@@ -126,7 +126,7 @@ description: "${manifest.description}."
 
 ${paragraphs(moduleDoc(barrel))}
 
-${read(join(packageRoot, Package.api.source)).trim()}
+${read(join(packageRoot, Manifest.api.source)).trim()}
 
 ## Exports
 
@@ -141,19 +141,19 @@ ${table}
 // five exported modules were missing from it entirely.
 const readmePath = "packages/control/README.md"
 const outputs = new Map([
-  [Package.api.target, apiPage],
+  [Manifest.api.target, apiPage],
   [readmePath, replaceRegion(read(join(repoRoot, readmePath)), "control-modules", table)]
 ])
-for (const snippet of Package.snippets) {
+for (const snippet of Manifest.snippets) {
   const current = outputs.get(snippet.target) ?? read(join(repoRoot, snippet.target))
   outputs.set(snippet.target, replaceRegion(current, snippet.region, read(join(packageRoot, snippet.source))))
 }
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/control")) {
-    failures.push(`${path}: must reference ${Package.name} and /api/control`)
+  if (!content.includes(Manifest.name) || !content.includes("/api/control")) {
+    failures.push(`${path}: must reference ${Manifest.name} and /api/control`)
   }
 }
 for (const [path, content] of outputs) {

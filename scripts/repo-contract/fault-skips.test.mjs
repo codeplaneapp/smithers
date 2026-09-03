@@ -83,7 +83,7 @@ const requiredGates = new Map([
  * logger, the gate went green with no edit to the case, and `e2e-faults` became
  * a required CI job. While this map is empty the matrix is expected to be green
  * end to end; adding an entry back means putting `continueOnError` back on that
- * job in the root `BUILD.ts` in the same commit.
+ * job in the root `PACKAGE.ts` in the same commit.
  */
 const requiredRedGates = new Map([])
 
@@ -195,7 +195,7 @@ describe("the fault-suite skip audit", () => {
     // is enforced by nothing, and the two limitation cases below pass over an
     // empty collection. A red gate the matrix is required to carry means
     // `e2e-faults` cannot fail the pipeline, and an empty map means it must.
-    const build = readFileSync(join(root, "BUILD.ts"), "utf8")
+    const build = readFileSync(join(root, "PACKAGE.ts"), "utf8")
     const faultsJob = build.slice(build.indexOf("id: \"e2e-faults\""))
     const jobBody = faultsJob.slice(0, faultsJob.indexOf("\n    }"))
     const advisory = /continueOnError:\s*true/.test(jobBody)

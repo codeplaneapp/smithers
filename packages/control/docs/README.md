@@ -16,7 +16,7 @@ them are inside the package:
 `docs/pages/api/control.md` is a generated output. Do not edit it. Run
 `node packages/control/scripts/docs.mjs` from the repository root to write it,
 and `node packages/control/scripts/docs.mjs --check` to fail on drift. The
-`docsPages` target in `packages/control/BUILD.ts` runs the check form in CI, so
+`docsPages` target in `packages/control/PACKAGE.ts` runs the check form in CI, so
 a JSDoc edit cannot land without regenerating the page.
 
 Generated content must contain no em-dashes; the generator refuses them.

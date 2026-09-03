@@ -1,11 +1,11 @@
 # PackageJson
 
-Declares `package.json` in `BUILD.ts` and expands it into separate check, write,
+Declares `package.json` in `PACKAGE.ts` and expands it into separate check, write,
 and LLM-refresh targets.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const template = Smithers.PackageJsonTemplate.make({
   license: "MIT",
@@ -52,7 +52,7 @@ The declaration above becomes `packageJsonCheck`, `packageJsonWrite`, and
 
 ## Templates and merge semantics
 
-`PackageJsonTemplate.make` is an inert root `BUILD.ts` declaration for shared
+`PackageJsonTemplate.make` is an inert root `PACKAGE.ts` declaration for shared
 fields such as license, author, engines, and the standard `test` and
 `test:coverage` scripts. The package is deep-merged over the template:
 
@@ -98,7 +98,7 @@ smithers-build run //:newPackage --name @smthrs/widget
 
 It creates `packages/widget/package.json`, `tsconfig.json`, `README.md`,
 `src/index.ts`, and a test stub. It refuses an existing directory and writes no
-`BUILD.ts`; the root `PackageDefaults` synthesizes the standard build, test, lint,
+`PACKAGE.ts`; the root `PackageDefaults` synthesizes the standard build, test, lint,
 docs, and PackageJson targets.
 
 ## Publication and lint coherence

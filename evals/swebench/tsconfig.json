@@ -13,5 +13,5 @@
     "sourceMap": false
   },
   "include": ["*.ts"],
-  "exclude": ["BUILD.ts"]
+  "exclude": ["PACKAGE.ts"]
 }

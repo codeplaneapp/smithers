@@ -31,7 +31,7 @@ the published `1.0.0-rc.0` packages, so every `@since` tag in `src/` reads
   enforces the invariant in SQLite.
 - `recordOnce` now accepts only the two possible affected-row counts, zero or
   one, and rolls back on any contradictory driver result.
-- Added package-owned generated documentation: `Package.ts`, `BUILD.ts`, and
+- Added package-owned generated documentation: `docs/Manifest.ts`, `PACKAGE.ts`, and
   `scripts/docs.mjs` project categorized source exports into `docs/exports.md`,
   while `test/docs.test.ts` keeps the curated API table synchronized.
 

@@ -66,7 +66,7 @@ dryRun: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true)))
 ```
 
 Every tool-running catalog target takes a `cwd` attribute defaulting to `"."`. Do
-the same in a new target: a package-level `BUILD.ts` needs to say where its tool
+the same in a new target: a package-level `PACKAGE.ts` needs to say where its tool
 runs.
 
 Keep attrs declarative. Both the collector and the key encoder walk them, and the
@@ -180,7 +180,7 @@ fails the target, exactly as it does in Bazel. An empty directory is a valid
 output; a missing path is not.
 
 The `outputs` metadata a target declares is validated when a target is
-constructed, so a bad declaration fails the BUILD.ts load with a message naming
+constructed, so a bad declaration fails the PACKAGE.ts load with a message naming
 the target. Keep every declared path workspace-relative, below `cwd`, outside
 `.flows` and `.git`, and non-overlapping: `dist` and `dist/index.js` cannot both
 be outputs of one target. [ToolBuild](../reference/targets/tool-build.md#what-a-declaration-may-name)

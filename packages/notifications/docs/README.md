@@ -1,12 +1,12 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
 contract for `@smthrs/notifications`. Generated pages under `docs/pages` are
 outputs.
 
 `scripts/docs.mjs` builds `docs/pages/api/notifications.md` from the barrel's
 module JSDoc, the prose in `api.md`, and the `@category` summary of every
-documented export, then verifies the reference list declared by `Package.ts`
+documented export, then verifies the reference list declared by `docs/Manifest.ts`
 still points readers to `/api/notifications`. It writes no snippet regions: no
 shared repository page carries a generated fragment for this package today.
 

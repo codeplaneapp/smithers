@@ -15,7 +15,7 @@
 - Added `ModelError.body` and `ModelError.bodyTruncated`: the redacted, 16 KiB-capped provider response body an executor failure was classified from. Both sit outside the durable schema and are defined non-enumerably, so a journal, a `JSON.stringify` and a structural comparison see exactly what they saw before, because a provider body is diagnostic text and not run state.
 - Added `ModelError.isQuotaExhausted` and `ModelError.path`. The refinement gives an exhausted account one typed code across every provider; the path names the offending request member on a preparation failure and never carries its value.
 - Added `Framing.ndjson` for newline-delimited JSON transports.
-- Added package-owned documentation: `docs/`, `Package.ts`, and
+- Added package-owned documentation: `docs/`, `docs/Manifest.ts`, and
   `scripts/docs.mjs` generate `docs/reference.md`,
   `docs/pages/api/model.md`, and the public API list in `README.md` from package
   sources.

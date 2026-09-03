@@ -45,7 +45,7 @@ export const releaseSmoke = Smithers.NodeTest({
 ## Runners
 
 The runner is a discriminated union, so the fields one form does not have are
-fields a BUILD.ts file cannot write: no argument list on a test-runner run, no
+fields a PACKAGE.ts file cannot write: no argument list on a test-runner run, no
 file list on an entry-point run.
 
 | Constructor                | Renders (Node)          | Renders (Bun)          |

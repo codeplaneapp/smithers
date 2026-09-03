@@ -57,7 +57,7 @@
 - Added transient sealed-model retries while preserving non-retryable model
   failures.
 
-- Added package-owned documentation: `Package.ts`, `docs/`, and
+- Added package-owned documentation: `docs/Manifest.ts`, `docs/`, and
   `scripts/docs.mjs` generate `docs/pages/api/agent.md` from the package's own
   JSDoc and prose, so the API page has one source rather than three.
 

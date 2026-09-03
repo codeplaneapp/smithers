@@ -246,5 +246,5 @@ print the envelope they always did.
 Child output does not stream, so `toolOutput` has no producer and there is no
 grouped or prefixed log mode; the failure tail is the whole of a tool's
 voice. There is no interactive pane, no keybindings, no terminal title, and
-no GitHub Actions log folding. Package-mode `graph` has never had a Mermaid
+no GitHub Actions log folding. Build-system `graph` has never had a Mermaid
 renderer; `--mermaid` there still returns the text graph in the envelope.

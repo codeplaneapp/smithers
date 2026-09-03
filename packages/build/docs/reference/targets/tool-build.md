@@ -73,7 +73,7 @@ target instead of digesting content the workspace does not own.
 
 ### What a declaration may name
 
-A declared path is checked where it is written, so a BUILD.ts that cannot name
+A declared path is checked where it is written, so a PACKAGE.ts that cannot name
 an in-workspace output fails to load rather than failing at every execution. The
 same check runs again at execution, because the paths also arrive through an
 action payload and a cache entry. Refused:

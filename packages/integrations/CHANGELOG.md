@@ -29,7 +29,7 @@ listed a changelog; this is it.
   Telegram send are legible in the journal rather than only on the client
   error.
 - Added `Environment.ambientWorkingDirectory`, package-owned documentation
-  under `docs/`, and the `BUILD.ts` target that generates the published API
+  under `docs/`, and the `PACKAGE.ts` target that generates the published API
   page from it.
 - Added `Core.ActionFailure.isMessageId` and `Core.ActionFailure.MessageId`,
   the one rule the Telegram guard, the journal conversion, and the persisted

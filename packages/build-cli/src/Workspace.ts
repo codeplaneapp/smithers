@@ -9,6 +9,7 @@ import { isFilegroup } from "@smthrs/targets/Filegroup"
 import { writeGeneratedFile } from "@smthrs/targets/GeneratedFile"
 import * as Input from "@smthrs/targets/Input"
 import * as Nix from "@smthrs/targets/Nix"
+import * as PackageValue from "@smthrs/targets/Package"
 import * as PackageDefaults from "@smthrs/targets/PackageDefaults"
 import * as PackageJson from "@smthrs/targets/PackageJson"
 import * as RemoteCache from "@smthrs/targets/RemoteCache"
@@ -372,8 +373,9 @@ const namespaces = new Map<string, Promise<unknown>>()
  * dependency to its label by.
  */
 const moduleKey = async (entry: SafeFs.Entry): Promise<string> => {
-  const digest = await SafeFs.digestFile(entry.path, { what: "BUILD.ts" })
-  if (digest === undefined) throw new Error(`BUILD.ts no longer exists: ${entry.path}`)
+  const what = NodePath.basename(entry.path)
+  const digest = await SafeFs.digestFile(entry.path, { what })
+  if (digest === undefined) throw new Error(`${what} no longer exists: ${entry.path}`)
   return `${entry.path}\0${digest}`
 }
 
@@ -393,7 +395,41 @@ const moduleKey = async (entry: SafeFs.Entry): Promise<string> => {
 const buildEntry = (
   root: string,
   relative: string
-): Promise<SafeFs.Entry | undefined> => SafeFs.resolveFile(NodePath.join(root, relative), { root, what: "BUILD.ts" })
+): Promise<SafeFs.Entry | undefined> =>
+  SafeFs.resolveFile(NodePath.join(root, relative), { root, what: NodePath.basename(relative) })
+
+/**
+ * Declaration filenames the compatibility index recognizes, in preference order.
+ *
+ * @category discovery
+ * @since 0.1.0
+ */
+export const declarationFileNames = ["PACKAGE.ts", "BUILD.ts"] as const
+
+const isDeclarationFile = (file: string): boolean =>
+  declarationFileNames.some((name) => file === name || file.endsWith(`/${name}`))
+
+const rootDeclarationEntry = async (root: string): Promise<SafeFs.Entry | undefined> => {
+  const packageEntry = await buildEntry(root, "PACKAGE.ts")
+  const legacyEntry = await buildEntry(root, "BUILD.ts")
+  if (packageEntry !== undefined && legacyEntry !== undefined) {
+    throw new Error("the workspace root holds both PACKAGE.ts and BUILD.ts; keep PACKAGE.ts and delete BUILD.ts")
+  }
+  return packageEntry ?? legacyEntry
+}
+
+const exportedTargets = (namespace: unknown): Array<Target.AnyTarget> => {
+  const found: Array<Target.AnyTarget> = []
+  for (const [, value] of Object.entries(Object(namespace)).sort(([left], [right]) => byCodeUnit(left, right))) {
+    if (PackageValue.isPackage(value)) {
+      const map: Readonly<Record<string, Target.AnyTarget>> = value
+      for (const key of PackageValue.metadata(value).keys) found.push(map[key]!)
+    } else if (Target.isTarget(value)) {
+      found.push(value)
+    }
+  }
+  return found
+}
 
 /**
  * Imports one BUILD.ts module through tsx's programmatic loader, at most once
@@ -479,7 +515,7 @@ export const resolveConfig = async (
   override?: string | undefined
 ): Promise<ResolvedConfig> => {
   const canonical = await SafeFs.canonicalRoot(root)
-  const entry = await buildEntry(canonical, "BUILD.ts")
+  const entry = await rootDeclarationEntry(canonical)
   const declaration = entry === undefined ? undefined : declaredConfig(await importNamespace(entry))
   const declared = declaration ?? Config.Workspace()
   return {
@@ -505,11 +541,10 @@ export const resolveConfig = async (
  */
 export const resolveInstallAttrs = async (root: string): Promise<unknown> => {
   const canonical = await SafeFs.canonicalRoot(root)
-  const entry = await buildEntry(canonical, "BUILD.ts")
+  const entry = await rootDeclarationEntry(canonical)
   if (entry === undefined) return undefined
   const namespace = await importNamespace(entry)
-  for (const [, value] of Object.entries(Object(namespace)).sort(([left], [right]) => byCodeUnit(left, right))) {
-    if (!Target.isTarget(value)) continue
+  for (const value of exportedTargets(namespace)) {
     const metadata = Target.metadata(value)
     if (metadata.target === "Install") return metadata.attrs
   }
@@ -634,7 +669,7 @@ export const resolveRemoteCache = async (
   options: { readonly environment?: Readonly<Record<string, string | undefined>> | undefined } = {}
 ): Promise<ResolvedRemoteCache | undefined> => {
   const canonical = await SafeFs.canonicalRoot(root)
-  const entry = await buildEntry(canonical, "BUILD.ts")
+  const entry = await rootDeclarationEntry(canonical)
   const resolved = remoteCacheOf(
     entry === undefined ? undefined : declaredRemoteCache(await importNamespace(entry)),
     endpointOverride
@@ -1106,7 +1141,29 @@ export class Workspace {
     // module that bounds everything else explicitly.
     this.fileSet = new Set(files)
     this.signal = signal
-    this.buildFiles = files.filter((file) => file === "BUILD.ts" || file.endsWith("/BUILD.ts"))
+    const embedded = new Set<string>()
+    for (const file of files) {
+      const match = /^(.+)\/WORKSPACE\.ts$/.exec(file)
+      if (match === null) continue
+      const directory = match[1]!
+      embedded.add(directory.endsWith("/.smithers") ? directory.slice(0, -"/.smithers".length) : directory)
+    }
+    const inEmbeddedWorkspace = (file: string): boolean => {
+      for (const directory of embedded) {
+        if (file.startsWith(`${directory}/`)) return true
+      }
+      return false
+    }
+    this.buildFiles = files.filter((file) => isDeclarationFile(file) && !inEmbeddedWorkspace(file))
+    const directories = new Map<string, string>()
+    for (const file of this.buildFiles) {
+      const directory = posix(NodePath.dirname(file))
+      if (directories.has(directory)) {
+        const where = directory === "." ? "the workspace root" : `//${directory}`
+        throw new Error(`${where} holds both PACKAGE.ts and BUILD.ts; keep PACKAGE.ts and delete BUILD.ts`)
+      }
+      directories.set(directory, file)
+    }
   }
 
   /**
@@ -1161,7 +1218,12 @@ export class Workspace {
   }
 
   private buildForPackage(packagePath: string): string {
-    return packagePath === "" ? "BUILD.ts" : `${packagePath}/BUILD.ts`
+    const prefix = packagePath === "" ? "" : `${packagePath}/`
+    for (const name of declarationFileNames) {
+      const candidate = `${prefix}${name}`
+      if (this.buildFiles.includes(candidate)) return candidate
+    }
+    return `${prefix}${declarationFileNames[0]}`
   }
 
   /**
@@ -1172,7 +1234,7 @@ export class Workspace {
    */
   loadBuild(file: string): Promise<BuildModule> {
     const relative = this.relativeBuild(NodePath.isAbsolute(file) ? file : NodePath.join(this.root, file))
-    if (!this.buildFiles.includes(relative)) throw new Error(`BUILD.ts is not discoverable: ${relative}`)
+    if (!this.buildFiles.includes(relative)) throw new Error(`declaration module is not discoverable: ${relative}`)
     const existing = this.modules.get(relative)
     if (existing !== undefined) return existing
     const loaded = this.importBuild(relative)
@@ -1236,19 +1298,23 @@ export class Workspace {
 
   private async importBuild(relative: string): Promise<BuildModule> {
     const entry = await buildEntry(this.root, relative)
-    if (entry === undefined) throw new Error(`BUILD.ts no longer exists: ${relative}`)
+    if (entry === undefined) throw new Error(`declaration module no longer exists: ${relative}`)
     const namespace: unknown = await importNamespace(entry)
     if (typeof namespace !== "object" || namespace === null) {
-      throw new Error(`BUILD.ts did not evaluate to a module namespace: ${relative}`)
+      throw new Error(`declaration module did not evaluate to a module namespace: ${relative}`)
     }
     const packagePath = packagePathForBuild(relative)
     const targets = new Map<string, Target.AnyTarget>()
     const defaults: Array<PackageDefaults.PackageDefaults> = []
     const declarations: Array<readonly [string, PackageJson.Declaration]> = []
+    const packageExports: Array<readonly [string, PackageValue.PackageValue]> = []
+    const looseTargets: Array<readonly [string, Target.AnyTarget]> = []
     let environment: Nix.Environment | undefined
     for (const [name, value] of Object.entries(namespace).sort(([left], [right]) => byCodeUnit(left, right))) {
-      if (Target.isTarget(value)) {
-        this.register(targets, packagePath, name, value)
+      if (PackageValue.isPackage(value)) {
+        packageExports.push([name, value])
+      } else if (Target.isTarget(value)) {
+        looseTargets.push([name, value])
       } else if (PackageDefaults.isPackageDefaults(value)) {
         defaults.push(value)
         if (!this.defaultRules.some((entry) => entry.declaration === value)) {
@@ -1264,6 +1330,27 @@ export class Workspace {
         }
         environment = value
         this.environments.set(packagePath, value)
+      }
+    }
+    if (packageExports.length > 1) {
+      throw new Error(
+        `${relative} exports ${packageExports.length} Package values ` +
+          `(${packageExports.map(([name]) => name).join(", ")}); a declaration module exports exactly one`
+      )
+    }
+    const packaged = packageExports[0]
+    if (packaged !== undefined && looseTargets.length > 0) {
+      throw new Error(
+        `${relative} exports the Package value ${packaged[0]} and loose target exports ` +
+          `(${looseTargets.map(([name]) => name).join(", ")}); move every target into the Package map`
+      )
+    }
+    if (packaged === undefined) {
+      for (const [name, target] of looseTargets) this.register(targets, packagePath, name, target)
+    } else {
+      const map: Readonly<Record<string, Target.AnyTarget>> = packaged[1]
+      for (const key of PackageValue.metadata(packaged[1]).keys) {
+        this.register(targets, packagePath, key, map[key]!)
       }
     }
     // Manifest declarations expand in a second pass, after every target this
@@ -1303,7 +1390,7 @@ export class Workspace {
       const label = resolved.get(target)
       if (label === undefined) {
         throw new Error(
-          `a package manifest in ${relative} names a target with no label; export it from a BUILD.ts file`
+          `a package manifest in ${relative} names a target with no label; export it from a PACKAGE.ts module`
         )
       }
       return label
@@ -1356,7 +1443,8 @@ export class Workspace {
    * are discovered before any synthesis decision.
    */
   private async ensureDefaults(): Promise<void> {
-    if (this.buildFiles.includes("BUILD.ts")) await this.loadBuild("BUILD.ts")
+    const root = this.buildForPackage("")
+    if (this.buildFiles.includes(root)) await this.loadBuild(root)
   }
 
   private hasFile(path: string): boolean {
@@ -1366,6 +1454,7 @@ export class Workspace {
   private eligible(entry: PackageDefaultsEntry, directory: string): boolean {
     const prefix = directory === "" ? "" : `${directory}/`
     return this.hasFile(`${prefix}${entry.declaration.marker}`) &&
+      !declarationFileNames.some((name) => this.hasFile(`${prefix}${name}`)) &&
       !this.hasFile(`${prefix}${entry.declaration.unless}`) &&
       PackageDefaults.matches(entry.declaration, entry.packagePath, directory)
   }
@@ -1473,7 +1562,7 @@ export class Workspace {
     await this.ensureDefaults()
     const targets = this.synthesizeDirectory(packagePath)
     if (targets === undefined) {
-      throw new Error(`package //${packagePath} has no BUILD.ts and matches no default target`)
+      throw new Error(`package //${packagePath} has no PACKAGE.ts and matches no default target`)
     }
     return targets
   }
@@ -1532,7 +1621,9 @@ export class Workspace {
         return label
       }
     }
-    throw new Error(`could not derive a label for ${Target.metadata(target).target}; export it from a BUILD.ts file`)
+    throw new Error(
+      `could not derive a label for ${Target.metadata(target).target}; export it from a PACKAGE.ts module`
+    )
   }
 
   private packagePathOf(target: Target.AnyTarget): string {

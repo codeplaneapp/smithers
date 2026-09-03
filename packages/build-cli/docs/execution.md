@@ -2,7 +2,7 @@
 
 ## Write-set confinement
 
-A package-mode target that mutates the tree declares what it may write. Every
+A build-system target that mutates the tree declares what it may write. Every
 such run is wrapped: the tracked tree, the gitignored tree, and every escaping
 symlink are measured before the body runs and again after, and any change whose
 resolved location falls outside the declared write set is reverted and fails the

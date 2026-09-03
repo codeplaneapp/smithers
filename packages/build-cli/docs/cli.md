@@ -27,11 +27,11 @@ These take `--workspace, -w <dir>` (default: the current directory) and
 workspace paths, or of every path `--diff <base>` reports changed, from the
 PACKAGE.ts `owners` declarations. `graph` prints the target
 graph without executing it; `--mermaid` renders a flowchart instead of a text
-tree, in both BUILD mode and package mode.
+tree, in both build system and build system.
 
 `install` plans and executes the install Flow under the package manager and
-runtime named by the root BUILD.ts `Install` declaration. It falls back to pnpm
-on node when the workspace declares none, and refuses to run in package mode.
+runtime named by the root PACKAGE.ts `Install` declaration. It falls back to pnpm
+on node when the workspace declares none, and refuses to run in build system.
 
 ## Execution commands
 
@@ -51,7 +51,7 @@ workspace options above. `--plan` prints the inert plan instead of executing.
 
 `ci` executes build, test, lint, and documentation targets over one merged
 graph. `run` executes run targets; `--name` supplies a package name to scaffold
-targets. `target` is the bare-label form: it runs one package-mode label under
+targets. `target` is the bare-label form: it runs one build-system label under
 the verb its rule flavour implies.
 
 `--fix` applies agent lint fixes inside the declared `fixes` write set.
@@ -74,5 +74,5 @@ versions. It takes neither `--workspace` nor `--cache-dir`.
 
 The package requires Node 22.19 or newer. `src/main.js` boots the programmatic
 `tsx` loader that ships as a CLI dependency, then loads the TypeScript command
-modules and the declaration modules. BUILD.ts and PACKAGE.ts files must use
+modules and the declaration modules. PACKAGE.ts and PACKAGE.ts files must use
 erasable TypeScript syntax and top-level imports.

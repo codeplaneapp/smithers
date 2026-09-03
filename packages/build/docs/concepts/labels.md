@@ -1,6 +1,6 @@
 # Labels
 
-A label identifies one target. Labels come only from a `BUILD.ts` file's path and
+A label identifies one target. Labels come only from a `PACKAGE.ts` file's path and
 one of its named exports.
 
 ```
@@ -9,7 +9,7 @@ one of its named exports.
   package path  target name
 ```
 
-The package path is the `BUILD.ts` file's directory relative to the workspace
+The package path is the `PACKAGE.ts` file's directory relative to the workspace
 root, in posix form. The target name is the export name.
 
 ## Grammar
@@ -78,9 +78,9 @@ resolves to it in a workspace laid out like the Smithers repository.
 ## Recursive patterns
 
 `//...` and `//pkg/...` select targets rather than one target. They load every
-`BUILD.ts` in the selected subtree and return every target those modules export,
+`PACKAGE.ts` in the selected subtree and return every target those modules export,
 plus every target synthesized by a matching default target for a directory in the
-subtree without its own `BUILD.ts`.
+subtree without its own `PACKAGE.ts`.
 
 The prefix is a path prefix, not a glob. `//packages/...` selects
 `packages/flow`, `packages/flow/internal`, and every other package beneath
@@ -93,12 +93,12 @@ error, because you named it deliberately.
 ## Where labels do not appear
 
 Labels never appear in target attributes. A dependency is a direct import of
-another `BUILD.ts` file's export, and the imported value is placed in the attrs.
+another `PACKAGE.ts` file's export, and the imported value is placed in the attrs.
 The planner derives the label afterwards, from the module the value was exported
 from.
 
 ```ts
-import { lib as plan } from "../plan/BUILD.ts"
+import { lib as plan } from "../plan/PACKAGE.ts"
 
 export const lib = TsBuild({ packageManager, deps: [plan] /* ... */ })
 ```
@@ -109,15 +109,15 @@ See [Dependencies](dependencies.md).
 
 Deriving a label from a target value has two paths.
 
-- The target was already indexed, because its `BUILD.ts` was loaded. The label
+- The target was already indexed, because its `PACKAGE.ts` was loaded. The label
   comes from the index.
 - The target was reached through a direct import and its module was never loaded
-  as a package. The target call recorded its own `BUILD.ts` call-site path from the
+  as a package. The target call recorded its own `PACKAGE.ts` call-site path from the
   stack at construction time. The workspace loads that module and looks again.
 
 If neither path resolves, the command fails with
-`could not derive a label for <target>; export it from a BUILD.ts file`. The fix is
-to export the target: a target that no `BUILD.ts` exports has no label.
+`could not derive a label for <target>; export it from a PACKAGE.ts file`. The fix is
+to export the target: a target that no `PACKAGE.ts` exports has no label.
 
 `API-REVIEW.md` records the stack-derived source path as an open API question.
 

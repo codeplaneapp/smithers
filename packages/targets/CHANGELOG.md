@@ -43,7 +43,7 @@ of it.
   metadata table keys and builds every parsed table with a null prototype, so a
   manifest under `vendor/` can no longer mutate `Object.prototype`.
   `Cargo.metadataMatches` matches own properties only and is depth bounded.
-- `Cargo.Clippy` and `Cargo.Test` refuse a package-mode key passed without a
+- `Cargo.Clippy` and `Cargo.Test` refuse a build-system key passed without a
   crate selector instead of silently dropping it and constructing the BUILD-era
   check with invented defaults.
 - Target attrs are snapshotted before the schema reads them, so a `Proxy` is

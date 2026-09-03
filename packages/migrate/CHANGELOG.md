@@ -97,7 +97,7 @@
 - The package owns its documentation. `docs/api.md` and the JSDoc of every
   public module are the only sources of
   `docs/pages/migration/migrate-tool.md`, which `scripts/docs.mjs` writes and
-  whose `--check` form the `docsPages` target in `BUILD.ts` runs as part of
+  whose `--check` form the `docsPages` target in `PACKAGE.ts` runs as part of
   the workspace `ci` step; the page now carries a generated exports table, so
   a documented export cannot go unlisted.
 - The report's Verification section says that command output is captured

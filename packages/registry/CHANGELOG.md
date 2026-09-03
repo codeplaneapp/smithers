@@ -27,7 +27,7 @@
 - Added the `unreadable_pack_range` registry error code and the
   `unknown_pack_key`, `symlink_cycle`, `max_depth_exceeded`, and
   `entry_too_large` discovery warning codes.
-- Added `packages/registry/BUILD.ts`, `Package.ts`, and `scripts/docs.mjs`, so
+- Added `packages/registry/PACKAGE.ts`, `docs/Manifest.ts`, and `scripts/docs.mjs`, so
   the package is a target in the build graph and `docs/pages/api/registry.md` is
   generated from package-owned sources instead of hand-maintained.
 

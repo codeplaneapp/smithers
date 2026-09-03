@@ -29,7 +29,7 @@ line 25 pins the expected result: `corepack pnpm run browser` exits 0 with
 `browser contract holds: 28 browser entry points, 7 Node-only`. CI runs the
 same script through the `browser` job
 (`pnpm exec smithers-build test '//scripts:browserContract'`, target declared
-at `scripts/BUILD.ts:122`).
+at `scripts/PACKAGE.ts:122`).
 
 New since the `cd14388ed7` run: commit `6f4f2bacf9` (landed through the wave-8
 polish-2 merge `a42f8f6e5d`) moved the `BROWSER_SAFE` and `NODE_ONLY` lists out
@@ -49,17 +49,17 @@ therefore runs check-docs as well, which the task requires to agree with
 
 ## Environment
 
-| Item | Value |
-| --- | --- |
-| Checkout | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-4` |
-| HEAD | `341c8fa87e2dadbe80d0f0d3258dae112a7d03d3` (`v1/rc0-migration`, `docs(release): consumer overrides note and the browser-contract list's new home`); `git status --porcelain` empty before and after the run; `vendor/jj` submodule clean at `47589ada70c` |
-| Host | macOS, Darwin 25.2.0, arm64; load averages 3.37 4.30 5.40 at start, 6.71 4.86 5.48 before check-docs (other Phase 7 gates share the machine and checkout) |
-| Date | 2026-08-31 16:17:39 to 16:19:39 UTC (09:17 to 09:19 PT) |
-| Node | v24.18.0 (rc-contract floor `>=22.19.0`; CI pins 22.19.0) |
-| corepack / pnpm | 0.35.0 / 11.21.0 (`packageManager: pnpm@11.21.0`) |
-| Bun | 1.4.0 (not used by this gate) |
-| esbuild | 0.28.1 from the checkout's `node_modules` (root `devDependencies.esbuild: "0.28.1"`) |
-| Environment | `SMITHERS_HOME` stripped with `env -u` on every command; `SMITHERS_CACHE_URL` and `SMITHERS_CACHE_TOKEN` also stripped for the build-CLI route so no remote cache could answer |
+| Item            | Value                                                                                                                                                                                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Checkout        | `/Users/williamcory/.claude/projects/-Users-williamcory-smithers/a3338dfd-4a32-4134-9477-e9757af89d2c/migration/clean-checkout-4`                                                                                                                         |
+| HEAD            | `341c8fa87e2dadbe80d0f0d3258dae112a7d03d3` (`v1/rc0-migration`, `docs(release): consumer overrides note and the browser-contract list's new home`); `git status --porcelain` empty before and after the run; `vendor/jj` submodule clean at `47589ada70c` |
+| Host            | macOS, Darwin 25.2.0, arm64; load averages 3.37 4.30 5.40 at start, 6.71 4.86 5.48 before check-docs (other Phase 7 gates share the machine and checkout)                                                                                                 |
+| Date            | 2026-08-31 16:17:39 to 16:19:39 UTC (09:17 to 09:19 PT)                                                                                                                                                                                                   |
+| Node            | v24.18.0 (rc-contract floor `>=22.19.0`; CI pins 22.19.0)                                                                                                                                                                                                 |
+| corepack / pnpm | 0.35.0 / 11.21.0 (`packageManager: pnpm@11.21.0`)                                                                                                                                                                                                         |
+| Bun             | 1.4.0 (not used by this gate)                                                                                                                                                                                                                             |
+| esbuild         | 0.28.1 from the checkout's `node_modules` (root `devDependencies.esbuild: "0.28.1"`)                                                                                                                                                                      |
+| Environment     | `SMITHERS_HOME` stripped with `env -u` on every command; `SMITHERS_CACHE_URL` and `SMITHERS_CACHE_TOKEN` also stripped for the build-CLI route so no remote cache could answer                                                                            |
 
 Dependencies come from the setup step's frozen offline install at this HEAD
 (`corepack pnpm install --frozen-lockfile --offline`, exit 0).
@@ -70,12 +70,12 @@ Logs: `browser-bundling-logs/` next to this file. Each log starts with a
 `start <UTC timestamp>` line and ends with an `exit=<code> duration=<seconds>s`
 line appended by the harness.
 
-| Command (from the checkout root) | Exit | Duration | Final output line | Log |
-| --- | --- | --- | --- | --- |
-| `env -u SMITHERS_HOME corepack pnpm run browser` | 0 | 2 s | `browser contract holds: 28 browser entry points, 7 Node-only.` | `pnpm-run-browser.log` |
-| `env -u SMITHERS_HOME -u SMITHERS_CACHE_URL -u SMITHERS_CACHE_TOKEN pnpm exec smithers-build test '//scripts:browserContract'` | 0 | 5 s (target 2.6 s) | `ok: true`; result row `"//scripts:browserContract",NodeTest,ran` | `smithers-build-test-browserContract.log` |
-| `env -u SMITHERS_HOME node scripts/check-docs.mjs` | 0 | 77 s | `✓ the browser tables and counts match the 28 entry points the gate bundles` (17 of 17 checks pass) | `check-docs.log` |
-| `node browser-bundling-logs/extra-browser-bundle.mjs <checkout>` (ad hoc, see below) | 0 | 0 s | `esbuild 0.28.1; 3/3 bundled` | `extra-doc-advertised-entries.log` |
+| Command (from the checkout root)                                                                                               | Exit | Duration           | Final output line                                                                                   | Log                                       |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---- | ------------------ | --------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `env -u SMITHERS_HOME corepack pnpm run browser`                                                                               | 0    | 2 s                | `browser contract holds: 28 browser entry points, 7 Node-only.`                                     | `pnpm-run-browser.log`                    |
+| `env -u SMITHERS_HOME -u SMITHERS_CACHE_URL -u SMITHERS_CACHE_TOKEN pnpm exec smithers-build test '//scripts:browserContract'` | 0    | 5 s (target 2.6 s) | `ok: true`; result row `"//scripts:browserContract",NodeTest,ran`                                   | `smithers-build-test-browserContract.log` |
+| `env -u SMITHERS_HOME node scripts/check-docs.mjs`                                                                             | 0    | 77 s               | `✓ the browser tables and counts match the 28 entry points the gate bundles` (17 of 17 checks pass) | `check-docs.log`                          |
+| `node browser-bundling-logs/extra-browser-bundle.mjs <checkout>` (ad hoc, see below)                                           | 0    | 0 s                | `esbuild 0.28.1; 3/3 bundled`                                                                       | `extra-doc-advertised-entries.log`        |
 
 The `pnpm run browser` final line matches `docs/migration/phase2-baseline.md`
 line 25 verbatim. `git status --porcelain` in the checkout is empty after
@@ -87,48 +87,48 @@ Sizes are the in-memory ESM bundle reported by the script. All 28 sizes are
 byte-for-byte identical to the `cd14388ed7` run: `6f4f2bacf9` moved the list
 declaration but changed no bundled source.
 
-| Entry point | Source | Bundle size |
-| --- | --- | --- |
-| @smthrs/artifacts | packages/artifacts/src/index.ts | 290.1 kB |
-| @smthrs/canonical | packages/canonical/src/index.ts | 155.9 kB |
-| @smthrs/capability | packages/capability/src/index.ts | 503.8 kB |
-| @smthrs/chain | packages/chain/src/index.ts | 1828.3 kB |
-| @smthrs/crypto | packages/crypto/src/index.ts | 156.8 kB |
-| @smthrs/jj | packages/jj/src/index.ts | 598.5 kB |
-| @smthrs/jj/browser/BrowserJj | packages/jj/src/browser/BrowserJj.ts | 525.8 kB |
-| @smthrs/platform-browser | packages/platform-browser/src/index.ts | 916.4 kB |
-| @smthrs/platform-browser/BrowserHost | packages/platform-browser/src/BrowserHost.ts | 915.6 kB |
-| @smthrs/sandbox | packages/sandbox/src/index.ts | 269.3 kB |
-| @smthrs/kernel | packages/kernel/src/index.ts | 940.0 kB |
-| @smthrs/keys | packages/keys/src/index.ts | 160.9 kB |
-| @smthrs/plan | packages/plan/src/index.ts | 741.6 kB |
-| @smthrs/database | packages/database/src/index.ts | 693.3 kB |
-| @smthrs/journal | packages/journal/src/index.ts | 784.3 kB |
-| @smthrs/run-store | packages/run-store/src/index.ts | 743.3 kB |
-| @smthrs/step-cache | packages/step-cache/src/index.ts | 734.2 kB |
-| @smthrs/flow | packages/flow/src/index.ts | 416.1 kB |
-| @smthrs/engine | packages/engine/src/index.ts | 591.2 kB |
-| @smthrs/engine-store | packages/engine-store/src/index.ts | 1462.8 kB |
-| @smthrs/flows | packages/flows/src/index.ts | 2103.6 kB |
-| @smthrs/observability | packages/observability/src/index.ts | 426.5 kB |
-| @smthrs/sync | packages/sync/src/index.ts | 423.5 kB |
-| @smthrs/time-travel | packages/time-travel/src/index.ts | 841.1 kB |
-| @smthrs/std/Grep | packages/std/src/Grep.ts | 622.1 kB |
-| @smthrs/std/Glob | packages/std/src/Glob.ts | 615.1 kB |
-| @smthrs/std/Search | packages/std/src/Search.ts | 597.7 kB |
-| @smthrs/std/PortableSearch | packages/std/src/PortableSearch.ts | 629.5 kB |
+| Entry point                          | Source                                       | Bundle size |
+| ------------------------------------ | -------------------------------------------- | ----------- |
+| @smthrs/artifacts                    | packages/artifacts/src/index.ts              | 290.1 kB    |
+| @smthrs/canonical                    | packages/canonical/src/index.ts              | 155.9 kB    |
+| @smthrs/capability                   | packages/capability/src/index.ts             | 503.8 kB    |
+| @smthrs/chain                        | packages/chain/src/index.ts                  | 1828.3 kB   |
+| @smthrs/crypto                       | packages/crypto/src/index.ts                 | 156.8 kB    |
+| @smthrs/jj                           | packages/jj/src/index.ts                     | 598.5 kB    |
+| @smthrs/jj/browser/BrowserJj         | packages/jj/src/browser/BrowserJj.ts         | 525.8 kB    |
+| @smthrs/platform-browser             | packages/platform-browser/src/index.ts       | 916.4 kB    |
+| @smthrs/platform-browser/BrowserHost | packages/platform-browser/src/BrowserHost.ts | 915.6 kB    |
+| @smthrs/sandbox                      | packages/sandbox/src/index.ts                | 269.3 kB    |
+| @smthrs/kernel                       | packages/kernel/src/index.ts                 | 940.0 kB    |
+| @smthrs/keys                         | packages/keys/src/index.ts                   | 160.9 kB    |
+| @smthrs/plan                         | packages/plan/src/index.ts                   | 741.6 kB    |
+| @smthrs/database                     | packages/database/src/index.ts               | 693.3 kB    |
+| @smthrs/journal                      | packages/journal/src/index.ts                | 784.3 kB    |
+| @smthrs/run-store                    | packages/run-store/src/index.ts              | 743.3 kB    |
+| @smthrs/step-cache                   | packages/step-cache/src/index.ts             | 734.2 kB    |
+| @smthrs/flow                         | packages/flow/src/index.ts                   | 416.1 kB    |
+| @smthrs/engine                       | packages/engine/src/index.ts                 | 591.2 kB    |
+| @smthrs/engine-store                 | packages/engine-store/src/index.ts           | 1462.8 kB   |
+| @smthrs/flows                        | packages/flows/src/index.ts                  | 2103.6 kB   |
+| @smthrs/observability                | packages/observability/src/index.ts          | 426.5 kB    |
+| @smthrs/sync                         | packages/sync/src/index.ts                   | 423.5 kB    |
+| @smthrs/time-travel                  | packages/time-travel/src/index.ts            | 841.1 kB    |
+| @smthrs/std/Grep                     | packages/std/src/Grep.ts                     | 622.1 kB    |
+| @smthrs/std/Glob                     | packages/std/src/Glob.ts                     | 615.1 kB    |
+| @smthrs/std/Search                   | packages/std/src/Search.ts                   | 597.7 kB    |
+| @smthrs/std/PortableSearch           | packages/std/src/PortableSearch.ts           | 629.5 kB    |
 
 ### Node-only entry points that failed on the documented builtin (7 of 7)
 
-| Entry point | Documented builtin | Reason recorded by the gate |
-| --- | --- | --- |
-| @smthrs/platform-node | node:child_process | the Node host bundle spawns child processes |
-| @smthrs/platform-bun | node:fs | the Bun bundle falls back to the @effect/platform-node adapters off Bun |
-| @smthrs/kernel/test/TestHost | node:assert | effect/testing's TestClock pulls node:assert |
-| @smthrs/jj/node/NodeJj | node:child_process | the Node jj adapter spawns the jj CLI |
-| @smthrs/jj/bun/BunJj | node:child_process | the Bun jj adapter reuses the Node child-process implementation |
-| @smthrs/database/node/NodeDatabase | node:sqlite | the Node database layer is node:sqlite through @effect/sql-sqlite-node |
-| @smthrs/flows/NodeRuntime | node:sqlite | the supported production composition opens the database through NodeDatabase |
+| Entry point                        | Documented builtin | Reason recorded by the gate                                                  |
+| ---------------------------------- | ------------------ | ---------------------------------------------------------------------------- |
+| @smthrs/platform-node              | node:child_process | the Node host bundle spawns child processes                                  |
+| @smthrs/platform-bun               | node:fs            | the Bun bundle falls back to the @effect/platform-node adapters off Bun      |
+| @smthrs/kernel/test/TestHost       | node:assert        | effect/testing's TestClock pulls node:assert                                 |
+| @smthrs/jj/node/NodeJj             | node:child_process | the Node jj adapter spawns the jj CLI                                        |
+| @smthrs/jj/bun/BunJj               | node:child_process | the Bun jj adapter reuses the Node child-process implementation              |
+| @smthrs/database/node/NodeDatabase | node:sqlite        | the Node database layer is node:sqlite through @effect/sql-sqlite-node       |
+| @smthrs/flows/NodeRuntime          | node:sqlite        | the supported production composition opens the database through NodeDatabase |
 
 The script accepts a Node-only entry only when every esbuild error is an
 unresolved `node:` builtin and one of them is the documented module, so each
@@ -170,11 +170,11 @@ The docs and the rc-contract advertise three more browser bundles outside
 checkout's esbuild 0.28.1 (`browser-bundling-logs/extra-browser-bundle.mjs`).
 All three bundle, at the same sizes as at `cd14388ed7`:
 
-| Advertised where | Entry | Bundle size |
-| --- | --- | --- |
-| `docs/pages/examples.md:28` (example 09, also covered by `examples/test/09-browser-use.test.ts`, which bundles the file with `platform: "browser"`) | examples/src/09-browser-use.ts | 444.9 kB |
-| rc-contract line 162 named subpath | packages/platform-browser/src/BrowserChildProcessSpawner/index.ts | 124.5 kB |
-| rc-contract line 162 named subpath | packages/platform-browser/src/BrowserFileSystem/index.ts | 846.3 kB |
+| Advertised where                                                                                                                                    | Entry                                                             | Bundle size |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ----------- |
+| `docs/pages/examples.md:28` (example 09, also covered by `examples/test/09-browser-use.test.ts`, which bundles the file with `platform: "browser"`) | examples/src/09-browser-use.ts                                    | 444.9 kB    |
+| rc-contract line 162 named subpath                                                                                                                  | packages/platform-browser/src/BrowserChildProcessSpawner/index.ts | 124.5 kB    |
+| rc-contract line 162 named subpath                                                                                                                  | packages/platform-browser/src/BrowserFileSystem/index.ts          | 846.3 kB    |
 
 The `cd14388ed7` run's `@smthrs/patterns` and `@smthrs/core` rows are gone
 from this list because `6f4f2bacf9` removed the ungated browser claim from

@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, relative, sep } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -78,7 +78,7 @@ const publicSources = (directory) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("memory docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("memory docs: Manifest.ts and package.json names differ")
 
 const barrel = read(join(sourceRoot, "index.ts"))
 const modules = [...barrel.matchAll(/export \* as (\w+) from "\.\/([^"]+)\.ts"/g)].map((match) => ({
@@ -126,7 +126,7 @@ const moduleEntries = modules.map((entry) => {
 const cell = (value) => value.replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ")
 const tableRows = moduleEntries.map((entry) => [
   `\`${entry.name}\``,
-  `\`${Package.name}/${entry.source}\``,
+  `\`${Manifest.name}/${entry.source}\``,
   cell(entry.summary),
   entry.exports.map((name) => `\`${name}\``).join(", ")
 ])
@@ -155,15 +155,15 @@ ${intro === "" ? "" : `${intro.trim()}\n\n`}${body.trim()}
 `
 
 const modulesMarker = "<!-- generated:modules -->"
-const apiSource = read(join(packageRoot, Package.api.source))
+const apiSource = read(join(packageRoot, Manifest.api.source))
 if (apiSource.split(modulesMarker).length !== 2) {
-  throw new Error(`memory docs: ${Package.api.source} must contain one ${modulesMarker} marker`)
+  throw new Error(`memory docs: ${Manifest.api.source} must contain one ${modulesMarker} marker`)
 }
 const apiBody = apiSource.replace(modulesMarker, `## Modules\n\n${table}`)
 
 const outputs = new Map([
-  [Package.api.target, renderPage(Package.api, apiBody, paragraphs(moduleDoc(barrel, "index.ts")))],
-  ...Package.pages.map((page) => [page.target, renderPage(page, read(join(packageRoot, page.source)))])
+  [Manifest.api.target, renderPage(Manifest.api, apiBody, paragraphs(moduleDoc(barrel, "index.ts")))],
+  ...Manifest.pages.map((page) => [page.target, renderPage(page, read(join(packageRoot, page.source)))])
 ])
 
 const outputPath = (target) => target === "README.md" ? `packages/memory/${target}` : target
@@ -179,7 +179,7 @@ const replaceRegion = (source, target, name, body) => {
   return `${source.slice(0, start)}${startMarker}\n\n${body.trim()}\n\n${source.slice(end)}`
 }
 
-for (const snippet of Package.snippets) {
+for (const snippet of Manifest.snippets) {
   const target = outputPath(snippet.target)
   const current = outputs.get(target) ?? read(join(repoRoot, target))
   const body = `${read(join(packageRoot, snippet.source)).trim()}\n\n${table}`
@@ -187,10 +187,10 @@ for (const snippet of Package.snippets) {
 }
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/memory")) {
-    failures.push(`${path}: must reference ${Package.name} and /api/memory`)
+  if (!content.includes(Manifest.name) || !content.includes("/api/memory")) {
+    failures.push(`${path}: must reference ${Manifest.name} and /api/memory`)
   }
 }
 for (const [path, content] of outputs) {

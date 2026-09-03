@@ -74,7 +74,7 @@
       "workspace": ".",
       "label": "//:tsconfig",
       "title": "Root tsconfig",
-      "summary": "Regenerate and check the workspace tsconfig.json from BUILD.ts."
+      "summary": "Regenerate and check the workspace tsconfig.json from PACKAGE.ts."
     },
     {
       "id": "known-files",

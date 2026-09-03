@@ -17,28 +17,28 @@ Status: **done**. One defect, fixed red-first.
 `node_modules/vocs/src/vite.ts:34` registers the plugin unconditionally:
 
 ```ts
-    Plugins.llms(config),
+Plugins.llms(config),
 ```
 
 `node_modules/vocs/src/internal/vite-plugins.ts:233` writes the two files at
 build end, into the directory the deploy uploads:
 
 ```ts
-    async buildEnd() {
-      const content = await buildLlmsContent()
-      const outDir = path.resolve(viteConfig.root, config.outDir, 'public')
-      await fs.mkdir(outDir, { recursive: true })
-      await Promise.all([
-        fs.writeFile(path.join(outDir, 'llms-full.txt'), content.full, { encoding: 'utf-8' }),
-        fs.writeFile(path.join(outDir, 'llms.txt'), content.short, { encoding: 'utf-8' }),
+async buildEnd() {
+  const content = await buildLlmsContent()
+  const outDir = path.resolve(viteConfig.root, config.outDir, 'public')
+  await fs.mkdir(outDir, { recursive: true })
+  await Promise.all([
+    fs.writeFile(path.join(outDir, 'llms-full.txt'), content.full, { encoding: 'utf-8' }),
+    fs.writeFile(path.join(outDir, 'llms.txt'), content.short, { encoding: 'utf-8' }),
 ```
 
 `.github/workflows/docs-deploy.yml` uploads that directory:
 
 ```yaml
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/dist/public
+- uses: actions/upload-pages-artifact@v3
+  with:
+    path: docs/dist/public
 ```
 
 `claude-plugin/skills/smithers/SKILL.md:17,141,156` tells every agent to read
@@ -75,9 +75,9 @@ node_modules/vocs/src/internal/config.ts` finds nothing), and its build command
 disables user vite config entirely, so no user plugin can run a later hook:
 
 ```ts
-    const builder = await vite.createBuilder({
-      configFile: false,
-      plugins: [react(), vocs()],
+const builder = await vite.createBuilder({
+  configFile: false,
+  plugins: [react(), vocs()],
 ```
 
 The overwrite-at-deploy shape is therefore the only one available without
@@ -88,7 +88,7 @@ compares the served bytes whenever `docs/dist` exists, and the deploy runs
 ### Test
 
 `scripts/check-llms.test.mjs` (new, 6 tests), registered in
-`scripts/BUILD.ts` `docsUnit`:
+`scripts/PACKAGE.ts` `docsUnit`:
 
 - `a tree with no built site has no served bundle to compare`
 - `served bundles that match the curated bundles byte for byte are not drift`
@@ -153,11 +153,11 @@ exit=1
   `cp docs/llms.txt docs/llms-full.txt docs/dist/public/` step, then a second
   `node scripts/check-llms.mjs` before `actions/configure-pages@v5` and the
   upload.
-- `scripts/BUILD.ts`: `//scripts/check-llms.test.mjs` added to `docsUnit`.
+- `scripts/PACKAGE.ts`: `//scripts/check-llms.test.mjs` added to `docsUnit`.
 - `known-files.d.ts`: regenerated for the new file
   (`node scripts/generate-known-files.mjs`), same commit.
 
-`docs-deploy.yml` is hand-written, not generated from `BUILD.ts`; only
+`docs-deploy.yml` is hand-written, not generated from `PACKAGE.ts`; only
 `.github/workflows/ci.yml` is generated. No pin in
 `packages/flows/test/vitestCoverageIsolation.test.ts` names its contents, and
 `//:ci` is unchanged.
@@ -166,17 +166,17 @@ exit=1
 
 All in the lane worktree, `uptime` load recorded per run.
 
-| Command | Load | Result |
-| --- | --- | --- |
-| `node --test scripts/check-llms.test.mjs` (after the deploy's copy) | 9.65 | `pass 6, fail 0` |
-| `node scripts/check-docs.mjs` | 13.08 | exit 0, 16 checks green, `all 504 internal links resolve` |
-| `node scripts/check-llms.mjs` | 8.95 | exit 0: `✓ 12 documentation artifact(s) are current` and `✓ the built site serves 2 curated bundle(s)` |
-| `pnpm run docs:llms` | 8.95 | `12 artifact(s) written, 0 changed.`, `git status --short` shows no bundle change |
-| `pnpm exec vocs build` (clean `docs/dist`) | 3.54 and 8.95 | exit 0, `349 files generated` |
-| `pnpm exec smithers-build test '//scripts:docsUnit'` | 11.03 | `1 targets: 0 hit, 1 ran, 0 failed`, 101.8s |
-| `pnpm exec smithers-build lint '//:ci'` | 11.03 | `0 failed`, `ok: true` |
-| `pnpm exec smithers-build lint '//:knownFiles'` | 11.03 | `0 failed`, `ok: true` |
-| `actionlint .github/workflows/docs-deploy.yml` | 11.03 | exit 0 |
+| Command                                                             | Load          | Result                                                                                                 |
+| ------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
+| `node --test scripts/check-llms.test.mjs` (after the deploy's copy) | 9.65          | `pass 6, fail 0`                                                                                       |
+| `node scripts/check-docs.mjs`                                       | 13.08         | exit 0, 16 checks green, `all 504 internal links resolve`                                              |
+| `node scripts/check-llms.mjs`                                       | 8.95          | exit 0: `✓ 12 documentation artifact(s) are current` and `✓ the built site serves 2 curated bundle(s)` |
+| `pnpm run docs:llms`                                                | 8.95          | `12 artifact(s) written, 0 changed.`, `git status --short` shows no bundle change                      |
+| `pnpm exec vocs build` (clean `docs/dist`)                          | 3.54 and 8.95 | exit 0, `349 files generated`                                                                          |
+| `pnpm exec smithers-build test '//scripts:docsUnit'`                | 11.03         | `1 targets: 0 hit, 1 ran, 0 failed`, 101.8s                                                            |
+| `pnpm exec smithers-build lint '//:ci'`                             | 11.03         | `0 failed`, `ok: true`                                                                                 |
+| `pnpm exec smithers-build lint '//:knownFiles'`                     | 11.03         | `0 failed`, `ok: true`                                                                                 |
+| `actionlint .github/workflows/docs-deploy.yml`                      | 11.03         | exit 0                                                                                                 |
 
 Served bundles after `pnpm exec vocs build` plus the deploy's copy step:
 

@@ -8,5 +8,5 @@
     "composite": false,
     "resolveJsonModule": true
   },
-  "include": ["Package.ts", "src/**/*", "test/**/*"]
+  "include": ["docs/Manifest.ts", "src/**/*", "test/**/*"]
 }

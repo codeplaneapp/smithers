@@ -4,10 +4,10 @@ smithers build lives in the Smithers repository as three pnpm workspace packages
 
 ```
 smithers/
-  BUILD.ts
+  PACKAGE.ts
   packages/
     build/        # @smthrs/build: Install, PackageManager, and Runtime
-    targets/      # @smthrs/targets: the BUILD.ts authoring surface
+    targets/      # @smthrs/targets: the PACKAGE.ts authoring surface
     build-cli/    # @smthrs/build-cli: the smithers-build bin
 ```
 
@@ -44,10 +44,10 @@ devDependencies on the workspace:
 `pnpm install` links both packages from the workspace. The CLI dependency
 exposes the `smithers-build` bin to `pnpm exec` at the workspace root.
 
-`BUILD.ts` files then import by bare specifier:
+`PACKAGE.ts` files then import by bare specifier:
 
 ```ts
-// smithers/BUILD.ts
+// smithers/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 ```
 
@@ -77,7 +77,7 @@ package.
 
 The bin entry is `smithers-build`, backed by `packages/build-cli/src/main.js`. That
 file is a JavaScript bootstrap: it loads `main.ts` through the programmatic
-`tsx` loader, which is also what evaluates `BUILD.ts` modules.
+`tsx` loader, which is also what evaluates `PACKAGE.ts` modules.
 
 ```sh
 # From the workspace root.
@@ -98,11 +98,11 @@ also determines which package a relative `:target` label resolves in. See
 
 smithers build keeps its result cache and target scratch files under a
 workspace-relative directory, `.flows` by default. Add it to the workspace
-`.gitignore`, or declare the policy in the root `BUILD.ts` and let the CLI
+`.gitignore`, or declare the policy in the root `PACKAGE.ts` and let the CLI
 maintain the entry:
 
 ```ts
-// smithers/BUILD.ts
+// smithers/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })

@@ -1,13 +1,13 @@
 # Dependencies
 
-A dependency edge is a direct import between `BUILD.ts` files. There are no label
+A dependency edge is a direct import between `PACKAGE.ts` files. There are no label
 strings in target attributes.
 
 ```ts
-// packages/engine/BUILD.ts
+// packages/engine/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
-import { lib as flow } from "../flow/BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
+import { lib as flow } from "../flow/PACKAGE.ts"
 
 export const { lib, test, lint } = Smithers.StandardPackage({
   packageManager,
@@ -79,9 +79,9 @@ The conventional shape is one `lib` target per package, imported by dependent
 packages:
 
 ```ts
-import { packageManager } from "../../BUILD.ts"
-import { lib as flow } from "../flow/BUILD.ts"
-import { lib as plan } from "../plan/BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
+import { lib as flow } from "../flow/PACKAGE.ts"
+import { lib as plan } from "../plan/PACKAGE.ts"
 
 export const { lib, test, lint } = StandardPackage({
   packageManager,
@@ -104,7 +104,7 @@ siblings.
 
 `API-REVIEW.md` records this as open question 3: how synthesized packages should
 infer edges, for example from `package.json` workspace dependencies. Write a real
-`BUILD.ts` for a package that needs edges.
+`PACKAGE.ts` for a package that needs edges.
 
 ## Ordering inside one target
 

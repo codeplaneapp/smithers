@@ -1,0 +1,85 @@
+/**
+ * Targets for the review application: two typechecks and the unit suite.
+ *
+ * Two typechecks because the app has two type environments and they are not
+ * compatible. `src/` runs under Node — the bin is `bin/smithers-review.mjs`
+ * and the durable runtime it composes needs Node's HTTP client — so it is
+ * checked with `@types/node` alone. The suite runs under Bun, whose own types
+ * redefine `process.env` in a way the workspace packages' own signatures
+ * refuse, so it is checked separately with `bun-types` on top.
+ *
+ * The suite includes one live test. `tests/reviewPullRequest.e2e.test.ts`
+ * reviews a real pull request through the `gh` CLI and skips with a named
+ * reason when no GitHub credential is present, so a runner without one still
+ * goes green and says what it did not prove.
+ *
+ * @since 1.0.0
+ */
+import { Smithers } from "@smthrs/targets"
+import { bunRuntime, packageManager } from "../../PACKAGE.ts"
+
+const cwd = "apps/review"
+
+/** The CLI, the flow, the walkthrough renderer, and the Worker. */
+const sources = [
+  Smithers.glob("//apps/review/src/**/*.ts"),
+  Smithers.glob("//apps/review/action/src/**/*.ts"),
+  Smithers.glob("//apps/review/bin/*.mjs"),
+  Smithers.file("//apps/review/action/action.yml")
+]
+
+/** The suite, and the fixtures it spawns. */
+const suiteSources = [
+  Smithers.glob("//apps/review/tests/**/*.ts"),
+  Smithers.glob("//apps/review/tests/**/fixtures/*")
+]
+
+/**
+ * Checks the application sources against the Node tsconfig.
+ *
+ * @since 1.0.0
+ * @category build
+ */
+const check = Smithers.Typecheck({
+  packageManager,
+  srcs: sources,
+  deps: [],
+  tsconfig: Smithers.file("tsconfig.json"),
+  buildMode: false,
+  incremental: false,
+  cwd
+})
+
+/**
+ * Checks the suite against the Bun tsconfig.
+ *
+ * @since 1.0.0
+ * @category build
+ */
+const checkTests = Smithers.Typecheck({
+  packageManager,
+  srcs: [...sources, ...suiteSources],
+  deps: [],
+  tsconfig: Smithers.file("tsconfig.test.json"),
+  buildMode: false,
+  incremental: false,
+  cwd
+})
+
+/**
+ * The unit suite plus the live pull-request review.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const unitTests = Smithers.NodeTest({
+  runtime: bunRuntime,
+  runner: Smithers.testSuite(["tests"]),
+  srcs: [...sources, ...suiteSources],
+  deps: [],
+  cwd
+})
+
+export const Package = Smithers.Package({
+  targets: { check, checkTests, unitTests }
+})

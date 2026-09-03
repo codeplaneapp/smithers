@@ -28,7 +28,7 @@ owns its formatting and dprint's table alignment would fight it forever.
 ## The one surface this package does not yet own
 
 `@smthrs/mcp` is published at rc.0 and has no page under `docs/pages/api/`.
-`Package.ts` records the target and what blocks it: `vocs.config.ts` is
+`docs/Manifest.ts` records the target and what blocks it: `vocs.config.ts` is
 hand-written, `scripts/check-docs.mjs` fails any published page the sidebar does
 not list, and the release support matrix's `@smthrs/mcp` row has to link the
 page in the same edit. `@smthrs/testing` records the same arrangement for the

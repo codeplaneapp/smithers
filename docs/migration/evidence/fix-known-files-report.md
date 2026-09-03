@@ -30,15 +30,15 @@ built its scan with no repository boundaries at all
 (`packages/targets/src/Input.ts:820` before the fix):
 
 ```ts
-    packageScoped: false,
-    repositoryBoundaries: [],
-    enteredRepositories: new Set(),
+packageScoped: false,
+repositoryBoundaries: [],
+enteredRepositories: new Set(),
 ```
 
 and the walk skipped only two names (`packages/targets/src/Input.ts:647`):
 
 ```ts
-    if (entry.name === ".git" || entry.name === "node_modules") continue
+if (entry.name === ".git" || entry.name === "node_modules") continue
 ```
 
 The boundary rule the glob walk honors is three lines below, at
@@ -111,19 +111,19 @@ $ corepack pnpm exec vitest run test/KnownFile.test.ts test/Exec.test.ts test/In
 
 ### Confirmation at the source
 
-Root `BUILD.ts:12-15` declares the repository's only `Smithers.Generate`. Its
-script form planned package-mode placeholders into the exec node
+Root `PACKAGE.ts:12-15` declares the repository's only `Smithers.Generate`. Its
+script form planned build-system placeholders into the exec node
 (`packages/targets/src/Compose.ts`, `generateDefinition` before the fix):
 
 ```ts
-      return Target.runTool({
-        cwd: ".",
-        argv: [Shell.scriptInterpreterToken(attrs.script.path), Shell.scriptToken(attrs.script.path)],
+return Target.runTool({
+  cwd: ".",
+  argv: [Shell.scriptInterpreterToken(attrs.script.path), Shell.scriptToken(attrs.script.path)],
 ```
 
 where `Shell.scriptInterpreterToken` (`packages/targets/src/Shell.ts:176-177`)
 renders `toolToken(Reference.runtimeBin)`. `packages/build-cli/src/PackageExec.ts:1754`
-substitutes those while planning, but this repository is a BUILD.ts workspace:
+substitutes those while planning, but this repository is a PACKAGE.ts workspace:
 `Cli.openPackageIndex` returns undefined without a `WORKSPACE.ts`, so the target
 runs through `Executor.runTarget`, whose `ExecLive` spawned the argv verbatim.
 
@@ -224,11 +224,11 @@ $ corepack pnpm exec vitest run test/GeneratedFile.test.ts                      
 
 ## Item C: the drift is gated in CI
 
-Root `BUILD.ts` declares one more step in the `test` job, beside the workflow
+Root `PACKAGE.ts` declares one more step in the `test` job, beside the workflow
 drift check:
 
 ```ts
-        { name: "Known-file registry drift", verb: Smithers.Verb.Lint, pattern: "//:knownFiles" }
+{ name: "Known-file registry drift", verb: Smithers.Verb.Lint, pattern: "//:knownFiles" }
 ```
 
 `.github/workflows/ci.yml` was regenerated from the declaration. The generated
@@ -236,11 +236,11 @@ step carries the `env:` block every step in that job carries, so what the file
 gained is these five lines:
 
 ```yaml
-      - name: Known-file registry drift
-        run: pnpm exec smithers-build lint '//:knownFiles'
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+- name: Known-file registry drift
+  run: pnpm exec smithers-build lint '//:knownFiles'
+  env:
+    SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+    SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
 ```
 
 `GithubCiGen` is declared `mode: "check"`, so `smithers-build build '//:ci'`
@@ -252,7 +252,7 @@ committed declaration is unchanged apart from the new step.
 cell that pins every other enforcement step:
 
 ```ts
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:knownFiles'$/m)
+expect(ci).toMatch(/^\s*run: pnpm exec smithers-build lint '\/\/:knownFiles'$/m)
 ```
 
 ## Final proof
@@ -286,51 +286,51 @@ $ node scripts/generate-known-files.mjs && pnpm exec smithers-build lint '//:kno
 
 ## Gates
 
-| Gate | Load | Result |
-| --- | --- | --- |
-| `packages/targets`: `pnpm run check` | 18.25 → 4.38 | pass |
-| `packages/targets`: `pnpm test` | 4.38 | 42 files, 763 tests passed; coverage 94.34 stmts / 88.79 branches / 91.18 funcs / 95.11 lines, all above the package thresholds |
-| `packages/targets`: `pnpm run lint` | 4.38 | pass (one file needed `dprint fmt`, applied) |
-| `packages/targets`: `pnpm run circular` | 4.07 | pass |
-| `packages/build-cli`: `pnpm run check` | 4.07 | pass |
-| `packages/build-cli`: `pnpm run lint` | 4.07 | pass |
-| `packages/build-cli`: `pnpm run circular` | 4.07 | pass |
-| `packages/build-cli`: `pnpm test` | 4.93 | 51 of 52 files pass, 811 passed / 4 failed. The 4 are `test/ChainExecution.test.ts` Docker and mise cells; they fail identically on the pre-fix tree (verified by `git stash`), because this host has no Docker daemon (`dial unix /Users/williamcory/.orbstack/run/docker.sock: connect: no such file or directory`) and no `mise` on PATH |
-| `packages/flows`: `vitest run test/vitestCoverageIsolation.test.ts` | 16.44 | 264 passed, including the new pin |
-| root: `pnpm exec tsc -p tsconfig.json --noEmit` | 13.6 | exit 0 (the program that carries `BUILD.ts` and `known-files.d.ts`) |
-| `pnpm exec smithers-build lint '//:ci'` | 3.7 | exit 0 |
-| `pnpm exec smithers-build lint '//:knownFiles'` | 3.7 | exit 0, submodule present and absent |
-| `pnpm exec smithers-build test '//scripts/...'` | 13.6 → 20.7 | see below |
+| Gate                                                                | Load         | Result                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/targets`: `pnpm run check`                                | 18.25 → 4.38 | pass                                                                                                                                                                                                                                                                                                                                        |
+| `packages/targets`: `pnpm test`                                     | 4.38         | 42 files, 763 tests passed; coverage 94.34 stmts / 88.79 branches / 91.18 funcs / 95.11 lines, all above the package thresholds                                                                                                                                                                                                             |
+| `packages/targets`: `pnpm run lint`                                 | 4.38         | pass (one file needed `dprint fmt`, applied)                                                                                                                                                                                                                                                                                                |
+| `packages/targets`: `pnpm run circular`                             | 4.07         | pass                                                                                                                                                                                                                                                                                                                                        |
+| `packages/build-cli`: `pnpm run check`                              | 4.07         | pass                                                                                                                                                                                                                                                                                                                                        |
+| `packages/build-cli`: `pnpm run lint`                               | 4.07         | pass                                                                                                                                                                                                                                                                                                                                        |
+| `packages/build-cli`: `pnpm run circular`                           | 4.07         | pass                                                                                                                                                                                                                                                                                                                                        |
+| `packages/build-cli`: `pnpm test`                                   | 4.93         | 51 of 52 files pass, 811 passed / 4 failed. The 4 are `test/ChainExecution.test.ts` Docker and mise cells; they fail identically on the pre-fix tree (verified by `git stash`), because this host has no Docker daemon (`dial unix /Users/williamcory/.orbstack/run/docker.sock: connect: no such file or directory`) and no `mise` on PATH |
+| `packages/flows`: `vitest run test/vitestCoverageIsolation.test.ts` | 16.44        | 264 passed, including the new pin                                                                                                                                                                                                                                                                                                           |
+| root: `pnpm exec tsc -p tsconfig.json --noEmit`                     | 13.6         | exit 0 (the program that carries `PACKAGE.ts` and `known-files.d.ts`)                                                                                                                                                                                                                                                                       |
+| `pnpm exec smithers-build lint '//:ci'`                             | 3.7          | exit 0                                                                                                                                                                                                                                                                                                                                      |
+| `pnpm exec smithers-build lint '//:knownFiles'`                     | 3.7          | exit 0, submodule present and absent                                                                                                                                                                                                                                                                                                        |
+| `pnpm exec smithers-build test '//scripts/...'`                     | 13.6 → 20.7  | see below                                                                                                                                                                                                                                                                                                                                   |
 
 `pnpm exec smithers-build test '//scripts/...'` reported three failures while a
 second lane loaded the machine to 20. All three are environmental, and each was
 rerun alone:
 
-| Target | Failure under load | Rerun alone |
-| --- | --- | --- |
-| `//scripts:docsUnit` | `docs-removals.test.mjs` cell "every removed verb really prints its documented sentence" timed out at exactly 120000 ms while spawning CLI processes | `ok: true` at load 5.93 |
-| `//scripts:docs` | `scripts/check-docs.mjs` hit the 600000 ms tool bound after printing nine green checks | `ok: true` at load 5.57 |
-| `//scripts:releasePack` | `pack-release.mjs` refuses in 114 ms: `ENOENT ... packages/canonical/dist/cjs/Canonical.js` | still refuses. `smithers-build build '//packages/...' --jobs 4` (exit 0) writes `dist/esm` only; no package in this worktree carries a `dist/cjs`, so the release-pack gate is missing a build output this lane never produced. Its dependent `//scripts:releaseSmoke` skips behind it |
+| Target                  | Failure under load                                                                                                                                   | Rerun alone                                                                                                                                                                                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `//scripts:docsUnit`    | `docs-removals.test.mjs` cell "every removed verb really prints its documented sentence" timed out at exactly 120000 ms while spawning CLI processes | `ok: true` at load 5.93                                                                                                                                                                                                                                                                |
+| `//scripts:docs`        | `scripts/check-docs.mjs` hit the 600000 ms tool bound after printing nine green checks                                                               | `ok: true` at load 5.57                                                                                                                                                                                                                                                                |
+| `//scripts:releasePack` | `pack-release.mjs` refuses in 114 ms: `ENOENT ... packages/canonical/dist/cjs/Canonical.js`                                                          | still refuses. `smithers-build build '//packages/...' --jobs 4` (exit 0) writes `dist/esm` only; no package in this worktree carries a `dist/cjs`, so the release-pack gate is missing a build output this lane never produced. Its dependent `//scripts:releaseSmoke` skips behind it |
 
 None of the three touches `packages/targets`, `packages/build-cli`, or the root
-`BUILD.ts` this lane changed, and `//packages/...` builds clean (`0 failed`)
+`PACKAGE.ts` this lane changed, and `//packages/...` builds clean (`0 failed`)
 with the fix in place.
 
 ## Files changed
 
-| Path | Change |
-| --- | --- |
-| `packages/targets/src/Input.ts` | nested-repository boundary in the walk; `.gitmodules` boundaries for workspace discovery |
-| `packages/targets/src/Exec.ts` | `runtimeBinToken`, `scriptTokenPrefix`, and their substitution before spawn |
-| `packages/targets/src/Shell.ts` | renders both tokens from those constants |
-| `packages/targets/src/Compose.ts` | `Generate` write/check pair, `GenerateCheck` action, `checkGenerator`, `GenerateCheckLive` |
-| `packages/build-cli/src/Executor.ts` | provides `GenerateCheckLive` |
-| `packages/targets/test/KnownFile.test.ts` | two boundary cells |
-| `packages/targets/test/GeneratedFile.test.ts` | four `checkGenerator` cells |
-| `packages/build-cli/test/Execute.test.ts` | three `generate script form` cells |
-| `BUILD.ts` | the `Known-file registry drift` CI step |
-| `.github/workflows/ci.yml` | regenerated |
-| `packages/flows/test/vitestCoverageIsolation.test.ts` | pins the new step |
+| Path                                                  | Change                                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `packages/targets/src/Input.ts`                       | nested-repository boundary in the walk; `.gitmodules` boundaries for workspace discovery   |
+| `packages/targets/src/Exec.ts`                        | `runtimeBinToken`, `scriptTokenPrefix`, and their substitution before spawn                |
+| `packages/targets/src/Shell.ts`                       | renders both tokens from those constants                                                   |
+| `packages/targets/src/Compose.ts`                     | `Generate` write/check pair, `GenerateCheck` action, `checkGenerator`, `GenerateCheckLive` |
+| `packages/build-cli/src/Executor.ts`                  | provides `GenerateCheckLive`                                                               |
+| `packages/targets/test/KnownFile.test.ts`             | two boundary cells                                                                         |
+| `packages/targets/test/GeneratedFile.test.ts`         | four `checkGenerator` cells                                                                |
+| `packages/build-cli/test/Execute.test.ts`             | three `generate script form` cells                                                         |
+| `PACKAGE.ts`                                          | the `Known-file registry drift` CI step                                                    |
+| `.github/workflows/ci.yml`                            | regenerated                                                                                |
+| `packages/flows/test/vitestCoverageIsolation.test.ts` | pins the new step                                                                          |
 
 `known-files.d.ts` is unchanged: no file was added or removed, and the fix makes
 the committed bytes the output of the generator in both submodule states.
@@ -351,16 +351,16 @@ reached 40.
 whatever `changes` the declaration happened to carry:
 
 ```ts
-    return attrs.mode === "check"
-      ? GenerateCheck.call({ run: payload, changes: attrs.changes ?? [] })
-      : Target.runTool(payload)
+return attrs.mode === "check"
+  ? GenerateCheck.call({ run: payload, changes: attrs.changes ?? [] })
+  : Target.runTool(payload)
 ```
 
 `checkGenerator` snapshots exactly the paths it is given, so an empty list
 snapshots nothing, restores nothing, and reports no drift. The generator still
 runs against the real tree. That breaks the invariant `Execute.test.ts` states
 in its own header, "a checking verb does not mutate the working tree", and it
-is not the parity with package mode the round 1 comment claimed: package mode
+is not the parity with build system the round 1 comment claimed: build system
 builds the enforced write set from `changes` and `stdout`
 (`packages/build-cli/src/PackageExec.ts:1649-1653,1850`), and `enforceWriteSet`
 reverts every change that matches no pattern and fails the node, so an empty
@@ -409,13 +409,13 @@ AssertionError: expected [Function] to throw an error
 `packages/build-cli/test/Execute.test.ts`, describe `generate script form`:
 
 4. `refuses a process generator that declares no write set` (quoted above)
-5. `refuses the lint verb on a stdout generator a BUILD.ts workspace cannot confine`
+5. `refuses the lint verb on a stdout generator a PACKAGE.ts workspace cannot confine`
 
 Red for cell 5 (`corepack pnpm exec vitest run test/Execute.test.ts -t
 "generate script form"`, load 18.67):
 
 ```
- FAIL  test/Execute.test.ts > generate script form > refuses the lint verb on a stdout generator a BUILD.ts workspace cannot confine
+ FAIL  test/Execute.test.ts > generate script form > refuses the lint verb on a stdout generator a PACKAGE.ts workspace cannot confine
 AssertionError: expected true to be false // Object.is equality
 
 - Expected
@@ -434,11 +434,11 @@ AssertionError: expected true to be false // Object.is equality
   `changes` nor a `stdout`: "Generate requires changes or stdout: a script,
   bin, or command form declares the paths it writes". The emit form names its
   outputs as the map keys and is exempt. Every `Generate` declaration in the
-  tree already satisfies this: root `BUILD.ts`, `packages/create-app`, and the
+  tree already satisfies this: root `PACKAGE.ts`, `packages/create-app`, and the
   six `PACKAGE.ts` fixtures declare `changes`, `stdout`, or `emit`.
 - `generateDefinition.implementation` refuses check mode when the effective
   `changes` list is empty, with `Target.notImplemented("Generate check without
-  declared changes")`. That is the stdout form, whose output a BUILD.ts
+  declared changes")`. That is the stdout form, whose output a PACKAGE.ts
   workspace does not capture, so the check is refused rather than run against
   nothing. No process is spawned.
 
@@ -496,7 +496,7 @@ AssertionError: expected '[19:53:28.629] ERROR (#57): A flow bo…' not to conta
 `packages/targets/src/Compose.ts`, the `Generate` target definition:
 
 ```ts
-  error: Schema.Union([Exec.ExecError, GeneratedFile.DriftError, Target.NotImplemented]),
+error: Schema.Union([Exec.ExecError, GeneratedFile.DriftError, Target.NotImplemented]),
 ```
 
 `Target.NotImplemented` joins the union because the emit form and the new
@@ -540,7 +540,7 @@ Fixed in place, above:
 
 One more round 1 claim does not reproduce and is corrected here rather than
 above. The round 1 gate table lists `pnpm exec tsc -p tsconfig.json --noEmit`
-at exit 0, described as "the program that carries `BUILD.ts` and
+at exit 0, described as "the program that carries `PACKAGE.ts` and
 `known-files.d.ts`". It is not that program: the generated root `tsconfig.json`
 includes `packages/*/src/**/*` and `packages/*/test/**/*`, so it typechecks
 every package source under the root compiler options, without each package's
@@ -554,38 +554,38 @@ green.
 
 ### Gates
 
-| Gate | Load | Result |
-| --- | --- | --- |
-| `packages/targets`: `pnpm run check` | 18.43 | pass |
-| `packages/targets`: `pnpm run lint` | 19.90 | pass (`dprint fmt` applied to the new test block, then clean) |
-| `packages/targets`: `pnpm run circular` | 31.09 | pass |
-| `packages/targets`: `pnpm test` | 31.09 | 42 files, 767 tests passed; coverage 94.29 stmts / 88.58 branches / 91.18 funcs / 95.01 lines, all above the package thresholds |
-| `packages/build-cli`: `pnpm run check` | 34.25 | pass |
-| `packages/build-cli`: `pnpm run lint` | 34.25 | pass |
-| `packages/build-cli`: `pnpm run circular` | 34.25 | pass |
-| `packages/build-cli`: `pnpm test` | 36.49 | 51 of 52 files pass, 814 passed / 4 failed / 1 skipped. The 4 are the same `test/ChainExecution.test.ts` Docker and mise cells round 1 recorded: this host has no Docker daemon and no `mise` on PATH |
-| `pnpm exec smithers-build build '//packages/...' --jobs 4` | 22.28 | exit 0, 0 failed (every package's `:check` Typecheck target included) |
-| `pnpm exec smithers-build lint '//:knownFiles'` | 29.68 | `ok: true`; fails and restores on a hand edit |
-| `pnpm exec smithers-build lint '//:ci'` | 29.68 | `ok: true` |
-| `pnpm exec smithers-build lint '//:tsconfig'` | 16.91 | `ok: true` |
-| `git status --porcelain` after every run | — | only the three files this round changed; `known-files.d.ts` byte-identical |
+| Gate                                                       | Load  | Result                                                                                                                                                                                                |
+| ---------------------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/targets`: `pnpm run check`                       | 18.43 | pass                                                                                                                                                                                                  |
+| `packages/targets`: `pnpm run lint`                        | 19.90 | pass (`dprint fmt` applied to the new test block, then clean)                                                                                                                                         |
+| `packages/targets`: `pnpm run circular`                    | 31.09 | pass                                                                                                                                                                                                  |
+| `packages/targets`: `pnpm test`                            | 31.09 | 42 files, 767 tests passed; coverage 94.29 stmts / 88.58 branches / 91.18 funcs / 95.01 lines, all above the package thresholds                                                                       |
+| `packages/build-cli`: `pnpm run check`                     | 34.25 | pass                                                                                                                                                                                                  |
+| `packages/build-cli`: `pnpm run lint`                      | 34.25 | pass                                                                                                                                                                                                  |
+| `packages/build-cli`: `pnpm run circular`                  | 34.25 | pass                                                                                                                                                                                                  |
+| `packages/build-cli`: `pnpm test`                          | 36.49 | 51 of 52 files pass, 814 passed / 4 failed / 1 skipped. The 4 are the same `test/ChainExecution.test.ts` Docker and mise cells round 1 recorded: this host has no Docker daemon and no `mise` on PATH |
+| `pnpm exec smithers-build build '//packages/...' --jobs 4` | 22.28 | exit 0, 0 failed (every package's `:check` Typecheck target included)                                                                                                                                 |
+| `pnpm exec smithers-build lint '//:knownFiles'`            | 29.68 | `ok: true`; fails and restores on a hand edit                                                                                                                                                         |
+| `pnpm exec smithers-build lint '//:ci'`                    | 29.68 | `ok: true`                                                                                                                                                                                            |
+| `pnpm exec smithers-build lint '//:tsconfig'`              | 16.91 | `ok: true`                                                                                                                                                                                            |
+| `git status --porcelain` after every run                   | —     | only the three files this round changed; `known-files.d.ts` byte-identical                                                                                                                            |
 
 ### Files changed in round 2
 
-| Path | Change |
-| --- | --- |
-| `packages/targets/src/Compose.ts` | `requireWriteSet` declaration guard, check-mode refusal for an empty `changes`, and the `Generate` error union |
-| `packages/targets/test/GeneratedFile.test.ts` | four `Generate declarations` cells |
-| `packages/build-cli/test/Execute.test.ts` | three `generate script form` cells |
+| Path                                          | Change                                                                                                         |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `packages/targets/src/Compose.ts`             | `requireWriteSet` declaration guard, check-mode refusal for an empty `changes`, and the `Generate` error union |
+| `packages/targets/test/GeneratedFile.test.ts` | four `Generate declarations` cells                                                                             |
+| `packages/build-cli/test/Execute.test.ts`     | three `generate script form` cells                                                                             |
 
-`known-files.d.ts`, `BUILD.ts`, `.github/workflows/ci.yml`, and
+`known-files.d.ts`, `PACKAGE.ts`, `.github/workflows/ci.yml`, and
 `packages/flows/test/vitestCoverageIsolation.test.ts` are untouched this round.
 
 ## Round 3
 
 Lane `known-files`, branch `phase7/known-files`, commit `19e0902f17` on top of
 round 2's `3518d31536`. The verifier's three round 2 findings are closed. No
-lockfile, `BUILD.ts`, `known-files.d.ts`, `.github/workflows/ci.yml`, or
+lockfile, `PACKAGE.ts`, `known-files.d.ts`, `.github/workflows/ci.yml`, or
 coverage-pin change this round; the four files touched are two sources and two
 test files.
 
@@ -596,18 +596,18 @@ test files.
 `packages/targets/src/Compose.ts:268`, in `outputPaths`:
 
 ```ts
-    for (const path of await Input.expandGlob(workspaceRoot, "", pattern, { signal })) paths.add(path)
+for (const path of await Input.expandGlob(workspaceRoot, "", pattern, { signal })) paths.add(path)
 ```
 
 `expandGlob` set `packageScoped: true` unconditionally
 (`packages/targets/src/Input.ts:800`) and ran `crossesPackageBoundary`
 unconditionally (`Input.ts:816`), which returns true as soon as a directory on
-the static prefix holds a `BUILD.ts` (`isPackage`, `Input.ts:498-512`;
+the static prefix holds a `PACKAGE.ts` (`isPackage`, `Input.ts:498-512`;
 `crossesPackageBoundary`, `Input.ts:613-630`). A `changes` entry under a nested
 package therefore expanded to `[]`: nothing was snapshotted, nothing compared,
 nothing restored, and `checkGenerator` returned success over a tree the
 generator had rewritten. This repository has exactly that shape, a root
-`BUILD.ts` above `packages/*/BUILD.ts`.
+`PACKAGE.ts` above `packages/*/PACKAGE.ts`.
 
 #### Behavior tests and the red run
 
@@ -615,7 +615,7 @@ generator had rewritten. This repository has exactly that shape, a root
   `compares and restores a declared output inside a nested package`.
 - `packages/build-cli/test/Execute.test.ts`, describe `generate script form`:
   `fails the lint verb on a drifted file inside a nested package`, which drives
-  the real planner and executor over `pkg/BUILD.ts`.
+  the real planner and executor over `pkg/PACKAGE.ts`.
 
 Red against the pre-fix source, load 8.12 and 7.33:
 
@@ -639,7 +639,7 @@ option, defaulting to `true`, feeds `Scan.packageScoped` and now guards the
 `crossesPackageBoundary` call:
 
 ```ts
-  if (scan.packageScoped && await crossesPackageBoundary(scan, packageRoot, start, chain)) return []
+if (scan.packageScoped && await crossesPackageBoundary(scan, packageRoot, start, chain)) return []
 ```
 
 `packages/targets/src/Compose.ts`, `outputPaths`, passes
@@ -704,7 +704,7 @@ Same two suites as item G, both fully passing.
 `generateDefinition.implementation` read:
 
 ```ts
-    if (attrs.mode !== "check") return Target.runTool(payload)
+if (attrs.mode !== "check") return Target.runTool(payload)
 ```
 
 Round 2 refused check mode when `changes` was empty but left write mode alone,
@@ -712,18 +712,18 @@ so `run '//:generated'` on a `stdout` declaration spawned the generator, threw
 its stdout away, and reported `ok: true` with the declared file absent. Only
 the package executor captures `stdout` (`packages/build-cli/src/PackageExec.ts:447`),
 and it dispatches on the rule name at `PackageExec.ts:4826`, never through this
-node, so the refusal cannot reach a PACKAGE.ts workspace. No `BUILD.ts` or
+node, so the refusal cannot reach a PACKAGE.ts workspace. No `PACKAGE.ts` or
 `PACKAGE.ts` in the tree declares `stdout`.
 
 #### Behavior test and the red run
 
 `packages/build-cli/test/Execute.test.ts`, describe `generate script form`:
-`refuses the run verb on a stdout generator a BUILD.ts workspace cannot capture`.
+`refuses the run verb on a stdout generator a PACKAGE.ts workspace cannot capture`.
 
 Red against the pre-fix source, load 7.33:
 
 ```
- FAIL  test/Execute.test.ts > generate script form > refuses the run verb on a stdout generator a BUILD.ts workspace cannot capture
+ FAIL  test/Execute.test.ts > generate script form > refuses the run verb on a stdout generator a PACKAGE.ts workspace cannot capture
 AssertionError: expected true to be false // Object.is equality
 ```
 
@@ -732,12 +732,12 @@ AssertionError: expected true to be false // Object.is equality
 `packages/targets/src/Compose.ts`, `generateDefinition.implementation`:
 
 ```ts
-    const changes = attrs.changes ?? []
-    if (attrs.mode !== "check") {
-      return changes.length === 0
-        ? Target.notImplemented("Generate stdout form in a BUILD.ts workspace")
-        : Target.runTool(payload)
-    }
+const changes = attrs.changes ?? []
+if (attrs.mode !== "check") {
+  return changes.length === 0
+    ? Target.notImplemented("Generate stdout form in a PACKAGE.ts workspace")
+    : Target.runTool(payload)
+}
 ```
 
 The check-mode refusal keeps its own message, which the round 2 cell pins.
@@ -748,28 +748,28 @@ Same `Execute.test.ts` run, 24 passing.
 
 ### Gates, round 3
 
-| Gate | Load | Result |
-| --- | --- | --- |
-| `packages/targets`: `pnpm run check` | 9.90 | pass |
-| `packages/targets`: `pnpm test` | 9.90 | 42 files, 769 tests passed; coverage above every package threshold |
-| `packages/targets`: `pnpm run lint` | 10.51 | pass |
-| `packages/targets`: `pnpm run circular` | 10.51 | pass |
-| `packages/build-cli`: `pnpm run check` | 9.57 | pass |
-| `packages/build-cli`: `pnpm run lint` | 9.57 | pass |
-| `packages/build-cli`: `pnpm run circular` | 9.57 | pass |
-| `packages/build-cli`: `pnpm test` | 8.70 | 51 of 52 files pass, 816 passed / 4 failed / 1 skipped. The 4 are the same `test/ChainExecution.test.ts` Docker and mise cells rounds 1 and 2 recorded: this host has no Docker daemon and no `mise` on PATH |
-| `packages/create-app`: `pnpm run check`, `pnpm test` | 15.32 | pass; 8 files, 93 tests. It is the only other package that depends on `@smthrs/targets` |
-| `pnpm exec smithers-build build '//packages/...' --jobs 4` | 14.58 | `103 targets: 0 hit, 103 ran, 0 failed, 0 skipped`, ok: true |
-| `pnpm exec smithers-build lint '//:knownFiles'` | 16.35 | ok: true; on a hand-edited `known-files.d.ts` it fails with the drift message and restores the file |
-| `pnpm exec smithers-build lint '//:ci'` | 16.35 | ok: true |
-| `pnpm exec smithers-build lint '//:tsconfig'` | 16.35 | ok: true |
-| `git status --porcelain` after every run | — | only the four files this round changed |
+| Gate                                                       | Load  | Result                                                                                                                                                                                                       |
+| ---------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/targets`: `pnpm run check`                       | 9.90  | pass                                                                                                                                                                                                         |
+| `packages/targets`: `pnpm test`                            | 9.90  | 42 files, 769 tests passed; coverage above every package threshold                                                                                                                                           |
+| `packages/targets`: `pnpm run lint`                        | 10.51 | pass                                                                                                                                                                                                         |
+| `packages/targets`: `pnpm run circular`                    | 10.51 | pass                                                                                                                                                                                                         |
+| `packages/build-cli`: `pnpm run check`                     | 9.57  | pass                                                                                                                                                                                                         |
+| `packages/build-cli`: `pnpm run lint`                      | 9.57  | pass                                                                                                                                                                                                         |
+| `packages/build-cli`: `pnpm run circular`                  | 9.57  | pass                                                                                                                                                                                                         |
+| `packages/build-cli`: `pnpm test`                          | 8.70  | 51 of 52 files pass, 816 passed / 4 failed / 1 skipped. The 4 are the same `test/ChainExecution.test.ts` Docker and mise cells rounds 1 and 2 recorded: this host has no Docker daemon and no `mise` on PATH |
+| `packages/create-app`: `pnpm run check`, `pnpm test`       | 15.32 | pass; 8 files, 93 tests. It is the only other package that depends on `@smthrs/targets`                                                                                                                      |
+| `pnpm exec smithers-build build '//packages/...' --jobs 4` | 14.58 | `103 targets: 0 hit, 103 ran, 0 failed, 0 skipped`, ok: true                                                                                                                                                 |
+| `pnpm exec smithers-build lint '//:knownFiles'`            | 16.35 | ok: true; on a hand-edited `known-files.d.ts` it fails with the drift message and restores the file                                                                                                          |
+| `pnpm exec smithers-build lint '//:ci'`                    | 16.35 | ok: true                                                                                                                                                                                                     |
+| `pnpm exec smithers-build lint '//:tsconfig'`              | 16.35 | ok: true                                                                                                                                                                                                     |
+| `git status --porcelain` after every run                   | —     | only the four files this round changed                                                                                                                                                                       |
 
 ### Files changed in round 3
 
-| Path | Change |
-| --- | --- |
-| `packages/targets/src/Input.ts` | `packageScoped` option on `expandGlob`, guarding `crossesPackageBoundary` |
-| `packages/targets/src/Compose.ts` | unscoped `outputPaths`, the `onInterrupt` restore, the run-mode refusal |
-| `packages/targets/test/GeneratedFile.test.ts` | an `until` poll helper and two `checkGenerator` cells |
-| `packages/build-cli/test/Execute.test.ts` | two `generate script form` cells |
+| Path                                          | Change                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------- |
+| `packages/targets/src/Input.ts`               | `packageScoped` option on `expandGlob`, guarding `crossesPackageBoundary` |
+| `packages/targets/src/Compose.ts`             | unscoped `outputPaths`, the `onInterrupt` restore, the run-mode refusal   |
+| `packages/targets/test/GeneratedFile.test.ts` | an `until` poll helper and two `checkGenerator` cells                     |
+| `packages/build-cli/test/Execute.test.ts`     | two `generate script form` cells                                          |

@@ -1,13 +1,13 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
 contract for `@smthrs/engine-store`. Generated pages under `docs/pages` are
 outputs.
 
 `scripts/docs.mjs` builds `docs/pages/api/engine-store.md` from the module
 JSDoc of `src/index.ts`, the `@category`-tagged JSDoc of every namespace the
 barrel re-exports, and `docs/api.md`, then verifies that the reference list
-declared by `Package.ts` still points readers to `/api/engine-store`.
+declared by `docs/Manifest.ts` still points readers to `/api/engine-store`.
 
 The `//packages/engine-store:docsPages` target writes or drift-checks that
 output. After editing, run:

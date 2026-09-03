@@ -20,18 +20,18 @@ lists what moved.
 
 ## 1. Environment
 
-| Item | Value |
-| --- | --- |
-| Host | macOS 26.2 (build 25C56), Darwin 25.2.0, arm64 |
-| Date | 2026-08-31 11:59 to 12:09 UTC (2026-08-31 04:59 to 05:09 PT) |
-| Node | v24.18.0 (`/Users/williamcory/.nvm/versions/node/v24.18.0/bin/node`); rc-contract section 1 floor is `>=22.19.0` |
-| Bun | 1.4.0 (`bun --version`); not used, every suite here runs under Node because the durable engine refuses Bun |
-| corepack / pnpm | 0.35.0 / 11.21.0 (selected by `packageManager: pnpm@11.21.0`) |
-| vitest | 4.1.9 (`vitest/4.1.9 darwin-arm64 node-v24.18.0`) |
-| jj | 0.39.0 at `/opt/homebrew/bin/jj` (fault cases 12 and 21 drive a real Jujutsu workspace) |
-| git | 2.50.1 (Apple Git-155) |
-| `SMITHERS_HOME` | unset in the calling shell and stripped from every invocation (`env -u SMITHERS_HOME`) |
-| Host load | Other Phase 7 lanes ran at the same time, several of them inside this same checkout (an `examples` and a `packages/migrate` `vitest run`, `packages/build-cli` and `packages/cli` `tsc`, `smithers-build query //...`, `smithers list-runs`, and a `pnpm -r run build` that created `packages/*/dist/` between 12:02 and 12:05 UTC). 1-minute load averages, sampled before and after each run and recorded in `summary.tsv`: 20.23 before `journal`, 63.93 before and 71.91 after `engine-store`, 72.16 before and 62.44 after `time-travel`, 43.38 before and 83.38 after the e2e matrix. |
+| Item            | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host            | macOS 26.2 (build 25C56), Darwin 25.2.0, arm64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Date            | 2026-08-31 11:59 to 12:09 UTC (2026-08-31 04:59 to 05:09 PT)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Node            | v24.18.0 (`/Users/williamcory/.nvm/versions/node/v24.18.0/bin/node`); rc-contract section 1 floor is `>=22.19.0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Bun             | 1.4.0 (`bun --version`); not used, every suite here runs under Node because the durable engine refuses Bun                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| corepack / pnpm | 0.35.0 / 11.21.0 (selected by `packageManager: pnpm@11.21.0`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| vitest          | 4.1.9 (`vitest/4.1.9 darwin-arm64 node-v24.18.0`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| jj              | 0.39.0 at `/opt/homebrew/bin/jj` (fault cases 12 and 21 drive a real Jujutsu workspace)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| git             | 2.50.1 (Apple Git-155)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `SMITHERS_HOME` | unset in the calling shell and stripped from every invocation (`env -u SMITHERS_HOME`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Host load       | Other Phase 7 lanes ran at the same time, several of them inside this same checkout (an `examples` and a `packages/migrate` `vitest run`, `packages/build-cli` and `packages/cli` `tsc`, `smithers-build query //...`, `smithers list-runs`, and a `pnpm -r run build` that created `packages/*/dist/` between 12:02 and 12:05 UTC). 1-minute load averages, sampled before and after each run and recorded in `summary.tsv`: 20.23 before `journal`, 63.93 before and 71.91 after `engine-store`, 72.16 before and 62.44 after `time-travel`, 43.38 before and 83.38 after the e2e matrix. |
 
 The load inflates durations relative to the superseded run (`engine-store`
 128.68 s here against 101.66 s then; the e2e matrix 203.7 s against 139.8 s)
@@ -70,13 +70,13 @@ enforces its thresholds on every run, so exit 0 means the thresholds held.
 `engine-store` and `time-travel` scope their coverage directory to the process,
 so the concurrent lanes' vitest runs in other packages could not clobber them.
 
-| Package | Start (UTC) | End (UTC) | Exit | Test files | Tests | Duration |
-| --- | --- | --- | --- | --- | --- | --- |
-| `@smthrs/journal` | 11:59:39 | 11:59:49 | 0 | 20 passed (20) | 156 passed (156) | 7.91 s |
-| `@smthrs/run-store` | 11:59:49 | 12:00:04 | 0 | 17 passed (17) | 131 passed (131) | 12.24 s |
-| `@smthrs/testing` | 12:00:04 | 12:00:16 | 0 | 18 passed (18) | 123 passed, 2 skipped (125) | 7.99 s |
-| `@smthrs/engine-store` | 12:00:54 | 12:03:05 | 0 | 102 passed (102) | 821 passed (821) | 128.68 s |
-| `@smthrs/time-travel` | 12:03:10 | 12:03:57 | 0 | 34 passed (34) | 312 passed (312) | 44.31 s |
+| Package                | Start (UTC) | End (UTC) | Exit | Test files       | Tests                       | Duration |
+| ---------------------- | ----------- | --------- | ---- | ---------------- | --------------------------- | -------- |
+| `@smthrs/journal`      | 11:59:39    | 11:59:49  | 0    | 20 passed (20)   | 156 passed (156)            | 7.91 s   |
+| `@smthrs/run-store`    | 11:59:49    | 12:00:04  | 0    | 17 passed (17)   | 131 passed (131)            | 12.24 s  |
+| `@smthrs/testing`      | 12:00:04    | 12:00:16  | 0    | 18 passed (18)   | 123 passed, 2 skipped (125) | 7.99 s   |
+| `@smthrs/engine-store` | 12:00:54    | 12:03:05  | 0    | 102 passed (102) | 821 passed (821)            | 128.68 s |
+| `@smthrs/time-travel`  | 12:03:10    | 12:03:57  | 0    | 34 passed (34)   | 312 passed (312)            | 44.31 s  |
 
 Totals: 191 test files, 1543 tests passed, 2 skipped, 0 failed.
 
@@ -93,13 +93,13 @@ time-travel:  Test Files  34 passed (34)   / Tests  312 passed (312)
 Coverage, from each log's `Coverage summary` block against the thresholds in
 each `vitest.config.ts`:
 
-| Package | Statements | Branches | Functions | Lines | Thresholds (stmts/branches/funcs/lines) |
-| --- | --- | --- | --- | --- | --- |
-| `journal` | 100% (595/595) | 100% (315/315) | 100% (184/184) | 100% (570/570) | 100/100/100/100 |
-| `run-store` | 100% (457/457) | 100% (327/327) | 100% (142/142) | 100% (434/434) | 100/100/100/100 |
-| `engine-store` | 100% (3566/3566) | 100% (1786/1786) | 100% (933/933) | 100% (3232/3232) | 100/100/100/100 |
-| `time-travel` | 100% (1123/1123) | 100% (564/564) | 100% (296/296) | 100% (1045/1045) | 100/100/100/100 |
-| `testing` | 90.59% (1349/1489) | 75.19% (570/758) | 90.46% (484/535) | 91.82% (1235/1345) | 89/73/89/90 |
+| Package        | Statements         | Branches         | Functions        | Lines              | Thresholds (stmts/branches/funcs/lines) |
+| -------------- | ------------------ | ---------------- | ---------------- | ------------------ | --------------------------------------- |
+| `journal`      | 100% (595/595)     | 100% (315/315)   | 100% (184/184)   | 100% (570/570)     | 100/100/100/100                         |
+| `run-store`    | 100% (457/457)     | 100% (327/327)   | 100% (142/142)   | 100% (434/434)     | 100/100/100/100                         |
+| `engine-store` | 100% (3566/3566)   | 100% (1786/1786) | 100% (933/933)   | 100% (3232/3232)   | 100/100/100/100                         |
+| `time-travel`  | 100% (1123/1123)   | 100% (564/564)   | 100% (296/296)   | 100% (1045/1045)   | 100/100/100/100                         |
+| `testing`      | 90.59% (1349/1489) | 75.19% (570/758) | 90.46% (484/535) | 91.82% (1235/1345) | 89/73/89/90                             |
 
 `engine-store` grew by 49 statements, 45 branches, 11 functions, and 44 lines
 since `20b32c6316` (`src/internal/ExitEncoding.ts` and the `RunDriver.ts`
@@ -111,14 +111,14 @@ The suites the gate names individually were also run as single files with
 `--coverage.enabled=false`, since one file cannot meet a whole-package
 threshold. Every count below is already inside the package totals in section 3.
 
-| Suite | Command (cwd) | Exit | Tests |
-| --- | --- | --- | --- |
-| In-package fault matrix | `packages/engine-store`: `vitest run test/FaultMatrix.test.ts --coverage.enabled=false` | 0 | 9 passed (9) |
-| Interrupted park | `packages/engine-store`: `vitest run test/InterruptedSuspensionPark.test.ts --coverage.enabled=false` | 0 | 3 passed (3) |
-| Unencodable settlement (new since `20b32c6316`) | `packages/engine-store`: `vitest run test/UnencodableSettlement.test.ts --coverage.enabled=false` | 0 | 2 passed (2) |
-| Hard-kill reclaim | `packages/engine-store`: `vitest run test/HardKillReclaim.test.ts --coverage.enabled=false` | 0 | 5 passed (5) |
-| RestartableEngine harness | `packages/testing`: `vitest run test/RestartableEngine.test.ts --coverage.enabled=false` | 0 | 2 passed (2) |
-| RestartableEngine consumer | `packages/testing`: `vitest run test/applied/MemoryEngineConformance.test.ts --coverage.enabled=false` | 0 | 15 passed (15) |
+| Suite                                           | Command (cwd)                                                                                          | Exit | Tests          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---- | -------------- |
+| In-package fault matrix                         | `packages/engine-store`: `vitest run test/FaultMatrix.test.ts --coverage.enabled=false`                | 0    | 9 passed (9)   |
+| Interrupted park                                | `packages/engine-store`: `vitest run test/InterruptedSuspensionPark.test.ts --coverage.enabled=false`  | 0    | 3 passed (3)   |
+| Unencodable settlement (new since `20b32c6316`) | `packages/engine-store`: `vitest run test/UnencodableSettlement.test.ts --coverage.enabled=false`      | 0    | 2 passed (2)   |
+| Hard-kill reclaim                               | `packages/engine-store`: `vitest run test/HardKillReclaim.test.ts --coverage.enabled=false`            | 0    | 5 passed (5)   |
+| RestartableEngine harness                       | `packages/testing`: `vitest run test/RestartableEngine.test.ts --coverage.enabled=false`               | 0    | 2 passed (2)   |
+| RestartableEngine consumer                      | `packages/testing`: `vitest run test/applied/MemoryEngineConformance.test.ts --coverage.enabled=false` | 0    | 15 passed (15) |
 
 `RestartableEngine.test.ts` proves the harness itself: `restarts over the same
 store and executes only the frontier` and `kill leaves the abandoned instance
@@ -154,26 +154,26 @@ runner propagates vitest's exit code; the budget verdict itself passed:
 Per-case outcomes, verbatim from `e2e-fault-results.json` (`family` joined from
 `fault-matrix.json`):
 
-| Case | Family | Outcome | Tests | Duration |
-| --- | --- | --- | --- | --- |
-| case01 kill-engine-mid-action | crash | pass | 1 | 36910 ms |
-| case02 kill-sandbox-engine-alive | provider | pass | 1 | 1052 ms |
-| case03 restart-waiting-approval | crash | pass | 1 | 4636 ms |
-| case04 restart-waiting-event | crash | pass | 1 | 7341 ms |
-| case05 restart-waiting-timer | crash | pass | 1 | 10646 ms |
-| case06 concurrent-resume-vs-sweep | crash | pass | 2 | 5651 ms |
-| case08 inspector-never-idle | time-travel | pass | 1 | 1591 ms |
-| case09 reconnect-durable-cursor | gateway | pass | 1 | 8220 ms |
-| case11 frame-scrub-view-only | time-travel | pass | 1 | 2535 ms |
-| case12 rewind-reverts-vcs | time-travel | pass | 1 | 2067 ms |
-| case14 gateway-rpc-roundtrip | gateway | pass | 2 | 7074 ms |
-| case15 ws-drop-reconnect | gateway | pass | 1 | 6470 ms |
-| case16 n5-subscribers-bounded-memory | gateway | pass | 1 | 18389 ms |
-| case21 jj-pointer-integrity | provider | pass | 2 | 818 ms |
-| case22 secret-never-in-journal | safety | **fail** | 2 (1 failed) | 2172 ms |
-| case25 approval-scope-denial | gateway | pass | 5 | 2604 ms |
-| case31 real-engine-kill-resume | crash | pass | 1 | 36067 ms |
-| case32 checkpoint-kill-resume | crash | pass | 2 | 1723 ms |
+| Case                                 | Family      | Outcome  | Tests        | Duration |
+| ------------------------------------ | ----------- | -------- | ------------ | -------- |
+| case01 kill-engine-mid-action        | crash       | pass     | 1            | 36910 ms |
+| case02 kill-sandbox-engine-alive     | provider    | pass     | 1            | 1052 ms  |
+| case03 restart-waiting-approval      | crash       | pass     | 1            | 4636 ms  |
+| case04 restart-waiting-event         | crash       | pass     | 1            | 7341 ms  |
+| case05 restart-waiting-timer         | crash       | pass     | 1            | 10646 ms |
+| case06 concurrent-resume-vs-sweep    | crash       | pass     | 2            | 5651 ms  |
+| case08 inspector-never-idle          | time-travel | pass     | 1            | 1591 ms  |
+| case09 reconnect-durable-cursor      | gateway     | pass     | 1            | 8220 ms  |
+| case11 frame-scrub-view-only         | time-travel | pass     | 1            | 2535 ms  |
+| case12 rewind-reverts-vcs            | time-travel | pass     | 1            | 2067 ms  |
+| case14 gateway-rpc-roundtrip         | gateway     | pass     | 2            | 7074 ms  |
+| case15 ws-drop-reconnect             | gateway     | pass     | 1            | 6470 ms  |
+| case16 n5-subscribers-bounded-memory | gateway     | pass     | 1            | 18389 ms |
+| case21 jj-pointer-integrity          | provider    | pass     | 2            | 818 ms   |
+| case22 secret-never-in-journal       | safety      | **fail** | 2 (1 failed) | 2172 ms  |
+| case25 approval-scope-denial         | gateway     | pass     | 5            | 2604 ms  |
+| case31 real-engine-kill-resume       | crash       | pass     | 1            | 36067 ms |
+| case32 checkpoint-kill-resume        | crash       | pass     | 2            | 1723 ms  |
 
 Totals: 18 cases, 17 passed, 1 failed; 27 tests, 26 passed, 1 failed, 0
 skipped, 0 incomplete. All seven crash-family cases (01, 03, 04, 05, 06, 31,
@@ -207,7 +207,7 @@ outside this gate's verdict.
   (line 58 onward) refuses every way of making it green without the logger.
 - rc-contract ruling R-12 makes case 22 a Phase 7 required parity test, so it
   must pass before the maintainer publishes. Owner: the Phase 5 redaction
-  deliverable (rc-contract section 5.2). Root `BUILD.ts` lines 213 to 225 keep
+  deliverable (rc-contract section 5.2). Root `PACKAGE.ts` lines 213 to 225 keep
   the `e2e-faults` CI job advisory (`continueOnError: true`, absent from
   `requiredJobs`) until that lands.
 - The superseded evidence recorded that no known-limitations entry existed at

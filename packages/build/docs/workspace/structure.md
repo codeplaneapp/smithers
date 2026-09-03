@@ -1,6 +1,6 @@
 # Workspace structure
 
-A smithers build workspace is a directory tree containing `BUILD.ts` files. The
+A smithers build workspace is a directory tree containing `PACKAGE.ts` files. The
 workspace root is whatever `--workspace` points at, and it defaults to the
 process working directory.
 
@@ -18,8 +18,8 @@ process working directory.
    the resolved cache directory, and the fixed `.flows/store` subtree, then
    sorts by UTF-16 code unit.
 
-The listing is the workspace's view of itself. `BUILD.ts` files are the entries
-equal to `BUILD.ts` or ending in `/BUILD.ts`.
+The listing is the workspace's view of itself. `PACKAGE.ts` files are the entries
+equal to `PACKAGE.ts` or ending in `/PACKAGE.ts`.
 
 Host state is dropped unconditionally, even when git lists it. Replayable cache,
 scratch, and store content must never feed input discovery or a content digest.
@@ -50,33 +50,33 @@ argument.
 ### The walk stays inside the workspace
 
 Fallback discovery uses the same walk glob expansion uses, with the package
-boundary removed so it sees every `BUILD.ts`. Both therefore agree on which
+boundary removed so it sees every `PACKAGE.ts`. Both therefore agree on which
 `.gitignore` files apply, which symbolic links name workspace content, and which
 directories are confined to the canonical root. See
 [Inputs](../concepts/inputs.md).
 
-## BUILD.ts placement
+## PACKAGE.ts placement
 
-A `BUILD.ts` file defines a package. Its package path is its directory relative
-to the workspace root; the root `BUILD.ts` defines the package with the empty
+A `PACKAGE.ts` file defines a package. Its package path is its directory relative
+to the workspace root; the root `PACKAGE.ts` defines the package with the empty
 path, addressed as `//`.
 
 ```
-BUILD.ts                     -> //
-packages/flow/BUILD.ts       -> //packages/flow
-packages/flow/test/BUILD.ts  -> //packages/flow/test
+PACKAGE.ts                     -> //
+packages/flow/PACKAGE.ts       -> //packages/flow
+packages/flow/test/PACKAGE.ts  -> //packages/flow/test
 ```
 
-There is no `subpackages` target and no visibility system. Nesting a `BUILD.ts`
+There is no `subpackages` target and no visibility system. Nesting a `PACKAGE.ts`
 inside another package's directory simply creates a second package.
 
 ## Lazy evaluation
 
-The workspace imports only the `BUILD.ts` modules a command needs.
+The workspace imports only the `PACKAGE.ts` modules a command needs.
 
-- An exact label loads the one `BUILD.ts` for its package.
-- A recursive pattern loads every `BUILD.ts` in the selected subtree.
-- A direct import inside a `BUILD.ts` pulls its dependency's module in through
+- An exact label loads the one `PACKAGE.ts` for its package.
+- A recursive pattern loads every `PACKAGE.ts` in the selected subtree.
+- A direct import inside a `PACKAGE.ts` pulls its dependency's module in through
   the normal ESM module graph.
 
 Imports are cached by the file a module is, not by the name it was reached
@@ -84,24 +84,24 @@ under: the canonical path plus the device, inode, size, and modification time.
 Within one command the stamp does not move, so a module evaluates at most once
 and the target values it exports keep one identity — which is what the planner
 uses to match a dependency to its label. Across commands in one process, a
-`BUILD.ts` that was edited is re-evaluated, and two workspaces that happen to
+`PACKAGE.ts` that was edited is re-evaluated, and two workspaces that happen to
 share a path spelling never share a module.
 
-Besides targets, a `BUILD.ts` may export a `PackageDefaults` declaration, a
+Besides targets, a `PACKAGE.ts` may export a `PackageDefaults` declaration, a
 `Workspace` configuration, and one `Smithers.Nix.Environment`. The environment
 applies to the exporting package and every package below it; the root's is the
 workspace's, and a package that exports its own overrides it for that package
-alone. Two environment exports in one `BUILD.ts` fail the load. See
+alone. Two environment exports in one `PACKAGE.ts` fail the load. See
 [Environments](../concepts/environments.md).
 
-Three guards apply. A `BUILD.ts` must resolve, inside the canonical workspace
+Three guards apply. A `PACKAGE.ts` must resolve, inside the canonical workspace
 root, to a regular file; a link out of the workspace is refused rather than
-imported, because evaluating a `BUILD.ts` runs it. Loading a `BUILD.ts` that
-discovery did not list fails with `BUILD.ts is not discoverable`. Exporting one
+imported, because evaluating a `PACKAGE.ts` runs it. Loading a `PACKAGE.ts` that
+discovery did not list fails with `PACKAGE.ts is not discoverable`. Exporting one
 target value under two labels fails with
 `one target value is exported under both <a> and <b>`.
 
-Admitting a `BUILD.ts` is still a trust decision, not a sandbox: it is
+Admitting a `PACKAGE.ts` is still a trust decision, not a sandbox: it is
 executable TypeScript that can read any file the user can read and spawn any
 process. A workspace you would not run `pnpm install` in is a workspace you must
 not point this CLI at. What the confinement targets guarantee is narrower and
@@ -119,16 +119,16 @@ A package's boundary matters in three places.
 - **Tool working directory.** Every tool-running target takes a `cwd` attribute
   that names the workspace-relative directory the tool starts in, defaulting to
   the workspace root. That attribute is separate from the package path: a
-  package-level `BUILD.ts` passes its own directory explicitly.
+  package-level `PACKAGE.ts` passes its own directory explicitly.
 
 ## Default-target synthesis
 
-A directory without its own `BUILD.ts` can still produce targets. The root
-`BUILD.ts` exports a `PackageDefaults` declaration, and the workspace applies it to
+A directory without its own `PACKAGE.ts` can still produce targets. The root
+`PACKAGE.ts` exports a `PackageDefaults` declaration, and the workspace applies it to
 every matching directory.
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const packageDefaults = Smithers.PackageDefaults({
@@ -140,7 +140,7 @@ export const packageDefaults = Smithers.PackageDefaults({
 A directory is eligible when all three hold:
 
 - it contains the `marker` file,
-- it does not contain the `unless` file, which defaults to `BUILD.ts`,
+- it does not contain the `unless` file, which defaults to `PACKAGE.ts`,
 - it matches the declaration's `directories` glob, resolved against the package
   that declared it.
 
@@ -150,7 +150,7 @@ override `cwd`. Every target in the returned object is registered under a
 path-derived label, with names sorted so synthesis is deterministic. A macro that
 returns no targets fails with `default target synthesized no targets for //<dir>`.
 
-The root `BUILD.ts` is always loaded before any synthesis decision, so
+The root `PACKAGE.ts` is always loaded before any synthesis decision, so
 workspace-level declarations are in scope. See
 [Default targets](../extending/default-rules.md).
 

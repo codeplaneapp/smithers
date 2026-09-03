@@ -24,7 +24,7 @@ is part of the design: a weak observation is not relabelled as a hard boundary.
 
 ## 2. Authoring and analysis
 
-A `BUILD.ts` file is an executable TypeScript module. Named target exports are
+A `PACKAGE.ts` file is an executable TypeScript module. Named target exports are
 indexed under path-derived labels. Importing another target value creates a
 dependency edge; attributes never contain label strings.
 
@@ -44,7 +44,7 @@ plan-to-execution race. A final change between the last comparison and a tool's
 own syscall remains impossible to close portably without a snapshotting or
 descriptor-relative sandbox.
 
-`BUILD.ts` evaluation is a trust boundary, not a sandbox boundary. A repository
+`PACKAGE.ts` evaluation is a trust boundary, not a sandbox boundary. A repository
 module can run any code available to the user. The CLI never pretends that
 temporarily clearing `process.env` makes it safe; credentials are withheld at
 the child-process edge, where the guarantee is enforceable.
@@ -105,7 +105,7 @@ first.
 This used to be two trampoline rounds. The package-manager service is a
 runtime layer, so a pure body could not branch on it, and round one existed
 only to turn the wired manager's identity into ordinary payload. Declaring the
-manager in BUILD.ts removes the reason for the trampoline.
+manager in PACKAGE.ts removes the reason for the trampoline.
 
 ### 5.1 Measured content, declared identity
 

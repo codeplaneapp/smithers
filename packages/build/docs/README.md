@@ -1,8 +1,8 @@
 # smithers build documentation
 
-smithers build is a Bazel-style build orchestrator for TypeScript workspaces. `BUILD.ts`
+smithers build is a Bazel-style build orchestrator for TypeScript workspaces. `PACKAGE.ts`
 files are plain TypeScript modules whose named exports are targets. Target calls
-return flows with planner metadata. Direct imports between `BUILD.ts` files form
+return flows with planner metadata. Direct imports between `PACKAGE.ts` files form
 dependency edges.
 
 These pages describe what the code does today. Behavior that is declared but not
@@ -17,16 +17,16 @@ wired is marked as such on the page that covers it.
 
 ## Getting started
 
-| Page                                          | Description                                                              |
-| --------------------------------------------- | ------------------------------------------------------------------------ |
-| [Install](getting-started/install.md)         | Wire `@smthrs/targets` and the CLI into an existing pnpm workspace.      |
-| [First build](getting-started/first-build.md) | Write a root `BUILD.ts` and one package `BUILD.ts`, then run every verb. |
+| Page                                          | Description                                                                  |
+| --------------------------------------------- | ---------------------------------------------------------------------------- |
+| [Install](getting-started/install.md)         | Wire `@smthrs/targets` and the CLI into an existing pnpm workspace.          |
+| [First build](getting-started/first-build.md) | Write a root `PACKAGE.ts` and one package `PACKAGE.ts`, then run every verb. |
 
 ## Workspace
 
 | Page                                                       | Description                                                                                                            |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [Structure](workspace/structure.md)                        | Discovery, `BUILD.ts` placement, package boundaries, default-target synthesis.                                         |
+| [Structure](workspace/structure.md)                        | Discovery, `PACKAGE.ts` placement, package boundaries, default-target synthesis.                                       |
 | [Writing BUILD files](workspace/writing-build-files.md)    | Targets as named exports, target calls, import edges, macros.                                                          |
 | [Configuration](workspace/configuration.md)                | The `Workspace` declaration, `cacheDirectory`, `gitignored`, `--cache-dir`.                                            |
 | [Running targets](workspace/running-targets.md)            | `install`, target verbs including `run` and `docs`, `ci`, and what actually executes.                                  |

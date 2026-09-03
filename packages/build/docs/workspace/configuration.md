@@ -2,10 +2,10 @@
 
 A workspace declares where the CLI keeps its cache and target scratch files,
 and the confinement its tool-running targets execute under. The root
-`BUILD.ts` file declares both.
+`PACKAGE.ts` file declares both.
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 import { Workspace } from "@smthrs/targets/Config"
 
 export const config = Workspace({ cacheDirectory: ".flows", gitignored: true, sandbox: {} })
@@ -18,7 +18,7 @@ not wanted, for example `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`
 on a host without bubblewrap or seatbelt. See
 [Hermeticity](../concepts/actions-and-boundaries.md#hermeticity).
 
-`Workspace` validates its options and performs no I/O, so `BUILD.ts` evaluation
+`Workspace` validates its options and performs no I/O, so `PACKAGE.ts` evaluation
 stays pure. The export name does not matter; when several exports are `Workspace`
 values, the workspace takes the first one in ascending export-name order.
 
@@ -30,7 +30,7 @@ For the full schema and every validation target, see
 Every command settles the cache directory before it reads or writes anything.
 
 1. The `--cache-dir` flag.
-2. The `Workspace` declaration exported from the root `BUILD.ts`.
+2. The `Workspace` declaration exported from the root `PACKAGE.ts`.
 3. `.flows`.
 
 Both the flag and the declaration go through the same validation, so an absolute

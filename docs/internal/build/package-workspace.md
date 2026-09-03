@@ -34,7 +34,7 @@ is generated through `S.Generate`, so check mode reports drift and `--write`
 updates it.
 
 Every discovered file has a `//` workspace-absolute spelling, and every file
-below a directory that contains a `BUILD.ts` or `PACKAGE.ts` also has its
+below a directory that contains a `PACKAGE.ts` or `PACKAGE.ts` also has its
 package-local spelling. Those are the two spellings a declaration writes; a
 path with `..` is not accepted, because a declaration that reaches outside its
 package says so with `//`.

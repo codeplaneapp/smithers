@@ -146,7 +146,7 @@ declared confinement is enforced or the target fails closed. Nothing logs
 A target declares a policy: the default confinement, `{ network: "loopback" }`,
 `{ network: true }`, or the `"none"` opt-out. On the `PACKAGE.ts` surface
 that is the `sandbox` attr and the default is the confinement. On the
-`BUILD.ts` surface the root `Workspace({ sandbox })` declaration sets one
+`PACKAGE.ts` surface the root `Workspace({ sandbox })` declaration sets one
 policy for every tool-running target, and the default is `"none"` until a
 workspace declares otherwise, because the catalog's declared inputs are what
 the sandbox exposes and a workspace has to declare them completely first.
@@ -190,7 +190,7 @@ tree is what the content key covers; the loader, the interpreters, and the
 package manager live outside it, and the toolchain identity that names them is
 the `nix:<hash>` layer of a declared [Nix environment](environments.md).
 
-A `BUILD.ts` file is not sandboxed, and it is not meant to be. It is
+A `PACKAGE.ts` file is not sandboxed, and it is not meant to be. It is
 executable TypeScript evaluated in the CLI process: it can import any host
 module, read any file you can read, and spawn any process. Evaluating a
 workspace is exactly as trusted as running that repository's own code. The CLI

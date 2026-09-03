@@ -14,7 +14,7 @@ package. There are three:
   lists the package quotes.
 
 `exports.md` is the only generated file here. `scripts/docs.mjs` writes it
-from the JSDoc, `Package.ts` declares which surfaces the generator owns, and
+from the JSDoc, `docs/Manifest.ts` declares which surfaces the generator owns, and
 `//packages/chain:docsPages` runs the generator: the `run` verb writes and
 the `lint` verb — the one CI's `ci '//packages/...'` step includes — fails on
 drift. Regenerate it with `node packages/chain/scripts/docs.mjs`.

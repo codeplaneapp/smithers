@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Package } from "../Package.ts"
+import { Manifest } from "../docs/Manifest.ts"
 
 const check = process.argv.includes("--check")
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -164,7 +164,7 @@ const documentedBarrelEntries = (source) => {
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
-if (manifest.name !== Package.name) throw new Error("kernel docs: Package.ts and package.json names differ")
+if (manifest.name !== Manifest.name) throw new Error("kernel docs: Manifest.ts and package.json names differ")
 
 const barrel = read(join(packageRoot, "src", "index.ts"))
 const intro = moduleDoc(barrel)
@@ -199,7 +199,7 @@ const apiPage = [
   "",
   paragraphs(intro),
   "",
-  read(join(packageRoot, Package.api.source)).trim(),
+  read(join(packageRoot, Manifest.api.source)).trim(),
   "",
   "## Exports",
   "",
@@ -207,30 +207,30 @@ const apiPage = [
   ""
 ].join("\n")
 
-const outputs = new Map([[Package.api.target, apiPage]])
-for (const snippet of Package.snippets) {
+const outputs = new Map([[Manifest.api.target, apiPage]])
+for (const snippet of Manifest.snippets) {
   const current = outputs.get(snippet.target) ?? read(join(repoRoot, snippet.target))
   outputs.set(snippet.target, replaceRegion(current, snippet.region, read(join(packageRoot, snippet.source))))
 }
 
 const failures = []
-for (const path of Package.references) {
+for (const path of Manifest.references) {
   const content = read(join(repoRoot, path))
-  if (!content.includes(Package.name) || !content.includes("/api/kernel")) {
-    failures.push(path + ": must reference " + Package.name + " and /api/kernel")
+  if (!content.includes(Manifest.name) || !content.includes("/api/kernel")) {
+    failures.push(path + ": must reference " + Manifest.name + " and /api/kernel")
   }
 }
 for (const [path, content] of outputs) {
   if (content.includes("—")) failures.push(path + ": generated content contains an em-dash")
 }
 if (apiPage.includes("formatPattern")) {
-  failures.push(Package.api.target + ": generated content contains removed export formatPattern")
+  failures.push(Manifest.api.target + ": generated content contains removed export formatPattern")
 }
 
 const requiredSpecifiers = []
 for (const [key, mapping] of Object.entries(manifest.exports)) {
   if (key === "." || key === "./package.json" || key.includes("*") || mapping === null) continue
-  requiredSpecifiers.push(Package.name + key.slice(1))
+  requiredSpecifiers.push(Manifest.name + key.slice(1))
 }
 requiredSpecifiers.push(
   "@smthrs/kernel/test/TestGrantStore",
@@ -238,7 +238,7 @@ requiredSpecifiers.push(
 )
 for (const specifier of requiredSpecifiers) {
   if (!apiPage.includes(specifier)) {
-    failures.push(Package.api.target + ": missing public import specifier " + specifier)
+    failures.push(Manifest.api.target + ": missing public import specifier " + specifier)
   }
 }
 

@@ -21,7 +21,7 @@ node packages/time-travel/scripts/docs.mjs
 node packages/time-travel/scripts/docs.mjs --check
 ```
 
-`packages/time-travel/BUILD.ts` declares the same script as a `Generate`
+`packages/time-travel/PACKAGE.ts` declares the same script as a `Generate`
 target, so `smithers-build run //packages/time-travel:docsPages` writes the
 pages and `smithers-build lint //packages/time-travel:docsPages` fails on
 drift. `scripts/check-docs.mjs` discovers this generator automatically.

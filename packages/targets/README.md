@@ -1,11 +1,11 @@
 # @smthrs/targets
 
-`@smthrs/targets` defines the pure authoring surface used by `BUILD.ts` files.
+`@smthrs/targets` defines the pure authoring surface used by `PACKAGE.ts` files.
 Target calls perform no filesystem reads and start no processes. They return
 Flow declarations with planner metadata attached.
 
 The package exports one named namespace, `Smithers`, the way `effect` exports
-`Effect`. A `BUILD.ts` file imports it once and reaches the whole catalog
+`Effect`. A `PACKAGE.ts` file imports it once and reaches the whole catalog
 through it, so the import line never changes as a workspace grows. Library code
 that consumes this package imports the module it needs directly instead, as
 `@smthrs/targets/Target`.
@@ -38,7 +38,7 @@ namespace their constructors live under and the type those constructors return.
 Every tool-running target takes the manager as a required attr and asks
 `Smithers.PackageManager.exec` for its argv, so nothing in the catalog spells
 `pnpm` or `node` into an argv of its own and switching either is one edit to the
-root `BUILD.ts` file.
+root `PACKAGE.ts` file.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
@@ -111,7 +111,7 @@ The declared channel is selected, not hoped for: every cargo run carries it as
 `RUSTUP_TOOLCHAIN`, so a host without the pin fails at the start of the run
 naming the channel instead of mid-compile on a rustc the crates refuse.
 
-`Smithers.Cargo` holds the package-mode rules. Each names its crates with
+`Smithers.Cargo` holds the build-system rules. Each names its crates with
 exactly one selector — `workspace: true`, `package: "<name>"`, or
 `crates: <set>`:
 
@@ -181,11 +181,11 @@ selected crate.
 
 `Cargo.Fmt`, `Cargo.Clippy`, and `Cargo.Test` are also the BUILD-era check
 constructors the legacy `Smithers.CargoLint` and `Smithers.CargoTest` targets
-take as an attr. The crate selector tells the two apart: every package-mode
+take as an attr. The crate selector tells the two apart: every build-system
 declaration names one and no BUILD-era call ever passes one, so
 `Smithers.Cargo.Clippy()` is still a check value and
 `Smithers.Cargo.Clippy({ workspace: true })` is a target. A repository moving
-from `BUILD.ts` to `PACKAGE.ts` does not rename its cargo gates.
+from `PACKAGE.ts` to `PACKAGE.ts` does not rename its cargo gates.
 
 The BUILD-era `RustToolchain.Pinned` declaration follows the same content rule:
 `pin` defaults to `S.file("//rust-toolchain.toml")`, and Cargo targets digest it

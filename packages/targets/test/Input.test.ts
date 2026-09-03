@@ -115,8 +115,8 @@ describe("Input.expandGlob", () => {
     ])
   })
 
-  it("never descends into a subdirectory holding a BUILD.ts file", async () => {
-    await write("src/sub/BUILD.ts", "export const nothing = 1\n")
+  it("never descends into a subdirectory holding a PACKAGE.ts file", async () => {
+    await write("src/sub/PACKAGE.ts", "export const nothing = 1\n")
     await write("src/sub/inner.ts", "export const inner = 1\n")
     await write("src/sub/deeper/deep.ts", "export const deep = 1\n")
     expect(await Input.expandGlob(root, "", "**/*.ts")).toEqual([
@@ -130,34 +130,47 @@ describe("Input.expandGlob", () => {
   })
 
   it("scopes a package's glob to its own package", async () => {
-    await write("packages/a/BUILD.ts", "export const nothing = 1\n")
+    await write("packages/a/PACKAGE.ts", "export const nothing = 1\n")
     await write("packages/a/src/index.ts", "export const a = 1\n")
-    await write("packages/a/examples/BUILD.ts", "export const nothing = 1\n")
+    await write("packages/a/examples/PACKAGE.ts", "export const nothing = 1\n")
     await write("packages/a/examples/demo.ts", "export const demo = 1\n")
     expect(await Input.expandGlob(root, "packages/a", "**/*.ts")).toEqual([
-      "packages/a/BUILD.ts",
+      "packages/a/PACKAGE.ts",
       "packages/a/src/index.ts"
     ])
   })
 
   it("cannot bypass a subpackage boundary with a static prefix", async () => {
-    await write("packages/a/BUILD.ts", "export const nothing = 1\n")
+    await write("packages/a/PACKAGE.ts", "export const nothing = 1\n")
     await write("packages/a/src/index.ts", "export const a = 1\n")
     expect(await Input.expandGlob(root, "", "packages/a/src/**/*.ts")).toEqual([])
     expect(await Input.expandGlob(root, "", "//packages/a/src/**/*.ts")).toEqual([])
   })
 
   it("allows a static prefix inside the declaring package", async () => {
-    await write("packages/a/BUILD.ts", "export const nothing = 1\n")
+    await write("packages/a/PACKAGE.ts", "export const nothing = 1\n")
     await write("packages/a/src/index.ts", "export const a = 1\n")
     expect(await Input.expandGlob(root, "packages/a", "src/**/*.ts")).toEqual([
       "packages/a/src/index.ts"
     ])
   })
 
+  it("does not treat an explicitly entered repository as a package boundary", async () => {
+    await write("vendor/repo/PACKAGE.ts", "export const nothing = 1\n")
+    await write("vendor/repo/src/index.ts", "export const value = 1\n")
+    expect(
+      await Input.expandGlob(root, "", "vendor/repo/**/*.ts", {
+        repositoryBoundaries: ["vendor/repo"]
+      })
+    ).toEqual([
+      "vendor/repo/PACKAGE.ts",
+      "vendor/repo/src/index.ts"
+    ])
+  })
+
   it("keeps root-anchored globs scoped to the declaring package", async () => {
     await write("root.ts", "export const root = 1\n")
-    await write("packages/a/BUILD.ts", "export const nothing = 1\n")
+    await write("packages/a/PACKAGE.ts", "export const nothing = 1\n")
     await write("packages/a/src/index.ts", "export const a = 1\n")
     expect(await Input.expandGlob(root, "packages/a", "//packages/a/src/**/*.ts")).toEqual([
       "packages/a/src/index.ts"
@@ -264,14 +277,14 @@ describe("Input.expandGlob", () => {
   })
 
   /**
-   * A `BUILD.ts` that is a link is a package marker exactly when the workspace
+   * A `PACKAGE.ts` that is a link is a package marker exactly when the workspace
    * index would import it. Deciding otherwise would erase a boundary the index
    * knows about, and the glob would then reach into another package's files.
    */
-  it("treats a linked BUILD.ts as the package boundary it is", async () => {
+  it("treats a linked PACKAGE.ts as the package boundary it is", async () => {
     await write("marker.ts", "export const marker = 1\n")
     await write("src/sub/inner.ts", "export const inner = 1\n")
-    await Fs.symlink(at("marker.ts"), at("src/sub/BUILD.ts"))
+    await Fs.symlink(at("marker.ts"), at("src/sub/PACKAGE.ts"))
     expect(await Input.expandGlob(root, "", "**/*.ts")).toEqual([
       "marker.ts",
       "src/index.ts",
@@ -279,8 +292,8 @@ describe("Input.expandGlob", () => {
     ])
   })
 
-  it("never lets a directory named BUILD.ts invent a package boundary", async () => {
-    await Fs.mkdir(at("src/sub/BUILD.ts"), { recursive: true })
+  it("never lets a directory named PACKAGE.ts invent a package boundary", async () => {
+    await Fs.mkdir(at("src/sub/PACKAGE.ts"), { recursive: true })
     await write("src/sub/inner.ts", "export const inner = 1\n")
     expect(await Input.expandGlob(root, "", "**/*.ts")).toEqual([
       "src/index.ts",
@@ -360,13 +373,13 @@ describe("Input.expandPnpmWorkspace", () => {
 })
 
 describe("Input.discoverFiles", () => {
-  it("lists every workspace file, including BUILD.ts files", async () => {
-    await write("BUILD.ts", "export const nothing = 1\n")
-    await write("packages/a/BUILD.ts", "export const nothing = 1\n")
+  it("lists every workspace file, including PACKAGE.ts files", async () => {
+    await write("PACKAGE.ts", "export const nothing = 1\n")
+    await write("packages/a/PACKAGE.ts", "export const nothing = 1\n")
     await write("packages/a/src/index.ts", "export const a = 1\n")
     expect(await Input.discoverFiles(root)).toEqual([
-      "BUILD.ts",
-      "packages/a/BUILD.ts",
+      "PACKAGE.ts",
+      "packages/a/PACKAGE.ts",
       "packages/a/src/index.ts",
       "src/index.ts",
       "src/nested/deep.ts"

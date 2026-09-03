@@ -1,13 +1,13 @@
 # Writing BUILD files
 
-A `BUILD.ts` file is a TypeScript module. The CLI imports it through the
+A `PACKAGE.ts` file is a TypeScript module. The CLI imports it through the
 programmatic `tsx` loader with `tsconfig: false`, then inspects every named
 export.
 
 One constraint comes from that loader. `tsconfig: false` means no tsconfig is
 read, so compiler options declared in the workspace do not apply: a `paths` alias
 does not resolve, and a relative import names the real file, extension included,
-as in `import { lib } from "../plan/BUILD.ts"`.
+as in `import { lib } from "../plan/PACKAGE.ts"`.
 
 ## Targets are named exports
 
@@ -15,9 +15,9 @@ Any export whose value is a target becomes a label. The label is the package pat
 plus the export name.
 
 ```ts
-// packages/flow/BUILD.ts
+// packages/flow/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 const sources = Smithers.glob("src/**/*.ts")
 const tests = Smithers.glob("test/**/*.test.ts")
@@ -75,7 +75,7 @@ export const ci = Smithers.GithubCiGen({
 })
 
 // Right. The gate is a target, and the pipeline names it.
-// scripts/BUILD.ts
+// scripts/PACKAGE.ts
 export const packManifest = Smithers.NodeTest({
   runtime,
   runner: Smithers.testRunner([Smithers.file("//scripts/pack-release.test.mjs")]),
@@ -83,7 +83,7 @@ export const packManifest = Smithers.NodeTest({
   deps: []
 })
 
-// BUILD.ts
+// PACKAGE.ts
 export const ci = Smithers.GithubCiGen({
   jobs: [{ id: "test", toolchain, steps: [{ verb: Smithers.Verb.Test, pattern: "//scripts/..." }] }]
 })
@@ -136,10 +136,10 @@ Import a target and put it in an attrs value. The target collector walks the who
 attrs object, at any depth, through arrays and plain objects.
 
 ```ts
-// packages/engine/BUILD.ts
+// packages/engine/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
-import { lib as flow } from "../flow/BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
+import { lib as flow } from "../flow/PACKAGE.ts"
 
 const standard = Smithers.StandardPackage({ packageManager, deps: [flow], cwd: "packages/engine" })
 
@@ -177,9 +177,9 @@ A macro is an ordinary function that returns targets. It is not a target, has no
 identity in the graph, and produces no node of its own.
 
 ```ts
-// packages/plan/BUILD.ts
+// packages/plan/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const { lib, test, lint } = Smithers.StandardPackage({ packageManager, deps: [], cwd: "packages/plan" })
 ```
@@ -196,7 +196,7 @@ export const check = standard.test
 Mix a macro with extra target calls in the same file:
 
 ```ts
-import { packageManager, runtime } from "../../BUILD.ts"
+import { packageManager, runtime } from "../../PACKAGE.ts"
 
 const standard = StandardPackage({ packageManager, deps: [flow], cwd: "packages/engine" })
 
@@ -219,12 +219,12 @@ export const dependencyPolicy = DepsLint({
 
 See [Writing macros](../extending/writing-macros.md).
 
-## The root BUILD.ts
+## The root PACKAGE.ts
 
 The root file carries workspace-level declarations.
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
@@ -244,7 +244,7 @@ export const packageDefaults = Smithers.PackageDefaults({
 ```
 
 A shared `file()` export like `rootJSDocConfig` is a plain declared value. Other
-`BUILD.ts` files import it and put it in their attrs.
+`PACKAGE.ts` files import it and put it in their attrs.
 
 ## Targets to follow
 
@@ -253,7 +253,7 @@ A shared `file()` export like `rootJSDocConfig` is a plain declared value. Other
 - Do not export the same target value under two names. Discovery refuses it.
 - Give every tool-running target a `cwd` when it belongs to a package. The
   default is the workspace root.
-- Keep `BUILD.ts` imports to `@smthrs/targets`, other `BUILD.ts` files, and
+- Keep `PACKAGE.ts` imports to `@smthrs/targets`, other `PACKAGE.ts` files, and
   standard TypeScript. Anything else runs at discovery time on every command.
 
 ## Next

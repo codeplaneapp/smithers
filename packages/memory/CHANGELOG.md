@@ -21,7 +21,7 @@
 - Added `Bank.parse`, the validating bank-name reader, and the public
   `Database` port `makeSqlVectorStore` accepts, so no public signature names a
   blocked `internal/*` type.
-- Added package-owned documentation: `docs/` plus `Package.ts` generate
+- Added package-owned documentation: `docs/` plus `docs/Manifest.ts` generate
   `docs/pages/api/memory.md` and the README export table, drift-checked by
   `//packages/memory:docsPages`.
 

@@ -18,7 +18,7 @@ The flake form names `flake.nix`. The lock beside it is declared with it, so
 an edit to either re-keys everything that runs under the environment.
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const environment = Smithers.Nix.Environment({
@@ -65,10 +65,10 @@ declared.
 
 ## Which targets it applies to
 
-A `BUILD.ts` export applies to its own package and every package below it. The
-root `BUILD.ts` therefore declares the workspace environment, and a package
+A `PACKAGE.ts` export applies to its own package and every package below it. The
+root `PACKAGE.ts` therefore declares the workspace environment, and a package
 that exports its own `Smithers.Nix.Environment` overrides it for that package
-alone. A `BUILD.ts` exports at most one; two is an error.
+alone. A `PACKAGE.ts` exports at most one; two is an error.
 
 `graph` and `query` describe the tree without running anything, so they never
 need `nix` on the host. Every executing verb resolves the declared environment

@@ -53,7 +53,7 @@ that declared it. A value starting with `//` resolves from the workspace root
 instead.
 
 ```ts
-// In packages/flow/BUILD.ts
+// In packages/flow/PACKAGE.ts
 file("tsconfig.json") // packages/flow/tsconfig.json
 file("//eslint.jsdoc.js") // eslint.jsdoc.js
 glob("src/**/*.ts") // packages/flow/src/**/*.ts
@@ -62,7 +62,7 @@ glob("src/**/*.ts") // packages/flow/src/**/*.ts
 The result is a normalized workspace-relative posix path. A value that escapes
 the workspace throws `declared input escapes the workspace: <value>`.
 
-The package directory used here is the target's `BUILD.ts` directory, which is
+The package directory used here is the target's `PACKAGE.ts` directory, which is
 not the same thing as the target's `cwd` attribute. `cwd` is where the tool
 process starts. Both are usually the same directory, and `StandardPackage`
 passes the package directory as `cwd`, but they are resolved independently.
@@ -78,7 +78,7 @@ The walk:
   directory,
 - skips `.git` and `node_modules` entries,
 - stops at subpackage boundaries: it never descends into a subdirectory holding
-  a `BUILD.ts` file,
+  a `PACKAGE.ts` file,
 - skips the resolved cache directory and the fixed `.flows/store` subtree
   unconditionally, ignored or not,
 - matches the result against the pattern with `minimatch` and `dot: true`,
@@ -89,16 +89,16 @@ The walk:
 
 Like Bazel, a glob only sees its own package. A recursive pattern declared in
 `packages/flow` matches `packages/flow/src/index.ts`, but stops before
-`packages/flow/examples/index.ts` once `packages/flow/examples/BUILD.ts` exists.
+`packages/flow/examples/index.ts` once `packages/flow/examples/PACKAGE.ts` exists.
 Those files belong to the subpackage's own targets; a target that wants them
 depends on that package's label instead.
 
-The `BUILD.ts` name is compared exactly, so a source file named `build.ts` is
+The `PACKAGE.ts` name is compared exactly, so a source file named `build.ts` is
 never mistaken for a package marker on a case-insensitive filesystem.
 
 The target applies to every glob in every target. It also applies before the
 pattern's static-prefix directory: starting a walk at
-`packages/flow/examples/src` does not bypass a `packages/flow/examples/BUILD.ts`
+`packages/flow/examples/src` does not bypass a `packages/flow/examples/PACKAGE.ts`
 boundary. A `//`-rooted glob resolves its pattern from the workspace root but
 remains scoped to the declaring package: `//packages/flow/src/**/*.ts` is legal
 from `packages/flow`, while `//*.ts` is not. Depend on another package's label
@@ -157,7 +157,7 @@ canonical workspace root and ends at a regular file.
 - A link that stays inside is content either way, and both paths digest it
   identically, so a glob and a `file()` never disagree about a target's inputs.
 
-A `BUILD.ts` that is a link is a package marker exactly when the workspace index
+A `PACKAGE.ts` that is a link is a package marker exactly when the workspace index
 would import it: when it resolves, inside the workspace, to a regular file. A
 link can therefore neither invent a package boundary nor erase one.
 
@@ -190,16 +190,16 @@ export const lib = TsBuild({ packageManager, srcs: [sources] /* ... */ })
 export const lint = EsLint({ packageManager, sources: [sources] /* ... */ })
 ```
 
-Export a declaration for other `BUILD.ts` files to import:
+Export a declaration for other `PACKAGE.ts` files to import:
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 export const rootJSDocConfig = file("//eslint.jsdoc.js")
 ```
 
 ```ts
-// packages/flow/BUILD.ts
-import { rootJSDocConfig } from "../../BUILD.ts"
+// packages/flow/PACKAGE.ts
+import { rootJSDocConfig } from "../../PACKAGE.ts"
 
 export const lint = EsLint({
   packageManager,

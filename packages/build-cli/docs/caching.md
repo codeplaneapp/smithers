@@ -8,7 +8,7 @@ files. `create-app` is the exception: it scaffolds a directory and takes only
 `--template` and `--link`.
 
 Precedence is the flag, then the workspace declaration (the `Config` export from
-the root `BUILD.ts`, or `S.Cache({ directory })` in `WORKSPACE.ts`), then
+the root `PACKAGE.ts`, or `S.Cache({ directory })` in `WORKSPACE.ts`), then
 `.flows`. An empty value, an absolute path, and any `..` segment fail the
 command.
 
@@ -42,7 +42,7 @@ before anything reaches the store, naming the path and the limit.
 
 ## The remote cache
 
-A workspace may declare a shared cache. In BUILD.ts:
+A workspace may declare a shared cache. In PACKAGE.ts:
 
 ```ts
 export const cache = S.RemoteCache.make({

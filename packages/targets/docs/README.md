@@ -13,7 +13,7 @@ points here.
   added, re-verbed, or made cacheable shows up without anyone remembering to
   write it down.
 
-`Package.ts` at the package root names those surfaces, the way every other
+`docs/Manifest.ts` at the package root names those surfaces, the way every other
 package in the workspace does. The generator reads the source directory and the
 generated path from it and refuses to run when its `name` and the one in
 `package.json` disagree, so the declaration is what the generator obeys rather

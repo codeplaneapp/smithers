@@ -517,7 +517,7 @@ describe("vitest coverage isolation conformance", () => {
     //
     // The gates used to be `pnpm run check`, `pnpm run lint`, `pnpm run
     // circular`, `pnpm run browser`, and `pnpm test` — five recursive scripts
-    // named as raw strings in BUILD.ts. They are targets now, so what is pinned
+    // named as raw strings in PACKAGE.ts. They are targets now, so what is pinned
     // is the verb-and-pattern invocation that plans them: `smithers-build ci` over the
     // package graph covers lib, check, test, lint, fmt, docs, and circular for
     // every package, and the browser contract is its own labelled target.
@@ -567,7 +567,7 @@ describe("vitest coverage isolation conformance", () => {
     // reads that bit rather than excusing every row at once.
     //
     // macOS and Windows are advisory ONLY until the matrix proves them green.
-    // Promoting one flips its boolean in BUILD.ts and moves the `advisory:
+    // Promoting one flips its boolean in PACKAGE.ts and moves the `advisory:
     // true` line below; leaving a promoted platform advisory here is the drift
     // this cell exists to force into review.
     const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
@@ -601,7 +601,7 @@ describe("vitest coverage isolation conformance", () => {
   })
 
   it("keeps every CI step a target invocation, never a hand-written command", () => {
-    // The rule this pins: a BUILD.ts file declares targets, and the argv a
+    // The rule this pins: a PACKAGE.ts file declares targets, and the argv a
     // target runs is rendered inside its implementation. A `run:` line in the
     // generated workflow that is not a target invocation, an install, or a
     // toolchain step derived from a declaration would mean someone reopened the

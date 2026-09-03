@@ -1,16 +1,16 @@
 # First build
 
-This tutorial writes a root `BUILD.ts` and one package `BUILD.ts`, then runs the
+This tutorial writes a root `PACKAGE.ts` and one package `PACKAGE.ts`, then runs the
 core query, graph, build, test, lint, CI, and install paths. It assumes the
 layout from [Install](install.md).
 
 ## 1. Declare the root
 
-The root `BUILD.ts` holds workspace-wide declarations: configuration, shared
+The root `PACKAGE.ts` holds workspace-wide declarations: configuration, shared
 input values, the install target, and any default targets.
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
@@ -44,9 +44,9 @@ Point `StandardPackage` at a package directory, passing the toolchain the root
 file declared. It expands into six targets.
 
 ```ts
-// packages/greeter/BUILD.ts
+// packages/greeter/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const { lib, check, test, lint, fmt, docs } = Smithers.StandardPackage({
   packageManager,
@@ -70,10 +70,10 @@ and `//packages/greeter:docs`.
 Import another package's target to declare a dependency.
 
 ```ts
-// packages/app/BUILD.ts
+// packages/app/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
-import { lib as greeter } from "../greeter/BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
+import { lib as greeter } from "../greeter/PACKAGE.ts"
 
 export const { lib, test, lint } = Smithers.StandardPackage({
   packageManager,

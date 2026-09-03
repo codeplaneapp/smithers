@@ -42,7 +42,7 @@
   it on an interval, and retires it after `tolerance` consecutive unhealthy
   verdicts, failing everything running in it so a retry policy can land the
   work on a fresh session.
-- Added package-owned documentation: `docs/` plus `Package.ts` generate
+- Added package-owned documentation: `docs/` plus `docs/Manifest.ts` generate
   `docs/pages/api/sandbox.md` and the README's namespace and limits regions
   from this package's own JSDoc, so the two published descriptions of the
   package cannot disagree about what it exports.

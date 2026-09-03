@@ -1,6 +1,6 @@
-# Local repositories in package mode
+# Local repositories in build system
 
-Package-mode workspaces can declare complete Smithers workspaces nested below
+Build-system workspaces can declare complete Smithers workspaces nested below
 their root. The loader treats each declared repository as opaque. It does not
 merge the child packages into the parent label graph.
 

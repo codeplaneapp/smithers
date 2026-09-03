@@ -10,9 +10,9 @@ node in the graph, and no label. It calls [TsBuild](ts-build.md),
 targets.
 
 ```ts
-// packages/plan/BUILD.ts
+// packages/plan/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
   packageManager,
@@ -86,7 +86,7 @@ declaration's `attrs` supply the toolchain, so it plugs straight into a
 `PackageDefaults` declaration:
 
 ```ts
-// BUILD.ts
+// PACKAGE.ts
 export const packageDefaults = PackageDefaults({
   directories: "packages/*",
   macro: StandardPackage,

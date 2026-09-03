@@ -80,9 +80,9 @@ export const StandardPackage = (options: Options): StandardTargets => {
 Use it by destructuring:
 
 ```ts
-// packages/plan/BUILD.ts
+// packages/plan/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const { lib, test, lint } = Smithers.StandardPackage({
   packageManager,
@@ -125,10 +125,10 @@ macro encodes that constraint so callers do not rediscover it.
 The macro's result is an ordinary object. Rename, drop, or extend it.
 
 ```ts
-// packages/engine/BUILD.ts
+// packages/engine/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager, runtime } from "../../BUILD.ts"
-import { lib as flow } from "../flow/BUILD.ts"
+import { packageManager, runtime } from "../../PACKAGE.ts"
+import { lib as flow } from "../flow/PACKAGE.ts"
 
 const standard = Smithers.StandardPackage({ packageManager, deps: [flow], cwd: "packages/engine" })
 
@@ -151,15 +151,15 @@ export const dependencyPolicy = Smithers.DepsLint({
 
 Only exported targets get labels. Export every macro target that another exported
 target depends on. Planning labels every dependency it walks, so a dependency
-that no `BUILD.ts` exports fails the command with
-`could not derive a label for <target>; export it from a BUILD.ts file`. In the
+that no `PACKAGE.ts` exports fails the command with
+`could not derive a label for <target>; export it from a PACKAGE.ts file`. In the
 example above, dropping the `export` on `lib` would fail every command that
 reaches `dependencyPolicy`.
 
 ## Writing your own macro
 
-Put it in a shared module and import it from `BUILD.ts` files, or define it
-directly in the root `BUILD.ts` and import it from package files.
+Put it in a shared module and import it from `PACKAGE.ts` files, or define it
+directly in the root `PACKAGE.ts` and import it from package files.
 
 ```ts
 // build/macros.ts
@@ -212,14 +212,14 @@ Guidelines:
   replacing the macro.
 - Return an object whose keys are the intended export names, so callers can
   destructure.
-- Do not read the filesystem. A macro runs during `BUILD.ts` evaluation.
+- Do not read the filesystem. A macro runs during `PACKAGE.ts` evaluation.
 
 ## Macros as default targets
 
 A macro whose remaining required options arrive through the declaration's
 `attrs` can be used directly as a default-target macro, which is how
 `StandardPackage` covers every package in the Smithers workspace that has no
-`BUILD.ts` of its own:
+`PACKAGE.ts` of its own:
 
 ```ts
 export const packageDefaults = PackageDefaults({

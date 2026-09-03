@@ -4,7 +4,7 @@ Validates or rewrites `package.json` key ordering with `sort-package-json`.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const manifestOrder = Smithers.SortPackageJson({
   packageManager,

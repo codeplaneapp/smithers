@@ -24,7 +24,7 @@ When the package publishes, follow the shape `packages/crypto` landed:
    JSDoc, collects every export carrying an `@category` tag into a summary
    table, writes `docs/pages/api/create-app.md` whole from `docs/api.md`, and
    supports `--check` for drift.
-3. Declare a `Smithers.Generate` target in `BUILD.ts` beside the
+3. Declare a `Smithers.Generate` target in `PACKAGE.ts` beside the
    `StandardPackage` destructure, listing `Package.ts`, `src/**/*.ts`,
    `docs/*.md` and `package.json` as data and the page paths as changes. The
    `run` verb writes, the `lint` verb drift-checks, and the workspace `ci` step

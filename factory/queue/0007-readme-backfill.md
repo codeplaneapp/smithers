@@ -17,10 +17,10 @@ contract (the "Colocated Docs" spec), then enable the `docs` kind in CI.
   its design rationale, how it relates to its neighbors. Standalone
   markdown, relative links only, no wikilinks.
 - `packages/engine`, `packages/flow`, and `packages/plan` have explicit
-  `BUILD.ts` files destructuring `{ lib, test, lint }` from
+  `PACKAGE.ts` files destructuring `{ lib, test, lint }` from
   `StandardPackage`; add `docs` to those destructurings so they gain the
   target.
 - When `smthrs docs //...` is green, add the `docs` kind to the CI
-  generator declaration in the root `BUILD.ts` (read the current
+  generator declaration in the root `PACKAGE.ts` (read the current
   `GithubCiGen` shape first; the file has grown) and regenerate the CI
   workflow, so doc drift becomes a red check from then on.

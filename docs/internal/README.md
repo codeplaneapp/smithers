@@ -48,7 +48,7 @@ Private-alpha operators should also read the [alpha notes](../alpha-notes.md) fo
 
 ## Package reference
 
-- [Package-mode local repositories](build/local-repositories.md) — opaque nested workspaces, explicit input boundaries, and `S.Repo.Target`
+- [Build-system local repositories](build/local-repositories.md) — opaque nested workspaces, explicit input boundaries, and `S.Repo.Target`
 - [`@smthrs/flows`](../pages/api/flows.md) — barrel package re-exporting everything below
 - [`@smthrs/database`](../pages/api/database.md)
 - [`@smthrs/jj`](../pages/api/jj.mdx)

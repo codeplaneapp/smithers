@@ -5,7 +5,7 @@ Emits TypeScript declarations with `tsc --emitDeclarationOnly` or
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const types = Smithers.DtsBuild({
   packageManager,

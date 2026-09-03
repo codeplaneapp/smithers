@@ -4,7 +4,7 @@ Runs Biome lint and format checks without writing files.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const lint = Smithers.BiomeCheck({
   packageManager,

@@ -62,7 +62,7 @@ agents: deny Server/**
 
 ## Verbs and cacheability
 
-`build` and `lint`. Package mode plans the check form unless `--write` is
+`build` and `lint`. Build system plans the check form unless `--write` is
 passed, and never replays a result.
 
 ## Next

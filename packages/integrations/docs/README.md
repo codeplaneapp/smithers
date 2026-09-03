@@ -32,13 +32,13 @@ node packages/integrations/scripts/docs.mjs           # write the pages
 node packages/integrations/scripts/docs.mjs --check   # report drift, exit 1
 ```
 
-`BUILD.ts` declares the same two forms as a `Smithers.Generate` target, so
+`PACKAGE.ts` declares the same two forms as a `Smithers.Generate` target, so
 `smithers-build run` writes and `smithers-build lint` drift-checks, and the
 workspace `ci` step runs the lint form.
 
 ## The rules the generator enforces
 
-- `Package.ts` and `package.json` must agree on the package name.
+- `docs/Manifest.ts` and `package.json` must agree on the package name.
 - Every module the barrels re-export must parse, and at least one export must
   carry an `@category`. An export with no category is silently absent from the
   table, which is the one failure mode worth knowing about.

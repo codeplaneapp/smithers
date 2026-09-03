@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 
 const cli = NodePath.resolve(import.meta.dirname, "../src/main.js")
 const fixture = NodePath.resolve(import.meta.dirname, "fixtures/implementation-identity")
+const repository = NodePath.resolve(import.meta.dirname, "../../..")
 
 interface ProcessResult {
   readonly code: number | null
@@ -17,9 +18,9 @@ const plan = (): Promise<ProcessResult> =>
     const child = spawn(process.execPath, [
       cli,
       "build",
-      "//...",
+      "//packages/build-cli/test/fixtures/implementation-identity/...",
       "--workspace",
-      fixture,
+      repository,
       "--plan",
       "--format",
       "json"
@@ -50,7 +51,7 @@ describe("implementation identity", () => {
     expect(second.code, `${second.stderr}\n${second.stdout}`).toBe(0)
     const firstBytes = keyMaterialBytes(first.stdout)
     const secondBytes = keyMaterialBytes(second.stdout)
-    expect(JSON.parse(firstBytes.toString())).toHaveLength(2)
+    expect(JSON.parse(firstBytes.toString())).toHaveLength(1)
     expect(secondBytes).toEqual(firstBytes)
   })
 })

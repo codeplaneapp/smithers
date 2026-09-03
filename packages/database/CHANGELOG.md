@@ -38,7 +38,7 @@
   `flows_db_write_retries`.
 - `WriteRetryOptions` is re-exported from `DurableWriter`, so the options type
   the public constructors accept has a public name.
-- Package-owned documentation: `Package.ts`, `docs/`, and
+- Package-owned documentation: `docs/Manifest.ts`, `docs/`, and
   `scripts/docs.mjs` generate `docs/pages/api/database.md`.
 
 ### Changed
@@ -97,7 +97,7 @@
 - The generated entry-point table lists the root-module subpaths
   (`DurableWriter`, `DatabaseMetrics`, `Migrations`), and `docs.mjs --check`
   fails when a module the `./*` export map publishes is missing from
-  `Package.ts` entries.
+  `docs/Manifest.ts` entries.
 
 ## [0.1.0] - 2026-08-05
 

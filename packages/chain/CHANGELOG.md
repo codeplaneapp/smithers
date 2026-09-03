@@ -65,8 +65,8 @@ The version the manifest has carried since the package moved into
 - `QuickJsRunner.decodeCallInput` and `QuickJsRunner.dispatchBridgeCall`, the
   two host-side bridge gates, named so the suite can drive their fail-closed
   paths directly rather than only through a hardened realm.
-- Package-owned documentation generation: `BUILD.ts` declares the seven
-  standard targets plus a `docsPages` Generate target, `Package.ts` declares
+- Package-owned documentation generation: `PACKAGE.ts` declares the seven
+  standard targets plus a `docsPages` Generate target, `docs/Manifest.ts` declares
   which surfaces the package owns, and `scripts/docs.mjs` writes
   `docs/exports.md` from the JSDoc. `--check` drift-checks it, which is what
   `//packages/chain:docsPages` runs under the `lint` verb, what

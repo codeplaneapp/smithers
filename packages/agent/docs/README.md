@@ -1,12 +1,12 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
 contract for `@smthrs/agent`. Generated pages under `docs/pages` are outputs.
 
 `scripts/docs.mjs` builds `docs/pages/api/agent.md` from the module JSDoc of the
 barrel, the prose in `docs/api.md`, and every documented export it reaches
 through the package barrels, and it verifies the reference list declared by
-`Package.ts` still points readers to `/api/agent`.
+`docs/Manifest.ts` still points readers to `/api/agent`.
 
 The `//packages/agent:docsPages` target writes or drift-checks those outputs.
 After editing, run:

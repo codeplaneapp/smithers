@@ -159,7 +159,7 @@
   `windowsSystem` was unreachable and every Windows orphan was retired
   unsignalled. Windows remains outside the 1.0.0-rc.0 support contract and this
   path is unsupported best-effort.
-- Moved the package's published documentation into `docs/` and `Package.ts`.
+- Moved the package's published documentation into `docs/` and `docs/Manifest.ts`.
   `docs/pages/api/platform-node.md` is generated from package sources and said,
   until now, that the package "adds no implementation of its own".
 

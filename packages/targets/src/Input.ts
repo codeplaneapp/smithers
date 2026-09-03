@@ -422,7 +422,14 @@ const staticPrefix = (pattern: string): string => {
 const inputNoun = "declared input"
 const ignoreNoun = ".gitignore"
 const directoryNoun = "declared input directory"
-const buildNoun = "BUILD.ts"
+const declarationFileNames = ["PACKAGE.ts", "BUILD.ts"] as const
+
+const insideEnteredRepository = (scan: Scan, relative: string): boolean => {
+  for (const boundary of scan.enteredRepositories) {
+    if (relative === boundary || relative.startsWith(`${boundary}/`)) return true
+  }
+  return false
+}
 const submoduleNoun = ".gitmodules"
 
 /**
@@ -503,12 +510,12 @@ const readIgnore = async (
 
 /**
  * Reports whether a directory listing makes the directory its own package,
- * meaning it holds a BUILD.ts file.
+ * meaning it holds a declaration module.
  *
  * The name is compared exactly, so a case-insensitive filesystem never
  * mistakes a `build.ts` source file for a package marker.
  *
- * A `BUILD.ts` that is a symbolic link counts exactly when the workspace index
+ * A declaration that is a symbolic link counts exactly when the workspace index
  * would be willing to import it: when it resolves, inside the workspace, to a
  * regular file. Deciding otherwise would let a link either invent a package
  * boundary the index does not know about, or erase one the index does — and
@@ -520,15 +527,19 @@ const isPackage = async (
   relative: string,
   entries: ReadonlyArray<Dirent>
 ): Promise<boolean> => {
-  const marker = entries.find((entry) => entry.name === "BUILD.ts")
-  if (marker === undefined) return false
-  if (marker.isFile()) return true
-  if (!marker.isSymbolicLink()) return false
-  const resolved = await SafeFs.resolveFile(
-    NodePath.join(scan.root, relative, "BUILD.ts"),
-    scanOptions(scan, buildNoun)
-  )
-  return resolved !== undefined
+  if (insideEnteredRepository(scan, relative)) return false
+  for (const name of declarationFileNames) {
+    const marker = entries.find((entry) => entry.name === name)
+    if (marker === undefined) continue
+    if (marker.isFile()) return true
+    if (!marker.isSymbolicLink()) continue
+    const resolved = await SafeFs.resolveFile(
+      NodePath.join(scan.root, relative, name),
+      scanOptions(scan, name)
+    )
+    if (resolved !== undefined) return true
+  }
+  return false
 }
 
 /**

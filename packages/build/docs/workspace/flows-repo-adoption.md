@@ -7,16 +7,16 @@ record, not a design.
 
 ## Adopted (2026-08-15)
 
-- **Targets for every package.** The root `BUILD.ts` declares
+- **Targets for every package.** The root `PACKAGE.ts` declares
   `PackageDefaults({ directories: "packages/*", macro: StandardPackage })`, so
-  every package without its own `BUILD.ts` synthesizes six targets: `lib`
+  every package without its own `PACKAGE.ts` synthesizes six targets: `lib`
   (TsBuild), `check` (Typecheck over `tsconfig.test.json`, scheduled after
   `lib`), `test` (Vitest), `lint` (EsLint), `fmt` (Dprint), and `docs`
   (DocsParity). Four packages declare targets by hand — `packages/flow`
   (the desugared form, kept equivalent to the macro), `packages/engine`,
   `packages/plan`, and `packages/build` — and
   `build-cli/test/CommittedBuildFiles.test.ts` loads every committed
-  `BUILD.ts` on each test run so a targets-API change cannot silently
+  `PACKAGE.ts` on each test run so a targets-API change cannot silently
   invalidate one again.
 - **Gate parity at the package level.** `smithers-build ci "//packages/..."` plans
   130 targets over 26 packages. `lib` + `check` cover what the package
@@ -35,7 +35,7 @@ record, not a design.
   package's lint-participating targets instead of refusing on the
   build-only default target.
 - **Workflow generation (2026-08-19).** `.github/workflows/ci.yml` is a
-  generated root file. The root `BUILD.ts` declares it through `GithubCiGen`
+  generated root file. The root `PACKAGE.ts` declares it through `GithubCiGen`
   with `mode: "check"`, `smithers-build build //:ci` regenerates it, and every other
   verb drift-checks it, on the same terms as `tsconfig.json`. Nothing in the
   declaration is a command: a job states what the runner must provide and
@@ -52,11 +52,11 @@ record, not a design.
   invalidate dependency resolution.
 
 - **Root-level gates (2026-08-19).** Every gate that used to be a workflow
-  string is a target now, in the package that owns it: `scripts/BUILD.ts`
+  string is a target now, in the package that owns it: `scripts/PACKAGE.ts`
   (the operator and release scripts, the browser bundle guard, the release
-  pack-and-smoke chain), `crates/flows-jj/BUILD.ts` (the cargo gates and the
-  wasm reproducibility rebuild), `apps/ui/BUILD.ts` (the end-to-end suites),
-  `evals/agent/BUILD.ts` (the offline eval suite), and `ci/BUILD.ts` (the Bun
+  pack-and-smoke chain), `crates/flows-jj/PACKAGE.ts` (the cargo gates and the
+  wasm reproducibility rebuild), `apps/ui/PACKAGE.ts` (the end-to-end suites),
+  `evals/agent/PACKAGE.ts` (the offline eval suite), and `ci/PACKAGE.ts` (the Bun
   compatibility matrix, which belongs to no single package). The
   circular-dependency guard is emitted per package by `StandardPackage`.
   `NodeTest`, `NodeBinary`, `CargoLint`, and `CargoTest` are the catalog
@@ -69,7 +69,7 @@ record, not a design.
   (the external toolchain versions are not folded in). Until they opt in,
   the shadow lane re-runs everything. The remote cache service is
   implemented but not deployed, and no `RemoteCache` declaration exists in
-  the root `BUILD.ts`.
+  the root `PACKAGE.ts`.
 - **Green `docs` verdicts.** DocsParity is in the `ci` verb set — the `test`
   job's step declares `Verb.Ci`, which plans the docs verb with the rest —
   but its verdicts stay red until the README backfill (factory queue item

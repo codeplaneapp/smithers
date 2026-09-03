@@ -57,6 +57,18 @@ export interface RepositoryBoundary {
   readonly path: string
 }
 
+/** Reports whether a declaration exists with exactly the requested spelling. */
+const declarationAt = async (absolute: string): Promise<boolean> => {
+  try {
+    const stats = await Fs.lstat(absolute)
+    if (!(stats.isFile() || stats.isSymbolicLink())) return false
+    const entries = await Fs.readdir(NodePath.dirname(absolute))
+    return entries.includes(NodePath.basename(absolute))
+  } catch {
+    return false
+  }
+}
+
 /**
  * The nearest ancestor of `start` that holds a workspace declaration, or
  * undefined when no ancestor does.
@@ -77,13 +89,7 @@ export const findWorkspaceRoot = async (start: string): Promise<string | undefin
         NodePath.join(directory, "WORKSPACE.ts")
       ]
     ) {
-      try {
-        const stats = await Fs.lstat(candidate)
-        if (stats.isFile() || stats.isSymbolicLink()) return directory
-      } catch {
-        // Absent is the common case; every other failure re-surfaces when
-        // discover() admits the file properly.
-      }
+      if (await declarationAt(candidate)) return directory
     }
     const parent = NodePath.dirname(directory)
     if (parent === directory) return undefined
@@ -102,12 +108,7 @@ export const findWorkspaceRoot = async (start: string): Promise<string | undefin
  */
 export const workspaceFileOf = async (root: string): Promise<string | undefined> => {
   for (const candidate of [".smithers/WORKSPACE.ts", "WORKSPACE.ts"]) {
-    try {
-      const stats = await Fs.lstat(NodePath.join(root, candidate))
-      if (stats.isFile()) return candidate
-    } catch {
-      // Absent is the common case; discover() reports every other failure.
-    }
+    if (await declarationAt(NodePath.join(root, candidate))) return candidate
   }
   return undefined
 }
@@ -140,16 +141,7 @@ const pruned = (walk: Walk, child: string): boolean =>
 const nestedWorkspace = async (walk: Walk, child: string): Promise<boolean> => {
   const probes = ["WORKSPACE.ts", ".smithers/WORKSPACE.ts"]
     .filter((relative) => `${child}/${relative}` !== walk.workspaceFile)
-    .map(async (relative) => {
-      try {
-        const stats = await Fs.lstat(NodePath.join(walk.root, child, relative))
-        return stats.isFile() || stats.isSymbolicLink()
-      } catch {
-        // Absent is the common case; admission errors surface when that
-        // nested workspace is selected directly.
-        return false
-      }
-    })
+    .map((relative) => declarationAt(NodePath.join(walk.root, child, relative)))
   return (await Promise.all(probes)).some((found) => found)
 }
 
@@ -180,6 +172,14 @@ const walkDirectory = async (walk: Walk, relative: string): Promise<void> => {
   // inventory: `walk.found` is sorted by the caller, so discovery order never
   // escapes this function.
   const directories: Array<string> = []
+  if (entries.some((child) => child.name === "PACKAGE.ts") && entries.some((child) => child.name === "BUILD.ts")) {
+    const where = relative === "" ? "the workspace root" : `//${relative}`
+    throw new PackageError(
+      "duplicate_package_path",
+      `${where} holds both PACKAGE.ts and BUILD.ts; keep PACKAGE.ts and delete BUILD.ts`,
+      { path: relative === "" ? "PACKAGE.ts" : `${relative}/PACKAGE.ts` }
+    )
+  }
   const nestedMarker = entries.find((child) =>
     child.name === "WORKSPACE.ts" && !child.isDirectory() &&
     (relative !== "" && (relative !== ".smithers" || NodePath.posix.dirname(relative) !== "."))

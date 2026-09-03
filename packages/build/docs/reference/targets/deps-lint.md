@@ -4,7 +4,7 @@ Checks missing, unused, and undeclared dependencies with knip or depcheck.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager, runtime } from "../../BUILD.ts"
+import { packageManager, runtime } from "../../PACKAGE.ts"
 
 export const dependencyPolicy = Smithers.DepsLint({
   runtime,

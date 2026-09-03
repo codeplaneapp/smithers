@@ -1,6 +1,6 @@
 # Colocated documentation
 
-This directory, `Package.ts`, and the public JSDoc in `src/` own the published
+This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
 contract for `@smthrs/flows`. Generated pages under `docs/pages` are outputs.
 
 `scripts/docs.mjs` builds `docs/pages/api/flows.md` from `docs/api.md`, the

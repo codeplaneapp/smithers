@@ -4,7 +4,7 @@ Runs a non-watch `vitest run` over a declared test set.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const test = Smithers.Vitest({
   packageManager,

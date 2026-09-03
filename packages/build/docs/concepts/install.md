@@ -5,7 +5,7 @@ three actions: measure, fetch, and link. A workspace declares pnpm or Bun.
 Only pnpm performs work today; the Bun layer resolves the service and refuses
 every operation with a typed `unsupported` error.
 
-`node_modules` is a target. A BUILD.ts file declares the toolchain once and
+`node_modules` is a target. A PACKAGE.ts file declares the toolchain once and
 asks the `Install` target for the tree:
 
 ```ts
@@ -60,7 +60,7 @@ The flow used to trampoline. The package-manager implementation is a runtime
 layer, so a pure body could not branch on it, and the first round existed to
 measure which manager was wired before a second round could select a
 manager-specific fetch. The manager is now a plan-time declaration from
-BUILD.ts, so one body selects one fetch action with one exact lockfile
+PACKAGE.ts, so one body selects one fetch action with one exact lockfile
 declaration, and measure feeds it as an ordinary settled upstream reference.
 
 ## Measure
@@ -109,7 +109,7 @@ The fetch payload includes:
 The scheduler also folds declaration identity, layers, capabilities, effects,
 and settled dependencies into its step key. The manager name and version reach
 the key through the layer identity the planner records for the target, which is
-derived from the BUILD.ts declaration. The absolute project root and store path
+derived from the PACKAGE.ts declaration. The absolute project root and store path
 are host placement, not content identity.
 
 Before fetch starts, the implementation checks the layer for internal
@@ -173,7 +173,7 @@ restored from another machine.
 
 A declaration selects pnpm or Bun. Those two are the whole of
 `PackageManager.Name`, so npm and Yarn are not unsupported selections: they
-cannot be written down at all, and a BUILD.ts naming one fails to decode.
+cannot be written down at all, and a PACKAGE.ts naming one fails to decode.
 
 | Manager | Status      | Behavior                                                                             |
 | ------- | ----------- | ------------------------------------------------------------------------------------ |
