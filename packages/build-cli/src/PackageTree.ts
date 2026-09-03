@@ -1240,12 +1240,16 @@ export const releasePortals = async (snapshot: PortalSnapshot): Promise<void> =>
 /**
  * Copies the workspace to a scratch directory for a check-mode run.
  *
- * `.git`, the cache directory, and `node_modules` contents are skipped;
- * symlinks — the e2e clone's node_modules among them — are copied verbatim,
- * so the scratch tree reads the same installed tools without duplicating
- * them. `skip` names further workspace-relative roots the caller is going to
- * clear anyway — an overlay build's own `outDirs` — so a large previous
- * output is not copied only to be deleted.
+ * Version-control state (`.git`, `.jj`), the cache directory, the root
+ * `node_modules` contents, and every nested checkout (a directory carrying
+ * its own `.git`, such as an agent worktree or a vendored clone) are skipped;
+ * a package's own `node_modules` is copied because under pnpm it is a
+ * directory of symlinks into the root store, which the scratch tree needs; symlinks — the e2e clone's
+ * node_modules among them — are copied verbatim, so the scratch tree reads
+ * the same installed tools without duplicating them. `skip` names further
+ * workspace-relative roots the caller is going to clear anyway — an overlay
+ * build's own `outDirs` — so a large previous output is not copied only to be
+ * deleted.
  *
  * @category scratch
  * @since 0.1.0
@@ -1257,15 +1261,25 @@ export const scratchCopy = async (
 ): Promise<string> => {
   const destination = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-scratch-"))
   const cacheAbsolute = NodePath.join(root, ...cacheDirectory.split("/"))
-  const gitAbsolute = NodePath.join(root, ".git")
   const nodeModulesAbsolute = NodePath.join(root, "node_modules")
   const skipped = new Set(skip.map((path) => NodePath.join(root, ...path.split("/"))))
-  await Fs.cp(root, destination, {
-    recursive: true,
-    verbatimSymlinks: true,
-    filter: (source) =>
-      source !== cacheAbsolute && source !== gitAbsolute && source !== nodeModulesAbsolute && !skipped.has(source)
-  })
+  const versionControl = new Set([".git", ".jj"])
+  const nestedCheckout = (source: string): boolean =>
+    source !== root && NodeFs.existsSync(NodePath.join(source, ".git"))
+  try {
+    await Fs.cp(root, destination, {
+      recursive: true,
+      verbatimSymlinks: true,
+      filter: (source) =>
+        source !== cacheAbsolute && source !== nodeModulesAbsolute && !skipped.has(source) &&
+        !versionControl.has(NodePath.basename(source)) && !nestedCheckout(source)
+    })
+  } catch (error) {
+    // A copy that dies part-way (ENOSPC, a vanished file) must not leave a
+    // half-built tree in the temporary directory for the next run to find.
+    await Fs.rm(destination, { recursive: true, force: true })
+    throw error
+  }
   if (await Fs.lstat(nodeModulesAbsolute).then(() => true, () => false)) {
     await Fs.symlink(nodeModulesAbsolute, NodePath.join(destination, "node_modules"), "dir")
   }

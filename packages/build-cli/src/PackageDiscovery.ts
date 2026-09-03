@@ -4,7 +4,8 @@
  * Discovery walks the filesystem from the canonical workspace root and never
  * consults git: gitignore status is irrelevant, so a gitignored or generated
  * PACKAGE.ts participates like any other. The walk prunes `.git`,
- * `node_modules`, and the resolved cache directory, admits declaration files
+ * `node_modules`, nested checkouts (any directory carrying its own `.git`),
+ * and the resolved cache directory, admits declaration files
  * through the shared SafeFs policy, and rejects a symlinked declaration file
  * outright.
  *
@@ -144,6 +145,15 @@ const nestedWorkspace = async (walk: Walk, child: string): Promise<boolean> => {
   return (await Promise.all(probes)).some((found) => found)
 }
 
+/**
+ * Whether a child directory is another checkout: a clone's `.git` directory
+ * or the `.git` file a linked worktree carries. Git never lists such a tree
+ * as part of this repository, and neither does discovery, so the stale
+ * declarations an agent worktree or a vendored clone holds are never read.
+ */
+const nestedCheckout = (walk: Walk, child: string): Promise<boolean> =>
+  Fs.lstat(NodePath.join(walk.root, child, ".git")).then(() => true, () => false)
+
 const walkDirectory = async (walk: Walk, relative: string): Promise<void> => {
   walk.signal?.throwIfAborted()
   const depth = relative === "" ? 0 : relative.split("/").length
@@ -223,6 +233,7 @@ const walkDirectory = async (walk: Walk, relative: string): Promise<void> => {
   }
   await Promise.all(directories.map(async (childRelative) => {
     if (walk.repositories.has(childRelative)) return
+    if (await nestedCheckout(walk, childRelative)) return
     if (await nestedWorkspace(walk, childRelative)) {
       const marker = `${childRelative}/WORKSPACE.ts`
       const nested = await workspaceFileOf(NodePath.join(walk.root, childRelative))

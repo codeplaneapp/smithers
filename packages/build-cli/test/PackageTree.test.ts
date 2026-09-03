@@ -183,6 +183,33 @@ describe("scratchCopy keeps installed dependencies as host state", () => {
     }
   })
 
+  it("never copies version-control state or a nested checkout", async () => {
+    // A linked worktree carries a `.git` file, a clone a `.git` directory, and
+    // either may hold its own installed dependencies: none of it is workspace
+    // content, and copying it is what filled a disk.
+    await Fs.mkdir(NodePath.join(root, ".claude", "worktrees", "agent", "node_modules", "dep"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, ".claude", "worktrees", "agent", ".git"), "gitdir: /elsewhere\n")
+    await Fs.writeFile(NodePath.join(root, ".claude", "worktrees", "agent", "node_modules", "dep", "index.js"), "")
+    await Fs.writeFile(NodePath.join(root, ".claude", "worktrees", "agent", "stale.ts"), "stale")
+    await Fs.mkdir(NodePath.join(root, ".jj", "repo", "op_store"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, ".jj", "repo", "op_store", "view"), "jj state")
+    await Fs.mkdir(NodePath.join(root, "vendor", "clone", ".git"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "vendor", "clone", "lib.rs"), "")
+    await Fs.mkdir(NodePath.join(root, "apps", "site"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "apps", "site", "index.ts"), "site")
+    const scratch = await PackageTree.scratchCopy(root, ".flows")
+    try {
+      const present = (relative: string) =>
+        Fs.lstat(NodePath.join(scratch, ...relative.split("/"))).then(() => true, () => false)
+      expect(await present(".claude/worktrees/agent")).toBe(false)
+      expect(await present(".jj")).toBe(false)
+      expect(await present("vendor/clone")).toBe(false)
+      expect(await Fs.readFile(NodePath.join(scratch, "apps", "site", "index.ts"), "utf8")).toBe("site")
+    } finally {
+      await Fs.rm(scratch, { recursive: true, force: true })
+    }
+  })
+
   it("omits the roots the caller is going to clear anyway", async () => {
     await Fs.mkdir(NodePath.join(root, "out", "nested"), { recursive: true })
     await Fs.writeFile(NodePath.join(root, "out", "nested", "stale.js"), "stale")

@@ -244,6 +244,25 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
     expect(index.targets().map((row) => row.label)).toEqual(["//generated:run"])
   })
 
+  it("never descends into a nested checkout, whether a repository or a linked worktree", async () => {
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule)
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { root: S.Shell.Test({ command: "true" }) } })\n`
+    )
+    // A linked worktree carries a `.git` FILE; a clone carries a directory.
+    // Both hold another tree's declarations, including old-form ones.
+    await write(root, "scratch/worktree/.git", "gitdir: /elsewhere/.git/worktrees/worktree\n")
+    await write(root, "scratch/worktree/BUILD.ts", "export const stale = 1\n")
+    await write(root, "scratch/worktree/pkg/PACKAGE.ts", "export const Package = 1\n")
+    await write(root, "vendor/clone/.git/HEAD", "ref: refs/heads/main\n")
+    await write(root, "vendor/clone/WORKSPACE.ts", workspaceModule)
+    const index = await openIndex(root)
+    expect(index.targets().map((row) => row.label)).toEqual(["//:root"])
+  })
+
   it("refuses package files owned by an undeclared nested workspace", async () => {
     const root = await temporaryWorkspace()
     await write(root, "WORKSPACE.ts", workspaceModule)
