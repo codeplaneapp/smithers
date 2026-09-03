@@ -42,7 +42,7 @@ import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import { Sha256 } from "@smthrs/crypto"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { Workspace as KernelWorkspace } from "@smthrs/kernel/Workspace"
-import { Key } from "@smthrs/keys"
+import { DerivedKey } from "@smthrs/keys"
 import * as FileSet from "@smthrs/plan/FileSet"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -863,7 +863,7 @@ const revisionOf = Effect.fn("WorkspaceSandbox.revision")(function*(base: Readon
   for (const [path, content] of [...base].sort((left, right) => compareText(left[0], right[0]))) {
     entries.push({ path, digest: yield* digestOf(content) })
   }
-  return yield* Schema.decodeUnknownEffect(Key)({ kind: "workspace-revision", entries }).pipe(Effect.orDie)
+  return yield* Schema.decodeUnknownEffect(DerivedKey)({ kind: "workspace-revision", entries }).pipe(Effect.orDie)
 })
 
 /**

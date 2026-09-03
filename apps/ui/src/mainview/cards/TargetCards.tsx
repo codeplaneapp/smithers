@@ -780,26 +780,6 @@ export const TargetsCardBody = ({
   )
 }
 
-const HTML_CARD_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'"
-
-/** Legacy HTML cards are inert documents: no script, network, forms, or parent bridge. */
-export const inertHtmlDocument = (html: string): string =>
-  `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${HTML_CARD_CSP}"></head><body>${html}</body></html>`
-
-export const HtmlCardBody = ({ card }: { readonly card: Extract<Card, { kind: "html" }> }) => (
-  <div className="html-card">
-    <iframe
-      className="html-card-frame"
-      title={card.payload.title}
-      sandbox=""
-      referrerPolicy="no-referrer"
-      srcDoc={inertHtmlDocument(card.payload.html)}
-      data-testid={`html-card-frame-${card.id}`}
-      data-source={card.payload.source}
-    />
-  </div>
-)
-
 /* The run card's per-target rows: failures first once the run settled, else executor order. */
 const NODE_PILL: Readonly<Record<string, string>> = {
   pending: "pending",

@@ -111,7 +111,9 @@ export const main = (filename: string): Effect.Effect<Summary> =>
       })
       return page.entries.map((entry) => entry.eventType)
     }).pipe(
-      Effect.provide(NodeRuntime.layerHost({ filename, owner: { hostId }, signals: [] }, Layer.empty)),
+      Effect.provide(
+        NodeRuntime.layerHost({ filename, workspaceRoot: dirname(filename), owner: { hostId }, signals: [] }, Layer.empty)
+      ),
       Effect.orDie,
       Effect.scoped
     )

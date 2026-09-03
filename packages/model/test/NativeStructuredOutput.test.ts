@@ -48,9 +48,9 @@ const body = (route: Route.Route<OpenAIChatCompletions.Body, string, never, neve
   Effect.runPromise(Effect.result(Route.prepare(route as never, input)))
 
 const configured = (structuredOutput?: OpenAIChatCompletions.StructuredOutput) =>
-  Result.getOrThrow(Route.openaiCompatible({
+  Result.getOrThrow(Route.openaiChatCompatible({
     id: "cerebras",
-    baseUrl: "https://api.cerebras.ai/v1",
+    baseUrl: "https://api.cerebras.ai",
     apiKey: Redacted.make("test-key"),
     ...(structuredOutput === undefined ? {} : { structuredOutput })
   }))

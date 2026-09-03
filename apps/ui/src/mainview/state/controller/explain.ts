@@ -40,7 +40,7 @@ export const createExplainController = (ctx: ControllerContext, config: ExplainC
 
   const explain: ExplainController["explain"] = async (what) => {
     const question = what.trim()
-    if (question === "") return "explain needs something to explain: /explain <what>"
+    if (question === "") return "agent.explain needs something to explain: /agent.explain <what>"
     if (!agent.available) return "There is no agent on this host to explain with."
     const runId = `explain-${Date.now()}`
     const cardId = `explain-${runId}`

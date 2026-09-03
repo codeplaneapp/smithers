@@ -25,8 +25,7 @@ export const version = 1 as const
  * One successful score retained by a baseline.
  *
  * `scorer` is the scorer key a comparison matches on. `scorerName` is the
- * readable name of the same scorer, optional so a baseline written before it
- * existed still loads.
+ * optional readable name of the same scorer.
  *
  * @category models
  * @since 0.1.0
@@ -43,16 +42,14 @@ export interface BaselineRecord {
 /**
  * Canonical committed evaluation baseline.
  *
- * `suite` records artifact ownership even when `records` is empty. It is
- * optional so a baseline written before artifact ownership was added still
- * loads and relies on the suite carried by each record.
+ * `suite` records artifact ownership even when `records` is empty.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Baseline {
   readonly version: typeof version
-  readonly suite?: string | undefined
+  readonly suite: string
   readonly records: ReadonlyArray<BaselineRecord>
 }
 
@@ -121,14 +118,14 @@ const validate = (value: unknown): Effect.Effect<Baseline, EvalError> =>
     if (rawVersion !== version) {
       return yield* fail(`Baseline version must be ${version}, got ${String(rawVersion)}`, "version")
     }
-    if (rawSuite !== undefined && typeof rawSuite !== "string") {
+    if (typeof rawSuite !== "string") {
       return yield* fail(`Baseline field 'suite' must be a string, got ${typeof rawSuite}`, "suite")
     }
     if (!Array.isArray(rawRecords)) {
       return yield* fail("Baseline records must be an array", "records")
     }
     const records = yield* Effect.forEach(rawRecords, decodeRecord)
-    return { version, ...(rawSuite === undefined ? {} : { suite: rawSuite }), records: Object.freeze(records) }
+    return { version, suite: rawSuite, records: Object.freeze(records) }
   })
 
 /**
@@ -176,9 +173,8 @@ export const make = (
   baseline: Omit<Baseline, "version"> & { readonly version?: typeof version }
 ): Effect.Effect<Baseline, EvalError> => {
   const artifactVersion = baseline.version ?? version
-  const suite = baseline.suite
   const records = baseline.records
-  return validate({ version: artifactVersion, ...(suite === undefined ? {} : { suite }), records })
+  return validate({ version: artifactVersion, suite: baseline.suite, records })
 }
 
 /**
@@ -198,7 +194,7 @@ export const write = (baseline: Baseline): string => {
   const records = [...baseline.records].sort((left, right) => compareText(sortKey(left), sortKey(right)))
   return stringify({
     version: baseline.version,
-    ...(baseline.suite === undefined ? {} : { suite: baseline.suite }),
+    suite: baseline.suite,
     records
   })
 }
@@ -214,11 +210,3 @@ export const load = (text: string): Effect.Effect<Baseline, EvalError> =>
     try: () => JSON.parse(text) as unknown,
     catch: (cause) => new EvalError({ code: "invalid_baseline", message: "Baseline is not valid JSON", cause })
   }).pipe(Effect.flatMap(validate))
-
-/**
- * Alias for {@link load}.
- *
- * @category serialization
- * @since 0.1.0
- */
-export const parse = load

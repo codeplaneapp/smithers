@@ -144,6 +144,7 @@ export const layerNode = (options: {
   return NodeRuntime.layerHost(
     {
       filename: options.filename,
+      workspaceRoot: process.cwd(),
       owner: { hostId: "smithers-review" },
       rules: modelCallRules(environment)
     },

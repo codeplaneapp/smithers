@@ -40,11 +40,11 @@ describe("Baseline", () => {
   it("writes sorted canonical JSON and validates its version", async () => {
     const baseline = await Effect.runPromise(
       Baseline.load(
-        "{\"version\":1,\"records\":[{\"suite\":\"s\",\"case\":\"c\",\"scorer\":\"x\",\"stepKey\":\"k\",\"score\":0.5}]}"
+        "{\"version\":1,\"suite\":\"s\",\"records\":[{\"suite\":\"s\",\"case\":\"c\",\"scorer\":\"x\",\"stepKey\":\"k\",\"score\":0.5}]}"
       )
     )
     expect(Baseline.write(baseline)).toBe(
-      "{\"records\":[{\"case\":\"c\",\"score\":0.5,\"scorer\":\"x\",\"stepKey\":\"k\",\"suite\":\"s\"}],\"version\":1}\n"
+      "{\"records\":[{\"case\":\"c\",\"score\":0.5,\"scorer\":\"x\",\"stepKey\":\"k\",\"suite\":\"s\"}],\"suite\":\"s\",\"version\":1}\n"
     )
     const bad = await failure(Baseline.load("{\"version\":2,\"records\":[]}"))
     expect(bad.code).toBe("invalid_baseline")
@@ -54,6 +54,7 @@ describe("Baseline", () => {
 
   it("orders records by an injective tuple encoding", async () => {
     const baseline = await Effect.runPromise(Baseline.make({
+      suite: "collection",
       records: [
         { suite: "z", case: "c", scorer: "x", stepKey: "k", score: 1 },
         { suite: "é", case: "c", scorer: "x", stepKey: "k", score: 1 },
@@ -76,7 +77,7 @@ describe("Baseline", () => {
       ]
     }))
     const once = Baseline.write(baseline)
-    const twice = Baseline.write(await Effect.runPromise(Baseline.parse(once)))
+    const twice = Baseline.write(await Effect.runPromise(Baseline.load(once)))
     expect(twice).toBe(once)
   })
 
@@ -92,13 +93,13 @@ describe("Baseline", () => {
       }
     }
     const records: Array<Baseline.BaselineRecord> = [hostile]
-    const baseline = await Effect.runPromise(Baseline.make({ records }))
+    const baseline = await Effect.runPromise(Baseline.make({ suite: "s", records }))
     records.push({ ...record, case: "late" })
 
     expect(baseline.records).toEqual([record])
     expect(Object.isFrozen(baseline.records)).toBe(true)
     expect(Baseline.write(baseline)).toBe(
-      "{\"records\":[{\"case\":\"c\",\"score\":0.5,\"scorer\":\"x\",\"stepKey\":\"k\",\"suite\":\"s\"}],\"version\":1}\n"
+      "{\"records\":[{\"case\":\"c\",\"score\":0.5,\"scorer\":\"x\",\"stepKey\":\"k\",\"suite\":\"s\"}],\"suite\":\"s\",\"version\":1}\n"
     )
   })
 
@@ -112,7 +113,7 @@ describe("Baseline", () => {
       }
     }
     const baseline = await Effect.runPromise(
-      Baseline.make({ records: [stateful as Baseline.BaselineRecord] })
+      Baseline.make({ suite: "s", records: [stateful as Baseline.BaselineRecord] })
     )
 
     expect(reads).toBe(1)
@@ -160,7 +161,7 @@ describe("Baseline", () => {
     ]
     for (const [value, path, message] of cases) {
       const error = await failure(
-        Baseline.make({ records: [value] as ReadonlyArray<Baseline.BaselineRecord> })
+        Baseline.make({ suite: "s", records: [value] as ReadonlyArray<Baseline.BaselineRecord> })
       )
       expect(error.code).toBe("invalid_baseline")
       expect(error.path).toBe(path)
@@ -176,7 +177,7 @@ describe("Baseline", () => {
     const nullArtifact = await failure(Baseline.load("null"))
     expect(nullArtifact.message).toBe("Baseline must be an object")
 
-    const notArray = await failure(Baseline.load("{\"version\":1,\"records\":{}}"))
+    const notArray = await failure(Baseline.load("{\"version\":1,\"suite\":\"s\",\"records\":{}}"))
     expect(notArray.message).toBe("Baseline records must be an array")
     expect(notArray.path).toBe("records")
 
@@ -189,7 +190,7 @@ describe("Baseline", () => {
   })
 
   it("normalises a negative zero score", async () => {
-    const baseline = await Effect.runPromise(Baseline.make({ records: [{ ...record, score: -0 }] }))
+    const baseline = await Effect.runPromise(Baseline.make({ suite: "s", records: [{ ...record, score: -0 }] }))
     expect(Object.is(baseline.records[0]?.score, 0)).toBe(true)
   })
 
@@ -202,7 +203,7 @@ describe("Baseline", () => {
       "{\"records\":[" +
         "{\"case\":\"adds numbers\",\"score\":1,\"scorer\":\"exact\",\"stepKey\":\"step-a\",\"suite\":\"arithmetic\"}," +
         "{\"case\":\"multiplies numbers\",\"score\":0.875,\"scorer\":\"exact\",\"stepKey\":\"step-b\",\"suite\":\"arithmetic\"}" +
-        "],\"version\":1}\n"
+        "],\"suite\":\"arithmetic\",\"version\":1}\n"
     )
   })
 })

@@ -534,8 +534,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     }
     return ok({ roleId, task })
   },
-  "agent.explain": (args) => required("what", args, "explain needs something to explain: /explain <what>"),
-  "explain": (args) => required("what", args, "explain needs something to explain: /explain <what>"),
+  "agent.explain": (args) => required("what", args, "agent.explain needs something to explain: /agent.explain <what>"),
   "tab.card": (args) => required("cardId", args, "tab.card needs the card id"),
   "tab.select": (args) => required("tab", args, "tab.select needs a tab id or a position 1-9"),
   "tab.read": (args) => required("tab", args, "tab.read needs a tab id"),

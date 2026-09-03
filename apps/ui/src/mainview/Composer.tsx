@@ -464,8 +464,7 @@ function ComposerConnect({
   /*
    * The trigger names the selection in the piper grammar (lane piper step
    * 3/4): `org/repo` at its head, `org/repo · copy` for a working copy. The
-   * legacy pin key still reads through the open-repo rows until every reader
-   * moves.
+   * local-only checkouts read through the open-repo rows.
    */
   const activeKey = activeRows[0]?.activeRepoKey ?? null
   const selection = activeKey === null ? null : parseRepoSelection(activeKey)
@@ -814,14 +813,14 @@ function ComposerOrigin() {
     }
   }
 
-  /* The legacy rows: an open checkout selected by its pin key, else a connector. */
-  const legacyCopyId = selection !== null && !("repoId" in selection) ? selection.legacyCopyId : null
-  const legacyCopy = legacyCopyId === null ? undefined : copyRows.find((row) => row.id === legacyCopyId)
-  const repo = legacyCopy?.path !== undefined
-    ? repoRows.find((row) => row.path === legacyCopy.path)
+  /* A local-only checkout selected by its key, else a connector. */
+  const localCopyId = selection !== null && !("repoId" in selection) ? selection.localCopyId : null
+  const localCopy = localCopyId === null ? undefined : copyRows.find((row) => row.id === localCopyId)
+  const repo = localCopy?.path !== undefined
+    ? repoRows.find((row) => row.path === localCopy.path)
     : activeRepoOf(activeRows[0] ?? { activeRepoKey: null }, repoRows)
   if (repo !== undefined) {
-    const ahead = legacyCopy?.ahead ?? repo.jj?.ahead
+    const ahead = localCopy?.ahead ?? repo.jj?.ahead
     const bookmark = repo.jj?.bookmark ?? null
     return (
       <span className="composer-origin" data-origin="local" data-testid="repo-chip" title={repo.path}>

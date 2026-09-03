@@ -111,7 +111,7 @@ describe("the color-theme axis in the store and the DOM", () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, unavailableAgent)
     for (const palette of PALETTES) {
-      expect((await controller.commands.run("theme", palette)).status).toBe("executed")
+      expect((await controller.commands.run("appearance.theme", palette)).status).toBe("executed")
       expect(store.session().palette).toBe(palette)
       expect(document.documentElement.dataset.palette).toBe(palette)
     }
@@ -133,9 +133,9 @@ describe("the color-theme axis in the store and the DOM", () => {
   test("the two axes are independent: the light/dark toggle leaves the palette alone", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, unavailableAgent)
-    await controller.commands.run("theme", "catppuccin")
+    await controller.commands.run("appearance.theme", "catppuccin")
     const before = store.session().theme
-    await controller.commands.run("dark-mode")
+    await controller.commands.run("appearance.dark-mode")
     expect(store.session().theme).not.toBe(before)
     expect(store.session().palette).toBe("catppuccin")
     expect(document.documentElement.dataset.palette).toBe("catppuccin")

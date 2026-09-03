@@ -34,11 +34,10 @@ describe("bug worker", () => {
     const env = makeEnv();
     const res = await worker.fetch(
       postBug({
-        title: "engine crashed on resume",
-        body: "stack trace here",
-        smithersVersion: "0.26.1",
-        platform: { os: "darwin", arch: "arm64" },
-        run: { runId: "r-123", status: "failed" },
+        summary: "engine crashed on resume",
+        version: "1.0.0-rc.0",
+        platform: "darwin-arm64",
+        digest: { runId: "r-123", status: "failed" },
         extraLooseField: true,
       }),
       env,
@@ -52,24 +51,24 @@ describe("bug worker", () => {
     const stored = await env.BUGS.get(`bug:${id}`);
     expect(stored).not.toBeNull();
     const record = JSON.parse(stored!);
-    expect(record.report.title).toBe("engine crashed on resume");
-    expect(record.report.run.runId).toBe("r-123");
+    expect(record.report.summary).toBe("engine crashed on resume");
+    expect(record.report.digest.runId).toBe("r-123");
     expect(record.report.extraLooseField).toBe(true);
   });
 
-  test("null optional fields accepted (smithers bug sends run: null without --run)", async () => {
+  test("null optional fields are accepted", async () => {
     const worker = createBugWorker();
     const env = makeEnv();
     const res = await worker.fetch(
-      postBug({ title: "report without a run", body: null, smithersVersion: null, platform: null, run: null }),
+      postBug({ summary: "report without a run", version: null, platform: null, digest: null }),
       env,
     );
     expect(res.status).toBe(201);
   });
 
-  test("invalid payload (missing title) rejected 400", async () => {
+  test("invalid payload (missing summary) rejected 400", async () => {
     const worker = createBugWorker();
-    const res = await worker.fetch(postBug({ body: "no title" }), makeEnv());
+    const res = await worker.fetch(postBug({ version: "1.0.0-rc.0" }), makeEnv());
     expect(res.status).toBe(400);
   });
 
@@ -81,7 +80,7 @@ describe("bug worker", () => {
 
   test("oversized payload rejected 413", async () => {
     const worker = createBugWorker();
-    const res = await worker.fetch(postBug({ title: "big", body: "x".repeat(256 * 1024 + 1) }), makeEnv());
+    const res = await worker.fetch(postBug({ summary: "big", detail: "x".repeat(256 * 1024 + 1) }), makeEnv());
     expect(res.status).toBe(413);
   });
 
@@ -94,7 +93,7 @@ describe("bug worker", () => {
         "cf-connecting-ip": "203.0.113.99",
         "content-length": String(256 * 1024 + 1),
       },
-      body: JSON.stringify({ title: "big" }),
+      body: JSON.stringify({ summary: "big" }),
     });
     const res = await worker.fetch(request, makeEnv());
     expect(res.status).toBe(413);
@@ -103,7 +102,7 @@ describe("bug worker", () => {
 
   test("oversized streamed body with no content-length is rejected 413 by the stream counter", async () => {
     const worker = createBugWorker();
-    const oversized = new TextEncoder().encode(JSON.stringify({ title: "big", body: "x".repeat(256 * 1024 + 1) }));
+    const oversized = new TextEncoder().encode(JSON.stringify({ summary: "big", detail: "x".repeat(256 * 1024 + 1) }));
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         // Emit in chunks so the running byte count crosses the cap mid-stream.
@@ -143,26 +142,26 @@ describe("bug worker", () => {
     const worker = createBugWorker({ now: () => clock });
     const env = makeEnv(() => clock);
     for (let i = 0; i < 20; i++) {
-      const res = await worker.fetch(postBug({ title: `bug ${i}` }), env);
+      const res = await worker.fetch(postBug({ summary: `bug ${i}` }), env);
       expect(res.status).toBe(201);
     }
-    const blocked = await worker.fetch(postBug({ title: "bug 21" }), env);
+    const blocked = await worker.fetch(postBug({ summary: "bug 21" }), env);
     expect(blocked.status).toBe(429);
 
     // Different IP is unaffected.
-    const otherIp = await worker.fetch(postBug({ title: "other" }, "198.51.100.9"), env);
+    const otherIp = await worker.fetch(postBug({ summary: "other" }, "198.51.100.9"), env);
     expect(otherIp.status).toBe(201);
 
     // Next hour bucket resets the counter.
     clock += 61 * 60 * 1000;
-    const nextHour = await worker.fetch(postBug({ title: "next hour" }), env);
+    const nextHour = await worker.fetch(postBug({ summary: "next hour" }), env);
     expect(nextHour.status).toBe(201);
   });
 
   test("admin GET requires x-bug-admin and returns the stored record", async () => {
     const worker = createBugWorker();
     const env = makeEnv();
-    const posted = await worker.fetch(postBug({ title: "gated" }), env);
+    const posted = await worker.fetch(postBug({ summary: "gated" }), env);
     const { id } = (await posted.json()) as { id: string };
 
     const noHeader = await worker.fetch(new Request(`https://bug.smithers.sh/api/bugs/${id}`), env);
@@ -179,9 +178,9 @@ describe("bug worker", () => {
       env,
     );
     expect(ok.status).toBe(200);
-    const record = (await ok.json()) as { id: string; report: { title: string } };
+    const record = (await ok.json()) as { id: string; report: { summary: string } };
     expect(record.id).toBe(id);
-    expect(record.report.title).toBe("gated");
+    expect(record.report.summary).toBe("gated");
   });
 
   test("admin GET 404s for an unknown id", async () => {

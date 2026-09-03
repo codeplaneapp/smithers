@@ -13,9 +13,6 @@
       "PlanFooter",
       "planStepStatus",
       "PlanProps",
-      "PlanLegacyProps",
-      "PlanCompoundProps",
-      "PlanStepModel",
       "PlanStepProps",
       "PlanStepStatus"
     ],
@@ -23,10 +20,7 @@
     "registryItem": "https://elements.ai-sdk.dev/components/plan",
     "ported": "full-anatomy",
     "omissions": [],
-    "divergences": [
-      "Upstream is a streaming Card compound; we retain the legacy step-array API alongside the new compound anatomy",
-      "PlanStepModel keeps the legacy step model while PlanStep names only the compound li"
-    ]
+    "divergences": []
   },
   {
     "file": "src/agentic/TaskItem.tsx",

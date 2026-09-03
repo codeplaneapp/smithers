@@ -28,6 +28,7 @@ import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import * as ControlLive from "@smthrs/control/ControlLive"
 import type { Receipt } from "@smthrs/control/ControlSchema"
 import * as SqlControlRuntime from "@smthrs/control/SqlControlRuntime"
+import { FlowEngine } from "@smthrs/engine"
 import * as EngineStore from "@smthrs/engine-store/EngineStore"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as TestStores from "@smthrs/engine-store/test/TestStores"
@@ -534,7 +535,8 @@ describe("EngineChildren.await", () => {
       // driven. `await` has nothing to read yet and has to come back.
       yield* store.create(
         "pending-child",
-        JSON.stringify({ version: 1, flowName: Worker._tag, payload: {} })
+        JSON.stringify({ version: 1, flowName: Worker._tag, payload: {} }),
+        { lineageId: FlowEngine.Round.initial("pending-child").lineageId, roundOrdinal: 0 }
       )
 
       const collector = yield* Effect.forkChild(port.await({ child: "pending-child" }), {

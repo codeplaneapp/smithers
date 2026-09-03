@@ -41,7 +41,7 @@
  *
  * @since 0.1.0
  */
-import { Key } from "@smthrs/keys"
+import { DerivedKey, digest } from "@smthrs/keys"
 import * as KeyMaterial from "@smthrs/plan/KeyMaterial"
 import * as Node from "@smthrs/plan/Node"
 import * as Planned from "@smthrs/plan/Planned"
@@ -154,8 +154,8 @@ const ownDataProperty = (value: unknown, key: PropertyKey): unknown => {
  * The canonical tuple includes the callee and a canonical payload digest, so
  * delimiter splicing and a changed invocation cannot alias an earlier child.
  * SHA-256 uses the same injected derivation services as the repository's
- * other durable identities. The versioned `Key` prefix is dropped because the
- * existing child-id wire format is the bare digest. `Key.digest` owns the
+ * other durable identities. The versioned key prefix is dropped because the
+ * child-id wire format is the bare digest. `digest` owns the
  * prefix knowledge, so this package never guesses at a stored-key format.
  *
  * @since 0.1.0
@@ -168,14 +168,14 @@ export const childExecutionId = (
   payload: unknown
 ): Effect.Effect<string, never, Crypto.Crypto> =>
   Effect.gen(function*() {
-    const payloadDigest = yield* Schema.decodeUnknownEffect(Key)(payload).pipe(Effect.orDie)
-    const tupleDigest = yield* Schema.decodeUnknownEffect(Key)([
+    const payloadDigest = yield* Schema.decodeUnknownEffect(DerivedKey)(payload).pipe(Effect.orDie)
+    const tupleDigest = yield* Schema.decodeUnknownEffect(DerivedKey)([
       parentExecutionId,
       nodeId,
       calleeTag,
       payloadDigest
     ]).pipe(Effect.orDie)
-    return Key.digest(tupleDigest)
+    return digest(tupleDigest)
   })
 
 /**

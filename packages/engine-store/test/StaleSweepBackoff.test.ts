@@ -88,7 +88,9 @@ const insertRunOwnedBy = (runId: string, owner: Ownership.OwnerId, heartbeatAtMs
         owner_pid,
         owner_nonce,
         heartbeat_at_ms,
-        state_json
+        state_json,
+        lineage_id,
+        round_ordinal
       ) VALUES (
         ${runId},
         'running',
@@ -98,7 +100,9 @@ const insertRunOwnedBy = (runId: string, owner: Ownership.OwnerId, heartbeatAtMs
         ${owner.pid},
         ${owner.nonce},
         ${heartbeatAtMs},
-        ${stateJson}
+        ${stateJson},
+        ${runId},
+        0
       )
     `).pipe(Effect.orDie)
   })

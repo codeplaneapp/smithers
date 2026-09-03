@@ -361,9 +361,7 @@ function parseValue(
   if (!combinedResponse && !combinedSummary && combinedCalls.length === 0) return null;
   return {
     ...(combinedResponse ? { response: combinedResponse } : {}),
-    // Both fields carry the identical provider-disclosed summary; `reasoning`
-    // remains only as a deprecated alias.
-    ...(combinedSummary ? { reasoningSummary: combinedSummary, reasoning: combinedSummary } : {}),
+    ...(combinedSummary ? { reasoningSummary: combinedSummary } : {}),
     toolCalls: combinedCalls,
     streaming: streaming || (nestedModel?.streaming ?? false),
   };

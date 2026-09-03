@@ -7,7 +7,7 @@
  * @since 0.1.0
  */
 import { Action, Flow, StepIdentity } from "@smthrs/flow"
-import { Key, type Key as KeyType } from "@smthrs/keys"
+import { DerivedKey, type StoredKey } from "@smthrs/keys"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -169,7 +169,7 @@ export const actionKey = Effect.fn("FlowEngine.actionKey")(function*(
   ordinal: number,
   environment: Action.CacheEnvironment | undefined,
   scope: string
-): Effect.fn.Return<KeyType, Schema.SchemaError, Crypto.Crypto> {
+): Effect.fn.Return<StoredKey, Schema.SchemaError, Crypto.Crypto> {
   if (action.tier === "sealed" && action.idempotencyKey !== undefined) {
     // Skyframe's SkyKey is (functionName, argument): a string idempotencyKey
     // is namespaced by the action name so two distinct actions sharing an
@@ -219,7 +219,7 @@ export const actionKey = Effect.fn("FlowEngine.actionKey")(function*(
     // tolerant declaration could consume a strict row (or the reverse) under
     // an identity whose conflict policy was never part of the claim. Omitting
     // it emits no field and preserves every deterministic key byte-for-byte.
-    return yield* Schema.decodeUnknownEffect(Key)({
+    return yield* Schema.decodeUnknownEffect(DerivedKey)({
       kind: environment === undefined ? "run" : "cache",
       form,
       input,

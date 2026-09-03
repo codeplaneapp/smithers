@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PLUGIN_MANIFEST, readRepoPlugin } from "./RepoPlugin"
@@ -80,28 +80,5 @@ describe("readRepoPlugin", () => {
     const workspace = readRepoPlugin(dir, ["."])
     expect(workspace.plugin).toBeUndefined()
     expect(workspace.warnings.join(" ")).toContain("aomi-sdk")
-  })
-})
-
-describe("the pre-rc.0 manifest location", () => {
-  test("a manifest left at .smithers/UI.json is never read and names the move", async () => {
-    const dir = await scratch()
-    await mkdir(join(dir, ".smithers"), { recursive: true })
-    await writeFile(join(dir, ".smithers", "UI.json"), JSON.stringify(manifest))
-    const read = readRepoPlugin(dir, [".", "aomi-sdk"])
-    expect(read.plugin).toBeUndefined()
-    expect(read.warnings).toEqual([
-      `.smithers/UI.json is not read: rc.0 treats .smithers/ as 0.x state. Move it to ${PLUGIN_MANIFEST}.`
-    ])
-  })
-
-  test("the warning rides alongside a valid root manifest", async () => {
-    const dir = await scratch()
-    await mkdir(join(dir, ".smithers"), { recursive: true })
-    await writeFile(join(dir, ".smithers", "UI.json"), "{}")
-    await writeManifest(dir, manifest)
-    const read = readRepoPlugin(dir, [".", "aomi-sdk"])
-    expect(read.plugin?.name).toBe("aomi")
-    expect(read.warnings).toHaveLength(1)
   })
 })

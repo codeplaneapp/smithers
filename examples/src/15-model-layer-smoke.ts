@@ -38,7 +38,7 @@ export const executorLayer = RequestExecutor.layer.pipe(
 )
 
 /**
- * Sends one prompt to a real `openaiCompatible` endpoint and returns the
+ * Sends one prompt to a real `openaiChatCompatible` endpoint and returns the
  * concatenated text of the response, with nothing but `packages/model`
  * between the caller and the wire.
  *
@@ -47,7 +47,7 @@ export const executorLayer = RequestExecutor.layer.pipe(
  */
 export const ask = (question: string, modelId: string, baseUrl: string, apiKey: string) =>
   Effect.gen(function*() {
-    const routeConfig = yield* Effect.fromResult(Route.openaiCompatible({ id: "smoke", baseUrl, apiKey: Redacted.make(apiKey) }))
+    const routeConfig = yield* Effect.fromResult(Route.openaiChatCompatible({ id: "smoke", baseUrl, apiKey: Redacted.make(apiKey) }))
     const model = yield* Route.toModel(routeConfig)
     const request = ModelRequest.make({
       modelId,
@@ -68,7 +68,7 @@ export const ask = (question: string, modelId: string, baseUrl: string, apiKey: 
   }).pipe(Effect.provide(executorLayer))
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [, , modelId = "qwen2.5-coder:1.5b", baseUrl = "http://localhost:11434/v1", apiKey = "local"] = process.argv
+  const [, , modelId = "qwen2.5-coder:1.5b", baseUrl = "http://localhost:11434", apiKey = "local"] = process.argv
   Effect.runPromise(ask("What is the capital of France? Answer in one word.", modelId, baseUrl, apiKey)).then(
     (answer) => {
       console.log("ANSWER:", answer)

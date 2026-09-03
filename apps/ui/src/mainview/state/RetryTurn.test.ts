@@ -95,13 +95,13 @@ describe("/retry re-runs the last turn", () => {
     fail(turnId as string, "the upstream fell over")
     await settled()
 
-    await controller.commands.run("retry")
+    await controller.commands.run("chat.retry")
     await settled()
     expect(userBubbles(store, "Reply with one random uncommon English noun, nothing else.").length).toBe(1)
 
     fail(turnId as string, "again")
     await settled()
-    await controller.commands.run("retry")
+    await controller.commands.run("chat.retry")
     await settled()
     expect(userBubbles(store, "Reply with one random uncommon English noun, nothing else.").length).toBe(1)
     // Three legs: the original send plus two re-runs, all on the same turn.
@@ -122,7 +122,7 @@ describe("/retry re-runs the last turn", () => {
     await settled()
     expect(store.collections.messages.get(`message-${turnId}-smithers`)).toBeDefined()
 
-    await controller.commands.run("retry")
+    await controller.commands.run("chat.retry")
     await settled()
     expect(store.collections.messages.get(`message-${turnId}-smithers`)).toBeUndefined()
     const retried = launches[1]
@@ -137,7 +137,7 @@ describe("/retry re-runs the last turn", () => {
     const controller = createAppController(store, unavailableRepositories, agent, {
       fetchImpl: async () => new Response("{}", { status: 200 })
     })
-    const outcome = await controller.commands.run("retry")
+    const outcome = await controller.commands.run("chat.retry")
     expect(outcome).toEqual({ status: "failed", error: "Nothing to retry yet — send a message first." })
     expect(launches.length).toBe(0)
   })
@@ -151,7 +151,7 @@ describe("/retry re-runs the last turn", () => {
     controller.send("still running")
     await settled()
     expect(store.session().phase).toBe("responding")
-    const outcome = await controller.commands.run("retry")
+    const outcome = await controller.commands.run("chat.retry")
     await settled()
     expect(launches.length).toBe(1)
     expect(outcome.status).toBe("failed")

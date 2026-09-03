@@ -241,7 +241,7 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
     expect(beforeClear.length).toBeGreaterThan(0)
     expect(beforeClear.some((message) => message.text === "remember that I prefer dark mode")).toBe(true)
 
-    const outcome = await controller.commands.run("clear")
+    const outcome = await controller.commands.run("chat.clear")
     expect(outcome.status).toBe("executed")
     await settled()
 
@@ -277,7 +277,7 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
     await settled()
     const before = [...store.collections.messages.values()].length
 
-    await controller.commands.run("clear")
+    await controller.commands.run("chat.clear")
     await settled()
 
     const messages = [...store.collections.messages.values()]
@@ -304,7 +304,7 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
     await signIn(store)
     controller.send("hi")
     await settled()
-    await controller.commands.run("clear")
+    await controller.commands.run("chat.clear")
     const messages = [...store.collections.messages.values()]
     expect(messages).toHaveLength(1)
     expect(messages[0]?.text).toBe("Cleared — there was nothing new worth keeping.")
@@ -329,7 +329,7 @@ describe("wave 10 — the browser tool (§2d)", () => {
     await signIn(store)
     const result = await controller.commands.executeForAgent({
       name: "commands",
-      arguments: JSON.stringify({ action: "execute", name: "browser", args: "https://example.com/" })
+      arguments: JSON.stringify({ action: "execute", name: "browser.open", args: "https://example.com/" })
     })
     expect(result).toContain("Example Domain")
     const card = store.collections.cards.get("browser-https://example.com/")
@@ -355,7 +355,7 @@ describe("wave 10 — the browser tool (§2d)", () => {
       })
     })
     await signIn(store)
-    await controller.commands.run("browser", "https://x.com/")
+    await controller.commands.run("browser.open", "https://x.com/")
     const card = store.collections.cards.get("browser-https://x.com/")
     expect(card?.kind).toBe("browser")
     if (card?.kind === "browser") {
@@ -372,7 +372,7 @@ describe("wave 10 — the browser tool (§2d)", () => {
           type: "tool_call" as const,
           call_id: "call_1",
           name: "commands",
-          arguments: JSON.stringify({ action: "execute", name: "browser", args: "https://example.com/" })
+          arguments: JSON.stringify({ action: "execute", name: "browser.open", args: "https://example.com/" })
         },
         { type: "done" as const, reason: "tool_call" as const }
       ],

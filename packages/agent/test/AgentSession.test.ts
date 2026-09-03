@@ -298,6 +298,7 @@ const stack = (options: StackOptions) => {
   const engine = NodeRuntime.layer(
     {
       filename: join(root, "engine.db"),
+      workspaceRoot: root,
       owner: { hostId: "agent-session-test" },
       isAlive: () => Effect.succeed(false)
     },

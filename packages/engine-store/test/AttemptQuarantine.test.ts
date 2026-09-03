@@ -166,7 +166,10 @@ describe("succeeded-row corruption quarantines its evidence and heals on resume 
             flowName: "AttemptQuarantine/Flow",
             payload: {}
           })
-          yield* runs.create("quarantine-run", stateJson)
+          yield* runs.create("quarantine-run", stateJson, {
+            lineageId: "quarantine-run",
+            roundOrdinal: 0
+          })
           const row = yield* runs.get("quarantine-run")
           yield* runs.claimAndOwn(
             "quarantine-run",

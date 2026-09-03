@@ -979,8 +979,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
   /*
    * The local app's repository cards (apps/ui/docs/LOCAL-APP.md "Cards"):
    * the opened repository, its trusted typed target list, and one streamed
-   * target run. The legacy html variant remains decodable for existing rows,
-   * but the product no longer creates executable model-authored panels.
+   * target run.
    */
   z.object({
     ...cardBaseShape,
@@ -1005,16 +1004,6 @@ export const CardSchema = z.discriminatedUnion("kind", [
       starred: z.array(z.string()).optional(),
       /** The manifest's featured pattern runs (`ci //packages/...`): the Featured view's run strip. */
       patternRuns: z.array(PatternRunEntrySchema).optional()
-    })
-  }),
-  z.object({
-    ...cardBaseShape,
-    kind: z.literal("html"),
-    payload: z.object({
-      title: z.string(),
-      html: z.string(),
-      source: z.enum(["agent", "template"]),
-      repoId: z.string()
     })
   }),
   z.object({

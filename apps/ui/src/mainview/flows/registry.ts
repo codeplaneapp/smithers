@@ -28,8 +28,6 @@ export interface FlowMetadata {
   readonly summary: string
   /** Not listed in the slash menu (id-scoped button actions); still invocable. */
   readonly hidden?: boolean
-  /** Alias of another flow: executing it executes the canonical target. */
-  readonly aliasOf?: string
   /**
    * The slash argument hint, e.g. `<number> [owner/repo]`. Its presence is
    * what makes `/name <text>` parse as an invocation rather than a prompt;
@@ -210,10 +208,9 @@ export const recommendedNames = (state: CommandState): ReadonlyArray<string> => 
  * ── The namespace tree ─────────────────────────────────────────────────
  *
  * A flow's namespace is its dotted head (`auth.sign-in` → `auth`). Every
- * canonical flow lives in one; the only bare names are the three surface
+ * Namespaced flows live in one; the only bare names are the three surface
  * switches (`chat`, `world`, `connect`), which ARE the top level of the app
- * and read wrong under any prefix, and the hidden bare aliases that keep old
- * spellings (`/dark-mode`, `/clear`, `/reset`) working. Aliases never show.
+ * and read wrong under any prefix.
  */
 
 /** The surface switches: the one legitimate top-level leaves. */
@@ -347,10 +344,6 @@ export const slashTree = <C extends CatalogItem>(
 export const visible = <C extends CatalogItem>(
   commands: ReadonlyArray<C>
 ): Array<C> => commands.filter((command) => command.hidden !== true)
-
-/** The canonical flow a name resolves to, following one alias hop. */
-export const canonical = <C extends CatalogItem>(name: string, commands: ReadonlyArray<C>): string =>
-  commands.find((command) => command.name === name)?.aliasOf ?? name
 
 /** A needle matches a flow by name or summary, case-insensitively. */
 export const matches = (command: CatalogItem, needle: string): boolean => {
@@ -514,7 +507,7 @@ const commandHead = (text: string): { readonly name: string; readonly args?: str
  *  - blank (or a bare "/") submits nothing — bare "/" + Enter is handled by the
  *    menu selecting its first (recommended) item,
  *  - an input that is ONLY a registered slash flow executes it directly
- *    (aliases parse as themselves; execution resolves the canonical target),
+ *    by its registered name,
  *  - `/name <text>` executes directly when the flow declares an args hint,
  *  - a leading token that is flow SYNTAX but names no registered flow is
  *    refused by name — never handed to the model as prose,

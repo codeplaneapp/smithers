@@ -104,6 +104,7 @@ export const groupRows = (rows: ReadonlyArray<TargetRow>, facts: FeaturedFacts =
     for (const member of members) counts[member.state] += 1
     out.push({
       target: {
+        id: groupLabel(row.target.name),
         label,
         target: `${members.length} packages`,
         kinds,

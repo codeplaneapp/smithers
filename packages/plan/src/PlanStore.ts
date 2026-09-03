@@ -14,6 +14,7 @@
  * @since 0.1.0
  */
 import { affectedRows, DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
+import { StoredKey } from "@smthrs/keys"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -118,8 +119,8 @@ const decodeNode = Schema.decodeUnknownEffect(Schema.fromJsonString(Plan.PlanNod
 const PlanRow = Schema.Struct({
   plan_id: Schema.NonEmptyString,
   flow: Schema.NonEmptyString,
-  base_digest: Plan.KeyDigest,
-  digest: Plan.KeyDigest,
+  base_digest: StoredKey,
+  digest: StoredKey,
   generation: Schema.Int
 })
 

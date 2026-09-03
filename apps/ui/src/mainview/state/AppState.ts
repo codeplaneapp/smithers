@@ -287,13 +287,12 @@ export const repoIdFromRemote = (remote: string | null | undefined): string | nu
 
 /**
  * The repo.select grammar (lane piper step 3): `org/repo` selects the
- * repository (its head); `org/repo#copyId` selects one working copy. The
- * legacy pin key (`local:/path`) still parses, as a copy id with no repo —
- * rows persisted before the grammar carry it.
+ * repository (its head); `org/repo#copyId` selects one working copy; and a
+ * `local:/path` key selects a checkout that has no repository remote.
  */
 export const parseRepoSelection = (
   token: string
-): { readonly repoId: string; readonly copyId?: string } | { readonly legacyCopyId: string } | null => {
+): { readonly repoId: string; readonly copyId?: string } | { readonly localCopyId: string } | null => {
   const hash = token.indexOf("#")
   const head = hash === -1 ? token : token.slice(0, hash)
   if (/^[\w.-]+\/[\w.-]+$/.test(head)) {
@@ -301,7 +300,7 @@ export const parseRepoSelection = (
     const copyId = token.slice(hash + 1)
     return copyId === "" ? null : { repoId: head, copyId }
   }
-  return hash === -1 && token.startsWith("local:") ? { legacyCopyId: token } : null
+  return hash === -1 && token.startsWith("local:") ? { localCopyId: token } : null
 }
 
 export const ActorSchema = z.enum(["user", "smithers", "system"])

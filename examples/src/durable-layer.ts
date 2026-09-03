@@ -15,6 +15,7 @@ import { Jj } from "@smthrs/kernel"
 import { Ownership } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { dirname } from "node:path"
 
 /**
  * A Jujutsu service that records nothing. The engine calls it for compensable
@@ -79,6 +80,7 @@ export const durableEngine = (filename: string, hostId: string) =>
   NodeRuntime.layer(
     {
       filename,
+      workspaceRoot: dirname(filename),
       owner: { hostId },
       isAlive: Ownership.sameHostPidProbe
     },

@@ -8,11 +8,7 @@
  * Governing design: `packages/testing/docs/concepts.md`, "Errors are typed
  * values, not string conventions".
  *
- * Two casing conventions live in {@link Code}. Most literals are `snake_case`;
- * `REPLAY_HARNESS_MISMATCH`, `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, and
- * `RALPH_MAX_REACHED` are inherited verbatim from the 0.x codes consumers
- * already match on, and are kept shouted so a migrated matcher keeps working.
- * A new code is `snake_case`.
+ * Every literal uses `snake_case`.
  *
  * @since 0.0.0
  */
@@ -113,9 +109,9 @@ export const Code = Schema.Literals([
   "conformance_violation",
   "unscripted_model",
   "fixture_not_encodable",
-  "REPLAY_HARNESS_MISMATCH",
+  "replay_harness_mismatch",
   "fixture_divergence",
-  "EXACTLY_ONCE_UNSUPPORTED",
+  "exactly_once_unsupported",
   "capability_contract_violation",
   "conformance_skipped",
   "engine_unavailable",
@@ -124,8 +120,8 @@ export const Code = Schema.Literals([
   "transaction_commit_failed",
   "rewind_failed",
   "flow_hash_mismatch",
-  "TASK_TIMEOUT",
-  "RALPH_MAX_REACHED"
+  "task_timeout",
+  "ralph_max_reached"
 ])
 
 /**
@@ -222,16 +218,13 @@ export class FixtureEncodingError extends Schema.TaggedError<FixtureEncodingErro
 /**
  * A replay harness produced output different from its recorded expectation.
  *
- * The code literal is inherited from the Smithers testing library's stable
- * `REPLAY_HARNESS_MISMATCH` code.
- *
  * @since 0.0.0
  * @category errors
  */
 export class ReplayHarnessMismatchError extends Schema.TaggedError<ReplayHarnessMismatchError>()(
   "ReplayHarnessMismatchError",
   {
-    code: constantCode("REPLAY_HARNESS_MISMATCH"),
+    code: constantCode("replay_harness_mismatch"),
     expected: Schema.String,
     actual: Schema.String
   }
@@ -258,16 +251,13 @@ export class FixtureDivergenceError extends Schema.TaggedError<FixtureDivergence
  * Exactly-once assertions are unsupported because the assertion vocabulary must
  * not be able to lie: the engine does not provide exactly-once execution.
  *
- * The code literal is inherited from the Smithers testing library's stable
- * `EXACTLY_ONCE_UNSUPPORTED` code.
- *
  * @since 0.0.0
  * @category errors
  */
 export class ExactlyOnceUnsupportedError extends Schema.TaggedError<ExactlyOnceUnsupportedError>()(
   "ExactlyOnceUnsupportedError",
   {
-    code: constantCode("EXACTLY_ONCE_UNSUPPORTED"),
+    code: constantCode("exactly_once_unsupported"),
     message: Schema.String
   }
 ) {}
@@ -489,7 +479,7 @@ export class FlowHashMismatchError extends Schema.TaggedError<FlowHashMismatchEr
  * @category errors
  */
 export class TaskTimeoutError extends Schema.TaggedError<TaskTimeoutError>()("TaskTimeoutError", {
-  code: constantCode("TASK_TIMEOUT"),
+  code: constantCode("task_timeout"),
   requestId: Schema.String,
   policy: Schema.Literal("fail"),
   requestedAtLogicalTimeMillis: Schema.Number,
@@ -503,7 +493,7 @@ export class TaskTimeoutError extends Schema.TaggedError<TaskTimeoutError>()("Ta
  * @category errors
  */
 export class RalphMaxReachedError extends Schema.TaggedError<RalphMaxReachedError>()("RalphMaxReachedError", {
-  code: constantCode("RALPH_MAX_REACHED"),
+  code: constantCode("ralph_max_reached"),
   loopId: Schema.String,
   maxIterations: Schema.Number
 }) {}

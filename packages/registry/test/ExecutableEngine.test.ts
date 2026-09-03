@@ -33,7 +33,7 @@ import * as Schema from "effect/Schema"
 import { TestClock } from "effect/testing"
 import { existsSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type * as Descriptor from "../src/Descriptor.ts"
 import * as Discovery from "../src/Discovery.ts"
@@ -153,6 +153,7 @@ const durable = (filename: string, hostId: string, registration: Layer.Layer<unk
   NodeRuntime.layer(
     {
       filename,
+      workspaceRoot: dirname(filename),
       owner: { hostId },
       isAlive: () => Effect.succeed(false)
     },
@@ -472,6 +473,7 @@ describe("the host seam", () => {
       const runtime = NodeRuntime.layer(
         {
           filename: join(directory, "engine.db"),
+          workspaceRoot: directory,
           owner: { hostId: "registry-host" },
           isAlive: () => Effect.succeed(false)
         },

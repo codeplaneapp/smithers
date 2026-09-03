@@ -85,7 +85,6 @@ export * as OpenAIChatGPT from "./OpenAIChatGPT.ts"
  * @since 0.1.0
  * @slop
  */
-export * as OpenAICompatible from "./OpenAICompatible.ts"
 
 /**
  * @since 0.1.0

@@ -6,12 +6,10 @@ import {
   forwardRef,
   type ForwardRefExoticComponent,
   type ReactNode,
-  type Ref,
   type RefAttributes,
   useCallback,
   useContext,
   useEffect,
-  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -73,24 +71,6 @@ export type MessageScrollerButtonProps = Omit<ComponentProps<"button">, "onClick
   behavior?: ScrollBehavior;
 };
 
-export type MessageScrollerHandle = {
-  scrollToBottom: (behavior?: ScrollBehavior) => void;
-  isFollowing: () => boolean;
-};
-
-export type MessageScrollerProps = Omit<ComponentProps<"div">, "onScroll"> & {
-  stickToBottom?: boolean;
-  streaming?: boolean;
-  bottomThreshold?: number;
-  firstItemKey?: string | number;
-  fade?: boolean;
-  hideJumpToLatest?: boolean;
-  jumpToLatestLabel?: string;
-  onFollowChange?: (following: boolean) => void;
-  contentClassName?: string;
-  children?: ReactNode;
-};
-
 /* -------------------------------------------------------------------------- */
 /* Provider internals                                                         */
 /* -------------------------------------------------------------------------- */
@@ -117,15 +97,6 @@ type ScrollerContextValue = {
 
 const ScrollerContext = createContext<ScrollerContextValue | null>(null);
 
-type ScrollerFrameOptions = {
-  fade: boolean;
-  hideJumpToLatest: boolean;
-  jumpToLatestLabel: string;
-  contentClassName?: string;
-};
-
-const ScrollerFrameOptionsContext = createContext<ScrollerFrameOptions | null>(null);
-
 function useScrollerContext(part: string): ScrollerContextValue {
   const ctx = useContext(ScrollerContext);
   if (!ctx) throw new Error(`${part} must be used inside <MessageScrollerProvider>`);
@@ -139,18 +110,14 @@ function useScrollerLaneCss(): void {
 
 const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown"]);
 
-/** Internal-only extension used by the flat compat wrapper (legacy prop). */
-type InternalProviderProps = MessageScrollerProviderProps & { firstItemKey?: string | number; };
-
 function MessageScrollerProviderImpl({
   scrollAnchor = "none",
   initialMessageId,
   bottomThreshold = 24,
   peekPx = 56,
   onFollowChange,
-  firstItemKey,
   children,
-}: InternalProviderProps) {
+}: MessageScrollerProviderProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   const itemsRef = useRef(new Map<string, HTMLElement>());
@@ -166,12 +133,11 @@ function MessageScrollerProviderImpl({
   const queuedJumpRef = useRef<{ messageId: string; opts?: { behavior?: ScrollBehavior; peek?: boolean; }; } | null>(
     null,
   );
-  const snapshotRef = useRef<ScrollSnapshot>({ firstItemKey, scrollHeight: 0, scrollTop: 0 });
+  const snapshotRef = useRef<ScrollSnapshot>({ firstItemKey: undefined, scrollHeight: 0, scrollTop: 0 });
   const previousAnchorRef = useRef(scrollAnchor);
   const onFollowChangeRef = useRef(onFollowChange);
   const thresholdRef = useRef(bottomThreshold);
   const peekPxRef = useRef(peekPx);
-  const firstItemKeyRef = useRef(firstItemKey);
   const stateRef = useRef<ViewportState>({
     atTop: true,
     atBottom: true,
@@ -187,7 +153,6 @@ function MessageScrollerProviderImpl({
   onFollowChangeRef.current = onFollowChange;
   thresholdRef.current = bottomThreshold;
   peekPxRef.current = peekPx;
-  firstItemKeyRef.current = firstItemKey;
 
   const emitState = useCallback((patch: Partial<ViewportState>) => {
     const next = { ...stateRef.current, ...patch };
@@ -247,7 +212,7 @@ function MessageScrollerProviderImpl({
   const remember = useCallback(
     (viewport: HTMLDivElement) => {
       snapshotRef.current = {
-        firstItemKey: firstItemKeyRef.current ?? firstDomItemId(),
+        firstItemKey: firstDomItemId(),
         scrollHeight: viewport.scrollHeight,
         scrollTop: viewport.scrollTop,
       };
@@ -683,7 +648,7 @@ function MessageScrollerProviderImpl({
       }
     }
 
-    const currentFirstKey = firstItemKeyRef.current ?? firstDomItemId();
+    const currentFirstKey = firstDomItemId();
     const firstItemChanged = !Object.is(previous.firstItemKey, currentFirstKey);
     if (firstItemChanged && !followingRef.current) {
       viewport.scrollTop += viewport.scrollHeight - previous.scrollHeight;
@@ -803,8 +768,7 @@ export const MessageScrollerViewport: ForwardRefExoticComponent<
   ref,
 ) {
   useScrollerLaneCss();
-  const frameOptions = useContext(ScrollerFrameOptionsContext);
-  const resolvedFade = fade ?? frameOptions?.fade ?? false;
+  const resolvedFade = fade ?? false;
   const { registerViewport, handleViewportScroll } = useScrollerContext("MessageScrollerViewport");
   const { atTop, atBottom, autoscrolling } = useMessageScrollerState();
   const composedRef = useCallback(
@@ -837,12 +801,11 @@ export const MessageScrollerViewport: ForwardRefExoticComponent<
 /** Message list container; defaults to role='log' (live-log semantics). */
 export function MessageScrollerContent({ className, role, ...props }: MessageScrollerContentProps) {
   useScrollerLaneCss();
-  const frameOptions = useContext(ScrollerFrameOptionsContext);
   return (
     <div
       data-slot="message-scroller-content"
       role={role ?? "log"}
-      className={cn("sui-msg-scroller-content", frameOptions?.contentClassName, className)}
+      className={cn("sui-msg-scroller-content", className)}
       {...props}
     />
   );
@@ -929,7 +892,6 @@ function MessageScrollerFrameButton({
 }
 
 function MessageScrollerLatestButton({ "aria-label": ariaLabel, ...props }: MessageScrollerButtonProps) {
-  const frameOptions = useContext(ScrollerFrameOptionsContext);
   const { commands } = useScrollerContext("MessageScrollerButton");
   const { atBottom } = useMessageScrollerState();
   return (
@@ -937,7 +899,7 @@ function MessageScrollerLatestButton({ "aria-label": ariaLabel, ...props }: Mess
       {...props}
       target="latest"
       active={!atBottom}
-      label={ariaLabel ?? frameOptions?.jumpToLatestLabel ?? "Jump to latest"}
+      label={ariaLabel ?? "Jump to latest"}
       onJump={() => commands.scrollToBottom(props.behavior ?? "smooth")}
     />
   );
@@ -976,9 +938,7 @@ function MessageScrollerTargetButton({
 
 /** Jump affordance; inert while already at the target region. */
 export function MessageScrollerButton({ target = "latest", ...props }: MessageScrollerButtonProps) {
-  const frameOptions = useContext(ScrollerFrameOptionsContext);
   if (target === "latest") {
-    if (frameOptions?.hideJumpToLatest) return null;
     return <MessageScrollerLatestButton {...props} />;
   }
   if (target === "start") return <MessageScrollerStartButton {...props} />;
@@ -1010,130 +970,3 @@ export function useMessageScrollerState(): ViewportState {
   const { subscribeState, getState } = useScrollerContext("useMessageScrollerState");
   return useSyncExternalStore(subscribeState, getState, getState);
 }
-
-/* -------------------------------------------------------------------------- */
-/* Flat compat component (unchanged public surface)                           */
-/* -------------------------------------------------------------------------- */
-
-type FlatInnerProps = MessageScrollerProps & { handleRef: Ref<MessageScrollerHandle>; };
-
-function useScrollerHandle(handleRef: Ref<MessageScrollerHandle>): void {
-  const ctx = useScrollerContext("MessageScroller");
-  useImperativeHandle(
-    handleRef,
-    () => ({ scrollToBottom: ctx.commands.scrollToBottom, isFollowing: ctx.isFollowing }),
-    [ctx],
-  );
-}
-
-/**
- * Styled frame for the Provider/Scroller composition: the ambient provider
- * owns scroll state, so the frame renders the compound anatomy (Viewport,
- * Content, Items, Button) verbatim instead of nesting a shadow provider.
- */
-function AmbientScrollerFrame({
-  streaming = false,
-  className,
-  children,
-  handleRef,
-  fade = true,
-  hideJumpToLatest = false,
-  jumpToLatestLabel = "Jump to latest",
-  contentClassName,
-  ...props
-}: FlatInnerProps) {
-  useScrollerLaneCss();
-  const { following, autoscrolling } = useMessageScrollerState();
-  useScrollerHandle(handleRef);
-  const frameOptions = useMemo<ScrollerFrameOptions>(
-    () => ({ fade, hideJumpToLatest, jumpToLatestLabel, contentClassName }),
-    [contentClassName, fade, hideJumpToLatest, jumpToLatestLabel],
-  );
-  return (
-    <ScrollerFrameOptionsContext.Provider value={frameOptions}>
-      <div
-        data-slot="message-scroller"
-        className={cn("sui-msg-scroller", className)}
-        data-following={following ? "true" : "false"}
-        data-streaming={streaming ? "true" : "false"}
-        data-autoscrolling={autoscrolling ? "true" : undefined}
-        {...(props as ComponentProps<"div">)}
-      >
-        {children}
-      </div>
-    </ScrollerFrameOptionsContext.Provider>
-  );
-}
-
-function FlatScrollerInner({
-  fade = true,
-  hideJumpToLatest = false,
-  jumpToLatestLabel = "Jump to latest",
-  streaming = false,
-  contentClassName,
-  className,
-  children,
-  handleRef,
-  ...props
-}: FlatInnerProps) {
-  useScrollerLaneCss();
-  const ctx = useScrollerContext("MessageScroller");
-  const { atBottom, following, autoscrolling } = useMessageScrollerState();
-  useScrollerHandle(handleRef);
-
-  return (
-    <div
-      data-slot="message-scroller"
-      className={cn("sui-msg-scroller", className)}
-      data-following={following ? "true" : "false"}
-      data-streaming={streaming ? "true" : "false"}
-      data-autoscrolling={autoscrolling ? "true" : undefined}
-      {...(props as ComponentProps<"div">)}
-    >
-      <MessageScrollerViewport fade={fade}>
-        <div data-slot="message-scroller-content" className={cn("sui-msg-scroller-content", contentClassName)}>
-          {children}
-        </div>
-      </MessageScrollerViewport>
-      {!atBottom && !hideJumpToLatest ?
-        (
-          <button
-            type="button"
-            data-slot="message-scroller-jump"
-            className="sui-msg-scroller-jump"
-            aria-label={jumpToLatestLabel}
-            onClick={() => ctx.commands.scrollToBottom("smooth")}
-          >
-            <span aria-hidden="true">↓</span>
-          </button>
-        ) :
-        null}
-    </div>
-  );
-}
-
-/** Anchored conversation viewport with streaming follow and prepend compensation. */
-export const MessageScroller: ForwardRefExoticComponent<MessageScrollerProps & RefAttributes<MessageScrollerHandle>> =
-  forwardRef<MessageScrollerHandle, MessageScrollerProps>(function MessageScroller(
-    { stickToBottom = true, streaming = false, bottomThreshold = 24, firstItemKey, onFollowChange, ...rest },
-    ref,
-  ) {
-    useScrollerLaneCss();
-    const ambient = useContext(ScrollerContext);
-    if (ambient) {
-      // Provider/Scroller composition: the ambient provider owns scroll state,
-      // so the styled frame renders the compound anatomy (Viewport, Content,
-      // Items, Button) as its children instead of nesting a shadow scroller.
-      return <AmbientScrollerFrame {...rest} streaming={streaming} handleRef={ref} />;
-    }
-    return (
-      <MessageScrollerProviderImpl
-        scrollAnchor={stickToBottom ? "bottom" : "none"}
-        bottomThreshold={bottomThreshold}
-        firstItemKey={firstItemKey}
-        onFollowChange={onFollowChange}
-      >
-        <FlatScrollerInner {...rest} streaming={streaming} handleRef={ref} />
-      </MessageScrollerProviderImpl>
-    );
-  }) as ForwardRefExoticComponent<MessageScrollerProps & RefAttributes<MessageScrollerHandle>>;

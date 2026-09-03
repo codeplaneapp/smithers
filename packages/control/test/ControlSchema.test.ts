@@ -1,4 +1,3 @@
-import * as PersistedPlan from "@smthrs/plan/Plan"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as ControlSchema from "../src/ControlSchema.ts"
@@ -7,7 +6,8 @@ const roundTrip = <A>(schema: Schema.Codec<A, unknown, never, never>, value: A):
   expect(Schema.decodeUnknownSync(schema)(Schema.encodeSync(schema)(value))).toEqual(value)
 }
 
-const storedKey = Schema.decodeUnknownSync(PersistedPlan.KeyDigest)
+type StoredKey = NonNullable<ControlSchema.PlanCard["plan"]>["baseDigest"]
+const storedKey = (value: string): StoredKey => value as StoredKey
 
 const envelope = {
   capabilities: ["fs:read"],

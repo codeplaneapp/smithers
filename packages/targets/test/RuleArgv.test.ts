@@ -6,7 +6,6 @@
  * changeset run reaches the irreversible action rather than the ordinary one.
  */
 import { describe, expect, it } from "vitest"
-import { Changesets } from "../src/Changesets.ts"
 import { DepsLint } from "../src/DepsLint.ts"
 import { Dev } from "../src/Dev.ts"
 import * as Input from "../src/Input.ts"
@@ -47,31 +46,6 @@ describe("PackageLint", () => {
     const withAttw = plannedCalls(PackageLint({ ...base, strict: false, pack: true, attw: true }))
     expect(withAttw).toHaveLength(2)
     expect(withAttw[1]?.payload["argv"]).toEqual(["pnpm", "exec", "attw", "--pack", "."])
-  })
-})
-
-describe("Changesets", () => {
-  const base = {
-    packageManager,
-    changesets: [],
-    config: Input.file(".changeset/config.json"),
-    rootPackageJson: Input.file("package.json"),
-    lockfile: Input.file("pnpm-lock.yaml"),
-    deps: []
-  }
-
-  it("routes a version run to the irreversible action and a status run to the ordinary one", () => {
-    const version = plannedCalls(Changesets({ ...base, operation: "version", since: null }))[0]
-    expect(version?.action).toBe("smithers-build/exec-irreversible")
-    expect(version?.payload["argv"]).toEqual(["pnpm", "exec", "changeset", "version"])
-    const status = plannedCalls(Changesets({ ...base, operation: "status", since: null }))[0]
-    expect(status?.action).toBe("smithers-build/exec")
-    expect(status?.payload["argv"]).toEqual(["pnpm", "exec", "changeset", "status"])
-  })
-
-  it("passes a declared since through to status", () => {
-    expect(plannedArgv(Changesets({ ...base, operation: "status", since: "main" })))
-      .toEqual(["pnpm", "exec", "changeset", "status", "--since", "main"])
   })
 })
 

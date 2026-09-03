@@ -159,6 +159,7 @@ export const host = (options: FlowOptions) =>
   NodeRuntime.layerHost(
     {
       filename: options.filename,
+      workspaceRoot: options.markerDir,
       owner: { hostId: options.hostId },
       // A killed host never runs a handler, and a shut-down host is not what
       // this family tests. Nothing here installs one.

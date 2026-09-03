@@ -62,11 +62,8 @@ import { dirname, join, resolve } from "node:path"
 export interface Options {
   /** SQLite database filename. Its parent directory is created recursively. */
   readonly filename: string
-  /**
-   * Workspace whose files actions may read or mutate. When omitted, the
-   * database directory is used as a fail-closed compatibility default.
-   */
-  readonly workspaceRoot?: string | undefined
+  /** Workspace whose file actions may read or mutate. */
+  readonly workspaceRoot: string
   /** Stable identity of this engine host. */
   readonly owner: {
     readonly hostId: string
@@ -128,10 +125,7 @@ interface ValidatedOptions {
 /** Captures one absolute, immutable runtime configuration at API entry. */
 const validate = (options: Options): ValidatedOptions => {
   const filename = decodeField("filename", Schema.NonEmptyString, options.filename, nonEmpty)
-  const configuredRoot = options.workspaceRoot
-  const workspaceRoot = configuredRoot === undefined
-    ? undefined
-    : decodeField("workspaceRoot", Schema.NonEmptyString, configuredRoot, nonEmpty)
+  const workspaceRoot = decodeField("workspaceRoot", Schema.NonEmptyString, options.workspaceRoot, nonEmpty)
   // A JavaScript caller can omit `owner` entirely, so the field is read off a
   // possibly-absent record rather than dereferenced.
   const owner = options.owner as { readonly hostId?: unknown } | undefined
@@ -143,7 +137,7 @@ const validate = (options: Options): ValidatedOptions => {
   const absoluteFilename = resolve(filename)
   return Object.freeze({
     filename: absoluteFilename,
-    workspaceRoot: resolve(workspaceRoot ?? dirname(absoluteFilename)),
+    workspaceRoot: resolve(workspaceRoot),
     owner: Object.freeze({ hostId }),
     isAlive
   })
@@ -476,9 +470,8 @@ export interface HostOptions {
   /**
    * Absolute or relative project workspace. It is resolved once while the
    * host is constructed and all Jj operations stay bound to that root.
-   * Defaults to the database directory for backwards compatibility.
    */
-  readonly workspaceRoot?: string | undefined
+  readonly workspaceRoot: string
   /** Stable identity of this engine host. */
   readonly owner: {
     readonly hostId: string
@@ -643,7 +636,6 @@ interface ValidatedHostOptions extends ValidatedOptions {
 /** Captures every host option before construction returns to the caller. */
 const validateHost = (options: HostOptions): ValidatedHostOptions => {
   const filename = options.filename
-  const workspaceRoot = options.workspaceRoot
   const owner = options.owner
   const configuredLiveness = options.isAlive
   const rules = options.rules
@@ -652,7 +644,7 @@ const validateHost = (options: HostOptions): ValidatedHostOptions => {
   const containment = options.containment
   const validated = validate({
     filename,
-    ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+    workspaceRoot: options.workspaceRoot,
     owner,
     isAlive: configuredLiveness ?? HostLiveness.isAlive({ hostId: owner.hostId })
   })

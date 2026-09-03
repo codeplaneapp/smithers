@@ -556,33 +556,6 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
       expect(outputs.outputs.map((entry) => entry.path)).toEqual(expected)
     }))
 
-  it.effect("keeps the obsolete memo option from weakening fresh measurement", () =>
-    Effect.gen(function*() {
-      const host = memoryFs({ "a.txt": "a", "b.txt": "b", "c.txt": "c" })
-      for (const path of host.files.keys()) host.mtimes.set(path, 0)
-      const boundary = StepBoundary.makeFileSystem(host.fs, ArtifactStore.makeNoop(), {
-        maxDigestMemoEntries: 2
-      })
-      const last = yield* withCrypto(
-        Effect.gen(function*() {
-          yield* TestClock.setTime(3_000)
-          const measure = (path: string) =>
-            boundary.prepare({
-              readSet: [{ path, digest: "declared" }],
-              writeSet: [],
-              boundaryMode: "hard"
-            })
-          yield* measure("a.txt")
-          yield* measure("b.txt")
-          yield* measure("c.txt")
-          return (yield* measure("a.txt")).readSnapshot[0]!.digest
-        }).pipe(Effect.provide(TestClock.layer()))
-      )
-
-      expect(host.reads).toEqual(["a.txt", "b.txt", "c.txt", "a.txt"])
-      expect(last).toBe(sha256("a"))
-    }))
-
   it.effect("falls back to read-and-hash without memoizing when stat is unavailable", () =>
     Effect.gen(function*() {
       const reads: Array<string> = []
@@ -1307,29 +1280,6 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
         measuredDigest: "invalid_base64"
       })
       expect(host.files.has("output.txt")).toBe(false)
-    }))
-
-  it.effect("classifies undecodable legacy inline content as corruption too (issue #159)", () =>
-    Effect.gen(function*() {
-      const host = memoryFs({})
-      const failure = yield* withCrypto(
-        Effect.gen(function*() {
-          const boundary = yield* StepBoundary.StepBoundary
-          return yield* Effect.flip(
-            boundary.replayOutputs({
-              declaredOutputs: { outputs: [{ path: "legacy.txt", content: "%%%not-base64%%%" }] },
-              diffIdentity: "corrupt-legacy"
-            })
-          )
-        }).pipe(Effect.provide(host.layer))
-      )
-      expect(failure).toMatchObject({
-        _tag: "@smthrs/engine-store/BoundaryCorruption",
-        code: "boundary_corruption",
-        path: "legacy.txt",
-        recordedDigest: "legacy_inline",
-        measuredDigest: "invalid_base64"
-      })
     }))
 
   it.effect("refuses to replay evidence recorded without materializable outputs", () =>

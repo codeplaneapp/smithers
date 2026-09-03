@@ -126,7 +126,12 @@ describe("ToolCall compound anatomy", () => {
   });
 
   test("legacy mode renders durationMs in the heading when terminal", () => {
-    const html = renderToStaticMarkup(<ToolCall name="search" state="output-available" durationMs={250} result="ok" />);
+    const html = renderToStaticMarkup(
+      <ToolCall name="search" state="output-available" durationMs={250}>
+        <ToolCallHeader />
+        <ToolCallContent><ToolCallOutput result="ok" /></ToolCallContent>
+      </ToolCall>,
+    );
     expect(html).toContain("250ms");
     expect(html).toContain('data-slot="tool-call-duration"');
   });

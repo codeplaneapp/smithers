@@ -23,8 +23,6 @@ export type ChatComposerProps = Omit<ComponentProps<"form">, "onSubmit"> & {
   onValueChange: (value: string) => void;
   onSubmit: (value: string) => void | Promise<void>;
   placeholder?: string;
-  /** @deprecated Free-form toolbar status. Prefer `statusText`. */
-  status?: ReactNode;
   /** Lifecycle state, mirroring PromptInput: while submitted|streaming the composer is busy, submission is blocked, and a Stop button appears when `onStop` is set. */
   lifecycleStatus?: ChatComposerStatus;
   /** Stop the in-flight generation; renders a Stop button next to Send while busy. */
@@ -39,7 +37,7 @@ export type ChatComposerProps = Omit<ComponentProps<"form">, "onSubmit"> & {
   submitLabel?: string;
   /** Visible content for the Send button. */
   sendLabel?: ReactNode;
-  /** Visible content for the Stop button. Strings also customize its accessible name for compatibility. */
+  /** Visible content for the Stop button. Strings also customize its accessible name. */
   stopLabel?: ReactNode;
   /*
    * Pass-through attributes for the two buttons this component renders on the
@@ -65,7 +63,6 @@ export function ChatComposer({
   onValueChange,
   onSubmit,
   placeholder = "Message Smithers…",
-  status,
   lifecycleStatus = "ready",
   onStop,
   statusText,
@@ -151,7 +148,7 @@ export function ChatComposer({
       />
       <div className="sui-chat-composer-toolbar">
         <div className="sui-chat-composer-status" aria-live="polite">
-          {statusText ?? status}
+          {statusText}
         </div>
         <div className="sui-chat-composer-actions">
           {actions}

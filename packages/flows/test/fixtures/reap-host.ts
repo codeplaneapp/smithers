@@ -65,6 +65,7 @@ const program = Host.execute({ what: "spawn" }, { executionId }).pipe(
     NodeRuntime.layerHost(
       {
         filename,
+        workspaceRoot: process.cwd(),
         owner: { hostId },
         signals: [],
         rules: [

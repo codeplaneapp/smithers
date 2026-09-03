@@ -130,6 +130,10 @@ describe("Anvil and Docker targets", () => {
       action: "smithers-build/not-implemented",
       payload: { target: "Docker.Bake" }
     })
+    expect(plannedCalls(build)[0]).toEqual({
+      action: "smithers-build/not-implemented",
+      payload: { target: "Docker.Build" }
+    })
     expect(plannedCalls(push)[0]).toEqual({
       action: "smithers-build/not-implemented",
       payload: { target: "Docker.Push" }

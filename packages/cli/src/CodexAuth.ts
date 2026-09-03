@@ -281,7 +281,7 @@ export const make = (options: MakeOptions): Store => {
       text = readFileSync(file, "utf8")
     } catch {
       return Effect.fail(authenticationError(
-        `No ChatGPT credentials at ${file}; sign in with \`codex login\` or use FLOWS_OPENAI_AUTH=api-key`
+        `No ChatGPT credentials at ${file}; sign in with \`codex login\` or use SMITHERS_OPENAI_AUTH=api-key`
       ))
     }
     let parsed: unknown

@@ -8,8 +8,8 @@ import { localApiGet, localApiPost } from "./localApi"
 /*
  * The repo plugin (docs/LOCAL-APP.md "Plugin manifest"): a repository with a
  * valid smithers-ui.json opens with the repo-plugin card ahead of its
- * targets card, the generative panel turn is skipped (no html card), and an
- * entry's Run streams a target run from the entry's workspace. The primary
+ * targets card, and an entry's Run streams a target run from the entry's
+ * workspace. The primary
  * fixture is the tiny two-workspace repo under e2e/fixtures/repo-plugin
  * (copied to a temp dir so its .flows cache never dirties the checkout);
  * the secondary test opens the real multi-workspace aomi repo when present.
@@ -22,7 +22,6 @@ const AOMI = "/Users/williamcory/aomi"
 
 const pluginCard = (page: Page) => page.locator(".smithers-card[data-kind=\"repo-plugin\"]")
 const targetsCard = (page: Page) => page.locator(".smithers-card[data-kind=\"targets\"]")
-const htmlCard = (page: Page) => page.locator(".smithers-card[data-kind=\"html\"]")
 const runCard = (page: Page) => page.locator(".smithers-card[data-kind=\"target-run\"]")
 
 /** The chrome's Open repository, answered through the window.prompt fallback. */
@@ -111,8 +110,6 @@ test("a repo with smithers-ui.json opens with the plugin card, no panel, and Run
   await expect(targets.locator("[data-target-row][data-workspace=\".\"]").first()).toBeVisible()
   await expect(targets.locator("[data-target-row][data-workspace=\"tools\"]").first()).toBeVisible()
   await expect(targets.locator("[data-target-row=\"//:polish\"][data-workspace=\"tools\"]")).toBeVisible()
-  await expect(htmlCard(page)).toHaveCount(0)
-
   // Run the tools entry: the run streams from join(repo, "tools") to a target-run card.
   await plugin.getByTestId("plugin-run-polish").click()
   const run = runCard(page)
@@ -143,6 +140,4 @@ test("the aomi checkout opens with its declared plugin groups when present", asy
   const sdkEntry = plugin.locator("[data-plugin-entry]", { has: page.locator("[data-badge=\"workspace\"]", { hasText: "aomi-sdk" }) }).first()
   await expect(sdkEntry).toBeVisible()
   await expect(sdkEntry.locator("[data-badge=\"kind\"]")).toBeVisible()
-  // The manifest leads; the generative panel never runs for it.
-  await expect(htmlCard(page)).toHaveCount(0)
 })

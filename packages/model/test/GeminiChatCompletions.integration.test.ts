@@ -18,9 +18,10 @@ const MODEL_ID = "gemini-3-flash-preview"
 const executorLayer = Layer.provide(RequestExecutor.layer, FetchHttpClient.layer)
 
 const route = () =>
-  Route.openaiCompatible({
+  Route.openaiChatCompatible({
     id: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    path: "/chat/completions",
     apiKey: Redacted.make(apiKey ?? "")
   })
 

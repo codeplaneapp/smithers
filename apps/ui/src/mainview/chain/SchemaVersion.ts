@@ -21,11 +21,6 @@ import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY } from "./Transaction
  * not migration, matches the OPFS policy, so both backends behave identically
  * on a bump.
  *
- * A store with NO stamp is adopted rather than cleared. See
- * `enforceSchemaVersion` for why: clearing it wipes the conversation of every
- * user who upgrades into this gate, which is the failure the backend half of
- * this module exists to prevent.
- *
  * The backend half. AppStore can persist into either store, and it cannot
  * merge them. A launch that opens the store the previous launch did not write
  * reads an empty database and greets a returning user with a first-run app
@@ -131,15 +126,10 @@ export const persistedStorageKeys = (): ReadonlyArray<string> => [
 
 export interface SchemaVersionOutcome {
   /**
-   * "match" left the store alone. "reset" cleared it: either the stamp named
-   * a different version, or there was no stamp and the rows predate the gate.
+   * "match" left the store alone. "reset" cleared it because the stamp named
+   * a different version.
    */
-  /**
-   * "match" left the store alone. "reset" cleared it: the stamp named a
-   * different version. "adopt" left an unstamped store's data in place and
-   * stamped it — see `enforceSchemaVersion`.
-   */
-  readonly action: "match" | "reset" | "adopt"
+  readonly action: "match" | "reset"
   /** The stamp the gate read, or null when the store carried none. */
   readonly from: string | null
   /** The version now stamped. */
@@ -196,21 +186,7 @@ const keysToClear = (storage: StorageApi): ReadonlyArray<string> => {
  * - A stamp that matches: untouched.
  * - A stamp that differs: cleared and restamped. The rows were written under a
  *   shape this build cannot satisfy, and reset matches the OPFS policy.
- * - No stamp: **adopted**, not cleared. The data stays and the store is
- *   stamped.
- *
- * Adopting is the difference between an upgrade and a data-loss event. An
- * unstamped store is not an old store; it is a store written before this gate
- * existed, and the gate ships in the same build as the version it stamps, so
- * the rows in it were written by the release immediately before this one. The
- * gate cannot tell that store apart from a genuinely ancient one, and clearing
- * on that ambiguity destroys a real user's conversation to avoid a shape
- * mismatch that is unlikely and recoverable. The failure it trades for is a
- * collection that wedges on the first full-row validation, which `/clear`
- * resolves; the failure it avoids is silent, total, and permanent.
- *
- * This is the same rule the backend stamp follows in `resolvePersistence`:
- * never present an empty store as a returning user's conversation.
+ * - No stamp: stamped as the current version.
  */
 export const enforceSchemaVersion = (
   storage: StorageApi,
@@ -223,7 +199,7 @@ export const enforceSchemaVersion = (
   }
   if (from === null) {
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(version))
-    return { action: "adopt", from, to: version, clearedKeys: [], quarantinedKeys: [] }
+    return { action: "match", from, to: version, clearedKeys: [], quarantinedKeys: [] }
   }
   const clearedKeys = keysToClear(storage)
   const quarantinedKeys: string[] = []

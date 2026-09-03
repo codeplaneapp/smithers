@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import { dirname } from "node:path"
 
 const [filename, executionId, secret] = process.argv.slice(2)
 if (filename === undefined || executionId === undefined || secret === undefined) {
@@ -72,7 +73,7 @@ const registration = Interpreter.layer(Deploy).pipe(
 const exit = await Effect.runPromise(
   Deploy.execute({ apiKey: secret, endpoint: "https://example.test/deploy" }, { executionId }).pipe(
     Effect.provide(
-      NodeRuntime.layerHost({ filename, owner: { hostId: "secret-host" }, signals: [] }, registration)
+      NodeRuntime.layerHost({ filename, workspaceRoot: dirname(filename), owner: { hostId: "secret-host" }, signals: [] }, registration)
     ),
     Effect.scoped,
     Effect.exit

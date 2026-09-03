@@ -4,7 +4,6 @@ import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { CONVERSATION_FOUNDATION_CSS_ID } from "../src/chat/conversationFoundationCss";
 import {
-  MessageScroller,
   MessageScrollerButton,
   type MessageScrollerCommands,
   MessageScrollerContent,
@@ -738,7 +737,7 @@ describe("MessageScroller compound", () => {
     expect(getComputedStyle(button).color).toBe("#d6deeb");
   });
 
-  test("Provider/Scroller composition renders the required compound anatomy through the styled frame", async () => {
+  test("the compound anatomy shares one provider and viewport", async () => {
     let commands: MessageScrollerCommands | undefined;
     let latestState: { atTop: boolean; atBottom: boolean; following: boolean; } | undefined;
     function Probe() {
@@ -750,7 +749,7 @@ describe("MessageScroller compound", () => {
     geometryByMessageId.set("m2", { top: 500, height: 500 });
     await render(
       <MessageScrollerProvider scrollAnchor="bottom">
-        <MessageScroller>
+        <div data-slot="message-scroller">
           <MessageScrollerViewport>
             <MessageScrollerContent>
               <MessageScrollerItem messageId="m1" scrollAnchor>
@@ -760,13 +759,12 @@ describe("MessageScroller compound", () => {
             </MessageScrollerContent>
           </MessageScrollerViewport>
           <MessageScrollerButton behavior="auto" />
-        </MessageScroller>
+        </div>
         <Probe />
       </MessageScrollerProvider>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
-    // The frame wraps the compound parts verbatim: a single viewport owned by
-    // the ambient provider, pinned on mount.
+    // The frame groups compound parts around a single provider-owned viewport.
     const frames = container!.querySelectorAll<HTMLElement>('[data-slot="message-scroller"]');
     expect(frames).toHaveLength(1);
     expect(container!.querySelectorAll('[data-slot="message-scroller-viewport"]')).toHaveLength(1);
@@ -774,7 +772,6 @@ describe("MessageScroller compound", () => {
     expect(frame.contains(getViewport())).toBe(true);
     expect(frame.querySelector('[data-slot="message-scroller-button"]')).not.toBeNull();
     expect(getViewport().scrollTop).toBe(1000);
-    expect(frame.dataset.following).toBe("true");
     expect(latestState!.following).toBe(true);
     // The jump affordance lives in the frame and drives the ambient viewport.
     const button = frame.querySelector<HTMLButtonElement>('[data-slot="message-scroller-button"]')!;
@@ -782,12 +779,11 @@ describe("MessageScroller compound", () => {
     metrics().scrollTop = 300;
     await scroll();
     expect(latestState!.following).toBe(false);
-    expect(frame.dataset.following).toBe("false");
     expect(button.getAttribute("data-active")).toBe("true");
     await act(async () => button.click());
     expect(getViewport().scrollTop).toBe(1000);
     expect(latestState!.following).toBe(true);
-    // Ambient commands drive the same viewport through the compound parts.
+    // Commands drive the same viewport through the compound parts.
     await act(async () => {
       commands!.scrollToMessage("m2", { peek: false });
     });
@@ -798,113 +794,82 @@ describe("MessageScroller compound", () => {
     expect(latestState!.following).toBe(true);
   });
 
-  test("fade options reach flat and ambient viewports", async () => {
+  test("fade options reach compound viewports", async () => {
     await render(
       <>
-        <MessageScroller data-testid="flat" stickToBottom={false} fade={false}>
-          flat
-        </MessageScroller>
         <MessageScrollerProvider>
-          <MessageScroller data-testid="ambient-false" fade={false}>
-            <MessageScrollerViewport />
-          </MessageScroller>
+          <div data-testid="without-fade"><MessageScrollerViewport fade={false} /></div>
         </MessageScrollerProvider>
         <MessageScrollerProvider>
-          <MessageScroller data-testid="ambient-true" fade>
-            <MessageScrollerViewport />
-          </MessageScroller>
+          <div data-testid="with-fade"><MessageScrollerViewport fade /></div>
         </MessageScrollerProvider>
       </>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
 
-    const flat = container!.querySelector<HTMLElement>('[data-testid="flat"]')!;
-    const ambientFalse = container!.querySelector<HTMLElement>('[data-testid="ambient-false"]')!;
-    const ambientTrue = container!.querySelector<HTMLElement>('[data-testid="ambient-true"]')!;
-    expect(flat.querySelector('[data-slot="message-scroller-viewport"]')!.classList).not.toContain("sui-scroll-fade");
-    expect(ambientFalse.querySelector('[data-slot="message-scroller-viewport"]')!.classList).not.toContain(
+    const withoutFade = container!.querySelector<HTMLElement>('[data-testid="without-fade"]')!;
+    const withFade = container!.querySelector<HTMLElement>('[data-testid="with-fade"]')!;
+    expect(withoutFade.querySelector('[data-slot="message-scroller-viewport"]')!.classList).not.toContain(
       "sui-scroll-fade",
     );
-    expect(ambientTrue.querySelector('[data-slot="message-scroller-viewport"]')!.classList).toContain(
+    expect(withFade.querySelector('[data-slot="message-scroller-viewport"]')!.classList).toContain(
       "sui-scroll-fade",
     );
   });
 
-  test("hideJumpToLatest suppresses flat and ambient latest buttons", async () => {
+  test("a latest button can be omitted by the compound caller", async () => {
     await render(
       <>
-        <MessageScroller data-testid="flat" stickToBottom={false} hideJumpToLatest>
-          flat
-        </MessageScroller>
         <MessageScrollerProvider>
-          <MessageScroller data-testid="ambient" hideJumpToLatest>
-            <MessageScrollerViewport />
-            <MessageScrollerButton />
-          </MessageScroller>
+          <div data-testid="without-button"><MessageScrollerViewport /></div>
         </MessageScrollerProvider>
       </>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
 
-    expect(container!.querySelector('[data-testid="flat"] [data-slot="message-scroller-jump"]')).toBeNull();
-    expect(container!.querySelector('[data-testid="ambient"] [data-slot="message-scroller-button"]')).toBeNull();
+    expect(container!.querySelector('[data-testid="without-button"] [data-slot="message-scroller-button"]')).toBeNull();
   });
 
-  test("jumpToLatestLabel labels flat and ambient latest buttons", async () => {
+  test("aria-label customizes the latest button", async () => {
     await render(
       <>
-        <MessageScroller data-testid="flat" stickToBottom={false} jumpToLatestLabel="Go">
-          flat
-        </MessageScroller>
         <MessageScrollerProvider>
-          <MessageScroller data-testid="ambient" jumpToLatestLabel="Go">
+          <div data-testid="custom-label">
             <MessageScrollerViewport />
-            <MessageScrollerButton />
-          </MessageScroller>
+            <MessageScrollerButton aria-label="Go" />
+          </div>
         </MessageScrollerProvider>
       </>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
 
     expect(
-      container!.querySelector('[data-testid="flat"] [data-slot="message-scroller-jump"]')!.getAttribute(
-        "aria-label",
-      ),
-    ).toBe("Go");
-    expect(
-      container!.querySelector('[data-testid="ambient"] [data-slot="message-scroller-button"]')!.getAttribute(
+      container!.querySelector('[data-testid="custom-label"] [data-slot="message-scroller-button"]')!.getAttribute(
         "aria-label",
       ),
     ).toBe("Go");
   });
 
-  test("contentClassName reaches flat and ambient content", async () => {
+  test("className reaches compound content", async () => {
     await render(
       <>
-        <MessageScroller data-testid="flat" stickToBottom={false} contentClassName="x">
-          flat
-        </MessageScroller>
         <MessageScrollerProvider>
-          <MessageScroller data-testid="ambient" contentClassName="x">
+          <div data-testid="custom-content">
             <MessageScrollerViewport>
-              <MessageScrollerContent />
+              <MessageScrollerContent className="x" />
             </MessageScrollerViewport>
-          </MessageScroller>
+          </div>
         </MessageScrollerProvider>
       </>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
 
-    expect(container!.querySelector('[data-testid="flat"] [data-slot="message-scroller-content"]')!.classList)
-      .toContain(
-        "x",
-      );
     expect(
-      container!.querySelector('[data-testid="ambient"] [data-slot="message-scroller-content"]')!.classList,
+      container!.querySelector('[data-testid="custom-content"] [data-slot="message-scroller-content"]')!.classList,
     ).toContain("x");
   });
 
-  test("root and viewport expose data-autoscrolling only while a programmatic jump runs", async () => {
+  test("the viewport exposes data-autoscrolling only while a programmatic jump runs", async () => {
     let commands: MessageScrollerCommands | undefined;
     function Probe() {
       commands = useMessageScroller();
@@ -912,20 +877,18 @@ describe("MessageScroller compound", () => {
     }
     await render(
       <MessageScrollerProvider scrollAnchor="bottom">
-        <MessageScroller>
+        <div data-slot="message-scroller">
           <MessageScrollerViewport>
             <MessageScrollerContent>
               <MessageScrollerItem messageId="m1">one</MessageScrollerItem>
             </MessageScrollerContent>
           </MessageScrollerViewport>
-        </MessageScroller>
+        </div>
         <Probe />
       </MessageScrollerProvider>,
       { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 },
     );
-    const frame = container!.querySelector<HTMLElement>('[data-slot="message-scroller"]')!;
     const viewport = getViewport();
-    expect(frame.hasAttribute("data-autoscrolling")).toBe(false);
     expect(viewport.hasAttribute("data-autoscrolling")).toBe(false);
     metrics().scrollTop = 300;
     await scroll();
@@ -940,11 +903,9 @@ describe("MessageScroller compound", () => {
     await act(async () => commands!.scrollToBottom("smooth"));
     Object.defineProperty(viewport, "scrollTo", { configurable: true, value: originalScrollTo });
     expect(viewport.getAttribute("data-autoscrolling")).toBe("true");
-    expect(frame.getAttribute("data-autoscrolling")).toBe("true");
     // The jump settles: the attribute clears and follow reconciles.
     await act(async () => viewport.dispatchEvent(new Event("scrollend")));
     expect(viewport.hasAttribute("data-autoscrolling")).toBe(false);
-    expect(frame.hasAttribute("data-autoscrolling")).toBe(false);
     // Landed jumps never raise the attribute at all.
     await act(async () => commands!.scrollToBottom("auto"));
     expect(viewport.hasAttribute("data-autoscrolling")).toBe(false);

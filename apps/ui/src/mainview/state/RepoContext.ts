@@ -39,14 +39,14 @@ export const resolveTargetRepo = (
   }
   /*
    * Lane piper: the active selection is the target — a working copy's
-   * repository, the selected repository, or a legacy pin's checkout. A
+   * repository, the selected repository, or a local-only checkout. A
    * single loaded repository is the target when nothing is selected.
    */
   const key = store.session().activeRepoKey ?? null
   const selection = key === null ? null : parseRepoSelection(key)
   if (selection !== null) {
     if ("repoId" in selection) return { repo: selection.repoId }
-    const copy = store.collections.workingCopies.get(selection.legacyCopyId)
+    const copy = store.collections.workingCopies.get(selection.localCopyId)
     if (copy !== undefined && REPO_TOKEN.test(copy.repoId)) return { repo: copy.repoId }
   }
   const loaded = [...store.collections.repositories.values()]
@@ -64,15 +64,14 @@ export const resolveTargetRepo = (
  * graph): the active working copy when it is a checkout open here (lane
  * piper: "the active working copy if one is active, else head" — a head
  * selection has no local checkout, which is an honest error for a LOCAL
- * command). The legacy pin-key rule (activeRepoOf, the rule the sidebar
- * highlight, the composer's selector, and a new terminal already follow)
- * stands until every reader carries the new grammar.
+ * command). Local-only checkouts are resolved through the same working-copy
+ * collection as remote-backed checkouts.
  */
 export const resolveOpenRepo = (store: AppStore): { readonly repo: Repo } | { readonly error: string } => {
   const key = store.session().activeRepoKey ?? null
   const selection = key === null ? null : parseRepoSelection(key)
   if (selection !== null) {
-    const copyId = "repoId" in selection ? selection.copyId : selection.legacyCopyId
+    const copyId = "repoId" in selection ? selection.copyId : selection.localCopyId
     if (copyId !== undefined) {
       const copy = store.collections.workingCopies.get(copyId)
       if (copy?.kind === "local" && copy.path !== undefined) {

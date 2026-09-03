@@ -7,9 +7,9 @@
  * module answers exactly that question, and `smithers doctor` prints the
  * answer.
  *
- * Resolution order, carried over from the 0.x `@smthrs/vcs` resolver:
+ * Resolution order:
  *
- * 1. `SMITHERS_JJ_PATH` (`FLOWS_JJ_PATH` is read as an rc.0 alias). An
+ * 1. `SMITHERS_JJ_PATH`. An
  *    override that names an existing file stays authoritative even when it is
  *    not executable, so a bad explicit path is reported instead of silently
  *    running a different binary.
@@ -65,14 +65,12 @@ export interface Resolved {
 }
 
 /**
- * The environment names this resolver reads, most specific first.
- *
- * `FLOWS_JJ_PATH` is an rc.0-only alias and is removed at 1.0.0.
+ * The environment name this resolver reads.
  *
  * @category constants
  * @since 1.0.0
  */
-export const overrideVariables: ReadonlyArray<string> = ["SMITHERS_JJ_PATH", "FLOWS_JJ_PATH"]
+export const overrideVariables: ReadonlyArray<string> = ["SMITHERS_JJ_PATH"]
 
 /**
  * Whether the operating system can execute a candidate.
@@ -190,8 +188,8 @@ export const resolveJjBinary = (options: Options = {}): Resolved => {
     // operator who set the variable deserves to hear that their file is
     // broken, not to have a different binary quietly substituted.
     //
-    // One that names nothing falls through to PATH, which is the behavior 0.x
-    // recorded, but the fall-through is REPORTED rather than silent.
+    // One that names nothing falls through to PATH, and the fall-through is
+    // reported rather than silent.
     if (!exists(override)) {
       ignored ??= { variable, path: override }
       continue
@@ -202,8 +200,7 @@ export const resolveJjBinary = (options: Options = {}): Resolved => {
       source: "env",
       executable: usable,
       variable,
-      ...(usable ? {} : { hint: permissionHint(override, platform) }),
-      ...(ignored === undefined ? {} : { ignored })
+      ...(usable ? {} : { hint: permissionHint(override, platform) })
     }
   }
 

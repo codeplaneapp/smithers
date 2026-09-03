@@ -342,10 +342,10 @@ test("a maximized card offers Open in tab; closing the tab keeps the card", asyn
   await serve(page)
   await page.goto("/")
 
-  // /theme opens the color-theme picker card with no backend at all.
+  // /appearance.theme opens the color-theme picker card with no backend at all.
   const composer = page.getByTestId("composer-input")
   await composer.click()
-  await composer.fill("/theme")
+  await composer.fill("/appearance.theme")
   await composer.press("Enter")
   const transcript = page.getByTestId("transcript")
   const card = transcript.getByTestId("card-theme-picker")

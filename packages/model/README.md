@@ -41,7 +41,6 @@ The root entry point exports these namespaces; each is also importable from `@sm
   `ResponseFormat`, `StructuredOutput`, `Body`, `State`, `protocolWith`, `protocol`
 - **`OpenAIChatGPT`**: Route construction for OpenAI's ChatGPT-subscription Responses backend, the deployment the codex CLI speaks.
   `defaultBaseUrl`, `clientHeaders`, `make`
-- **`OpenAICompatible`**: Route construction for providers that serve the OpenAI Responses API without its native extensions.
   `make`
 - **`OpenAIResponses`**: OpenAI Responses request lowering and SSE event handling.
   `Body`, `ChatGPTBody`, `State`, `protocol`, `chatgptProtocol`

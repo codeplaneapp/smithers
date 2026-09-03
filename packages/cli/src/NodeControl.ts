@@ -49,7 +49,6 @@ import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import * as Recall from "@smthrs/memory/Recall"
 import type * as ModelError from "@smthrs/model/ModelError"
 import * as OpenAIChatGPT from "@smthrs/model/OpenAIChatGPT"
-import * as OpenAICompatible from "@smthrs/model/OpenAICompatible"
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Route from "@smthrs/model/Route"
 import type { NotificationQueue } from "@smthrs/notifications"
@@ -90,8 +89,7 @@ import * as Serve from "./Serve.ts"
  * The environment subset consulted while resolving Node application
  * configuration.
  *
- * Names are read through `Environment.read`, so each canonical `SMITHERS_*`
- * spelling also accepts its rc.0 `FLOWS_*` alias. Pass a captured source to
+ * Names are read through `Environment.read`. Pass a captured source to
  * configuration helpers so tests and alternate hosts do not read ambient
  * process state; invalid values fail through the helper that consumes them.
  *
@@ -146,7 +144,7 @@ const isMcpServerEntry = (value: unknown): value is McpClient.ConnectOptions => 
 }
 
 /**
- * Reads and validates the MCP servers named by `--mcp-config`/`FLOWS_MCP_CONFIG`.
+ * Reads and validates the MCP servers named by `--mcp-config`/`SMITHERS_MCP_CONFIG`.
  *
  * The file is a JSON array of `{server, command, args, cwd?, env?,
  * handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}`
@@ -701,7 +699,7 @@ export const seatResolver = (
           ? seatOf(Route.anthropic({ apiKey: Redacted.make(key) }), executor, seat, modelId)
           : provider === "openrouter"
           ? seatOf(
-            OpenAICompatible.make({
+            Route.openaiResponsesCompatible({
               id: "openrouter",
               baseUrl: "https://openrouter.ai/api",
               apiKey: Redacted.make(key)

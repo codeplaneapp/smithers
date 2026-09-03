@@ -33,7 +33,11 @@ const observation = (
 const report = (overrides: Partial<Regression.Report>) =>
   Effect.runPromise(
     Regression.compare(
-      { version: 1, records: [{ suite: "s", case: "c", scorer: "0123456789abcdef", stepKey: "old", score: 0.9 }] },
+      {
+        version: 1,
+        suite: "s",
+        records: [{ suite: "s", case: "c", scorer: "0123456789abcdef", stepKey: "old", score: 0.9 }]
+      },
       { runId: "run", suite: "s", cases: [], observations: [observation("new", 0.2)] }
     )
   ).then((base) => ({ ...base, ...overrides }))
@@ -42,8 +46,6 @@ describe("Report", () => {
   it("renders stable JSON and a summary-only Markdown report", async () => {
     const result = await empty()
     expect(Report.json(result)).toContain("\"suite\":\"s\"")
-    expect(Report.renderJson).toBe(Report.json)
-    expect(Report.renderMarkdown).toBe(Report.markdown)
     expect(Report.markdown(result)).toBe(
       [
         "# Evaluation report: s",

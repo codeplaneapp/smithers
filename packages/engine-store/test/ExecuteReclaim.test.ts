@@ -78,7 +78,9 @@ const insertHardKilledRun = (runId: string, heartbeatAtMs: number) =>
         owner_pid,
         owner_nonce,
         heartbeat_at_ms,
-        state_json
+        state_json,
+        lineage_id,
+        round_ordinal
       ) VALUES (
         ${runId},
         'running',
@@ -88,7 +90,9 @@ const insertHardKilledRun = (runId: string, heartbeatAtMs: number) =>
         ${deadOwner.pid},
         ${deadOwner.nonce},
         ${heartbeatAtMs},
-        ${stateJson}
+        ${stateJson},
+        ${runId},
+        0
       )
     `).pipe(Effect.orDie)
   })

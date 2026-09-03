@@ -382,70 +382,6 @@ export const openai = (
     }))
 
 /**
- * Creates a route for any endpoint that speaks the OpenAI Chat Completions
- * wire shape: Ollama, Gemini's OpenAI-compatibility layer, and most other
- * self-hosted or third-party "OpenAI-compatible" servers, none of which
- * implement api.openai.com's newer Responses API that {@link openai} targets.
- *
- * `apiKey` may be a non-empty placeholder for a server that does not check
- * it (Ollama ignores its `Authorization` header entirely) — {@link Auth.bearer}
- * only rejects an empty credential.
- *
- * `structuredOutput` is the native-structured-output toggle. Omitted, the route
- * lowers requests exactly as it always has and the answer's shape is taught in
- * the prompt (`@smthrs/harness` `StructuredOutput.instructions`) and validated
- * locally. Supplied, the route sends `response_format` so the provider enforces
- * the schema, and it sends no `tools`: measured against a live Cerebras seat on
- * 2026-08-29, `https://api.cerebras.ai/v1/chat/completions` refuses a body
- * carrying both with `"tools" is incompatible with "response_format"`
- * (`wrong_api_format`), so a request that declares tools fails as
- * `invalid_request` here rather than on the wire.
- *
- * ```ts
- * const cerebras = Route.openaiCompatible({
- *   id: "cerebras",
- *   baseUrl: "https://api.cerebras.ai/v1",
- *   apiKey,
- *   structuredOutput: { name: "capital", schema: { type: "object", properties: { city: { type: "string" } } } }
- * })
- * ```
- *
- * @deprecated Use {@link openaiChatCompatible}, which takes the provider origin
- * and appends `/v1/chat/completions` itself. This constructor requires a base
- * that already ends in `/v1`, and {@link OpenAICompatible.make} requires one
- * that does not, which is how the same provider ended up configured two
- * different ways in this repository.
- * @since 0.1.0
- * @category constructors
- */
-export const openaiCompatible = (
-  input: {
-    readonly id: string
-    readonly baseUrl: string
-    readonly apiKey: Auth.Redacted<string>
-    readonly structuredOutput?: OpenAIChatCompletions.StructuredOutput | undefined
-  }
-): Result.Result<
-  Route<
-    OpenAIChatCompletions.Body,
-    string,
-    Parameters<typeof OpenAIChatCompletions.protocol.stream.step>[1],
-    ReturnType<typeof OpenAIChatCompletions.protocol.stream.initial>
-  >,
-  ModelError
-> =>
-  Result.map(Endpoint.make({ url: input.baseUrl, path: "/chat/completions" }), (endpoint) =>
-    make({
-      id: input.id,
-      protocol: OpenAIChatCompletions.protocolWith(
-        input.structuredOutput === undefined ? {} : { structuredOutput: input.structuredOutput }
-      ),
-      endpoint,
-      auth: Auth.bearer(input.apiKey),
-      framing: Framing.sse
-    }))
-
-/**
  * Creates a route for a provider that serves the OpenAI **Responses** API
  * without OpenAI's native deferred-tool extensions.
  *
@@ -494,16 +430,14 @@ export const openaiResponsesCompatible = (
  * API: Ollama, Gemini's OpenAI-compatibility layer, Cerebras, and most other
  * self-hosted or third-party "OpenAI-compatible" servers.
  *
- * `baseUrl` is the provider origin and this constructor appends
- * `/v1/chat/completions` itself, so one origin can only ever produce one URL:
- * `https://openrouter.ai/api` becomes
- * `https://openrouter.ai/api/v1/chat/completions`. A trailing slash is
- * accepted.
+ * `baseUrl` is the provider origin and `path` defaults to
+ * `/v1/chat/completions`. Providers with a different compatible endpoint,
+ * such as Gemini, pass their exact path explicitly.
  *
  * `apiKey` may be a non-empty placeholder for a server that does not check it
  * (Ollama ignores its `Authorization` header entirely); {@link Auth.bearer}
  * only rejects an empty credential. `structuredOutput` behaves exactly as it
- * does on {@link openaiCompatible}.
+ * does on this route.
  *
  * @since 0.1.0
  * @category constructors
@@ -512,6 +446,7 @@ export const openaiChatCompatible = (
   input: {
     readonly id: string
     readonly baseUrl: string
+    readonly path?: string | undefined
     readonly apiKey: Auth.Redacted<string>
     readonly structuredOutput?: OpenAIChatCompletions.StructuredOutput | undefined
   }
@@ -524,7 +459,7 @@ export const openaiChatCompatible = (
   >,
   ModelError
 > =>
-  Result.map(Endpoint.make({ url: input.baseUrl, path: "/v1/chat/completions" }), (endpoint) =>
+  Result.map(Endpoint.make({ url: input.baseUrl, path: input.path ?? "/v1/chat/completions" }), (endpoint) =>
     make({
       id: input.id,
       protocol: OpenAIChatCompletions.protocolWith(

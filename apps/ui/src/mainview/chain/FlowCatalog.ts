@@ -4,7 +4,7 @@ import type { CommandRegistry } from "../flows/Commands"
 import type { FlowEntry } from "../flows/registry"
 
 /*
- * The thin adapter that lets the legacy chain runtime call registered flows.
+ * The thin adapter that lets the chain runtime call registered flows.
  *
  * This is NOT a second catalog. It holds no capability table, no trigger
  * filter, and no description copy of its own: every one of those now lives on

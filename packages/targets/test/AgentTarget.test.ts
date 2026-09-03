@@ -159,12 +159,14 @@ describe("Agent.Diff", () => {
 describe("Agent.Pr", () => {
   it("defaults maxRounds and declares no payload or MCP surface", () => {
     const attrs = {
+      agent: AgentTarget.Agents["luna"],
       prompt: Input.file("prompts/pr.md"),
       data: [],
       changes: ["src/**"],
       gates: [gate]
     }
     const payload = AgentTarget.prPayload(attrs, context)
+    expect(payload.agent).toEqual(AgentTarget.Agents["luna"])
     expect(payload.maxRounds).toBe(AgentTarget.defaultPrRounds)
     expect(payload.payloadSpec).toEqual({})
     expect(payload.mcp).toEqual([])

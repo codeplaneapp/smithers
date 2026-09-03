@@ -190,6 +190,7 @@ const cancelFromAnotherDriver = (options: {
       NodeRuntime.layerHost(
         {
           filename,
+          workspaceRoot: root,
           owner: { hostId },
           signals: [],
           containment: { graceMs: options.graceMs },

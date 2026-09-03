@@ -29,7 +29,7 @@
  *    the two env variables set. The runner finds the flow by tag among the
  *    entry's exports, decodes the payload, runs the flow under an in-memory
  *    engine, and writes `.smithers-sandbox/result.json`: either
- *    `{ status: "finished", output }` with the success value encoded through
+ *    `{ status: "succeeded", output }` with the success value encoded through
  *    the success schema's JSON codec, or `{ status: "failed", error }`.
  * 4. The host reads the result back, refuses a non-zero exit, an unparseable
  *    file, or a result the limits reject, decodes `output` through the same

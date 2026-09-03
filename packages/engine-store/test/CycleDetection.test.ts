@@ -71,7 +71,8 @@ const createRun = (id: string, parent?: string) =>
         flowName: TestFlow._tag,
         payload: {},
         ...(parent === undefined ? {} : { parentExecutionId: parent })
-      })
+      }),
+      { lineageId: id, roundOrdinal: 0 }
     )
     if (parent !== undefined) {
       yield* state.recordRunParent(id, parent)

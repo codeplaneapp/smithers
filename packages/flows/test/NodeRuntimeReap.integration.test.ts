@@ -128,7 +128,7 @@ describe("a host that was killed", () => {
       Effect.void.pipe(
         Effect.provide(
           NodeRuntime.layerHost(
-            { filename, owner: { hostId: "reap-host" }, signals: [] },
+            { filename, workspaceRoot: directory, owner: { hostId: "reap-host" }, signals: [] },
             Layer.empty
           )
         ),

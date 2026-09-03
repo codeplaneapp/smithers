@@ -43,7 +43,6 @@ import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
 import type * as Model from "@smthrs/model/Model"
 import type * as ModelError from "@smthrs/model/ModelError"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
-import * as OpenAICompatible from "@smthrs/model/OpenAICompatible"
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Route from "@smthrs/model/Route"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
@@ -172,7 +171,7 @@ export const seatResolver = (options: {
           ? seatOf(Route.anthropic({ apiKey: redacted }), options.executor, chosen, modelId)
           : provider === "openrouter"
           ? seatOf(
-            OpenAICompatible.make({
+            Route.openaiResponsesCompatible({
               id: "openrouter",
               baseUrl: "https://openrouter.ai/api",
               apiKey: redacted

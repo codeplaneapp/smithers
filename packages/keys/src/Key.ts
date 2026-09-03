@@ -6,7 +6,7 @@
  * Deriving a key and parsing one from storage are deliberately separate
  * operations. {@link deriveKey} canonicalizes structured input and hashes it;
  * {@link StoredKey} validates an already-derived wire value without changing
- * it. The legacy {@link Key} schema remains the derivation transformation.
+ * it. {@link DerivedKey} provides the derivation as a schema transformation.
  *
  * @since 0.1.0
  */
@@ -73,14 +73,6 @@ export type StoredKey = typeof StoredKey.Type
  * @since 1.0.0
  */
 export const digest = (key: StoredKey): Sha256Digest => key.slice("key1_".length) as Sha256Digest
-
-/**
- * Compatibility name for the validated key value produced by {@link Key}.
- *
- * @category models
- * @since 0.1.0
- */
-export type Key = StoredKey
 
 /**
  * Stable failure codes returned by {@link deriveKey}.
@@ -171,7 +163,18 @@ const schemaIssue = (error: KeyDerivationError): SchemaIssue.InvalidValue =>
     cause: error
   })
 
-const KeySchema = Schema.Unknown.pipe(
+/**
+ * Schema that derives a fresh key from its decoded input.
+ *
+ * This does not parse stored keys: decoding the text `key1_…` derives a new
+ * key from that text. Use {@link StoredKey} to validate persisted or received
+ * key values. Prefer {@link deriveKey} when typed operational failures are
+ * useful; this schema maps them to redacted schema issues for composition.
+ *
+ * @category transformations
+ * @since 1.0.0
+ */
+export const DerivedKey = Schema.Unknown.pipe(
   Schema.decodeTo(KeyV1, {
     decode: SchemaGetter.transformOrFail((input) => deriveKey(input).pipe(Effect.mapError(schemaIssue))),
     encode: SchemaGetter.forbidden(
@@ -183,25 +186,4 @@ const KeySchema = Schema.Unknown.pipe(
   // Key material may contain secrets or large payloads. Never retain it in a
   // schema issue, even when an enclosing caller requests input reporting.
   parseOptions: { reportInput: false }
-})
-
-/**
- * Compatibility schema that derives a fresh key from its decoded input.
- *
- * This does not parse stored keys: decoding the text `key1_…` derives a new
- * key from that text. Use {@link StoredKey} to validate persisted or received
- * key values. Prefer {@link deriveKey} when typed operational failures are
- * useful; this schema maps them to redacted schema issues for composition.
- *
- * `Key.derive`, `Key.StoredKey`, and `Key.KeyV1` mirror the named exports for
- * discoverability.
- *
- * @category transformations
- * @since 0.1.0
- */
-export const Key = Object.assign(KeySchema, {
-  derive: deriveKey,
-  digest,
-  StoredKey,
-  KeyV1
 })

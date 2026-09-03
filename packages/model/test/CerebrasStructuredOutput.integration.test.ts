@@ -40,9 +40,10 @@ const capital = {
 const Capital = Schema.Struct({ city: Schema.String })
 
 const route = (structuredOutput?: OpenAIChatCompletions.StructuredOutput) =>
-  Route.openaiCompatible({
+  Route.openaiChatCompatible({
     id: "cerebras",
     baseUrl: BASE_URL,
+    path: "/chat/completions",
     apiKey: Redacted.make(apiKey ?? ""),
     ...(structuredOutput === undefined ? {} : { structuredOutput })
   })
@@ -75,7 +76,7 @@ const requireKey = (ctx: TestContext): void => {
   if (apiKey === undefined || apiKey === "") ctx.skip("CEREBRAS_API_KEY is unset")
 }
 
-describe("Route.openaiCompatible over Cerebras", () => {
+describe("Route.openaiChatCompatible over Cerebras", () => {
   it("targets the compatible chat-completions path", (ctx) => {
     requireKey(ctx)
     const configured = Result.getOrThrow(route(capital))

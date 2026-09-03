@@ -22,7 +22,6 @@ import type { CommandActions } from "./Flows"
 import { adminFlows, baseFlows } from "./Flows"
 import type { CatalogItem, CommandState, FlowEntry, SlashItem, SlashRow } from "./registry"
 import {
-  canonical,
   flowRequirements,
   itemOf,
   modelInvocable,
@@ -230,8 +229,7 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
   ): Promise<CommandOutcome> => {
     const entry = find(name)
     if (entry === undefined) return { status: "unknown-command" }
-    const targetName = canonical(name, items())
-    const target = find(targetName) ?? entry
+    const target = entry
     const unmet = unmetRequirements(target.metadata, actions.snapshot(), flowRequirements)[0]
     if (unmet !== undefined) {
       if (invoker === "agent") {

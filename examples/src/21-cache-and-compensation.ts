@@ -39,7 +39,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { stubJj } from "./durable-layer.ts"
 
 /** The failure the first attempt of the compensable step raises. */
@@ -116,7 +116,7 @@ export const directoryJj = (options: {
  */
 const engine = (filename: string, hostId: string, jj: Layer.Layer<Jj.Jj>) =>
   NodeRuntime.layer(
-    { filename, owner: { hostId }, isAlive: () => Effect.succeed(false) },
+    { filename, workspaceRoot: dirname(filename), owner: { hostId }, isAlive: () => Effect.succeed(false) },
     StepBoundary.layer,
     WorkspaceSandbox.layerFileSystem(),
     Layer.empty

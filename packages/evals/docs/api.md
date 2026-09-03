@@ -159,9 +159,7 @@ The root entry point exports these namespaces; each is also importable from
 | `EvalError.EvalError`           | errors        | A typed failure raised while loading or executing an evaluation.                    |
 | `Suite.Binding`                 | models        | A scorer binding accepted from `/scorers`.                                          |
 | `Suite.Case`                    | models        | One immutable fixed-suite case.                                                     |
-| `Suite.SuiteCase`               | models        | Alias for a fixed-suite case.                                                       |
 | `Suite.MakeOptions`             | models        | Options for constructing a suite.                                                   |
-| `Suite.SuiteOptions`            | models        | Alias for suite construction options.                                               |
 | `Suite.Suite`                   | models        | A validated, named collection of fixed cases and scorer bindings.                   |
 | `Suite.limits`                  | models        | The declared ceilings a suite is validated against.                                 |
 | `Suite.make`                    | constructors  | Builds and validates a fixed suite.                                                 |
@@ -197,18 +195,14 @@ The root entry point exports these namespaces; each is also importable from
 | `Baseline.make`                 | constructors  | Validates an in-memory baseline.                                                    |
 | `Baseline.write`                | serialization | Serializes a baseline with recursively sorted keys and stable numbers.              |
 | `Baseline.load`                 | serialization | Loads and validates canonical baseline JSON.                                        |
-| `Baseline.parse`                | serialization | Alias for `load`.                                                                   |
 | `Regression.Tolerances`         | models        | Tolerances used for score comparisons.                                              |
 | `Regression.Regression`         | models        | A score drop at a changed step key.                                                 |
 | `Regression.Nondeterminism`     | models        | A changed score at the same step key, indicating nondeterminism.                    |
 | `Regression.MissingObservation` | models        | An observation present on only one side of a comparison.                            |
 | `Regression.Report`             | models        | Complete regression comparison.                                                     |
 | `Regression.compare`            | constructors  | Compares a run to a baseline, preserving missing and inconclusive observations.     |
-| `Regression.check`              | constructors  | Alias for `compare`.                                                                |
 | `Report.json`                   | serialization | Serializes a regression report as stable, sorted-key JSON.                          |
-| `Report.renderJson`             | serialization | Alias for `json`.                                                                   |
 | `Report.markdown`               | rendering     | Renders a concise stable Markdown regression report.                                |
-| `Report.renderMarkdown`         | rendering     | Alias for `markdown`.                                                               |
 | `Gate.Options`                  | models        | Thresholds accepted by a CI score gate.                                             |
 | `Gate.check`                    | constructors  | Checks thresholds through `/testing`'s shared ScoreGate arithmetic.                 |
 | `Gate.ciGrade`                  | grading       | Maps a gate verdict to the shared CI convention.                                    |

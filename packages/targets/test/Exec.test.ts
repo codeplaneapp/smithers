@@ -7,14 +7,19 @@
  * `.flows` is a link to somewhere else would otherwise hand a tool a directory
  * outside the workspace to write into.
  */
+import { Flow, FlowRuntime } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Latch from "effect/Latch"
+import * as Layer from "effect/Layer"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import * as Changesets from "../src/Changesets.ts"
 import * as Exec from "../src/Exec.ts"
 import * as Secret from "../src/Secret.ts"
+import * as Target from "../src/Target.ts"
 
 let root: string
 let outside: string
@@ -54,6 +59,77 @@ afterEach(async () => {
 })
 
 describe("run", () => {
+  it("executes the catalog refusal through its live layer", async () => {
+    type Registered = (
+      input: { readonly target: string },
+      executionId: string
+    ) => Effect.Effect<never, Target.NotImplemented>
+    let registered: Registered | undefined
+    const runtime = FlowRuntime.FlowRuntime.of(
+      {
+        register: (_flow: unknown, execute: Registered) =>
+          Effect.sync(() => {
+            registered = execute
+          }),
+        actionExecute: (action: { readonly execute: Effect.Effect<unknown, unknown> }) =>
+          Effect.map(Effect.exit(action.execute), (exit) => new Flow.Complete({ exit }))
+      } as unknown as FlowRuntime.FlowRuntime["Service"]
+    )
+
+    const exit = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      yield* Layer.build(
+        Target.layerNotImplemented.pipe(Layer.provide(Layer.succeed(FlowRuntime.FlowRuntime, runtime)))
+      )
+      if (registered === undefined) throw new Error("catalog refusal action was not registered")
+      const instance = FlowRuntime.FlowInstance.of({
+        executionId: "catalog-refusal-probe",
+        actionState: { count: 0, latch: Latch.makeUnsafe() }
+      } as never)
+      return yield* Effect.exit(registered({ target: "Catalog.Probe" }, "catalog-refusal-probe")).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, instance),
+        Effect.provideService(FlowRuntime.FlowRuntime, runtime)
+      )
+    })))
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("executes the irreversible action through its live layer", async () => {
+    type Registered = (
+      input: Exec.Payload,
+      executionId: string
+    ) => Effect.Effect<Exec.Result, Exec.ExecError>
+    let registered: Registered | undefined
+    const runtime = FlowRuntime.FlowRuntime.of(
+      {
+        register: (_flow: unknown, execute: Registered) =>
+          Effect.sync(() => {
+            registered = execute
+          }),
+        actionExecute: (action: { readonly execute: Effect.Effect<unknown, unknown> }) =>
+          Effect.map(Effect.exit(action.execute), (exit) => new Flow.Complete({ exit }))
+      } as unknown as FlowRuntime.FlowRuntime["Service"]
+    )
+
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      yield* Layer.build(
+        Changesets.ExecIrreversibleLive({ workspaceRoot: root }).pipe(
+          Layer.provide(Layer.succeed(FlowRuntime.FlowRuntime, runtime))
+        )
+      )
+      if (registered === undefined) throw new Error("irreversible exec action was not registered")
+      const instance = FlowRuntime.FlowInstance.of({
+        executionId: "exec-irreversible-probe",
+        actionState: { count: 0, latch: Latch.makeUnsafe() }
+      } as never)
+      return yield* registered(payload(["node", "-e", "process.stdout.write('ok')"]), "exec-irreversible-probe").pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, instance),
+        Effect.provideService(FlowRuntime.FlowRuntime, runtime)
+      )
+    })))
+    expect(result.stdout).toBe("ok")
+    expect(result.exitCode).toBe(0)
+  })
+
   it("inherits CI so spawned tools stay non-interactive on hosted runners", async () => {
     const previous = process.env.CI
     process.env.CI = "true"

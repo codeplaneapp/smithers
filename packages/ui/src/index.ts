@@ -97,8 +97,6 @@ export {
   type ToolCallProps,
   type ToolCallState,
   type ToolResultPart,
-  type ToolCallLegacyProps,
-  type ToolCallCompoundProps,
   type ToolCallHeaderProps,
   type ToolCallContentProps,
   type ToolCallInputProps,
@@ -114,7 +112,6 @@ export { ChatMessage, type ChatMessageProps, type ChatMessageRole } from "./chat
 export { ChatTranscript, type ChatTranscriptProps } from "./chat/ChatTranscript";
 export { ChatComposer, type ChatComposerProps, type ChatComposerStatus } from "./chat/ChatComposer";
 export {
-  MessageScroller,
   MessageScrollerProvider,
   MessageScrollerViewport,
   MessageScrollerContent,
@@ -123,8 +120,6 @@ export {
   useMessageScroller,
   useMessageVisibility,
   useMessageScrollerState,
-  type MessageScrollerProps,
-  type MessageScrollerHandle,
   type MessageScrollerCommands,
   type MessageScrollerProviderProps,
   type MessageScrollerViewportProps,
@@ -191,8 +186,6 @@ export {
   planStepStatus,
   type PlanProps,
   type PlanStepStatus,
-  type PlanLegacyProps,
-  type PlanCompoundProps,
   type PlanStepProps,
 } from "./agentic/Plan";
 export { TaskItem, TaskItemFile, type TaskItemProps, type TaskItemFileProps } from "./agentic/TaskItem";
@@ -265,7 +258,7 @@ export {
   type ParseUnifiedFileOverrides,
 } from "./diff-paginate";
 export { FileTree, type FileTreeProps, type FileTreeNode, type FileTreeItem } from "./file-tree";
-export { Markdown, safeMarkdownHref, type MarkdownProps, type MarkdownLinkClick } from "./primitives/markdown";
+export { Markdown, type MarkdownProps, type MarkdownLinkClick } from "./primitives/markdown";
 export { MessageResponse, type MessageResponseProps } from "./agentic/MessageResponse";
 export {
   AgentOutput,
@@ -565,20 +558,12 @@ export { SecretField, type SecretFieldProps } from "./artifacts/SecretField";
 
 // lane:sandbox-previews
 export {
-  AgentSandbox,
-  AgentSandboxHeader,
-  AgentSandboxStatus,
-  AgentSandboxActions,
-  AgentSandboxContent,
   Sandbox,
   SandboxHeader,
   SandboxStatus,
   SandboxActions,
   SandboxContent,
   sandboxStateToStatus,
-  type AgentSandboxProps,
-  type AgentSandboxStatusProps,
-  type AgentSandboxActionsProps,
   type SandboxProps,
   type SandboxStatusProps,
   type SandboxActionsProps,

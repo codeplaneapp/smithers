@@ -71,10 +71,7 @@ export interface PutFactInput {
    * @since 0.1.0
    */
   readonly value: unknown
-  /**
-   * Validated first-class fact tags. When absent, search falls back to tags
-   * embedded in legacy fact values.
-   */
+  /** Validated first-class fact tags. */
   readonly tags?: Namespace.Tags | undefined
   readonly ttlMs?: number | undefined
   readonly provenance: Provenance

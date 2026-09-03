@@ -260,12 +260,6 @@ describe("chat", () => {
     );
     expect(ready).not.toContain("sui-chat-composer-stop");
 
-    const legacyStatus = renderToStaticMarkup(
-      <ChatComposer value="Ship it" onValueChange={() => {}} onSubmit={() => {}} status={<em>streaming</em>} />,
-    );
-    expect(legacyStatus).toContain("<em>streaming</em>");
-    expect(legacyStatus).toContain('data-status="ready"');
-    expect(legacyStatus).not.toContain('disabled=""');
   });
 
   test("renders custom ReactNode send and stop labels without changing accessible names", () => {

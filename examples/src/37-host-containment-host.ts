@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { dirname } from "node:path"
 
 const filename = process.argv[2]
 const hostId = process.argv[3]
@@ -63,6 +64,7 @@ await Effect.runPromise(
         NodeRuntime.layerHost(
           {
             filename,
+            workspaceRoot: dirname(filename),
             owner: { hostId },
             signals: [],
             rules: [

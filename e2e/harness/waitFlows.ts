@@ -15,6 +15,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { appendFileSync } from "node:fs"
+import { dirname } from "node:path"
 
 /** Which wait a child parks on. */
 export type WaitMode = "approval" | "event" | "timer"
@@ -106,6 +107,7 @@ export const eventRegistration = (options: WaitOptions) =>
 /** The Node host options both incarnations of a wait case share. */
 export const hostOptions = (options: WaitOptions) => ({
   filename: options.filename,
+  workspaceRoot: dirname(options.filename),
   owner: { hostId: options.hostId },
   signals: [] as ReadonlyArray<NodeJS.Signals>
 })

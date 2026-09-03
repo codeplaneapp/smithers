@@ -1,4 +1,3 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { StorageApi } from "@tanstack/db"
 
 /*
@@ -27,18 +26,9 @@ export const ENVELOPE_VERSION = 1
 /** Raw envelopes retained outside the live namespace (never deleted). */
 export const ENVELOPE_QUARANTINE_PREFIX = "smithers-mvp-quarantine.store."
 
-/** Legacy rows that failed schema decode during adoption (never deleted). */
-export const ROW_QUARANTINE_PREFIX = "smithers-mvp-quarantine.row."
-
 interface Envelope {
   readonly version: number
   readonly entries: Record<string, string>
-}
-
-/** A collection whose pre-envelope host rows the 0→1 migration adopts. */
-export interface LegacyCollectionSpec {
-  readonly id: string
-  readonly schema: StandardSchemaV1
 }
 
 export type RecoveryOutcome = "clean" | "complete" | "rollback"
@@ -63,7 +53,7 @@ export interface TransactionalStorage {
   readonly batch: <T>(work: () => T) => T
   /** How the boot recovered the interrupted commit it found, if any. */
   readonly recovery: RecoveryOutcome
-  /** The quarantine keys this open wrote (adoption failures, future shapes). */
+  /** The quarantine keys this open wrote for unreadable or future shapes. */
   readonly quarantinedKeys: ReadonlyArray<string>
 }
 
@@ -103,126 +93,33 @@ export const recoverInterruptedCommit = (host: StorageApi): RecoveryOutcome => {
   return outcome
 }
 
-const decodeRow = async (
-  schema: StandardSchemaV1,
-  row: unknown
-): Promise<{ readonly ok: boolean }> => {
-  const result = schema["~standard"].validate(row)
-  const settled = result instanceof Promise ? await result : result
-  return { ok: settled.issues === undefined || settled.issues.length === 0 }
-}
-
-/*
- * The 0→1 migration: adopt the pre-envelope layout (one host key per
- * collection, each holding TanStack's `{ encodedKey: { versionKey, data } }`
- * map) into the envelope. Every row is schema-decoded before adoption — an
- * unstamped legacy row is never adopted blind: rows that fail decode are
- * quarantined with their raw bytes, and a collection key that does not parse
- * is quarantined whole. Adopted or not, the legacy key leaves the live
- * namespace.
- */
-const adoptLegacyRows = async (
-  host: StorageApi,
-  collections: ReadonlyArray<LegacyCollectionSpec>,
-  entries: Record<string, string>,
-  quarantinedKeys: string[]
-): Promise<void> => {
-  for (const collection of collections) {
-    const legacyKey = `smithers-mvp.${collection.id}`
-    const raw = host.getItem(legacyKey)
-    if (raw === null) continue
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      parsed = undefined
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      const quarantineKey = `${ENVELOPE_QUARANTINE_PREFIX}unparseable.${collection.id}`
-      host.setItem(quarantineKey, raw)
-      quarantinedKeys.push(quarantineKey)
-      host.removeItem(legacyKey)
-      continue
-    }
-    const adopted: Record<string, unknown> = {}
-    for (const [encodedKey, stored] of Object.entries(parsed)) {
-      const row = typeof stored === "object" && stored !== null && "data" in stored
-        ? (stored as { readonly data: unknown }).data
-        : undefined
-      if (row !== undefined && (await decodeRow(collection.schema, row)).ok) {
-        adopted[encodedKey] = stored
-      } else {
-        const quarantineKey = `${ROW_QUARANTINE_PREFIX}${collection.id}.${encodedKey}`
-        host.setItem(quarantineKey, JSON.stringify(stored))
-        quarantinedKeys.push(quarantineKey)
-      }
-    }
-    entries[legacyKey] = JSON.stringify(adopted)
-    host.removeItem(legacyKey)
-  }
-}
-
-/**
- * Ordered envelope migrations: step at index `n` migrates version `n` to
- * version `n + 1`. Open applies every step between the stored version and
- * ENVELOPE_VERSION, in order. Version 0 is the pre-envelope host layout, so
- * step 0 is the legacy adoption above.
- */
-const migrateEntries = async (
-  host: StorageApi,
-  collections: ReadonlyArray<LegacyCollectionSpec>,
-  fromVersion: number,
-  entries: Record<string, string>,
-  quarantinedKeys: string[]
-): Promise<Record<string, string>> => {
-  let migrated = entries
-  for (let version = fromVersion; version < ENVELOPE_VERSION; version += 1) {
-    if (version === 0) {
-      await adoptLegacyRows(host, collections, migrated, quarantinedKeys)
-    }
-    // Later steps slot in here, one pure entries→entries transform each.
-  }
-  return migrated
-}
-
 /**
  * Open the transactional store over `host`: recover any interrupted commit,
  * load or migrate the envelope, and hand out the facade the collections write
  * through.
  */
 export const openTransactionalStorage = async (
-  host: StorageApi,
-  options: { readonly collections: ReadonlyArray<LegacyCollectionSpec> }
+  host: StorageApi
 ): Promise<TransactionalStorage> => {
   const recovery = recoverInterruptedCommit(host)
   const quarantinedKeys: string[] = []
   let entries: Record<string, string> = {}
   const raw = host.getItem(ENVELOPE_STORAGE_KEY)
-  if (raw === null) {
-    // No envelope: anything under the declared legacy keys is version 0.
-    entries = await migrateEntries(host, options.collections, 0, entries, quarantinedKeys)
-  } else {
+  if (raw !== null) {
     const envelope = parseEnvelope(raw)
     if (envelope === undefined) {
       const quarantineKey = `${ENVELOPE_QUARANTINE_PREFIX}corrupt`
       host.setItem(quarantineKey, raw)
       quarantinedKeys.push(quarantineKey)
       host.removeItem(ENVELOPE_STORAGE_KEY)
-    } else if (envelope.version > ENVELOPE_VERSION) {
-      // A newer build wrote this store. Quarantine — never delete — and
-      // boot empty rather than guess at a shape this build cannot read.
-      const quarantineKey = `${ENVELOPE_QUARANTINE_PREFIX}future.${envelope.version}`
+    } else if (envelope.version !== ENVELOPE_VERSION) {
+      const direction = envelope.version > ENVELOPE_VERSION ? "future" : "unsupported"
+      const quarantineKey = `${ENVELOPE_QUARANTINE_PREFIX}${direction}.${envelope.version}`
       host.setItem(quarantineKey, raw)
       quarantinedKeys.push(quarantineKey)
       host.removeItem(ENVELOPE_STORAGE_KEY)
     } else {
-      entries = await migrateEntries(
-        host,
-        options.collections,
-        envelope.version,
-        { ...envelope.entries },
-        quarantinedKeys
-      )
+      entries = { ...envelope.entries }
     }
   }
 
