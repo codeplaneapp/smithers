@@ -6,7 +6,8 @@
  * (labeled as such), and — since plue#446 — the facts the DTO now carries:
  * the sandbox kind, the workspace's OWN head, how far ahead of and behind the
  * bookmark it is, how long it has been up, the Nix environment it was built
- * from, its persistence, and its ssh host as a copyable line. Every one of
+ * from, its persistence, the languages it relays a language server for
+ * (plue#505, `lsp: typescript`), and its ssh host as a copyable line. Every one of
  * them renders only when the payload carries it: an absent field renders
  * NOTHING, never a placeholder and never a zero that was not on the wire.
  *
@@ -104,6 +105,8 @@ export const headerFacts = (payload: WorkspacePayload, now: number): ReadonlyArr
     )
   }
   if (payload.persistence != null && payload.persistence !== "") facts.push(payload.persistence)
+  /* Lane L6 (plue #505): the languages the workspace relays a language server for; an empty or absent list says nothing. */
+  if (payload.lspLanguages != null && payload.lspLanguages.length > 0) facts.push(`lsp: ${payload.lspLanguages.join(", ")}`)
   return facts
 }
 

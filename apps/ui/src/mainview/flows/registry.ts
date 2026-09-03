@@ -16,6 +16,8 @@
  */
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type { AppBootstrap, RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
+import type { Schema } from "effect"
+import type { FormHints } from "./FlowForms"
 
 /**
  * The UI-catalog concerns wrapped around one registered flow.
@@ -81,6 +83,14 @@ export interface FlowMetadata {
    * without a reason fails that gate.
    */
   readonly userOnlyReason?: string
+  /**
+   * THE FORM LAW (apps/ui/AGENTS.md): what the flow says about the form a
+   * missing-input invocation renders — labels, placeholders, the seam a
+   * field's options come from, and the grammar inverses when the positional
+   * default is wrong. The fields themselves derive from the input schema
+   * (flows/FlowForms.ts); a flow with no hints still gets a derived form.
+   */
+  readonly form?: FormHints
 }
 
 /** The confirmation label an agent invocation of this flow needs, or undefined when it needs none. */
@@ -109,6 +119,8 @@ export interface CatalogItem extends FlowMetadata {
 export interface FlowEntry<R = never> {
   readonly binding: FlowBinding.Binding<R>
   readonly metadata: FlowMetadata
+  /** The flow's input schema, kept beside the binding so the form derives from it (the descriptor does not carry it). */
+  readonly input: Schema.Top
 }
 
 /** An entry's name, which lives on the descriptor rather than the wrapper. */

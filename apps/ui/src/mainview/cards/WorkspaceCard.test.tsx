@@ -203,9 +203,21 @@ describe("the workspace card", () => {
   test("every header fact the payload does not carry renders nothing at all", () => {
     const { host } = render(workspaceCard())
     const text = host.textContent ?? ""
-    for (const invented of ["container", "workspace head", "ahead", "behind", "up ", "environment.nix", "persistent", "ssh"]) {
+    for (const invented of ["container", "workspace head", "ahead", "behind", "up ", "environment.nix", "persistent", "ssh", "lsp"]) {
       expect(text).not.toContain(invented)
     }
+    host.remove()
+  })
+
+  /* Lane L6 (plue#505): the languages the workspace relays a language server for, on the header's facts line. */
+  test("the header states `lsp: typescript` from the DTO's lsp.languages, and nothing when the DTO named none", () => {
+    expect(headerFacts(workspaceCard({ lspLanguages: ["typescript"] }).payload, 0)).toEqual(["lsp: typescript"])
+    expect(headerFacts(workspaceCard({ workspaceKind: "vm", persistence: "persistent", lspLanguages: ["typescript", "rust"] }).payload, 0))
+      .toEqual(["vm", "persistent", "lsp: typescript, rust"])
+    expect(headerFacts(workspaceCard({ lspLanguages: [] }).payload, 0)).toEqual([])
+    expect(headerFacts(workspaceCard({ lspLanguages: null }).payload, 0)).toEqual([])
+    const { host } = render(workspaceCard({ lspLanguages: ["typescript"] }))
+    expect(host.textContent).toContain("lsp: typescript")
     host.remove()
   })
 

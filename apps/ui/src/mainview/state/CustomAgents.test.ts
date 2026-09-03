@@ -13,9 +13,10 @@ import type { Card } from "./AppState"
 /*
  * Agents as data, renderer side (docs/workbench-lanes/custom-agents.md): the
  * app-agents mirror loads from `GET /api/agents`; `agent.list` renders the
- * Agents card with the live availability; `agent.new` renders the form card
- * whose draft lives in its payload and whose fields commit through
- * `agent.form`; `agent.create` PUTs and re-reads; `agent.edit` and
+ * Agents card with the live availability; `agent.new` renders the generic
+ * flow form (THE FORM LAW) for agent.create, whose draft lives in its payload
+ * and whose fields commit through `form.set`; `agent.create` PUTs and
+ * re-reads; `agent.edit` and
  * `agent.remove` do the same, a built-in refusing removal; a custom agent
  * appears in the `+` menu rule and in the orchestrator's roles paragraph. The
  * server is a recorder: it holds the list in memory and answers exactly what
@@ -94,6 +95,7 @@ const boot = async () => {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>
         puts.push({ id, body })
         if (body.harness === "crush") return json(400, { error: { code: "harness_no_model_flag", message: "Crush takes no model flag this app has verified, so an agent cannot be bound to a model on it." } })
+        if (body.purpose === "refuse") return json(400, { error: { code: "refused", message: "The server refused this agent." } })
         const existing = agents.find((row) => row.id === id)
         const row = AgentRoleSchema.parse({
           id,
@@ -158,45 +160,54 @@ describe("custom agents — the mirror and the Agents card", () => {
     expect(byId["fast-ui"]).toMatchObject({ available: false, reason: "opencode-cerebras is not installed" })
   })
 
-  test("agent.new renders the form card prefilled with the first credentialed harness and its model list; agent.form commits fields into the payload", async () => {
+  test("agent.new renders agent.create's generic form with the harness and model selects fed by the harness seam; form.set commits fields into the payload", async () => {
     const { store, controller, modelsCalls } = await boot()
     controller.runCommand("agent.new")
     await settle()
-    const form = cardOf(store, "agent-form", "agent-form")
-    expect(form?.payload).toMatchObject({ mode: "create", phase: "editing", draft: { id: "", label: "", harness: "claude", model: "" } })
-    // The harnesses offered are those whose model flag the table verified: crush (no flag) is absent.
-    expect(form?.payload.harnesses.map((row) => row.id)).toEqual(["claude", "codex", "opencode-kimi"])
-    expect(form?.payload.models).toEqual(["claude-fable-5"])
+    const form = cardOf(store, "form-agent.create", "flow-form")
+    expect(form?.payload).toMatchObject({ flow: "agent.create", via: "user", draft: {}, given: {} })
+    expect(form?.payload.fields.map((field) => field.name)).toEqual(["id", "harness", "model", "purpose"])
+    // The harness options are the seam's rows: credentialed ones pickable, the rest disabled with the reason (crush has no verified model flag).
+    expect(form?.payload.fields[1]?.options).toEqual([
+      { value: "claude", label: "Claude Code · will@example.com" },
+      { value: "codex", label: "Codex · OPENAI_API_KEY" },
+      { value: "opencode-kimi", label: "OpenCode · Kimi", disabled: true, reason: "no credential" },
+      { value: "crush", label: "Crush · OPENAI_API_KEY", disabled: true, reason: "no verified model flag" }
+    ])
+    // Nothing is preselected: no harness, no model list yet, and no list command has run.
+    expect(form?.payload.fields[2]?.options).toEqual([])
+    expect(modelsCalls()).toBe(0)
+    controller.runCommandArgs("form.set", "form-agent.create id reviewer")
+    controller.runCommandArgs("form.set", "form-agent.create purpose Reviews diffs for correctness")
+    await settle()
+    controller.runCommandArgs("form.set", "form-agent.create harness codex")
+    await settle()
+    controller.runCommandArgs("form.set", "form-agent.create model gpt-5.6-terra")
+    await settle()
+    const filled = cardOf(store, "form-agent.create", "flow-form")
+    expect(filled?.payload.draft).toEqual({ id: "reviewer", purpose: "Reviews diffs for correctness", harness: "codex", model: "gpt-5.6-terra" })
+    // Picking the harness read its model list into the model field.
+    expect(filled?.payload.fields[2]?.options?.map((option) => option.value)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
     expect(modelsCalls()).toBe(1)
-    controller.runCommandArgs("agent.form", "label Reviewer")
-    controller.runCommandArgs("agent.form", "purpose Reviews diffs for correctness")
+    // A harness the seam marked unpickable is refused with its reason.
+    controller.runCommandArgs("form.set", "form-agent.create harness crush")
     await settle()
-    controller.runCommandArgs("agent.form", "harness codex")
-    await settle()
-    controller.runCommandArgs("agent.form", "model gpt-5.6-terra")
-    await settle()
-    const filled = cardOf(store, "agent-form", "agent-form")
-    expect(filled?.payload.draft).toEqual({ id: "", label: "Reviewer", purpose: "Reviews diffs for correctness", harness: "codex", model: "gpt-5.6-terra" })
-    // Switching the harness re-read its model list.
-    expect(filled?.payload.models).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
-    expect(modelsCalls()).toBe(2)
-    // A harness the form does not offer is refused by name.
-    controller.runCommandArgs("agent.form", "harness crush")
-    await settle()
-    expect(failedToasts(store).some((detail) => detail.includes("crush is not one of them"))).toBe(true)
+    expect(failedToasts(store).some((detail) => detail.includes("Crush · OPENAI_API_KEY cannot be picked: no verified model flag"))).toBe(true)
     // A blank value clears the field.
-    controller.runCommandArgs("agent.form", "purpose")
+    controller.runCommandArgs("form.set", "form-agent.create purpose")
     await settle()
-    expect(cardOf(store, "agent-form", "agent-form")?.payload.draft.purpose).toBe("")
+    expect(cardOf(store, "form-agent.create", "flow-form")?.payload.draft.purpose).toBeUndefined()
   })
 
-  test("agent.create PUTs the agent with the form's name, re-reads the mirror, settles the form, and the new agent is in the menu rule and the roles paragraph", async () => {
+  test("the form's Submit runs agent.create: it PUTs the agent, re-reads the mirror, settles the card, and the new agent is in the menu rule and the roles paragraph", async () => {
     const { store, controller, puts, launches, ptyBodies } = await boot()
     controller.runCommand("agent.new")
     await settle()
-    controller.runCommandArgs("agent.form", "label Reviewer")
-    await settle()
-    controller.runCommandArgs("agent.create", "reviewer codex gpt-5.6-terra Reviews diffs for correctness")
+    for (const line of ["id reviewer", "harness codex", "model gpt-5.6-terra", "purpose Reviews diffs for correctness"]) {
+      controller.runCommandArgs("form.set", `form-agent.create ${line}`)
+      await settle()
+    }
+    controller.runCommandArgs("form.submit", "form-agent.create")
     await settle(10)
     expect(puts).toEqual([{
       id: "reviewer",
@@ -208,9 +219,9 @@ describe("custom agents — the mirror and the Agents card", () => {
       }
     }])
     expect(store.collections.agents.get("reviewer")).toMatchObject({ id: "reviewer", label: "Reviewer", builtin: false })
-    const form = cardOf(store, "agent-form", "agent-form")
-    expect(form?.payload.phase).toBe("saved")
+    const form = cardOf(store, "form-agent.create", "flow-form")
     expect(form?.status).toBe("acted")
+    expect(form?.payload.error).toBeUndefined()
     // The Agents card, once shown, refreshes in place with the new row.
     controller.runCommand("agent.list")
     await settle()
@@ -220,12 +231,13 @@ describe("custom agents — the mirror and the Agents card", () => {
     await settle()
     expect(ptyBodies.at(-1)).toMatchObject({ kind: "harness", harnessId: "codex", roleId: "reviewer", task: "review the retry" })
     expect(store.collections.cards.get(`agent-pty-${ptyBodies.length}`)?.payload).toMatchObject({ roleId: "reviewer", purpose: "Reviews diffs for correctness" })
-    // And the orchestrator is told about it.
+    // And the orchestrator is told about it, and told how missing input is answered.
     await controller.send("hi")
     await settle(10)
     const instructions = launches.at(-1)?.instructions ?? ""
     expect(instructions).toContain("- reviewer (gpt-5.6-terra): Reviews diffs for correctness")
     expect(instructions).toContain("create and manage agents (agent.new, agent.create)")
+    expect(instructions).toContain("it renders a form for the rest. Never ask the user to type arguments.")
   })
 
   test("agent.create refuses a taken id, a bad id, a flag-shaped model, and relays the server's refusal onto the form", async () => {
@@ -243,14 +255,17 @@ describe("custom agents — the mirror and the Agents card", () => {
     expect(puts).toEqual([])
     controller.runCommand("agent.new")
     await settle()
-    controller.runCommandArgs("agent.form", "label Crusher")
-    await settle()
-    controller.runCommandArgs("agent.create", "crusher crush gpt-5.6-terra")
+    for (const line of ["id crusher", "harness codex", "model gpt-5.6-terra", "purpose refuse"]) {
+      controller.runCommandArgs("form.set", `form-agent.create ${line}`)
+      await settle()
+    }
+    controller.runCommandArgs("form.submit", "form-agent.create")
     await settle(10)
-    const form = cardOf(store, "agent-form", "agent-form")
-    expect(form?.payload.phase).toBe("failed")
-    expect(form?.payload.error).toContain("Crush takes no model flag")
+    const form = cardOf(store, "form-agent.create", "flow-form")
     expect(form?.status).toBe("error")
+    expect(form?.payload.error).toContain("The server refused this agent.")
+    // The card carries the refusal; the human's Submit raised no toast of its own.
+    expect(failedToasts(store).some((detail) => detail.includes("The server refused this agent."))).toBe(false)
   })
 
   test("agent.edit changes a built-in's model and purpose (its harness stays), agent.remove refuses a built-in and removes a custom agent", async () => {

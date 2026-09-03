@@ -252,6 +252,12 @@ export const CloudWorkspaceRowSchema = z.object({
    * credential the facet renders never lands here (see seams/DesktopStream.ts).
    */
   desktop: WorkspaceDesktopSchema.nullable().optional(),
+  /**
+   * Lane L6 (plue #505): the languages the workspace relays a language server
+   * for (DTO `lsp.languages`, `["typescript"]` today). Null when the DTO
+   * carried no `lsp` object — unknown, never assumed empty.
+   */
+  lspLanguages: z.array(z.string()).nullable().optional(),
   updatedAt: z.number(),
   revision: z.number().int().nonnegative()
 })
@@ -280,6 +286,7 @@ export type CloudWorkspaceInput = Pick<
   | "persistence"
   | "sshHost"
   | "desktop"
+  | "lspLanguages"
 >
 
 /*
@@ -1072,7 +1079,7 @@ export type AppTransition =
     name: string
     args: string | null
     hidden: boolean
-    outcome: "executed" | "failed" | "unknown-command" | "deferred" | "confirm-requested"
+    outcome: "executed" | "failed" | "unknown-command" | "deferred" | "confirm-requested" | "form"
     detail: string | null
     durationMs: number
   }

@@ -15,6 +15,7 @@ import type { AppStore } from "./AppStore"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import type { PtyClient } from "./PtyClient"
 import { createLspClient } from "./LspClient"
+import { createCloudLspClient, pageCloudLspSocketUrl } from "./CloudLspClient"
 import { createCloudTerminalClient, pageCloudSocketUrl } from "./CloudTerminalClient"
 import type { CloudTerminalClient } from "./CloudTerminalClient"
 import { createTargetRunClient } from "./TargetRunClient"
@@ -32,6 +33,8 @@ import { createRecommendController } from "./controller/recommend"
 import type { RecommenderConfig } from "./controller/recommend"
 import { createTabsController } from "./controller/tabs"
 import { createAgentsController } from "./controller/agents"
+import { createFormsController } from "./controller/forms"
+import type { FormsController } from "./controller/forms"
 import type { AgentsController } from "./controller/agents"
 import { createSidebarController } from "./controller/sidebar"
 import type { SidebarController } from "./controller/sidebar"
@@ -195,7 +198,11 @@ export interface AppController {
   readonly editAgent: AgentsController["editAgent"]
   readonly removeAgent: AgentsController["removeAgent"]
   readonly listHarnessModels: AgentsController["listHarnessModels"]
-  readonly updateAgentForm: AgentsController["updateAgentForm"]
+  /* THE FORM LAW (apps/ui/AGENTS.md): the flow-form card's render, field commits, submit, and dismiss; see controller/forms.ts. */
+  readonly renderFlowForm: FormsController["renderFlowForm"]
+  readonly setFormField: FormsController["setFormField"]
+  readonly submitForm: FormsController["submitForm"]
+  readonly dismissCard: FormsController["dismissCard"]
   readonly loadRepos: TabsController["loadRepos"]
   readonly notePtyExit: TabsController["notePtyExit"]
   /** The PTY transport the terminal tabs attach to (docs/LOCAL-APP.md "/ws"). */
@@ -478,6 +485,12 @@ export interface AppServices {
    * default the page's own origin. Tests bind `() => undefined`.
    */
   readonly cloudSocketUrl?: (repo: string, sessionId: string) => string | undefined
+  /**
+   * Lane L6: the `/api/cloud-ws/…/lsp` tunnel URL for one workspace
+   * language-server session; default the page's own origin. Tests bind
+   * `() => undefined` or a real local origin.
+   */
+  readonly cloudLspSocketUrl?: (repo: string, sessionId: string, language: string) => string | undefined
   readonly bootstrap?: AppBootstrap
   readonly frameHistory?: FrameHistoryPort
   readonly baseUrl?: string
@@ -708,6 +721,7 @@ export const createAppController = (
     notePtyExit,
     installKeyboard
   } = createTabsController(ctx)
+  const { renderFlowForm, setFormField, submitForm, dismissCard } = createFormsController(ctx, { nextOrdinal: nextTranscriptOrdinal })
   const {
     loadAgents,
     listAgents,
@@ -715,9 +729,8 @@ export const createAppController = (
     createAgent,
     editAgent,
     removeAgent,
-    listHarnessModels,
-    updateAgentForm
-  } = createAgentsController(ctx, { nextOrdinal: nextTranscriptOrdinal, loadHarnesses })
+    listHarnessModels
+  } = createAgentsController(ctx, { nextOrdinal: nextTranscriptOrdinal, loadHarnesses, renderFlowForm })
   const { toggleRepoTree, renameWorkspace, toggleWorkspaceRename } = createSidebarController(ctx, repoTreeSeam)
   /*
    * "Open in tab" is offered on the maximized card, so opening the tab also
@@ -753,7 +766,22 @@ export const createAppController = (
    */
   const lsp = createLspClient({ http: (input, init) => ctx.boundedFetch(input, init), baseUrl, socketUrl, socketProtocols })
   ctx.onDispose(lsp.dispose)
-  const codeIntelSeam = createCodeIntelSeam(seamCtx, { lsp, readFile: filesSeam.readFile })
+  /*
+   * Lane L6: the workspace language-server transport (plue #505), one socket
+   * per (workspace, language) through the same tunnel the cloud terminal
+   * rides — so it exists exactly where that tunnel does (`cloud.terminal`);
+   * elsewhere the seam tells a cloud file so instead of dialing nothing.
+   */
+  const cloudLsp = services.bootstrap === undefined || services.bootstrap.capabilities.includes("cloud.terminal")
+    ? createCloudLspClient({
+      http: seamCtx.http,
+      baseUrl,
+      socketUrl: services.cloudLspSocketUrl ?? pageCloudLspSocketUrl,
+      socketProtocol: () => socketProtocols()[0]
+    })
+    : undefined
+  if (cloudLsp !== undefined) ctx.onDispose(cloudLsp.dispose)
+  const codeIntelSeam = createCodeIntelSeam(seamCtx, { lsp, readFile: filesSeam.readFile, ...(cloudLsp === undefined ? {} : { cloudLsp }) })
   ctx.onDispose(codeIntelSeam.dispose)
   const codeHover: CodeIntelSeam["hover"] = (path, line, column, repo) =>
     withToast("code.hover", `Asking the language server about ${path}:${line}:${column}…`, "Language server answered", () =>
@@ -1100,7 +1128,10 @@ export const createAppController = (
     editAgent,
     removeAgent,
     listHarnessModels,
-    updateAgentForm,
+    renderFlowForm,
+    setFormField,
+    submitForm,
+    dismissCard,
     loadRepos,
     notePtyExit,
     pty,
@@ -1405,7 +1436,10 @@ export const createAppController = (
     editAgent,
     removeAgent,
     listHarnessModels,
-    updateAgentForm,
+    renderFlowForm,
+    setFormField,
+    submitForm,
+    dismissCard,
     loadRepos,
     notePtyExit,
     pty,

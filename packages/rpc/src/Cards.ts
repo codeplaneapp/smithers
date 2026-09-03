@@ -89,6 +89,18 @@ export const CardPlanItemSchema = z.object({
 })
 export type CardPlanItem = z.infer<typeof CardPlanItemSchema>
 
+/** The seams a form field's select may draw its options from (apps/ui flows/FlowForms.ts OPTION_PROVIDERS). */
+export const FORM_OPTION_PROVIDERS = [
+  "harnesses",
+  "agent-harnesses",
+  "harness-models",
+  "open-repos",
+  "cloud-repos",
+  "bookmarks",
+  "workspaces",
+  "agents"
+] as const
+
 const cardBaseShape = {
   id: z.string(),
   title: z.string(),
@@ -936,13 +948,24 @@ export const CardSchema = z.discriminatedUnion("kind", [
       /** The anchored line and column (`files.read <path>:<line>[:<col>]`), 1-based: scrolled to and marked. */
       line: z.number().int().min(1).optional(),
       column: z.number().int().min(1).optional(),
-      /** What the language server published for this file; absent until it answered (an unread file has no count). */
+      /**
+       * The digest of the bytes the card shows (RepoFilesResponse.digest). A
+       * language server answers about the file on disk and names that
+       * digest; the seam re-reads a card whose digest differs before it
+       * draws the answer. Absent on cloud reads and cards persisted before.
+       */
+      digest: z.string().optional(),
+      /** What the language server published for this file, up to the cap; absent until it answered (an unread file has no count). */
       diagnostics: z.array(LspDiagnosticSchema).max(LSP_DIAGNOSTICS_CAP).optional(),
+      /** How many the server published when `diagnostics` is the capped head of them; absent when the list is complete. */
+      diagnosticsTotal: z.number().int().nonnegative().optional(),
       /** The last hover answer at a position: null when the server had nothing there; absent when never asked. */
       hover: z.object({
         line: z.number().int().min(1),
         character: z.number().int().min(1),
-        contents: z.string().max(LSP_HOVER_CAP_CHARS)
+        contents: z.string().max(LSP_HOVER_CAP_CHARS),
+        /** True when the host cut the server's text at its cap; the box says so. */
+        truncated: z.boolean().optional()
       }).nullable().optional(),
       /** The language server as far as this card knows; absent until a `code.*` flow ran on the file. */
       intel: z.object({
@@ -1158,8 +1181,21 @@ export const CardSchema = z.discriminatedUnion("kind", [
         z.object({ id: z.string(), name: z.string(), createdAt: z.string().nullable() })
       ),
       sessions: z.array(
-        z.object({ id: z.string(), status: z.string(), createdAt: z.string().nullable() })
+        z.object({
+          id: z.string(),
+          status: z.string(),
+          createdAt: z.string().nullable(),
+          /** plue #505: `terminal` or `lsp`, and the lsp session's language; absent on rows written before. */
+          kind: z.string().nullable().optional(),
+          language: z.string().nullable().optional()
+        })
       ),
+      /**
+       * Lane L6 (plue #505): the languages the workspace relays a language
+       * server for (DTO `lsp.languages`); the header states them. Null when
+       * the DTO carried none; absent on cards written before.
+       */
+      lspLanguages: z.array(z.string()).nullable().optional(),
       /** The Files facet's listing at `filesPath`; absent until the facet loads it. */
       files: z.array(WorkspaceFileEntrySchema).optional(),
       /** Which directory `files` lists; `""` is the working copy's root. */
@@ -1416,33 +1452,42 @@ export const CardSchema = z.discriminatedUnion("kind", [
       error: z.string().optional()
     })
   }),
+  /*
+   * THE FORM LAW (apps/ui/AGENTS.md; docs/workbench-lanes/flow-forms.md): a
+   * flow invoked without its required input renders this card for the
+   * missing fields. The fields derive from the flow's input schema; the
+   * draft IS the payload (a field commit is a card-payload update, never
+   * component state); `given` is what the slash line already carried; an
+   * option the human cannot pick carries its reason.
+   */
   z.object({
     ...cardBaseShape,
-    kind: z.literal("agent-form"),
+    kind: z.literal("flow-form"),
     payload: z.object({
-      /** `create`, or `edit` of the agent named by `draft.id` (the id is then fixed). */
-      mode: z.enum(["create", "edit"]),
-      draft: z.object({
-        id: z.string(),
-        label: z.string(),
-        purpose: z.string(),
-        harness: z.enum(HARNESS_IDS).optional(),
-        model: z.string()
-      }),
-      /** The harnesses the form offers: those whose model flag the table verified, with the live signal. */
-      harnesses: z.array(
+      flow: z.string(),
+      /** Who invoked the flow the form continues: the submit runs it as that actor, so an agent's ask still confirms. */
+      via: z.enum(["user", "agent"]),
+      fields: z.array(
         z.object({
-          id: z.enum(HARNESS_IDS),
-          displayName: z.string(),
-          status: z.enum(["signed-in", "api-key", "binary-only", "unavailable"]),
-          account: z.string()
+          name: z.string(),
+          label: z.string(),
+          kind: z.enum(["text", "number", "boolean", "select"]),
+          required: z.boolean(),
+          placeholder: z.string().optional(),
+          options: z.array(
+            z.object({
+              value: z.string(),
+              label: z.string(),
+              disabled: z.boolean().optional(),
+              reason: z.string().optional()
+            })
+          ).optional(),
+          optionsFrom: z.enum(FORM_OPTION_PROVIDERS).optional()
         })
       ),
-      /** The selected harness's model ids (its list command, or the verified suggestions). */
-      models: z.array(z.string()),
-      modelsSource: z.enum(["list", "suggestions"]).optional(),
-      modelsReason: z.string().optional(),
-      phase: z.enum(["editing", "saving", "saved", "cancelled", "failed"]),
+      draft: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+      given: z.record(z.string(), z.unknown()),
+      /** The last submit's honest refusal, kept on the card. */
       error: z.string().optional()
     })
   }),

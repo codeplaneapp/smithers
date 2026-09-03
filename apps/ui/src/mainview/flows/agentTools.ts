@@ -205,5 +205,12 @@ export const executeAgentToolCall = async (
         : `failed: ${outcome.reason} The refusal is already rendered in the chat as a card; point the user at it`
     case "failed":
       return `failed: ${outcome.error}`
+    case "form":
+      /*
+       * THE FORM LAW: the call lacked required input, so the app rendered the
+       * flow's form in the chat. The model tells the human to fill it in —
+       * never to type arguments.
+       */
+      return `rendered a form for ${outcome.fields.join(", ")}: ask the user to fill it in`
   }
 }

@@ -379,7 +379,7 @@ describe("the three-door law", () => {
   test("the + menu's flows are the agent's flows: tab.terminal, agent.role and tab.harness are callable", async () => {
     const { controller } = await boot()
     const callable = new Set(controller.commands.callable().map(nameOf))
-    for (const name of ["tab.terminal", "agent.role", "tab.harness", "repo.open", "tab.card", "agent.new", "agent.list", "agent.create", "agent.form"]) {
+    for (const name of ["tab.terminal", "agent.role", "tab.harness", "repo.open", "tab.card", "agent.new", "agent.list", "agent.create", "form.set", "form.submit", "card.dismiss"]) {
       expect(callable.has(name)).toBe(true)
     }
     // And listed: the slash menu and the prompt's catalog show them.
@@ -388,8 +388,8 @@ describe("the three-door law", () => {
       expect(disclosed.has(name)).toBe(true)
     }
     expect(disclosed.has("flow.run.retry")).toBe(false)
-    // The form's field commit is hidden from the catalog and callable, like every id-scoped card act.
-    expect(disclosed.has("agent.form")).toBe(false)
+    // The form card's acts (THE FORM LAW) are hidden from the catalog and callable, like every id-scoped card act.
+    for (const name of ["form.set", "form.submit", "card.dismiss"]) expect(disclosed.has(name)).toBe(false)
   })
 
   test("agent.delegate and agent.role accept a custom id: the launch goes by role id, and the confirm card names it", async () => {

@@ -1,4 +1,4 @@
-import { AGENT_RUNTIME_CONTEXT_VERSION, renderAgentRuntimeContext } from "@smthrs/rpc/AgentContext"
+import { AGENT_RUNTIME_CONTEXT_VERSION, composeAgentInstructions, renderAgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import type { AgentChatMessage, AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import { hasCapability } from "@smthrs/rpc/AppBootstrap"
@@ -10,7 +10,7 @@ import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
 import { roleMenuEntries } from "../../AgentRoleMenu"
 import { currentAgentRoles } from "./agents"
-import type { ImpossibleAskClass, InstructionRole } from "../Instructions"
+import type { ImpossibleAskClass, InstructionRole, InstructionStage } from "../Instructions"
 import { CHAT_INSTRUCTIONS_CAP_BYTES, INSTRUCTIONS_HEADROOM_BYTES, bytesOf, smithersInstructions } from "../Instructions"
 import {
   impossibleAskOf,
@@ -20,7 +20,7 @@ import {
   runLaunchCommandOf,
   toolResultLaunchedRun
 } from "../RunClaims"
-import { worldContextDocuments } from "../WorldContext"
+import { WORLD_BODY_BUDGET, worldContextDocuments } from "../WorldContext"
 import { downloadUrlOf } from "./app"
 import type { ActiveTurn, ControllerContext, PendingToolCall } from "./context"
 
@@ -132,7 +132,7 @@ export const createTurnController = (
     }
   }
 
-  const agentRuntimeContext = (): AgentRuntimeContext => {
+  const agentRuntimeContext = (worldBodyBudget: number = WORLD_BODY_BUDGET): AgentRuntimeContext => {
     const snapshot = store.agentContextSnapshot()
     const current = store.session()
     const identity = store.collections.identitySessions.get("identity")
@@ -207,7 +207,8 @@ export const createTurnController = (
         documentCount: snapshot.worldState.documents.length,
         documents: worldContextDocuments(
           snapshot.worldState.documents,
-          current.selectedWorldDocumentId
+          current.selectedWorldDocumentId,
+          worldBodyBudget
         )
       },
       /*
@@ -267,7 +268,7 @@ export const createTurnController = (
    * truth — so the model's offers are bounded by what actually exists, and a
    * workflow is never presented as laundering an effect the catalog lacks.
    */
-  const turnInstructions = (context?: AgentRuntimeContext): string => {
+  const turnInstructions = (context?: AgentRuntimeContext, lastStage: InstructionStage = 3): string => {
     const identity = store.collections.identitySessions.get("identity")
     const signedIn = identity?.state === "signed-in"
     /*
@@ -275,7 +276,8 @@ export const createTurnController = (
      * seam caps at CHAT_INSTRUCTIONS_CAP_BYTES, so the prompt's budget is what
      * the cap leaves after this turn's context (world notes ride under their
      * own 8 000-char budget, tabs and repositories grow with the session).
-     * The catalog degrades in stages to fit; the turn never fails on size.
+     * The catalog degrades in stages to fit, down to `lastStage`; composeTurn
+     * below owns the floor under that.
      */
     const contextBytes = context === undefined ? 0 : bytesOf(renderAgentRuntimeContext(context)) + 2
     const budgetBytes = CHAT_INSTRUCTIONS_CAP_BYTES - INSTRUCTIONS_HEADROOM_BYTES - contextBytes
@@ -295,7 +297,34 @@ export const createTurnController = (
         ])
       ],
       localRepositoriesAvailable: repositories.available
-    }, instructionRoles(), { budgetBytes })
+    }, instructionRoles(), { budgetBytes, lastStage })
+  }
+
+  /*
+   * The floor under the budget. The catalog degrades first (stages 0→2 keep
+   * every command's name); when the namespace list plus this turn's context
+   * still exceeds the cap, the World bodies give way (each cut note says so
+   * in the context, and the pane still holds it); only with no body left
+   * does the catalog fall to stage 3 (namespaces and counts, every name
+   * behind the list action). A turn fails on size only past that — a context
+   * whose tabs and repositories alone pass the cap, which no session has
+   * produced.
+   */
+  const composeTurn = (): { readonly context: AgentRuntimeContext; readonly instructions: string } => {
+    const limit = CHAT_INSTRUCTIONS_CAP_BYTES - INSTRUCTIONS_HEADROOM_BYTES
+    let worldBodyBudget = WORLD_BODY_BUDGET
+    let context = agentRuntimeContext(worldBodyBudget)
+    let instructions = turnInstructions(context, 2)
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const over = bytesOf(composeAgentInstructions(instructions, context)) - limit
+      if (over <= 0) return { context, instructions }
+      if (worldBodyBudget === 0) break
+      // A character is at least one byte: cutting `over` characters of note text cuts at least `over` bytes.
+      worldBodyBudget = Math.max(0, worldBodyBudget - over)
+      context = agentRuntimeContext(worldBodyBudget)
+      instructions = turnInstructions(context, 2)
+    }
+    return { context, instructions: turnInstructions(context, 3) }
   }
 
   /*
@@ -331,12 +360,12 @@ export const createTurnController = (
      * every later turn failed the same way, and /clear could not recover it
      * because /clear runs a model turn of its own into the same wall.
      */
-    const context = agentRuntimeContext()
+    const { context, instructions } = composeTurn()
     const { request } = boundTurnRequest(
       {
         runId: turnId,
         messages,
-        instructions: turnInstructions(context),
+        instructions,
         tools: ctx.commands.toolSpecs(),
         context
       },

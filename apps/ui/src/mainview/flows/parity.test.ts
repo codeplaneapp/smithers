@@ -224,8 +224,10 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/RunsCards.tsx": 6,
       "../cards/RunHistoryCard.tsx": 1,
       "../cards/AffectedCard.tsx": 1,
-      // Agents as data (custom-agents.md): Launch, Edit, Remove, New agent, the harness chip, Cancel, and the submit.
-      "../cards/AgentCards.tsx": 7,
+      // Agents as data (custom-agents.md): Launch, Edit, Remove, New agent.
+      "../cards/AgentCards.tsx": 4,
+      // THE FORM LAW (flow-forms.md): the generic form's Cancel (card.dismiss) and Submit (form.submit); fields commit on blur/change.
+      "../cards/FlowFormCards.tsx": 2,
       /*
        * Lane change (ADR 0003) + lane L1 (ADR 0004, the live plue routes):
        * the change card's facet tabs, Land / Split ready / Revert / Full

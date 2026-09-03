@@ -155,24 +155,42 @@ describe("the agent cards", () => {
     ).toBe(false)
   })
 
-  test("the form card holds the draft, the offered harnesses, and the model list in its payload", () => {
+  test("the flow-form card holds the flow, who asked, the derived fields, the draft and what was given; a bad kind or provider is rejected", () => {
     const card = CardSchema.parse({
       ...base,
-      kind: "agent-form",
+      kind: "flow-form",
       payload: {
-        mode: "create",
-        draft: { id: "", label: "Reviewer", purpose: "", harness: "codex", model: "gpt-5.6-terra" },
-        harnesses: [{ id: "codex", displayName: "Codex", status: "signed-in", account: "will@example.com" }],
-        models: ["gpt-5.6-sol", "gpt-5.6-terra"],
-        modelsSource: "suggestions",
-        phase: "editing"
+        flow: "agent.create",
+        via: "agent",
+        fields: [
+          { name: "id", label: "Id", kind: "text", required: true },
+          {
+            name: "harness",
+            label: "Harness",
+            kind: "select",
+            required: true,
+            optionsFrom: "agent-harnesses",
+            options: [
+              { value: "codex", label: "Codex · OPENAI_API_KEY" },
+              { value: "opencode", label: "OpenCode", disabled: true, reason: "no credential" }
+            ]
+          },
+          { name: "model", label: "Model", kind: "text", required: true, optionsFrom: "harness-models", options: [] },
+          { name: "purpose", label: "Purpose", kind: "text", required: false }
+        ],
+        draft: { id: "reviewer", harness: "codex" },
+        given: { id: "reviewer", harness: "codex" }
       }
     })
-    if (card.kind !== "agent-form") return
-    expect(card.payload.draft.model).toBe("gpt-5.6-terra")
-    expect(card.payload.harnesses[0]?.status).toBe("signed-in")
-    expect(CardSchema.safeParse({ ...base, kind: "agent-form", payload: { mode: "make", draft: {}, harnesses: [], models: [], phase: "editing" } }).success)
-      .toBe(false)
+    if (card.kind !== "flow-form") return
+    expect(card.payload.fields[1]?.options?.[1]).toEqual({ value: "opencode", label: "OpenCode", disabled: true, reason: "no credential" })
+    expect(card.payload.draft.harness).toBe("codex")
+    const payload = card.payload
+    expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, fields: [{ name: "x", label: "X", kind: "date", required: true }] } }).success).toBe(false)
+    expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, fields: [{ name: "x", label: "X", kind: "select", required: true, optionsFrom: "moons" }] } }).success).toBe(false)
+    expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, via: "system" } }).success).toBe(false)
+    // The hand-made agent form is gone: the generic card is the only form.
+    expect(CardSchema.safeParse({ ...base, kind: "agent-form", payload: { mode: "create", draft: {}, harnesses: [], models: [], phase: "editing" } }).success).toBe(false)
   })
 
   test("the models card is what the harness printed, with its source", () => {

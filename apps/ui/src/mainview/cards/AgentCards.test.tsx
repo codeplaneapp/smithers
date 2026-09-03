@@ -3,13 +3,13 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import type { Card } from "../state/AppState"
-import { AgentFormCardBody, AgentModelsCardBody, AgentsCardBody } from "./AgentCards"
+import { AgentModelsCardBody, AgentsCardBody } from "./AgentCards"
 
 /*
- * Agents as data (custom-agents.md): the Agents card's rows and acts, the
- * form card's create path (every field commits through agent.form, the
- * submit IS agent.create, nothing lives in component state), and the models
- * card. Every act is asserted as the flow it names.
+ * Agents as data (custom-agents.md): the Agents card's rows and acts, and
+ * the models card. Every act is asserted as the flow it names. The New-agent
+ * form is the generic flow form (FlowFormCards.test.tsx; CustomAgents.test.ts
+ * renders it from the live harness seam).
  */
 
 GlobalRegistrator.register()
@@ -20,7 +20,6 @@ afterAll(async () => {
 })
 
 type AgentsCard = Extract<Card, { kind: "agents" }>
-type AgentFormCard = Extract<Card, { kind: "agent-form" }>
 type AgentModelsCard = Extract<Card, { kind: "agent-models" }>
 
 const base = { title: "Agents", status: "active" as const, createdAt: 0, ordinal: 0 }
@@ -61,26 +60,6 @@ const docs: AgentsCard["payload"]["agents"][number] = {
   reason: "OpenCode · Kimi has no credential for Kimi K3",
   account: ""
 }
-
-const formCard = (payload: Partial<AgentFormCard["payload"]> = {}): AgentFormCard => ({
-  ...base,
-  id: "agent-form",
-  kind: "agent-form",
-  title: "New agent",
-  payload: {
-    mode: "create",
-    draft: { id: "", label: "", purpose: "", harness: "codex", model: "" },
-    harnesses: [
-      { id: "claude", displayName: "Claude Code", status: "signed-in", account: "will@example.com" },
-      { id: "codex", displayName: "Codex", status: "api-key", account: "OPENAI_API_KEY" },
-      { id: "opencode", displayName: "OpenCode", status: "binary-only", account: "" }
-    ],
-    models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
-    modelsSource: "suggestions",
-    phase: "editing",
-    ...payload
-  }
-})
 
 const mount = (node: React.ReactNode): HTMLElement => {
   const host = document.createElement("div")
@@ -142,81 +121,6 @@ describe("the Agents card", () => {
   test("the last act's refusal stays on the card", () => {
     const host = mount(<AgentsCardBody card={agentsCard({ native: true, agents: [orchestrator], error: "The server answered 500" })} onRunCommand={() => {}} />)
     expect(host.querySelector("[role=alert]")?.textContent).toBe("The server answered 500")
-  })
-})
-
-describe("the New agent form card", () => {
-  test("every field commits through agent.form and the submit is agent.create with the draft's id, harness, model, and purpose", () => {
-    const { calls, onRunCommand } = recorder()
-    const host = mount(<AgentFormCardBody card={formCard()} onRunCommand={onRunCommand} />)
-    const label = host.querySelector<HTMLInputElement>("[data-testid=agent-form-label]")
-    if (label === null) throw new Error("no name field")
-    label.value = "Reviewer"
-    label.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
-    const purpose = host.querySelector<HTMLInputElement>("[data-testid=agent-form-purpose]")
-    if (purpose === null) throw new Error("no purpose field")
-    purpose.value = "Reviews diffs for correctness"
-    purpose.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
-    click(host, "[data-testid=agent-form-harness-claude]")
-    const model = host.querySelector<HTMLInputElement>("[data-testid=agent-form-model]")
-    if (model === null) throw new Error("no model field")
-    model.value = "gpt-5.6-terra"
-    model.dispatchEvent(new FocusEvent("focusout", { bubbles: true }))
-    expect(calls).toEqual([
-      ["agent.form", "label Reviewer"],
-      ["agent.form", "purpose Reviews diffs for correctness"],
-      ["agent.form", "harness claude"],
-      ["agent.form", "model gpt-5.6-terra"]
-    ])
-    // The submit needs an id (from the draft's name), a harness, and a model: with an empty draft it is disabled.
-    expect(host.querySelector<HTMLButtonElement>("[data-testid=agent-form-submit]")?.disabled).toBe(true)
-    // The suggestions ride a datalist, and the harness chips show the live signal.
-    expect([...host.querySelectorAll("datalist option")].map((option) => option.getAttribute("value"))).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
-    expect(host.querySelector("[data-testid=agent-form-harness-codex]")?.getAttribute("aria-checked")).toBe("true")
-    expect(host.querySelector("[data-testid=agent-form-harness-opencode]")?.textContent).toContain("○")
-    expect(host.querySelector("[data-testid=agent-form-harness-claude]")?.textContent).toContain("●")
-  })
-
-  test("a filled draft submits agent.create with the id derived from the name; Cancel is agent.form cancel", () => {
-    const { calls, onRunCommand } = recorder()
-    const host = mount(
-      <AgentFormCardBody
-        card={formCard({ draft: { id: "", label: "Docs writer", purpose: "Writes the docs.", harness: "codex", model: "gpt-5.6-terra" } })}
-        onRunCommand={onRunCommand}
-      />
-    )
-    const submit = host.querySelector<HTMLButtonElement>("[data-testid=agent-form-submit]")
-    expect(submit?.disabled).toBe(false)
-    expect(submit?.getAttribute("data-flow")).toBe("agent.create")
-    expect(submit?.textContent).toBe("Create agent")
-    submit?.click()
-    click(host, "[data-testid=agent-form-cancel]")
-    expect(calls).toEqual([
-      ["agent.create", "docs-writer codex gpt-5.6-terra Writes the docs."],
-      ["agent.form", "cancel"]
-    ])
-  })
-
-  test("edit mode fixes the id and the harness and submits agent.edit with flags; saved and cancelled phases read as one line", () => {
-    const { calls, onRunCommand } = recorder()
-    const host = mount(
-      <AgentFormCardBody
-        card={formCard({ mode: "edit", draft: { id: "reviewer", label: "Reviewer", purpose: "Reviews diffs.", harness: "codex", model: "gpt-5.6-sol" } })}
-        onRunCommand={onRunCommand}
-      />
-    )
-    expect(host.querySelector<HTMLButtonElement>("[data-testid=agent-form-harness-claude]")?.disabled).toBe(true)
-    const submit = host.querySelector<HTMLButtonElement>("[data-testid=agent-form-submit]")
-    expect(submit?.getAttribute("data-flow")).toBe("agent.edit")
-    expect(submit?.textContent).toBe("Save")
-    submit?.click()
-    expect(calls).toEqual([["agent.edit", "reviewer --model gpt-5.6-sol --purpose Reviews diffs. --label Reviewer"]])
-    const saved = mount(<AgentFormCardBody card={formCard({ phase: "saved", draft: { id: "reviewer", label: "Reviewer", purpose: "", harness: "codex", model: "x" } })} onRunCommand={onRunCommand} />)
-    expect(saved.textContent).toBe("Created Reviewer.")
-    const cancelled = mount(<AgentFormCardBody card={formCard({ phase: "cancelled" })} onRunCommand={onRunCommand} />)
-    expect(cancelled.textContent).toBe("Cancelled.")
-    const failed = mount(<AgentFormCardBody card={formCard({ phase: "failed", error: "codex takes no such model" })} onRunCommand={onRunCommand} />)
-    expect(failed.querySelector("[role=alert]")?.textContent).toBe("codex takes no such model")
   })
 })
 

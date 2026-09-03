@@ -1645,33 +1645,33 @@
 	opacity: 0.55;
 }
 
-/* Agents as data (docs/workbench-lanes/custom-agents.md): the New-agent form's rows. */
-.agent-form {
+/* THE FORM LAW (docs/workbench-lanes/flow-forms.md): the generic flow form's rows; a required row marks itself. */
+.flow-form {
 	display: flex;
 	flex-direction: column;
 	gap: 0.5rem;
 }
-.agent-form-row {
+.flow-form-row {
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
 }
-.agent-form-row > span:first-child {
-	flex: 0 0 4.5rem;
+.flow-form-row > span:first-child {
+	flex: 0 0 6rem;
 	color: var(--muted-foreground, #6b6457);
 	font-size: 0.8125rem;
 }
-.agent-form-row > input {
+.flow-form-row[data-required="true"] > span:first-child::after {
+	content: " *";
+}
+.flow-form-row > input:not([type="checkbox"]),
+.flow-form-row > select {
 	flex: 1;
 	min-width: 0;
 }
-.agent-form-harnesses {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.375rem;
-}
-.agent-form-harness[aria-checked="true"] {
-	font-weight: 600;
+.flow-form-row > select {
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 0.8125rem;
 }
 
 /*

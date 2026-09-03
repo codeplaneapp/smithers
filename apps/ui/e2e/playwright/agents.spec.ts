@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
 
 /*
- * Custom agents, T1 (docs/workbench-lanes/custom-agents.md): an agent created
- * through the New agent form card appears in the `+` menu with its
- * availability. The server is a double, like tabs.spec.ts: `/api/agents`
+ * Custom agents, T1 (docs/workbench-lanes/custom-agents.md; flow-forms.md):
+ * an agent created through the derived agent.create form card appears in the
+ * `+` menu with its availability. The server is a double, like tabs.spec.ts: `/api/agents`
  * holds the list in memory and answers what routes/agents.ts answers, so the
  * spec proves the SPA's side of the contract and keeps passing unchanged
  * once the real `bun src/bun/serve.ts` stands behind the same paths.
@@ -118,31 +118,30 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test("an agent created through the New agent form appears in the + menu with its availability", async ({ page }) => {
+test("an agent created through the derived form appears in the + menu with its availability", async ({ page }) => {
   const double = await serve(page)
   await page.goto("/")
-  // The sidebar's `+` ends with New agent…, which renders the form card in the chat.
+  // The sidebar's `+` ends with New agent…, which renders agent.create's form card in the chat (THE FORM LAW).
   await page.getByTestId("tab-add").click()
   const newAgent = page.getByTestId("tab-add-new-agent")
   await expect(newAgent).toHaveText("New agent…")
   await newAgent.click()
-  const form = page.locator("[data-kind=agent-form]")
+  const form = page.locator("[data-kind=flow-form]")
   await expect(form).toBeVisible()
-  // The harnesses offered carry their signal; the first credentialed one is preselected.
-  await expect(page.getByTestId("agent-form-harness-claude")).toHaveAttribute("aria-checked", "true")
-  await expect(page.getByTestId("agent-form-harness-opencode-kimi")).toContainText("○")
-  await page.getByTestId("agent-form-label").fill("Reviewer")
-  await page.getByTestId("agent-form-label").press("Enter")
-  await page.getByTestId("agent-form-purpose").fill("Reviews diffs for correctness")
-  await page.getByTestId("agent-form-purpose").press("Enter")
-  await page.getByTestId("agent-form-harness-codex").click()
-  await expect(page.getByTestId("agent-form-harness-codex")).toHaveAttribute("aria-checked", "true")
-  await page.getByTestId("agent-form-model").fill("gpt-5.6-terra")
-  await page.getByTestId("agent-form-model").press("Enter")
-  const submit = page.getByTestId("agent-form-submit")
+  // The harness select is the harness seam: an unpickable harness is disabled with its reason.
+  await expect(page.getByTestId("flow-form-harness").locator("option[value=opencode-kimi]")).toBeDisabled()
+  await expect(page.getByTestId("flow-form-harness").locator("option[value=opencode-kimi]")).toContainText("no credential")
+  await page.getByTestId("flow-form-id").fill("reviewer")
+  await page.getByTestId("flow-form-id").press("Enter")
+  await page.getByTestId("flow-form-harness").selectOption("codex")
+  await page.getByTestId("flow-form-model").fill("gpt-5.6-terra")
+  await page.getByTestId("flow-form-model").press("Enter")
+  await page.getByTestId("flow-form-purpose").fill("Reviews diffs for correctness")
+  await page.getByTestId("flow-form-purpose").press("Enter")
+  const submit = page.getByTestId("flow-form-submit")
   await expect(submit).toBeEnabled()
   await submit.click()
-  await expect(form).toContainText("Created Reviewer.")
+  await expect(form).toHaveAttribute("data-status", "acted")
   expect(double.puts).toEqual([{
     id: "reviewer",
     body: {

@@ -259,13 +259,13 @@ describe("environment seam — env.set", () => {
     expect(document.env).toContainEqual({ name: "TOKEN", value: "abc=def==" })
   })
 
-  test("an empty pair answers the Commands.ts error; malformed pairs answer the seam's own", async () => {
+  test("an empty pair renders env.set's form (THE FORM LAW); malformed pairs answer the seam's own", async () => {
     const { store, controller, requests } = await freshController()
     await ready(store)
 
     const empty = await controller.commands.run("env.set")
-    expect(empty.status).toBe("failed")
-    if (empty.status === "failed") expect(empty.error).toBe("env.set needs a NAME=value pair")
+    expect(empty).toEqual({ status: "form", flow: "env.set", cardId: "form-env.set", fields: ["assignment"] })
+    expect(store.collections.cards.get("form-env.set")?.kind).toBe("flow-form")
 
     const noEquals = await controller.commands.run("env.set", "NOEQUALS")
     expect(noEquals.status).toBe("failed")

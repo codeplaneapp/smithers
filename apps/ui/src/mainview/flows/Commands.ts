@@ -57,6 +57,13 @@ export type CommandOutcome =
     readonly action: "app.download.prompt" | null
   }
   | { readonly status: "failed"; readonly error: string }
+  /**
+   * THE FORM LAW (apps/ui/AGENTS.md): the invocation lacked required input,
+   * so nothing ran and the flow's form card is rendered instead — prefilled
+   * from what the line gave, asking for `fields`. Only the agent and slash
+   * doors reach this; a button always carries its args.
+   */
+  | { readonly status: "form"; readonly flow: string; readonly cardId: string; readonly fields: ReadonlyArray<string> }
 
 /**
  * The door classes an exact miss resolves to. `cloud.session` refines
@@ -301,6 +308,8 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
         ? outcome.error
         : outcome.status === "unavailable"
         ? outcome.reason
+        : outcome.status === "form"
+        ? `rendered a form for ${outcome.fields.join(", ")}`
         : outcome.status === "executed"
         ? outcome.value ?? null
         : null
@@ -367,7 +376,24 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
      * the binding runs.
      */
     const parsed = payloadFor(nameOf(target), args)
-    if ("error" in parsed) return { status: "failed", error: parsed.error }
+    if ("error" in parsed) {
+      /*
+       * THE FORM LAW: a line without the flow's required input renders the
+       * flow's form — derived from its input schema, prefilled with what the
+       * line gave — and nothing else. No door answers with a usage sentence;
+       * the grammar's own reason stays the fallback only for a flow with no
+       * fields to ask for (none today).
+       */
+      const rendered = actions.renderFlowForm({
+        name: nameOf(target),
+        args,
+        via: invoker,
+        input: target.input,
+        ...(target.metadata.form === undefined ? {} : { hints: target.metadata.form })
+      })
+      if (rendered === undefined) return { status: "failed", error: parsed.error }
+      return { status: "form", flow: nameOf(target), cardId: rendered.cardId, fields: rendered.missing }
+    }
     /*
      * A `confirm` flow asked for by the MODEL: consequential acts (land a
      * PR, remove a credential, launch a harness) are invocable by the agent

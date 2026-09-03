@@ -1,14 +1,12 @@
 import {
   AGENT_ROLE_ID,
-  agentIdFromLabel,
   AgentsResponseSchema,
   findAgentRole,
-  HarnessModelsResponseSchema,
   isAgentRoleId,
   MODEL_ID,
   orderedAgentRoles
 } from "@smthrs/rpc/AgentRoles"
-import type { AgentPutRequest, AgentRole, HarnessModelsResponse } from "@smthrs/rpc/AgentRoles"
+import type { AgentPutRequest, AgentRole } from "@smthrs/rpc/AgentRoles"
 import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import { HARNESS_IDS } from "@smthrs/rpc/LocalApp"
 import type { Harness } from "@smthrs/rpc/LocalApp"
@@ -16,30 +14,26 @@ import { roleMenuEntries } from "../../AgentRoleMenu"
 import type { Card } from "../AppState"
 import type { AppStore } from "../AppStore"
 import type { ControllerContext } from "./context"
+import { fetchHarnessModels, formRenderedText } from "./forms"
+import type { FormsController } from "./forms"
 
 /*
  * Agents as data (docs/workbench-lanes/custom-agents.md): the renderer's
  * half. `app-agents` mirrors `GET /api/agents` (loaded at boot beside the
  * harness list, re-read after every mutation); every act is a flow with
  * three doors (agent.list, agent.new, agent.create, agent.edit,
- * agent.remove, agent.models, and the form's agent.form), and the management
- * UI is two cards in the chat — THE EMBED LAW — whose state lives in their
- * payloads. Availability is the harness signal through roleMenuEntries,
- * never guessed.
+ * agent.remove, agent.models), and the management UI is cards in the chat —
+ * THE EMBED LAW — whose state lives in their payloads. The New-agent form is
+ * the generic flow form (THE FORM LAW, controller/forms.ts) derived from
+ * agent.create's own schema; agent.new renders it. Availability is the
+ * harness signal through roleMenuEntries, never guessed.
  */
 
 export const AGENTS_CARD_ID = "agents"
-export const AGENT_FORM_CARD_ID = "agent-form"
 
 type AgentsCard = Extract<Card, { kind: "agents" }>
-type AgentFormCard = Extract<Card, { kind: "agent-form" }>
-type AgentFormDraft = AgentFormCard["payload"]["draft"]
 
 export type HarnessId = Harness["id"]
-
-/** The fields the form's rows commit (`agent.form <field> [value]`). */
-export const AGENT_FORM_FIELDS = ["label", "purpose", "harness", "model", "cancel"] as const
-export type AgentFormField = (typeof AGENT_FORM_FIELDS)[number]
 
 export interface AgentsController {
   /** `GET /api/agents` → app-agents. Silent where no server answers (the web, a test). */
@@ -48,8 +42,8 @@ export interface AgentsController {
   readonly agentRoles: () => ReadonlyArray<AgentRole>
   /** `agent.list`: the Agents card, at the transcript's tail. */
   readonly listAgents: () => Promise<string | void>
-  /** `agent.new [id] [harness] [model] [purpose]`: the form card, prefilled; an existing id opens it in edit mode. */
-  readonly newAgent: (prefill: { readonly id?: string; readonly harness?: string; readonly model?: string; readonly purpose?: string }) => Promise<string | void>
+  /** `agent.new [id] [harness] [model] [purpose]`: agent.create's form, prefilled; an existing id renders agent.edit's instead. */
+  readonly newAgent: (prefill: { readonly id?: string; readonly harness?: string; readonly model?: string; readonly purpose?: string }) => Promise<string | void | { readonly value: string }>
   /** `agent.create <id> <harness> <model> [purpose]`. */
   readonly createAgent: (input: { readonly id: string; readonly harness: string; readonly model: string; readonly purpose?: string }) => Promise<string | void | { readonly value: string }>
   /** `agent.edit <id> [--model m] [--purpose p] [--label l]`. */
@@ -58,13 +52,13 @@ export interface AgentsController {
   readonly removeAgent: (id: string) => Promise<string | void | { readonly value: string }>
   /** `agent.models <harness>`: the harness's own model list as a card. */
   readonly listHarnessModels: (harness: string) => Promise<string | void>
-  /** `agent.form <field> [value]`: one form-card payload update. */
-  readonly updateAgentForm: (field: string, value: string) => Promise<string | void>
 }
 
 export interface AgentsControllerDependencies {
   readonly nextOrdinal: () => number
   readonly loadHarnesses: () => Promise<void>
+  /** The generic flow form (THE FORM LAW): agent.new renders agent.create's or agent.edit's through it. */
+  readonly renderFlowForm: FormsController["renderFlowForm"]
 }
 
 /** The agents in menu order from the store's mirror; the built-ins while it is empty. */
@@ -127,11 +121,6 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
     return card?.kind === "agents" ? card : undefined
   }
 
-  const formCard = (): AgentFormCard | undefined => {
-    const card = collections.cards.get(AGENT_FORM_CARD_ID)
-    return card?.kind === "agent-form" ? card : undefined
-  }
-
   const agentsPayload = (): AgentsCard["payload"] => {
     if (!native()) return { native: false, agents: [] }
     const rows = harnesses()
@@ -176,62 +165,14 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
     renderAgentsCard(true)
   }
 
-  const fetchModels = async (harness: HarnessId): Promise<HarnessModelsResponse> => {
-    try {
-      const response = await ctx.boundedFetch(`${baseUrl}/api/harnesses/${harness}/models`)
-      if (!response.ok) {
-        return { harnessId: harness, models: [], source: "suggestions", reason: await ctx.errorMessageOf(response, `The server answered ${response.status}`) }
-      }
-      const parsed = HarnessModelsResponseSchema.safeParse(await response.json())
-      if (!parsed.success) return { harnessId: harness, models: [], source: "suggestions", reason: "The server's model list did not parse." }
-      return parsed.data
-    } catch (error) {
-      return { harnessId: harness, models: [], source: "suggestions", reason: error instanceof Error ? error.message : String(error) }
-    }
-  }
+  const fetchModels = (harness: HarnessId) => fetchHarnessModels(ctx, harness)
 
-  /** The harnesses the form offers: those whose model flag the table verified (the wire says so), with the live signal. */
-  const formHarnesses = (): AgentFormCard["payload"]["harnesses"] =>
-    harnesses()
-      .filter((harness) => harness.models !== undefined)
-      .map((harness) => ({
-        id: harness.id,
-        displayName: harness.displayName,
-        status: harness.status,
-        account: harness.account?.email ?? harness.account?.label ?? ""
-      }))
-
-  const modelsFields = (answer: HarnessModelsResponse | undefined): Pick<AgentFormCard["payload"], "models" | "modelsSource" | "modelsReason"> =>
-    answer === undefined
-      ? { models: [] }
-      : { models: answer.models, modelsSource: answer.source, ...(answer.reason === undefined ? {} : { modelsReason: answer.reason }) }
-
-  const upsertForm = (payload: AgentFormCard["payload"], status: Card["status"] = "active"): void => {
-    const existing = formCard()
-    store.dispatch({
-      type: "card.upsert",
-      actor: ctx.commandActor,
-      card: {
-        id: AGENT_FORM_CARD_ID,
-        kind: "agent-form",
-        title: payload.mode === "edit" ? `Edit agent · ${payload.draft.id}` : "New agent",
-        status,
-        createdAt: existing?.createdAt ?? Date.now(),
-        ordinal: deps.nextOrdinal(),
-        payload
-      }
-    })
-  }
-
-  const patchForm = (card: AgentFormCard, patch: Partial<AgentFormCard["payload"]>, status?: Card["status"]): void => {
-    store.dispatch({
-      type: "card.updated",
-      actor: ctx.commandActor,
-      id: card.id,
-      patch: { payload: { ...card.payload, ...patch }, ...(status === undefined ? {} : { status }) }
-    })
-  }
-
+  /*
+   * agent.new: the generic form (THE FORM LAW) for agent.create, prefilled
+   * from the line; an existing id renders agent.edit's form with the row's
+   * current model and purpose instead. The form runs as whoever asked for
+   * it, so the agent's ask still confirms on submit.
+   */
   const newAgent: AgentsController["newAgent"] = async (prefill) => {
     if (prefill.harness !== undefined && !isHarnessId(prefill.harness)) {
       return `There is no harness with id ${prefill.harness}. Harnesses: ${HARNESS_IDS.join(", ")}.`
@@ -242,23 +183,25 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
     if (prefill.id !== undefined && existing === undefined && !isAgentRoleId(prefill.id)) {
       return `${prefill.id} is not an agent id: lowercase letters, digits and dashes, starting with a letter.`
     }
-    const offered = formHarnesses()
-    const harness = prefill.harness ?? existing?.harness ?? offered.find((row) => row.status === "signed-in" || row.status === "api-key")?.id ?? offered[0]?.id
-    const draft: AgentFormDraft = {
-      id: existing?.id ?? prefill.id ?? "",
-      label: existing?.label ?? "",
-      purpose: prefill.purpose ?? existing?.purpose ?? "",
-      ...(harness === undefined ? {} : { harness }),
-      model: prefill.model ?? existing?.model.id ?? ""
-    }
-    const models = harness === undefined ? undefined : await fetchModels(harness)
-    upsertForm({
-      mode: existing === undefined ? "create" : "edit",
-      draft,
-      harnesses: offered,
-      ...modelsFields(models),
-      phase: "editing"
-    })
+    const via = ctx.commandActor === "smithers" ? "agent" : "user"
+    const rendered = existing === undefined
+      ? deps.renderFlowForm({
+        name: "agent.create",
+        args: [prefill.id, prefill.harness, prefill.model, prefill.purpose].filter((part): part is string => part !== undefined).join(" "),
+        via
+      })
+      : deps.renderFlowForm({
+        name: "agent.edit",
+        args: [
+          existing.id,
+          `--model ${prefill.model ?? existing.model.id}`,
+          `--purpose ${prefill.purpose ?? existing.purpose}`,
+          `--label ${existing.label}`
+        ].join(" "),
+        via
+      })
+    if (rendered === undefined) return "The agent form could not be rendered here."
+    return { value: formRenderedText(rendered.missing) }
   }
 
   const putAgent = async (id: string, body: AgentPutRequest): Promise<string | undefined> => {
@@ -271,15 +214,10 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
     return undefined
   }
 
-  /** After a mutation: the mirror re-reads, the Agents card (if shown) refreshes in place, the form (if open) settles. */
-  const settle = async (form: AgentFormCard | undefined, error: string | undefined): Promise<void> => {
+  /** After a mutation: the mirror re-reads and the Agents card (if shown) refreshes in place; the form settles itself (forms.ts). */
+  const settle = async (error: string | undefined): Promise<void> => {
     await load()
     renderAgentsCard(false, error)
-    if (form !== undefined) {
-      const current = formCard() ?? form
-      if (error === undefined) patchForm(current, { phase: "saved" }, "acted")
-      else patchForm(current, { phase: "failed", error }, "error")
-    }
   }
 
   const createAgent: AgentsController["createAgent"] = async (input) => {
@@ -289,20 +227,16 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
     if (!MODEL_ID.test(input.model)) return `${input.model} is not a model id: no spaces, no leading dash.`
     await load()
     if (findAgentRole(id, agentRoles()) !== undefined) return `An agent named ${id} already exists — agent.edit ${id} changes it.`
-    const form = formCard()
-    const fromForm = form !== undefined && form.payload.phase === "editing" && (form.payload.draft.id === id || agentIdFromLabel(form.payload.draft.label) === id)
-      ? form
-      : undefined
-    const label = fromForm?.payload.draft.label.trim() || labelFromId(id)
-    const purpose = input.purpose?.trim() ?? fromForm?.payload.draft.purpose ?? ""
-    if (fromForm !== undefined) patchForm(fromForm, { draft: { ...fromForm.payload.draft, id }, phase: "saving" })
+    // The label is the id humanized ("docs-writer" → "Docs writer"); agent.edit --label renames it.
+    const label = labelFromId(id)
+    const purpose = input.purpose?.trim() ?? ""
     const error = await putAgent(id, {
       label,
       purpose,
       harness: input.harness,
       model: { provider: providerOf(input.harness, input.model), id: input.model, label: input.model }
     })
-    await settle(fromForm, error)
+    await settle(error)
     if (error !== undefined) return error
     return { value: `created agent ${id}: ${label} on ${input.harness} with ${input.model}` }
   }
@@ -316,9 +250,6 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
       return `agent.edit ${id} needs --model <id>, --purpose <text>, or --label <name>.`
     }
     if (patch.label !== undefined && patch.label.trim() === "") return "agent.edit's --label needs a name."
-    const form = formCard()
-    const fromForm = form !== undefined && form.payload.phase === "editing" && form.payload.mode === "edit" && form.payload.draft.id === id ? form : undefined
-    if (fromForm !== undefined) patchForm(fromForm, { phase: "saving" })
     const error = await putAgent(id, {
       label: patch.label?.trim() ?? existing.label,
       purpose: patch.purpose ?? existing.purpose,
@@ -326,7 +257,7 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
       model: patch.model === undefined ? existing.model : { provider: providerOf(existing.harness, patch.model), id: patch.model, label: patch.model },
       delegates: existing.delegates
     })
-    await settle(fromForm, error)
+    await settle(error)
     if (error !== undefined) return error
     return { value: `edited agent ${id}` }
   }
@@ -345,7 +276,7 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause)
     }
-    await settle(undefined, error)
+    await settle(error)
     if (error !== undefined) return error
     return { value: `removed agent ${id}` }
   }
@@ -378,39 +309,5 @@ export const createAgentsController = (ctx: ControllerContext, deps: AgentsContr
     })
   }
 
-  const updateAgentForm: AgentsController["updateAgentForm"] = async (field, value) => {
-    const card = formCard()
-    if (card === undefined || card.payload.phase !== "editing") return "There is no agent form open — agent.new opens one."
-    const draft = card.payload.draft
-    switch (field) {
-      case "label":
-        patchForm(card, { draft: { ...draft, label: value } })
-        return
-      case "purpose":
-        patchForm(card, { draft: { ...draft, purpose: value } })
-        return
-      case "model":
-        patchForm(card, { draft: { ...draft, model: value.trim() } })
-        return
-      case "harness": {
-        const harness = value.trim()
-        if (!isHarnessId(harness) || !card.payload.harnesses.some((row) => row.id === harness)) {
-          return `The form offers ${card.payload.harnesses.map((row) => row.id).join(", ")}; ${harness} is not one of them.`
-        }
-        if (card.payload.mode === "edit") return "An existing agent keeps its harness; agent.create makes a new one."
-        patchForm(card, { draft: { ...draft, harness } })
-        const answer = await fetchModels(harness)
-        const current = formCard()
-        if (current !== undefined && current.payload.draft.harness === harness) patchForm(current, modelsFields(answer))
-        return
-      }
-      case "cancel":
-        patchForm(card, { phase: "cancelled" }, "acted")
-        return
-      default:
-        return `agent.form takes one of ${AGENT_FORM_FIELDS.join(", ")}, then the value.`
-    }
-  }
-
-  return { loadAgents: load, agentRoles, listAgents, newAgent, createAgent, editAgent, removeAgent, listHarnessModels, updateAgentForm }
+  return { loadAgents: load, agentRoles, listAgents, newAgent, createAgent, editAgent, removeAgent, listHarnessModels }
 }

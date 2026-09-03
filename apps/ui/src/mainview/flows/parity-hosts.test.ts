@@ -454,7 +454,7 @@ describe("host parity — the web and native catalogs against the servers' own c
    * workspace card is the one whose act rides a host door — the terminal
    * tunnel — so it is the card in the transcript here.
    */
-  test("(a‴) a signed-in web page with a workspace card renders no control bound to a flow the web registry lacks", async () => {
+  test("(a‴) a signed-in web page with a workspace card and a TypeScript file card renders no control bound to a flow the web registry lacks", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, unavailableAgent, {
       bootstrap: WEB,
@@ -486,18 +486,47 @@ describe("host parity — the web and native catalogs against the servers' own c
         }
       }
     })
+    /*
+     * The file card's pointer gestures are bindings to code.hover /
+     * code.definition (`runtime: ["local.lsp"]`, a native door): a TypeScript
+     * card is in the sweep so a binding rendered on the web fails here. The
+     * surface is a lazy chunk, so the sweep waits for it.
+     */
+    store.dispatch({
+      type: "card.upsert",
+      actor: "system",
+      card: {
+        id: "file-will/smithers-src/app.ts",
+        kind: "file",
+        title: "File · will/smithers · src/app.ts",
+        status: "active",
+        createdAt: 0,
+        ordinal: 1,
+        payload: { repo: "will/smithers", path: "src/app.ts", content: "export const answer: number = 42\n", truncated: false }
+      }
+    })
     await new Promise((resolve) => setTimeout(resolve, 0))
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
     flushSync(() => root.render(createElement(ControllerTestProvider, { controller, children: createElement(App) })))
     try {
+      for (let tick = 0; tick < 600 && host.querySelector(".code-surface") === null; tick += 1) await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(host.querySelector(".code-surface")).not.toBeNull()
       const webNames = new Set(controller.commands.all().map((command) => command.name))
-      const rendered = [...new Set([...host.querySelectorAll("[data-flow]")].map((el) => el.getAttribute("data-flow") ?? ""))]
-      // The card is on the page: its session act is in the sweep.
+      const rendered = [
+        ...new Set([
+          ...[...host.querySelectorAll("[data-flow]")].map((el) => el.getAttribute("data-flow") ?? ""),
+          ...[...host.querySelectorAll("[data-flow-activate]")].map((el) => el.getAttribute("data-flow-activate") ?? "")
+        ])
+      ]
+      // Both cards are on the page: the session act and the file surface are in the sweep.
       expect(host.querySelector('[data-kind="workspace"]')).not.toBeNull()
+      expect(host.querySelector('[data-kind="file"]')).not.toBeNull()
       expect(rendered).toContain("workspace.session.destroy")
       expect(rendered.filter((name) => !webNames.has(name))).toEqual([])
+      // The door is stated on the card instead.
+      expect(host.querySelector('[data-kind="file"] [data-intel="unavailable"]')?.textContent).toContain("needs the native app")
     } finally {
       flushSync(() => root.unmount())
       host.remove()

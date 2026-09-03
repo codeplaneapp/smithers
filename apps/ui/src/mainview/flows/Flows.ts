@@ -28,6 +28,7 @@ import { isAgentRoleId } from "@smthrs/rpc/AgentRoles"
 import type { AppController } from "../state/AppController"
 import { PALETTES, WORLD_DISPLAY_NAME } from "../state/AppState"
 import type { CommandState, FlowEntry, FlowMetadata } from "./registry"
+import { flag, line, text } from "./FlowForms"
 
 /**
  * What a flow handler resolves: nothing, an honest error string, or a success
@@ -156,7 +157,8 @@ const flow = <I extends Payload>(declaration: Declaration<I>): FlowEntry => {
       modelInvocable: userOnly !== true,
       handler: (payload) => act(() => handler(payload))
     }),
-    metadata
+    metadata,
+    input
   }
 }
 
@@ -501,6 +503,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "flow.run",
+    form: { fields: { name: { label: "Workflow" }, repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Run a workflow on your workspace",
     runtime: ["jjhub"],
     args: "<name> [owner/repo]",
@@ -522,6 +525,17 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    */
   flow({
     name: "runs.list",
+    form: {
+      fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } },
+      args: (payload) =>
+        line(
+          text(payload, "status"),
+          text(payload, "flow"),
+          text(payload, "by") === undefined ? undefined : `by=${text(payload, "by")}`,
+          text(payload, "lineage") === undefined ? undefined : `lineage=${text(payload, "lineage")}`,
+          text(payload, "repo")
+        )
+    },
     summary: "List the runs on your workspace",
     runtime: ["jjhub"],
     args: "[status] [flow] [by=principal] [lineage=id] [owner/repo]",
@@ -703,6 +717,15 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     userOnlyReason: "minimizing a card is the human's explicit act",
     input: NoPayload,
     handler: () => actions.minimizeCard()
+  }),
+  flow({
+    /* THE FORM LAW: a form card's Cancel. Only form cards dismiss; the handler refuses the rest by kind. */
+    name: "card.dismiss",
+    summary: "Dismiss a form card",
+    hidden: true,
+    args: "<cardId>",
+    input: CardTarget,
+    handler: ({ cardId }) => actions.dismissCard(cardId)
   }),
   flow({
     name: "frame.back",
@@ -1025,6 +1048,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "issues.create",
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Create an issue",
     runtime: ["jjhub"],
     args: "<title> [owner/repo]",
@@ -1052,6 +1076,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "issues.comment",
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Comment on an issue",
     runtime: ["jjhub"],
     args: "<number> <text> [owner/repo]",
@@ -1083,6 +1108,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "prs.create",
+    form: {
+      fields: { from: { optionsFrom: "bookmarks", kind: "text", label: "From bookmark" }, repo: { optionsFrom: "cloud-repos", kind: "text" } },
+      args: (payload) => line(text(payload, "title"), text(payload, "from") === undefined ? undefined : `from:${text(payload, "from")}`, text(payload, "repo"))
+    },
     summary: "Open a pull request",
     runtime: ["jjhub"],
     args: "<title> [from:<bookmark>] [owner/repo]",
@@ -1111,6 +1140,11 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "prs.review",
+    form: {
+      fields: { text: { required: false }, repo: { optionsFrom: "cloud-repos", kind: "text" } },
+      args: (payload) =>
+        line(text(payload, "number"), text(payload, "verdict") === "request_changes" ? "request-changes" : text(payload, "verdict"), text(payload, "text"), text(payload, "repo"))
+    },
     summary: "Review a pull request",
     runtime: ["jjhub"],
     args: "<number> approve|request-changes|comment [text] [owner/repo]",
@@ -1201,6 +1235,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "files.read",
+    form: {
+      fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } },
+      args: (payload) => line([text(payload, "path"), text(payload, "line"), text(payload, "column")].filter((part) => part !== undefined).join(":"), text(payload, "repo"))
+    },
     summary: "Read a file from a repository",
     runtimeAny: ["jjhub", "local.repositories"],
     /* `:line[:col]` (docs/code-intel/PLAN.md §1): the card scrolls to and marks the line; the parser strips it off the path token. */
@@ -1225,6 +1263,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    */
   flow({
     name: "code.hover",
+    form: {
+      fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } },
+      args: (payload) => line(`${text(payload, "path") ?? ""}:${text(payload, "line") ?? ""}:${text(payload, "column") ?? ""}`, text(payload, "repo"))
+    },
     summary: "The type and docs of the symbol at a position",
     runtime: ["local.lsp"],
     args: "<path>:<line>:<col> [owner/repo]",
@@ -1233,6 +1275,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "code.definition",
+    form: {
+      fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } },
+      args: (payload) => line(`${text(payload, "path") ?? ""}:${text(payload, "line") ?? ""}:${text(payload, "column") ?? ""}`, text(payload, "repo"))
+    },
     summary: "Where the symbol at a position is defined; opens that file at the line",
     runtime: ["local.lsp"],
     args: "<path>:<line>:<col> [owner/repo]",
@@ -1241,6 +1287,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "code.diagnostics",
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "The language server's errors and warnings for a file",
     runtime: ["local.lsp"],
     args: "<path> [owner/repo]",
@@ -1385,6 +1432,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     /* Disconnecting drops every issue's Linear link: agent invocations confirm first. */
     name: "linear.disconnect",
+    form: { fields: { confirmKey: { label: "Team key, typed back" } } },
     summary: "Disconnect a Linear integration",
     runtime: ["jjhub"],
     confirm: "disconnect the Linear integration",
@@ -1427,6 +1475,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "issues.link-linear",
+    form: { fields: { number: { label: "Issue number" }, identifier: { label: "Linear identifier" }, repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Link an issue to a Linear identifier",
     runtime: ["jjhub"],
     args: "<number> <identifier> [owner/repo]",
@@ -1472,6 +1521,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     /* Launching a cloud computer is an outbound act: the capability always asks. */
     name: "workspace.open",
+    form: {
+      fields: { bookmark: { optionsFrom: "bookmarks", kind: "text" }, repo: { optionsFrom: "cloud-repos", kind: "text" } },
+      args: (payload) => line(text(payload, "bookmark"), text(payload, "repo"), flag(payload, "kind"))
+    },
     summary: "Open (create or reuse) a Linux workspace in Smithers Cloud on a bookmark: a real machine with a terminal, files, and services the user can use",
     runtime: ["jjhub"],
     capabilities: ["outbound:launch"],
@@ -1487,6 +1540,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "workspace.view",
+    form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Open one cloud workspace's card",
     runtime: ["jjhub"],
     args: "<workspaceId>",
@@ -1570,6 +1624,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "workspace.template",
+    form: {
+      fields: { workspaceId: { optionsFrom: "workspaces" } },
+      args: (payload) => line(text(payload, "snapshotId"), text(payload, "workspaceId"), flag(payload, "name"))
+    },
     summary: "Create a workspace template from a snapshot",
     runtime: ["jjhub"],
     args: "<snapshotId> <name> [workspaceId]",
@@ -1603,6 +1661,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "workspace.delete",
+    form: { fields: { workspaceId: { optionsFrom: "workspaces" }, confirmName: { label: "Name, typed back" } } },
     summary: "Delete a cloud workspace",
     runtime: ["jjhub"],
     hidden: true,
@@ -1616,6 +1675,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     /* The card's body tab: showing a facet is how the agent answers "show me the files" too (agent-parity.md). */
     name: "workspace.facet",
+    form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Switch a workspace card's facet",
     runtime: ["jjhub"],
     args: "<workspaceId> <facet>",
@@ -1644,6 +1704,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "workspace.file",
+    form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Read one file out of a cloud workspace",
     runtime: ["jjhub"],
     args: "<path> [workspaceId]",
@@ -1678,6 +1739,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    */
   flow({
     name: "workspace.desktop",
+    form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Open the desktop of a cloud workspace and stream it into the card",
     runtime: ["jjhub"],
     confirm: "open the workspace's desktop",
@@ -1689,6 +1751,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     /* Rotating changes the VNC password in the guest: the old iframe disconnects. */
     name: "workspace.desktop.rotate",
+    form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Rotate a workspace desktop session",
     runtime: ["jjhub"],
     hidden: true,
@@ -1907,6 +1970,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * performs it.
      */
     name: "review.request",
+    form: { fields: { reviewer: { label: "Login or agent:name" } } },
     summary: "Ask someone to review a change",
     runtime: ["jjhub"],
     confirm: "request a review of the change",
@@ -1979,6 +2043,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     /* Launching Claude Code / Codex / Gemini / OpenCode spends money and acts on the repo: the agent asks, the human confirms. */
     name: "tab.harness",
+    form: { fields: { harnessId: { optionsFrom: "harnesses" } } },
     summary: "Open a harness session (Claude Code, Codex, Gemini, OpenCode)",
     runtime: ["local.harnesses"],
     confirm: "launch a harness as a session",
@@ -1993,6 +2058,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * The same launch as tab.harness, so the same confirm.
      */
     name: "agent.role",
+    form: { fields: { roleId: { optionsFrom: "agents" } } },
     summary: "Launch a named agent (built-in or custom) as a session",
     runtime: ["local.harnesses"],
     confirm: "launch an agent role as a session",
@@ -2011,6 +2077,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * reads the result back with tab.read.
      */
     name: "agent.delegate",
+    form: { fields: { roleId: { optionsFrom: "agents" } } },
     summary: "Delegate a task to an agent (built-in or custom; agent.list shows them)",
     runtime: ["local.harnesses"],
     args: "<role> <task>",
@@ -2048,18 +2115,33 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     }),
     handler: (prefill) => actions.newAgent(prefill)
   }),
+  /*
+   * THE FORM LAW (apps/ui/AGENTS.md): the generic form card's own acts. A
+   * field commits through form.set (one payload update, never component
+   * state); form.submit assembles the line and runs the form's flow as the
+   * actor that asked for it, so a consequential flow the agent asked for
+   * still confirms. Hidden like every id-scoped card act, callable by the
+   * agent like every hidden act.
+   */
   flow({
-    /* The form's rows commit through here: one payload update per field, never component state. */
-    name: "agent.form",
-    summary: "Set one field of the open New agent form",
-    runtime: ["local.harnesses"],
+    name: "form.set",
+    summary: "Set one field of a form card",
     hidden: true,
-    args: "<label|purpose|harness|model|cancel> [value]",
-    input: Schema.Struct({ field: Schema.String, value: Schema.String }),
-    handler: ({ field, value }) => actions.updateAgentForm(field, value)
+    args: "<cardId> <field> [value]",
+    input: Schema.Struct({ cardId: Schema.String, field: Schema.String, value: Schema.String }),
+    handler: ({ cardId, field, value }) => actions.setFormField(cardId, field, value)
+  }),
+  flow({
+    name: "form.submit",
+    summary: "Submit a form card: run its flow with the fields filled in",
+    hidden: true,
+    args: "<cardId>",
+    input: CardTarget,
+    handler: ({ cardId }) => actions.submitForm(cardId)
   }),
   flow({
     name: "agent.create",
+    form: { fields: { harness: { optionsFrom: "agent-harnesses" }, model: { optionsFrom: "harness-models", kind: "text" } } },
     summary: "Create an agent: an id, the harness that runs it, the model id that harness accepts, and its purpose",
     runtime: ["local.harnesses"],
     confirm: ({ id, harness, model }) => `create the agent ${String(id)} on ${String(harness)} with ${String(model)}`,
@@ -2069,6 +2151,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "agent.edit",
+    form: {
+      fields: { id: { optionsFrom: "agents" }, model: { optionsFrom: "harness-models", kind: "text" } },
+      args: (payload) => line(text(payload, "id"), flag(payload, "model"), flag(payload, "purpose"), flag(payload, "label"))
+    },
     summary: "Change an agent's model, purpose, or name (a built-in keeps its harness)",
     runtime: ["local.harnesses"],
     confirm: ({ id }) => `edit the agent ${String(id)}`,
@@ -2083,6 +2169,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "agent.remove",
+    form: { fields: { id: { optionsFrom: "agents" } } },
     summary: "Remove a custom agent (a built-in cannot be removed)",
     runtime: ["local.harnesses"],
     confirm: ({ id }) => `remove the agent ${String(id)}`,
@@ -2092,6 +2179,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "agent.models",
+    form: { fields: { harness: { optionsFrom: "agent-harnesses" } } },
     summary: "List the models a harness can run, as the harness reports them",
     runtime: ["local.harnesses"],
     args: "<harness>",
@@ -2184,6 +2272,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    */
   flow({
     name: "repo.tree",
+    form: { args: (payload) => text(payload, "path") === undefined ? text(payload, "copy") ?? "" : `${text(payload, "copy")}#${text(payload, "path")}` },
     summary: "Expand or collapse a directory of a working copy in the sidebar",
     runtime: ["local.repositories"],
     args: "<copyId>[#path]",
@@ -2241,6 +2330,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   /* The target-card runs: builds and tests on the human's machine, so the agent asks and the human confirms. */
   flow({
     name: "target.run",
+    form: {
+      fields: { repoId: { optionsFrom: "open-repos" }, label: { label: "Target label" } },
+      args: (payload) => line(text(payload, "repoId"), text(payload, "workspace"), text(payload, "label"))
+    },
     summary: "Run a Smithers target",
     runtime: ["local.targets"],
     confirm: "run the Smithers target",
@@ -2250,6 +2343,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "target.run.pattern",
+    form: {
+      fields: { repoId: { optionsFrom: "open-repos" } },
+      args: (payload) => line(text(payload, "repoId"), text(payload, "workspace"), text(payload, "verb"), text(payload, "pattern"))
+    },
     summary: "Run a Smithers verb over a pattern (`ci //packages/...`)",
     runtime: ["local.targets"],
     confirm: "run the Smithers verb over the pattern",
@@ -2265,6 +2362,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     /* Showing a target is how the agent answers "show me //src:lint" too. */
     name: "target.open",
+    form: {
+      fields: { repoId: { optionsFrom: "open-repos" }, label: { label: "Target label" } },
+      args: (payload) => line(text(payload, "repoId"), text(payload, "workspace"), text(payload, "label"))
+    },
     summary: "Show a Smithers target in its targets card",
     runtime: ["local.targets"],
     args: "<repoId> <label>",
@@ -2435,6 +2536,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "target.runs.select",
+    form: { args: (payload) => line(text(payload, "repoId"), text(payload, "runId")) },
     summary: "Replay a recorded run into the timeline and the graph",
     runtime: ["local.targets"],
     hidden: true,

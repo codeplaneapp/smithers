@@ -139,6 +139,17 @@ export const createFailureController = (ctx: ControllerContext): FailureControll
    * same refusal.
    */
   const surfaceCommandFailure = (name: string, outcome: CommandOutcome): void => {
+    if (outcome.status === "form") {
+      /*
+       * THE FORM LAW: the slash line lacked its input, so the form card is in
+       * the transcript; the composer's line points at it and says nothing
+       * about arguments. An ok toast: it resolves and leaves on its own.
+       */
+      const key = `command.form.${name}`
+      ctx.store.dispatch({ type: "toast.shown", actor: "system", key, title: "Fill in the form above" })
+      resolveToast(key, { status: "ok", detail: "" })
+      return
+    }
     if (outcome.status !== "failed") return
     if (outcome.error === ZERO_BALANCE_EXHAUSTED_TEXT) return
     const key = `command.failed.${name}`

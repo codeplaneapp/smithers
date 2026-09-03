@@ -134,7 +134,14 @@ export const RepoFilesResponseSchema = z.discriminatedUnion("kind", [
     size: z.number().int().nonnegative(),
     content: z.string(),
     truncated: z.boolean(),
-    binary: z.boolean()
+    binary: z.boolean(),
+    /**
+     * SHA-256 of the bytes read, hex. The file card keeps it; a language
+     * server answer carries the digest of the text it was asked about, so
+     * the card can tell an answer about the file it shows from one about a
+     * newer file on disk. Optional for peers and fixtures that predate it.
+     */
+    digest: z.string().optional()
   })
 ])
 export type RepoFilesResponse = z.infer<typeof RepoFilesResponseSchema>
@@ -167,6 +174,21 @@ export const lspTopic = (repoId: string): string => `lsp:${repoId}`
 export const LSP_LANGUAGE_IDS = ["typescript"] as const
 export const LspLanguageIdSchema = z.enum(LSP_LANGUAGE_IDS)
 export type LspLanguageId = z.infer<typeof LspLanguageIdSchema>
+/**
+ * The file extensions each language's server handles. The host registry
+ * (apps/ui/src/bun/lsp/LanguageServers.ts) reads its rows from here, and the
+ * renderer asks the same table which file cards code intelligence serves at
+ * all, so a host without the `local.lsp` door can say so on exactly those.
+ */
+export const LSP_LANGUAGE_EXTENSIONS: Readonly<Record<LspLanguageId, ReadonlyArray<string>>> = {
+  typescript: [".ts", ".mts", ".cts", ".tsx", ".js", ".mjs", ".cjs", ".jsx"]
+}
+/** The language whose server handles the path's extension, or null when no row does. */
+export const lspLanguageFor = (path: string): LspLanguageId | null => {
+  const extension = /\.[^./]+$/.exec(path)?.[0]?.toLowerCase()
+  if (extension === undefined) return null
+  return LSP_LANGUAGE_IDS.find((id) => LSP_LANGUAGE_EXTENSIONS[id].includes(extension)) ?? null
+}
 
 /** Hover text is cut here; the card and the model see the same text. */
 export const LSP_HOVER_CAP_CHARS = 4 * 1024
@@ -182,6 +204,13 @@ export const LSP_LANGUAGE_SERVER_MISSING = "language_server_missing"
 const lspOrdinal = z.number().int().min(1)
 const lspRepoId = z.string().min(1)
 const lspRepoPath = z.string().min(1).max(4096)
+/**
+ * The digest (RepoFilesResponse.digest) of the file text the server was
+ * asked about. A file card whose own digest differs shows a file the answer
+ * is not about; the renderer re-reads the card before it draws the answer.
+ */
+const lspDigest = z.string().min(1)
+const lspCount = z.number().int().nonnegative()
 
 /** A span, 1-based on both ends; `endCharacter` is exclusive, as the server's is. */
 const lspRangeShape = { line: lspOrdinal, character: lspOrdinal, endLine: lspOrdinal, endCharacter: lspOrdinal }
@@ -222,29 +251,48 @@ export const LspLocationSchema = z.object({ path: z.string().min(1), ...lspRange
 export type LspLocation = z.infer<typeof LspLocationSchema>
 
 export const LspHoverSchema = z.object({
-  /** Markdown as the server wrote it, cut at LSP_HOVER_CAP_CHARS. */
+  /**
+   * Markdown as the server wrote it, with the host's absolute paths made
+   * repository-relative (or cut to their last segment outside it), then cut
+   * at LSP_HOVER_CAP_CHARS.
+   */
   contents: z.string().max(LSP_HOVER_CAP_CHARS),
+  /** True when the cap cut the server's text; the card and the model state the cut. */
+  truncated: z.boolean(),
   /** The token the hover describes, when the server says. */
   range: LspRangeSchema.optional()
 })
 export type LspHover = z.infer<typeof LspHoverSchema>
 
 /** `POST /api/lsp/hover`: `hover` is null when the server has nothing at the position. */
-export const LspHoverResponseSchema = z.object({ hover: LspHoverSchema.nullable() })
+export const LspHoverResponseSchema = z.object({ hover: LspHoverSchema.nullable(), digest: lspDigest })
 export type LspHoverResponse = z.infer<typeof LspHoverResponseSchema>
-/** `POST /api/lsp/definition` */
-export const LspDefinitionResponseSchema = z.object({ locations: z.array(LspLocationSchema).max(LSP_LOCATIONS_CAP) })
+/**
+ * `POST /api/lsp/definition`: `total` is how many targets the server named,
+ * `omitted` how many of them lie outside the repository (not a file card the
+ * renderer can open), and `locations` the rest up to the cap — so an empty
+ * list with `omitted > 0` is a definition elsewhere, never "none found".
+ */
+export const LspDefinitionResponseSchema = z.object({
+  locations: z.array(LspLocationSchema).max(LSP_LOCATIONS_CAP),
+  total: lspCount,
+  omitted: lspCount,
+  digest: lspDigest
+})
 export type LspDefinitionResponse = z.infer<typeof LspDefinitionResponseSchema>
 /**
  * `POST /api/lsp/diagnostics`: `items` is what the server published for
- * `version`, or null when it published nothing within the wait. An unread
- * file has no count: the card states none until the stream carries one.
+ * `version` up to the cap and `total` how many it published, or both null
+ * when it published nothing within the wait. An unread file has no count:
+ * the card states none until the stream carries one.
  */
 export const LspDiagnosticsResponseSchema = z.object({
   path: z.string(),
   /** The server's document version the items belong to; null when it names none or has not published. */
   version: z.number().int().nonnegative().nullable(),
-  items: z.array(LspDiagnosticSchema).max(LSP_DIAGNOSTICS_CAP).nullable()
+  items: z.array(LspDiagnosticSchema).max(LSP_DIAGNOSTICS_CAP).nullable(),
+  total: lspCount.nullable(),
+  digest: lspDigest
 })
 export type LspDiagnosticsResponse = z.infer<typeof LspDiagnosticsResponseSchema>
 
@@ -254,7 +302,9 @@ export const LspDiagnosticsMessageSchema = z.object({
   repoId: z.string(),
   path: z.string(),
   version: z.number().int().nonnegative().nullable(),
-  items: z.array(LspDiagnosticSchema).max(LSP_DIAGNOSTICS_CAP)
+  items: z.array(LspDiagnosticSchema).max(LSP_DIAGNOSTICS_CAP),
+  total: lspCount,
+  digest: lspDigest
 })
 export type LspDiagnosticsMessage = z.infer<typeof LspDiagnosticsMessageSchema>
 
@@ -387,6 +437,51 @@ export const CLOUD_ROUTE_PREFIX = "/api/cloud/"
  * `terminal` subprotocol attached upstream.
  */
 export const CLOUD_WS_ROUTE_PREFIX = "/api/cloud-ws/"
+/*
+ * Lane L6 — the cloud language-server relay (plue #505; apps/ui/docs/code-intel/
+ * PLAN.md "Live"): the same tunnel carries `…/workspace/sessions/{id}/lsp`
+ * with plue's `lsp` subprotocol. One JSON-RPC 2.0 message per text frame,
+ * 1 MiB per frame; a larger message crosses as `{ seq, last, data }`
+ * fragments (seq from 1) that the renderer reassembles, up to 16 MiB. The
+ * session is `POST …/workspace/sessions { workspace_id, kind: "lsp",
+ * language }`, one per (workspace, language), and the guest's checkout is the
+ * server's one workspace folder. A refused upgrade reaches the renderer as a
+ * 44xx close code that mirrors plue's HTTP status (ADR 0002's 4401 … 4429,
+ * plus 4425 `workspace_session_pending` and 4503 `guest_not_ready`), its
+ * reason plue's `code: message` verbatim and, when the refusal named a
+ * `Retry-After`, that instruction in words at the end of the reason.
+ */
+export const CLOUD_WS_SESSION_KINDS = ["terminal", "lsp"] as const
+export type CloudWsSessionKind = (typeof CLOUD_WS_SESSION_KINDS)[number]
+export const CLOUD_LSP_SUBPROTOCOL = "lsp"
+/** plue's terminal route caps a message at 64 KiB. */
+export const CLOUD_TERMINAL_FRAME_CAP_BYTES = 64 * 1024
+/** plue's lsp route caps a frame at 1 MiB; hover and diagnostics exceed 64 KiB. */
+export const CLOUD_LSP_FRAME_CAP_BYTES = 1024 * 1024
+/** A fragmented message is reassembled up to this many bytes; past it the message is dropped. */
+export const CLOUD_LSP_REASSEMBLY_CAP_BYTES = 16 * 1024 * 1024
+/** The guest's checkout: the server's `rootUri` and its one workspace folder. */
+export const CLOUD_LSP_ROOT_URI = "file:///home/developer/workspace"
+/** One fragment of a message larger than a frame: `seq` counts from 1 and `last` closes the set. */
+export const CloudLspFragmentSchema = z.object({ seq: z.number().int().min(1), last: z.boolean(), data: z.string() }).strict()
+export type CloudLspFragment = z.infer<typeof CloudLspFragmentSchema>
+/** The 201 of the session POST with `kind: "lsp"`, as far as the client reads it. */
+export const CloudLspSessionSchema = z.object({
+  id: z.string().min(1),
+  status: z.string(),
+  kind: z.literal("lsp"),
+  language: z.string().min(1)
+})
+export type CloudLspSession = z.infer<typeof CloudLspSessionSchema>
+export const CLOUD_WS_PENDING_CLOSE_CODE = 4425
+export const CLOUD_WS_NOT_READY_CLOSE_CODE = 4503
+/** The close reason with the refusal's `Retry-After` in words; `retryAfterOf` reads it back. */
+export const withRetryAfter = (reason: string, seconds: number): string => `${reason} (retry after ${seconds} s)`
+/** The `Retry-After` seconds a close reason names, or null when it names none. */
+export const retryAfterOf = (reason: string): number | null => {
+  const match = /\(retry after (\d+) s\)$/.exec(reason.trim())
+  return match === null ? null : Number(match[1])
+}
 export const CLOUD_AUTH_START_PATH = "/api/cloud-auth/start"
 export const CLOUD_AUTH_SESSION_PATH = "/api/cloud-auth/session"
 export const CLOUD_AUTH_SIGN_OUT_PATH = "/api/cloud-auth/sign-out"

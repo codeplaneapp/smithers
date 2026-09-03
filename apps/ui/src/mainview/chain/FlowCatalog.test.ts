@@ -130,15 +130,16 @@ describe("commandEntries — execution through the one door", () => {
       store,
       entries: commandEntries(commands),
       scripts: [
-        // world.select without args fails with the command's own message.
-        flow(`await ctx.call("world.select", {})`, `return done({})`),
+        // card.dismiss on a card that does not exist fails with the command's own message
+        // (a call WITHOUT its required input renders the flow's form instead — THE FORM LAW).
+        flow(`await ctx.call("card.dismiss", { args: "nope" })`, `return done({})`),
         flow(`return done({ recovered: true })`)
       ]
     })
     expect(outcome._tag).toBe("Done")
     const rejections = events.filter((event) => event._tag === "GateRejected")
     expect(rejections.length).toBeGreaterThan(0)
-    expect(JSON.stringify(rejections)).toContain("world.select needs the document id")
+    expect(JSON.stringify(rejections)).toContain("There is no card nope.")
   })
 
   test("a call to a name outside the catalog is gate 3's rejection", async () => {

@@ -244,6 +244,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok(repo === undefined ? { name } : { name, repo })
   },
   "card.maximize": (args) => required("cardId", args, "card.maximize needs the card id"),
+  "card.dismiss": (args) => required("cardId", args, "card.dismiss needs the card id"),
   // The clipboard text is taken verbatim: trimming would silently rewrite what
   // the human asked to copy.
   "chat.copy-message": (args) => (args ?? "") === "" ? no("copy-message needs the text to copy") : ok({ text: args ?? "" }),
@@ -714,7 +715,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
    * positionally; `agent.create` needs the three that define an agent, the
    * purpose is the rest of the line; `agent.edit` reads `--model`,
    * `--purpose`, `--label` anywhere on the line, each value running to the
-   * next flag; `agent.form` is a field name then the value (blank clears).
+   * next flag.
    */
   "agent.new": (args) => {
     const [id, harness, model, ...rest] = tokensOf(args)
@@ -726,12 +727,15 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
       ...(purpose === "" ? {} : { purpose })
     })
   },
-  "agent.form": (args) => {
-    const [field, ...rest] = tokensOf(args)
-    if (field === undefined) return no("agent.form needs a field: label, purpose, harness, model, or cancel")
-    const value = trimmed(args).slice(field.length).trim()
-    return ok({ field, value: rest.length === 0 ? "" : value })
+  /* THE FORM LAW: the generic form card's acts. `form.set`'s value is the rest of the line (blank clears). */
+  "form.set": (args) => {
+    const [cardId, field, ...rest] = tokensOf(args)
+    if (cardId === undefined) return no("form.set needs the card id")
+    if (field === undefined) return no("form.set needs the field name")
+    const value = trimmed(args).slice(cardId.length).trim().slice(field.length).trim()
+    return ok({ cardId, field, value: rest.length === 0 ? "" : value })
   },
+  "form.submit": (args) => required("cardId", args, "form.submit needs the card id"),
   "agent.create": (args) => {
     const [id, harness, model, ...rest] = tokensOf(args)
     if (id === undefined || harness === undefined || model === undefined) {

@@ -501,6 +501,7 @@ describe("command registry bindings", () => {
       "approvals.open",
       "card.maximize",
       "card.minimize",
+      "card.dismiss",
       "frame.back",
       "frame.forward",
       "frame.fork",
@@ -628,7 +629,9 @@ describe("command registry bindings", () => {
       // Agents as data (docs/workbench-lanes/custom-agents.md).
       "agent.list",
       "agent.new",
-      "agent.form",
+      // THE FORM LAW (docs/workbench-lanes/flow-forms.md): the generic form card's acts.
+      "form.set",
+      "form.submit",
       "agent.create",
       "agent.edit",
       "agent.remove",
@@ -707,8 +710,10 @@ describe("command registry bindings", () => {
     expect((await controller.commands.run("world.delete.confirm")).status).toBe("failed")
 
     expect((await controller.commands.run("does-not-exist")).status).toBe("unknown-command")
-    const failed = await controller.commands.run("connector.remove")
-    expect(failed.status).toBe("failed")
+    // THE FORM LAW: a flow run without its required input renders its form; no door answers with a usage sentence.
+    const formed = await controller.commands.run("connector.remove")
+    expect(formed).toEqual({ status: "form", flow: "connector.remove", cardId: "form-connector.remove", fields: ["connectorId"] })
+    expect(store.collections.cards.get("form-connector.remove")?.kind).toBe("flow-form")
   })
 
   test("admin commands are ABSENT for a non-admin session, present for an admin", async () => {

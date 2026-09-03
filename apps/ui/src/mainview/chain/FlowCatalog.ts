@@ -59,6 +59,9 @@ const entryFor = (commands: CommandRegistry, entry: FlowEntry): Catalog.Entry =>
               return Effect.fail(new Catalog.CallError({ name, message: outcome.reason }))
             case "failed":
               return Effect.fail(new Catalog.CallError({ name, message: outcome.error }))
+            case "form":
+              // THE FORM LAW: nothing ran; the form is in the chat and the model points the human at it.
+              return Effect.succeed<unknown>(`rendered a form for ${outcome.fields.join(", ")}: ask the user to fill it in`)
           }
         })
       )

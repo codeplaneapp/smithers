@@ -18,7 +18,8 @@ import { findAgentRole } from "@smthrs/rpc/AgentRoles"
 import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "lucide-react"
 import { lazy, Suspense, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
-import { AgentFormCardBody, AgentModelsCardBody, AgentsCardBody } from "./cards/AgentCards"
+import { AgentModelsCardBody, AgentsCardBody } from "./cards/AgentCards"
+import { FlowFormCardBody } from "./cards/FlowFormCards"
 import { BranchesCardBody } from "./cards/BranchesCard"
 import { ChangeCardBody, DiffCardBody } from "./cards/ChangeCards"
 import { EnvironmentImagesCardBody, WorkspaceCardBody } from "./cards/WorkspaceCard"
@@ -170,13 +171,10 @@ export const pillStatus = (card: Card): string => {
     if (card.payload.phase === "asking") return "running"
     return card.payload.phase === "answered" ? "done" : "failed"
   }
-  /* Agents as data: the listings settle when they render; the form's pill is its phase. */
+  /* Agents as data: the listings settle when they render. */
   if (card.kind === "agents" || card.kind === "agent-models") return "done"
-  if (card.kind === "agent-form") {
-    if (card.payload.phase === "saving") return "running"
-    if (card.payload.phase === "failed") return "failed"
-    return card.payload.phase === "editing" ? "pending" : "done"
-  }
+  /* THE FORM LAW: a form waits on the human until it is submitted (acted) or its submit was refused (error, above). */
+  if (card.kind === "flow-form") return card.status === "acted" ? "done" : "pending"
   if (card.status === "acted") return "done"
   if (card.kind !== "status") return "pending"
   const progress = card.payload.progress
@@ -1154,7 +1152,7 @@ export function CardView({
           {card.kind === "ci-matrix" ? <CiMatrixCardBody card={card} /> : null}
           {card.kind === "agent" ? <AgentCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "agents" ? <AgentsCardBody card={card} onRunCommand={onRunCommand} /> : null}
-          {card.kind === "agent-form" ? <AgentFormCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "flow-form" ? <FlowFormCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "agent-models" ? <AgentModelsCardBody card={card} /> : null}
           {card.kind === "explain" ? <ExplainCardBody card={card} /> : null}
           {card.kind === "workspace" ? <WorkspaceCardBody card={card} onRunCommand={onRunCommand} /> : null}

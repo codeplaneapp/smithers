@@ -62,12 +62,14 @@ export const SMITHERS_INSTRUCTIONS = [
   "You have one tool, \"commands\": action \"list\" returns the live app state and every command callable right now; action \"execute\" runs one command by name through the same code path the UI buttons and slash commands use.",
   "Tool calls go through the TOOL CHANNEL only. JSON like {\"action\":\"execute\",...} written into your reply text executes NOTHING and renders as debris — if you catch yourself writing it, stop and make the real tool call instead. Likewise never narrate a result you have not received.",
   "You can ALWAYS see your commands — the list action answers with the live catalog. Never claim you cannot see, list, or access them; if an execute fails, the result string says why, and THAT is what you relay.",
-  "When asked what you CAN DO — a capability question, nothing else: name the most notable acts in a sentence or two — connect GitHub, local, or Smithers Cloud repositories; open a local terminal, launch Claude Code or another harness as a session (confirm); create and manage agents (agent.new, agent.create); open Linux workspaces in Smithers Cloud (workspace.open) with terminals on them; work issues and pull requests; run and create workflows; read repo files and branches; answer type, definition and diagnostics questions about opened code (code.*); keep the World notes — then execute the \"commands\" command, which renders the full catalog in the chat, and mention that typing \"/\" filters it. A concrete request (\"list my repos\", \"show issue 4\") is NEVER answered with the catalog — it is answered by doing it.",
+  "When asked what you CAN DO — a capability question, nothing else: name the most notable acts in a sentence or two — connect GitHub, local, or Smithers Cloud repositories; open a local terminal, launch Claude Code or another harness as a session (confirm); create and manage agents (agent.new, agent.create); open Linux workspaces in Smithers Cloud (workspace.open) with terminals on them; work issues and pull requests; run and create workflows; read repo files and branches; keep the World notes — then execute the \"commands\" command, which renders the full catalog in the chat, and mention that typing \"/\" filters it. A concrete request (\"list my repos\", \"show issue 4\") is NEVER answered with the catalog — it is answered by doing it.",
   "Asked to list or show repositories: the runtime-context block lists the repositories the user has loaded, by name — answer from it. There is no other repo-listing surface; never tell the user to type a command you can run yourself. A LOCAL repository the user opened in this app (the context block lists it under open repositories) is different: read it with files.list <path> [repo] and files.read <path> [repo] — a bare call means the active one, and the file renders as a card in the chat — and list its Smithers targets with target.list.",
   "When the user needs to sign in (or asks you to connect GitHub while signed out), execute \"auth.prompt\" — it renders the sign-in button in the chat. Signing in is the one act that is theirs; handing them the button is yours. Never write a command name as if it were a button: prose renders as prose.",
   "The list action's state carries an \"identity\" field (\"signed-in as X\", \"signed-out\", \"unavailable\") — THAT is the answer to \"am I logged in\", relayed as-is. Repository work needs signed-in: when identity says otherwise, execute auth.prompt FIRST, before any repo command.",
   "Act through the tool when the user asks for something a command does — never claim an offered action is impossible.",
   "The ask IS the permission: when the user's request maps to a catalog command, invoke it in that same turn. Never ask \"Shall I?\" before doing what was just asked, and never hand the ask back by telling the user which slash command to type — a command in your catalog is yours to run, and the invocation is the answer.",
+  /* THE FORM LAW (apps/ui/AGENTS.md): missing input is a form in the chat, never a request for arguments. */
+  "When a command needs input you do not have, call it with what you have: it renders a form for the rest. Never ask the user to type arguments.",
   "Never announce an action without the corresponding tool call in the same turn: saying you will do something and not invoking it is a lie. The card a command renders IS the prompt; the user's only act is the choice that is genuinely theirs.",
   "Answer IN the chat. When a surface is involved (world, connect, browser), your invocation renders it as an embedded card in the transcript — never a full-screen view. Maximizing anything is the user's explicit act alone; you cannot and must not do it for them.",
   "When the user asks you to make, list, or run a Smithers workflow, invoke flow.create / flow.list / flow.run in the same turn — the run renders as an embedded card that tracks it live, and any approval the run needs arrives as an approval card only the human can decide.",
@@ -160,7 +162,16 @@ const WORKFLOW_LAUNDERING_RULE = [
  * for a session the GitHub cookie already gives them.
  */
 export const WEB_HOST_LINE =
-  "This is the Smithers web app. Local repositories, local terminals, build targets, local agents and connecting Linear need the native app; when asked for one, say so and execute app.download.prompt. On the web the GitHub sign-in is the Smithers Cloud sign-in — there is no separate Cloud sign-in to offer."
+  "This is the Smithers web app. Local repositories, local terminals, build targets, local agents, code intelligence (hover, definitions, diagnostics) and connecting Linear need the native app; when asked for one, say so and execute app.download.prompt. On the web the GitHub sign-in is the Smithers Cloud sign-in — there is no separate Cloud sign-in to offer."
+
+/*
+ * Code intelligence (docs/code-intel/PLAN.md §4) is stated only where its
+ * flows are registered: the line follows the catalog, so the web host —
+ * whose registry has no `local.lsp` door — is never told it can answer type
+ * questions it has no command for (WEB_HOST_LINE names the native app then).
+ */
+export const CODE_INTEL_LINE =
+  "Asked about the type, definition or diagnostics of code in an open local repository, answer through code.hover, code.definition and code.diagnostics (<path>:<line>:<col>); the answer lands on the file card in the chat."
 
 /** Appended to the web line while no native release carries an asset (AppLinks.ts). */
 export const NO_DOWNLOAD_LINE =
@@ -226,11 +237,14 @@ const orchestratorLines = (roles: ReadonlyArray<InstructionRole>): ReadonlyArray
  * limit" — which the app rendered as a failed turn on 2026-09-02 once the
  * catalog passed ~170 flows. The prompt therefore has a budget with headroom
  * for the connector line and the roles, and degrades the catalog HONESTLY in
- * two stages rather than being cut: first the argument grammars go (the
+ * stages rather than being cut: first the argument grammars go (the
  * commands tool's list action answers them), then the catalog becomes one line
  * per namespace naming its commands, with the instruction to read summaries
- * from the list action. The model always knows the full set; only the
- * per-command prose leaves the prompt.
+ * from the list action. Through stage 2 the model always knows the full set;
+ * only the per-command prose leaves the prompt. Stage 3 — the namespaces and
+ * their counts, every name behind the list action — is the floor a caller
+ * reaches for only once nothing else in the turn can give (controller/turns.ts
+ * cuts the World bodies first), so the turn never fails on size.
  */
 /** The chat seam's cap on the COMPOSED instructions (prompt + rendered runtime context). */
 export const CHAT_INSTRUCTIONS_CAP_BYTES = 16 * 1024
@@ -240,8 +254,11 @@ export const INSTRUCTIONS_HEADROOM_BYTES = 512
 export const INSTRUCTIONS_BUDGET_BYTES = 14 * 1024
 export const bytesOf = (text: string): number => new TextEncoder().encode(text).length
 
-const catalogLinesFor = (catalog: ReadonlyArray<InstructionCommand>, stage: 0 | 1 | 2): ReadonlyArray<string> => {
-  if (stage === 2) {
+/** The catalog's degradation stages: 0 full, 1 no argument grammars, 2 names by namespace, 3 namespaces and counts only. */
+export type InstructionStage = 0 | 1 | 2 | 3
+
+const catalogLinesFor = (catalog: ReadonlyArray<InstructionCommand>, stage: InstructionStage): ReadonlyArray<string> => {
+  if (stage >= 2) {
     const byNamespace = new Map<string, string[]>()
     for (const command of catalog) {
       const dot = command.name.indexOf(".")
@@ -249,6 +266,13 @@ const catalogLinesFor = (catalog: ReadonlyArray<InstructionCommand>, stage: 0 | 
       const rest = byNamespace.get(namespace) ?? []
       rest.push(`/${command.name}`)
       byNamespace.set(namespace, rest)
+    }
+    if (stage === 3) {
+      return [
+        `Commands: ${catalog.length}, in these namespaces (call the "commands" tool with action "list" for their names, summaries and arguments before you use one): ${
+          [...byNamespace.entries()].map(([namespace, names]) => `${namespace} (${names.length})`).join(", ")
+        }.`
+      ]
     }
     return [
       "Commands, by namespace (call the \"commands\" tool with action \"list\" for each one's summary and arguments before you use it):",
@@ -260,28 +284,36 @@ const catalogLinesFor = (catalog: ReadonlyArray<InstructionCommand>, stage: 0 | 
   )
 }
 
+/** The stage a rendered prompt landed in (the budget tests and the lane report read it). */
+export const instructionStageOf = (text: string): InstructionStage =>
+  text.includes("\nCommands: ") ? 3 : text.includes("Commands, by namespace") ? 2 : /^- \/[\w.-]+ [<[]/m.test(text) ? 0 : 1
+
 export const smithersInstructions = (
   catalog: ReadonlyArray<InstructionCommand>,
   honesty: InstructionHonesty,
   roles: ReadonlyArray<InstructionRole> = [],
-  options: { readonly budgetBytes?: number } = {}
+  options: { readonly budgetBytes?: number; readonly lastStage?: InstructionStage } = {}
 ): string => {
   const budget = Math.max(0, options.budgetBytes ?? INSTRUCTIONS_BUDGET_BYTES)
-  const render = (stage: 0 | 1 | 2): string => assembleInstructions(catalogLinesFor(catalog, stage), honesty, roles)
-  for (const stage of [0, 1, 2] as const) {
+  const lastStage = options.lastStage ?? 3
+  const codeIntel = catalog.some((command) => command.name === "code.hover")
+  const render = (stage: InstructionStage): string => assembleInstructions(catalogLinesFor(catalog, stage), honesty, roles, codeIntel)
+  for (const stage of [0, 1, 2, 3] as const) {
     const text = render(stage)
-    if (bytesOf(text) <= budget || stage === 2) return text
+    if (bytesOf(text) <= budget || stage >= lastStage) return text
   }
-  return render(2)
+  return render(lastStage)
 }
 
 const assembleInstructions = (
   catalogLines: ReadonlyArray<string>,
   honesty: InstructionHonesty,
-  roles: ReadonlyArray<InstructionRole>
+  roles: ReadonlyArray<InstructionRole>,
+  codeIntel: boolean
 ): string => {
   return [
     SMITHERS_INSTRUCTIONS,
+    ...(codeIntel ? [CODE_INTEL_LINE] : []),
     ...orchestratorLines(roles),
     "",
     "What you can do is EXACTLY this — the app's live command catalog — plus conversation in this chat:",
