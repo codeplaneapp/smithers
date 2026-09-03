@@ -59,6 +59,20 @@ const firstLine = (process: RemoteProcess): Effect.Effect<string, ProviderError>
     (line) => Option.getOrElse(line, () => "")
   )
 
+/**
+ * The pids a kill fixture prints on its first lines: the wrapper the host
+ * spawner owns first, then the descendant that must not survive it. A line the
+ * fixture never printed reads back as `NaN`, which the caller asserts on
+ * rather than handing to `kill`.
+ */
+const printedPids = (process: RemoteProcess, count: number): Effect.Effect<Array<number>, ProviderError> =>
+  Stream.decodeText(process.stdout).pipe(
+    Stream.splitLines,
+    Stream.take(count),
+    Stream.runCollect,
+    Effect.map((lines) => lines.map(Number))
+  )
+
 const stdoutOf = (process: RemoteProcess): Effect.Effect<string, ProviderError> =>
   Stream.mkString(Stream.decodeText(process.stdout))
 
@@ -291,16 +305,30 @@ describe("DirectorySandbox", () => {
         // Two shapes of work that outlive a signal aimed at the shell alone: a
         // background job the shell forked, and a grandchild that moved into its
         // own process group (Node's `detached`), which a process-group signal
-        // from the spawner cannot reach either. Each fixture prints the pid of
-        // the process that must not survive; the durations are distinctive so
-        // a stray host `sleep` cannot be mistaken for the leak — and none is
-        // 3607, the duration `posixCommands.survivor` greps for, so a
-        // concurrent conformance run cannot mistake these fixtures for its
-        // own leak either.
+        // from the spawner cannot reach either. Each fixture prints its own pid
+        // and then the pid of the process that must not survive it; the
+        // durations are distinctive so a stray host `sleep` cannot be mistaken
+        // for the leak — and none is 3607, the duration
+        // `posixCommands.survivor` greps for, so a concurrent conformance run
+        // cannot mistake these fixtures for its own leak either.
+        //
+        // A fixture that can finish on its own turns a kill that did nothing
+        // into a kill that looks like it worked. `wait` and a bare pipeline
+        // both could: POSIX `wait` with no operands reports 0 once every child
+        // is gone, and a pipeline reports its last member's status, so a loaded
+        // runner that let the shell reap the descendant this kill signals first
+        // — in the window before the shell's own signal landed — watched the
+        // wrapper exit 0. Every wrapper below ends on `cat gate` instead, a
+        // fifo nothing ever opens for writing, so it is parked in `open` and a
+        // signal is the only thing that can end it.
+        const gate = `${root}/kill-tree-gate`
+        rmSync(gate, { force: true })
+        expect(spawnSync("mkfifo", [gate]).status).toBe(0)
+        const parked = `cat ${CommandLine.quote(gate)}`
         const node = CommandLine.quote(globalThis.process.execPath)
         const fixtures = [
-          "sleep 3709 & echo $!; wait",
-          `${node} -e 'const child = require("node:child_process").spawn("sleep", ["3611"], ` +
+          `sleep 3709 & echo $$; echo $!; ${parked}`,
+          `echo $$; ${node} -e 'const child = require("node:child_process").spawn("sleep", ["3611"], ` +
           `{ detached: true, stdio: "ignore" }); console.log(child.pid); setInterval(() => {}, 1e6)'`
         ]
         const started: Array<number> = []
@@ -311,9 +339,19 @@ describe("DirectorySandbox", () => {
               const outcome = yield* Effect.scoped(
                 Effect.gen(function*() {
                   const running = yield* session.spawn(line, {})
-                  const pid = Number(yield* firstLine(running))
-                  started.push(pid)
+                  const [wrapper = Number.NaN, pid = Number.NaN] = yield* printedPids(running, 2)
+                  started.push(wrapper, pid)
+                  expect([wrapper, pid].every(Number.isInteger), `\`${line}\` printed a wrapper and a victim pid`)
+                    .toBe(true)
                   expect(processIsAlive(pid)).toBe(true)
+                  // The kill must be the only thing that can end this wrapper.
+                  // A fixture that finished early would make the exit below a
+                  // success, and the assertion on it would read a kill that
+                  // never landed as a kill that failed to stop anything.
+                  expect(
+                    processHasEnded(wrapper),
+                    `the wrapper ${wrapper} running \`${line}\` ended before the kill was issued`
+                  ).toBe(false)
                   yield* session.kill!(running, "SIGTERM")
                   return { pid, exit: yield* Effect.exit(running.exitCode) }
                 })
@@ -325,11 +363,19 @@ describe("DirectorySandbox", () => {
             }
             // A pipeline is the shape that forks on every shell: no member can
             // print another's pid, so the host is asked instead, with a bracket
-            // that keeps the probe's own command line out of the match.
+            // that keeps the probe's own command line out of the match. The
+            // parked `cat` is the pipeline's last member, so the status the
+            // shell reports is a signalled one however the kill interleaves.
             const piped = yield* Effect.scoped(
               Effect.gen(function*() {
-                const running = yield* session.spawn("sleep 3719 | cat", {})
+                const running = yield* session.spawn(`echo $$; sleep 3719 | ${parked}`, {})
+                const [wrapper = Number.NaN] = yield* printedPids(running, 1)
+                started.push(wrapper)
                 yield* waitFor(() => anyProcessMatching("sleep 371[9]"), "the pipeline to start")
+                expect(
+                  processHasEnded(wrapper),
+                  `the pipeline's wrapper ${wrapper} ended before the kill was issued`
+                ).toBe(false)
                 yield* session.kill!(running, "SIGTERM")
                 return yield* Effect.exit(running.exitCode)
               })
@@ -339,6 +385,7 @@ describe("DirectorySandbox", () => {
           })
         ).pipe(Effect.ensuring(Effect.sync(() => {
           spawnSync("pkill", ["-TERM", "-f", "sleep 371[9]"])
+          spawnSync("pkill", ["-TERM", "-f", gate])
           for (const pid of started) {
             try {
               globalThis.process.kill(pid, "SIGKILL")
