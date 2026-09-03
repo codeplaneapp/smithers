@@ -6,7 +6,7 @@
  * reached — a summary from the future, or output a node had not printed.
  */
 import { expect, test } from "bun:test"
-import type { RunSummary, TargetRunEvent } from "smithers-shared/TargetGraph"
+import type { RunSummary, TargetRunEvent } from "@smthrs/rpc/TargetGraph"
 import { foldRunFrame, replayAtCursor } from "./targetGraph"
 
 const BASE = 1_700_000_000_000

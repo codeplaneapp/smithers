@@ -1,4 +1,4 @@
-import type { RepositoryAccess } from "smithers-shared/NativeRepository"
+import type { RepositoryAccess } from "@smthrs/rpc/NativeRepository"
 import type { ControllerContext } from "./context"
 
 export interface ConnectorController {

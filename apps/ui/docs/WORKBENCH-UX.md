@@ -617,7 +617,7 @@ code lanes are briefed here for the first available seat.
 | M1 mock: workspace + desktop | §3.1 and §4, both states, all facets, tokens from `apps/ui/src/mainview/styles/tokens.css` | `apps/ui/docs/workbench-mocks/workspace.html` | opens standalone; embedded and maximized states toggle | Kimi K3 | running |
 | M2 mock: change + review | §3.2, §3.3, §4 | `…/change.html` | same | Kimi K3 | running |
 | M3 mock: search, findings, migration | §3.4, §3.6, §3.8 | `…/search-findings-migration.html` | same | Kimi K3 | running |
-| C1 contracts | shared schemas for `workspace`, `change`, `diff`, `findings`, `search-results`, `migration` cards and the new flows' payloads | `apps/shared/src/Cards.ts`, `apps/shared/src/Workbench.ts` | tsc, Cards tests | Sol / Opus | briefed |
+| C1 contracts | shared schemas for `workspace`, `change`, `diff`, `findings`, `search-results`, `migration` cards and the new flows' payloads | `packages/rpc/src/Cards.ts`, `packages/rpc/src/Workbench.ts` | tsc, Cards tests | Sol / Opus | briefed |
 | C2 cloud proxy | `/api/cloud/*` on the local origin, the identity pattern, with the session capability stripped | `apps/ui/src/bun/server.ts` | server tests | Sol / Opus | briefed |
 | C3 workspace seam + card | `WorkspaceSeam`, `workspace` card, Terminal and Files facets, `workspace.*` flows, T1 spec | `apps/ui/src/mainview/{state/seams,cards,flows}` | seam tests, card tests, T1 | Sol / Opus | briefed, waits on C1 |
 | C4 desktop facet | video element, thumbnail, attach/release, §5 input encoder, meta row | `apps/ui/src/mainview/cards/WorkspaceDesktop.tsx` | card tests with a fake session | Sol / Opus | blocked on plue desktop contract |

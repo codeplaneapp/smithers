@@ -17,9 +17,9 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { afterEach, beforeEach, expect, test } from "bun:test"
-import type { Repo } from "smithers-shared/LocalApp"
-import type { TargetGraphResponse } from "smithers-shared/TargetGraph"
-import { TARGET_GRAPH_ROUTES } from "smithers-shared/TargetGraph"
+import type { Repo } from "@smthrs/rpc/LocalApp"
+import type { TargetGraphResponse } from "@smthrs/rpc/TargetGraph"
+import { TARGET_GRAPH_ROUTES } from "@smthrs/rpc/TargetGraph"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import { createAppController } from "../AppController"
 import { createAppStore } from "../AppStore"

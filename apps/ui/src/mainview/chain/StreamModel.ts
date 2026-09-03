@@ -5,8 +5,8 @@ import { Endpoint, Framing, Model, RequestExecutor, Route } from "@smthrs/model"
 import { Effect, Layer, Result } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as HttpClient from "effect/unstable/http/HttpClient"
-import { MODEL_STREAM_PATH } from "smithers-shared/AgentApiRoutes"
-import type { FetchLike } from "smithers-shared/NativeAgent"
+import { MODEL_STREAM_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 import { protocol } from "./RelayProtocol"
 
 /*

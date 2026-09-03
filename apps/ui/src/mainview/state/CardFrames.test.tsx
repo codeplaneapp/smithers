@@ -1,8 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { Card } from "smithers-shared/Cards"
-import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
+import type { Card } from "@smthrs/rpc/Cards"
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import { CardView } from "../ChatCards"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
@@ -174,6 +174,43 @@ describe("server-emitted card frames", () => {
     )
     expect(statusMarkup).toContain("data-kind=\"status\"")
     expect(statusMarkup).toContain("Halfway there")
+  })
+
+  /*
+   * Ask 8 (will, 2026-09-02): "when I maximize a file I have no way of
+   * minimizing it". The way back is a NAMED button — Restore — in the header
+   * slot the maximize button held, bound to the restore flow that already
+   * exists (card.minimize), never a new one.
+   */
+  test("a maximized card names its way back: a Restore button on card.minimize", () => {
+    const handlers = {
+      onDecideApproval: () => {},
+      onGrantConfirm: () => {},
+      onGrantCancel: () => {},
+      onQueueApprove: () => {},
+      onMaximize: () => {},
+      onMinimize: () => {},
+      onOpenInTab: () => {},
+      onConnectGitHub: () => {},
+      onConnectLocal: () => {},
+      onRunWorkflow: () => {},
+      onStopRun: () => {},
+      onRetryRun: () => {},
+      onChooseWorkflowRepo: () => {},
+      worldDocuments: [],
+      onChangeWorldDocument: () => {},
+      onRunCommand: () => {}
+    }
+    const embedded = renderToStaticMarkup(<CardView card={statusCard} maximized={false} {...handlers} />)
+    expect(embedded).toContain("data-flow=\"card.maximize\"")
+    expect(embedded).not.toContain("Restore")
+
+    const maximized = renderToStaticMarkup(<CardView card={statusCard} maximized {...handlers} />)
+    expect(maximized).toContain("data-flow=\"card.minimize\"")
+    expect(maximized).toContain("data-testid=\"card-minimize-card-status\"")
+    expect(maximized).toContain("Restore")
+    expect(maximized).toContain("aria-label=\"Restore\"")
+    expect(maximized).not.toContain("Minimize card")
   })
 
   test("an approval card frame carries the run identity the decision round-trips against", async () => {

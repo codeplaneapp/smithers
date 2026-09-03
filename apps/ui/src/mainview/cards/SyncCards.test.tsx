@@ -18,9 +18,15 @@ import { ConnectorSetupCardBody, rateLimitHeldUntil, SyncOpsCardBody } from "./S
  * The lane-sync cards (ADR 0005): the Linear wizard renders its steps, the
  * team pick, the repository pick, and the Connect act; the SAME card turned
  * connected offers Sync now / Activity / Disconnect; the GitHub card offers
- * the install and reconcile acts; the sync-ops card renders the ops it was
- * given, the plue#468 degraded note, and the ADR's rate-limit line. Every
- * act rides onRunCommand with a complete invocation.
+ * the install and reconcile acts; the sync-ops card renders a run's live
+ * state and counts, one row per op (with the wire's own status word, the
+ * age, the verbatim error and Retry on a failure), the mirror's per-ref
+ * rows and its `mirror_status` header word, and the ADR's rate-limit line.
+ * Every act rides onRunCommand with a complete invocation.
+ *
+ * The states below are ADR 0005's own list: authorizing, active, a failed op
+ * with Retry, an expired key, importing with counts, a failed import with
+ * Retry, and rate-limited with a disabled Retry.
  */
 
 GlobalRegistrator.register()
@@ -195,11 +201,55 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
     expect(commands).toEqual([{ name: "linear.connect.open", args: "will/smithers" }])
   })
 
+  test("ADR 0005 authorizing: step 1 is the only act, and no later step claims anything", () => {
+    const { host, commands } = renderSetup(
+      setupCard({
+        steps: [
+          { id: "authorize", label: "Authorize in your browser", state: "active", detail: null },
+          { id: "team", label: "Team", state: "pending", detail: null },
+          { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
+          { id: "confirm", label: "Confirm", state: "pending", detail: null }
+        ],
+        setupKey: undefined,
+        teams: undefined
+      })
+    )
+
+    /* The card wears the running pill while the browser step is out. */
+    expect(pillStatus(setupCard({ phase: "setup" }))).toBe("running")
+    expect(host.textContent).toContain("Authorize in your browser")
+    /* No team list, no repository pick, no Connect — nothing is offered before its step. */
+    expect([...host.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
+      expect.stringContaining("Open Linear")
+    ])
+    click(host, "Open Linear")
+    expect(commands).toEqual([{ name: "linear.connect.open", args: "will/smithers" }])
+  })
+
+  test("ADR 0005 expired key: the wording rides step 1 and Open Linear is still the act", () => {
+    const { host, commands } = renderSetup(
+      setupCard({
+        steps: [
+          { id: "authorize", label: "Authorize in your browser", state: "error", detail: null, error: "authorization expired · Open Linear again" },
+          { id: "team", label: "Team", state: "pending", detail: null },
+          { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
+          { id: "confirm", label: "Confirm", state: "pending", detail: null }
+        ],
+        setupKey: undefined,
+        teams: undefined
+      })
+    )
+
+    expect(host.textContent).toContain("authorization expired · Open Linear again")
+    click(host, "Open Linear")
+    expect(commands).toEqual([{ name: "linear.connect.open", args: "will/smithers" }])
+  })
+
   test("a failed step renders the server error verbatim", () => {
     const { host } = renderSetup(
       setupCard({
         steps: [
-          { id: "authorize", label: "Authorize in your browser", state: "error", detail: null, error: "authorization expired · Open Linear again" },
+          { id: "authorize", label: "Authorize in your browser", state: "error", detail: null, error: "Reading /linear/setup/sk-123 failed (404)" },
           { id: "team", label: "Team", state: "pending", detail: null },
           { id: "repository", label: "Repository", state: "pending", detail: "will/smithers" },
           { id: "confirm", label: "Confirm", state: "pending", detail: null }
@@ -207,7 +257,7 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
       })
     )
 
-    expect(host.textContent).toContain("authorization expired · Open Linear again")
+    expect(host.textContent).toContain("Reading /linear/setup/sk-123 failed (404)")
   })
 
   test("the repository pick lists the loaded repositories", async () => {
@@ -253,6 +303,30 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
     ])
   })
 
+  test("the connected state names the Linear account the integration authorized as (plue#491)", () => {
+    const { host } = renderSetup(
+      setupCard({
+        phase: "connected",
+        actor: "Will",
+        integration: { id: 7, teamKey: "ENG", teamName: "Engineering", active: true, lastSyncAt: null }
+      })
+    )
+
+    expect(host.textContent).toContain("authorized as Will")
+  })
+
+  test("a connected card whose wire named no actor says nothing about one", () => {
+    const { host } = renderSetup(
+      setupCard({
+        phase: "connected",
+        actor: null,
+        integration: { id: 7, teamKey: "ENG", teamName: "Engineering", active: true, lastSyncAt: null }
+      })
+    )
+
+    expect(host.textContent).not.toContain("authorized as")
+  })
+
   test("Disconnect arms a confirm row; only its second click runs the flow, with the team key typed back", () => {
     /*
      * Review finding 4: one click on a ghost button deleted the integration.
@@ -277,11 +351,15 @@ describe("ConnectorSetupCardBody — the Linear wizard", () => {
 })
 
 describe("the frame pill of a sync-ops card", () => {
-  test("a null run state (no run DTO yet, plue#468/#470) is never done", () => {
+  test("a null run state (nothing has answered yet) is never done, and a wire word is never renamed", () => {
     /* Review finding 3: null fell into "done", so a sync that had just started wore a finished pill. */
-    expect(pillStatus(syncOpsCard({ runState: null, trigger: "sync started" }))).toBe("pending")
+    expect(pillStatus(syncOpsCard({ runState: null, trigger: "sync started · run 41" }))).toBe("pending")
+    /* Every word below is one of plue's own CHECK values, Linear's and the mirror's. */
+    expect(pillStatus(syncOpsCard({ runState: "pending" }))).toBe("pending")
     expect(pillStatus(syncOpsCard({ runState: "running" }))).toBe("running")
-    expect(pillStatus(syncOpsCard({ runState: "done" }))).toBe("done")
+    expect(pillStatus(syncOpsCard({ runState: "completed" }))).toBe("completed")
+    expect(pillStatus(syncOpsCard({ runState: "queued" }))).toBe("queued")
+    expect(pillStatus(syncOpsCard({ runState: "succeeded" }))).toBe("succeeded")
     expect(pillStatus(syncOpsCard({ runState: "failed" }))).toBe("failed")
     expect(pillStatus(syncOpsCard({ runState: null, error: "Starting the sync failed (500)" }))).toBe("failed")
   })
@@ -397,6 +475,83 @@ describe("ConnectorSetupCardBody — the GitHub card", () => {
   })
 })
 
+describe("RepoImportCardBody — the job card (ADR 0005 \"Import a GitHub repository\")", () => {
+  const importCard = (
+    payload: Partial<Extract<Card, { kind: "repo-import" }>["payload"]>
+  ): Extract<Card, { kind: "repo-import" }> => ({
+    id: "repo-import-acme/web",
+    kind: "repo-import",
+    title: "Import · acme/web",
+    status: "active",
+    createdAt: 0,
+    ordinal: 0,
+    payload: { repo: "acme/web", jobId: "job-1", phase: "running", detail: null, ...payload }
+  })
+
+  test("ADR 0005 importing: the counts and the raw stage word, with no act while it runs", () => {
+    const { host } = render(
+      <RepoImportCardBody
+        card={importCard({
+          phase: "running",
+          detail: "Provisioning workspace…",
+          stage: "provisioning_workspace",
+          counts: {
+            refs: { done: 214, total: 214 },
+            objects: { done: 88_210, total: 91_004 },
+            issues: { done: 0, total: 312 }
+          }
+        })}
+        onRunCommand={() => {}}
+      />
+    )
+
+    expect(host.textContent).toContain("refs 214 of 214 · objects 88210 of 91004 · issues 0 of 312")
+    /* plue's own stage word, never translated into one of this app's. */
+    expect(host.textContent).toContain("stage · provisioning_workspace")
+    expect(host.querySelectorAll("button")).toHaveLength(0)
+  })
+
+  test("ADR 0005 failed import: the job's error verbatim, with Retry naming the job", () => {
+    const commands: Array<{ name: string; args?: string }> = []
+    const { host } = render(
+      <RepoImportCardBody
+        card={importCard({
+          phase: "failed",
+          detail: "github: repository acme/web not found or not accessible",
+          stage: "cloning_github",
+          error: "github: repository acme/web not found or not accessible"
+        })}
+        onRunCommand={(name, args) => commands.push({ name, args })}
+      />
+    )
+
+    expect(host.textContent).toContain("github: repository acme/web not found or not accessible")
+    const retry = buttonNamed(host, "Try again")
+    expect(retry.disabled).toBe(false)
+    click(host, "Try again")
+    expect(commands).toEqual([{ name: "repos.import.retry", args: "job-1" }])
+  })
+
+  test("a done import links the repository and the workspace it created", () => {
+    const commands: Array<{ name: string; args?: string }> = []
+    const { host } = render(
+      <RepoImportCardBody
+        card={importCard({
+          phase: "done",
+          detail: null,
+          repository: { owner: "acme", name: "web" },
+          workspaceId: "ws-9"
+        })}
+        onRunCommand={(name, args) => commands.push({ name, args })}
+      />
+    )
+
+    expect(host.textContent).toContain("acme/web")
+    click(host, "Open the workspace")
+    expect(commands).toEqual([{ name: "workspace.view", args: "ws-9" }])
+  })
+})
+
 describe("RepoImportCardBody — the rate-limited retry", () => {
   test("a structured 429 holds Try again until the reset, with the time on it", () => {
     const resetAt = minutesFromNow(12)
@@ -433,58 +588,229 @@ describe("RepoImportCardBody — the rate-limited retry", () => {
 })
 
 describe("SyncOpsCardBody", () => {
-  test("the degraded note renders when the feed does not exist; no op is faked", () => {
+  test("a started run with no run DTO yet claims no state and no counts", () => {
+    const { host } = render(
+      <SyncOpsCardBody card={syncOpsCard({ runId: "41", trigger: "sync started · run 41" })} onRunCommand={() => {}} />
+    )
+
+    expect(host.textContent).toContain("Linear ENG ↔ will/smithers")
+    expect(host.textContent).toContain("sync started · run 41")
+    /* Nothing has answered yet, so nothing claims a state or a count. */
+    expect(host.textContent).not.toContain("of ")
+    expect(host.querySelectorAll("button")).toHaveLength(0)
+  })
+
+  test("ADR 0005 active: the live run wears the wire's own state word and its summed counts", () => {
     const { host } = render(
       <SyncOpsCardBody
-        card={syncOpsCard({ opsNote: "The sync ops feed isn't recorded yet (plue#468) — each sync's ops appear here once the backend records them.", trigger: "sync started" })}
+        card={syncOpsCard({
+          runId: "41",
+          runState: "running",
+          counts: { total: 12, done: 10, failed: 1 },
+          ops: [
+            {
+              id: "12",
+              source: "linear",
+              target: "jjhub",
+              entity: "issue",
+              entityId: "ENG-482",
+              action: "create",
+              status: "success",
+              retryable: false,
+              at: new Date(Date.now() - 2_000).toISOString()
+            }
+          ]
+        })}
         onRunCommand={() => {}}
       />
     )
 
-    expect(host.textContent).toContain("Linear ENG ↔ will/smithers")
-    expect(host.textContent).toContain("sync started")
-    expect(host.textContent).toContain("plue#468")
+    expect(host.textContent).toContain("Running")
+    expect(host.textContent).toContain("10 of 12 · 1 failed")
+    expect(host.textContent).toContain("linear → jjhub issue ENG-482 create")
+    /* ADR row: "… action, age". */
+    expect(host.textContent).toContain("just now")
+    /* Nothing succeeded may offer a Retry. */
     expect(host.querySelectorAll("button")).toHaveLength(0)
   })
 
-  test("a failed retryable op carries the error verbatim and the Retry act", () => {
+  test("ADR 0005 failed op: the error is verbatim on the row, with Retry naming the op", () => {
     const commands: Array<{ name: string; args?: string }> = []
     const { host } = render(
       <SyncOpsCardBody
         card={syncOpsCard({
+          runState: "completed",
           ops: [
-            { id: "op-3", source: "linear", target: "smithers", entity: "issue", entityId: "ENG-482", action: "updated", status: "failed", error: "remote rejected", retryable: true, at: null }
+            {
+              id: "90",
+              source: "jjhub",
+              target: "linear",
+              entity: "issue",
+              entityId: "90",
+              action: "update",
+              status: "failed",
+              error: "Linear API: 422 label 'infra' does not exist on team ENG",
+              retryable: true,
+              at: null
+            },
+            {
+              id: "91",
+              source: "linear",
+              target: "jjhub",
+              entity: "comment",
+              entityId: "ENG-480",
+              action: "create",
+              status: "skipped",
+              retryable: false,
+              at: null
+            }
           ]
         })}
         onRunCommand={(name, args) => commands.push({ name, args })}
       />
     )
 
-    expect(host.textContent).toContain("linear → smithers issue ENG-482 updated")
-    expect(host.textContent).toContain("remote rejected")
+    expect(host.textContent).toContain("jjhub → linear issue 90 update")
+    expect(host.textContent).toContain("Linear API: 422 label 'infra' does not exist on team ENG")
+    /* The skipped row is a state, not a failure, and it is never filtered out. */
+    expect(host.textContent).toContain("Skipped")
+    expect(host.querySelectorAll("button")).toHaveLength(1)
     click(host, "Retry")
-    expect(commands).toEqual([{ name: "sync.retry", args: "op-3" }])
+    expect(commands).toEqual([{ name: "sync.retry", args: "90" }])
   })
 
-  test("past the cut, Show more widens the window", () => {
+  test("a mirror run renders one row per ref and the repository's own mirror_status word", () => {
+    const { host } = render(
+      <SyncOpsCardBody
+        card={{
+          ...syncOpsCard(),
+          id: "sync-ops-mirror-will/smithers",
+          payload: {
+            subject: "GitHub → will/smithers mirror",
+            source: "github-mirror",
+            repo: "will/smithers",
+            runId: "88",
+            runState: "succeeded",
+            mirrorStatus: "unconfigured",
+            ops: [
+              {
+                id: "refs/heads/main",
+                source: "b775d9",
+                target: "3f2a1b",
+                entity: "ref",
+                entityId: "refs/heads/main",
+                action: "push",
+                status: "succeeded",
+                retryable: false,
+                at: null
+              }
+            ]
+          }
+        }}
+        onRunCommand={() => {}}
+      />
+    )
+
+    expect(host.textContent).toContain("GitHub → will/smithers mirror")
+    expect(host.textContent).toContain("unconfigured")
+    expect(host.textContent).toContain("b775d9 → 3f2a1b ref refs/heads/main push")
+    /* plue#491 retries only a FAILED ref, so a succeeded one offers nothing. */
+    expect(host.querySelectorAll("button")).toHaveLength(0)
+  })
+
+  test("a behind mirror reads plue#491's ref counts, and a failed ref retries through the per-ref route", () => {
+    const commands: Array<{ name: string; args?: string }> = []
+    const { host } = render(
+      <SyncOpsCardBody
+        card={{
+          ...syncOpsCard(),
+          id: "sync-ops-mirror-will/smithers",
+          payload: {
+            subject: "GitHub → will/smithers mirror",
+            source: "github-mirror",
+            repo: "will/smithers",
+            runId: "88",
+            runState: "failed",
+            mirrorStatus: "behind",
+            behindRefs: 3,
+            failedRefs: 1,
+            ops: [
+              {
+                id: "refs/heads/wip",
+                source: "—",
+                target: "aa11bb",
+                entity: "ref",
+                entityId: "refs/heads/wip",
+                action: "push",
+                status: "failed",
+                error: "remote rejected: non-fast-forward",
+                retryable: true,
+                at: null
+              }
+            ]
+          }
+        }}
+        onRunCommand={(name, args) => commands.push({ name, args })}
+      />
+    )
+
+    /* ADR 0005's header line, with the count plue now states. */
+    expect(host.textContent).toContain("behind GitHub · 3 refs · 1 failed")
+    expect(host.textContent).toContain("remote rejected: non-fast-forward")
+    /* A mirror row's Retry is the MIRROR's route, never the Linear op retry. */
+    click(host, "Retry")
+    expect(commands).toEqual([{ name: "github.mirror.retry-ref", args: "refs/heads/wip will/smithers" }])
+  })
+
+  test("a mirror card whose repository stated no counts shows the word alone", () => {
+    const { host } = render(
+      <SyncOpsCardBody
+        card={{
+          ...syncOpsCard(),
+          id: "sync-ops-mirror-will/smithers",
+          payload: {
+            subject: "GitHub → will/smithers mirror",
+            source: "github-mirror",
+            repo: "will/smithers",
+            runState: null,
+            mirrorStatus: "behind",
+            ops: []
+          }
+        }}
+        onRunCommand={() => {}}
+      />
+    )
+
+    expect(host.textContent).toContain("behind")
+    expect(host.textContent).not.toContain("refs")
+  })
+
+  test("past the cut, Show more widens the window; older ops offer Load older", () => {
     const commands: Array<{ name: string; args?: string }> = []
     const ops = Array.from({ length: 12 }, (_, index) => ({
       id: `op-${index}`,
       source: "linear",
-      target: "smithers",
+      target: "jjhub",
       entity: "issue",
       entityId: `ENG-${index}`,
-      action: "updated",
-      status: "done" as const,
+      action: "update",
+      status: "success",
       retryable: false,
       at: null
     }))
     const { host } = render(
-      <SyncOpsCardBody card={syncOpsCard({ ops })} onRunCommand={(name, args) => commands.push({ name, args })} />
+      <SyncOpsCardBody
+        card={syncOpsCard({ ops, window: "24h", hasOlder: true })}
+        onRunCommand={(name, args) => commands.push({ name, args })}
+      />
     )
 
     expect(host.textContent).not.toContain("ENG-11")
     click(host, "Show more")
-    expect(commands).toEqual([{ name: "sync.ops.show-more", args: "sync-ops-linear-7" }])
+    click(host, "Load older")
+    expect(commands).toEqual([
+      { name: "sync.ops.show-more", args: "sync-ops-linear-7" },
+      { name: "sync.ops.load-older", args: "sync-ops-linear-7" }
+    ])
   })
 })

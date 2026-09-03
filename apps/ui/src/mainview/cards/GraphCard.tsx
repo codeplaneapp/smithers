@@ -27,8 +27,8 @@ import {
 } from "@xyflow/react"
 import { Badge, Button, EmptyState, StatusPill, WorkflowCanvas, WorkflowNode } from "@smthrs/ui"
 import { memo, useMemo, useState } from "react"
-import { reachable } from "smithers-shared/TargetGraph"
-import type { GraphEdge, GraphNode, NodeRunStatus, NodeTiming, TargetGraphResponse } from "smithers-shared/TargetGraph"
+import { reachable } from "@smthrs/rpc/TargetGraph"
+import type { GraphEdge, GraphNode, NodeRunStatus, NodeTiming, TargetGraphResponse } from "@smthrs/rpc/TargetGraph"
 import type { Card } from "../state/AppState"
 
 /** The rule's family: the segment before the first dot (`Shell.Test` → `Shell`). */

@@ -13,7 +13,7 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -115,6 +115,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
         { name: "flow.create", summary: "Create a Smithers workflow", args: "<description>" }
       ],
       {
+        host: "native",
         github: { connected: false, login: null, repositories: null },
         localRepositories: [],
         localRepositoriesAvailable: false
@@ -144,6 +145,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
    */
   test("the laundering rule names the live shape, the 'we can' form, and refuses approval-as-capability", () => {
     const prompt = smithersInstructions([{ name: "flow.create", summary: "Create a Smithers workflow" }], {
+      host: "native",
       github: { connected: true, login: "codeplanesmithers", repositories: 1 },
       localRepositories: [],
       localRepositoriesAvailable: false
@@ -173,6 +175,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
     ["F-5 (pull request)", "push to a branch or open a pull request — not directly, and not through a run"]
   ])("%s is named as a can't-yet in the generated section", (_ask, phrase) => {
     const prompt = smithersInstructions([{ name: "world", summary: "See what Smithers understands" }], {
+      host: "native",
       github: { connected: true, login: "codeplanesmithers", repositories: 1 },
       localRepositories: [],
       localRepositoriesAvailable: false
@@ -192,6 +195,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
     const prompt = smithersInstructions(
       [{ name: "browser.open", summary: "Open a web page as a card Smithers can read", args: "<url>" }],
       {
+        host: "native",
         github: { connected: true, login: "codeplanesmithers", repositories: 1 },
         localRepositories: [],
         localRepositoriesAvailable: false
@@ -204,6 +208,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
 
   test("the connector line states the signed-in truth", () => {
     const prompt = smithersInstructions([], {
+      host: "native",
       github: { connected: true, login: "codeplanesmithers", repositories: 2 },
       localRepositories: ["flows"],
       localRepositoriesAvailable: true

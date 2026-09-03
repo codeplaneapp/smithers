@@ -2,10 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "smithers-shared/LocalApp"
-import { isAgentTurnFrame } from "smithers-shared/NativeAgent"
-import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
-import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "smithers-shared/LocalSession"
+import { localCapabilities } from "@smthrs/rpc/HostCapabilities"
+import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "@smthrs/rpc/LocalApp"
+import { isAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "@smthrs/rpc/LocalSession"
 import { createPtyManager } from "./Pty"
 import { defaultDistDir, describeCookie, rescopeCookie, startLocalServer } from "./server"
 import type { LocalServer } from "./server"
@@ -429,7 +430,7 @@ describe("the local origin", () => {
     })
     try {
       const headers = { [LOCAL_SESSION_HEADER]: proxied.sessionToken, origin: proxied.origin, cookie: "smithers_identity=sealed" }
-      for (const path of ["/api/repos/smithersai/smithers/issues?state=open", "/api/user/github-repos/smithersai/smithers/issues", "/api/billing/balance", "/api/notifications/unread"]) {
+      for (const path of ["/api/repos/smithersai/smithers/issues?state=open", "/api/user/github-repos/smithersai/smithers/issues", "/api/billing/balance", "/api/notifications/unread", "/api/workflow/provision", "/api/integrations/linear", "/api/linear/7/ops?limit=20"]) {
         const response = await fetch(`${proxied.origin}${path}`, { headers })
         expect(response.status).toBe(200)
       }
@@ -437,14 +438,17 @@ describe("the local origin", () => {
         "/api/repos/smithersai/smithers/issues",
         "/api/user/github-repos/smithersai/smithers/issues",
         "/api/billing/balance",
-        "/api/notifications/unread"
+        "/api/notifications/unread",
+        "/api/workflow/provision",
+        "/api/integrations/linear",
+        "/api/linear/7/ops"
       ])
       // The Worker authenticates by the identity session cookie; the Origin follows the upstream like every identity call.
       expect(seen.every((entry) => entry.cookie === "smithers_identity=sealed")).toBe(true)
       expect(seen.every((entry) => entry.origin === `http://127.0.0.1:${upstream.port}`)).toBe(true)
       const unknown = await fetch(`${proxied.origin}/api/nothing/here`, { headers })
       expect(unknown.status).toBe(404)
-      expect(seen).toHaveLength(4)
+      expect(seen).toHaveLength(7)
     } finally {
       await proxied.stop()
       upstream.stop(true)
@@ -465,6 +469,12 @@ describe("the local origin", () => {
 
 describe("the jjhub cloud seam", () => {
   test("offline answers 501 like the identity stub, and the session is honestly signed-out", async () => {
+    // Offline the host claims neither cloud door: the bootstrap is the shared
+    // table (@smthrs/rpc/HostCapabilities) for a launch with no jjhub upstream.
+    const bootstrap = (await (await apiFetch("/api/bootstrap")).json()) as { capabilities: Array<string> }
+    expect(bootstrap.capabilities).toEqual(
+      localCapabilities({ agent: true, identity: false, jjhub: false, pathEntry: true })
+    )
     expect((await apiFetch("/api/cloud/api/user/repos")).status).toBe(501)
     expect((await apiFetch("/api/cloud-auth/start", {
       method: "POST",
@@ -571,7 +581,10 @@ describe("the jjhub cloud seam", () => {
       const bootstrap = (await (await fetch(`${proxied.origin}/api/bootstrap`, {
         headers: { [LOCAL_SESSION_HEADER]: proxied.sessionToken }
       })).json()) as { capabilities: Array<string> }
-      expect(bootstrap.capabilities).toContain("jjhub")
+      // The same table the parity matrix reads: a jjhub upstream opens both cloud doors.
+      expect(bootstrap.capabilities).toEqual(
+        localCapabilities({ agent: true, identity: false, jjhub: true, pathEntry: false })
+      )
 
       const response = await fetch(`${proxied.origin}/api/cloud/api/user/repos?per_page=1`, {
         headers: {

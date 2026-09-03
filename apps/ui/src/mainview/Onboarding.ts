@@ -1,4 +1,4 @@
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { Harness, LocalRepositoryConnector, Message, Repo, Suggestion } from "./state/AppState"
 
 /*

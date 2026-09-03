@@ -15,7 +15,7 @@
  * A note cut by the budget says so; the model is never left to infer that
  * silence means the note is empty.
  */
-import type { AgentRuntimeWorldDocument } from "smithers-shared/AgentContext"
+import type { AgentRuntimeWorldDocument } from "@smthrs/rpc/AgentContext"
 
 /** What the caller must supply per note. `AppState`'s WorldDocument satisfies it. */
 export interface WorldContextInput {

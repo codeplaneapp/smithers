@@ -151,7 +151,7 @@ test("the + menu lists the signed-in Claude account and launches Claude Code", a
   await page.getByTestId(`tab-close-${sessionId}`).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog).toBeVisible()
-  await dialog.getByRole("button", { name: "Close tab", exact: true }).click()
+  await dialog.getByRole("button", { name: "Close session", exact: true }).click()
   await expect(page.getByTestId(`tab-${sessionId}`)).toHaveCount(0)
   await expect
     .poll(async () => {

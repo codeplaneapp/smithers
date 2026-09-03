@@ -1,6 +1,6 @@
-import type { FetchLike } from "smithers-shared/NativeAgent"
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
-import type { RepositoryAccess } from "smithers-shared/NativeRepository"
+import type { FetchLike } from "@smthrs/rpc/NativeAgent"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
+import type { RepositoryAccess } from "@smthrs/rpc/NativeRepository"
 import { createCommandRegistry } from "../flows/Commands"
 import type { CommandRegistry } from "../flows/Commands"
 import type { CatalogItem } from "../flows/Commands"
@@ -14,9 +14,12 @@ import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import type { PtyClient } from "./PtyClient"
+import { createLspClient } from "./LspClient"
 import { createCloudTerminalClient, pageCloudSocketUrl } from "./CloudTerminalClient"
 import type { CloudTerminalClient } from "./CloudTerminalClient"
 import { createTargetRunClient } from "./TargetRunClient"
+import { createAppShellController } from "./controller/app"
+import type { AppShellController } from "./controller/app"
 import { createAuthBillingController } from "./controller/auth-billing"
 import { createConnectorController } from "./controller/connectors"
 import { createControllerContext } from "./controller/context"
@@ -28,6 +31,10 @@ import type { ExplainConfig, ExplainController } from "./controller/explain"
 import { createRecommendController } from "./controller/recommend"
 import type { RecommenderConfig } from "./controller/recommend"
 import { createTabsController } from "./controller/tabs"
+import { createAgentsController } from "./controller/agents"
+import type { AgentsController } from "./controller/agents"
+import { createSidebarController } from "./controller/sidebar"
+import type { SidebarController } from "./controller/sidebar"
 import type { TabsController } from "./controller/tabs"
 import { createTargetsController } from "./controller/targets"
 import type { TargetsController } from "./controller/targets"
@@ -51,6 +58,9 @@ import { createEnvironmentSeam } from "./seams/EnvironmentSeam"
 import type { EnvironmentSeam } from "./seams/EnvironmentSeam"
 import { createFilesSeam } from "./seams/FilesSeam"
 import type { FilesSeam } from "./seams/FilesSeam"
+import { createCodeIntelSeam } from "./seams/CodeIntelSeam"
+import type { CodeIntelSeam } from "./seams/CodeIntelSeam"
+import { createRepoTreeSeam } from "./seams/RepoTreeSeam"
 import { createIssuesSeam } from "./seams/IssuesSeam"
 import type { IssuesSeam } from "./seams/IssuesSeam"
 import { createKeysSeam } from "./seams/KeysSeam"
@@ -61,7 +71,9 @@ import { createNotificationsSeam } from "./seams/NotificationsSeam"
 import type { NotificationsSeam } from "./seams/NotificationsSeam"
 import { createRepositoriesSeam } from "./seams/RepositoriesSeam"
 import { createWorkspaceSeam } from "./seams/WorkspaceSeam"
+import { createEgressSeam } from "./seams/EgressSeam"
 import type { WorkspaceSeam } from "./seams/WorkspaceSeam"
+import type { EgressSeam } from "./seams/EgressSeam"
 import { createChangeSeam } from "./seams/ChangeSeam"
 import type { ChangeSeam } from "./seams/ChangeSeam"
 import type { RepositoriesSeam } from "./seams/RepositoriesSeam"
@@ -74,6 +86,8 @@ import type { SeamContext } from "./seams/SeamContext"
 export interface AppController {
   readonly store: AppStore
   readonly bootstrap: AppBootstrap | undefined
+  /** The native app's download URL this page offers; null while no native release carries an asset (controller/app.ts). */
+  readonly downloadUrl: string | null
   /** The resolved feature flags (every flag defaults off). */
   readonly features: Required<AppFeatures>
   readonly nativeAgentAvailable: boolean
@@ -123,6 +137,8 @@ export interface AppController {
     repo?: string
   ) => Promise<string | void | { readonly value: string }>
   readonly listWorkspaceWorkflows: () => Promise<string | void | { readonly value: string }>
+  /** Ask 5: the Flows pane — the surface switch and the listing that fills it. */
+  readonly showFlows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
   /* Wave 12 §2 — the answer to "which loaded repository?" (one act). */
   readonly chooseWorkflowRepo: (fullName: string) => Promise<string | void | { readonly value: string }>
@@ -165,8 +181,21 @@ export interface AppController {
   readonly toggleTabMenu: TabsController["toggleTabMenu"]
   readonly selectRepo: TabsController["selectRepo"]
   readonly unpinRepo: TabsController["unpinRepo"]
+  /* The sidebar's file tree and workspace heading (docs/workbench-lanes/sidebar-tree.md); see controller/sidebar.ts. */
+  readonly toggleRepoTree: SidebarController["toggleRepoTree"]
+  readonly renameWorkspace: SidebarController["renameWorkspace"]
+  readonly toggleWorkspaceRename: SidebarController["toggleWorkspaceRename"]
   readonly openLocalRepo: TabsController["openLocalRepo"]
   readonly loadHarnesses: TabsController["loadHarnesses"]
+  /* Agents as data (docs/workbench-lanes/custom-agents.md); see controller/agents.ts. */
+  readonly loadAgents: AgentsController["loadAgents"]
+  readonly listAgents: AgentsController["listAgents"]
+  readonly newAgent: AgentsController["newAgent"]
+  readonly createAgent: AgentsController["createAgent"]
+  readonly editAgent: AgentsController["editAgent"]
+  readonly removeAgent: AgentsController["removeAgent"]
+  readonly listHarnessModels: AgentsController["listHarnessModels"]
+  readonly updateAgentForm: AgentsController["updateAgentForm"]
   readonly loadRepos: TabsController["loadRepos"]
   readonly notePtyExit: TabsController["notePtyExit"]
   /** The PTY transport the terminal tabs attach to (docs/LOCAL-APP.md "/ws"). */
@@ -277,8 +306,14 @@ export interface AppController {
   readonly showCommandCatalog: () => void
   /** Render the sign-in step into the chat (auth.prompt — the agent's door to login). */
   readonly promptSignIn: () => void
+  /** Render the Smithers Cloud sign-in step into the chat (cloud.prompt — the agent's door to the cloud session). */
+  readonly promptCloudSignIn: () => void
   /** Reload the app window — the /reload affordance (dev loop, stuck states). */
   readonly reloadApp: () => void
+  /** Open the native app's download page (app.download — the web app's one door to the native app). */
+  readonly openDownload: AppShellController["openDownload"]
+  /** Render the native-only refusal card with the download action (app.download.prompt — the agent's door). */
+  readonly promptDownload: AppShellController["promptDownload"]
   /*
    * The multi-parity domain seams (MULTI-ACTIONS-GAP.md Tier 1/2): issues,
    * PRs/landings, billing checkout, BYOK keys, notifications, the agent
@@ -310,6 +345,10 @@ export interface AppController {
   readonly listBookmarks: BookmarksSeam["listBookmarks"]
   readonly listFiles: FilesSeam["listFiles"]
   readonly readFile: FilesSeam["readFile"]
+  /* Code intelligence (docs/code-intel/PLAN.md §4): the three code.* reads against the local language server (seams/CodeIntelSeam.ts). */
+  readonly codeHover: CodeIntelSeam["hover"]
+  readonly codeDefinition: CodeIntelSeam["definition"]
+  readonly codeDiagnostics: CodeIntelSeam["diagnostics"]
   /*
    * Lane sync (ADR 0005): Linear and GitHub sync as actions — the
    * connector-setup cards, the sync-ops card, and the GitHub App status
@@ -326,9 +365,11 @@ export interface AppController {
   readonly linearDisconnect: LinearSeam["disconnect"]
   readonly retrySyncOp: LinearSeam["retryOp"]
   readonly showMoreSyncOps: LinearSeam["showMoreOps"]
+  readonly loadOlderSyncOps: LinearSeam["loadOlderOps"]
   readonly githubApp: GitHubSeam["app"]
   readonly githubOpenInstall: GitHubSeam["openInstall"]
   readonly githubReconcile: GitHubSeam["reconcile"]
+  readonly retryMirrorRef: GitHubSeam["retryMirrorRef"]
   readonly githubMirrorSync: GitHubSeam["mirrorSync"]
   /*
    * Lane piper: the jjhub Cloud session (the CLI browser login; the token
@@ -358,6 +399,16 @@ export interface AppController {
   readonly destroyWorkspaceSession: WorkspaceSeam["destroySession"]
   readonly deleteWorkspace: WorkspaceSeam["deleteWorkspace"]
   readonly setWorkspaceFacet: WorkspaceSeam["setFacet"]
+  /* Lane L3: the workspace facets plue#449 and the sandbox egress audit answer. */
+  readonly listWorkspaceFiles: WorkspaceSeam["listFiles"]
+  readonly readWorkspaceFile: WorkspaceSeam["readFile"]
+  readonly listWorkspaceServices: WorkspaceSeam["listServices"]
+  readonly listWorkspaceEgress: WorkspaceSeam["listEgress"]
+  /* Lane L3b: the NixOS desktop and the environment images a repository has built. */
+  readonly openWorkspaceDesktop: WorkspaceSeam["openDesktop"]
+  readonly rotateWorkspaceDesktop: WorkspaceSeam["rotateDesktop"]
+  readonly listEnvironmentImages: WorkspaceSeam["listEnvironmentImages"]
+  readonly listSessionEgress: EgressSeam["listSessionEgress"]
   /*
    * Lane change (ADR 0003): the change is the unit — the change and diff
    * cards behind the `/api/cloud/*` proxy (state/seams/ChangeSeam.ts).
@@ -366,9 +417,22 @@ export interface AppController {
   readonly diffChange: ChangeSeam["diffChange"]
   readonly landChange: ChangeSeam["landChange"]
   readonly splitReadyChange: ChangeSeam["splitReady"]
+  readonly splitChange: ChangeSeam["splitChange"]
   readonly resolveChangeConflict: ChangeSeam["resolveConflict"]
   readonly revertChange: ChangeSeam["revertChange"]
   readonly setChangeFacet: ChangeSeam["setFacet"]
+  /* Lane L1: the live plue routes — pins, checks per revision, threads, findings, the snapshot fork. */
+  readonly setChangePins: ChangeSeam["setPins"]
+  readonly checksOfChangeAt: ChangeSeam["checksAt"]
+  readonly openChangeComputer: ChangeSeam["openComputer"]
+  readonly diffSinceMyReview: ChangeSeam["sinceMyReview"]
+  readonly reviewThreadDone: ChangeSeam["threadDone"]
+  readonly reviewThreadAck: ChangeSeam["threadAck"]
+  readonly reviewThreadReopen: ChangeSeam["threadReopen"]
+  readonly fixFinding: ChangeSeam["pleaseFix"]
+  readonly findingNotUseful: ChangeSeam["notUseful"]
+  readonly requestChangeReview: ChangeSeam["requestReview"]
+  readonly unrequestChangeReview: ChangeSeam["unrequestReview"]
   /** Dismiss one toast on the shared corner stack (the toast.dismiss command). */
   readonly dismissToast: (id: string) => void
   /** Refresh the billing record from the billing seam (actor: system). */
@@ -404,6 +468,12 @@ export interface AppServices {
    */
   readonly socketUrl?: () => string | undefined
   /**
+   * The per-launch local capability every `/ws` socket carries as its
+   * subprotocol; default the page's injected token (runtime/LocalSession.ts).
+   * A test against a real local origin binds the server's protocol.
+   */
+  readonly socketProtocols?: () => ReadonlyArray<string>
+  /**
    * Lane citc: the `/api/cloud-ws/` tunnel URL for one workspace session;
    * default the page's own origin. Tests bind `() => undefined`.
    */
@@ -419,6 +489,13 @@ export interface AppServices {
    * work; absent = pure web keeps the same-page navigation.
    */
   readonly openExternal?: (url: string) => Promise<boolean>
+  /**
+   * The native app's download URL, when the composition root knows one;
+   * default the shared constant (AppLinks.ts), null until a release carries
+   * an asset. Tests inject a URL to exercise the door, and null to prove it
+   * is absent.
+   */
+  readonly downloadUrl?: string | null
   /** The handoff claim poll cadence; tests shorten it. */
   readonly handoffPollMs?: number
   /** How long a settled-ok toast states its result before dismissing itself. */
@@ -512,6 +589,7 @@ export const createAppController = (
   const repoImportSeam = createRepoImportSeam(seamCtx)
   const bookmarksSeam = createBookmarksSeam(seamCtx)
   const filesSeam = createFilesSeam(seamCtx)
+  const repoTreeSeam = createRepoTreeSeam(seamCtx)
   /*
    * Lane sync: the Linear and GitHub seams. The OAuth handoffs ride the
    * same native openExternal door as cloud sign-in; the Linear handoff's
@@ -534,9 +612,11 @@ export const createAppController = (
   const repositoriesSeam = createRepositoriesSeam(seamCtx)
   /* Lane citc: the cloud workspaces; its settle watches die with the controller. */
   const workspaceSeam = createWorkspaceSeam(seamCtx)
+  const egressSeam = createEgressSeam(seamCtx)
   ctx.onDispose(workspaceSeam.dispose)
   /* Lane change: the change/diff cards and their acts. */
-  const changeSeam = createChangeSeam(seamCtx)
+  /* Lane L1: a revision's snapshot forks into a computer whose card the workspace seam renders. */
+  const changeSeam = createChangeSeam(seamCtx, { viewWorkspace: workspaceSeam.viewWorkspace })
   const reloadRepositoriesWhenSignedIn = (): void => {
     if (store.collections.cloudSessions.get("cloud")?.state === "signed-in") {
       void repositoriesSeam.loadRepositories()
@@ -574,6 +654,7 @@ export const createAppController = (
     settleTurnBilling,
     watchIdentityAcrossTabs
   } = createAuthBillingController(ctx, nextTranscriptOrdinal)
+  const { downloadUrl, openDownload, promptDownload } = createAppShellController(ctx)
 
   const {
     showChat,
@@ -627,6 +708,17 @@ export const createAppController = (
     notePtyExit,
     installKeyboard
   } = createTabsController(ctx)
+  const {
+    loadAgents,
+    listAgents,
+    newAgent,
+    createAgent,
+    editAgent,
+    removeAgent,
+    listHarnessModels,
+    updateAgentForm
+  } = createAgentsController(ctx, { nextOrdinal: nextTranscriptOrdinal, loadHarnesses })
+  const { toggleRepoTree, renameWorkspace, toggleWorkspaceRename } = createSidebarController(ctx, repoTreeSeam)
   /*
    * "Open in tab" is offered on the maximized card, so opening the tab also
    * returns the transcript's copy to its embedded form — through the frames
@@ -641,16 +733,37 @@ export const createAppController = (
     if (wasMaximized) minimizeCard()
   }
   const socketUrl = services.socketUrl ?? pageSocketUrl
-  const pty = createPtyClient({ http, baseUrl, socketUrl, socketProtocols: localSocketProtocols })
+  const socketProtocols = services.socketProtocols ?? localSocketProtocols
+  const pty = createPtyClient({ http, baseUrl, socketUrl, socketProtocols })
   ctx.onDispose(pty.dispose)
   /* Lane citc: the cloud-workspace terminal transport, one socket per session. */
   const cloudTerminal = createCloudTerminalClient({
     socketUrl: services.cloudSocketUrl ?? pageCloudSocketUrl,
-    socketProtocol: () => localSocketProtocols()[0]
+    socketProtocol: () => socketProtocols()[0]
   })
   ctx.onDispose(cloudTerminal.dispose)
-  const targetRuns = createTargetRunClient({ socketUrl, socketProtocols: localSocketProtocols })
+  const targetRuns = createTargetRunClient({ socketUrl, socketProtocols })
   ctx.onDispose(targetRuns.dispose)
+  /*
+   * Code intelligence (docs/code-intel/PLAN.md §3-4): the `/api/lsp/*`
+   * transport with the `lsp:<repoId>` diagnostics stream, and the seam that
+   * turns the three code.* acts into `{ value }` for the model and patches to
+   * the file card. A request past 300 ms states itself on the toast stack (the
+   * 300 ms law): the host spawns the language server on first use.
+   */
+  const lsp = createLspClient({ http: (input, init) => ctx.boundedFetch(input, init), baseUrl, socketUrl, socketProtocols })
+  ctx.onDispose(lsp.dispose)
+  const codeIntelSeam = createCodeIntelSeam(seamCtx, { lsp, readFile: filesSeam.readFile })
+  ctx.onDispose(codeIntelSeam.dispose)
+  const codeHover: CodeIntelSeam["hover"] = (path, line, column, repo) =>
+    withToast("code.hover", `Asking the language server about ${path}:${line}:${column}…`, "Language server answered", () =>
+      codeIntelSeam.hover(path, line, column, repo))
+  const codeDefinition: CodeIntelSeam["definition"] = (path, line, column, repo) =>
+    withToast("code.definition", `Asking the language server where ${path}:${line}:${column} is defined…`, "Language server answered", () =>
+      codeIntelSeam.definition(path, line, column, repo))
+  const codeDiagnostics: CodeIntelSeam["diagnostics"] = (path, repo) =>
+    withToast("code.diagnostics", `Asking the language server about ${path}…`, "Language server answered", () =>
+      codeIntelSeam.diagnostics(path, repo))
   const targetGraph = createTargetGraphController(ctx, {
     nextOrdinal: nextTranscriptOrdinal,
     runs: targetRuns,
@@ -676,6 +789,7 @@ export const createAppController = (
   const {
     createWorkflow,
     listWorkspaceWorkflows,
+    showFlows,
     runWorkflow,
     chooseWorkflowRepo,
     forwardApprovalDecision,
@@ -805,6 +919,37 @@ export const createAppController = (
   }
 
   /*
+   * cloud.prompt, mirroring auth.prompt (agent-parity.md): the agent cannot
+   * run cloud.sign-in (the browser login is the human's gesture), but it CAN
+   * hand the step over — one message whose action IS the Smithers Cloud
+   * sign-in button. A host without the PAT door (the web) has no
+   * cloud.sign-in to offer: there the GitHub sign-in IS the Cloud sign-in
+   * (Instructions.ts WEB_HOST_LINE), so that step is the one rendered.
+   * Referenced before `commands` initializes; only ever called after.
+   */
+  const promptCloudSignIn = (): void => {
+    const cloud = store.collections.cloudSessions.get("cloud")
+    if (cloud?.state === "signed-in") {
+      store.dispatch({
+        type: "message.appended",
+        actor: "system",
+        text: `Smithers Cloud is already signed in as ${cloud.username ?? "you"}.`
+      })
+      return
+    }
+    if (commands.find("cloud.sign-in") === undefined) {
+      promptSignIn()
+      return
+    }
+    store.dispatch({
+      type: "message.appended",
+      actor: "system",
+      text: "One step signs in to Smithers Cloud: workspaces, changes and sync need it.",
+      action: { flow: "cloud.sign-in", label: "Sign in to Smithers Cloud" }
+    })
+  }
+
+  /*
    * The /chat.commands answer: the LIVE visible catalog as one chat message —
    * the slash menu caps at 8 for calm, so this is where "all of it" lives.
    * Referenced before `commands` initializes; only ever called after.
@@ -906,6 +1051,7 @@ export const createAppController = (
     openBrowser,
     createWorkflow,
     listWorkspaceWorkflows,
+    showFlows,
     runWorkflow,
     chooseWorkflowRepo,
     stopWatchingRun,
@@ -942,8 +1088,19 @@ export const createAppController = (
     toggleTabMenu,
     selectRepo,
     unpinRepo,
+    toggleRepoTree,
+    renameWorkspace,
+    toggleWorkspaceRename,
     openLocalRepo,
     loadHarnesses,
+    loadAgents,
+    listAgents,
+    newAgent,
+    createAgent,
+    editAgent,
+    removeAgent,
+    listHarnessModels,
+    updateAgentForm,
     loadRepos,
     notePtyExit,
     pty,
@@ -1001,7 +1158,10 @@ export const createAppController = (
     explain,
     showCommandCatalog,
     promptSignIn,
+    promptCloudSignIn,
     reloadApp,
+    openDownload,
+    promptDownload,
     listIssues: issuesSeam.listIssues,
     viewIssue: issuesSeam.viewIssue,
     createIssue: issuesSeam.createIssue,
@@ -1027,6 +1187,9 @@ export const createAppController = (
     listBookmarks: bookmarksSeam.listBookmarks,
     listFiles: filesSeam.listFiles,
     readFile: filesSeam.readFile,
+    codeHover,
+    codeDefinition,
+    codeDiagnostics,
     linearConnect: linearSeam.connect,
     linearConnectOpen: linearSeam.openLinear,
     linearConnectTeam: linearSeam.pickTeam,
@@ -1037,9 +1200,11 @@ export const createAppController = (
     linearDisconnect: linearSeam.disconnect,
     retrySyncOp: linearSeam.retryOp,
     showMoreSyncOps: linearSeam.showMoreOps,
+    loadOlderSyncOps: linearSeam.loadOlderOps,
     githubApp: gitHubSeam.app,
     githubOpenInstall: gitHubSeam.openInstall,
     githubReconcile: gitHubSeam.reconcile,
+    retryMirrorRef: gitHubSeam.retryMirrorRef,
     githubMirrorSync: gitHubSeam.mirrorSync,
     loadCloudSession,
     signInCloud,
@@ -1060,13 +1225,33 @@ export const createAppController = (
     destroyWorkspaceSession: workspaceSeam.destroySession,
     deleteWorkspace: workspaceSeam.deleteWorkspace,
     setWorkspaceFacet: workspaceSeam.setFacet,
+    listWorkspaceFiles: workspaceSeam.listFiles,
+    readWorkspaceFile: workspaceSeam.readFile,
+    listWorkspaceServices: workspaceSeam.listServices,
+    listWorkspaceEgress: workspaceSeam.listEgress,
+    openWorkspaceDesktop: workspaceSeam.openDesktop,
+    rotateWorkspaceDesktop: workspaceSeam.rotateDesktop,
+    listEnvironmentImages: workspaceSeam.listEnvironmentImages,
+    listSessionEgress: egressSeam.listSessionEgress,
     viewChange: changeSeam.viewChange,
     diffChange: changeSeam.diffChange,
     landChange: changeSeam.landChange,
     splitReadyChange: changeSeam.splitReady,
+    splitChange: changeSeam.splitChange,
     resolveChangeConflict: changeSeam.resolveConflict,
     revertChange: changeSeam.revertChange,
     setChangeFacet: changeSeam.setFacet,
+    setChangePins: changeSeam.setPins,
+    checksOfChangeAt: changeSeam.checksAt,
+    openChangeComputer: changeSeam.openComputer,
+    diffSinceMyReview: changeSeam.sinceMyReview,
+    reviewThreadDone: changeSeam.threadDone,
+    reviewThreadAck: changeSeam.threadAck,
+    reviewThreadReopen: changeSeam.threadReopen,
+    fixFinding: changeSeam.pleaseFix,
+    findingNotUseful: changeSeam.notUseful,
+    requestChangeReview: changeSeam.requestReview,
+    unrequestChangeReview: changeSeam.unrequestReview,
     dismissToast,
     refreshBalance,
     showBalance,
@@ -1135,6 +1320,7 @@ export const createAppController = (
   return {
     store,
     bootstrap: services.bootstrap,
+    downloadUrl,
     features,
     nativeAgentAvailable: agent.available,
     nativeRepositoriesAvailable: repositories.available,
@@ -1170,6 +1356,7 @@ export const createAppController = (
     openBrowser,
     createWorkflow,
     listWorkspaceWorkflows,
+    showFlows,
     runWorkflow,
     chooseWorkflowRepo,
     stopWatchingRun,
@@ -1206,8 +1393,19 @@ export const createAppController = (
     toggleTabMenu,
     selectRepo,
     unpinRepo,
+    toggleRepoTree,
+    renameWorkspace,
+    toggleWorkspaceRename,
     openLocalRepo,
     loadHarnesses,
+    loadAgents,
+    listAgents,
+    newAgent,
+    createAgent,
+    editAgent,
+    removeAgent,
+    listHarnessModels,
+    updateAgentForm,
     loadRepos,
     notePtyExit,
     pty,
@@ -1265,7 +1463,10 @@ export const createAppController = (
     explain,
     showCommandCatalog,
     promptSignIn,
+    promptCloudSignIn,
     reloadApp,
+    openDownload,
+    promptDownload,
     listIssues: issuesSeam.listIssues,
     viewIssue: issuesSeam.viewIssue,
     createIssue: issuesSeam.createIssue,
@@ -1291,6 +1492,9 @@ export const createAppController = (
     listBookmarks: bookmarksSeam.listBookmarks,
     listFiles: filesSeam.listFiles,
     readFile: filesSeam.readFile,
+    codeHover,
+    codeDefinition,
+    codeDiagnostics,
     linearConnect: linearSeam.connect,
     linearConnectOpen: linearSeam.openLinear,
     linearConnectTeam: linearSeam.pickTeam,
@@ -1301,9 +1505,11 @@ export const createAppController = (
     linearDisconnect: linearSeam.disconnect,
     retrySyncOp: linearSeam.retryOp,
     showMoreSyncOps: linearSeam.showMoreOps,
+    loadOlderSyncOps: linearSeam.loadOlderOps,
     githubApp: gitHubSeam.app,
     githubOpenInstall: gitHubSeam.openInstall,
     githubReconcile: gitHubSeam.reconcile,
+    retryMirrorRef: gitHubSeam.retryMirrorRef,
     githubMirrorSync: gitHubSeam.mirrorSync,
     loadCloudSession,
     signInCloud,
@@ -1324,13 +1530,33 @@ export const createAppController = (
     destroyWorkspaceSession: workspaceSeam.destroySession,
     deleteWorkspace: workspaceSeam.deleteWorkspace,
     setWorkspaceFacet: workspaceSeam.setFacet,
+    listWorkspaceFiles: workspaceSeam.listFiles,
+    readWorkspaceFile: workspaceSeam.readFile,
+    listWorkspaceServices: workspaceSeam.listServices,
+    listWorkspaceEgress: workspaceSeam.listEgress,
+    openWorkspaceDesktop: workspaceSeam.openDesktop,
+    rotateWorkspaceDesktop: workspaceSeam.rotateDesktop,
+    listEnvironmentImages: workspaceSeam.listEnvironmentImages,
+    listSessionEgress: egressSeam.listSessionEgress,
     viewChange: changeSeam.viewChange,
     diffChange: changeSeam.diffChange,
     landChange: changeSeam.landChange,
     splitReadyChange: changeSeam.splitReady,
+    splitChange: changeSeam.splitChange,
     resolveChangeConflict: changeSeam.resolveConflict,
     revertChange: changeSeam.revertChange,
     setChangeFacet: changeSeam.setFacet,
+    setChangePins: changeSeam.setPins,
+    checksOfChangeAt: changeSeam.checksAt,
+    openChangeComputer: changeSeam.openComputer,
+    diffSinceMyReview: changeSeam.sinceMyReview,
+    reviewThreadDone: changeSeam.threadDone,
+    reviewThreadAck: changeSeam.threadAck,
+    reviewThreadReopen: changeSeam.threadReopen,
+    fixFinding: changeSeam.pleaseFix,
+    findingNotUseful: changeSeam.notUseful,
+    requestChangeReview: changeSeam.requestReview,
+    unrequestChangeReview: changeSeam.unrequestReview,
     dismissToast,
     refreshBalance,
     showBalance,

@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { RunRecordSchema, TargetRunEventSchema } from "smithers-shared/TargetGraph"
-import type { RunRecord, RunReplayResponse, TargetRunEvent } from "smithers-shared/TargetGraph"
+import { RunRecordSchema, TargetRunEventSchema } from "@smthrs/rpc/TargetGraph"
+import type { RunRecord, RunReplayResponse, TargetRunEvent } from "@smthrs/rpc/TargetGraph"
 import type { TargetRun } from "./Targets"
 
 type HistoryLine = { readonly type: "record"; readonly record: RunRecord } | { readonly type: "event"; readonly event: TargetRunEvent }

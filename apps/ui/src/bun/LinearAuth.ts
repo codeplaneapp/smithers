@@ -1,6 +1,6 @@
 /*
  * The Linear OAuth handoff on the local origin (lane sync, ADR 0005): the
- * settled team-pick flow (plue#469) is handoff → GET setup → pick → create,
+ * settled team-pick flow is handoff → GET setup → pick → create,
  * and the handoff's callback redirects with `?setup=<key>`. The backend's
  * registered redirect URI is fixed at the API host, so the app runs its own
  * receiver, the same shape the CLI browser login already speaks: `start`
@@ -17,7 +17,7 @@
  * the handoff did not come back; no route is faked.
  */
 import type { Server } from "bun"
-import type { LinearAuthSession } from "smithers-shared/LocalApp"
+import type { LinearAuthSession } from "@smthrs/rpc/LocalApp"
 
 export interface LinearAuthOptions {
   /** The local origin the `/api/cloud/*` proxy lives on (no trailing slash); read at start time. */

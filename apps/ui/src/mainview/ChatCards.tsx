@@ -14,13 +14,14 @@ import {
   StatusPill
 } from "@smthrs/ui"
 import type { ApprovalState } from "@smthrs/ui"
-import { agentRole } from "smithers-shared/AgentRoles"
+import { findAgentRole } from "@smthrs/rpc/AgentRoles"
 import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "lucide-react"
 import { lazy, Suspense, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
+import { AgentFormCardBody, AgentModelsCardBody, AgentsCardBody } from "./cards/AgentCards"
 import { BranchesCardBody } from "./cards/BranchesCard"
 import { ChangeCardBody, DiffCardBody } from "./cards/ChangeCards"
-import { WorkspaceCardBody } from "./cards/WorkspaceCard"
+import { EnvironmentImagesCardBody, WorkspaceCardBody } from "./cards/WorkspaceCard"
 import { AffectedCardBody } from "./cards/AffectedCard"
 import { CiMatrixCardBody } from "./cards/CiMatrixCard"
 import {
@@ -38,7 +39,6 @@ import { RepoImportCardBody } from "./cards/RepoImportCard"
 import { ConnectorSetupCardBody, SyncOpsCardBody } from "./cards/SyncCards"
 import { RunHistoryCardBody } from "./cards/RunHistoryCard"
 import { RunTimelineCardBody } from "./cards/RunTimelineCard"
-import { RepoPluginCardBody } from "./cards/RepoPluginCard"
 import { ApprovalsInboxCardBody, RunListCardBody } from "./cards/RunsCards"
 import { RepoCardBody, TargetRunCardBody, TargetsCardBody } from "./cards/TargetCards"
 import { ThemePickerCardBody } from "./cards/ThemePickerCard"
@@ -122,10 +122,13 @@ export const pillStatus = (card: Card): string => {
   if (card.kind === "sync-ops") {
     if (card.payload.error !== undefined) return "failed"
     /*
-     * The run state comes from the sync-run DTO alone; until plue#468/#470
-     * ship it is null, and null is an outcome the app cannot see — it wears
-     * the neutral pill, never "done" (review finding 3: a sync that had just
-     * started read as finished).
+     * The run state comes from the sync-run DTO alone and is that DTO's own
+     * word (`pending | running | completed | failed` for a Linear run,
+     * `queued | running | succeeded | failed` for a mirror run — the shared
+     * status vocabulary tints every one). Null means nothing has answered
+     * yet, which is an outcome the app cannot see: it wears the neutral
+     * pill, never "done" (review finding 3: a sync that had just started
+     * read as finished).
      */
     if (card.payload.runState === null) return "pending"
     return card.payload.runState
@@ -157,7 +160,7 @@ export const pillStatus = (card: Card): string => {
     return card.payload.status
   }
   if (card.kind === "run-timeline") return card.payload.status
-  if (card.kind === "repo" || card.kind === "repo-plugin") return "done"
+  if (card.kind === "repo") return "done"
   /* A subagent's pill is its process: running, done on a clean exit, failed otherwise. */
   if (card.kind === "agent") {
     if (card.payload.phase === "running") return "running"
@@ -166,6 +169,13 @@ export const pillStatus = (card: Card): string => {
   if (card.kind === "explain") {
     if (card.payload.phase === "asking") return "running"
     return card.payload.phase === "answered" ? "done" : "failed"
+  }
+  /* Agents as data: the listings settle when they render; the form's pill is its phase. */
+  if (card.kind === "agents" || card.kind === "agent-models") return "done"
+  if (card.kind === "agent-form") {
+    if (card.payload.phase === "saving") return "running"
+    if (card.payload.phase === "failed") return "failed"
+    return card.payload.phase === "editing" ? "pending" : "done"
   }
   if (card.status === "acted") return "done"
   if (card.kind !== "status") return "pending"
@@ -817,7 +827,8 @@ const AgentCardBody = ({
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
   const { displayName, cwd, phase, exitCode, tabId, roleId, task } = card.payload
-  const role = roleId === undefined ? undefined : agentRole(roleId)
+  // The purpose rode the card at launch (a custom agent's is in no table); older cards fall back to the built-in row.
+  const purpose = card.payload.purpose ?? (roleId === undefined ? undefined : findAgentRole(roleId)?.purpose)
   const state = phase === "running"
     ? `${displayName} is running in ${cwd}.`
     : exitCode === null
@@ -825,7 +836,7 @@ const AgentCardBody = ({
     : `${displayName} exited (${exitCode}).`
   return (
     <div className="agent-card" data-phase={phase} data-role={roleId}>
-      {role !== undefined ? <p className="smithers-card-note agent-card-role">{role.purpose}</p> : null}
+      {purpose !== undefined ? <p className="smithers-card-note agent-card-role">{purpose}</p> : null}
       {task !== undefined ? <p className="smithers-card-note agent-card-task">Task: {task}</p> : null}
       <p className="smithers-card-note">{state}</p>
       {phase === "running" ?
@@ -867,8 +878,12 @@ const ExplainCardBody = ({ card }: { readonly card: Extract<Card, { kind: "expla
   )
 }
 
-/* The workspace's workflows (flow.list) — each row's Run is a command binding. */
-const WorkflowListCardBody = ({
+/*
+ * The workspace's workflows (flow.list) — each row's Run is a command binding.
+ * Exported because the Flows pane (ask 5, App.tsx) renders THESE rows: one
+ * list with two mounts, never a second implementation of the same listing.
+ */
+export const WorkflowListCardBody = ({
   card,
   onRunWorkflow
 }: {
@@ -1003,31 +1018,42 @@ export function CardView({
                 >
                   <GitFork size={13} />
                 </Button>
-                {/* Open in tab exists only on the maximized card: a user's explicit act (THE EMBED LAW). */}
+                {/* Open in sidebar exists only on the maximized card: a user's explicit act (THE EMBED LAW). */}
                 <Button
                   variant="ghost"
                   size="icon"
                   className="card-maximize-btn"
                   data-flow="tab.card"
                   data-testid={`card-open-in-tab-${card.id}`}
-                  aria-label="Open in tab"
-                  title="Open in tab"
+                  aria-label="Open in sidebar"
+                  title="Open in sidebar"
                   onClick={() => onOpenInTab(card.id)}
                 >
                   <PanelTop size={13} />
                 </Button>
+                {
+                  /*
+                   * Ask 8 (will, 2026-09-02): "when I maximize a file I have no
+                   * way of minimizing it". The way back is NAMED — an icon
+                   * alone was not read as an exit — and the header it sits in
+                   * sticks to the top of the scrolling card (cards.css), so it
+                   * is on screen however far the body scrolls. It is the same
+                   * restore flow Escape and the backdrop run.
+                   */
+                }
                 <Button
                   ref={minimizeRef}
                   variant="ghost"
-                  size="icon"
+                  size="sm"
                   className="card-minimize-btn"
                   data-flow="card.minimize"
                   data-testid={`card-minimize-${card.id}`}
-                  aria-label="Minimize card"
-                  title="Minimize card"
+                  aria-label="Restore"
+                  title="Restore"
                   onClick={minimizeThenFocus}
                 >
                   <Minimize2 size={13} />
+                  Restore
                 </Button>
               </>
             ) :
@@ -1113,7 +1139,6 @@ export function CardView({
           {card.kind === "file" ? <FileCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "theme-picker" ? <ThemePickerCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "repo" ? <RepoCardBody card={card} /> : null}
-          {card.kind === "repo-plugin" ? <RepoPluginCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "targets" ? <TargetsCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "target-run" ? <TargetRunCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "graph" ?
@@ -1128,8 +1153,12 @@ export function CardView({
           {card.kind === "affected" ? <AffectedCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "ci-matrix" ? <CiMatrixCardBody card={card} /> : null}
           {card.kind === "agent" ? <AgentCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "agents" ? <AgentsCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "agent-form" ? <AgentFormCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "agent-models" ? <AgentModelsCardBody card={card} /> : null}
           {card.kind === "explain" ? <ExplainCardBody card={card} /> : null}
           {card.kind === "workspace" ? <WorkspaceCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "environment-images" ? <EnvironmentImagesCardBody card={card} /> : null}
         </div>
       </section>
     </>

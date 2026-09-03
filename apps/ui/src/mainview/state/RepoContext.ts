@@ -6,7 +6,7 @@
  * repository's head); otherwise the answer is an honest error naming the
  * choice — the target is a genuine user decision, never a guess.
  */
-import type { Repo } from "smithers-shared/LocalApp"
+import type { Repo } from "@smthrs/rpc/LocalApp"
 import { activeRepoOf, parseRepoSelection } from "./AppState"
 import type { AppStore } from "./AppStore"
 

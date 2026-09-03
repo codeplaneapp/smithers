@@ -1,10 +1,11 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import { CLOUD_ROUTE_PREFIX } from "smithers-shared/LocalApp"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
 import type { CloudWorkspaceInput } from "../AppState"
-import { createWorkspaceSeam, DEGRADED_WORKSPACE_REFUSAL } from "./WorkspaceSeam"
+import { dropDesktopStream, readDesktopStream } from "./DesktopStream"
+import { createWorkspaceSeam, DEGRADED_WORKSPACE_REFUSAL, desktopSessionRetry, terminalSessionRetry } from "./WorkspaceSeam"
 import type { SeamContext } from "./SeamContext"
 
 /*
@@ -18,12 +19,18 @@ import type { SeamContext } from "./SeamContext"
  * 404 mid-watch re-reads the repository's list.
  */
 
-const memoryStorage = (): StorageApi => {
+/**
+ * The persistence backend, with its bytes readable: lane L3b's credential
+ * guarantee asserts against what was actually WRITTEN, not only against the
+ * in-memory collections, because a card payload reaches disk through here.
+ */
+const memoryStorage = (): StorageApi & { readonly written: () => string } => {
   const data = new Map<string, string>()
   return {
     getItem: (key) => data.get(key) ?? null,
     setItem: (key, value) => void data.set(key, value),
-    removeItem: (key) => void data.delete(key)
+    removeItem: (key) => void data.delete(key),
+    written: () => [...data.entries()].map(([key, value]) => `${key}=${value}`).join("\n")
   }
 }
 
@@ -42,6 +49,79 @@ const WS_RUNNING = {
   provisioning_stage: null,
   suspended_at: null,
   created_at: "2026-09-01T00:00:00Z"
+}
+
+/*
+ * The live sample probed from the app on 2026-09-02
+ * (`GET /api/repos/smithersai/smithers/workspaces`), reshaped onto this
+ * suite's repository. Every plue#446 field is here exactly as the wire spells
+ * it, `started_at: null` included — a suspended computer has no uptime.
+ */
+const WS_LIVE = {
+  id: "ws-1",
+  repository_id: 7,
+  user_id: 3,
+  repo_full_name: "will/smithers",
+  name: "smithers landing",
+  target_bookmark: "landing/smithers/main",
+  status: "suspended",
+  kind: "container",
+  environment: {
+    source: ".smithers/environment.nix",
+    revision: "b3f21c9d4e5a6b7c",
+    closure_hash: "sha256-abc"
+  },
+  head: { change_id: "qupxosqwmnrt", commit_id: "c0ffee1234567890" },
+  ahead: 0,
+  behind: 0,
+  is_fork: true,
+  vm_id: "vm-77",
+  persistence: "persistent",
+  ssh_host: "vm-77@ssh.jjhub.tech",
+  idle_timeout_seconds: 1800,
+  last_activity_at: "2026-09-02T09:00:00Z",
+  suspended_at: "2026-09-02T09:30:00Z",
+  started_at: null,
+  created_at: "2026-09-01T00:00:00Z",
+  updated_at: "2026-09-02T09:30:00Z"
+}
+
+/*
+ * Lane L3b — a desktop workspace (plue's NixOS compute path). `kind` is
+ * `desktop`, the environment carries the registry `image` the VM booted, and
+ * the DTO's own `desktop` object holds the RELATIVE stream path and the
+ * session that was last minted (null before the first mint). Nothing here is
+ * a credential: the token only exists in the session POST's answer.
+ */
+const WS_DESKTOP = {
+  ...WS_RUNNING,
+  kind: "desktop",
+  environment: {
+    source: ".smithers/environment.nix",
+    revision: "b3f21c9d4e5a6b7c",
+    closure_hash: "9f2b1c0d4e5a6b7c8d9e0f1a",
+    image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
+  },
+  /* plue#496: `ready` is true only once the guest verified noVNC. */
+  desktop: { ready: true, stream_url: "/api/workspaces/ws-1/desktop/stream", session: null }
+}
+
+/*
+ * The 201 of POST …/workspaces/{id}/desktop/session. The `token`, the
+ * `vnc_password`, and the ABSOLUTE `stream_url` that embeds both are the only
+ * credentials in this suite; every test below asserts they never leave the
+ * ephemeral holder.
+ */
+const DESKTOP_TOKEN = "dtok-8f3a2b1c"
+const DESKTOP_VNC_PASSWORD = "vncpw-51ce9d0a"
+const DESKTOP_STREAM_URL =
+  `https://api.jjhub.tech/api/workspaces/ws-1/desktop/${DESKTOP_TOKEN}/vnc.html?autoconnect=1&password=${DESKTOP_VNC_PASSWORD}`
+const DESKTOP_MINT = {
+  workspace_id: "ws-1",
+  stream_url: DESKTOP_STREAM_URL,
+  session: { id: "dsess-1", expires_at: "2026-09-03T09:12:00Z" },
+  token: DESKTOP_TOKEN,
+  vnc_password: DESKTOP_VNC_PASSWORD
 }
 
 /** plue's UserWorkspaceRow (GET /api/user/workspaces — services/workspace.go): a switcher row, not the DTO. */
@@ -75,11 +155,14 @@ const harness = async (
   routes: Record<string, Route>,
   options: { readonly signedIn?: boolean; readonly degraded?: boolean } = {}
 ) => {
-  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const storage = memoryStorage()
+  const store = await createAppStore({ kind: "localStorage", storage })
   /** `METHOD path` per request, the query string dropped. */
   const requests: Array<string> = []
   /** The same, with the query string. */
   const urls: Array<string> = []
+  /** Each request's decoded JSON body, keyed `METHOD path` — what the create actually asked plue for. */
+  const bodies: Array<{ readonly key: string; readonly body: unknown }> = []
   /** The store as each of the seam's dispatches left it: what one transition did, before the next. */
   const dispatched: Array<{ readonly type: string; readonly tabs: Array<string>; readonly attached: string | undefined }> = []
   const ctx: SeamContext = {
@@ -91,6 +174,7 @@ const harness = async (
       const key = `${method} ${path}`
       requests.push(key)
       urls.push(`${key}${url.search}`)
+      if (typeof init?.body === "string") bodies.push({ key, body: JSON.parse(init.body) })
       const route = routes[key] ?? routes[path]
       if (route === undefined) return json(404, { message: `no route ${key}` })
       return typeof route === "function" ? route(url) : route
@@ -128,7 +212,7 @@ const harness = async (
       }
     ]
   })
-  return { store, seam: createWorkspaceSeam(ctx, { pollMs: 1 }), requests, urls, dispatched }
+  return { store, seam: createWorkspaceSeam(ctx, { pollMs: 1 }), requests, urls, dispatched, storage, bodies }
 }
 
 const seedWorkspace = async (store: AppStore, workspace: CloudWorkspaceInput = wsRow): Promise<void> => {
@@ -253,6 +337,29 @@ describe("workspace seam list", () => {
     expect(messagesOf(store).join("\n")).toContain("review (ws-1) · running · will/smithers")
   })
 
+  test("a vm and a desktop on ONE bookmark are two rows, and the list carries both (plue#495)", async () => {
+    /*
+     * plue#495 keys workspace reuse on the KIND: a create for a kind that has
+     * no active row makes a second computer on the same bookmark rather than
+     * handing back the first. The list is what shows it, so both rows and
+     * both tree copies must survive the same-bookmark collision.
+     */
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces": json(200, [
+        { ...WS_RUNNING, id: "ws-vm", kind: "vm", name: "landing vm", target_bookmark: "landing/main" },
+        { ...WS_RUNNING, id: "ws-desk", kind: "desktop", name: "landing desktop", target_bookmark: "landing/main" }
+      ])
+    })
+
+    await seam.listWorkspaces("will/smithers")
+
+    expect(workspacesOf(store).map((row) => [row.id, row.kind, row.targetBookmark])).toEqual([
+      ["ws-vm", "vm", "landing/main"],
+      ["ws-desk", "desktop", "landing/main"]
+    ])
+    expect(copiesOf(store).map((copy) => copy.id)).toEqual(["workspace:ws-vm", "workspace:ws-desk"])
+  })
+
   test("a per-user row keeps the bookmark the collection already knows; a status that moved on drops its stage", async () => {
     const { store, seam } = await harness({
       "api/user/workspaces": json(200, [USER_ROW])
@@ -328,6 +435,31 @@ describe("workspace seam list", () => {
     await seam.listWorkspaces("will/smithers")
     expect(workspacesOf(store).length).toBe(101)
     expect(urls).toEqual(["GET api/repos/will/smithers/workspaces?limit=100", "GET api/repos/will/smithers/workspaces?limit=100&cursor=100"])
+  })
+
+  test("the per-user list follows plue#503's cursor Link header", async () => {
+    /*
+     * plue#503 replaced the legacy page/per_page links on both workspace list
+     * routes with cursor form — `</api/user/workspaces?cursor=2&limit=2>;
+     * rel="next"` beside rel="first" and rel="prev" — which is the form the
+     * route's own parser reads. The seam already followed a cursor link; this
+     * pins that it still does, at plue's own spelling.
+     */
+    const { store, seam, urls } = await harness({
+      "api/user/workspaces": (url) =>
+        url.searchParams.get("cursor") === "2"
+          ? json(200, [{ ...USER_ROW, workspace_id: "ws-3", workspace_title: "third" }], {
+            link: "</api/user/workspaces?limit=2>; rel=\"first\", </api/user/workspaces?cursor=0&limit=2>; rel=\"prev\"",
+            "x-total-count": "3"
+          })
+          : json(200, [USER_ROW, { ...USER_ROW, workspace_id: "ws-2", workspace_title: "second" }], {
+            link: "</api/user/workspaces?limit=2>; rel=\"first\", </api/user/workspaces?cursor=2&limit=2>; rel=\"next\"",
+            "x-total-count": "3"
+          })
+    })
+    await seam.listWorkspaces()
+    expect(urls).toEqual(["GET api/user/workspaces?limit=100", "GET api/user/workspaces?limit=100&cursor=2"])
+    expect(workspacesOf(store).map((row) => row.id).sort()).toEqual(["ws-1", "ws-2", "ws-3"])
   })
 
   test("a next link that leaves the route is not followed", async () => {
@@ -692,6 +824,131 @@ describe("workspace seam terminal", () => {
     expect(store.collections.tabs.get("sess-1")).toBeDefined()
   })
 
+  test("a 503 guest_not_ready reads plue's own body and code, and retries the session POST on the Retry-After it named (plue#504)", async () => {
+    const previous = { ...terminalSessionRetry }
+    /* plue asks for 3s; the test shortens the wait rather than sleeping through it. */
+    terminalSessionRetry.defaultDelayMs = 1
+    try {
+      let posts = 0
+      const { store, seam, requests } = await harness({
+        "POST api/repos/will/smithers/workspace/sessions": () => {
+          posts += 1
+          /*
+           * plue's own 503 (routes/workspace_terminal_test.go): writeRouteError
+           * sanitizes a 5xx MESSAGE to the status text but keeps `code`, and
+           * `GuestNotReady` carries RetryAfter 3 onto the header.
+           */
+          return posts < 3
+            ? json(503, { code: "guest_not_ready", message: "service unavailable" }, { "retry-after": "0" })
+            : json(201, { id: "sess-1", status: "running", workspace_id: "ws-1", created_at: null })
+        },
+        "api/repos/will/smithers/workspace/sessions/sess-1": json(200, { id: "sess-1", status: "running", workspace_id: "ws-1", created_at: null }),
+        "api/repos/will/smithers/workspace/sessions": json(200, [{ id: "sess-1", status: "running", workspace_id: "ws-1", created_at: null }])
+      })
+      await seedWorkspace(store)
+
+      const result = await seam.openTerminal("ws-1")
+
+      /* The server asked to be retried, so it was — and the third answer created the session. */
+      expect(posts).toBe(3)
+      expect(requests.filter((request) => request === "POST api/repos/will/smithers/workspace/sessions")).toHaveLength(3)
+      expect(typeof result).toBe("object")
+      expect(store.collections.tabs.get("sess-1")).toBeDefined()
+      /* A POST that finally succeeded leaves no refusal behind. */
+      expect(payloadOf(store)?.terminalRefusal).toBeUndefined()
+    } finally {
+      Object.assign(terminalSessionRetry, previous)
+    }
+  })
+
+  test("a guest_not_ready that never clears gives up at the bound, with plue's words and code on the terminal facet", async () => {
+    const previous = { ...terminalSessionRetry }
+    /* The default is deliberately NOT used here: the wait must come from the header. */
+    terminalSessionRetry.defaultDelayMs = 0
+    terminalSessionRetry.maxAttempts = 2
+    try {
+      let posts = 0
+      const { store, seam } = await harness({
+        "POST api/repos/will/smithers/workspace/sessions": () => {
+          posts += 1
+          return json(503, { code: "guest_not_ready", message: "service unavailable" }, { "retry-after": "1" })
+        }
+      })
+      await seedWorkspace(store)
+
+      const startedAt = Date.now()
+      const refusal = await seam.openTerminal("ws-1")
+
+      expect(posts).toBe(2)
+      /* One retry, and it waited the second the header asked for — not the app's own default. */
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900)
+      expect(refusal).toBe("service unavailable")
+      expect(payloadOf(store)?.terminalRefusal).toEqual({
+        status: 503,
+        message: "service unavailable",
+        code: "guest_not_ready",
+        retryAfterSeconds: 1
+      })
+      expect(payloadOf(store)?.facet).toBe("terminal")
+      expect(tabsOf(store)).toEqual([])
+    } finally {
+      Object.assign(terminalSessionRetry, previous)
+    }
+  })
+
+  test("any other session refusal is answered once — a code the server did not ask to be retried is not retried", async () => {
+    let posts = 0
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspace/sessions": () => {
+        posts += 1
+        return json(409, { message: "workspace is not running" })
+      }
+    })
+    await seedWorkspace(store)
+
+    const refusal = await seam.openTerminal("ws-1")
+
+    expect(posts).toBe(1)
+    expect(refusal).toBe("workspace is not running")
+    expect(payloadOf(store)?.terminalRefusal).toEqual({
+      status: 409,
+      message: "workspace is not running",
+      code: null,
+      retryAfterSeconds: null
+    })
+  })
+
+  test("a second terminal open supersedes a pending guest_not_ready retry", async () => {
+    const previous = { ...terminalSessionRetry }
+    /* No Retry-After on the wire, so the loop parks for this long — long enough to open again mid-wait. */
+    terminalSessionRetry.defaultDelayMs = 50
+    try {
+      let posts = 0
+      const { store, seam } = await harness({
+        "POST api/repos/will/smithers/workspace/sessions": () => {
+          posts += 1
+          return posts === 1
+            ? json(503, { code: "guest_not_ready", message: "service unavailable" })
+            : json(201, { id: "sess-1", status: "running", workspace_id: "ws-1", created_at: null })
+        },
+        "api/repos/will/smithers/workspace/sessions/sess-1": json(200, { id: "sess-1", status: "running", workspace_id: "ws-1", created_at: null }),
+        "api/repos/will/smithers/workspace/sessions": json(200, [])
+      })
+      await seedWorkspace(store)
+
+      const pending = seam.openTerminal("ws-1")
+      await wait(5)
+      await seam.openTerminal("ws-1")
+      await pending
+
+      /* The first loop stopped at the second open instead of posting again. */
+      expect(posts).toBe(2)
+      expect(store.collections.tabs.get("sess-1")).toBeDefined()
+    } finally {
+      Object.assign(terminalSessionRetry, previous)
+    }
+  })
+
   test("destroy session detaches the card that pointed at it and closes its tab in the same transaction", async () => {
     const { store, seam, dispatched } = await harness({
       "POST api/repos/will/smithers/workspace/sessions/sess-1/destroy": json(204, null),
@@ -775,5 +1032,1019 @@ describe("workspace seam facets", () => {
     const payload = payloadOf(store)
     expect(payload?.facet).toBe("snapshots")
     expect(payload?.snapshots).toEqual([{ id: "snap-1", name: "golden", createdAt: null }])
+  })
+})
+
+/*
+ * Lane L3: plue#446's header facts and plue#449's facet routes. The DTO
+ * fixture is the live sample probed from the app on 2026-09-02; the facet
+ * doubles answer the shapes `internal/services/workspace_facets.go` and
+ * `internal/services/sandbox_egress_audit.go` write.
+ */
+describe("workspace seam header facts (plue#446)", () => {
+  test("view parses the live DTO's kind, head, ahead/behind, environment, persistence and ssh host onto the row and the card", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_LIVE),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({
+        id: "ws-1",
+        name: "smithers landing",
+        targetBookmark: "landing/smithers/main",
+        status: "suspended",
+        kind: "container",
+        head: { changeId: "qupxosqwmnrt", commitId: "c0ffee1234567890" },
+        ahead: 0,
+        behind: 0,
+        startedAt: null,
+        /* Lane L3b: a container names no image, and an absent image is null — never an empty reference. */
+        environment: {
+          source: ".smithers/environment.nix",
+          revision: "b3f21c9d4e5a6b7c",
+          closureHash: "sha256-abc",
+          image: null
+        },
+        persistence: "persistent",
+        sshHost: "vm-77@ssh.jjhub.tech"
+      })
+    )
+    expect(payloadOf(store)).toEqual(
+      expect.objectContaining({
+        workspaceKind: "container",
+        head: { changeId: "qupxosqwmnrt", commitId: "c0ffee1234567890" },
+        ahead: 0,
+        behind: 0,
+        startedAt: null,
+        /* Lane L3b: a container names no image, and an absent image is null — never an empty reference. */
+        environment: {
+          source: ".smithers/environment.nix",
+          revision: "b3f21c9d4e5a6b7c",
+          closureHash: "sha256-abc",
+          image: null
+        },
+        persistence: "persistent",
+        sshHost: "vm-77@ssh.jjhub.tech"
+      })
+    )
+  })
+
+  test("a DTO that answers none of them carries none of them: empty strings and an empty head are absence", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, {
+        ...WS_LIVE,
+        kind: "",
+        environment: { source: "", revision: "", closure_hash: "" },
+        head: { change_id: "", commit_id: "" },
+        ahead: null,
+        behind: null,
+        persistence: "",
+        ssh_host: ""
+      }),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(payloadOf(store)).toEqual(
+      expect.objectContaining({
+        workspaceKind: null,
+        head: null,
+        ahead: null,
+        behind: null,
+        environment: null,
+        persistence: null,
+        sshHost: null
+      })
+    )
+  })
+
+  test("a started workspace carries its start time; the per-user row keeps the facts but drops the uptime once it stops running", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces": json(200, [{ ...WS_LIVE, status: "running", started_at: "2026-09-02T08:00:00Z" }]),
+      "api/user/workspaces": json(200, [{ ...USER_ROW, workspace_title: "smithers landing", state: "suspended" }])
+    })
+    await seam.listWorkspaces("will/smithers")
+    expect(workspacesOf(store)[0]).toEqual(expect.objectContaining({ startedAt: "2026-09-02T08:00:00Z", kind: "container" }))
+    // The switcher row carries none of these; what the per-repo DTO taught stands, except an uptime that no longer applies.
+    await seam.listWorkspaces()
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({
+        status: "suspended",
+        kind: "container",
+        persistence: "persistent",
+        sshHost: "vm-77@ssh.jjhub.tech",
+        head: { changeId: "qupxosqwmnrt", commitId: "c0ffee1234567890" },
+        startedAt: null
+      })
+    )
+  })
+})
+
+describe("workspace seam files and services (plue#449)", () => {
+  test("the Files facet reads the workspace's own route and keeps the path it listed", async () => {
+    const { store, seam, urls } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/files": json(200, [
+        { name: "src", path: "src", type: "dir", size: 0 },
+        { name: "latest", path: "latest", type: "symlink", size: 8 },
+        { name: "README.md", path: "README.md", type: "file", size: 42 },
+        { broken: true }
+      ])
+    })
+    await seedWorkspace(store)
+    const result = await seam.listFiles("/", "ws-1")
+    expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/files?path="])
+    expect(result).toEqual({ value: "3 entries under / in \"review\" (ws-1) — the card lists them." })
+    expect(payloadOf(store)?.files).toEqual([
+      { name: "src", path: "src", type: "dir", size: 0 },
+      { name: "latest", path: "latest", type: "symlink", size: 8 },
+      { name: "README.md", path: "README.md", type: "file", size: 42 }
+    ])
+    expect(payloadOf(store)?.filesPath).toBe("")
+    expect(payloadOf(store)?.facet).toBe("files")
+  })
+
+  test("a subdirectory listing replaces the previous path's rows, and the facet re-reads the path the card holds", async () => {
+    const { store, seam, urls } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/files": (url) =>
+        json(200, url.searchParams.get("path") === "src"
+          ? [{ name: "main.go", path: "src/main.go", type: "file", size: 12 }]
+          : [{ name: "src", path: "src", type: "dir", size: 0 }])
+    })
+    await seedWorkspace(store)
+    await seam.listFiles("src", "ws-1")
+    expect(payloadOf(store)?.files).toEqual([{ name: "main.go", path: "src/main.go", type: "file", size: 12 }])
+    expect(payloadOf(store)?.filesPath).toBe("src")
+    urls.length = 0
+    await seam.setFacet("ws-1", "files")
+    expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/files?path=src"])
+  })
+
+  test("a refused listing shows the server's own words and never an empty directory", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/files": json(404, { message: "path not found" })
+    })
+    await seedWorkspace(store)
+    expect(await seam.listFiles("nope", "ws-1")).toBe("path not found")
+    expect(payloadOf(store)?.error).toBe("path not found")
+    expect(payloadOf(store)?.files).toBeUndefined()
+  })
+
+  test("workspace.file reads the workspace's copy into a file card; base64 is stated as binary", async () => {
+    const { store, seam, urls } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/files/content": (url) =>
+        json(200, url.searchParams.get("path") === "logo.png"
+          ? { name: "logo.png", path: "logo.png", type: "file", encoding: "base64", content: "AAEC", size: 3 }
+          : { name: "README.md", path: "README.md", type: "file", encoding: "utf-8", content: "# hi", size: 4 })
+    })
+    await seedWorkspace(store)
+    expect(await seam.readFile("README.md", "ws-1")).toEqual({
+      value: "README.md in \"review\" (ws-1) is on the card."
+    })
+    expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/files/content?path=README.md"])
+    const text = store.collections.cards.get("workspace-file-ws-1-README.md")
+    expect(text).toEqual(
+      expect.objectContaining({
+        kind: "file",
+        payload: expect.objectContaining({
+          repo: "will/smithers",
+          path: "README.md",
+          content: "# hi",
+          binary: false,
+          address: "will/smithers · review · README.md"
+        })
+      })
+    )
+    await seam.readFile("logo.png", "ws-1")
+    const binary = store.collections.cards.get("workspace-file-ws-1-logo.png")
+    expect(binary?.kind === "file" ? binary.payload.binary : undefined).toBe(true)
+  })
+
+  test("the Services facet lists the name, the state, and plue#483's port and url", async () => {
+    const { store, seam, urls } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/services": json(200, [
+        { name: "postgres", state: "running", port: 5432 },
+        { name: "web", state: "failed", port: 3000, url: "https://ws-1.workspaces.jjhub.tech" },
+        { name: "" }
+      ])
+    })
+    await seedWorkspace(store)
+    const result = await seam.listServices("ws-1")
+    expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/services"])
+    expect(result).toEqual({ value: "\"review\" (ws-1) services: postgres (running), web (failed)." })
+    expect(payloadOf(store)?.services).toEqual([
+      { name: "postgres", state: "running", port: 5432, url: null },
+      { name: "web", state: "failed", port: 3000, url: "https://ws-1.workspaces.jjhub.tech" }
+    ])
+  })
+
+  test("a service that publishes neither a port nor a url carries neither — an absent port is never a zero", async () => {
+    /* plue#483 writes both `omitempty`, so a service with no published port answers without the key. */
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/services": json(200, [
+        { name: "worker", state: "running" },
+        { name: "idle", state: "stopped", port: 0, url: "" }
+      ])
+    })
+    await seedWorkspace(store)
+    await seam.listServices("ws-1")
+    expect(payloadOf(store)?.services).toEqual([
+      { name: "worker", state: "running", port: null, url: null },
+      { name: "idle", state: "stopped", port: null, url: null }
+    ])
+  })
+
+  test("a workspace that declares no services says so", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/services": json(200, [])
+    })
+    await seedWorkspace(store)
+    expect(await seam.listServices("ws-1")).toEqual({ value: "\"review\" (ws-1) declares no services." })
+    expect(payloadOf(store)?.services).toEqual([])
+  })
+})
+
+describe("workspace seam egress audit", () => {
+  const CALL = {
+    occurred_at: "2026-09-02T09:15:00Z",
+    host: "api.github.com",
+    method: "POST",
+    path: "/graphql",
+    status: 200,
+    allowed: true,
+    swapped_secret_names: ["GITHUB_TOKEN"]
+  }
+
+  test("the Egress facet reads a page, keeps plue's cursor, and never renders a secret's value", async () => {
+    const { store, seam, urls } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/egress": json(200, [CALL], {
+        link: "</api/repos/will/smithers/workspaces/ws-1/egress?limit=30>; rel=\"first\", "
+          + "</api/repos/will/smithers/workspaces/ws-1/egress?limit=30&cursor=eyJpZCI6MX0>; rel=\"next\""
+      })
+    })
+    await seedWorkspace(store)
+    const result = await seam.setFacet("ws-1", "egress")
+    expect(result).toBeUndefined()
+    expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/egress?limit=30"])
+    expect(payloadOf(store)?.egress).toEqual([
+      {
+        occurredAt: "2026-09-02T09:15:00Z",
+        host: "api.github.com",
+        method: "POST",
+        path: "/graphql",
+        status: 200,
+        allowed: true,
+        swappedSecretNames: ["GITHUB_TOKEN"]
+      }
+    ])
+    expect(payloadOf(store)?.egressCursor).toBe("eyJpZCI6MX0")
+    expect(payloadOf(store)?.facet).toBe("egress")
+  })
+
+  test("a cursor loads the older page and appends it; a page with no next link exhausts the cursor", async () => {
+    const older = { ...CALL, occurred_at: "2026-09-02T08:00:00Z", host: "registry.npmjs.org", method: "GET", allowed: false, status: 403, swapped_secret_names: [] }
+    const { store, seam, urls } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/egress": (url) =>
+        url.searchParams.get("cursor") === "eyJpZCI6MX0"
+          ? json(200, [older])
+          : json(200, [CALL], {
+            link: "</api/repos/will/smithers/workspaces/ws-1/egress?limit=30&cursor=eyJpZCI6MX0>; rel=\"next\""
+          })
+    })
+    await seedWorkspace(store)
+    await seam.listEgress("ws-1")
+    urls.length = 0
+    const result = await seam.listEgress("ws-1", "eyJpZCI6MX0")
+    expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/egress?limit=30&cursor=eyJpZCI6MX0"])
+    expect(result).toEqual({ value: "2 recorded calls from \"review\" (ws-1) — the card lists them." })
+    expect(payloadOf(store)?.egress?.map((row) => row.host)).toEqual(["api.github.com", "registry.npmjs.org"])
+    expect(payloadOf(store)?.egress?.[1]?.allowed).toBe(false)
+    expect(payloadOf(store)?.egressCursor).toBeNull()
+  })
+
+  test("an audit page Smithers cannot read is an error, never an empty audit", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/egress": json(200, [{ host: 12 }, { nope: true }])
+    })
+    await seedWorkspace(store)
+    expect(await seam.listEgress("ws-1")).toBe("Smithers Cloud answered 2 egress rows in a shape Smithers can't read.")
+    expect(payloadOf(store)?.egress).toBeUndefined()
+    expect(payloadOf(store)?.error).toBe("Smithers Cloud answered 2 egress rows in a shape Smithers can't read.")
+  })
+
+  test("a computer that called nothing says so", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/egress": json(200, [])
+    })
+    await seedWorkspace(store)
+    expect(await seam.listEgress("ws-1")).toEqual({ value: "\"review\" (ws-1) made no recorded calls." })
+    expect(payloadOf(store)?.egress).toEqual([])
+  })
+})
+
+describe("workspace seam egress_proxy_unavailable", () => {
+  test("a creation the worker refused for the missing egress proxy names plue's code exactly", async () => {
+    const { seam } = await harness({
+      "POST api/repos/will/smithers/workspaces": json(503, {
+        code: "egress_proxy_unavailable",
+        message: "service unavailable"
+      })
+    })
+    const refusal = await seam.openWorkspace("main", "will/smithers")
+    expect(refusal).toBe("egress_proxy_unavailable — service unavailable")
+  })
+
+  test("the same refusal on an act with a card puts the code on the card beside the server's words", async () => {
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/resume": json(503, {
+        code: "egress_proxy_unavailable",
+        message: "service unavailable"
+      })
+    })
+    await seedWorkspace(store, { ...wsRow, status: "suspended" })
+    expect(await seam.resumeWorkspace("ws-1")).toBe("egress_proxy_unavailable — service unavailable")
+    expect(payloadOf(store)?.egressProxyUnavailable).toBe(true)
+    expect(payloadOf(store)?.error).toBe("service unavailable")
+  })
+
+  test("a refusal with any other code stays the server's message alone", async () => {
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/resume": json(409, { code: "operation_in_progress", message: "already resuming" })
+    })
+    await seedWorkspace(store, { ...wsRow, status: "suspended" })
+    expect(await seam.resumeWorkspace("ws-1")).toBe("already resuming")
+    expect(payloadOf(store)?.egressProxyUnavailable).toBeUndefined()
+  })
+})
+
+/*
+ * Lane L3b — the NixOS compute path. `kind` on create, the environment's
+ * registry `image`, the DTO's `desktop` object, and the session mint whose
+ * answer is a live VM's password: the whole point of the block below is that
+ * the credential reaches the iframe and nothing else.
+ */
+describe("workspace seam desktop kinds and provenance", () => {
+  test("the create carries the kind the caller chose", async () => {
+    const { seam, bodies } = await harness({
+      "POST api/repos/will/smithers/workspaces": json(201, WS_DESKTOP),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seam.openWorkspace("main", "will/smithers", "desktop")
+    expect(bodies[0]).toEqual({
+      key: "POST api/repos/will/smithers/workspaces",
+      body: { source_bookmark: "main", kind: "desktop" }
+    })
+  })
+
+  test("a create that named no kind names none on the wire — plue's own default stands", async () => {
+    const { seam, bodies } = await harness({
+      "POST api/repos/will/smithers/workspaces": json(201, WS_RUNNING),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seam.openWorkspace("main", "will/smithers")
+    expect(bodies[0]?.body).toEqual({ source_bookmark: "main" })
+  })
+
+  test("the DTO's desktop kind, its environment image and its relative stream path read onto the row and the card", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({
+        kind: "desktop",
+        environment: {
+          source: ".smithers/environment.nix",
+          revision: "b3f21c9d4e5a6b7c",
+          closureHash: "9f2b1c0d4e5a6b7c8d9e0f1a",
+          image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
+        },
+        desktop: { ready: true, streamUrl: "/api/workspaces/ws-1/desktop/stream", session: null }
+      })
+    )
+    expect(payloadOf(store)?.workspaceKind).toBe("desktop")
+    expect(payloadOf(store)?.desktop?.streamUrl).toBe("/api/workspaces/ws-1/desktop/stream")
+    expect(payloadOf(store)?.desktop?.ready).toBe(true)
+  })
+
+  test("a container workspace carries no image and no desktop object — absence, never an empty one", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_RUNNING),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(workspacesOf(store)[0]?.desktop ?? null).toBeNull()
+    expect(workspacesOf(store)[0]?.environment ?? null).toBeNull()
+    expect(payloadOf(store)?.desktop ?? null).toBeNull()
+  })
+
+  test("a desktop object plue answered with a session names the session it minted, and no credential", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, {
+        ...WS_DESKTOP,
+        desktop: {
+          stream_url: "/api/workspaces/ws-1/desktop/stream",
+          session: { id: "dsess-9", expires_at: "2026-09-03T09:12:00Z" }
+        }
+      }),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(payloadOf(store)?.desktop?.session).toEqual({ id: "dsess-9", expiresAt: "2026-09-03T09:12:00Z" })
+  })
+})
+
+describe("workspace seam desktop session", () => {
+  test("the mint holds the credentialed stream for the facet and opens the facet on the card", async () => {
+    dropDesktopStream()
+    const { store, seam, requests } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": json(201, DESKTOP_MINT),
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP)
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+    const answer = await seam.openDesktop("ws-1")
+    expect(requests).toContain("POST api/repos/will/smithers/workspaces/ws-1/desktop/session")
+    expect(readDesktopStream("ws-1")).toEqual({
+      workspaceId: "ws-1",
+      url: DESKTOP_STREAM_URL,
+      sessionId: "dsess-1",
+      expiresAt: "2026-09-03T09:12:00Z"
+    })
+    expect(payloadOf(store)?.facet).toBe("desktop")
+    // The transcript line names the workspace and when the session lapses — never the URL that carries the password.
+    expect(JSON.stringify(answer)).not.toContain(DESKTOP_TOKEN)
+    expect(JSON.stringify(answer)).not.toContain(DESKTOP_VNC_PASSWORD)
+    dropDesktopStream()
+  })
+
+  test("the session answer never reaches a collection, a transcript row, or the persisted bytes", async () => {
+    dropDesktopStream()
+    const { store, seam, storage } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": json(201, DESKTOP_MINT),
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP)
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+    await seam.openDesktop("ws-1")
+    /*
+     * The whole store — every collection, the cards, the transcript — and the
+     * bytes the persistence backend actually wrote. A desktop session is a
+     * live machine's password; a single one of these containing it is the
+     * defect this test exists to catch.
+     */
+    const inMemory = JSON.stringify(
+      Object.fromEntries(
+        Object.entries(store.collections).map(([name, collection]) => [name, [...collection.values()]])
+      )
+    )
+    for (const secret of [DESKTOP_TOKEN, DESKTOP_VNC_PASSWORD, DESKTOP_STREAM_URL, "vnc.html"]) {
+      expect(inMemory).not.toContain(secret)
+      expect(storage.written()).not.toContain(secret)
+      expect(messagesOf(store).join("\n")).not.toContain(secret)
+    }
+    // …and it really was minted: the holder has it, so the assertions above are not vacuous.
+    expect(readDesktopStream("ws-1")?.url).toBe(DESKTOP_STREAM_URL)
+    dropDesktopStream()
+  })
+
+  test("a 409 reads the server's own words and marks the workspace as not running", async () => {
+    dropDesktopStream()
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": json(409, {
+        message: "workspace is suspended; resume it before opening the desktop"
+      }),
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP)
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop", status: "suspended" })
+    const refusal = await seam.openDesktop("ws-1")
+    expect(refusal).toBe("workspace is suspended; resume it before opening the desktop")
+    expect(payloadOf(store)?.desktopRefusal).toEqual({
+      status: 409,
+      message: "workspace is suspended; resume it before opening the desktop",
+      code: null,
+      retryAfterSeconds: null
+    })
+    expect(readDesktopStream("ws-1")).toBeNull()
+  })
+
+  test("a 400 reads the server's own words and offers no resume", async () => {
+    dropDesktopStream()
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": json(400, {
+        message: "workspace kind container has no desktop"
+      }),
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_RUNNING)
+    })
+    await seedWorkspace(store)
+    const refusal = await seam.openDesktop("ws-1")
+    expect(refusal).toBe("workspace kind container has no desktop")
+    expect(payloadOf(store)?.desktopRefusal).toEqual({
+      status: 400,
+      message: "workspace kind container has no desktop",
+      code: null,
+      retryAfterSeconds: null
+    })
+  })
+
+  test("a 503 desktop_not_ready reads plue's own body and code, and retries on the Retry-After it named (plue#496)", async () => {
+    dropDesktopStream()
+    const previous = { ...desktopSessionRetry }
+    /* plue asks for 2s; the test shortens the wait rather than sleeping through it. */
+    desktopSessionRetry.defaultDelayMs = 1
+    try {
+      let mints = 0
+      const { store, seam, requests } = await harness({
+        "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": () => {
+          mints += 1
+          /*
+           * plue's own 503, verbatim (routes/workspace_desktop_test.go):
+           * writeRouteError sanitizes a 5xx MESSAGE to the status text but
+           * keeps `code`, and #496 sets Retry-After on any retryable error.
+           */
+          return mints < 3
+            ? json(503, { code: "desktop_not_ready", message: "service unavailable" }, { "retry-after": "0" })
+            : json(201, DESKTOP_MINT)
+        },
+        "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP)
+      })
+      await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+
+      const result = await seam.openDesktop("ws-1")
+
+      /* The server asked to be retried, so it was — and the third answer minted. */
+      expect(mints).toBe(3)
+      expect((result as { value: string }).value).toContain("is streaming on the card")
+      expect(requests.filter((request) => request.endsWith("/desktop/session"))).toHaveLength(3)
+      expect(readDesktopStream("ws-1")?.url).toBe(DESKTOP_STREAM_URL)
+      /* A mint that finally succeeded leaves no refusal behind. */
+      expect(payloadOf(store)?.desktopRefusal).toBeUndefined()
+    } finally {
+      Object.assign(desktopSessionRetry, previous)
+    }
+  })
+
+  test("a desktop_not_ready that never clears gives up at the bound, with plue's words and code on the card", async () => {
+    dropDesktopStream()
+    const previous = { ...desktopSessionRetry }
+    /* The default is deliberately NOT used here: the wait must come from the header. */
+    desktopSessionRetry.defaultDelayMs = 0
+    desktopSessionRetry.maxAttempts = 2
+    try {
+      let mints = 0
+      const { store, seam } = await harness({
+        "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": () => {
+          mints += 1
+          return json(503, { code: "desktop_not_ready", message: "service unavailable" }, { "retry-after": "1" })
+        },
+        "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP)
+      })
+      await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+
+      const startedAt = Date.now()
+      const refusal = await seam.openDesktop("ws-1")
+
+      expect(mints).toBe(2)
+      /* One retry, and it waited the second the header asked for — not the app's own default. */
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900)
+      expect(refusal).toBe("service unavailable")
+      expect(payloadOf(store)?.desktopRefusal).toEqual({
+        status: 503,
+        message: "service unavailable",
+        code: "desktop_not_ready",
+        retryAfterSeconds: 1
+      })
+      expect(payloadOf(store)?.facet).toBe("desktop")
+      expect(readDesktopStream("ws-1")).toBeNull()
+    } finally {
+      Object.assign(desktopSessionRetry, previous)
+    }
+  })
+
+  test("any other 5xx is answered once — a code the server did not ask to be retried is not retried", async () => {
+    dropDesktopStream()
+    let mints = 0
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": () => {
+        mints += 1
+        return json(500, { message: "internal server error" })
+      },
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP)
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+
+    const refusal = await seam.openDesktop("ws-1")
+
+    expect(mints).toBe(1)
+    expect(refusal).toBe("internal server error")
+    expect(payloadOf(store)?.desktopRefusal).toEqual({
+      status: 500,
+      message: "internal server error",
+      code: null,
+      retryAfterSeconds: null
+    })
+  })
+
+  test("leaving the Desktop facet supersedes a pending desktop_not_ready retry", async () => {
+    dropDesktopStream()
+    const previous = { ...desktopSessionRetry }
+    /* No Retry-After on the wire, so the loop parks for this long — long enough to leave the facet mid-wait. */
+    desktopSessionRetry.defaultDelayMs = 50
+    try {
+      let mints = 0
+      const { store, seam } = await harness({
+        "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": () => {
+          mints += 1
+          return json(503, { code: "desktop_not_ready", message: "service unavailable" })
+        },
+        "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP),
+        "api/repos/will/smithers/workspaces/ws-1/services": json(200, [])
+      })
+      await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+
+      const pending = seam.openDesktop("ws-1")
+      await seam.setFacet("ws-1", "services")
+      await pending
+
+      /* The loop stopped at the facet change instead of running to its bound. */
+      expect(mints).toBe(1)
+      expect(payloadOf(store)?.facet).toBe("services")
+    } finally {
+      Object.assign(desktopSessionRetry, previous)
+    }
+  })
+
+  test("rotating mints again and swaps the held stream; the old one is gone", async () => {
+    dropDesktopStream()
+    let mints = 0
+    const rotated = DESKTOP_STREAM_URL.replace(DESKTOP_TOKEN, "dtok-rotated")
+    const { store, seam, requests } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": () => {
+        mints += 1
+        return mints === 1 ? json(201, DESKTOP_MINT) : json(201, {
+          ...DESKTOP_MINT,
+          stream_url: rotated,
+          session: { id: "dsess-2", expires_at: "2026-09-03T21:12:00Z" },
+          token: "dtok-rotated"
+        })
+      },
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP)
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+    await seam.openDesktop("ws-1")
+    await seam.rotateDesktop("ws-1")
+    expect(requests.filter((key) => key.endsWith("/desktop/session")).length).toBe(2)
+    expect(readDesktopStream("ws-1")?.url).toBe(rotated)
+    expect(readDesktopStream("ws-1")?.sessionId).toBe("dsess-2")
+    dropDesktopStream()
+  })
+
+  test("leaving the Desktop facet drops the credential — nothing survives the unmounted facet", async () => {
+    dropDesktopStream()
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": json(201, DESKTOP_MINT),
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_DESKTOP),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+    await seam.openDesktop("ws-1")
+    expect(readDesktopStream("ws-1")).not.toBeNull()
+    await seam.setFacet("ws-1", "terminal")
+    expect(readDesktopStream("ws-1")).toBeNull()
+  })
+
+  test("deleting the workspace drops the credential too", async () => {
+    dropDesktopStream()
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": json(201, DESKTOP_MINT),
+      "DELETE api/repos/will/smithers/workspaces/ws-1": json(200, {}),
+      "api/repos/will/smithers/workspaces": json(200, [])
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+    await seam.openDesktop("ws-1")
+    await seam.deleteWorkspace("ws-1", "review")
+    expect(readDesktopStream("ws-1")).toBeNull()
+  })
+
+  test("a signed-out session mints nothing, and a degraded one refuses with the enable wording", async () => {
+    dropDesktopStream()
+    const signedOut = await harness({}, { signedIn: false })
+    expect(await signedOut.seam.openDesktop("ws-1")).toBe("Sign in to Smithers Cloud first — /cloud.sign-in.")
+    expect(await signedOut.seam.rotateDesktop("ws-1")).toBe("Sign in to Smithers Cloud first — /cloud.sign-in.")
+    const degraded = await harness({}, { degraded: true })
+    await seedWorkspace(degraded.store, { ...wsRow, kind: "desktop" })
+    expect(await degraded.seam.openDesktop("ws-1")).toBe(DEGRADED_WORKSPACE_REFUSAL)
+    expect(await degraded.seam.rotateDesktop("ws-1")).toBe(DEGRADED_WORKSPACE_REFUSAL)
+    expect(readDesktopStream("ws-1")).toBeNull()
+  })
+
+  test("a mint whose answer names no stream is malformed, not an empty desktop", async () => {
+    dropDesktopStream()
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": json(201, { workspace_id: "ws-1", token: "t" })
+    })
+    await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+    const refusal = await seam.openDesktop("ws-1")
+    expect(refusal).toContain("malformed")
+    expect(readDesktopStream("ws-1")).toBeNull()
+  })
+})
+
+describe("workspace seam environment images", () => {
+  test("the listing names each image's kind, closure and status, and the cold-pull note when nothing is baked", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/environment-images": json(200, [
+        {
+          id: 4,
+          repository_id: 7,
+          kind: "desktop",
+          source: ".smithers/environment.nix",
+          source_revision: "b3f21c9d4e5a6b7c",
+          closure_hash: "9f2b1c0d4e5a6b7c8d9e0f1a",
+          image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
+          status: "ready",
+          golden_snapshot_id: "",
+          created_at: "2026-09-02T00:00:00Z"
+        },
+        {
+          id: 1,
+          repository_id: 0,
+          kind: "vm",
+          source: "platform",
+          source_revision: "",
+          closure_hash: "1122334455667788",
+          image: "registry.jjhub.tech/environments/base:nixos-2405",
+          status: "ready",
+          golden_snapshot_id: "snap-9",
+          created_at: "2026-08-01T00:00:00Z"
+        }
+      ])
+    })
+    const answer = await seam.listEnvironmentImages("will/smithers")
+    expect(typeof answer).toBe("object")
+    const card = store.collections.cards.get("environment-images-will/smithers")
+    expect(card?.kind).toBe("environment-images")
+    const rows = card?.kind === "environment-images" ? card.payload.images : []
+    expect(rows).toEqual([
+      {
+        id: "4",
+        kind: "desktop",
+        source: ".smithers/environment.nix",
+        sourceRevision: "b3f21c9d4e5a6b7c",
+        closureHash: "9f2b1c0d4e5a6b7c8d9e0f1a",
+        image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
+        status: "ready",
+        platformBase: false,
+        coldPull: true
+      },
+      {
+        id: "1",
+        kind: "vm",
+        source: "platform",
+        sourceRevision: null,
+        closureHash: "1122334455667788",
+        image: "registry.jjhub.tech/environments/base:nixos-2405",
+        status: "ready",
+        platformBase: true,
+        coldPull: false
+      }
+    ])
+  })
+
+  test("a repository with no images says so rather than rendering an empty list of nothing", async () => {
+    const { store, seam } = await harness({ "api/repos/will/smithers/environment-images": json(200, []) })
+    await seam.listEnvironmentImages("will/smithers")
+    const card = store.collections.cards.get("environment-images-will/smithers")
+    expect(card?.kind === "environment-images" ? card.payload.images : null).toEqual([])
+  })
+
+  test("a refused listing is the server's own message, never an empty catalogue", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/environment-images": json(403, { message: "environment images are not enabled for this repository" })
+    })
+    expect(await seam.listEnvironmentImages("will/smithers")).toBe(
+      "environment images are not enabled for this repository"
+    )
+    expect(store.collections.cards.get("environment-images-will/smithers")).toBeUndefined()
+  })
+})
+
+/*
+ * Lane L3b addendum (plue main 495e7269e604, RFD-004): an agent run executes
+ * in a workspace of its own — `kind: "agent"` with the session that drove it —
+ * and the status stream now carries the workspace's head as the guest reports
+ * it.
+ */
+describe("workspace seam agent workspaces", () => {
+  const WS_AGENT = {
+    ...WS_RUNNING,
+    kind: "agent",
+    agent_session_id: "asess-7f3c",
+    head: { change_id: "qupxosqwmnrt", commit_id: "c0ffee1234567890" },
+    ahead: 3,
+    behind: 0
+  }
+
+  test("an agent workspace reads its kind and the session that drove it", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_AGENT),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({ kind: "agent", agentSessionId: "asess-7f3c" })
+    )
+    expect(payloadOf(store)?.workspaceKind).toBe("agent")
+    expect(payloadOf(store)?.agentSessionId).toBe("asess-7f3c")
+  })
+
+  test("a workspace no agent drove names no session", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, WS_RUNNING),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+    await seam.viewWorkspace("ws-1")
+    expect(workspacesOf(store)[0]?.agentSessionId ?? null).toBeNull()
+    expect(payloadOf(store)?.agentSessionId ?? null).toBeNull()
+  })
+
+  test("a stream event carrying a new head applies it to the row and the card", async () => {
+    const { store, seam } = await harness({})
+    await seedWorkspace(store, { ...wsRow, head: { changeId: "old", commitId: "old" }, ahead: 0, behind: 5 })
+    await seedCard(store)
+    seam.applyStatusEvent("ws-1", {
+      status: "running",
+      head: { change_id: "qupxosqwmnrt", commit_id: "c0ffee1234567890" },
+      ahead: 3,
+      behind: 0
+    })
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({
+        status: "running",
+        head: { changeId: "qupxosqwmnrt", commitId: "c0ffee1234567890" },
+        ahead: 3,
+        behind: 0
+      })
+    )
+    expect(payloadOf(store)?.head).toEqual({ changeId: "qupxosqwmnrt", commitId: "c0ffee1234567890" })
+    expect(payloadOf(store)?.ahead).toBe(3)
+  })
+
+  test("a status-only event moves the status and leaves the head exactly as it was", async () => {
+    const { store, seam } = await harness({})
+    await seedWorkspace(store, { ...wsRow, head: { changeId: "keepme", commitId: "keepme2" }, ahead: 4, behind: 1 })
+    seam.applyStatusEvent("ws-1", { status: "suspended" })
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({
+        status: "suspended",
+        head: { changeId: "keepme", commitId: "keepme2" },
+        ahead: 4,
+        behind: 1
+      })
+    )
+  })
+
+  test("a failed DTO carries plue's failure code and message onto the row and the card (plue#482)", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, {
+        ...WS_RUNNING,
+        status: "failed",
+        failure_code: "image_pull_failed",
+        failure_message: "pulling nixos-2405-9f2b1c0d timed out after 300s"
+      }),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+
+    await seam.viewWorkspace("ws-1")
+
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        failureCode: "image_pull_failed",
+        failureMessage: "pulling nixos-2405-9f2b1c0d timed out after 300s"
+      })
+    )
+    expect(payloadOf(store)?.failureCode).toBe("image_pull_failed")
+    expect(payloadOf(store)?.failureMessage).toBe("pulling nixos-2405-9f2b1c0d timed out after 300s")
+  })
+
+  test("a workspace that failed with no recorded reason states none — a blank is never filled in", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": json(200, { ...WS_RUNNING, status: "failed" }),
+      "api/repos/will/smithers/bookmarks": json(200, { items: [], next_cursor: "" }),
+      "api/repos/will/smithers/workspace-snapshots": json(200, []),
+      "api/repos/will/smithers/workspace/sessions": json(200, [])
+    })
+    await seedWorkspace(store)
+
+    await seam.viewWorkspace("ws-1")
+
+    expect(payloadOf(store)?.status).toBe("failed")
+    expect(payloadOf(store)?.failureCode).toBeNull()
+    expect(payloadOf(store)?.failureMessage).toBeNull()
+  })
+
+  test("a per-user switcher row states its own failure too (plue#482)", async () => {
+    const { store, seam } = await harness({
+      "api/user/workspaces": json(200, [
+        { ...USER_ROW, state: "failed", failure_code: "egress_proxy_unavailable", failure_message: "proxy did not start" }
+      ])
+    })
+
+    await seam.listWorkspaces()
+
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        failureCode: "egress_proxy_unavailable",
+        failureMessage: "proxy did not start"
+      })
+    )
+  })
+
+  test("a failed status EVENT carries its reason; a later event that names none leaves the reason standing (plue#482)", async () => {
+    const { store, seam } = await harness({})
+    await seedWorkspace(store)
+    await seedCard(store)
+
+    seam.applyStatusEvent("ws-1", {
+      status: "failed",
+      failure_code: "image_pull_failed",
+      failure_message: "pulling nixos-2405 timed out"
+    })
+    expect(workspacesOf(store)[0]).toEqual(
+      expect.objectContaining({ status: "failed", failureCode: "image_pull_failed" })
+    )
+    expect(payloadOf(store)?.failureMessage).toBe("pulling nixos-2405 timed out")
+
+    /* A status-only event has said nothing about the reason, so it does not erase it. */
+    seam.applyStatusEvent("ws-1", { status: "failed" })
+    expect(workspacesOf(store)[0]?.failureCode).toBe("image_pull_failed")
+  })
+
+  test("an event for a workspace nobody loaded, or one that names no status Smithers knows, changes nothing", async () => {
+    const { store, seam } = await harness({})
+    await seedWorkspace(store, { ...wsRow, ahead: 4 })
+    seam.applyStatusEvent("ws-missing", { status: "running" })
+    seam.applyStatusEvent("ws-1", { status: "teleporting" })
+    seam.applyStatusEvent("ws-1", "not an event")
+    expect(workspacesOf(store)).toHaveLength(1)
+    expect(workspacesOf(store)[0]).toEqual(expect.objectContaining({ status: "running", ahead: 4 }))
+  })
+})
+
+describe("workspace seam create refusals", () => {
+  /*
+   * The desktop base image was still registering when this landed, so plue
+   * answers a kind=desktop create with a 409 naming exactly that. It is the
+   * honest state of the system, so it reads verbatim — on the card whose
+   * create affordance was pressed, not only in the answer.
+   */
+  test("a refused create reads the server's own words, verbatim, on the card that offered the kinds", async () => {
+    const message = "no NixOS environment image is registered for kind desktop"
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces": json(409, { message })
+    })
+    await seedWorkspace(store, { ...wsRow, status: "failed" })
+    await seedCard(store)
+    expect(await seam.openWorkspace("main", "will/smithers", "desktop")).toBe(message)
+    expect(payloadOf(store)?.error).toBe(message)
+  })
+
+  test("a refused create touches no card of a workspace that did not offer one", async () => {
+    const message = "no NixOS environment image is registered for kind desktop"
+    const { store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces": json(409, { message })
+    })
+    await seedWorkspace(store)
+    await seedCard(store)
+    expect(await seam.openWorkspace("main", "will/smithers", "desktop")).toBe(message)
+    expect(payloadOf(store)?.error).toBeUndefined()
   })
 })

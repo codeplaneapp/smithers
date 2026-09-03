@@ -67,9 +67,9 @@ test("a terminal tab runs a real shell: typed text echoes back, the session is l
   await page.getByTestId(`tab-close-${sessionId}`).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog).toBeVisible()
-  await dialog.getByRole("button", { name: "Close tab", exact: true }).click()
+  await dialog.getByRole("button", { name: "Close session", exact: true }).click()
   await expect(page.getByTestId(`tab-${sessionId}`)).toHaveCount(0)
-  await expect(page.getByTestId("tab-main")).toHaveAttribute("data-active", "true")
+  await expect(page.getByTestId("workspace-heading")).toHaveAttribute("data-active", "true")
   await expect
     .poll(async () => ((await (await localApiGet(page, request, "/api/pty")).json()) as { sessions: Array<unknown> }).sessions.length, {
       timeout: 10_000

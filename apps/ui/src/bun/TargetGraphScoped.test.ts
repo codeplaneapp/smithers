@@ -8,8 +8,8 @@ import { clearTargetGraphCache, queryTargetGraph } from "./TargetGraph"
 
 /*
  * A label-scoped graph read survives a checkout whose WHOLE graph cannot
- * load (this repository: `graph '//...'` refuses on the vendor/jj declared
- * input while `graph <label>` answers for hundreds of targets). The targets
+ * load (one bad declared input makes `graph '//...'` refuse while
+ * `graph <label>` still answers for hundreds of targets). The targets
  * card's drawer asks with `labels: [label]`, so it must get that target's
  * facts, and the scoped answer must never be cached as the repo's graph.
  */
@@ -27,7 +27,7 @@ beforeEach(async () => {
     cli,
     `const args = process.argv.slice(2)
 if (args[0] === "graph" && args[1] === "//...") {
-  process.stdout.write(JSON.stringify({ code: "graph_failed", message: "declared input is not a regular file: vendor/jj" }))
+  process.stdout.write(JSON.stringify({ code: "graph_failed", message: "declared input is not a regular file: packages/smithers/flows/jj/wasm" }))
   process.exit(1)
 }
 if (args[0] === "graph") {
@@ -53,7 +53,7 @@ afterEach(async () => {
 
 test("a whole-graph failure answers the named label's own subgraph instead, without caching it", async () => {
   const base = { repoId: "r", repo, node, cli, sandboxHost: noSandbox }
-  await expect(queryTargetGraph(base)).rejects.toThrow(/graph_failed: declared input is not a regular file: vendor\/jj/)
+  await expect(queryTargetGraph(base)).rejects.toThrow(/graph_failed: declared input is not a regular file: packages\/jj\/wasm/)
 
   const scoped = await queryTargetGraph({ ...base, labels: ["//src:check"], plan: true })
   expect(scoped.nodes.map((entry) => entry.label).sort()).toEqual(["//src:check", "//src:lib"])

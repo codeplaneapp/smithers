@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
-import type { InspectLocalRepositoryResult } from "smithers-shared/NativeRepository"
+import type { InspectLocalRepositoryResult } from "@smthrs/rpc/NativeRepository"
 import { inspectLocalRepository } from "./LocalRepository"
 
 const directories: Array<string> = []

@@ -37,15 +37,16 @@ When you run `bun run dev` (without HMR):
 
 ## Project Structure
 
-This package (`smithers-ui`) is one of three apps in the monorepo. Code it used
-to own now lives in siblings: `apps/shared` publishes the wire contracts as the
-workspace package `smithers-shared`, and `apps/server` holds the Cloudflare
+This package (`smithers-ui`) is one of two apps in the monorepo. Code it used
+to own now lives nearby: `packages/rpc` publishes the wire contracts as the
+workspace package `@smthrs/rpc`, and `apps/server` holds the Cloudflare
 Worker. Runtime packages come from the monorepo's `packages/` tree as pnpm
 workspace links; there is no vendored `@smthrs` closure any more.
 
 ```
+packages/
+└── rpc/                    # wire contracts (imported as "@smthrs/rpc/<Module>")
 apps/
-├── shared/                 # smithers-shared: wire contracts (imported as "smithers-shared/<Module>")
 ├── server/                 # Cloudflare Worker + wrangler.jsonc
 └── ui/                     # this package
     ├── src/
@@ -62,7 +63,7 @@ apps/
 ## Customizing
 
 - **React components**: Edit files in `src/mainview/`
-- **Shared contracts**: Edit `apps/shared/src/`, import as `smithers-shared/<Module>`
+- **Shared contracts**: Edit `packages/rpc/src/`, import as `@smthrs/rpc/<Module>`
 - **Dev-server API**: Edit `src/dev/AgentApi.ts`
 - **Tailwind theme**: Edit `tailwind.config.js`
 - **Vite settings**: Edit `vite.config.ts`

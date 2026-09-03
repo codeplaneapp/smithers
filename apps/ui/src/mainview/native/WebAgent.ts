@@ -1,6 +1,6 @@
-import { CANCEL_PATH, TURN_PATH } from "smithers-shared/AgentApiRoutes"
-import { isAgentTurnFrame } from "smithers-shared/NativeAgent"
-import type { AgentTurnFrame, FetchLike, StartAgentTurnResult } from "smithers-shared/NativeAgent"
+import { CANCEL_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import { isAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import type { AgentTurnFrame, FetchLike, StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent } from "./NativeBridge"
 
 const MAX_ERROR_BYTES = 320
@@ -132,8 +132,7 @@ const streamFrames = async (
 /*
  * The local app's chat backend (LOCAL-APP.md): ControllerBoot composes it
  * against the local origin's /api/chat/turn and /api/chat/cancel. The
- * default paths are the product Worker's /api/agent seam, which the terminal
- * client (apps/tui) still speaks.
+ * default paths are the product Worker's /api/agent seam.
  */
 export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
   const baseUrl = options.baseUrl ?? ""

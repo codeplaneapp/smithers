@@ -151,3 +151,83 @@ describe("the runs grammar", () => {
   })
 })
 
+
+/*
+ * The line anchor (docs/code-intel/PLAN.md §1, the grammar C7 reserved for
+ * `code.goto`): `files.read <path>[:<line>[:<col>]] [owner/repo]`. Only a
+ * TRAILING numeric suffix comes off the path token, so a repository path
+ * with a colon of its own keeps working; the parser stays first-token-is-path.
+ */
+describe("the files.read line anchor", () => {
+  test("a trailing :line or :line:col comes off the path token into the payload", () => {
+    expect(payloadFor("files.read", "src/x.ts:12")).toEqual({ payload: { path: "src/x.ts", line: 12 } })
+    expect(payloadFor("files.read", "src/x.ts:12:5 will/flows")).toEqual({
+      payload: { path: "src/x.ts", line: 12, column: 5, repo: "will/flows" }
+    })
+    expect(payloadFor("files.read", "/smithersai/smithers/src/x.ts:317")).toEqual({
+      payload: { path: "/smithersai/smithers/src/x.ts", line: 317 }
+    })
+  })
+
+  test("a colon inside the path is the path's own", () => {
+    expect(payloadFor("files.read", "notes/a:b.md")).toEqual({ payload: { path: "notes/a:b.md" } })
+    expect(payloadFor("files.read", "notes/a:b.md:4")).toEqual({ payload: { path: "notes/a:b.md", line: 4 } })
+    expect(payloadFor("files.read", "v1:2:3.txt")).toEqual({ payload: { path: "v1:2:3.txt" } })
+  })
+
+  test("zero is refused by name: lines and columns are 1-based", () => {
+    const error = "files.read lines and columns count from 1: /files.read <path>[:<line>[:<col>]]"
+    expect(payloadFor("files.read", "src/x.ts:0")).toEqual({ error })
+    expect(payloadFor("files.read", "src/x.ts:3:0")).toEqual({ error })
+    expect(payloadFor("files.read", ":12")).toEqual({ error: "files.read needs a file path" })
+  })
+
+  test("files.list keeps a path exactly as typed", () => {
+    expect(payloadFor("files.list", "src:1")).toEqual({ payload: { path: "src:1" } })
+  })
+})
+
+/*
+ * The code-intel positions (docs/code-intel/PLAN.md §4): `code.hover` and
+ * `code.definition` take `<path>:<line>:<col> [owner/repo]` with BOTH numbers
+ * required and 1-based; `code.diagnostics` takes the path alone. The path
+ * keeps a colon of its own exactly as files.read's anchor does.
+ */
+describe("the code.* positions", () => {
+  test("code.hover and code.definition take a path, a line, a column, and the optional repo", () => {
+    expect(payloadFor("code.hover", "src/x.ts:12:5")).toEqual({ payload: { path: "src/x.ts", line: 12, column: 5 } })
+    expect(payloadFor("code.definition", "src/x.ts:12:5 will/flows")).toEqual({
+      payload: { path: "src/x.ts", line: 12, column: 5, repo: "will/flows" }
+    })
+    expect(payloadFor("code.hover", "/smithersai/smithers/src/x.ts:317:9")).toEqual({
+      payload: { path: "/smithersai/smithers/src/x.ts", line: 317, column: 9 }
+    })
+    expect(payloadFor("code.hover", "notes/a:b.ts:4:2")).toEqual({ payload: { path: "notes/a:b.ts", line: 4, column: 2 } })
+  })
+
+  test("a position without both numbers, a zero, or an extra token is refused by name", () => {
+    const usage = "/code.hover <path>:<line>:<col> [owner/repo]"
+    expect(payloadFor("code.hover", "")).toEqual({ error: `code.hover needs a position: ${usage}` })
+    expect(payloadFor("code.hover", "src/x.ts")).toEqual({ error: `code.hover needs <path>:<line>:<col>: ${usage}` })
+    expect(payloadFor("code.hover", "src/x.ts:12")).toEqual({ error: `code.hover needs <path>:<line>:<col>: ${usage}` })
+    expect(payloadFor("code.hover", "src/x.ts:0:1")).toEqual({ error: `code.hover lines and columns count from 1: ${usage}` })
+    expect(payloadFor("code.hover", "src/x.ts:1:0")).toEqual({ error: `code.hover lines and columns count from 1: ${usage}` })
+    expect(payloadFor("code.hover", "src/x.ts:1:1 will/flows extra")).toEqual({
+      error: "code.hover takes a position and optionally an owner/repo"
+    })
+    expect(payloadFor("code.definition", ":1:1")).toEqual({
+      error: "code.definition needs <path>:<line>:<col>: /code.definition <path>:<line>:<col> [owner/repo]"
+    })
+  })
+
+  test("code.diagnostics takes the path and the optional repo, and refuses a third token", () => {
+    expect(payloadFor("code.diagnostics", "src/x.ts")).toEqual({ payload: { path: "src/x.ts" } })
+    expect(payloadFor("code.diagnostics", "src/x.ts will/flows")).toEqual({ payload: { path: "src/x.ts", repo: "will/flows" } })
+    expect(payloadFor("code.diagnostics", "")).toEqual({
+      error: "code.diagnostics needs a file path: /code.diagnostics <path> [owner/repo]"
+    })
+    expect(payloadFor("code.diagnostics", "src/x.ts will/flows extra")).toEqual({
+      error: "code.diagnostics takes a path and optionally an owner/repo"
+    })
+  })
+})

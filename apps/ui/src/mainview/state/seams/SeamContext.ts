@@ -37,6 +37,16 @@ export const readErrorMessage = async (response: Response, fallback: string): Pr
     const body = JSON.parse(text) as { message?: unknown; error?: unknown }
     if (typeof body.message === "string" && body.message !== "") return body.message.slice(0, 240)
     if (typeof body.error === "string" && body.error !== "") return body.error.slice(0, 240)
+    /*
+     * The local app's own envelope (src/bun/routes.ts jsonError):
+     * `{ error: { code, message } }`. Its message is addressed to a person
+     * ("secret points outside the repository.") and is what the sidebar's
+     * tree and the files cards show in place — never the fallback.
+     */
+    if (typeof body.error === "object" && body.error !== null) {
+      const nested = (body.error as { message?: unknown }).message
+      if (typeof nested === "string" && nested !== "") return nested.slice(0, 240)
+    }
   } catch {
     // Not JSON at all: plumbing, never copy.
     return fallback
@@ -63,11 +73,13 @@ export const trustedHttpsUrl = (value: string, host: string): string | null => {
 
 /*
  * Lane sync (ADR 0005 "Rate limits"): a refused GitHub-proxied call. plue's
- * structured 429 (plue#472) answers `{ code: "github_rate_limited", limit,
- * remaining, reset_at }`; when the body carries it the caller gets the
- * rate-limit facts for the card's line (`… · 0 of 5 000 · resets 12:40 ·
- * Retry after`) beside the honest message. Any other refusal is the verbatim
- * message alone — no reset is ever invented for a plain 429.
+ * structured 429 (`pkg/errors.CodeGitHubRateLimited`, raised by
+ * `internal/services/github_proxy.go`) answers `{ code:
+ * "github_rate_limited", message, limit, remaining, reset_at, retry_after }`;
+ * when the body carries it the caller gets the rate-limit facts for the
+ * card's line (`… · 0 of 5 000 · resets 12:40 · Retry after`) beside the
+ * honest message. Any other refusal is the verbatim message alone — no reset
+ * is ever invented for a plain 429.
  */
 export interface GitHubRefusal {
   readonly message: string

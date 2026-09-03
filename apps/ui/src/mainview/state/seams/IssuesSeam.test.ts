@@ -6,7 +6,6 @@ import type { AppServices } from "../AppController"
 import type { Card } from "../AppState"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
-import { NO_LINEAR_LINK_REFUSAL } from "./IssuesSeam"
 
 /*
  * The issues seam, driven through the one command run path: issues.list /
@@ -560,20 +559,82 @@ describe("issues seam — source-only fallback (repo not imported)", () => {
   })
 })
 
-describe("issues seam — the Linear link's confirm (lane sync, review finding 4)", () => {
-  test("issues.unlink-linear needs the identifier typed back; with it the plue#473 refusal answers and nothing is called", async () => {
+/*
+ * Lane L5 (ADR 0005 "Link an issue to Linear"): the mapping routes are
+ * POST/DELETE /api/repos/{o}/{r}/issues/{n}/linear-link, and the issue DTO's
+ * own `linear` field is what the card renders. Verified against `~/plue`
+ * main, `internal/routes/issue_linear_link.go` (201 { identifier, url } /
+ * 204) and `internal/services/issue.go` (`Linear *LinearIssueReference`).
+ */
+describe("issues seam — the Linear link (lane L5, live routes)", () => {
+  test("issues.link-linear posts the identifier and the re-read card carries the DTO's link", async () => {
     const calls: string[] = []
-    const { controller } = await issuesController(
+    let linear: unknown = null
+    const { store, controller } = await issuesController(
       backend({
-        "GET /api/repos/will/flows/issues/7": json(200, {
-          ...wireIssue(7),
-          linear: { identifier: "ENG-482", url: "https://linear.app/acme/issue/ENG-482" }
-        }),
+        "POST /api/repos/will/flows/issues/7/linear-link": () => {
+          linear = { identifier: "ENG-482", url: "https://linear.app/acme/issue/ENG-482" }
+          return json(201, { identifier: "ENG-482", url: "https://linear.app/acme/issue/ENG-482" })
+        },
+        "GET /api/repos/will/flows/issues/7": () => json(200, { ...wireIssue(7), linear }),
         "GET /api/repos/will/flows/issues/7/comments": json(200, [])
       }, calls)
     )
+
+    const outcome = await controller.commands.run("issues.link-linear", "7 ENG-482")
+
+    expect(outcome.status).not.toBe("failed")
+    expect(calls).toContain("POST /api/repos/will/flows/issues/7/linear-link")
+    await settled()
+    const card = store.collections.cards.get("issue-will/flows-7")
+    expect(card?.kind === "issue" ? card.payload.linear : undefined).toEqual({
+      identifier: "ENG-482",
+      url: "https://linear.app/acme/issue/ENG-482"
+    })
+  })
+
+  test("a link plue refuses reads its own sentence, never a product paraphrase", async () => {
+    const { controller } = await issuesController(
+      backend({
+        "POST /api/repos/will/flows/issues/7/linear-link": json(422, {
+          message: "linear issue ENG-9 belongs to another team"
+        })
+      })
+    )
+
+    const outcome = await controller.commands.run("issues.link-linear", "7 ENG-9")
+
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toBe("linear issue ENG-9 belongs to another team")
+  })
+
+  test("a 404 on the link route means the repository isn't imported, and never falls back", async () => {
+    const calls: string[] = []
+    const { controller } = await issuesController(backend({}, calls))
+
+    const outcome = await controller.commands.run("issues.link-linear", "7 ENG-482")
+
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") {
+      expect(outcome.error).toBe("will/flows isn't imported yet — run /repos.import will/flows first")
+    }
+    expect(calls.some((call) => call.includes("/api/user/github-repos/"))).toBe(false)
+  })
+
+  test("issues.unlink-linear needs the identifier typed back; only then does the DELETE go out", async () => {
+    const calls: string[] = []
+    let linear: unknown = { identifier: "ENG-482", url: "https://linear.app/acme/issue/ENG-482" }
+    const { store, controller } = await issuesController(
+      backend({
+        "GET /api/repos/will/flows/issues/7": () => json(200, { ...wireIssue(7), linear }),
+        "GET /api/repos/will/flows/issues/7/comments": json(200, []),
+        "DELETE /api/repos/will/flows/issues/7/linear-link": () => {
+          linear = null
+          return new Response(null, { status: 204 })
+        }
+      }, calls)
+    )
     await controller.commands.run("issues.view", "7")
-    const before = calls.length
 
     const bare = await controller.commands.run("issues.unlink-linear", "7")
     expect(bare.status).toBe("failed")
@@ -585,12 +646,16 @@ describe("issues seam — the Linear link's confirm (lane sync, review finding 4
     const wrong = await controller.commands.run("issues.unlink-linear", "7 ENG-1")
     expect(wrong.status).toBe("failed")
     if (wrong.status === "failed") expect(wrong.error).toContain("/issues.unlink-linear 7 ENG-482")
+    /* Neither near-miss reached the route: the typed identifier IS the confirm. */
+    expect(calls).not.toContain("DELETE /api/repos/will/flows/issues/7/linear-link")
 
     const typed = await controller.commands.run("issues.unlink-linear", "7 ENG-482")
-    expect(typed.status).toBe("failed")
-    if (typed.status === "failed") expect(typed.error).toBe(NO_LINEAR_LINK_REFUSAL)
-    /* No route exists (plue#473): none of the three made a request. */
-    expect(calls.length).toBe(before)
+
+    expect(typed.status).not.toBe("failed")
+    expect(calls).toContain("DELETE /api/repos/will/flows/issues/7/linear-link")
+    await settled()
+    const card = store.collections.cards.get("issue-will/flows-7")
+    expect(card?.kind === "issue" ? card.payload.linear : "unset").toBeUndefined()
   })
 
   test("with no issue card read, the identifier is still required and the answer shows the shape", async () => {

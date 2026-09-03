@@ -1,4 +1,4 @@
-import type { AgentChatMessage, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import type { AgentChatMessage, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { Message } from "./AppState"
 
 /** The deployed Worker rejects request bodies above 64 KiB. Leave framing headroom. */

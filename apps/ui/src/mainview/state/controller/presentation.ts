@@ -1,4 +1,4 @@
-import { TOOLS_BROWSER_FETCH_PATH } from "smithers-shared/AgentApiRoutes"
+import { TOOLS_BROWSER_FETCH_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { foldLineages } from "../../chain/DebugFolds"
 import { DEFAULT_PALETTE, isPalette, PALETTES, WORLD_DISPLAY_NAME } from "../AppState"
 import type { Card, Palette } from "../AppState"

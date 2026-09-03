@@ -17,11 +17,13 @@ import {
   TURN_PATH,
   WORKFLOW_PROVISION_PATH,
   WORKFLOW_RPC_PATH
-} from "smithers-shared/AgentApiRoutes"
-import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "smithers-shared/AppBootstrap"
-import { AgentRuntimeContextSchema, composeAgentInstructions } from "smithers-shared/AgentContext"
-import { browserFetch, browserFetchResponseBody, resolveHostOverHttps } from "smithers-shared/BrowserFetch"
-import type { StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+} from "@smthrs/rpc/AgentApiRoutes"
+import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "@smthrs/rpc/AppBootstrap"
+import { AgentRuntimeContextSchema, composeAgentInstructions } from "@smthrs/rpc/AgentContext"
+import { browserFetch, browserFetchResponseBody, resolveHostOverHttps } from "@smthrs/rpc/BrowserFetch"
+import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
+import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import { appendClientError, ClientErrorLog, readClientErrors } from "./clientErrorLog"
 import type { ClientErrorNamespace } from "./clientErrorLog"
 import {
@@ -2014,17 +2016,38 @@ const isCrossOriginRequest = (request: Request, url: URL): boolean => {
  * /api/billing/checkout|portal are EXACT matches routed to the platform's
  * Stripe seam; the rest of /api/billing/* stays with the product billing
  * worker below.
+ *
+ * Exported for the host parity matrix (apps/ui/docs/web-mode/PLAN.md §6):
+ * every cloud-present flow whose seam calls `/api/*` or `/api/cloud/*` must
+ * name a row here, and the test reads the table the router uses.
  */
-const PLATFORM_PROXY_RULES: ReadonlyArray<{
+export const PLATFORM_PROXY_RULES: ReadonlyArray<{
   readonly prefix?: string
   readonly exact?: string
   readonly methods: ReadonlyArray<string>
 }> = [
   { prefix: "/api/repos/", methods: ["GET", "POST", "PATCH", "PUT", "DELETE"] },
   { prefix: "/api/github/import", methods: ["GET", "POST"] },
+  /* The signed-in user's mirrored repositories: the web funnel's first list (W0). */
+  { prefix: "/api/user/repos", methods: ["GET"] },
   /* Source-only repo metadata (import-readiness fallback): reads only. */
   { prefix: "/api/user/github-repos/", methods: ["GET"] },
   { prefix: "/api/user/byok-keys", methods: ["GET", "POST", "DELETE"] },
+  /*
+   * Per-user cloud reads the app renders as trees and rows (RepositoriesSeam,
+   * WorkspaceSeam). Every row below names only the methods a seam under
+   * apps/ui/src/mainview/state/seams calls today: the bridge hands the page
+   * whatever the platform answers, so a method here is a capability, and a
+   * lane that needs a new one adds it in the same commit as its seam
+   * (parity-hosts.test.ts (b) reads this table).
+   */
+  { prefix: "/api/user/workspaces", methods: ["GET"] },
+  { prefix: "/api/user/orgs", methods: ["GET"] },
+  /* ChangeSeam: the changeset DTO, and landing one (ADR 0003). */
+  { prefix: "/api/orgs/", methods: ["GET", "POST"] },
+  /* LinearSeam (plue epic #474): integrations list and disconnect; setup lookup, create, sync, ops, per-op retry. */
+  { prefix: "/api/integrations/", methods: ["GET", "DELETE"] },
+  { prefix: "/api/linear", methods: ["GET", "POST"] },
   { prefix: "/api/notifications/", methods: ["GET", "PUT"] },
   { exact: "/api/billing/checkout", methods: ["POST"] },
   { exact: "/api/billing/portal", methods: ["POST"] }
@@ -2178,6 +2201,10 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
     }
   }
   const base = env.SMITHERS_CLOUD_API_BASE_URL?.trim() || DEFAULT_CLOUD_API_BASE_URL
+  // The path is joined onto the platform's origin and must still be there
+  // once parsed: a bearer never leaves for any other host.
+  const target = new URL(url.pathname + url.search, base)
+  if (target.origin !== new URL(base).origin) return notFound()
   const headers = new Headers({ authorization: `Bearer ${token.token}` })
   const contentType = request.headers.get("content-type")
   if (contentType !== null) headers.set("content-type", contentType)
@@ -2188,7 +2215,7 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
     upstream = await withDeadline(
       "Smithers Cloud",
       (signal) =>
-        fetch(new URL(url.pathname + url.search, base).toString(), {
+        fetch(target.toString(), {
           method: request.method,
           headers,
           signal,
@@ -2217,6 +2244,41 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
   return new Response(upstream.body, { status: upstream.status, headers: out })
 }
 
+/*
+ * The `/api/cloud/<inner>` bridge (apps/ui/docs/web-mode/PLAN.md §0
+ * correction 4). The product's cloud seams call CLOUD_ROUTE_PREFIX + path;
+ * the Bun origin forwards that with its jjhub PAT, and this Worker answered
+ * the canonical 404, so on the web the repository list never loaded. The
+ * inner path goes through the SAME allowlist and the SAME cookie-to-cloud-
+ * token bridge as the direct platform proxy above — one function, so the
+ * token, header and failure-message rules cannot fork.
+ *
+ * The inner path is joined as a plain path, never as a URL (the guard the
+ * Bun proxyCloud keeps): `/api/cloud//evil.example/x` sliced naively is
+ * scheme-relative and the WHATWG parser would send the bearer to
+ * evil.example. `new URL(request.url)` has already folded `..` and `%2e%2e`
+ * segments, so a rest the parser would rewrite, or that still carries a dot
+ * segment, is refused rather than forwarded. Every refusal is the canonical
+ * 404: the bridge enumerates nothing the direct route does not.
+ */
+const DOT_SEGMENT = /^(?:\.|%2e){1,2}$/i
+
+const cloudInnerUrl = (url: URL): URL | undefined => {
+  const rest = url.pathname.slice(CLOUD_ROUTE_PREFIX.length)
+  if (rest === "" || rest.startsWith("/") || rest.includes("\\")) return undefined
+  const pathname = `/${rest}`
+  if (pathname.split("/").some((segment) => DOT_SEGMENT.test(segment))) return undefined
+  const inner = new URL(pathname + url.search, url.origin)
+  if (inner.origin !== url.origin || inner.pathname !== pathname) return undefined
+  return inner
+}
+
+const handleCloudProxy = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
+  const inner = cloudInnerUrl(url)
+  if (inner === undefined || !platformProxyMatch(inner.pathname, request.method)) return notFound()
+  return handlePlatformProxy(request, env, inner)
+}
+
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url)
@@ -2237,12 +2299,10 @@ export default {
         host: "cloud",
         version: "1.0.0",
         buildSha: env.SMITHERS_BUILD_SHA?.trim() || "unknown",
-        capabilities: [
-          ...(agent ? ["agent"] : []),
-          ...(identity ? ["identity"] : []),
-          ...(jjhub ? ["jjhub"] : []),
-          ...(checkoutEnabled(env) ? ["billing.checkout"] : [])
-        ],
+        // The shared table the Bun host and the parity matrix read. `terminal`
+        // is the W4 relay: it stays false until that lane lands, so the Worker
+        // never claims a door it has not opened.
+        capabilities: cloudCapabilities({ identity, jjhub, agent, checkout: checkoutEnabled(env), terminal: false }),
         authFlow: identity ? "redirect" : "none",
         sandbox: null
       })
@@ -2318,6 +2378,9 @@ export default {
     }
     if (url.pathname === CLIENT_ERRORS_PATH && request.method === "POST") {
       return handleClientError(request, env)
+    }
+    if (url.pathname.startsWith(CLOUD_ROUTE_PREFIX)) {
+      return handleCloudProxy(request, env, url)
     }
     if (platformProxyMatch(url.pathname, request.method)) {
       return handlePlatformProxy(request, env, url)

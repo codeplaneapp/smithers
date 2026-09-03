@@ -5,8 +5,8 @@
  * `{ type: "pty.input", sessionId, data }`. Output leaves through the
  * manager's publish on `pty:<sessionId>`.
  */
-import { AgentRoleIdSchema } from "smithers-shared/AgentRoles"
-import { HARNESS_IDS } from "smithers-shared/LocalApp"
+import { AgentRoleIdSchema } from "@smthrs/rpc/AgentRoles"
+import { HARNESS_IDS } from "@smthrs/rpc/LocalApp"
 import { z } from "zod"
 import type { PtyManager } from "../Pty"
 import { json, jsonError, readJson, Router } from "../routes"
@@ -24,7 +24,7 @@ export const PtyCreateRequestSchema = z.object({
   cols: geometry,
   rows: geometry,
   harnessId: z.enum(HARNESS_IDS).optional(),
-  /** A named role (AgentRoles.ts) instead of a raw harness; the server picks the harness and argv. */
+  /** A named role (AgentRoles.ts), built-in or custom, instead of a raw harness; the server picks the harness and composes the argv. */
   roleId: AgentRoleIdSchema.optional(),
   /** The delegated task, bounded: it becomes one CLI argument. */
   task: z.string().max(8_000).optional()
@@ -73,7 +73,7 @@ export const registerPtyRoutes = (
     const result = await manager.create({ ...body.data, cwd: resolved.path })
     if (result.status === "error") {
       const status = result.code === "spawn_failed" ? 500
-        : result.code === "unknown_harness" ? 404
+        : result.code === "unknown_harness" || result.code === "unknown_role" ? 404
         : result.code === "capacity_reached" ? 429
         : 400
       return jsonError(status, result.code, result.message)

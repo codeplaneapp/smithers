@@ -12,7 +12,7 @@
  *  - `textarea` is the composer; its presence next to the transcript is what
  *    "no separate landing view" means in the rendered DOM.
  *  - `/api/billing/balance` answers `{ state, allowedToStartWork, introUsd }`
- *    (apps/shared/src/Cards.ts balance payload), so the one-time
+ *    (packages/rpc/src/Cards.ts balance payload), so the one-time
  *    "$500 of usage on us" grant line is checkable against grant state rather
  *    than assumed.
  */

@@ -12,8 +12,8 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { Card } from "smithers-shared/Cards"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import type { Card } from "@smthrs/rpc/Cards"
+import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import type { AppServices } from "./AppController"

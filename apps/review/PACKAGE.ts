@@ -16,7 +16,6 @@
  * @since 1.0.0
  */
 import { Smithers } from "@smthrs/targets"
-import { bunRuntime, packageManager } from "../../PACKAGE.ts"
 
 const cwd = "apps/review"
 
@@ -41,7 +40,6 @@ const suiteSources = [
  * @category build
  */
 const check = Smithers.Typecheck({
-  packageManager,
   srcs: sources,
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
@@ -57,7 +55,6 @@ const check = Smithers.Typecheck({
  * @category build
  */
 const checkTests = Smithers.Typecheck({
-  packageManager,
   srcs: [...sources, ...suiteSources],
   deps: [],
   tsconfig: Smithers.file("tsconfig.test.json"),
@@ -73,7 +70,7 @@ const checkTests = Smithers.Typecheck({
  * @category test
  */
 const unitTests = Smithers.NodeTest({
-  runtime: bunRuntime,
+  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
   runner: Smithers.testSuite(["tests"]),
   srcs: [...sources, ...suiteSources],
   deps: [],

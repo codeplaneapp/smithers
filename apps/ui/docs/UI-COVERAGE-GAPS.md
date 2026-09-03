@@ -16,7 +16,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### runs · Run inbox: list runs with status/flow/lineage filters, active-run count, per-workflow runs (`smithers ps`, Control List runs, `workspace-runs` projection; plue GET /runs, /workflow-runs/active-count)
 
 - Source: both · coverage: none · effort: M
-- Exists: One flow-run card per run the user launched (apps/shared/src/Cards.ts:286). The relay allowlists only List flows; no `List runs` and no `workspace-runs` selector (apps/server/src/gatewayRpc.ts:38-45; apps/ui/src/mainview/state/controller/gateway.ts:99-112).
+- Exists: One flow-run card per run the user launched (packages/rpc/src/Cards.ts:286). The relay allowlists only List flows; no `List runs` and no `workspace-runs` selector (apps/server/src/gatewayRpc.ts:38-45; apps/ui/src/mainview/state/controller/gateway.ts:99-112).
 - UI: New `run-list` card: header repo and one mono count line by status; rows runId · flow · status · waiting reason · age · turns/calls; a row opens the flow-run card; filter chips re-invoke runs.list with the chip's argument. No sidebar badge (NO INVENTION forbids status badges outside the card); the non-terminal count is the card header's mono line and system.recommend suggests runs.list when it is non-zero.
 - Flows: `runs.list [status] [flow] [by=<principal>] [lineage=<id>] [owner/repo]; runs.open <runId>`
 
@@ -51,7 +51,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### runs · Waiting reasons other than approval: quota park with resetAt, durable timer (wait flow), event/signal wait, released, plugin, and `accepted` with nothing driving it
 
 - Source: smithers · coverage: none · effort: S
-- Exists: The pump reads waitingReason only to detect approval (apps/ui/src/mainview/state/controller/workflow-pump.ts:199); phase words cover launching/running/waiting-approval/quiet only (apps/shared/src/Cards.ts:286).
+- Exists: The pump reads waitingReason only to detect approval (apps/ui/src/mainview/state/controller/workflow-pump.ts:199); phase words cover launching/running/waiting-approval/quiet only (packages/rpc/src/Cards.ts:286).
 - UI: flow-run phase line names the reason and the unblock act: `waiting · provider quota · resumes 12:40`, `waiting · timer · 14 min`, `waiting · signal deploy-done` (Signal button), `accepted · nothing is driving it` (Resume button).
 - Flows: `none new; reuses runs.resume, runs.signal, approval.*`
 
@@ -60,16 +60,16 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### agent environment · Edit the agent environment setup script and per-secret egress bindings (PUT /agent-environment)
 
 - Source: plue · coverage: partial · effort: S
-- Exists: env card shows setupScript read-only (apps/shared/src/Cards.ts:459); ADR 0002 L23-24 designs hosts/match_headers bindings without an editing surface.
+- Exists: env card shows setupScript read-only (packages/rpc/src/Cards.ts:459); ADR 0002 L23-24 designs hosts/match_headers bindings without an editing surface.
 - UI: env card Setup row opens the script in the code editor with Save; each secret row gains egress bindings `host · header match` with Add/Remove.
 - Flows: `env.setup.edit [owner/repo]; env.egress.bind <NAME> <host> [header=]; env.egress.unbind <NAME> <host>`
 
-### agent setup · Register the Smithers MCP server and curated skill in Claude Code / Codex (`smithers mcp add`, `skills add|list`); plue MCP integrations and skills catalog
+### agent setup · Register the Smithers MCP server in Claude Code / Codex (`smithers mcp add`); plue MCP integrations catalog
 
 - Source: both · coverage: none · effort: S
-- Exists: Nothing; agent tabs launch harnesses (apps/shared/src/Cards.ts:629) without registering Smithers in them.
-- UI: Connectors surface gains rows `Claude Code` and `Codex` with state words `MCP registered · skill installed` (Codex also `plugin installed` for the `smithersai` marketplace plugin, .agents/plugins/marketplace.json) and one act Install bound to agents.install, which runs mcp add and skills add; catalog rows from /api/integrations/mcp and /skills carry Add bound to catalog.mcp.add / catalog.skill.add (every act is a flow).
-- Flows: `agents.install [claude|codex]; agents.mcp.add [claude|codex]; agents.skill.add [claude|codex]; agents.skill.list; catalog.mcp; catalog.mcp.add <id>; catalog.skills; catalog.skill.add <id>`
+- Exists: Nothing; agent tabs launch harnesses (packages/rpc/src/Cards.ts:629) without registering Smithers in them.
+- UI: Connectors surface gains rows `Claude Code` and `Codex` with the state word `MCP registered` and one act Install bound to agents.install, which runs mcp add; catalog rows from /api/integrations/mcp carry Add bound to catalog.mcp.add (every act is a flow).
+- Flows: `agents.install [claude|codex]; agents.mcp.add [claude|codex]; catalog.mcp; catalog.mcp.add <id>`
 
 ### agent setup · Project MCP servers into a run's flow catalog (`--mcp-config <path>`, SMITHERS_MCP_CONFIG; a malformed file is a usage error)
 
@@ -81,35 +81,35 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### agents · Cloud agent sessions: create, list, get, delete, messages, SSE stream (`smithers agent session|chat`)
 
 - Source: plue · coverage: none · effort: M
-- Exists: agent card is a local harness tab (apps/shared/src/Cards.ts:629); workspace provenance names an `agent session` (ADR 0003 L20-47) with nothing to open.
+- Exists: agent card is a local harness tab (packages/rpc/src/Cards.ts:629); workspace provenance names an `agent session` (ADR 0003 L20-47) with nothing to open.
 - UI: No new card kind (an `agent-session` card duplicates the `agent` card: harnessId, task, sessionId, phase, exitCode): the agent card gains a cloud variant carrying workspaceId instead of cwd and an SSE transcript instead of a PTY tab, as the Terminal facet swaps PTY for WebSocket-to-SSH (WORKBENCH-UX L156-158); header session · workspace · harness · state; transcript rows; the app composer addresses the active session (no second composer in the card); footer Stop (confirm); listed as rows in the workspace card.
 - Flows: `agent.session.new <workspaceId> <task>; agent.session.list; agent.session.view <id>; agent.session.say <id> <text>; agent.session.stop <id> (confirm)`
 
 ### agents / seats · Per-run budget (tokens, latency) from the envelope, provider key add, seat resolution state (anthropic/openai/openrouter/cerebras), ChatGPT-subscription mode for openai seats (SMITHERS_OPENAI_AUTH=chatgpt)
 
 - Source: both · coverage: partial · effort: S
-- Exists: keys card lists masked keys with keys.list/keys.remove only (apps/shared/src/Cards.ts:435; Flows.ts:920-937); balance card is USD (Cards.ts:149); no budget, no add-key, no ChatGPT mode.
+- Exists: keys card lists masked keys with keys.list/keys.remove only (packages/rpc/src/Cards.ts:435; Flows.ts:920-937); balance card is USD (Cards.ts:149); no budget, no add-key, no ChatGPT mode.
 - UI: keys card gains Add key rows per provider with a resolution glyph and an `OpenAI via ChatGPT subscription` toggle row; flow-plan budget row is editable before Run and the flow-run facts strip reads `tokens used / budget`.
 - Flows: `keys.set <provider> <key>; keys.openai-auth <chatgpt|api>; flow.plan --budget <tokens>`
 
 ### approvals · Approval scope once|run|remembered and remembered bulk grants (Control Approve scope, installBulkGrant)
 
 - Source: smithers · coverage: partial · effort: S
-- Exists: approval card decides approve/deny with a fixed scope (apps/shared/src/Cards.ts:108; Flows.ts:596-617); debug.grants.reset is admin-only and revokes everything (Flows.ts:1548).
+- Exists: approval card decides approve/deny with a fixed scope (packages/rpc/src/Cards.ts:108; Flows.ts:596-617); debug.grants.reset is admin-only and revokes everything (Flows.ts:1548).
 - UI: approval card gains a segmented control `this time · this run · remember` beside Approve; a `grants` card lists remembered grants (capability · flow · granted at) with Revoke.
 - Flows: `approval.approve <cardId> [once|run|remembered]; grants.list; grants.revoke <id>`
 
 ### billing · Usage and quotas: compute hours, suspended storage, previews, concurrent workspaces, sandbox-hours, run concurrency, connected-repo quota, API rate limits; org billing
 
 - Source: plue · coverage: partial · effort: S
-- Exists: balance card shows USD and a low/empty state (apps/shared/src/Cards.ts:149); flow-run has a `no-capacity` phase; billing.upgrade/portal exist (Flows.ts:1475-1485).
+- Exists: balance card shows USD and a low/empty state (packages/rpc/src/Cards.ts:149); flow-run has a `no-capacity` phase; billing.upgrade/portal exist (Flows.ts:1475-1485).
 - UI: balance card gains a Usage facet: rows compute hours · storage · previews · workspaces N of M · runs N of 5 · repos N of 10 with reset times, and an org switch.
 - Flows: `billing.usage [org]; billing.org <org>`
 
 ### bookmarks/changes · Create and delete bookmarks
 
 - Source: plue · coverage: partial · effort: S
-- Exists: branches card lists name/head only (apps/shared/src/Cards.ts:481; Flows.ts:973).
+- Exists: branches card lists name/head only (packages/rpc/src/Cards.ts:481; Flows.ts:973).
 - UI: branches card footer New bookmark (name · from change ▾) and per-row Delete (confirm) plus Open workspace (workspace.open <bookmark>).
 - Flows: `branches.create <name> [from]; branches.delete <name> (confirm)`
 
@@ -144,7 +144,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### control plane targets · Per-repo workspace gateway state and wake (POST /api/repos/{owner}/{repo}/gateway provision/resume; gateway-token relay)
 
 - Source: plue · coverage: partial · effort: S
-- Exists: flow-run phases `reconnecting` and `no-capacity` (apps/shared/src/Cards.ts:286) are the only trace; the relay targets the gateway blindly (apps/server/src/gatewayRpc.ts:22-45); the control-plane targets row covers remote and local gateways, not the per-repo cloud one.
+- Exists: flow-run phases `reconnecting` and `no-capacity` (packages/rpc/src/Cards.ts:286) are the only trace; the relay targets the gateway blindly (apps/server/src/gatewayRpc.ts:22-45); the control-plane targets row covers remote and local gateways, not the per-repo cloud one.
 - UI: Connectors surface `Smithers Cloud` row (ADR 0005 L128-133) reads `gateway · running · <version>` or `gateway · cold` from GET /health; the run-list header repeats the word; a cold gateway's one act is Wake.
 - Flows: `gateway.status [owner/repo]; gateway.wake [owner/repo]`
 
@@ -165,7 +165,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### issues · Issue labels add/remove, repository labels CRUD, milestones, assignees
 
 - Source: plue · coverage: partial · effort: S
-- Exists: issue card shows labels read-only and has no assignees (apps/shared/src/Cards.ts:378).
+- Exists: issue card shows labels read-only and has no assignees (packages/rpc/src/Cards.ts:378).
 - UI: issue card header gains editable chips labels ▾ (with Create), assignees ▾ (members and agents), milestone ▾; issue-list filters by label/assignee/milestone are arguments of issues.list (an act needs a flow), not filter controls without one.
 - Flows: `issues.list [open|closed|all] [label=] [assignee=] [milestone=] [owner/repo]; issues.label <n> <+label|-label>; issues.assign <n> <login>; issues.milestone <n> <name>; labels.list; labels.create <name> <color>; labels.delete <name> (confirm); milestones.list; milestones.create <name>`
 
@@ -179,7 +179,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### memory · Durable memory: facts with namespaces flow|agent|user|global and tags, threads, notes with status/supersede, FTS and semantic recall, remember/recall flows, ttl/compaction; plue Hindsight recall/retain/reflect/primers/browse/curate
 
 - Source: both · coverage: partial · effort: M
-- Exists: world card lists documents path/title/confidence with world.new-note/select/delete (apps/shared/src/Cards.ts:252; Flows.ts:670-706); no facts, namespaces, recall query or curation.
+- Exists: world card lists documents path/title/confidence with world.new-note/select/delete (packages/rpc/src/Cards.ts:252; Flows.ts:670-706); no facts, namespaces, recall query or curation.
 - UI: world card gains namespace chips (each re-invokes memory.list) and three facets: Facts (rows key · value · tags · source with Edit/Forget), Threads (rows thread · messages · last at; a row opens transcript-style rows; Compact (confirm), Delete (confirm)), Recall (query row → ranked rows with confidence and provenance); notes carry the state word active|superseded as a mono meta row, not a pill; ttl/compaction is `Clean up` (confirm) with dry-run counts like runs.gc; Reflect and Curate are agent acts that render their result rows.
 - Flows: `memory.list [namespace] [prefix]; memory.get <key>; memory.set <key> <value>; memory.rm <key>; memory.threads [namespace]; memory.thread <id>; memory.thread.compact <id> (confirm); memory.thread.delete <id> (confirm); memory.recall <query> [banks]; memory.gc [--dry-run] (confirm); memory.reflect [scope]; memory.curate [scope]`
 
@@ -221,8 +221,8 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### runs · Plan preview before launch: PlanCard envelope (capabilities, callable flows, token/latency budget, host/deploy class), per-node cached|run, digest; plan-level deny (`smithers plan`, Control Plan/Deny)
 
 - Source: smithers · coverage: none · effort: M
-- Exists: launch plans, approves scope `run`, and runs in one motion with no card between (apps/ui/src/mainview/state/controller/gateway.ts:120-150); the `plan` card is a chat checklist (apps/shared/src/Cards.ts:103).
-- UI: No new card: the existing approval card (apps/shared/src/Cards.ts:108, with decision approved/denied, decidedAt, pending, error) gains a target `Plan` variant whose detail rows are the PlanCard envelope (capabilities, callable flows, budget, host/deploy class), digest, and node rows with a cached|run glyph; Approve launches and Deny is the plan-level deny, both through approval.approve/approval.deny (capability approve:self). flow.plan renders it; flow.run invoked by the agent renders it and waits when the envelope exceeds the session grant.
+- Exists: launch plans, approves scope `run`, and runs in one motion with no card between (apps/ui/src/mainview/state/controller/gateway.ts:120-150); the `plan` card is a chat checklist (packages/rpc/src/Cards.ts:103).
+- UI: No new card: the existing approval card (packages/rpc/src/Cards.ts:108, with decision approved/denied, decidedAt, pending, error) gains a target `Plan` variant whose detail rows are the PlanCard envelope (capabilities, callable flows, budget, host/deploy class), digest, and node rows with a cached|run glyph; Approve launches and Deny is the plan-level deny, both through approval.approve/approval.deny (capability approve:self). flow.plan renders it; flow.run invoked by the agent renders it and waits when the envelope exceeds the session grant.
 - Flows: `flow.plan <name> [key=value...] [owner/repo]; approval.approve <cardId> [once|run|remembered]; approval.deny <cardId>`
 
 ### runs · Run diagnosis facts: verdict, seat, elapsed, tokens, calls/failed, edits, refusals, cause, cancellation attribution, unblock and next act (`smithers status|why`, run-summary projection, Cancellation projection; plue compact status)
@@ -249,7 +249,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### runs · Run health classification and alerts (Monitor healthy|stalled|wedged-node|runaway-loop|awaiting-human|failing with remedy, autoHeal beats; Alerts with severity via Sink)
 
 - Source: smithers · coverage: partial · effort: M
-- Exists: flow-run `quiet` phase with quietForMs (apps/shared/src/Cards.ts:286); admin.health covers service health, not run health (Flows.ts:1624).
+- Exists: flow-run `quiet` phase with quietForMs (packages/rpc/src/Cards.ts:286); admin.health covers service health, not run health (Flows.ts:1624).
 - UI: flow-run header pill uses the Monitor class word with its remedy as the button; notifications card gains engine alerts (severity · run · condition · first seen) with Ack, the app acting as the alert Sink.
 - Flows: `runs.health [runId]; alerts.list; alerts.ack <id>`
 
@@ -270,7 +270,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### secrets · Secrets and credentials: repo secrets set/delete, org secrets, write-only setup secrets, Credential create/rotate with CredentialRef, push Claude Code credential into repo secrets (`smithers auth claude push`)
 
 - Source: both · coverage: partial · effort: S
-- Exists: env card lists secretNames read-only (apps/shared/src/Cards.ts:459); env.set writes nonsecret variables (Flows.ts:964).
+- Exists: env card lists secretNames read-only (packages/rpc/src/Cards.ts:459); env.set writes nonsecret variables (Flows.ts:964).
 - UI: env card gains a Secrets section: rows name · set at · Rotate/Delete, footer Add secret with a masked field never echoed to chat, a `Push my Claude Code credential` row, and a repo|org scope switch.
 - Flows: `secrets.set <NAME> [owner/repo|org]; secrets.rotate <NAME>; secrets.remove <NAME> (confirm); secrets.push-claude [owner/repo]`
 
@@ -306,7 +306,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 
 - Source: plue · coverage: partial · effort: M
 - Exists: issue card additions (workspace row, change row) and workspace.open --issue designed (WORKBENCH-UX §3.10; ADR 0003 L148-151); agent.delegate is local only (Flows.ts:1078).
-- UI: issue card footer `Start pipeline` (confirm) and Pause; progress is the existing `plan` card (apps/shared/src/Cards.ts:103: items with pending/active/done) carrying the five stages Research · Plan · Implement · Review · Land, each active or done item linking its run card; the issue card's designed workspace and change rows carry the rest; no new stage strip.
+- UI: issue card footer `Start pipeline` (confirm) and Pause; progress is the existing `plan` card (packages/rpc/src/Cards.ts:103: items with pending/active/done) carrying the five stages Research · Plan · Implement · Review · Land, each active or done item linking its run card; the issue card's designed workspace and change rows carry the rest; no new stage strip.
 - Flows: `issues.pipeline.start <n> (confirm); issues.pipeline.status <n>; issues.pipeline.pause <n>`
 
 ### workflows/automation · Dispatch a repository workflow on the sandbox plane (POST /workflows/{id}/dispatch, POST /invoke; `smithers workflow dispatch|run`; per-repo and per-user run quotas) as distinct from a workspace-gateway run
@@ -363,7 +363,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### agent setup · Configure the agent `test` standard flow: command, container, cwd, timeout (SMITHERS_TEST_COMMAND|CONTAINER|CWD|TIMEOUT_MS); the flow binds only when the command is set
 
 - Source: smithers · coverage: none · effort: S
-- Exists: Nothing; env card shows vars, setupScript and secretNames (apps/shared/src/Cards.ts:459); an unset command silently leaves the agent without a tests flow.
+- Exists: Nothing; env card shows vars, setupScript and secretNames (packages/rpc/src/Cards.ts:459); an unset command silently leaves the agent without a tests flow.
 - UI: env card gains a Tests row `command · cwd · container · timeout` with Edit and Clear; the flow-plan envelope `flows` row reads `tests` or `tests · not configured`.
 - Flows: `env.tests.set <command> [cwd=] [container=] [timeout=]; env.tests.clear`
 
@@ -377,16 +377,9 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### build cache · Workflow caches list/stats/clear and per-repo hosted build cache tokens (create/list/revoke, `smithers cache connect` writing PACKAGE.ts)
 
 - Source: both · coverage: none · effort: M
-- Exists: targets card shows patternRuns only (apps/shared/src/Cards.ts:536).
+- Exists: targets card shows patternRuns only (packages/rpc/src/Cards.ts:536).
 - UI: targets card gains a Cache row (hit rate · size · last save) with Clear (confirm) and `Connect hosted cache`, which mints a read token and shows the PACKAGE.ts edit in a diff card; token rows with Revoke.
 - Flows: `cache.stats [owner/repo]; cache.clear [owner/repo] (confirm); cache.connect [owner/repo]; cache.token.list; cache.token.create; cache.token.revoke <id> (confirm)`
-
-### docs · Bundled docs (`smithers docs [--full]`, llms.txt) and docs search inside `smithers agent ask`
-
-- Source: both · coverage: partial · effort: S
-- Exists: agent.explain asks the Explainer (Flows.ts:281); no docs source shown.
-- UI: explain card gains a `from docs` row citing the llms section it answered from with Open in browser card.
-- Flows: `docs [query]`
 
 ### evals · Evals and scorers: suites, deterministic runs, baselines, regression comparison, CI gate thresholds, score observations, scorer bindings
 
@@ -405,7 +398,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### flow discovery · Discovery warnings and descriptor facts: effect tier sealed|compensable|irreversible, placement, workspace mode, origin local|installed, packs name@version
 
 - Source: smithers · coverage: partial · effort: S
-- Exists: workflow-list card shows key and description only (apps/shared/src/Cards.ts:326).
+- Exists: workflow-list card shows key and description only (packages/rpc/src/Cards.ts:326).
 - UI: workflow-list rows gain one mono meta row `tier · placement · origin · entry ts|mdx|skill` (Copy law: mono meta rows, no badges), installed packs group by name@version, and a Warnings section listing each DiscoveryWarning with path and Open source.
 - Flows: `flow.list --warnings; flow.source <name>`
 
@@ -419,7 +412,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### identity · Profile edit, emails add/verify, avatar upload, push devices
 
 - Source: plue · coverage: none · effort: S
-- Exists: connect card shows github login only (apps/shared/src/Cards.ts:243).
+- Exists: connect card shows github login only (packages/rpc/src/Cards.ts:243).
 - UI: account card Profile facet: name · avatar · emails rows with Verify/Remove and Add.
 - Flows: `account.profile; account.profile.set <field> <value>; account.email.add <address>; account.email.remove <address>`
 
@@ -454,21 +447,21 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### issues · Issue dependencies, pinned issues, reactions, lock, events log, issue artifacts
 
 - Source: plue · coverage: none · effort: M
-- Exists: issue card has none of these (apps/shared/src/Cards.ts:378).
+- Exists: issue card has none of these (packages/rpc/src/Cards.ts:378).
 - UI: issue card gains a Depends-on row with Add (acyclic error verbatim), a Pin toggle (3 max), a reactions strip, Lock (confirm), an Activity facet from the events log, and Attachments rows.
 - Flows: `issues.link <n> <m>; issues.unlink <n> <m>; issues.pin <n>; issues.unpin <n>; issues.react <n> <emoji>; issues.lock <n> (confirm); issues.events <n>; issues.attach <n> <file>`
 
 ### issues · Edit an issue's title and body (PATCH issue; `smithers issue edit`)
 
 - Source: plue · coverage: none · effort: S
-- Exists: issues.create/close/reopen/comment built (Flows.ts:820-847); issue card body is read-only (apps/shared/src/Cards.ts:378); the labels row edits chips only.
+- Exists: issues.create/close/reopen/comment built (Flows.ts:820-847); issue card body is read-only (packages/rpc/src/Cards.ts:378); the labels row edits chips only.
 - UI: issue card header Edit opens title and body in the shared editor with Save, mirroring the landing-request Edit row.
 - Flows: `issues.edit <n> [title] [body] [owner/repo]`
 
 ### issues · Edit and delete issue comments (PATCH/DELETE issue comment)
 
 - Source: plue · coverage: none · effort: S
-- Exists: issues.comment posts only (Flows.ts:847); comment rows carry no actions (apps/shared/src/Cards.ts:378).
+- Exists: issues.comment posts only (Flows.ts:847); comment rows carry no actions (packages/rpc/src/Cards.ts:378).
 - UI: each comment row the viewer authored gains Edit (editor) and Delete (confirm).
 - Flows: `issues.comment.edit <n> <commentId> <text>; issues.comment.delete <n> <commentId> (confirm)`
 
@@ -496,7 +489,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### notifications · Notification preferences (account and per-repo subscription) and push devices
 
 - Source: plue · coverage: none · effort: S
-- Exists: notifications card lists and marks read (apps/shared/src/Cards.ts:442; Flows.ts:939-953).
+- Exists: notifications card lists and marks read (packages/rpc/src/Cards.ts:442; Flows.ts:939-953).
 - UI: notifications card footer Preferences: rows reason · in-app · email · push toggles; per-repo watch state row; a Devices row `this device · registered 3d ago` with Register/Remove (push devices are named in the feature and need an act).
 - Flows: `notifications.prefs; notifications.prefs.set <reason> <channel> <on|off>; notifications.device.register; notifications.device.remove <id> (confirm)`
 
@@ -517,14 +510,14 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### repositories · Repository settings: edit, topics, archive/unarchive, transfer, delete; fork; star/unstar; watch/subscribe; deploy keys
 
 - Source: plue · coverage: none · effort: M
-- Exists: repo card is read-only (apps/shared/src/Cards.ts:597).
+- Exists: repo card is read-only (packages/rpc/src/Cards.ts:597).
 - UI: repo card Settings facet with editable description/topics, Archive (confirm), Transfer (confirm names the owner), Delete (typed confirm); header Star and Watch toggles and Fork; Deploy keys rows with Add/Remove.
 - Flows: `repo.edit <field> <value>; repo.archive; repo.unarchive; repo.transfer <owner> (confirm); repo.delete (confirm); repo.fork; repo.star; repo.unstar; repo.watch; repo.unwatch; repo.deploy-keys; repo.deploy-key.add <title> <key>; repo.deploy-key.remove <id> (confirm)`
 
 ### repositories · Clone URLs (SSH/HTTPS), Git LFS objects and file locks
 
 - Source: plue · coverage: partial · effort: S
-- Exists: repo card has no clone or LFS rows (apps/shared/src/Cards.ts:597).
+- Exists: repo card has no clone or LFS rows (packages/rpc/src/Cards.ts:597).
 - UI: repo card header `Clone ▾` copies the ssh or https URL; an LFS row lists locks with Unlock (confirm).
 - Flows: `repo.clone-url [ssh|https]; lfs.locks [owner/repo]; lfs.unlock <path> (confirm)`
 
@@ -628,10 +621,10 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 
 ## Critic notes
 
-Laws applied, from the canon on disk: WORKBENCH-UX.md §2 L76-104 (EMBED LAW, NO INVENTION 'anatomy lists are exhaustive', Flows 'every act is a flow with slash, agent, and button invocations of the same name; consequential acts carry confirm', 300ms law, Copy 'no badges that are scores, mono meta rows for ids and timestamps') and apps/ui/AGENTS.md L3-16 (no takeover by default; 'no decorative chrome, no status badges, no extra pills'). ADR 0002 L5-7 (three sandbox kinds, no class picker) and ADR 0005 L128-133 (Connectors rows, one action per row) were read to check conflicts. Verified in the tree: the relay allowlist is Plan, Run, Cancel, List, Projection.Snapshot, Approval.Submit (apps/server/src/gatewayRpc.ts:38-45); Flows.ts registers no issues.edit, env.unset, repo.clone, workspace.ssh, mcp.server.*, or snapshot delete; card kinds match the UI inventory (apps/shared/src/Cards.ts z.literal list).
+Laws applied, from the canon on disk: WORKBENCH-UX.md §2 L76-104 (EMBED LAW, NO INVENTION 'anatomy lists are exhaustive', Flows 'every act is a flow with slash, agent, and button invocations of the same name; consequential acts carry confirm', 300ms law, Copy 'no badges that are scores, mono meta rows for ids and timestamps') and apps/ui/AGENTS.md L3-16 (no takeover by default; 'no decorative chrome, no status badges, no extra pills'). ADR 0002 L5-7 (three sandbox kinds, no class picker) and ADR 0005 L128-133 (Connectors rows, one action per row) were read to check conflicts. Verified in the tree: the relay allowlist is Plan, Run, Cancel, List, Projection.Snapshot, Approval.Submit (apps/server/src/gatewayRpc.ts:38-45); Flows.ts registers no issues.edit, env.unset, repo.clone, workspace.ssh, mcp.server.*, or snapshot delete; card kinds match the UI inventory (packages/rpc/src/Cards.ts z.literal list).
 
-(a) Twelve capabilities in the inventories that no gap row lists and the UI inventory does not plausibly cover: repo clone to a local checkout (plue commands_repo.go:306); issue title/body edit (issue PATCH, `issue edit`); issue comment edit/delete (router.go:1145-1146); variable delete + org variables (router.go:1264, 1674-1676); workspace snapshot delete (router.go:1410, ADR 0002 L31); workspace SSH info / SSH bridge (router.go:1407, workspace_bridge.go); per-repo gateway provision/resume state (router.go:569, 579-580) which every flow-run depends on and which the `reconnecting`/`no-capacity` phases hide; sandbox-plane dispatch/invoke (router.go:1286-1291) distinct from the gateway Plan/Run path the app uses; OAuth2 consent decision (router.go:990-991); `--mcp-config` MCP servers as run flows (packages/cli/src/NodeControl.ts:150-189); outbound channel projection post|edit|noop (packages/control/src/Channels.ts:402-456); SMITHERS_TEST_* configuration of the agent `test` flow (NodeControl.ts:764-830). Smaller misses folded into corrections rather than new rows: memory threads/messages and ttl/compaction (MemoryStore.ts:444-464, Maintenance.ts) into the memory row; push-device registration (router.go:1491-1492) into the notification-preferences row; admin orgs/repos/metrics/synced-repos (router.go:1723-1744, 1460) into the admin row; registry entry precedence ts|mdx|skill into the discovery row; the Codex `smithersai` marketplace plugin into the MCP-registration row.
+(a) Twelve capabilities in the inventories that no gap row lists and the UI inventory does not plausibly cover: repo clone to a local checkout (plue commands_repo.go:306); issue title/body edit (issue PATCH, `issue edit`); issue comment edit/delete (router.go:1145-1146); variable delete + org variables (router.go:1264, 1674-1676); workspace snapshot delete (router.go:1410, ADR 0002 L31); workspace SSH info / SSH bridge (router.go:1407, workspace_bridge.go); per-repo gateway provision/resume state (router.go:569, 579-580) which every flow-run depends on and which the `reconnecting`/`no-capacity` phases hide; sandbox-plane dispatch/invoke (router.go:1286-1291) distinct from the gateway Plan/Run path the app uses; OAuth2 consent decision (router.go:990-991); `--mcp-config` MCP servers as run flows (packages/smithers/src/NodeControl.ts:150-189); outbound channel projection post|edit|noop (packages/smithers/control/src/Channels.ts:402-456); SMITHERS_TEST_* configuration of the agent `test` flow (NodeControl.ts:764-830). Smaller misses folded into corrections rather than new rows: memory threads/messages and ttl/compaction (MemoryStore.ts:444-464, Maintenance.ts) into the memory row; push-device registration (router.go:1491-1492) into the notification-preferences row; admin orgs/repos/metrics/synced-repos (router.go:1723-1744, 1460) into the admin row; registry entry precedence ts|mdx|skill into the discovery row.
 
 (b) Twenty-one corrected rows, same feature strings. Patterns: sidebar badges or sidebar copy (run inbox, approvals inbox, workspace delete `N of M`) violate NO INVENTION; avatars, presence dots and sync glyphs (workspace sharing, app timelines) are decorative chrome; pills and badges (file drafts, discovery, memory notes) violate the Copy law and become mono meta rows; acts without a flow (run inbox/run tree lineage filter, issue-list label filter, MCP catalog Add and Install, remote-gateway follow-only toggle, push devices, admin metrics/orgs/repos, memory threads) gain flows or become flow arguments; duplicates of an existing card (flow-plan duplicates the approval card for a Plan target; workspace-status duplicates the designed change card for `@`; agent-session duplicates the agent card, following the canon's own PTY-to-SSH substitution precedent; the pipeline stage strip duplicates the plan card); a second flow name for one act (runs.cancel beside the built flow.run.stop that already cancels durably); invented sidebar `+` (create repo); an overflow menu outside the designed footer anatomy (workspace delete); and a canon conflict (nine-provider picker vs ADR 0002's three kinds and no class picker). No row proposed a page or a takeover; account and org cards with many facets stay inside EMBED LAW as cards.
 
-Left as-is but worth the author's attention: the steer row and the original agent-session row embed a composer inside a card (a second composer beside the app's); the `grants` card assumes list/revoke RPCs that packages/control exposes only as installBulkGrant; the signal row needs the awaited signal name, which RunSummary.waitingReason (an enum) does not carry; the `runs.*` namespace sits beside the built `flow.run.*` names; system/* catalog flows must be filtered from workflow-list and run-list rows (SystemFlows.ts:48-216); projection limits (10 000 events, 4 MiB row set, 500 runs) should render as verbatim resource_limit lines in the transcript and run-list facets. Observations outside the gap list: Flows.ts also registers cloud.sign-in and cloud.sign-out, which the UI inventory omits; the plue items 'stargazers list', 'landing comments list', 'mark one notification read', 'billing refresh' and 'Claude Code credential status' are sub-acts of covered rows and were not promoted. Protocol, internal, ops-only and CLI-ergonomic items (git/LFS transports, runner protocol, SSE tickets, rate limiting, --json/--quiet/completions, exit codes, removed verbs) were judged not user-facing in the app and excluded.
+Left as-is but worth the author's attention: the steer row and the original agent-session row embed a composer inside a card (a second composer beside the app's); the `grants` card assumes list/revoke RPCs that packages/smithers/control exposes only as installBulkGrant; the signal row needs the awaited signal name, which RunSummary.waitingReason (an enum) does not carry; the `runs.*` namespace sits beside the built `flow.run.*` names; system/* catalog flows must be filtered from workflow-list and run-list rows (SystemFlows.ts:48-216); projection limits (10 000 events, 4 MiB row set, 500 runs) should render as verbatim resource_limit lines in the transcript and run-list facets. Observations outside the gap list: Flows.ts also registers cloud.sign-in and cloud.sign-out, which the UI inventory omits; the plue items 'stargazers list', 'landing comments list', 'mark one notification read', 'billing refresh' and 'Claude Code credential status' are sub-acts of covered rows and were not promoted. Protocol, internal, ops-only and CLI-ergonomic items (git/LFS transports, runner protocol, SSE tickets, rate limiting, --json/--quiet/completions, exit codes, removed verbs) were judged not user-facing in the app and excluded.

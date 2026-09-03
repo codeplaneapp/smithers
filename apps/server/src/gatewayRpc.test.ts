@@ -2,7 +2,7 @@
  * The RPC framing the relay speaks to the workspace gateway.
  *
  * The frame shapes here were read off a live rc.0 gateway
- * (packages/gateway `GatewayServer.test.ts` serves the same mounts), so a
+ * (packages/smithers/gateway `GatewayServer.test.ts` serves the same mounts), so a
  * change to the gateway's wire that this seam has not followed fails here
  * rather than in a browser.
  */

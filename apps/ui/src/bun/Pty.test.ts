@@ -2,7 +2,9 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Harness } from "smithers-shared/LocalApp"
+import { AGENT_ROLES } from "@smthrs/rpc/AgentRoles"
+import type { AgentRole } from "@smthrs/rpc/AgentRoles"
+import type { Harness } from "@smthrs/rpc/LocalApp"
 import { childEnv, createPtyManager, ENV_ALLOWLIST, expandCwd, plainText, PTY_SCROLLBACK_BYTES } from "./Pty"
 import type { PtyManager } from "./Pty"
 
@@ -187,6 +189,40 @@ describe("sessions", () => {
     // A role whose harness is not installed is refused like any other harness.
     const refused = await m.create({ kind: "harness", cwd: "~", cols: 80, rows: 24, roleId: "explainer" })
     expect(refused).toMatchObject({ status: "error", code: "unknown_harness" })
+  })
+
+  test("a custom role id resolves against the agents store and launches with its own composed argv; an unknown id is refused", async () => {
+    const codex: Harness = {
+      id: "codex",
+      displayName: "Codex",
+      binary: "/bin/echo",
+      version: "0",
+      status: "signed-in",
+      account: { email: "will@example.com" },
+      launch: { argv: ["codex"] }
+    }
+    const reviewer: AgentRole = {
+      id: "reviewer",
+      label: "Reviewer",
+      purpose: "Reviews diffs.",
+      model: { provider: "openai", id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+      harness: "codex",
+      delegates: false,
+      builtin: false,
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const m = manager({ harnesses: async () => [codex], roles: async () => [...AGENT_ROLES, reviewer] })
+    const created = await m.create({ kind: "harness", cwd: tmpdir(), cols: 80, rows: 24, roleId: "reviewer", task: "review it" })
+    if (created.status !== "ok") throw new Error(created.message)
+    expect(created.session).toMatchObject({ kind: "harness", harnessId: "codex" })
+    await until(() => exitOf(created.session.sessionId) !== undefined)
+    expect(outputOf(created.session.sessionId)).toContain("-m gpt-5.6-terra review it")
+    // The store is the truth: an id it lacks is not a role, however well-formed.
+    expect(await m.create({ kind: "harness", cwd: "~", cols: 80, rows: 24, roleId: "poet" })).toMatchObject({ status: "error", code: "unknown_role" })
+    // Without a store the built-ins alone resolve.
+    const builtinOnly = manager({ harnesses: async () => [codex] })
+    expect(await builtinOnly.create({ kind: "harness", cwd: "~", cols: 80, rows: 24, roleId: "reviewer" })).toMatchObject({ status: "error", code: "unknown_role" })
   })
 
   test("read serves the scrollback as plain text: escapes stripped, bounded, tail-cut on request", async () => {

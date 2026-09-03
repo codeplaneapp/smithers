@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
-import { composeAgentInstructions } from "smithers-shared/AgentContext"
-import type { AgentRuntimeContext } from "smithers-shared/AgentContext"
+import { composeAgentInstructions } from "@smthrs/rpc/AgentContext"
+import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import { CHAT_INSTRUCTIONS_CAP_BYTES, INSTRUCTIONS_BUDGET_BYTES, smithersInstructions } from "./Instructions"
 
 /*
@@ -55,7 +55,7 @@ describe("the instructions budget", () => {
         host: "local",
         version: "0",
         buildSha: "x",
-        capabilities: ["agent", "identity", "jjhub", "local.repositories", "local.repository-path-entry", "local.targets", "local.terminal", "local.harnesses"],
+        capabilities: ["agent", "identity", "jjhub", "local.repositories", "local.repository-path-entry", "local.targets", "local.terminal", "local.harnesses", "local.lsp"],
         authFlow: "both",
         sandbox: null
       }

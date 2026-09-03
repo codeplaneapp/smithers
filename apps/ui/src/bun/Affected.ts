@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { join, posix } from "node:path"
-import { reachable } from "smithers-shared/TargetGraph"
-import type { AffectedResponse, GraphEdge, GraphNode } from "smithers-shared/TargetGraph"
+import { reachable } from "@smthrs/rpc/TargetGraph"
+import type { AffectedResponse, GraphEdge, GraphNode } from "@smthrs/rpc/TargetGraph"
 
 export interface DeclaredInput { readonly pattern: string; readonly source: "plan" | "declaration" }
 export type DeclaredInputs = ReadonlyMap<string, ReadonlyArray<DeclaredInput>>

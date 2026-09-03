@@ -1,7 +1,7 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import { CardSchema } from "smithers-shared/Cards"
-import type { Repo } from "smithers-shared/LocalApp"
+import { CardSchema } from "@smthrs/rpc/Cards"
+import type { Repo } from "@smthrs/rpc/LocalApp"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import { createAppController } from "../AppController"
 import type { AppServices } from "../AppController"
@@ -580,7 +580,9 @@ describe("files seam — a repository open in the local app", () => {
     })
     const missing = await controller.commands.run("files.read", "missing.txt")
     expect(missing.status).toBe("failed")
-    expect(JSON.stringify(missing)).toContain("Path not found: missing.txt in smithersai/smithers")
+    // The local app's own message (its `{ error: { code, message } }` envelope), never the seam's fallback.
+    expect(JSON.stringify(missing)).toContain("Path not found: missing.txt")
+    expect(JSON.stringify(missing)).not.toContain("missing.txt in smithersai/smithers")
     expect((await controller.commands.run("files.read", "src")).status).toBe("failed")
     expect((await controller.commands.run("files.list", "README.md")).status).toBe("failed")
   })
@@ -605,5 +607,41 @@ describe("files seam — the model's copy of a Cloud read", () => {
     const outcome = await controller.commands.run("files.read", "README.md")
     expect(outcome.status).toBe("executed")
     expect(outcome.status === "executed" ? outcome.value : undefined).toBe(`README.md in will/flows:\n${README_TEXT}`)
+  })
+})
+
+/*
+ * The line anchor (docs/code-intel/PLAN.md §1): `files.read <path>:<line>[:<col>]`
+ * reads the same file through the same route and records the anchor on the
+ * card, which scrolls to and marks the line. The card id stays
+ * `file-<repo>-<path>` (the dedupe every definition jump relies on), and a
+ * re-read without an anchor clears it: the card states where it stands.
+ */
+describe("files seam — the line anchor", () => {
+  test("a local read carries the bare path to the route and the line and column on the card", async () => {
+    const { store, controller, requests } = await localController([SMITHERS])
+    const outcome = await controller.commands.run("files.read", "README.md:2:3")
+    expect(outcome.status).toBe("executed")
+    expect(requests).toEqual([{ url: "/api/repo/files", body: { repoId: "repo-smithers", path: "README.md" } }])
+    const card = fileCard(store, "file-smithersai/smithers-README.md")
+    expect(card?.payload.line).toBe(2)
+    expect(card?.payload.column).toBe(3)
+    expect(card?.payload.content).toBe("# Local — hi\n")
+    expect(CardSchema.safeParse(card).success).toBe(true)
+    await controller.commands.run("files.read", "README.md:1")
+    expect(fileCard(store, "file-smithersai/smithers-README.md")?.payload).toMatchObject({ line: 1 })
+    expect(fileCard(store, "file-smithersai/smithers-README.md")?.payload.column).toBeUndefined()
+    await controller.commands.run("files.read", "README.md")
+    expect(fileCard(store, "file-smithersai/smithers-README.md")?.payload.line).toBeUndefined()
+  })
+
+  test("a Cloud read anchors the same way, and the model's copy is the file", async () => {
+    const { store, controller, requests } = await freshController()
+    await ready(store)
+    const outcome = await controller.commands.run("files.read", "README.md:1")
+    expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : undefined).toBe(`README.md in will/flows:\n${README_TEXT}`)
+    expect(requests.map((request) => request.url)).toEqual(["/api/repos/will/flows/contents/README.md"])
+    expect(fileCard(store, "file-will/flows-README.md")?.payload).toMatchObject({ path: "README.md", line: 1 })
   })
 })

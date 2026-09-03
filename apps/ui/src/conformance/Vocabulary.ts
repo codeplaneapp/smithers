@@ -9,8 +9,8 @@ import type { StorageApi } from "@tanstack/db"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import type { Card } from "smithers-shared/Cards"
-import { CardSchema } from "smithers-shared/Cards"
+import type { Card } from "@smthrs/rpc/Cards"
+import { CardSchema } from "@smthrs/rpc/Cards"
 import ts from "typescript"
 import { adminFlows, baseFlows, type CommandActions } from "../mainview/flows/Flows"
 import { nameOf } from "../mainview/flows/registry"
@@ -33,8 +33,8 @@ export const E2E = from("../../e2e")
 export const LAUNCH_CHECKLIST = from("../launch-checklist")
 /** This directory. */
 export const CONFORMANCE = from(".")
-/** `apps/shared/src` — the wire model both halves of the app share. */
-export const SHARED_SRC = from("../../../shared/src")
+/** `packages/rpc/src` — the wire model both halves of the app share. */
+export const SHARED_SRC = from("../../../../packages/rpc/src")
 /** The shipped component library the app renders through. */
 export const COMPONENT_LIBRARY = from("../../node_modules/@smthrs/ui/src")
 /**

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { LOCAL_SESSION_HEADER } from "smithers-shared/LocalSession"
+import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
 import { startLocalServer } from "./server"
 import type { LocalServer } from "./server"
 

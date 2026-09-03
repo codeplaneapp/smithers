@@ -22,9 +22,11 @@ import {
   HEALTH_PATH,
   IDENTITY_ROUTE_PREFIX,
   TURN_PATH
-} from "smithers-shared/AgentApiRoutes"
-import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "smithers-shared/AppBootstrap"
-import { AgentRuntimeContextSchema } from "smithers-shared/AgentContext"
+} from "@smthrs/rpc/AgentApiRoutes"
+import type { AgentRole } from "@smthrs/rpc/AgentRoles"
+import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "@smthrs/rpc/AppBootstrap"
+import { AgentRuntimeContextSchema } from "@smthrs/rpc/AgentContext"
+import { localCapabilities } from "@smthrs/rpc/HostCapabilities"
 import {
   CLOUD_AUTH_SESSION_PATH,
   CLOUD_AUTH_SIGN_OUT_PATH,
@@ -33,14 +35,14 @@ import {
   CLOUD_WS_ROUTE_PREFIX,
   LINEAR_AUTH_SESSION_PATH,
   LINEAR_AUTH_START_PATH
-} from "smithers-shared/LocalApp"
+} from "@smthrs/rpc/LocalApp"
 import {
   isLocalSessionToken,
   localSessionProtocol,
   LOCAL_SESSION_HEADER,
   LOCAL_SESSION_META
-} from "smithers-shared/LocalSession"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+} from "@smthrs/rpc/LocalSession"
+import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import { createChatStub } from "./ChatStub"
 import { createCloudAgent } from "./CloudAgent"
 import type { CloudAgent } from "./CloudAgent"
@@ -56,11 +58,15 @@ import { createRepositoryAuthority } from "./RepositoryAuthority"
 import type { RepositoryAuthority } from "./RepositoryAuthority"
 import { json, jsonError, readJson, Router } from "./routes"
 import type { RouteHandler } from "./routes"
+import { registerAgentRoutes } from "./routes/agents"
 import { registerRepoTargetRoutes } from "./routes/repoTargets"
 import { registerTargetGraphRoutes } from "./routes/targetGraph"
 import { registerHarnessRoutes } from "./routes/harnesses"
 import type { HarnessDetector } from "./routes/harnesses"
+import { registerLspRoutes } from "./routes/lsp"
 import { registerPtyRoutes } from "./routes/pty"
+import { createLspHost } from "./lsp/LspHost"
+import type { LspHost, LspHostOptions } from "./lsp/LspHost"
 import { currentSandboxHost, sandboxEnforced } from "./Sandbox"
 
 /** chat.smithers.sh accepts this origin anonymously (verified 2026-08-26). */
@@ -132,8 +138,17 @@ export interface LocalServerOptions {
   readonly home?: string
   /** The harness table behind `GET /api/harnesses` and harness tabs; default `detectHarnesses`. */
   readonly harnesses?: HarnessDetector
-  /** The PTY manager behind `/api/pty*`; the default spawns real sessions. */
-  readonly pty?: (deps: { readonly publish: LocalServer["publish"]; readonly harnesses: HarnessDetector; readonly home: string; readonly pathPrepend: () => Promise<ReadonlyArray<string>>; readonly log: (line: string) => void }) => PtyManager
+  /** The PTY manager behind `/api/pty*`; the default spawns real sessions. `roles` is the agents store (custom-agents.md). */
+  readonly pty?: (deps: {
+    readonly publish: LocalServer["publish"]
+    readonly harnesses: HarnessDetector
+    readonly roles: () => Promise<ReadonlyArray<AgentRole>>
+    readonly home: string
+    readonly pathPrepend: () => Promise<ReadonlyArray<string>>
+    readonly log: (line: string) => void
+  }) => PtyManager
+  /** The language-server host behind `/api/lsp/*`; the default spawns real servers (lsp/LspHost.ts). */
+  readonly lsp?: (deps: Pick<LspHostOptions, "publish" | "node" | "home" | "sandbox" | "log">) => LspHost
   readonly log?: (line: string) => void
   /** Test/replay override; production generates 256 fresh random bits. */
   readonly sessionToken?: string
@@ -319,6 +334,11 @@ const encoder = new TextEncoder()
  * is the bearer proxy straight to plue and never forwards here.
  */
 const PRODUCT_PROXY_PREFIXES: ReadonlyArray<string> = [
+  /* Flows and runs: provision + RPC live on the Worker (web-mode plan R6); the local origin forwarded neither. */
+  "/api/workflow/",
+  /* Linear: the integrations list and the per-integration sync/ops routes (lane L5); neither hop forwarded them. */
+  "/api/integrations/",
+  "/api/linear",
   "/api/repos/",
   "/api/github/",
   "/api/user/",
@@ -538,16 +558,14 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       host: "local",
       version,
       buildSha: options.buildSha ?? Bun.env.SMITHERS_BUILD_SHA ?? "unknown",
-      capabilities: [
-        ...(agent === undefined ? [] : ["agent"]),
-        ...(identityUpstream === null ? [] : ["identity"]),
-        ...(cloudUpstream === null ? [] : ["jjhub"]),
-        "local.repositories",
-        ...(options.allowManualRepositoryPaths === true ? ["local.repository-path-entry"] : []),
-        "local.targets",
-        "local.terminal",
-        "local.harnesses"
-      ],
+      // The shared table the Worker and the parity matrix read; both cloud
+      // doors (`cloud.terminal`, `cloud.pat`) ride the jjhub upstream.
+      capabilities: localCapabilities({
+        agent: agent !== undefined,
+        identity: identityUpstream !== null,
+        jjhub: cloudUpstream !== null,
+        pathEntry: options.allowManualRepositoryPaths === true
+      }),
       authFlow: identityUpstream === null ? "none" : "both",
       sandbox: {
         platform: process.platform,
@@ -1080,12 +1098,18 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     server.publish(topic, JSON.stringify(message))
   }
 
+  // Code intel (code-intel PLAN.md §3): one language server per (repository,
+  // language), started on first use, ended with the repository and with the server.
+  const lspDeps = { publish, node: nodeProbe, home, sandbox: sandboxHost, log }
+  const lsp = options.lsp === undefined ? createLspHost(lspDeps) : options.lsp(lspDeps)
+
   // L3: one repository authority feeds targets and every child-process cwd.
   const routeHost = { router, publish, onMessage }
   const repoTargets = registerRepoTargetRoutes(routeHost, {
     node: nodeProbe,
     authority: repositoryAuthority,
     allowManualRepositoryPaths: options.allowManualRepositoryPaths,
+    onRepoClosed: (repoId) => lsp.closeRepo(repoId),
     log,
     ...(options.buildCli === undefined ? {} : { cli: options.buildCli }),
     ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir })
@@ -1095,10 +1119,27 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
   // L4: the harness table and PTY sessions. Browser input carries a repo id,
   // never a filesystem path; the server resolves the authorized cwd here.
   registerHarnessRoutes(router, harnesses)
-  const ptyDeps = { publish, harnesses, home, pathPrepend: async () => binDirOf((await nodeProbe)?.path), log }
+  // Agents as data (custom-agents.md): the store under stateDir seeds from the built-ins; a role launch resolves against it.
+  const agents = registerAgentRoutes(router, {
+    harnesses,
+    log,
+    ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir })
+  })
+  const ptyDeps = {
+    publish,
+    harnesses,
+    roles: () => agents.store.list(),
+    home,
+    pathPrepend: async () => binDirOf((await nodeProbe)?.path),
+    log
+  }
   const pty = options.pty === undefined ? createPtyManager(ptyDeps) : options.pty(ptyDeps)
   registerPtyRoutes(routeHost, pty, {
     resolveRepo: (repoId) => repoTargets.resolveRepo(repoId, "read-write")
+  })
+  // A language server reads: read access suffices.
+  registerLspRoutes(routeHost, lsp, {
+    resolveRepo: (repoId) => repoTargets.resolveRepo(repoId, "read")
   })
 
   const local: LocalServer = {
@@ -1122,6 +1163,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       await cloudAuth?.stop()
       await linearAuth?.stop()
       await pty.killAll()
+      await lsp.killAll()
       repositoryAuthority.clear()
       server.stop(true)
     }

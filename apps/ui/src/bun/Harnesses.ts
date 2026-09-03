@@ -13,8 +13,9 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { basename, delimiter, join, resolve } from "node:path"
-import { HARNESS_IDS } from "smithers-shared/LocalApp"
-import type { Harness } from "smithers-shared/LocalApp"
+import type { HarnessModelSpec } from "@smthrs/rpc/AgentRoles"
+import { HARNESS_IDS } from "@smthrs/rpc/LocalApp"
+import type { Harness } from "@smthrs/rpc/LocalApp"
 import { currentSandboxHost, probePolicy, wrapSandbox } from "./Sandbox"
 
 export type HarnessId = (typeof HARNESS_IDS)[number]
@@ -157,11 +158,27 @@ const apiKey = (name: string): Signal => ({ status: "api-key", account: { label:
 /** `~/x` for a path below home, so a label stays short. */
 const tilde = (host: HarnessHost, path: string): string => (path.startsWith(`${host.home}/`) ? `~${path.slice(host.home.length)}` : path)
 
+/**
+ * How a harness takes a model on its command line (docs/workbench-lanes/
+ * custom-agents.md): the flag before the model id, the model ids the app has
+ * verified for it, and — where the binary has one — the argv that prints one
+ * model per line. Every entry is read off the installed binary's own
+ * `--help` (2026-09-03, this machine); a harness whose help names no model
+ * flag has no entry and never runs as a custom agent (NO INVENTION).
+ */
+export interface HarnessModels {
+  readonly flag: ReadonlyArray<string>
+  readonly suggestions: ReadonlyArray<string>
+  /** argv[0] is the binary name; the output is one model id per line. */
+  readonly list?: ReadonlyArray<string>
+}
+
 interface Detector {
   readonly id: HarnessId
   readonly displayName: string
   readonly binary: string
   readonly launch: ReadonlyArray<string>
+  readonly models?: HarnessModels
   readonly signal: (host: HarnessHost) => Signal
 }
 
@@ -171,6 +188,8 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "Claude Code",
     binary: "claude",
     launch: ["claude"],
+    /* `claude --help`: "--model <model> … an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5')". */
+    models: { flag: ["--model"], suggestions: ["claude-fable-5", "fable", "opus", "sonnet"] },
     signal: (host) => {
       const state = readJson(host, join(host.home, ".claude.json"))
       const oauth = state?.oauthAccount
@@ -195,6 +214,8 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "Codex",
     binary: "codex",
     launch: ["codex"],
+    /* `codex --help`: "-m, --model <MODEL>"; the ids are the GPT-5.6 family packages/smithers/agent/model/src/DeferredTools.ts lists. */
+    models: { flag: ["-m"], suggestions: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] },
     signal: (host) => {
       const auth = readJson(host, join(envDir(host, "CODEX_HOME", join(host.home, ".codex")), "auth.json"))
       const tokens = auth?.tokens
@@ -215,6 +236,8 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "Gemini",
     binary: "gemini",
     launch: ["gemini"],
+    /* `gemini --help`: "-m, --model  Model [string]"; it names no ids, so the field is free text. */
+    models: { flag: ["--model"], suggestions: [] },
     signal: (host) => {
       const root = envDir(host, "GEMINI_DIR", join(host.home, ".gemini"))
       if (host.isFile(join(root, "oauth_creds.json"))) {
@@ -231,6 +254,8 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "Kimi",
     binary: "kimi",
     launch: ["kimi"],
+    /* `kimi --help`: "--model -m TEXT  LLM model to use"; it names no ids. */
+    models: { flag: ["--model"], suggestions: [] },
     signal: (host) => {
       const share = envDir(host, "KIMI_SHARE_DIR", join(host.home, ".kimi"))
       if (host.isFile(join(share, "credentials", "kimi-code.json"))) {
@@ -244,6 +269,8 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "OpenCode",
     binary: "opencode",
     launch: ["opencode"],
+    /* `opencode --model provider/model`; `opencode models` prints every provider/model it can serve, one per line. */
+    models: { flag: ["--model"], suggestions: [OPENCODE_KIMI_MODEL, OPENCODE_CEREBRAS_MODEL], list: ["opencode", "models"] },
     signal: (host) => {
       const auth = readJson(host, join(host.home, ".local", "share", "opencode", "auth.json"))
       const providers = auth === null ? [] : Object.keys(auth).filter((id) => hasNonEmptyStringDeep(auth[id]))
@@ -272,6 +299,7 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "OpenCode · Kimi",
     binary: "opencode",
     launch: ["opencode", "--model", OPENCODE_KIMI_MODEL],
+    models: { flag: ["--model"], suggestions: [OPENCODE_KIMI_MODEL], list: ["opencode", "models", "kimi-for-coding"] },
     signal: (host) => {
       const auth = readJson(host, join(host.home, ".local", "share", "opencode", "auth.json"))
       if (auth !== null && hasNonEmptyStringDeep(auth["kimi-for-coding"])) {
@@ -291,6 +319,7 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "OpenCode · Cerebras",
     binary: "opencode",
     launch: ["opencode", "--model", OPENCODE_CEREBRAS_MODEL],
+    models: { flag: ["--model"], suggestions: [OPENCODE_CEREBRAS_MODEL, "cerebras/gemma-4-31b"], list: ["opencode", "models", "cerebras"] },
     signal: (host) => {
       const auth = readJson(host, join(host.home, ".local", "share", "opencode", "auth.json"))
       if (auth !== null && hasNonEmptyStringDeep(auth["cerebras"])) {
@@ -335,6 +364,8 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "Cursor Agent",
     binary: "cursor-agent",
     launch: ["cursor-agent"],
+    /* `cursor-agent --help`: "--model <model>  Model to use (e.g., gpt-5, sonnet-4, sonnet-4-thinking)". */
+    models: { flag: ["--model"], suggestions: ["gpt-5", "sonnet-4", "sonnet-4-thinking"] },
     signal: (host) => {
       const key = firstEnv(host.env, ["CURSOR_API_KEY"])
       if (key !== undefined) return apiKey(key)
@@ -351,6 +382,8 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     displayName: "Hermes",
     binary: "hermes",
     launch: ["hermes"],
+    /* `hermes --help`: "-m MODEL, --model MODEL  Model override for this invocation (e.g. anthropic/claude-sonnet-4.6)"; `hermes model` is an interactive picker, not a list. */
+    models: { flag: ["--model"], suggestions: ["anthropic/claude-sonnet-4.6"] },
     signal: (host) => {
       const auth = join(host.home, ".hermes", "auth.json")
       if (hasNonEmptyStringDeep(readJsonAny(host, auth))) return { status: "signed-in", account: { label: tilde(host, auth) } }
@@ -380,6 +413,15 @@ export const parseVersionLine = (output: string): string | null => {
   return match === null ? firstLine : match[0]
 }
 
+/** The model table for one harness id, or undefined when its help names no model flag the app verified. */
+export const harnessModels = (id: string): HarnessModels | undefined => DETECTORS.find((detector) => detector.id === id)?.models
+
+/** What `roleLaunchArgv` composes with: the harness's binary name and its model flag. */
+export const harnessModelSpec = (id: string): HarnessModelSpec | undefined => {
+  const detector = DETECTORS.find((candidate) => candidate.id === id)
+  return detector?.models === undefined ? undefined : { binary: detector.binary, flag: detector.models.flag }
+}
+
 /** The harness table for one host: every id, in contract order, whether installed or not. */
 export const detectHarnessesWith = async (host: HarnessHost): Promise<Array<Harness>> => {
   const found = DETECTORS.map((detector) => ({ detector, binary: findBinary(detector.binary, host) }))
@@ -393,7 +435,10 @@ export const detectHarnessesWith = async (host: HarnessHost): Promise<Array<Harn
       version: versions[index] ?? null,
       status: signal === null ? "unavailable" : signal.status,
       account: signal === null ? null : signal.account,
-      launch: { argv: [...detector.launch] }
+      launch: { argv: [...detector.launch] },
+      ...(detector.models === undefined
+        ? {}
+        : { models: { suggestions: [...detector.models.suggestions], listable: detector.models.list !== undefined } })
     }
   })
 }

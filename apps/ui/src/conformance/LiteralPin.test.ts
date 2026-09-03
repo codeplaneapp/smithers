@@ -263,7 +263,7 @@ describe("every literal the suites assert against still resolves", () => {
   })
 
   test("every deferred orphan is still an orphan", () => {
-    // The inverted assertion, copied from packages/flows'
+    // The inverted assertion, copied from packages/smithers/flows'
     // vitestCoverageIsolation deferral sets: the day the product emits the
     // attribute, this entry stops matching and the test above fails until
     // the entry is deleted. A deferral that cannot expire is a permanent

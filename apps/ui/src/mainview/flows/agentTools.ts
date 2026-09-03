@@ -9,7 +9,7 @@
  * `CommandRegistry.executeForAgent` (actor smithers), and the honest result
  * string below is what the continuation turn posts back to the model.
  */
-import type { AgentToolSpec } from "smithers-shared/NativeAgent"
+import type { AgentToolSpec } from "@smthrs/rpc/NativeAgent"
 import type { CommandRegistry } from "./Commands"
 import type { CatalogItem, FlowEntry } from "./registry"
 import { itemOf, visible } from "./registry"
@@ -46,31 +46,51 @@ export const agentVisibleCatalog = (
   }))
 
 /*
- * The honest tool-result error when the model reaches for user-only chrome
- * (§2a): name the visible alternative so the model can tell the user where
- * the affordance actually lives instead of promising an act it cannot take.
+ * The agent's own door beside a user-only act (§2a): the registry's
+ * `userOnlyReason` says WHY the act is the human's; this table says what the
+ * model does INSTEAD, where an instead exists — a prompt flow that renders the
+ * human's button in the chat, or the text answer that replaces the gesture.
+ * A flow that stops being user-only leaves this table (agent-parity.md).
  */
 const USER_ONLY_ALTERNATIVES: Readonly<Record<string, string>> = {
-  "auth.sign-in":
-    "sign-in is a button the human clicks — invoke auth.prompt instead, which renders that button in the chat",
-  "auth.sign-out": "sign-out is a control the human clicks — it lives in their slash menu",
-  "admin.reset": "resetting the conversation is the human's dev affordance — suggest /chat.clear if they want a fresh chat",
-  reset: "resetting the conversation is the human's dev affordance — suggest /chat.clear if they want a fresh chat",
-  "appearance.theme": "the color theme is the human's own choice — they set it with /appearance.theme",
-  theme: "the color theme is the human's own choice — they set it with /appearance.theme",
-  "appearance.dark-mode": "the light/dark toggle is a button the human clicks",
-  "dark-mode": "the light/dark toggle is a button the human clicks",
-  "chat.stop": "stopping a response is the human's Escape key / stop button",
-  "chat.send": "the composer belongs to the human — answer with text instead",
-  send: "the composer belongs to the human — answer with text instead",
-  "card.maximize": "maximizing a card is the human's explicit act — your invocation renders the embedded card",
-  "card.minimize": "minimizing a card is the human's explicit act"
+  "auth.sign-in": "invoke auth.prompt, which renders that button in the chat",
+  "cloud.sign-in": "invoke cloud.prompt, which renders that button in the chat",
+  "app.download": "invoke app.download.prompt, which renders that button in the chat",
+  "admin.reset": "suggest /chat.clear if they want a fresh chat",
+  "chat.send": "answer with text instead",
+  "card.maximize": "your invocation of a surface flow renders the embedded card"
 }
 
-export const userOnlyError = (name: string): string =>
-  `failed: /${name} is user-only — ${
-    USER_ONLY_ALTERNATIVES[name] ?? "it is a control the human clicks, already visible on their screen"
+/**
+ * The honest tool-result error when the model reaches for a user-only flow:
+ * the registry's reason, then the agent's own door when one exists, so the
+ * model tells the user where the act lives instead of promising it.
+ */
+export const userOnlyError = (name: string, reason?: string): string => {
+  const alternative = USER_ONLY_ALTERNATIVES[name]
+  return `failed: /${name} is user-only — ${reason ?? "it is a control the human clicks, already visible on their screen"}${
+    alternative === undefined ? "" : ` — ${alternative}`
   }`
+}
+
+/*
+ * The seams' instruction shape: "Sign in to Smithers Cloud first — /cloud.sign-in."
+ * and "sign in with /cloud.sign-in, or …". Only the slash INSIDE a sign-in
+ * instruction is rewritten; a refusal whose subject is the flow itself
+ * ("/cloud.sign-in is not in the web app — …", the W0 door sentence) keeps
+ * its name, because that sentence is about the flow, not an act to take.
+ */
+const CLOUD_SIGN_IN_INSTRUCTION = /(\bsign in\b[^.]*?)\/cloud\.sign-in\b/giu
+
+/**
+ * A handler's refusal, worded for the agent. The seams answer a missing
+ * Smithers Cloud session with the human's slash (`/cloud.sign-in`), which the
+ * model cannot invoke; its next act is the prompt flow that renders that
+ * button, so the failure text names it (agent-parity.md: the model ran
+ * `/auth.prompt`, the wrong prompt, because nothing named the right one).
+ */
+export const agentFailureText = (error: string): string =>
+  error.replace(CLOUD_SIGN_IN_INSTRUCTION, "$1cloud.prompt (it renders the Smithers Cloud sign-in button in the chat)")
 
 /** The one tool the chat model gets. */
 export const commandsToolSpec: AgentToolSpec = {
@@ -151,7 +171,7 @@ export const executeAgentToolCall = async (
    */
   const target = registry.find(name)
   if (target !== undefined && !registry.callable().includes(target)) {
-    return userOnlyError(name)
+    return userOnlyError(name, target.metadata.userOnlyReason)
   }
   /*
    * The agent-mode run (requirement axis): an unmet requirement comes back
@@ -172,6 +192,17 @@ export const executeAgentToolCall = async (
        * at the list action so the retry happens in the same turn.
        */
       return `unknown-command: ${name} — no command has that name; use the list action for every command callable right now`
+    case "unavailable":
+      /*
+       * A flow this host lacks the door for: nothing ran ("failed:" is the
+       * prefix the instructions bind to that). When the native app is the
+       * answer the registry has already rendered the refusal card — the same
+       * one a human's slash or button gets — so the model points at it
+       * instead of retrying; for the other doors the sentence is the answer.
+       */
+      return outcome.action === null
+        ? `failed: ${outcome.reason}`
+        : `failed: ${outcome.reason} The refusal is already rendered in the chat as a card; point the user at it`
     case "failed":
       return `failed: ${outcome.error}`
   }

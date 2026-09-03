@@ -26,7 +26,7 @@ export const RepoImportCardBody = ({
   readonly card: Extract<Card, { kind: "repo-import" }>
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const { repo, jobId, phase, detail, counts, repository, workspaceId, rateLimit } = card.payload
+  const { repo, jobId, phase, detail, stage, counts, repository, workspaceId, rateLimit } = card.payload
   /* A refused GitHub call holds Try again until the reset, with the time on it (ADR 0005 "Rate limits"). */
   const heldUntil = useRetryHold(rateLimit)
   return (
@@ -46,6 +46,8 @@ export const RepoImportCardBody = ({
           </p>
         ) :
         null}
+      {/* ADR 0005: `stage · provisioning_workspace` — the job's own word, never translated. */}
+      {stage != null ? <p className="world-card-path">{`stage · ${stage}`}</p> : null}
       {jobId !== null ? <p className="world-card-path">job {jobId}</p> : null}
       {phase === "done" && repository != null ?
         <p className="world-card-path">{`${repository.owner}/${repository.name}`}</p> :

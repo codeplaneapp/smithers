@@ -14,7 +14,7 @@
  */
 import type { ControlEvent, SteerMessage } from "@smthrs/control/ControlSchema"
 import type { ApprovalRow, NodeOutputRow, RunSummaryRow, TranscriptRow } from "@smthrs/gateway/GatewayProjection"
-import { WORKFLOW_RPC_PATH } from "smithers-shared/AgentApiRoutes"
+import { WORKFLOW_RPC_PATH } from "@smthrs/rpc/AgentApiRoutes"
 
 /** What one relayed call answered. */
 export type GatewayResult<A> =

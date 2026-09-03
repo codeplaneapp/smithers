@@ -99,6 +99,8 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-chain-events",
   "app-tabs",
   "app-harnesses",
+  /* Agents as data (custom-agents.md): the mirror of `GET /api/agents`. */
+  "app-agents",
   "app-repos",
   "app-pinned-repos",
   "app-starred-targets",
@@ -112,7 +114,13 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-cloud-workspaces",
   "app-changes",
   "app-linear-integrations",
-  "app-github-app-statuses"
+  "app-github-app-statuses",
+  /*
+   * The sidebar's file tree rows live in a per-launch memory store (a
+   * checkout changes on disk, so nothing survives a relaunch). Declared so
+   * the inventory test stays exact and a stray key under this id is cleared.
+   */
+  "app-repo-tree"
 ]
 
 /** The storage keys the gate clears on a mismatch. */

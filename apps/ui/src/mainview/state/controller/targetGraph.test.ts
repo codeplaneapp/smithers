@@ -3,15 +3,15 @@
  * graph"): every command the human types — /target.graph, /target.timeline,
  * /target.history, /target.affected, /target.ci and the hidden replay acts —
  * runs through the ONE registry path and lands the right card kind, filled
- * from the routes in smithers-shared/TargetGraph TARGET_GRAPH_ROUTES. The
+ * from the routes in @smthrs/rpc/TargetGraph TARGET_GRAPH_ROUTES. The
  * routes are stubbed here at the fetch seam with the captured force
  * fixtures; the backend lane implements them against the same contract.
  */
 import type { StorageApi } from "@tanstack/db"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { Repo } from "smithers-shared/LocalApp"
-import type { RunReplayResponse } from "smithers-shared/TargetGraph"
-import { TARGET_GRAPH_ROUTES } from "smithers-shared/TargetGraph"
+import type { Repo } from "@smthrs/rpc/LocalApp"
+import type { RunReplayResponse } from "@smthrs/rpc/TargetGraph"
+import { TARGET_GRAPH_ROUTES } from "@smthrs/rpc/TargetGraph"
 import { fixtureRunEvents, fixtureTargetGraph } from "../../dev/fixtureRunStream"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import { createAppController } from "../AppController"

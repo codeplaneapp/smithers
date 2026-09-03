@@ -1,17 +1,48 @@
-import { CardPatchSchema, CardPlanItemSchema, CardSchema } from "smithers-shared/Cards"
-import { AgentRoleIdSchema } from "smithers-shared/AgentRoles"
-import type { AgentRoleId } from "smithers-shared/AgentRoles"
-import { HARNESS_IDS, HarnessSchema, RepoSchema } from "smithers-shared/LocalApp"
-import type { Harness, Repo } from "smithers-shared/LocalApp"
-import { REPOSITORY_ACCESS_VALUES } from "smithers-shared/NativeRepository"
-import type { LocalRepositoryInspection, RepositoryAccess } from "smithers-shared/NativeRepository"
+import {
+  CardPatchSchema,
+  CardPlanItemSchema,
+  CardSchema,
+  EnvironmentImageRowSchema,
+  SandboxEgressRowSchema,
+  WorkspaceDesktopSchema,
+  WorkspaceEnvironmentSchema,
+  WorkspaceFileEntrySchema,
+  WorkspaceHeadSchema,
+  WorkspaceServiceSchema
+} from "@smthrs/rpc/Cards"
+import { AgentRoleIdSchema, AgentRoleSchema } from "@smthrs/rpc/AgentRoles"
+import type { AgentRole, AgentRoleId } from "@smthrs/rpc/AgentRoles"
+import { HARNESS_IDS, HarnessSchema, RepoFileEntrySchema, RepoSchema } from "@smthrs/rpc/LocalApp"
+import type { Harness, Repo } from "@smthrs/rpc/LocalApp"
+import { REPOSITORY_ACCESS_VALUES } from "@smthrs/rpc/NativeRepository"
+import type { LocalRepositoryInspection, RepositoryAccess } from "@smthrs/rpc/NativeRepository"
 import { z } from "zod"
 
-export { CardPatchSchema, CardPlanItemSchema, CardSchema }
-import type { Card, CardPatch } from "smithers-shared/Cards"
-export type { Card, CardPatch, CardPlanItem } from "smithers-shared/Cards"
-export { HARNESS_IDS, HarnessSchema, RepoSchema }
-export type { Harness, Repo }
+export {
+  CardPatchSchema,
+  CardPlanItemSchema,
+  CardSchema,
+  EnvironmentImageRowSchema,
+  SandboxEgressRowSchema,
+  WorkspaceDesktopSchema,
+  WorkspaceEnvironmentSchema,
+  WorkspaceFileEntrySchema,
+  WorkspaceHeadSchema,
+  WorkspaceServiceSchema
+}
+export type {
+  EnvironmentImageRow,
+  SandboxEgressRow,
+  WorkspaceDesktop,
+  WorkspaceEnvironment,
+  WorkspaceFileEntry,
+  WorkspaceHead,
+  WorkspaceService
+} from "@smthrs/rpc/Cards"
+import type { Card, CardPatch } from "@smthrs/rpc/Cards"
+export type { Card, CardPatch, CardPlanItem } from "@smthrs/rpc/Cards"
+export { AgentRoleSchema, HARNESS_IDS, HarnessSchema, RepoSchema }
+export type { AgentRole, Harness, Repo }
 
 /*
  * The sidebar's pinned repositories (docs/LOCAL-APP.md "Tabs"). A server
@@ -30,6 +61,37 @@ export const PinnedRepoSchema = z.object({
   pinnedAt: z.number()
 })
 export type PinnedRepo = z.infer<typeof PinnedRepoSchema>
+
+/*
+ * The sidebar's repository file tree (docs/workbench-lanes/sidebar-tree.md):
+ * one row per directory the user expanded in a working copy, keyed
+ * `<copyId>#<path>` (`""` is the copy's root). `expanded` is the caret;
+ * `state` is the listing's honest state — `loading` until the local route
+ * answers, `loaded` with the entries it returned (nothing filtered, nothing
+ * invented), `failed` with the server's error text verbatim. Collection
+ * state, never React state, and NEVER persisted across launches: a checkout
+ * changes on disk, so every launch starts with every row collapsed.
+ */
+export const RepoTreeEntrySchema = RepoFileEntrySchema
+export type RepoTreeEntry = z.infer<typeof RepoTreeEntrySchema>
+export const RepoTreeRowSchema = z.object({
+  /** `repoTreeRowId(copyId, path)`. */
+  id: z.string(),
+  /** The working copy (`WorkingCopy.id`, `local:<path>` for a checkout). */
+  copyId: z.string(),
+  /** Relative to the copy's root; `""` is the root. */
+  path: z.string(),
+  expanded: z.boolean(),
+  state: z.enum(["loading", "loaded", "failed"]),
+  entries: z.array(RepoTreeEntrySchema),
+  /** The route's error text, verbatim, when `state` is `failed`. */
+  error: z.string().optional(),
+  /** The route capped the listing at its first page by name. */
+  truncated: z.boolean().optional(),
+  loadedAt: z.number()
+})
+export type RepoTreeRow = z.infer<typeof RepoTreeRowSchema>
+export const repoTreeRowId = (copyId: string, path: string): string => `${copyId}#${path}`
 
 /*
  * A target this user starred (target.star): the targets card's Featured
@@ -134,11 +196,15 @@ export const initialCloudSession = (createdAt = Date.now()): CloudSessionRow => 
 })
 
 /*
- * A cloud workspace (lane citc, ADR 0002): plue's workspace DTO trimmed to
- * what the app states — the six statuses, the provisioning stage, the target
- * bookmark. NO kind, NO uptime, NO workspace head, NO ahead/behind
- * (plue#446 — the DTO does not carry them, so the row never does). This
- * collection is the authority the workspace working copies
+ * A cloud workspace (lane citc, ADR 0002; completed by lane L3): plue's
+ * workspace DTO trimmed to what the app states — the six statuses, the
+ * provisioning stage, the target bookmark, and the header facts plue#446
+ * landed: the sandbox kind, the workspace's OWN head, ahead/behind, the
+ * environment reference, persistence, the ssh host, and when the VM started.
+ * Each of those is nullable AND optional: absent on the wire means absent on
+ * the row and nothing rendered — never a default, never a guess. Optional so
+ * a row persisted before this lane still validates without a schema reset.
+ * This collection is the authority the workspace working copies
  * (`workingCopies`, kind "workspace") derive from.
  */
 export const WORKSPACE_STATUSES = ["pending", "starting", "running", "suspended", "stopped", "failed"] as const
@@ -153,9 +219,39 @@ export const CloudWorkspaceRowSchema = z.object({
   name: z.string(),
   targetBookmark: z.string().nullable(),
   status: CloudWorkspaceStatusSchema,
+  /**
+   * plue#482 `failure_code` / `failure_message`: why a `failed` workspace
+   * failed, in the provider's own words. Both null when the platform
+   * recorded none — a failure with no reason is a fact, not a blank.
+   */
+  failureCode: z.string().nullable().optional(),
+  failureMessage: z.string().nullable().optional(),
   provisioningStage: z.string().nullable(),
   suspendedAt: z.string().nullable(),
   createdAt: z.string().nullable(),
+  /**
+   * `container` / `vm` / `desktop` / `agent`, verbatim from the DTO (ADR 0002:
+   * the kind IS the choice; RFD-004 added `agent` for the computer an agent
+   * run executed in).
+   */
+  kind: z.string().nullable().optional(),
+  /** The agent session that drove this workspace (RFD-004 `agent_session_id`); null for a human's. */
+  agentSessionId: z.string().nullable().optional(),
+  /** The workspace's own head as the guest last reported it — never the bookmark's. */
+  head: WorkspaceHeadSchema.nullable().optional(),
+  ahead: z.number().int().nullable().optional(),
+  behind: z.number().int().nullable().optional(),
+  /** When the VM last started; null while it has never run, and the uptime line is then absent. */
+  startedAt: z.string().nullable().optional(),
+  environment: WorkspaceEnvironmentSchema.nullable().optional(),
+  persistence: z.string().nullable().optional(),
+  sshHost: z.string().nullable().optional(),
+  /**
+   * Lane L3b: the DTO's `desktop` object — the relative stream path and the
+   * last mint's id and expiry. Present only for `kind: "desktop"`; the
+   * credential the facet renders never lands here (see seams/DesktopStream.ts).
+   */
+  desktop: WorkspaceDesktopSchema.nullable().optional(),
   updatedAt: z.number(),
   revision: z.number().int().nonnegative()
 })
@@ -164,7 +260,26 @@ export type CloudWorkspaceRow = z.infer<typeof CloudWorkspaceRowSchema>
 /** The fields a workspace load or act writes (the reducer adds updatedAt/revision). */
 export type CloudWorkspaceInput = Pick<
   CloudWorkspaceRow,
-  "id" | "repoId" | "name" | "targetBookmark" | "status" | "provisioningStage" | "suspendedAt" | "createdAt"
+  | "id"
+  | "repoId"
+  | "name"
+  | "targetBookmark"
+  | "status"
+  | "failureCode"
+  | "failureMessage"
+  | "provisioningStage"
+  | "suspendedAt"
+  | "createdAt"
+  | "kind"
+  | "agentSessionId"
+  | "head"
+  | "ahead"
+  | "behind"
+  | "startedAt"
+  | "environment"
+  | "persistence"
+  | "sshHost"
+  | "desktop"
 >
 
 /*
@@ -484,7 +599,8 @@ export const SessionSchema = z.object({
    */
   palette: z.enum(PALETTES).optional(),
   composerOwner: z.enum(["user", "smithers"]),
-  surface: z.enum(["chat", "world", "connectors"]),
+  /* The pane the chat shell has open beside the conversation ("flows": will, ask 5, 2026-09-02). */
+  surface: z.enum(["chat", "world", "connectors", "flows"]),
   selectedWorldDocumentId: z.string().nullable(),
   /** The card currently maximized (a presentation transition; null = embedded). */
   maximizedCardId: z.string().nullable(),
@@ -582,9 +698,21 @@ export const SessionSchema = z.object({
    * terminal or agent starts. Optional (missing = the first open repo).
    */
   activeRepoKey: z.string().nullable().optional(),
+  /*
+   * The sidebar heading's name (docs/workbench-lanes/sidebar-tree.md):
+   * `workspace.rename <name>` writes it; the heading renders "Workspace"
+   * until it is set. `workspaceRenameOpen` is the inline editor the pencil
+   * opens (workspace.rename.edit) — session state like every other menu,
+   * so a component never owns it. Both optional so persisted sessions parse.
+   */
+  workspaceName: z.string().optional(),
+  workspaceRenameOpen: z.boolean().optional(),
   revision: z.number().int().nonnegative()
 })
 export type Session = z.infer<typeof SessionSchema>
+
+/** The heading's default until the user names the workspace. */
+export const DEFAULT_WORKSPACE_NAME = "Workspace"
 
 /**
  * The active open repository: the one the session names when it is open,
@@ -1201,6 +1329,8 @@ export type AppTransition =
   | { type: "tab.menu.toggled"; actor: Actor; open: boolean }
   | { type: "pty.exited"; actor: "system"; sessionId: string; code: number | null }
   | { type: "harnesses.loaded"; actor: "system"; harnesses: ReadonlyArray<Harness> }
+  /* Agents as data (custom-agents.md): `GET /api/agents` replaces the app-agents mirror the way the harness list does. */
+  | { type: "agents.loaded"; actor: "system"; agents: ReadonlyArray<AgentRole> }
   | { type: "repos.loaded"; actor: "system"; repos: ReadonlyArray<Repo> }
   /*
    * Lane piper: the cloud repository inventory (RepositoriesSeam) replaces
@@ -1283,6 +1413,18 @@ export type AppTransition =
   | { type: "repo.pinned"; actor: Actor; pin: PinnedRepo }
   | { type: "repo.unpinned"; actor: "user"; id: string }
   | { type: "repo.selected"; actor: Actor; id: string }
+  /*
+   * The sidebar's file tree (docs/workbench-lanes/sidebar-tree.md): a caret
+   * toggles a directory row; a first expand (or a retry of a failed one)
+   * marks it loading, and the local route's answer lands as loaded or failed.
+   */
+  | { type: "repo-tree.toggled"; actor: "user"; copyId: string; path: string; expanded: boolean }
+  | { type: "repo-tree.loading"; actor: "user"; copyId: string; path: string }
+  | { type: "repo-tree.loaded"; actor: "system"; copyId: string; path: string; entries: ReadonlyArray<RepoTreeEntry>; truncated: boolean }
+  | { type: "repo-tree.failed"; actor: "system"; copyId: string; path: string; error: string }
+  /* The workspace heading: its name, and the inline editor the pencil opens. */
+  | { type: "workspace.renamed"; actor: Actor; name: string }
+  | { type: "workspace.rename.toggled"; actor: "user"; open: boolean }
   /* A user's star on a target (targets card Featured view); `repoId` names the open card the mirror lands on. */
   | { type: "target.starred"; actor: "user"; repoId: string; star: StarredTarget }
   | { type: "target.unstarred"; actor: "user"; repoId: string; id: string }

@@ -1,6 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import { CLOUD_ROUTE_PREFIX } from "smithers-shared/LocalApp"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
 import { createRepositoriesSeam } from "./RepositoriesSeam"

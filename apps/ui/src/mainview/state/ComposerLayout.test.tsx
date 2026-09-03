@@ -3,7 +3,7 @@ import type { StorageApi } from "@tanstack/db"
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import App from "../App"
 import { ControllerTestProvider } from "../ControllerContext"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
@@ -394,17 +394,21 @@ describe("the composer's + menu and surface pill", () => {
       "Trivial implementation · GPT-5.6 Lunacodex is not installed",
       "UI · Kimi K3opencode-kimi is not installed",
       "Fast UI · Cerebras gpt-oss-120bopencode-cerebras is not installed",
-      "New agent…Claude Code"
+      // The raw harness session, named like the sidebar's `+` names it; then the New agent form (custom-agents.md).
+      "Claude Codewill@example.com",
+      "New agent…"
     ])
     // The orchestrator's harness is installed, so its role row is enabled; the explainer's is not.
     expect(items[2]?.hasAttribute("disabled")).toBe(false)
     expect(items[3]?.hasAttribute("disabled")).toBe(true)
     expect(items[8]?.hasAttribute("disabled")).toBe(false)
+    expect(items[9]?.hasAttribute("disabled")).toBe(false)
     expect(items.map((item) => item.dataset.flow)).toEqual([
       "files.add",
       "connector.add",
       ...Array<string>(6).fill("agent.role"),
-      "tab.harness"
+      "tab.harness",
+      "agent.new"
     ])
     // No jjhub on the local host: no flow.create, so no "New flow…" is offered.
     expect(controller.commands.find("flow.create")).toBeUndefined()
@@ -438,15 +442,72 @@ describe("the composer's + menu and surface pill", () => {
     expect(store.session().addMenuOpen).toBe(false)
   })
 
-  test("the surface pill lists Chat, Connect and World, and reads the pane it opened", async () => {
+  test("the surface pill lists Chat, Connect, World and Flows, and reads the pane it opened", async () => {
     const { store, controller } = await localController()
     const view = mount(controller)
 
     await view.act(() => byTestId(view.host, "composer-surface-trigger")?.click())
     const items = [...view.host.querySelectorAll<HTMLElement>(".composer-surfaces [role=\"menuitem\"]")]
-    expect(items.map((item) => item.dataset.flow)).toEqual(["chat", "connect", "world"])
+    expect(items.map((item) => item.dataset.flow)).toEqual(["chat", "connect", "world", "flows"])
     await view.act(() => items[2]?.click())
     expect(store.session().surface).toBe("world")
     expect(text(byTestId(view.host, "composer-surface-trigger"))).toBe("World")
+  })
+
+  /*
+   * Ask 5 (will, 2026-09-02): "where it says connect chat and world an option
+   * should also be flows which should allow us to look at flows". The entry is
+   * a registered flow like the other three, and choosing it opens the pane.
+   */
+  test("choosing Flows opens the flows pane and the pill reads Flows", async () => {
+    const { store, controller } = await localController()
+    expect(controller.commands.find("flows")).toBeDefined()
+    const view = mount(controller)
+
+    await view.act(() => byTestId(view.host, "composer-surface-trigger")?.click())
+    const items = [...view.host.querySelectorAll<HTMLElement>(".composer-surfaces [role=\"menuitem\"]")]
+    await view.act(() => items[3]?.click())
+
+    expect(store.session().surface).toBe("flows")
+    expect(text(byTestId(view.host, "composer-surface-trigger"))).toBe("Flows")
+    expect(view.host.querySelector(".flows-surface")).not.toBeNull()
+  })
+
+  /*
+   * The pane is the flow.list card's own rows — one list, two mounts — so a
+   * row's Run is the same flow.run binding it is in the transcript.
+   */
+  test("the flows pane renders the flow.list rows, each Run bound to flow.run", async () => {
+    const { store, controller } = await localController()
+    await persisted(store, {
+      type: "card.upsert",
+      actor: "user",
+      card: {
+        id: "workflow-list-acme/app",
+        kind: "workflow-list",
+        title: "Workflows — acme/app",
+        status: "active",
+        createdAt: 1,
+        ordinal: 4,
+        payload: {
+          repo: "acme/app",
+          workflows: [
+            { key: "review-pr", description: "Review an open PR" },
+            { key: "release", description: null }
+          ]
+        }
+      }
+    })
+    const view = mount(controller)
+    await view.act(() => {
+      store.dispatch({ type: "surface.changed", actor: "user", surface: "flows" })
+    })
+
+    const pane = view.host.querySelector<HTMLElement>(".flows-surface")
+    expect(pane).not.toBeNull()
+    const rows = [...(pane?.querySelectorAll<HTMLElement>(".workflow-list-row") ?? [])]
+    expect(rows.map((row) => text(row.querySelector("strong")))).toEqual(["review-pr", "release"])
+    expect(text(rows[0])).toContain("Review an open PR")
+    expect(rows.map((row) => row.querySelector("button")?.dataset.flow)).toEqual(["flow.run", "flow.run"])
   })
 })

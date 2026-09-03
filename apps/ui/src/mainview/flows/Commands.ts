@@ -14,18 +14,21 @@
 import * as Cell from "@smthrs/harness/Cell"
 import type * as Descriptor from "@smthrs/registry/Descriptor"
 import { Effect } from "effect"
-import { hasCapability } from "smithers-shared/AppBootstrap"
+import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import type { AgentToolCall, AgentToolSpec } from "./agentTools"
-import { agentToolSpecs, executeAgentToolCall, userOnlyError } from "./agentTools"
+import { agentFailureText, agentToolSpecs, executeAgentToolCall, userOnlyError } from "./agentTools"
 import type { AppTransition } from "../state/AppState"
 import type { CommandActions } from "./Flows"
 import { adminFlows, baseFlows } from "./Flows"
-import type { CatalogItem, CommandState, FlowEntry, SlashItem, SlashRow } from "./registry"
+import type { CatalogItem, CommandState, FlowEntry, MissingDoor, SlashItem, SlashRow } from "./registry"
 import {
+  absentDoor,
+  confirmLabel,
   flowRequirements,
   itemOf,
   modelInvocable,
   nameOf,
+  namespaceOf,
   recommendedNames,
   slashItems,
   slashTree,
@@ -38,8 +41,55 @@ export type { CommandActions, CommandResult } from "./Flows"
 
 export type CommandOutcome =
   | { readonly status: "executed"; readonly value?: string }
+  /** A name no host has. */
   | { readonly status: "unknown-command" }
+  /**
+   * A declared flow this host lacks the door for (`explainAbsent`): `reason`
+   * is the one sentence every trigger says. When the native app is the answer
+   * (`door` local or cloud.pat) the registry has already rendered the refusal
+   * card through the named action; for the other doors nothing is rendered
+   * and the sentence is the whole answer.
+   */
+  | {
+    readonly status: "unavailable"
+    readonly door: AbsentDoor
+    readonly reason: string
+    readonly action: "app.download.prompt" | null
+  }
   | { readonly status: "failed"; readonly error: string }
+
+/**
+ * The door classes an exact miss resolves to. `cloud.session` refines
+ * `cloud.pat`: the flows that ARE the PAT session (the `cloud.` namespace),
+ * which on the web the GitHub sign-in already answers.
+ */
+export type AbsentDoor = MissingDoor | "cloud.session"
+
+export interface AbsentExplanation {
+  readonly door: AbsentDoor
+  /** The one sentence every trigger says. */
+  readonly reason: string
+}
+
+/** Whether the native app is the answer to a miss of this door: the refusal card carries the download. */
+export const downloadAnswers = (door: AbsentDoor): boolean => door === "local" || door === "cloud.pat"
+
+/** The sentence a miss of each door gets, after the flow it names. */
+export const absentReason = (name: string, door: AbsentDoor): string => {
+  switch (door) {
+    case "local":
+      return `/${name} is not in the web app — it needs the native app.`
+    case "cloud.pat":
+      return `/${name} is not in the web app — it needs the native app's Smithers Cloud session.`
+    case "cloud.session":
+      return `/${name} is not in the web app — on the web your GitHub sign-in is your Smithers Cloud sign-in.`
+    case "origin":
+      return `/${name} is not available on this origin yet.`
+  }
+}
+
+/** The flow the registry renders for a native-only miss on the web. */
+const DOWNLOAD_PROMPT = "app.download.prompt"
 
 export interface CommandRegistry {
   /** Every registered flow as UI-catalog records, admin entries included only for admin sessions. */
@@ -47,6 +97,16 @@ export interface CommandRegistry {
   /** The same flows as executable entries. */
   readonly entries: () => ReadonlyArray<FlowEntry>
   readonly find: (name: string) => FlowEntry | undefined
+  /**
+   * Why an exact name is absent from THIS host, classified against the
+   * unfiltered catalog by the door the host lacks (registry.ts `absentDoor`):
+   * the native app (`local`, `cloud.pat`), the session flows the GitHub
+   * sign-in already answers on the web (`cloud.session`), or a door this
+   * origin could grow (`origin`). Undefined for a present flow, for a name no
+   * host has, and for a flow about the other host. A prerequisite (sign-in)
+   * is never a reason here — it is the requirement axis, resolved by `run`.
+   */
+  readonly explainAbsent: (name: string) => AbsentExplanation | undefined
   readonly state: () => CommandState
   readonly slashItems: (needle: string) => Array<SlashItem<CatalogItem>>
   /** The slash menu as a tree: leaves and namespace rows (registry.slashTree). */
@@ -130,6 +190,9 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
 
   const available = (entry: FlowEntry): boolean => {
     const bootstrap = actions.bootstrap
+    const { hosts } = entry.metadata
+    // A host-scoped flow exists only where the bootstrap names its host: no bootstrap, no host, no flow.
+    if (hosts !== undefined && (bootstrap === undefined || !hosts.includes(bootstrap.host))) return false
     if (bootstrap === undefined) return true
     const { runtime = [], runtimeAny } = entry.metadata
     return runtime.every((capability) => hasCapability(bootstrap, capability)) &&
@@ -142,6 +205,24 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
   const items = (): ReadonlyArray<CatalogItem> => entries().map(itemOf)
 
   const find = (name: string): FlowEntry | undefined => entries().find((entry) => nameOf(entry) === name)
+
+  /*
+   * The honest refusal (docs/web-mode/PLAN.md §1). The enabled catalog stays
+   * the only executable surface; an exact miss is classified against the
+   * UNFILTERED declarations by the door this bootstrap lacks, so the flow is
+   * never reported as nonexistent when it is this origin that lacks the door.
+   * Only a name absent from the declarations stays unknown-command.
+   */
+  const explainAbsent = (name: string): AbsentExplanation | undefined => {
+    const bootstrap = actions.bootstrap
+    if (bootstrap === undefined || find(name) !== undefined) return undefined
+    const declared = base.find((entry) => nameOf(entry) === name)
+    if (declared === undefined) return undefined
+    const missing = absentDoor(declared.metadata, bootstrap)
+    if (missing === undefined) return undefined
+    const door: AbsentDoor = missing === "cloud.pat" && namespaceOf(name) === "cloud" ? "cloud.session" : missing
+    return { door, reason: absentReason(name, door) }
+  }
 
   /** Invokes one flow through its binding — the single door every trigger shares. */
   const invoke = async (
@@ -214,8 +295,15 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
       name,
       args,
       startedAt,
-      outcome.status,
-      outcome.status === "failed" ? outcome.error : outcome.status === "executed" ? outcome.value ?? null : null
+      // The trace's outcome vocabulary predates the host boundary: an unavailable flow is recorded as the miss it is, with the reason as its detail.
+      outcome.status === "unavailable" ? "unknown-command" : outcome.status,
+      outcome.status === "failed"
+        ? outcome.error
+        : outcome.status === "unavailable"
+        ? outcome.reason
+        : outcome.status === "executed"
+        ? outcome.value ?? null
+        : null
     )
     return outcome
   }
@@ -228,7 +316,22 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
     startedAt: number
   ): Promise<CommandOutcome> => {
     const entry = find(name)
-    if (entry === undefined) return { status: "unknown-command" }
+    if (entry === undefined) {
+      const absent = explainAbsent(name)
+      if (absent === undefined) return { status: "unknown-command" }
+      const { door, reason } = absent
+      if (!downloadAnswers(door)) return { status: "unavailable", door, reason, action: null }
+      /*
+       * The refusal IS the download card: rendered here, through the prompt
+       * flow's own binding, so slash, button and agent get the same card and
+       * none of them has to know to ask for it. Invoked directly rather than
+       * through runAs: the human did not run app.download.prompt, the app did,
+       * so it neither ranks in their recent commands nor traces as their act.
+       */
+      const prompt = find(DOWNLOAD_PROMPT)
+      if (prompt !== undefined) await invoke(prompt, { flow: name })
+      return { status: "unavailable", door, reason, action: DOWNLOAD_PROMPT }
+    }
     const target = entry
     const unmet = unmetRequirements(target.metadata, actions.snapshot(), flowRequirements)[0]
     if (unmet !== undefined) {
@@ -267,20 +370,30 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
     if ("error" in parsed) return { status: "failed", error: parsed.error }
     /*
      * A `confirm` flow asked for by the MODEL: consequential acts (land a
-     * PR, remove a credential) are invocable by the agent — every listed
-     * flow is — but never performed by it. The invocation posts a
-     * confirmation message whose button runs the flow as the user.
+     * PR, remove a credential, launch a harness) are invocable by the agent
+     * — every listed flow is — but never performed by it. The invocation
+     * posts a confirmation message whose button runs the flow as the user.
+     * The label may depend on the payload (registry.ts `confirm`).
      */
-    if (invoker === "agent" && target.metadata.confirm !== undefined) {
-      actions.requestFlowConfirmation(nameOf(target), args ?? null, target.metadata.confirm)
-      trace(invoker, name, args, startedAt, "confirm-requested", target.metadata.confirm)
+    const confirmation = invoker === "agent" ? confirmLabel(target.metadata, parsed.payload) : undefined
+    if (confirmation !== undefined) {
+      actions.requestFlowConfirmation(nameOf(target), args ?? null, confirmation)
+      trace(invoker, name, args, startedAt, "confirm-requested", confirmation)
       return {
         status: "executed",
         value:
           `asked the user to confirm "/${nameOf(target)}${args === undefined ? "" : ` ${args}`}" — it runs only when they confirm, and nothing has happened yet`
       }
     }
-    const outcome = await invoke(target, parsed.payload)
+    const settledOutcome = await invoke(target, parsed.payload)
+    /*
+     * The agent reads a refusal as its next act: a handler that points the
+     * human at a slash the model cannot run (`/cloud.sign-in`) points the
+     * model at the prompt flow that renders that button instead.
+     */
+    const outcome: CommandOutcome = invoker === "agent" && settledOutcome.status === "failed"
+      ? { status: "failed", error: agentFailureText(settledOutcome.error) }
+      : settledOutcome
     // A successful, user-invoked, LISTED flow feeds the slash menu's recency
     // ranking; hidden id-scoped acts never rank.
     if (outcome.status === "executed" && invoker === "user" && target.metadata.hidden !== true) {
@@ -297,6 +410,7 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
     all: items,
     entries,
     find,
+    explainAbsent,
     state: actions.snapshot,
     slashItems: (needle) => slashItems(actions.snapshot(), needle, items()),
     slashTree: (needle) => slashTree(actions.snapshot(), needle, items()),
@@ -314,7 +428,7 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
         const clean = name.trim().replace(/^\/+/, "")
         const target = find(clean)
         if (target !== undefined && !modelInvocable(target)) {
-          return { status: "failed", error: userOnlyError(clean) }
+          return { status: "failed", error: userOnlyError(clean, target.metadata.userOnlyReason) }
         }
         return runAs("agent", clean, args)
       }),

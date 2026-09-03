@@ -1,4 +1,4 @@
-import type { PickLocalRepositoryResult, RepositoryAccess } from "smithers-shared/NativeRepository"
+import type { PickLocalRepositoryResult, RepositoryAccess } from "@smthrs/rpc/NativeRepository"
 
 /*
  * The native folder picker is a modal dialog: it returns when the human

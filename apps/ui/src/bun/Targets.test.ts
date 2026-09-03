@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
-import type { TargetRunFrame } from "smithers-shared/LocalApp"
+import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
 import type { SandboxHost } from "./Sandbox"
 import {
   buildCliNodePath,
@@ -39,17 +39,17 @@ const noSandbox: SandboxHost = { platform: "linux", disabled: true, log: () => {
 const LISTING = JSON.stringify({
   query: "//...",
   targets: [
-    { label: "//src:lint", target: "Shell.Test", kinds: ["test", "lint"] },
+    { label: "//src:lint", target: "Shell.Test", kinds: ["test", "lint"], summary: "Lint the sources.", featured: true },
     { label: "//:detectSecrets", target: "Shell.Test", kinds: ["test"] },
     { label: "//src/Apps/Auction:srcs", target: "Filegroup", kinds: ["build"] }
   ]
 })
 
 describe("mapTargets", () => {
-  test("maps the loader listing 1:1, splits labels into package and name, and tags the workspace", () => {
+  test("maps the loader listing 1:1, splits labels into package and name, tags the workspace, and keeps the declared presentation", () => {
     const mapped = mapTargets(LISTING, ".")
     expect("targets" in mapped && mapped.targets).toEqual([
-      { label: "//src:lint", target: "Shell.Test", kinds: ["test", "lint"], package: "//src", name: "lint", workspace: "." },
+      { label: "//src:lint", target: "Shell.Test", kinds: ["test", "lint"], package: "//src", name: "lint", workspace: ".", summary: "Lint the sources.", featured: true },
       { label: "//:detectSecrets", target: "Shell.Test", kinds: ["test"], package: "//", name: "detectSecrets", workspace: "." },
       { label: "//src/Apps/Auction:srcs", target: "Filegroup", kinds: ["build"], package: "//src/Apps/Auction", name: "srcs", workspace: "." }
     ])
@@ -70,16 +70,16 @@ describe("mapTargets", () => {
 })
 
 describe("resolveBuildCli and sandbox paths", () => {
-  test("SMITHERS_BUILD_CLI wins, else packages/build-cli/src/main.js from the checkout", () => {
+  test("SMITHERS_BUILD_CLI wins, else packages/smithers/build/build-cli/src/main.js from the checkout", () => {
     expect(resolveBuildCli({ SMITHERS_BUILD_CLI: "/x/main.js" }, "/ignored")).toBe("/x/main.js")
     const packaged = "/Applications/Smithers.app/Contents/Resources/app/build-cli/launcher.mjs"
     expect(resolveBuildCli({}, "/Applications/Smithers.app/Contents/Resources/app/bun", (path) => path === packaged))
       .toBe(packaged)
-    expect(resolveBuildCli({}, "/repo/apps/ui/src/bun", () => false)).toBe("/repo/packages/build-cli/src/main.js")
+    expect(resolveBuildCli({}, "/repo/apps/ui/src/bun", () => false)).toBe("/repo/packages/smithers/build/build-cli/src/main.js")
   })
 
   test("from inside an Electrobun bundle the loader is the nearest one above the bundle", () => {
-    const checkout = "/repo/packages/build-cli/src/main.js"
+    const checkout = "/repo/packages/smithers/build/build-cli/src/main.js"
     const bundled = "/repo/apps/ui/build/dev-macos-arm64/Smithers-dev.app/Contents/Resources/app/bun"
     expect(resolveBuildCli({}, bundled, (path) => path === checkout)).toBe(checkout)
     expect(resolveBuildCli({}, "/repo/apps/ui/src/bun", (path) => path === checkout)).toBe(checkout)
@@ -291,8 +291,8 @@ describe("runArgv picks the CLI form the workspace's authoring surface accepts",
   })
   test("a legacy declaration-rooted workspace runs `<verb> <label> --ui plain` with the verb from the first kind", () => {
     const exists = () => false
-    expect(runArgv("/w", "//packages/canonical:check", ["build"], exists)).toEqual(["build", "//packages/canonical:check", "--ui", "plain"])
-    expect(runArgv("/w", "//:knownFiles", ["run", "lint"], exists)).toEqual(["run", "//:knownFiles", "--ui", "plain"])
+    expect(runArgv("/w", "//packages/smithers/flows/canonical:check", ["build"], exists)).toEqual(["build", "//packages/smithers/flows/canonical:check", "--ui", "plain"])
+    expect(runArgv("/w", "//:tsconfig", ["run", "lint"], exists)).toEqual(["run", "//:tsconfig", "--ui", "plain"])
     expect(runArgv("/w", "//x:y", [], exists)).toEqual(["build", "//x:y", "--ui", "plain"])
   })
 })
@@ -302,17 +302,17 @@ describe("runArgv picks the CLI form the workspace's authoring surface accepts",
  * is how CI runs everything (`smithers-build ci '//packages/...'`), and the
  * executor's trailing results block is the one place each target's RULE is
  * printed. The fixture is the real output of
- * `smithers-build ci '//packages/canonical/...' --ui plain` on this checkout.
+ * `smithers-build ci '//packages/smithers/flows/canonical/...' --ui plain` on this checkout.
  */
 describe("pattern runs and the results block", () => {
   const { createRunStdoutParser, patternRunArgv } = require("./Targets") as typeof import("./Targets")
   const REAL_CI_OUTPUT = [
-    "//packages/canonical:docs  ran  13ms",
-    "//packages/canonical:fmt  ran  394ms",
-    "//packages/canonical:check  ran  836ms",
+    "//packages/smithers/flows/canonical:docs  ran  13ms",
+    "//packages/smithers/flows/canonical:fmt  ran  394ms",
+    "//packages/smithers/flows/canonical:check  ran  836ms",
     "3 targets: 0 hit, 3 ran, 0 failed, 0 skipped (2.6s)",
     "verb: ci",
-    "pattern: //packages/canonical/...",
+    "pattern: //packages/smithers/flows/canonical/...",
     "jobs: 16",
     "durationMs: 2551.275042",
     "counts:",
@@ -322,9 +322,9 @@ describe("pattern runs and the results block", () => {
     "  skipped: 0",
     "ok: true",
     "results[3]{label,target,status,durationMs,key}:",
-    "  \"//packages/canonical:fmt\",Dprint,ran,393.87254099999996,ce06981499a592588e6fcb4c617f00351198489566c0d07eec3b1db441f5d1b6",
-    "  \"//packages/canonical:check\",Typecheck,ran,835.5130409999997,d88ca8e8c34b996daad7b47c8bd24046963f957e141c3649facc216d875b56d9",
-    "  \"//packages/canonical:docs\",DocsParity,ran,12.953042000000096,9c99919d39ddfd9e1cc850480c9913756eb82ce6cd51f3d7e70666ce5800951c",
+    "  \"//packages/smithers/flows/canonical:fmt\",Dprint,ran,393.87254099999996,ce06981499a592588e6fcb4c617f00351198489566c0d07eec3b1db441f5d1b6",
+    "  \"//packages/smithers/flows/canonical:check\",Typecheck,ran,835.5130409999997,d88ca8e8c34b996daad7b47c8bd24046963f957e141c3649facc216d875b56d9",
+    "  \"//packages/smithers/flows/canonical:docs\",DocsParity,ran,12.953042000000096,9c99919d39ddfd9e1cc850480c9913756eb82ce6cd51f3d7e70666ce5800951c",
     ""
   ].join("\n")
 
@@ -337,20 +337,20 @@ describe("pattern runs and the results block", () => {
     const events = parser.push("stdout", REAL_CI_OUTPUT, 4_000)
     const nodes = events.filter((event) => event.type === "node")
     expect(nodes.map((event) => event.type === "node" ? `${event.node.label} ${event.node.status}` : "")).toEqual([
-      "//packages/canonical:docs ran",
-      "//packages/canonical:fmt ran",
-      "//packages/canonical:check ran",
-      "//packages/canonical:fmt ran",
-      "//packages/canonical:check ran",
-      "//packages/canonical:docs ran"
+      "//packages/smithers/flows/canonical:docs ran",
+      "//packages/smithers/flows/canonical:fmt ran",
+      "//packages/smithers/flows/canonical:check ran",
+      "//packages/smithers/flows/canonical:fmt ran",
+      "//packages/smithers/flows/canonical:check ran",
+      "//packages/smithers/flows/canonical:docs ran"
     ])
     const summary = events.find((event) => event.type === "summary")
     expect(summary?.type === "summary" ? summary.summary : undefined).toMatchObject({ total: 3, hit: 0, ran: 3, failed: 0, skipped: 0, durationMs: 2600, ok: true })
     const timings = parser.timings()
     expect(timings.map((node) => [node.label, node.rule, node.key?.slice(0, 8)])).toEqual([
-      ["//packages/canonical:docs", "DocsParity", "9c99919d"],
-      ["//packages/canonical:fmt", "Dprint", "ce069814"],
-      ["//packages/canonical:check", "Typecheck", "d88ca8e8"]
+      ["//packages/smithers/flows/canonical:docs", "DocsParity", "9c99919d"],
+      ["//packages/smithers/flows/canonical:fmt", "Dprint", "ce069814"],
+      ["//packages/smithers/flows/canonical:check", "Typecheck", "d88ca8e8"]
     ])
     // The `verb:` / `counts:` envelope lines are not targets and never become rows.
     expect(timings).toHaveLength(3)

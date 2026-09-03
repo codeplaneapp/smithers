@@ -1,5 +1,5 @@
-import type { StartAgentTurnRequest } from "smithers-shared/NativeAgent"
-import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
+import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { CloudAgent } from "./CloudAgent"
 
 /*

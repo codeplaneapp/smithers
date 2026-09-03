@@ -16,7 +16,7 @@
  * whose head could not be read carries `head: null`, and a failed bookmarks
  * call is an absent answer, not a fact.
  */
-import { CLOUD_ROUTE_PREFIX } from "smithers-shared/LocalApp"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 

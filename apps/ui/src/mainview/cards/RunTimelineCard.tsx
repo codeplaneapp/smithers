@@ -9,7 +9,7 @@
  */
 import { Button, EmptyState, KpiStat, StatusPill } from "@smthrs/ui"
 import { useRef, useState } from "react"
-import type { NodeTiming } from "smithers-shared/TargetGraph"
+import type { NodeTiming } from "@smthrs/rpc/TargetGraph"
 import { timeLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
 

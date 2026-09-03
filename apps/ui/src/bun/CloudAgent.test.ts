@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { Card } from "smithers-shared/Cards"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import type { Card } from "@smthrs/rpc/Cards"
+import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import { createCloudAgent } from "./CloudAgent"
 
 const request: StartAgentTurnRequest = {

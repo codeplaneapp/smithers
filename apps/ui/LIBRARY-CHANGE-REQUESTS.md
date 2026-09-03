@@ -6,7 +6,7 @@ changes personally.
 
 ## 1. `FlowBinding` refusals lose the raw handler message
 
-- **File**: `packages/harness/src/FlowBinding.ts`
+- **File**: `packages/smithers/agent/harness/src/FlowBinding.ts`
 - **What**: `make`'s runner wraps every handler failure as
   `` `Flow ${descriptor.name} failed: ${describe(produced.failure)}` `` and puts
   that single string in `CallResult.message`. The original failure value is not
@@ -49,8 +49,8 @@ changes personally.
 
 ## 2. The cell loop's capability envelope refuses any host capability vocabulary
 
-- **Files**: `packages/harness/src/CellTurn.ts` (the screen at ~line 353) and
-  `packages/capability/src/Capability.ts` (`parse`, `Action`).
+- **Files**: `packages/smithers/agent/harness/src/CellTurn.ts` (the screen at ~line 353) and
+  `packages/smithers/flows/capability/src/Capability.ts` (`parse`, `Action`).
 - **What**: before dispatching a cell's flow call, `CellTurn` filters the
   descriptor's declared capabilities:
 
@@ -151,10 +151,17 @@ changes personally.
   ComponentProps<"button">`.
 - **Landed**: `submitProps` / `stopProps` on `ChatComposerProps` and
   `nodeProps` on `FileTreeProps`, pinned by
-  `packages/ui/tests/host-pass-through.test.tsx`. Anything the host sets wins
+  `packages/smithers/ui/tests/host-pass-through.test.tsx`. Anything the host sets wins
   over the component's own attribute of the same name, so a host can also
   correct one. `apps/ui/src/mainview/FlowStamp.ts` can drop its ref callback
   for these three affordances.
+- **Landed (2026-09-02, sidebar tree lane)**: `FileTree` also takes
+  `directoryProps?: (path) => …` for its directory toggles (the sidebar's
+  `repo.tree` rows), `data-*` attributes are typed on both pass-throughs
+  (`DataAttributes`), and the tree can be lazy and controlled: `directories`,
+  `collapsed` + `onToggle(path, expanded)`, `renderDirectoryEmpty(path)`, and
+  `renderDirectoryFooter(path)`. Pinned by `packages/smithers/ui/tests/file-tree.test.tsx`
+  ("FileTree lazy and controlled").
 
 ## 4. LANDED: `MarkdownEditor` traps forward Tab
 

@@ -1,21 +1,56 @@
+import { FileTree } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
-import { FolderGit2, Moon, Plus, RotateCcw, Sun, X } from "lucide-react"
+import { ChevronRight, Download, FolderGit2, Moon, Pencil, Plus, RotateCcw, Sun, X } from "lucide-react"
 import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
-import { MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
-import type { TabRow, WorkingCopy } from "../state/AppState"
+import { DEFAULT_WORKSPACE_NAME, MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
+import type { Repo, RepoTreeRow, TabRow, WorkingCopy } from "../state/AppState"
 import { SELECT_REPO_LABEL } from "../Onboarding"
 
 /*
- * The sidebar (docs/LOCAL-APP.md "Tabs"): vertical like Arc — Smithers pinned
- * first and never closable; then the Repos section, one row per pinned
- * repository with its tabs nested under it (a tab whose repository is not
- * pinned sits under "No repository"); then `+`; and, at the bottom, the
- * chrome that must stay visible on every tab: the theme toggle, the admin
- * reset, and "Sign in".
- * Every affordance dispatches a registered flow; the list and the `+` menu
- * are projections of the tabs collection and the session row.
+ * The sidebar (docs/workbench-lanes/sidebar-tree.md): the workspace heading
+ * first — its name, the way back to the chat, and the pencil that renames it
+ * — then one row per repository, grouped `org/ → repo → working copies`. A
+ * local working copy's row is a file tree: its caret expands the checkout's
+ * ROOT, one directory per fetch, and a file click renders the existing file
+ * card in the chat (files.read). The SESSIONS a copy holds — terminals,
+ * agents, pinned cards — nest under it after its files. Then `+`, and at the
+ * bottom the chrome that must stay visible everywhere: the theme toggle, the
+ * admin reset, and "Sign in". Every affordance dispatches a registered flow;
+ * the list, the tree, and the `+` menu are projections of the collections
+ * and the session row. No user-visible word "tab" lives here.
  */
+
+/* The existing truncated line (cards/FileCards.tsx), so a capped directory says the same thing in both places. */
+const TRUNCATED_LINE = "Truncated — the directory holds more entries than the listing shows."
+
+/** The tree's view of one working copy: every loaded row, keyed by path. */
+interface CopyTree {
+  readonly root: RepoTreeRow | undefined
+  readonly rows: ReadonlyMap<string, RepoTreeRow>
+  readonly nodes: ReadonlyArray<string>
+  readonly directories: ReadonlyArray<string>
+  readonly collapsed: ReadonlySet<string>
+}
+
+const copyTreeOf = (copyId: string, treeRows: ReadonlyArray<RepoTreeRow>): CopyTree => {
+  const rows = new Map<string, RepoTreeRow>()
+  for (const row of treeRows) if (row.copyId === copyId) rows.set(row.path, row)
+  const nodes: string[] = []
+  const directories: string[] = []
+  // Rows in path order so each level keeps the route's order (dirs first, then by name).
+  for (const row of [...rows.values()].sort((left, right) => left.path.localeCompare(right.path))) {
+    if (row.state !== "loaded") continue
+    for (const entry of row.entries) {
+      const full = row.path === "" ? entry.name : `${row.path}/${entry.name}`
+      if (entry.kind === "dir") directories.push(full)
+      else nodes.push(full)
+    }
+  }
+  const collapsed = new Set(directories.filter((directory) => rows.get(directory)?.expanded !== true))
+  return { root: rows.get(""), rows, nodes, directories, collapsed }
+}
+
 export function ChromeBar() {
   const controller = useController()
   const { collections } = controller.store
@@ -26,31 +61,43 @@ export function ChromeBar() {
       activeTabId: session.activeTabId,
       tabMenuOpen: session.tabMenuOpen,
       theme: session.theme,
-      activeRepoKey: session.activeRepoKey
+      activeRepoKey: session.activeRepoKey,
+      workspaceName: session.workspaceName,
+      workspaceRenameOpen: session.workspaceRenameOpen
     }))
   )
   const { data: harnessRows } = useLiveQuery(collections.harnesses)
+  const { data: agentRows } = useLiveQuery(collections.agents)
   const { data: identityRows } = useLiveQuery(collections.identitySessions)
   const { data: repoRows } = useLiveQuery(collections.repos)
   const { data: pinRows } = useLiveQuery((q) => q.from({ pin: collections.pinnedRepos }).orderBy(({ pin }) => pin.pinnedAt))
   const { data: repositoryRows } = useLiveQuery(collections.repositories)
   const { data: copyRows } = useLiveQuery(collections.workingCopies)
+  const { data: treeRows } = useLiveQuery(collections.repoTree)
   const session = sessionRows[0]
   const identity = identityRows[0]
   const activeTabId = session?.activeTabId ?? MAIN_TAB_ID
   const dark = session?.theme === "dark"
   const menuOpen = session?.tabMenuOpen === true
+  const workspaceName = session?.workspaceName ?? DEFAULT_WORKSPACE_NAME
+  const renameOpen = session?.workspaceRenameOpen === true
   const available = harnessRows.filter((harness) => harness.status !== "unavailable")
   const unavailable = harnessRows.filter((harness) => harness.status === "unavailable")
-  const roleEntries = roleMenuEntries(harnessRows)
+  const roleEntries = roleMenuEntries(harnessRows, agentRows)
   const canOpenTerminal = controller.commands.find("tab.terminal") !== undefined
   const canOpenHarnesses = controller.commands.find("tab.harness") !== undefined
+  const canNewAgent = controller.commands.find("agent.new") !== undefined
   const canSignIn = controller.commands.find("auth.sign-in") !== undefined
+  // The web app's door to the native app (docs/web-mode/PLAN.md §3): registered on the cloud host only, and
+  // rendered only while a native release exists to download (AppLinks.ts — null until one carries an asset).
+  const canDownload = controller.commands.find("app.download") !== undefined && controller.downloadUrl !== null
   const canOpenRepo = controller.commands.find("repo.open") !== undefined
   const canSelectRepo = controller.commands.find("repo.select") !== undefined
+  const canTree = controller.commands.find("repo.tree") !== undefined
+  const canRename = controller.commands.find("workspace.rename.edit") !== undefined
   // Admin chrome follows the same capability-filtered registry as every act.
   const isAdmin = controller.commands.find("admin.devtools") !== undefined
-  const canAddTab = canOpenTerminal || canOpenHarnesses
+  const canAddSession = canOpenTerminal || canOpenHarnesses
 
   /*
    * The Repos section is the piper tree (ADR 0001, lane piper step 3): the
@@ -64,7 +111,7 @@ export function ChromeBar() {
   const selection = activeKey === null ? null : parseRepoSelection(activeKey)
   const activeCopyId = selection === null ? null : "repoId" in selection ? selection.copyId ?? null : selection.localCopyId
   const pinIds = new Set(pinRows.map((pin) => pin.id))
-  const openPaths = new Set(repoRows.map((repo) => repo.path))
+  const openByPath = new Map<string, Repo>(repoRows.map((repo) => [repo.path, repo]))
   const copiesByRepoId = new Map<string, ReadonlyArray<WorkingCopy>>()
   for (const copy of copyRows) {
     copiesByRepoId.set(copy.repoId, [...(copiesByRepoId.get(copy.repoId) ?? []), copy])
@@ -95,14 +142,14 @@ export function ChromeBar() {
     .sort((left, right) => left.name.localeCompare(right.name))
   const groups = [...tree, ...standalone]
   const copyIds = new Set(copyRows.map((copy) => copy.id))
-  const mainTab = tabRows.find((tab) => tab.kind === "main")
-  const tabsUnder = (key: string): ReadonlyArray<TabRow> =>
+  const sessionsUnder = (key: string): ReadonlyArray<TabRow> =>
     tabRows.filter((tab) => tab.kind !== "main" && tab.repoKey === key)
-  const orphanTabs = tabRows.filter((tab) =>
+  const orphanSessions = tabRows.filter((tab) =>
     tab.kind !== "main" && (tab.repoKey === undefined || !copyIds.has(tab.repoKey))
   )
 
-  const tabRow = (tab: TabRow) => (
+  /* A session row: a terminal, an agent, or a card opened in the sidebar. */
+  const sessionRow = (tab: TabRow) => (
     <div
       key={tab.id}
       className="tab"
@@ -123,24 +170,96 @@ export function ChromeBar() {
       >
         {tab.title}
       </button>
-      {tab.kind === "main" ? null : (
-        <button
-          type="button"
-          className="tab-close"
-          aria-label={`Close ${tab.title}`}
-          title="Close tab"
-          data-flow="tab.close"
-          data-testid={`tab-close-${tab.id}`}
-          onClick={() => controller.runCommandArgs("tab.close", tab.id)}
-        >
-          <X size={12} aria-hidden="true" />
-        </button>
-      )}
+      <button
+        type="button"
+        className="tab-close"
+        aria-label={`Close ${tab.title}`}
+        title="Close session"
+        data-flow="tab.close"
+        data-testid={`tab-close-${tab.id}`}
+        onClick={() => controller.runCommandArgs("tab.close", tab.id)}
+      >
+        <X size={12} aria-hidden="true" />
+      </button>
     </div>
   )
 
+  /*
+   * The caret on a local copy's row: `repo.tree <copyId>` expands the
+   * checkout's root. It renders only where the route can answer (a local
+   * checkout); a cloud workspace row has no caret rather than a dead one.
+   */
+  const treeToggle = (copy: WorkingCopy, root: RepoTreeRow | undefined) =>
+    copy.kind === "local" && canTree ?
+      (
+        <button
+          type="button"
+          className="repo-caret"
+          aria-expanded={root?.expanded === true}
+          aria-label={root?.expanded === true ? `Collapse ${copy.label}` : `Expand ${copy.label}`}
+          data-flow="repo.tree"
+          data-testid={`repo-tree-toggle-${copy.id}`}
+          onClick={() => controller.runCommandArgs("repo.tree", copy.id)}
+        >
+          <ChevronRight size={12} aria-hidden="true" />
+        </button>
+      ) :
+      null
+
+  /*
+   * The expanded tree under a copy's row: what the route returned, nothing
+   * else. Every directory row is `repo.tree <copyId>#<path>`; every file row
+   * is `files.read <path> <repo>` — the existing file card in the chat (THE
+   * EMBED LAW). A directory with nothing loaded shows its row's own state:
+   * `loading…`, `empty`, or the route's error text verbatim.
+   */
+  const copyTree = (copy: WorkingCopy, view: CopyTree) => {
+    if (view.root?.expanded !== true) return null
+    const repo = copy.path === undefined ? undefined : openByPath.get(copy.path)
+    const stateOf = (path: string): string => {
+      const row = view.rows.get(path)
+      if (row === undefined || row.state === "loading") return "loading…"
+      if (row.state === "failed") return row.error ?? "failed"
+      return "empty"
+    }
+    return (
+      <div className="repo-tree" role="presentation" data-testid={`repo-tree-${copy.id}`}>
+        <FileTree
+          nodes={view.nodes}
+          directories={view.directories}
+          collapsed={view.collapsed}
+          onToggle={(path) => controller.runCommandArgs("repo.tree", `${copy.id}#${path}`)}
+          onSelect={(path) => controller.runCommandArgs("files.read", repo === undefined ? path : `${path} ${repo.name}`)}
+          renderDirectoryEmpty={(path) => (
+            <span className="repo-tree-state" data-state={view.rows.get(path)?.state ?? "loading"} data-testid={`repo-tree-state-${copy.id}#${path}`}>
+              {stateOf(path)}
+            </span>
+          )}
+          renderDirectoryFooter={(path) => view.rows.get(path)?.truncated === true ? <span className="repo-tree-state">{TRUNCATED_LINE}</span> : null}
+          directoryProps={(path) => ({ "data-flow": "repo.tree", "data-testid": `repo-dir-${copy.id}#${path}` })}
+          nodeProps={(node) => ({ "data-flow": "files.read", "data-testid": `repo-file-${copy.id}#${node.path}` })}
+        />
+      </div>
+    )
+  }
+
+  /* A copy's sessions, labelled apart from its files once the tree is open. */
+  const copySessions = (copy: WorkingCopy, treeOpen: boolean) => {
+    const rows = sessionsUnder(copy.id)
+    return (
+      <>
+        {treeOpen && rows.length > 0 ?
+          <div className="repo-sessions-label" aria-hidden="true">sessions</div> :
+          null}
+        <div className="repo-tabs" role="presentation">
+          {rows.map(sessionRow)}
+        </div>
+      </>
+    )
+  }
+
   return (
-    <aside className="chrome-bar" aria-label="Tabs and chrome">
+    <aside className="chrome-bar" aria-label="Sessions and chrome">
       {
         /*
          * The `+` sits BESIDE the list, not inside it. The list scrolls
@@ -155,11 +274,11 @@ export function ChromeBar() {
         <div
           className="tab-strip"
           role="tablist"
-          aria-label="Tabs"
+          aria-label="Sessions"
           aria-orientation="vertical"
           data-testid="tab-strip"
           onKeyDown={(event) => {
-            // A vertical tablist: ArrowUp/ArrowDown (Home/End) move between tabs, across every repo group, and select the one reached.
+            // A vertical tablist: ArrowUp/ArrowDown (Home/End) move between the heading and the sessions, across every repo group, and select the one reached.
             const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
             if (step === 0 && event.key !== "Home" && event.key !== "End") return
             const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
@@ -178,9 +297,74 @@ export function ChromeBar() {
             if (id !== undefined && id !== activeTabId) controller.runCommandArgs("tab.select", id)
           }}
         >
-          {mainTab === undefined ? null : tabRow(mainTab)}
+          {
+            /*
+             * The heading IS the workspace: its name is the way back to the
+             * chat (tab.select main — a `role="tab"` so the roving focus and
+             * Cmd+1 keep working), and the pencil swaps it for the inline
+             * rename (Enter commits through workspace.rename, Escape closes
+             * through workspace.rename.edit; the draft lives in the input).
+             */
+          }
+          <div
+            className="workspace-heading"
+            role="presentation"
+            data-active={activeTabId === MAIN_TAB_ID}
+            data-testid="workspace-heading"
+          >
+            {renameOpen ?
+              (
+                <input
+                  className="workspace-name-input"
+                  type="text"
+                  aria-label="Workspace name"
+                  defaultValue={session?.workspaceName ?? ""}
+                  placeholder={DEFAULT_WORKSPACE_NAME}
+                  autoFocus
+                  data-testid="workspace-name-input"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault()
+                      controller.runCommandArgs("workspace.rename", event.currentTarget.value)
+                    } else if (event.key === "Escape") {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      controller.runCommand("workspace.rename.edit")
+                    }
+                  }}
+                />
+              ) :
+              (
+                <button
+                  type="button"
+                  role="tab"
+                  className="workspace-name"
+                  aria-selected={activeTabId === MAIN_TAB_ID}
+                  data-flow="tab.select"
+                  data-tab-id={MAIN_TAB_ID}
+                  data-testid="workspace-name"
+                  onClick={() => controller.runCommandArgs("tab.select", MAIN_TAB_ID)}
+                >
+                  {workspaceName}
+                </button>
+              )}
+            {canRename ?
+              (
+                <button
+                  type="button"
+                  className="workspace-rename"
+                  aria-label="Rename workspace"
+                  aria-pressed={renameOpen}
+                  data-flow="workspace.rename.edit"
+                  data-testid="workspace-rename"
+                  onClick={() => controller.runCommand("workspace.rename.edit")}
+                >
+                  <Pencil size={12} aria-hidden="true" />
+                </button>
+              ) :
+              null}
+          </div>
           <div className="repo-section" role="presentation" data-testid="repo-section">
-            <div className="repo-section-title" aria-hidden="true">Repos</div>
             {groups.length === 0 && canOpenRepo ?
               (
                 // No repository yet: the one step, bound exactly as the opening message binds it.
@@ -209,8 +393,9 @@ export function ChromeBar() {
               const active = single !== undefined
                 ? activeCopyId === single.id
                 : activeKey === group.repoId || (selection !== null && "repoId" in selection && selection.repoId === group.repoId)
-              const open = single !== undefined && single.path !== undefined && openPaths.has(single.path)
+              const open = single !== undefined && single.path !== undefined && openByPath.has(single.path)
               const orgHeader = group.org !== null && groups[groupIndex - 1]?.org !== group.org
+              const singleTree = single === undefined ? undefined : copyTreeOf(single.id, treeRows)
               return (
                 <div key={groupKey} role="presentation">
                   {orgHeader ?
@@ -224,6 +409,7 @@ export function ChromeBar() {
                     data-testid={`repo-${groupKey}`}
                   >
                     <div className="repo" role="presentation">
+                      {single !== undefined ? treeToggle(single, singleTree?.root) : null}
                       <button
                         type="button"
                         className="repo-select"
@@ -237,13 +423,13 @@ export function ChromeBar() {
                         <FolderGit2 size={14} aria-hidden="true" />
                         <span className="repo-name">{group.name}</span>
                       </button>
-                      {single !== undefined && canAddTab ?
+                      {single !== undefined && canAddSession ?
                         (
                           <button
                             type="button"
                             className="repo-add"
-                            aria-label={`New tab in ${single.label}`}
-                            title={`New tab in ${single.label}`}
+                            aria-label={`New session in ${single.label}`}
+                            title={`New session in ${single.label}`}
                             data-flow="tab.menu"
                             data-testid={`repo-add-${single.id}`}
                             onClick={() => controller.runCommandArgs("tab.menu", single.id)}
@@ -268,11 +454,12 @@ export function ChromeBar() {
                         ) :
                         null}
                     </div>
-                    {single !== undefined ?
+                    {single !== undefined && singleTree !== undefined ?
                       (
-                        <div className="repo-tabs" role="presentation">
-                          {tabsUnder(single.id).map(tabRow)}
-                        </div>
+                        <>
+                          {copyTree(single, singleTree)}
+                          {copySessions(single, singleTree.root?.expanded === true)}
+                        </>
                       ) :
                       (
                         <div className="repo-copies" role="presentation">
@@ -281,54 +468,57 @@ export function ChromeBar() {
                             const copyLabel = copy.kind === "workspace"
                               ? copy.state === undefined ? copy.label : `${copy.label} · ${copy.state}`
                               : copy.ahead === undefined ? copy.label : `${copy.label} · ${copy.ahead} ahead`
+                            const view = copyTreeOf(copy.id, treeRows)
                             return (
                               <div key={copy.id} className="repo-copy" role="presentation" data-testid={`copy-${copy.id}`}>
-                                <button
-                                  type="button"
-                                  className="repo-select"
-                                  aria-current={copyActive ? "true" : undefined}
-                                  title={copy.path ?? copy.workspaceId ?? copy.id}
-                                  data-flow="repo.select"
-                                  data-testid={`copy-select-${copy.id}`}
-                                  disabled={!canSelectRepo}
-                                  onClick={() => controller.runCommandArgs("repo.select", `${group.repoId}#${copy.id}`)}
-                                >
-                                  <FolderGit2 size={12} aria-hidden="true" />
-                                  <span className="repo-name">{copyLabel}</span>
-                                </button>
-                                {copy.kind === "local" && canAddTab ?
-                                  (
-                                    <button
-                                      type="button"
-                                      className="repo-add"
-                                      aria-label={`New tab in ${copy.label}`}
-                                      title={`New tab in ${copy.label}`}
-                                      data-flow="tab.menu"
-                                      data-testid={`repo-add-${copy.id}`}
-                                      onClick={() => controller.runCommandArgs("tab.menu", copy.id)}
-                                    >
-                                      <Plus size={12} aria-hidden="true" />
-                                    </button>
-                                  ) :
-                                  null}
-                                {copy.kind === "local" && canSelectRepo && pinIds.has(copy.id) ?
-                                  (
-                                    <button
-                                      type="button"
-                                      className="repo-unpin"
-                                      aria-label={`Unpin ${copy.label}`}
-                                      title="Unpin repository"
-                                      data-flow="repo.unpin"
-                                      data-testid={`repo-unpin-${copy.id}`}
-                                      onClick={() => controller.runCommandArgs("repo.unpin", copy.id)}
-                                    >
-                                      <X size={12} aria-hidden="true" />
-                                    </button>
-                                  ) :
-                                  null}
-                                <div className="repo-tabs" role="presentation">
-                                  {tabsUnder(copy.id).map(tabRow)}
+                                <div className="repo" role="presentation">
+                                  {treeToggle(copy, view.root)}
+                                  <button
+                                    type="button"
+                                    className="repo-select"
+                                    aria-current={copyActive ? "true" : undefined}
+                                    title={copy.path ?? copy.workspaceId ?? copy.id}
+                                    data-flow="repo.select"
+                                    data-testid={`copy-select-${copy.id}`}
+                                    disabled={!canSelectRepo}
+                                    onClick={() => controller.runCommandArgs("repo.select", `${group.repoId}#${copy.id}`)}
+                                  >
+                                    <FolderGit2 size={12} aria-hidden="true" />
+                                    <span className="repo-name">{copyLabel}</span>
+                                  </button>
+                                  {copy.kind === "local" && canAddSession ?
+                                    (
+                                      <button
+                                        type="button"
+                                        className="repo-add"
+                                        aria-label={`New session in ${copy.label}`}
+                                        title={`New session in ${copy.label}`}
+                                        data-flow="tab.menu"
+                                        data-testid={`repo-add-${copy.id}`}
+                                        onClick={() => controller.runCommandArgs("tab.menu", copy.id)}
+                                      >
+                                        <Plus size={12} aria-hidden="true" />
+                                      </button>
+                                    ) :
+                                    null}
+                                  {copy.kind === "local" && canSelectRepo && pinIds.has(copy.id) ?
+                                    (
+                                      <button
+                                        type="button"
+                                        className="repo-unpin"
+                                        aria-label={`Unpin ${copy.label}`}
+                                        title="Unpin repository"
+                                        data-flow="repo.unpin"
+                                        data-testid={`repo-unpin-${copy.id}`}
+                                        onClick={() => controller.runCommandArgs("repo.unpin", copy.id)}
+                                      >
+                                        <X size={12} aria-hidden="true" />
+                                      </button>
+                                    ) :
+                                    null}
                                 </div>
+                                {copyTree(copy, view)}
+                                {copySessions(copy, view.root?.expanded === true)}
                               </div>
                             )
                           })}
@@ -338,34 +528,34 @@ export function ChromeBar() {
                 </div>
               )
             })}
-            {orphanTabs.length > 0 ?
+            {orphanSessions.length > 0 ?
               (
                 <div className="repo-group" role="presentation" data-testid="repo-none">
                   <div className="repo repo-none" role="presentation">
                     <span className="repo-name">No repository</span>
                   </div>
                   <div className="repo-tabs" role="presentation">
-                    {orphanTabs.map(tabRow)}
+                    {orphanSessions.map(sessionRow)}
                   </div>
                 </div>
               ) :
               null}
           </div>
         </div>
-        {canAddTab ? <div className="tab-add">
+        {canAddSession ? <div className="tab-add">
           <button
             type="button"
             className="tab-add-trigger"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            aria-label="New tab"
-            title="New tab"
+            aria-label="New session"
+            title="New session"
             data-flow="tab.menu"
             data-testid="tab-add"
             onClick={() => controller.runCommand("tab.menu")}
           >
             <Plus size={14} aria-hidden="true" />
-            <span>New tab</span>
+            <span>New session</span>
           </button>
           {menuOpen ?
             (
@@ -376,7 +566,7 @@ export function ChromeBar() {
                   aria-hidden="true"
                   onClick={() => controller.runCommand("tab.menu")}
                 />
-                <div className="tab-add-menu" role="menu" aria-label="New tab" data-testid="tab-add-menu">
+                <div className="tab-add-menu" role="menu" aria-label="New session" data-testid="tab-add-menu">
                   {canOpenTerminal ? <button
                     type="button"
                     role="menuitem"
@@ -387,7 +577,7 @@ export function ChromeBar() {
                   >
                     <span>Terminal</span>
                   </button> : null}
-                  {/* Agents: each configured harness launches as a subagent of this conversation, in its own tab. */}
+                  {/* Agents: each configured harness launches as a subagent of this conversation, in its own session. */}
                   {canOpenHarnesses && harnessRows.length > 0 ?
                     <div className="tab-add-group" role="presentation" data-testid="tab-add-agents">Agents</div> :
                     null}
@@ -438,6 +628,21 @@ export function ChromeBar() {
                       <span className="tab-add-account">{harness.status}</span>
                     </button>
                   )) : null}
+                  {/* Agents as data (custom-agents.md): the last row opens the New agent form card in the chat. */}
+                  {canNewAgent ?
+                    (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="tab-add-item"
+                        data-flow="agent.new"
+                        data-testid="tab-add-new-agent"
+                        onClick={() => controller.runCommand("agent.new")}
+                      >
+                        <span>New agent…</span>
+                      </button>
+                    ) :
+                    null}
                 </div>
               </>
             ) :
@@ -446,9 +651,9 @@ export function ChromeBar() {
       </div>
       {
         /*
-         * The chrome that belongs to no tab, so it stays visible in a terminal
-         * or an agent exactly as in the chat. It renders LAST because DOM order
-         * is focus order and these controls are chrome, not the work.
+         * The chrome that belongs to no session, so it stays visible in a
+         * terminal or an agent exactly as in the chat. It renders LAST because
+         * DOM order is focus order and these controls are chrome, not the work.
          */
       }
       <div className="chrome-actions" data-testid="chrome-actions">
@@ -465,6 +670,21 @@ export function ChromeBar() {
             Sign in with GitHub
           </button>
         )}
+        {/* The click is the human's gesture window.open needs; the model renders the card (app.download.prompt) instead. */}
+        {canDownload ?
+          (
+            <button
+              type="button"
+              className="chrome-action chrome-action-download"
+              data-flow="app.download"
+              data-testid="chrome-download"
+              onClick={() => controller.runCommand("app.download")}
+            >
+              <Download size={14} aria-hidden="true" />
+              Download the app
+            </button>
+          ) :
+          null}
         <div className="chrome-corner">
           {/* The bare reset is admin-only dev tooling (§2); users get /clear. */}
           {isAdmin ?

@@ -15,7 +15,7 @@
  * dependency on Effect or the harness.
  */
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
-import type { RuntimeCapability } from "smithers-shared/AppBootstrap"
+import type { AppBootstrap, RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
 
 /**
  * The UI-catalog concerns wrapped around one registered flow.
@@ -53,14 +53,39 @@ export interface FlowMetadata {
    */
   readonly runtimeAny?: ReadonlyArray<RuntimeCapability>
   /**
+   * The bootstrap hosts this flow exists on; absent means every host. A flow
+   * about one host itself (the web app's download door) names it here, so the
+   * other host never registers a flow that reads wrong there. Unlike
+   * `runtime`, a missing bootstrap satisfies nothing: no host, no flow.
+   */
+  readonly hosts?: ReadonlyArray<AppBootstrap["host"]>
+  /**
    * A consequential act the MODEL may ask for but never perform: an
    * agent invocation does not run the handler — it posts a confirmation
    * message whose action button runs the flow as the user. The string is
    * the human-readable label of the act ("land pull request #12").
    * User invocations are unaffected.
+   *
+   * The function form decides per decoded payload: the label when THIS
+   * invocation needs the human's confirmation, undefined when the handler
+   * may run for the agent as it stands (`repo.open` confirms a named path;
+   * without one there is no act to confirm, and the handler refuses the
+   * agent by name — the folder dialog is the human's).
    */
-  readonly confirm?: string
+  readonly confirm?: string | ((payload: Record<string, unknown>) => string | undefined)
+  /**
+   * Why a user-only flow is the human's alone (the three-door law,
+   * apps/ui/AGENTS.md): the gesture is physically theirs, or the answer is
+   * theirs to give. The agent's refusal quotes it, and
+   * flows/agent-parity.test.ts enumerates every one — a user-only flow
+   * without a reason fails that gate.
+   */
+  readonly userOnlyReason?: string
 }
+
+/** The confirmation label an agent invocation of this flow needs, or undefined when it needs none. */
+export const confirmLabel = (metadata: FlowMetadata, payload: Record<string, unknown>): string | undefined =>
+  typeof metadata.confirm === "function" ? metadata.confirm(payload) : metadata.confirm
 
 /**
  * One registered flow as the catalog sees it: its name beside its UI metadata.
@@ -94,6 +119,54 @@ export const itemOf = (entry: FlowEntry): CatalogItem => ({
   name: nameOf(entry),
   ...entry.metadata
 })
+
+/** A door only the native host opens: a local service, or the host-held jjhub PAT session. */
+const nativeDoor = (capability: RuntimeCapability): boolean =>
+  capability.startsWith("local.") || capability === "cloud.pat"
+
+/**
+ * Whether a flow can exist only in the native app — the classification behind
+ * the web app's honest refusal (docs/web-mode/PLAN.md §1).
+ *
+ * A `runtime` entry that is a native door settles it. An either/or flow
+ * (`runtimeAny`) is native-only only when EVERY alternative is a native door:
+ * `files.list` names jjhub OR a local repository, and the web has jjhub. A
+ * flow that names its `hosts` without the cloud is native-only by declaration.
+ */
+export const nativeOnly = (metadata: FlowMetadata): boolean =>
+  (metadata.runtime ?? []).some(nativeDoor) ||
+  (metadata.runtimeAny !== undefined && metadata.runtimeAny.length > 0 && metadata.runtimeAny.every(nativeDoor)) ||
+  (metadata.hosts !== undefined && !metadata.hosts.includes("cloud"))
+
+/**
+ * The door a host lacks for a declared flow: a `local.*` service (only the
+ * native app has one), the host-held PAT session (`cloud.pat`, the native
+ * app's Smithers Cloud session), or a door this origin could grow (`origin`:
+ * the terminal relay, the jjhub upstream, keys).
+ */
+export type MissingDoor = "local" | "cloud.pat" | "origin"
+
+/**
+ * Why a declared flow is absent from THIS bootstrap, by door — the
+ * classification behind every honest refusal (docs/web-mode/PLAN.md §1).
+ * Undefined when nothing is missing, and for a host-scoped flow on the other
+ * host: that flow is about the other host, not a door this one lacks. The
+ * native doors are named only on the cloud host; on the native host a
+ * missing door is always one the launch could grow.
+ */
+export const absentDoor = (metadata: FlowMetadata, bootstrap: AppBootstrap): MissingDoor | undefined => {
+  const { hosts, runtime = [], runtimeAny } = metadata
+  if (hosts !== undefined && !hosts.includes(bootstrap.host)) return undefined
+  const has = (capability: RuntimeCapability): boolean => bootstrap.capabilities.includes(capability)
+  const missing = runtime.filter((capability) => !has(capability))
+  const alternatives = runtimeAny !== undefined && runtimeAny.length > 0 && !runtimeAny.some(has) ? runtimeAny : []
+  if (missing.length === 0 && alternatives.length === 0) return undefined
+  if (bootstrap.host !== "cloud") return "origin"
+  const local = (capability: RuntimeCapability): boolean => capability.startsWith("local.")
+  if (missing.some(local) || (alternatives.length > 0 && alternatives.every(local))) return "local"
+  if (missing.includes("cloud.pat") || (alternatives.length > 0 && alternatives.every(nativeDoor))) return "cloud.pat"
+  return "origin"
+}
 
 /**
  * Whether a model may invoke this flow.
@@ -168,7 +241,7 @@ export const unmetRequirements = (
 
 /** The app state the recommendation rule reads, sampled from the store. */
 export interface CommandState {
-  readonly surface: "chat" | "world" | "connectors"
+  readonly surface: "chat" | "world" | "connectors" | "flows"
   readonly typing: boolean
   readonly hasConnectors: boolean
   /** The validated session carries admin:true; the admin plugin registers only then. */
@@ -208,13 +281,13 @@ export const recommendedNames = (state: CommandState): ReadonlyArray<string> => 
  * ── The namespace tree ─────────────────────────────────────────────────
  *
  * A flow's namespace is its dotted head (`auth.sign-in` → `auth`). Every
- * Namespaced flows live in one; the only bare names are the three surface
- * switches (`chat`, `world`, `connect`), which ARE the top level of the app
- * and read wrong under any prefix.
+ * Namespaced flows live in one; the only bare names are the four surface
+ * switches (`chat`, `world`, `connect`, `flows`), which ARE the top level of
+ * the app and read wrong under any prefix.
  */
 
 /** The surface switches: the one legitimate top-level leaves. */
-export const SURFACE_FLOWS: ReadonlyArray<string> = ["chat", "world", "connect"]
+export const SURFACE_FLOWS: ReadonlyArray<string> = ["chat", "world", "connect", "flows"]
 
 export interface Namespace {
   readonly id: string
@@ -230,7 +303,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "repos", label: "Repositories", summary: "GitHub and Smithers Cloud repositories" },
   { id: "connector", label: "Connectors", summary: "Local repository connections" },
   { id: "world", label: "World", summary: "What Smithers understands" },
-  { id: "tab", label: "Tabs", summary: "Terminals, agents, and card tabs" },
+  { id: "tab", label: "Sessions", summary: "Terminals, agents, and cards in the sidebar" },
   { id: "target", label: "Targets", summary: "Build targets, runs, graph, CI" },
   { id: "flow", label: "Workflows", summary: "Create, list, and run workflows" },
   { id: "runs", label: "Runs", summary: "The runs on your workspace: open, resume, steer, stop" },
@@ -241,6 +314,11 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "github", label: "GitHub", summary: "The GitHub App and the mirror (ADR 0005)" },
   { id: "sync", label: "Sync", summary: "Sync ops and retries (ADR 0005)" },
   { id: "change", label: "Changes", summary: "Changes and diffs — the change is the unit (ADR 0003)" },
+  { id: "review", label: "Review", summary: "Review threads, requests, and the diff since your last one (ADR 0004)" },
+  { id: "findings", label: "Findings", summary: "What the analyzers raised on a change (ADR 0004)" },
+  { id: "workspace", label: "Computers", summary: "Cloud computers: open, stream, snapshot, and inspect (ADR 0002)" },
+  { id: "egress", label: "Egress", summary: "What a computer or an agent session called out to" },
+  { id: "agent", label: "Agents", summary: "Delegate a task to an agent role" },
   { id: "files", label: "Files", summary: "Read repository files" },
   { id: "branches", label: "Branches", summary: "Repository branches" },
   { id: "env", label: "Environment", summary: "Workspace environment variables" },
@@ -254,6 +332,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "frame", label: "Frames", summary: "Navigate and fork frames" },
   { id: "approval", label: "Approvals", summary: "Approve or deny requests" },
   { id: "debug", label: "Debug", summary: "Observability and dev tooling" },
+  { id: "app", label: "App", summary: "The Smithers app itself" },
   { id: "admin", label: "Admin", summary: "Operator tooling" },
   { id: "system", label: "System", summary: "Background flows" },
   { id: "toast", label: "Toasts", summary: "Notifications on screen" }

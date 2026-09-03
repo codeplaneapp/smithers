@@ -1,5 +1,5 @@
-import type { TargetRunFrame } from "smithers-shared/LocalApp"
-import { TargetRunMessageSchema } from "smithers-shared/LocalApp"
+import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
+import { TargetRunMessageSchema } from "@smthrs/rpc/LocalApp"
 
 /*
  * The target-run transport (docs/LOCAL-APP.md "HTTP and WebSocket API"):

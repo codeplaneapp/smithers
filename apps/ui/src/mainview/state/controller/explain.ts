@@ -1,5 +1,5 @@
-import { agentRole } from "smithers-shared/AgentRoles"
-import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
+import { agentRole } from "@smthrs/rpc/AgentRoles"
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { ControllerContext } from "./context"
 
 /*

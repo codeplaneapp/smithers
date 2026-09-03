@@ -13,7 +13,7 @@ Snapshot sit on the card footer beside Suspend/Resume, and the Snapshots
 facet lists them.
 
 Scope, in order:
-1. Shared schemas (`apps/shared/src/Cards.ts`, `apps/shared/src/Workbench.ts`
+1. Shared schemas (`packages/rpc/src/Cards.ts`, `packages/rpc/src/Workbench.ts`
    or the existing shared module the lane finds): `workspace` card payload
    (id, repo, name, targetBookmark, status pending|starting|running|
    suspended|stopped|failed, provisioningStage, bookmarkHead { changeId,

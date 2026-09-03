@@ -22,9 +22,9 @@
 import * as Flow from "@smthrs/core/Flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { Effect, Schema } from "effect"
-import type { RepositoryAccess } from "smithers-shared/NativeRepository"
-import type { RuntimeCapability } from "smithers-shared/AppBootstrap"
-import { AGENT_ROLE_IDS, isAgentRoleId } from "smithers-shared/AgentRoles"
+import type { RepositoryAccess } from "@smthrs/rpc/NativeRepository"
+import type { RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
+import { isAgentRoleId } from "@smthrs/rpc/AgentRoles"
 import type { AppController } from "../state/AppController"
 import { PALETTES, WORLD_DISPLAY_NAME } from "../state/AppState"
 import type { CommandState, FlowEntry, FlowMetadata } from "./registry"
@@ -56,8 +56,9 @@ export type CommandActions =
     | "runCommandArgs"
     | "commands"
     | "tappedFetch"
-    // Feature flags are the composition root's configuration, never an action.
+    // Feature flags and the download URL are the composition root's configuration, never an action.
     | "features"
+    | "downloadUrl"
     // The scope close is the composition root's act, never a flow's.
     | "dispose"
   >
@@ -121,7 +122,14 @@ interface Declaration<I extends Payload> extends FlowMetadata {
   readonly handler: (payload: I["Type"]) => CommandResult | Promise<CommandResult>
   /** Capability claims; the free `app:act` default when omitted. */
   readonly capabilities?: ReadonlyArray<string>
-  /** Browser mechanics the human clicks: never disclosed to, or callable by, the model. */
+  /**
+   * The human's alone: never disclosed to, or callable by, the model. An
+   * enumerated exception under the three-door law (AGENTS.md) for a gesture
+   * that is physically the human's or an answer only they may give — never
+   * for an act that is merely consequential (that is `confirm`). Every
+   * `userOnly` flow states its `userOnlyReason`; flows/agent-parity.test.ts
+   * enumerates them.
+   */
   readonly userOnly?: boolean
   /** Bootstrap capabilities required for this flow to exist in the registry. */
   readonly runtime?: ReadonlyArray<RuntimeCapability>
@@ -165,6 +173,13 @@ const NumberedTarget = Schema.Struct({
   number: Schema.Number,
   repo: Schema.optional(Schema.String)
 })
+/** A 1-based position in a repository file (`<path>:<line>:<col> [owner/repo]`, docs/code-intel/PLAN.md §4). */
+const CodePosition = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Number,
+  column: Schema.Number,
+  repo: Schema.optional(Schema.String)
+})
 
 /**
  * The flows every session has.
@@ -187,7 +202,10 @@ export const USER_ONLY_VISIBLE: ReadonlyArray<{ readonly name: string; readonly 
   { name: "debug.backend", why: "admin diagnostics presentation" },
   { name: "debug.grants.reset", why: "admin-only grant wipe" },
   { name: "cloud.sign-in", why: "external browser OAuth on the human's account; the human clicks" },
-  { name: "cloud.sign-out", why: "drops the human's cloud credential; the human clicks" }
+  { name: "cloud.sign-out", why: "drops the human's cloud credential; the human clicks" },
+  { name: "auth.sign-in", why: "the GitHub OAuth redirect yanks the page; the human clicks (auth.prompt is the agent's door)" },
+  { name: "auth.sign-out", why: "drops the human's session; the human clicks" },
+  { name: "flows", why: "surface switch: the model lists flows with flow.list, which answers as an embedded card" }
 ]
 
 export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {
@@ -237,6 +255,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "chat.send",
     summary: "Submit the composer",
     userOnly: true,
+    userOnlyReason: "the composer is the human's; the model is already the turn, and sending would nest one",
     args: "<text>",
     input: Schema.Struct({ text: Schema.String }),
     handler: ({ text }: { readonly text: string }) => {
@@ -281,6 +300,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Copy a message to the clipboard",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the clipboard write is the human's browser gesture",
     args: "<text>",
     input: Schema.Struct({ text: Schema.String }),
     /*
@@ -334,6 +354,20 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: NoPayload,
     handler: () => actions.showWorld()
   }),
+  flow({
+    /*
+     * Ask 5 (will, 2026-09-02): the fourth surface — the workspace's flows,
+     * beside chat, connect and world. User-only: the model lists flows with
+     * flow.list, whose answer is an embedded card (THE EMBED LAW), so opening
+     * a pane stays the human's own act.
+     */
+    name: "flows",
+    summary: "See the flows on your workspace",
+    userOnly: true,
+    userOnlyReason: "a surface switch; the model lists flows with flow.list, which answers as an embedded card",
+    input: NoPayload,
+    handler: () => actions.showFlows()
+  }),
   /*
    * `appearance.*` — look and feel. The color theme is the axis orthogonal to
    * light/dark: `/appearance.theme <key>` wears a palette, bare answers with
@@ -358,6 +392,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Refresh the next-step suggestions",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the system's own refresh; a model must not steer what the human is offered next",
     input: NoPayload,
     handler: () => actions.recommend()
   }),
@@ -376,6 +411,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "chat.stop",
     summary: "Stop the current response",
     userOnly: true,
+    userOnlyReason: "stopping the model's own turn is the human's Escape key",
     input: NoPayload,
     handler: () => actions.stop()
   }),
@@ -419,6 +455,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["jjhub"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the answer to the which-repository card is the human's choice; a model must not provision on its guess",
     args: "<owner/repo>",
     input: Schema.Struct({ repo: Schema.String }),
     handler: ({ repo }) => actions.chooseWorkflowRepo(repo)
@@ -444,11 +481,12 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ cardId, reason }) => actions.stopWatchingRun(cardId, reason)
   }),
   flow({
+    /* A retry spends (agent-parity.md): the model may ask, the human confirms. */
     name: "flow.run.retry",
     summary: "Check a run again",
     runtime: ["jjhub"],
     hidden: true,
-    userOnly: true,
+    confirm: "check the run again",
     args: "<cardId>",
     input: CardTarget,
     handler: ({ cardId }) => actions.retryRunWatch(cardId)
@@ -652,6 +690,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Maximize a card",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "maximizing a card is the human's explicit act (THE EMBED LAW)",
     args: "<cardId>",
     input: CardTarget,
     handler: ({ cardId }) => actions.maximizeCard(cardId)
@@ -661,6 +700,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Minimize the maximized card",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "minimizing a card is the human's explicit act",
     input: NoPayload,
     handler: () => actions.minimizeCard()
   }),
@@ -669,6 +709,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Go to the previous frame",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "frame navigation is the human's browser gesture",
     input: NoPayload,
     handler: () => actions.frameBack()
   }),
@@ -677,6 +718,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Go to the next frame",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "frame navigation is the human's browser gesture",
     input: NoPayload,
     handler: () => actions.frameForward()
   }),
@@ -685,6 +727,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Fork the current frame",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "forking a frame is the human's browser gesture",
     input: NoPayload,
     handler: () => actions.forkFrame()
   }),
@@ -739,6 +782,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.repositories"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "opens the human's confirm dialog; the act itself is connector.remove",
     args: "<connectorId>",
     input: Schema.Struct({ connectorId: Schema.String }),
     handler: ({ connectorId }) => actions.askConnectorRemoval(connectorId)
@@ -760,6 +804,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.repositories"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "a confirm-dialog answer is the human's",
     input: NoPayload,
     handler: () => actions.cancelConnectorRemoval()
   }),
@@ -796,6 +841,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Delete the note Smithers asked about",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "a confirm-dialog answer is the human's",
     input: NoPayload,
     handler: () => actions.confirmWorldDelete()
   }),
@@ -804,13 +850,21 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Keep the note Smithers asked about",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "a confirm-dialog answer is the human's",
     input: NoPayload,
     handler: () => actions.cancelWorldDelete()
   }),
   flow({
+    /*
+     * The OAuth redirect leaves the page (or, natively, opens the system
+     * browser): the human's gesture, so user-only — auth.prompt below is the
+     * agent's door, rendering this button in the chat.
+     */
     name: "auth.sign-in",
     summary: "Sign in with GitHub",
     runtime: ["identity"],
+    userOnly: true,
+    userOnlyReason: "the GitHub OAuth redirect is the human's browser gesture; the agent renders the step with auth.prompt",
     input: NoPayload,
     handler: () => actions.signIn()
   }),
@@ -832,6 +886,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "auth.sign-out",
     summary: "Sign out of Smithers",
     runtime: ["identity"],
+    userOnly: true,
+    userOnlyReason: "dropping the human's session is theirs alone",
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.signOut()
@@ -845,6 +901,32 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: () => actions.requestAccess()
   }),
   /*
+   * The web app's one door to the native app (docs/web-mode/PLAN.md §3). The
+   * split mirrors auth.sign-in / auth.prompt: `window.open` outside a user
+   * gesture is popup-blocked, so the model renders the card and the click is
+   * the human's. Both exist only on the cloud host — native chrome gains
+   * nothing, and the native model is never told to offer a download.
+   */
+  flow({
+    name: "app.download",
+    summary: "Download the native Smithers app",
+    hosts: ["cloud"],
+    /* The chrome button and the refusal card's action; the prompt flow is the listed door. */
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "a browser handoff the human clicks; the agent renders the step with app.download.prompt",
+    input: NoPayload,
+    handler: () => actions.openDownload()
+  }),
+  flow({
+    name: "app.download.prompt",
+    summary: "Offer the native app download in the chat",
+    hosts: ["cloud"],
+    args: "[flow]",
+    input: Schema.Struct({ flow: Schema.optional(Schema.String) }),
+    handler: ({ flow }) => actions.promptDownload(flow)
+  }),
+  /*
    * Lane piper (ADR 0001): the jjhub Cloud login is the CLI's browser flow —
    * Bun listens for the callback and holds the token (the keychain at rest);
    * the renderer only opens the URL through the native door. Browser
@@ -853,16 +935,32 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "cloud.sign-in",
     summary: "Sign in to Smithers Cloud",
-    runtime: ["jjhub"],
+    runtime: ["jjhub", "cloud.pat"],
     userOnly: true,
+    userOnlyReason:
+      "the Smithers Cloud browser login is the human's gesture on their account; the agent renders the step with cloud.prompt",
     input: NoPayload,
     handler: () => actions.signInCloud()
   }),
   flow({
+    /*
+     * The agent's door to the Cloud session, mirroring auth.prompt: it cannot
+     * run cloud.sign-in, but it CAN render the step — the message's action IS
+     * the sign-in button. Registered wherever jjhub is: on the web the GitHub
+     * sign-in is the Cloud sign-in, and the controller offers that step.
+     */
+    name: "cloud.prompt",
+    summary: "Offer the Smithers Cloud sign-in step in the chat",
+    runtime: ["jjhub"],
+    input: NoPayload,
+    handler: () => actions.promptCloudSignIn()
+  }),
+  flow({
     name: "cloud.sign-out",
     summary: "Sign out of Smithers Cloud",
-    runtime: ["jjhub"],
+    runtime: ["jjhub", "cloud.pat"],
     userOnly: true,
+    userOnlyReason: "dropping the human's Smithers Cloud credential is theirs alone",
     input: NoPayload,
     handler: () => actions.signOutCloud()
   }),
@@ -871,6 +969,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Dismiss a toast notification",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "dismissing a toast is the human's gesture",
     args: "<toastId>",
     input: Schema.Struct({ toastId: Schema.String }),
     handler: ({ toastId }) => {
@@ -1104,18 +1203,55 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "files.read",
     summary: "Read a file from a repository",
     runtimeAny: ["jjhub", "local.repositories"],
-    args: "<path> [owner/repo]",
+    /* `:line[:col]` (docs/code-intel/PLAN.md §1): the card scrolls to and marks the line; the parser strips it off the path token. */
+    args: "<path>[:<line>[:<col>]] [owner/repo]",
     requires: ["repo-source"],
+    input: Schema.Struct({
+      path: Schema.String,
+      repo: Schema.optional(Schema.String),
+      line: Schema.optional(Schema.Number),
+      column: Schema.optional(Schema.Number)
+    }),
+    handler: ({ path, repo, line, column }) =>
+      actions.readFile(path, repo, line === undefined ? undefined : { line, ...(column === undefined ? {} : { column }) })
+  }),
+  /*
+   * Code intelligence (docs/code-intel/PLAN.md §4): three reads against the
+   * local app's language server, one act each with the three doors, none
+   * confirming. Each answers `{ value }` to the model and patches the human's
+   * FILE card (hover, diagnostics, what the card knows about the server); the
+   * definition opens its target through files.read's line anchor. The door is
+   * the native host's `local.lsp`, so the web catalog never lists them.
+   */
+  flow({
+    name: "code.hover",
+    summary: "The type and docs of the symbol at a position",
+    runtime: ["local.lsp"],
+    args: "<path>:<line>:<col> [owner/repo]",
+    input: CodePosition,
+    handler: ({ path, line, column, repo }) => actions.codeHover(path, line, column, repo)
+  }),
+  flow({
+    name: "code.definition",
+    summary: "Where the symbol at a position is defined; opens that file at the line",
+    runtime: ["local.lsp"],
+    args: "<path>:<line>:<col> [owner/repo]",
+    input: CodePosition,
+    handler: ({ path, line, column, repo }) => actions.codeDefinition(path, line, column, repo)
+  }),
+  flow({
+    name: "code.diagnostics",
+    summary: "The language server's errors and warnings for a file",
+    runtime: ["local.lsp"],
+    args: "<path> [owner/repo]",
     input: Schema.Struct({ path: Schema.String, repo: Schema.optional(Schema.String) }),
-    handler: ({ path, repo }) => actions.readFile(path, repo)
+    handler: ({ path, repo }) => actions.codeDiagnostics(path, repo)
   }),
   /*
    * Lane sync (ADR 0005): Linear and GitHub sync as actions. The reads
    * render the connector-setup and sync-ops cards; the writes ride the same
-   * seams.
-   * The routes that do not exist (plue#468 ops/retry, plue#469 setup lookup,
-   * plue#473 reconcile/linear-link) refuse with the ADR's wording from the
-   * seams — the flows never fake them.
+   * seams. Every route these acts call exists on plue's own router; a server
+   * that has not deployed one answers, and the seam surfaces that answer.
    */
   flow({
     name: "github.app",
@@ -1156,6 +1292,20 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ repo }) => actions.githubMirrorSync(repo)
   }),
   flow({
+    /*
+     * plue#491: one failed ref, pushed again. The ref name carries slashes
+     * and rides as one escaped path segment; the answer is a new mirror run,
+     * which the same card then tracks.
+     */
+    name: "github.mirror.retry-ref",
+    summary: "Retry one failed mirror ref",
+    runtime: ["jjhub"],
+    args: "<ref> [owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ ref: Schema.String, repo: Schema.optional(Schema.String) }),
+    handler: ({ ref, repo }) => actions.retryMirrorRef(ref, repo)
+  }),
+  flow({
     name: "repos.import.retry",
     summary: "Retry a failed GitHub import job",
     runtime: ["jjhub"],
@@ -1167,7 +1317,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "linear.connect",
     summary: "Connect a repository to a Linear team",
-    runtime: ["jjhub"],
+    /* The wizard's Linear OAuth lands on the host's `/api/linear-auth/*` loopback, a PAT-session door. */
+    runtime: ["jjhub", "cloud.pat"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1178,7 +1329,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.connect.open",
     summary: "Open Linear to authorize the connection",
     hidden: true,
-    runtime: ["jjhub"],
+    runtime: ["jjhub", "cloud.pat"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1188,7 +1339,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.connect.team",
     summary: "Pick the Linear team for the connection",
     hidden: true,
-    runtime: ["jjhub"],
+    runtime: ["jjhub", "cloud.pat"],
     args: "<teamId> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ teamId: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -1198,7 +1349,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.connect.repo",
     summary: "Pick the repository for the connection",
     hidden: true,
-    runtime: ["jjhub"],
+    runtime: ["jjhub", "cloud.pat"],
     args: "<cardRepo> <owner/repo>",
     requires: ["signed-in"],
     input: Schema.Struct({ cardRepo: Schema.String, repo: Schema.String }),
@@ -1207,7 +1358,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "linear.connect.confirm",
     summary: "Create the Linear integration the wizard gathered",
-    runtime: ["jjhub"],
+    runtime: ["jjhub", "cloud.pat"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1264,6 +1415,17 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ cardId }) => actions.showMoreSyncOps(cardId)
   }),
   flow({
+    /* The sync-ops card's Load older — pages the feed past the 24-hour window. */
+    name: "sync.ops.load-older",
+    summary: "Load a sync card's older ops",
+    hidden: true,
+    runtime: ["jjhub"],
+    args: "<cardId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ cardId: Schema.String }),
+    handler: ({ cardId }) => actions.loadOlderSyncOps(cardId)
+  }),
+  flow({
     name: "issues.link-linear",
     summary: "Link an issue to a Linear identifier",
     runtime: ["jjhub"],
@@ -1310,13 +1472,18 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     /* Launching a cloud computer is an outbound act: the capability always asks. */
     name: "workspace.open",
-    summary: "Open (create or reuse) a cloud workspace on a bookmark",
+    summary: "Open (create or reuse) a Linux workspace in Smithers Cloud on a bookmark: a real machine with a terminal, files, and services the user can use",
     runtime: ["jjhub"],
     capabilities: ["outbound:launch"],
-    args: "[bookmark] [owner/repo]",
+    /* ADR 0002: three sandbox kinds share one option surface, and the kind is the choice. */
+    args: "[bookmark] [owner/repo] [--kind container|vm|desktop]",
     requires: ["signed-in"],
-    input: Schema.Struct({ bookmark: Schema.optional(Schema.String), repo: Schema.optional(Schema.String) }),
-    handler: ({ bookmark, repo }) => actions.openWorkspace(bookmark, repo)
+    input: Schema.Struct({
+      bookmark: Schema.optional(Schema.String),
+      repo: Schema.optional(Schema.String),
+      kind: Schema.optional(Schema.Literals(["container", "vm", "desktop"]))
+    }),
+    handler: ({ bookmark, repo, kind }) => actions.openWorkspace(bookmark, repo, kind)
   }),
   flow({
     name: "workspace.view",
@@ -1330,7 +1497,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.terminal",
     summary: "Open a terminal on a cloud workspace",
-    runtime: ["jjhub"],
+    /* The terminal rides this origin's `/api/cloud-ws/` tunnel: an origin without one registers no terminal. */
+    runtime: ["jjhub", "cloud.terminal"],
     args: "[workspaceId]",
     requires: ["signed-in"],
     input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
@@ -1446,19 +1614,112 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ workspaceId, confirmName }) => actions.deleteWorkspace(workspaceId, confirmName)
   }),
   flow({
-    /* The card's body tab — browser mechanics the human clicks. */
+    /* The card's body tab: showing a facet is how the agent answers "show me the files" too (agent-parity.md). */
     name: "workspace.facet",
     summary: "Switch a workspace card's facet",
     runtime: ["jjhub"],
-    hidden: true,
-    userOnly: true,
     args: "<workspaceId> <facet>",
     requires: ["signed-in"],
     input: Schema.Struct({
       workspaceId: Schema.String,
-      facet: Schema.Literals(["terminal", "files", "services", "snapshots"])
+      facet: Schema.Literals(["terminal", "files", "services", "snapshots", "egress", "desktop"])
     }),
     handler: ({ workspaceId, facet }) => actions.setWorkspaceFacet(workspaceId, facet)
+  }),
+  /*
+   * Lane L3: the facets plue#449 and the egress audit answer. Files and the
+   * file read are ordinary reads — the model asks about a computer's working
+   * copy the same way a human clicks the facet. The egress audit is cursor
+   * paginated: a bare call reads the newest page, a cursor reads the page
+   * behind it and the card appends.
+   */
+  flow({
+    name: "workspace.files",
+    summary: "List a cloud workspace's files under a directory",
+    runtime: ["jjhub"],
+    args: "[path] [workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ path: Schema.optional(Schema.String), workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ path, workspaceId }) => actions.listWorkspaceFiles(path, workspaceId)
+  }),
+  flow({
+    name: "workspace.file",
+    summary: "Read one file out of a cloud workspace",
+    runtime: ["jjhub"],
+    args: "<path> [workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ path: Schema.String, workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ path, workspaceId }) => actions.readWorkspaceFile(path, workspaceId)
+  }),
+  flow({
+    name: "workspace.services",
+    summary: "List a cloud workspace's services",
+    runtime: ["jjhub"],
+    args: "[workspaceId]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId }) => actions.listWorkspaceServices(workspaceId)
+  }),
+  flow({
+    name: "workspace.egress",
+    summary: "List what a cloud workspace called out to, and which secret names were swapped in",
+    runtime: ["jjhub"],
+    args: "[workspaceId] [cursor]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.optional(Schema.String), cursor: Schema.optional(Schema.String) }),
+    handler: ({ workspaceId, cursor }) => actions.listWorkspaceEgress(workspaceId, cursor)
+  }),
+  /*
+   * Lane L3b: the desktop. `workspace.desktop` MINTS a session — an absolute,
+   * already-credentialed stream URL carrying a live machine's VNC password —
+   * so it carries `confirm`: the model may ask for it, the human performs it.
+   * The credential never enters the store; the facet reads it out of module
+   * memory (state/seams/DesktopStream.ts).
+   */
+  flow({
+    name: "workspace.desktop",
+    summary: "Open the desktop of a cloud workspace and stream it into the card",
+    runtime: ["jjhub"],
+    confirm: "open the workspace's desktop",
+    args: "<workspaceId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.String }),
+    handler: ({ workspaceId }) => actions.openWorkspaceDesktop(workspaceId)
+  }),
+  flow({
+    /* Rotating changes the VNC password in the guest: the old iframe disconnects. */
+    name: "workspace.desktop.rotate",
+    summary: "Rotate a workspace desktop session",
+    runtime: ["jjhub"],
+    hidden: true,
+    confirm: "rotate the desktop session",
+    args: "<workspaceId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ workspaceId: Schema.String }),
+    handler: ({ workspaceId }) => actions.rotateWorkspaceDesktop(workspaceId)
+  }),
+  flow({
+    name: "workspace.images",
+    summary: "List the environment images a repository has built for its workspaces",
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.listEnvironmentImages(repo)
+  }),
+  flow({
+    /* The same audit for an agent session's sandbox; the app has no agent-session card to face it. */
+    name: "egress.session",
+    summary: "List what an agent session called out to, and which secret names were swapped in",
+    runtime: ["jjhub"],
+    args: "<sessionId> [owner/repo] [cursor]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      sessionId: Schema.String,
+      repo: Schema.optional(Schema.String),
+      cursor: Schema.optional(Schema.String)
+    }),
+    handler: ({ sessionId, repo, cursor }) => actions.listSessionEgress(sessionId, repo, cursor)
   }),
   /*
    * Lane change (ADR 0003): the change is the unit. `change.view` renders
@@ -1513,6 +1774,23 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ changeId }) => actions.splitReadyChange(changeId)
   }),
   flow({
+    /*
+     * plue#489 moves the NAMED PATHS' diff into a new change and leaves the
+     * original holding everything else, so the act is per path — plue refuses
+     * an empty `paths` outright. The card offers it on the diff's file rows,
+     * where the paths are, and only while the landing request's landable
+     * prefix is shorter than its stack.
+     */
+    name: "change.split",
+    summary: "Move a change's named paths into a new change",
+    runtime: ["jjhub"],
+    confirm: "move the named paths into a new change",
+    args: "<changeId> <path> [path…]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, paths: Schema.Array(Schema.String) }),
+    handler: ({ changeId, paths }) => actions.splitChange(changeId, paths)
+  }),
+  flow({
     name: "change.resolve",
     summary: "Dispatch an agent to resolve a change's conflict",
     runtime: ["jjhub"],
@@ -1533,36 +1811,157 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ changeId }) => actions.revertChange(changeId)
   }),
   flow({
-    /* The card's body tab — browser mechanics the human clicks. */
+    /* The card's body tab: showing a facet is how the agent answers "show me the diff / the checks" (agent-parity.md). */
     name: "change.facet",
     summary: "Switch a change card's facet",
     runtime: ["jjhub"],
-    hidden: true,
-    userOnly: true,
     args: "<changeId> <facet>",
     requires: ["signed-in"],
     input: Schema.Struct({
       changeId: Schema.String,
-      facet: Schema.Literals(["diff", "findings", "checks", "review", "history"])
+      facet: Schema.Literals(["walkthrough", "diff", "findings", "checks", "review", "history", "owners"])
     }),
     handler: ({ changeId, facet }) => actions.setChangeFacet(changeId, facet)
+  }),
+  /*
+   * Lane L1 (ADR 0004, the live plue routes): the Diff facet's revision
+   * pickers and the Checks facet's picker are the card's controls AND the
+   * agent's answer to "show me the diff since rev 2" (agent-parity.md); the
+   * thread transitions, the since-my-review pin, and the two finding acts are
+   * flows with the same slash, agent, and button path; opening a computer
+   * from a revision's snapshot is an outbound act.
+   */
+  flow({
+    name: "change.pins",
+    summary: "Pin a change card's diff between two revisions (parent|<rev> → <rev>|current)",
+    runtime: ["jjhub"],
+    args: "<changeId> <from> <to>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, from: Schema.String, to: Schema.String }),
+    handler: ({ changeId, from, to }) => actions.setChangePins(changeId, from, to)
+  }),
+  flow({
+    name: "change.checks",
+    summary: "Read a change's checks at one revision",
+    runtime: ["jjhub"],
+    args: "<changeId> <seq>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, seq: Schema.Number }),
+    handler: ({ changeId, seq }) => actions.checksOfChangeAt(changeId, seq)
+  }),
+  flow({
+    /* Forking a revision's snapshot into a computer is an outbound act: the capability always asks. */
+    name: "change.open-computer",
+    summary: "Open the computer that produced a revision (fork its snapshot into a workspace)",
+    runtime: ["jjhub"],
+    hidden: true,
+    capabilities: ["outbound:launch"],
+    confirm: "open a computer from the revision's snapshot",
+    args: "<changeId> <snapshotId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, snapshotId: Schema.String }),
+    handler: ({ changeId, snapshotId }) => actions.openChangeComputer(changeId, snapshotId)
+  }),
+  flow({
+    name: "review.since-mine",
+    summary: "Open a change's diff since my last review",
+    runtime: ["jjhub"],
+    args: "<changeId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String }),
+    handler: ({ changeId }) => actions.diffSinceMyReview(changeId)
+  }),
+  flow({
+    name: "review.done",
+    summary: "Mark a review thread done: the author addressed it at the current revision",
+    runtime: ["jjhub"],
+    args: "<changeId> <threadId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, threadId: Schema.Number }),
+    handler: ({ changeId, threadId }) => actions.reviewThreadDone(changeId, threadId)
+  }),
+  flow({
+    name: "review.ack",
+    summary: "Acknowledge a done review thread: the reviewer accepts the author's work",
+    runtime: ["jjhub"],
+    args: "<changeId> <threadId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, threadId: Schema.Number }),
+    handler: ({ changeId, threadId }) => actions.reviewThreadAck(changeId, threadId)
+  }),
+  flow({
+    name: "review.reopen",
+    summary: "Reopen a done or resolved review thread",
+    runtime: ["jjhub"],
+    args: "<changeId> <threadId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, threadId: Schema.Number }),
+    handler: ({ changeId, threadId }) => actions.reviewThreadReopen(changeId, threadId)
+  }),
+  flow({
+    /*
+     * plue#488: a review request names EITHER a human login or an agent, so
+     * `agent:<name>` is the one spelling that asks a named agent. Asking a
+     * person to review is consequential — it notifies them and flips the
+     * landing's turn — so the model may ask for it and only the human
+     * performs it.
+     */
+    name: "review.request",
+    summary: "Ask someone to review a change",
+    runtime: ["jjhub"],
+    confirm: "request a review of the change",
+    args: "<changeId> <login|agent:name>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, reviewer: Schema.String }),
+    handler: ({ changeId, reviewer }) => actions.requestChangeReview(changeId, reviewer)
+  }),
+  flow({
+    name: "review.unrequest",
+    summary: "Dismiss a review request on a change",
+    runtime: ["jjhub"],
+    confirm: "dismiss the review request",
+    args: "<changeId> <requestId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, requestId: Schema.Number }),
+    handler: ({ changeId, requestId }) => actions.unrequestChangeReview(changeId, requestId)
+  }),
+  flow({
+    name: "findings.please-fix",
+    summary: "Dispatch the agent on one finding",
+    runtime: ["jjhub"],
+    confirm: "dispatch the agent on the finding",
+    args: "<changeId> <findingId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, findingId: Schema.Number }),
+    handler: ({ changeId, findingId }) => actions.fixFinding(changeId, findingId)
+  }),
+  flow({
+    name: "findings.not-useful",
+    summary: "Mark a finding not useful",
+    runtime: ["jjhub"],
+    args: "<changeId> <findingId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, findingId: Schema.Number }),
+    handler: ({ changeId, findingId }) => actions.findingNotUseful(changeId, findingId)
   }),
   flow(RELOAD),
   flow(COMMANDS),
   /*
    * The local-app tabs (docs/LOCAL-APP.md "Tabs"): the strip, the `+` menu,
    * a maximized card's "Open in tab", and Cmd+T / Cmd+W / Cmd+1..9 all
-   * invoke these. Every one is browser mechanics the human clicks, so none
-   * is disclosed to the model; hidden, because the strip is the affordance.
+   * invoke these — and so does the agent (the three-door law, AGENTS.md).
+   * Opening a terminal or launching a harness is the product's main act,
+   * not browser mechanics: the launches confirm (they spend and act on the
+   * repository), the gestures (focus, the menu, a confirm answer) stay the
+   * human's and say why.
    */
   flow({
     name: "tab.terminal",
-    summary: "Open a terminal tab",
+    summary: "Open a terminal session (in an open working copy; the active one by default)",
     runtime: ["local.terminal"],
-    hidden: true,
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.openTerminalTab()
+    args: "[cwd]",
+    input: Schema.Struct({ cwd: Schema.optional(Schema.String) }),
+    handler: ({ cwd }) => actions.openTerminalTab(cwd)
   }),
   flow({
     /*
@@ -1572,17 +1971,17 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * context, so the model already knows the ids.
      */
     name: "tab.read",
-    summary: "Read another tab's recent output",
+    summary: "Read another session's recent output",
     args: "<tabId>",
     input: Schema.Struct({ tab: Schema.String }),
     handler: ({ tab }) => actions.readTab(tab)
   }),
   flow({
+    /* Launching Claude Code / Codex / Gemini / OpenCode spends money and acts on the repo: the agent asks, the human confirms. */
     name: "tab.harness",
-    summary: "Open a harness tab",
+    summary: "Open a harness session (Claude Code, Codex, Gemini, OpenCode)",
     runtime: ["local.harnesses"],
-    hidden: true,
-    userOnly: true,
+    confirm: "launch a harness as a session",
     args: "<harnessId>",
     input: Schema.Struct({ harnessId: Schema.String }),
     handler: ({ harnessId }) => actions.openHarnessTab(harnessId)
@@ -1591,18 +1990,19 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /*
      * A named role (AgentRoles.ts) from the `+` menus: the role's harness and
      * model launch in a tab, and the conversation gets the subagent card.
+     * The same launch as tab.harness, so the same confirm.
      */
     name: "agent.role",
-    summary: "Launch a named agent role in a tab",
+    summary: "Launch a named agent (built-in or custom) as a session",
     runtime: ["local.harnesses"],
-    hidden: true,
-    userOnly: true,
+    confirm: "launch an agent role as a session",
     args: "<roleId>",
     input: Schema.Struct({ roleId: Schema.String }),
+    // A well-formed id resolves against the agents store in the controller; the store's list names the rest.
     handler: ({ roleId }) =>
       isAgentRoleId(roleId)
         ? actions.openHarnessTab("", { roleId })
-        : `There is no agent role named ${roleId}. Roles: ${AGENT_ROLE_IDS.join(", ")}.`
+        : `${roleId} is not an agent id (lowercase letters, digits and dashes). agent.list shows the agents.`
   }),
   flow({
     /*
@@ -1611,88 +2011,201 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * reads the result back with tab.read.
      */
     name: "agent.delegate",
-    summary: "Delegate a task to an agent role (explainer, implementation, trivial-implementation, ui, fast-ui)",
+    summary: "Delegate a task to an agent (built-in or custom; agent.list shows them)",
     runtime: ["local.harnesses"],
     args: "<role> <task>",
     input: Schema.Struct({ roleId: Schema.String, task: Schema.String }),
     handler: ({ roleId, task }) =>
       isAgentRoleId(roleId)
         ? actions.openHarnessTab("", { roleId, task })
-        : `There is no agent role named ${roleId}. Roles: ${AGENT_ROLE_IDS.join(", ")}.`
+        : `${roleId} is not an agent id (lowercase letters, digits and dashes). agent.list shows the agents.`
   }),
   flow(EXPLAIN),
+  /*
+   * Agents as data (docs/workbench-lanes/custom-agents.md): the agents are
+   * rows the user manages from the chat. Listing and the form render cards;
+   * creating, editing, and removing an agent define what may spend money on
+   * the human's harnesses, so the agent asks and the human confirms. The
+   * web host has no local harnesses: agent.list says so on its card, and
+   * the rest are absent there (runtime).
+   */
   flow({
-    name: "tab.card",
-    summary: "Open a card in a tab",
+    name: "agent.list",
+    summary: "Show the agents: built-in and custom, with what each can launch here",
+    input: NoPayload,
+    handler: () => actions.listAgents()
+  }),
+  flow({
+    name: "agent.new",
+    summary: "Open the New agent form (an existing id opens it for editing)",
+    runtime: ["local.harnesses"],
+    args: "[id] [harness] [model] [purpose]",
+    input: Schema.Struct({
+      id: Schema.optional(Schema.String),
+      harness: Schema.optional(Schema.String),
+      model: Schema.optional(Schema.String),
+      purpose: Schema.optional(Schema.String)
+    }),
+    handler: (prefill) => actions.newAgent(prefill)
+  }),
+  flow({
+    /* The form's rows commit through here: one payload update per field, never component state. */
+    name: "agent.form",
+    summary: "Set one field of the open New agent form",
+    runtime: ["local.harnesses"],
     hidden: true,
-    userOnly: true,
+    args: "<label|purpose|harness|model|cancel> [value]",
+    input: Schema.Struct({ field: Schema.String, value: Schema.String }),
+    handler: ({ field, value }) => actions.updateAgentForm(field, value)
+  }),
+  flow({
+    name: "agent.create",
+    summary: "Create an agent: an id, the harness that runs it, the model id that harness accepts, and its purpose",
+    runtime: ["local.harnesses"],
+    confirm: ({ id, harness, model }) => `create the agent ${String(id)} on ${String(harness)} with ${String(model)}`,
+    args: "<id> <harness> <model> [purpose]",
+    input: Schema.Struct({ id: Schema.String, harness: Schema.String, model: Schema.String, purpose: Schema.optional(Schema.String) }),
+    handler: (input) => actions.createAgent(input)
+  }),
+  flow({
+    name: "agent.edit",
+    summary: "Change an agent's model, purpose, or name (a built-in keeps its harness)",
+    runtime: ["local.harnesses"],
+    confirm: ({ id }) => `edit the agent ${String(id)}`,
+    args: "<id> [--model <id>] [--purpose <text>] [--label <name>]",
+    input: Schema.Struct({
+      id: Schema.String,
+      model: Schema.optional(Schema.String),
+      purpose: Schema.optional(Schema.String),
+      label: Schema.optional(Schema.String)
+    }),
+    handler: ({ id, ...patch }) => actions.editAgent(id, patch)
+  }),
+  flow({
+    name: "agent.remove",
+    summary: "Remove a custom agent (a built-in cannot be removed)",
+    runtime: ["local.harnesses"],
+    confirm: ({ id }) => `remove the agent ${String(id)}`,
+    args: "<id>",
+    input: Schema.Struct({ id: Schema.String }),
+    handler: ({ id }) => actions.removeAgent(id)
+  }),
+  flow({
+    name: "agent.models",
+    summary: "List the models a harness can run, as the harness reports them",
+    runtime: ["local.harnesses"],
+    args: "<harness>",
+    input: Schema.Struct({ harness: Schema.String }),
+    handler: ({ harness }) => actions.listHarnessModels(harness)
+  }),
+  flow({
+    /* Pins a card the agent just rendered into the sidebar: an ordinary act. */
+    name: "tab.card",
+    summary: "Open a card in the sidebar",
     args: "<cardId>",
     input: CardTarget,
     handler: ({ cardId }) => actions.openCardTab(cardId)
   }),
   flow({
     name: "tab.select",
-    summary: "Select a tab",
+    summary: "Select a session",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "focus is the human's",
     args: "<tabId | 1-9>",
     input: Schema.Struct({ tab: Schema.String }),
     handler: ({ tab }) => actions.selectTab(tab)
   }),
   flow({
+    /* Closing stops a process: the agent asks, the human confirms (and a live process asks once more). */
     name: "tab.close",
-    summary: "Close a tab",
-    hidden: true,
-    userOnly: true,
+    summary: "Close a session",
+    confirm: "close the session",
     args: "[tabId]",
     input: Schema.Struct({ tabId: Schema.optional(Schema.String) }),
     handler: ({ tabId }) => actions.closeTab(tabId)
   }),
   flow({
     name: "tab.close.confirm",
-    summary: "Close the tab and stop its process",
+    summary: "Close the session and stop its process",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "a confirm-dialog answer is the human's",
     input: NoPayload,
     handler: () => actions.confirmTabClose()
   }),
   flow({
     name: "tab.close.cancel",
-    summary: "Keep the tab open",
+    summary: "Keep the session open",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "a confirm-dialog answer is the human's",
     input: NoPayload,
     handler: () => actions.cancelTabClose()
   }),
   flow({
     name: "tab.menu",
-    summary: "Open the new tab menu",
+    summary: "Open the new session menu",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "opening a menu is the human's gesture",
     args: "[repoKey]",
     input: Schema.Struct({ repo: Schema.optional(Schema.String) }),
     handler: ({ repo }) => actions.toggleTabMenu(repo)
   }),
-  /* The sidebar's pinned repositories (docs/LOCAL-APP.md "Tabs"): rows the human clicks. */
+  /* The sidebar's pinned repositories (docs/LOCAL-APP.md "Tabs"). */
   flow({
     name: "repo.select",
     summary: "Make a pinned repository the active one",
     runtime: ["local.repositories"],
     hidden: true,
     userOnly: true,
+    userOnlyReason:
+      "which pinned repository is active is the human's selection; an act names its working copy instead (tab.terminal [cwd])",
     args: "<repoKey>",
     input: Schema.Struct({ repo: Schema.String }),
     handler: ({ repo }) => actions.selectRepo(repo)
   }),
   flow({
+    /* Forgets a repository: the agent asks, the human confirms. */
     name: "repo.unpin",
     summary: "Unpin a repository from the sidebar",
     runtime: ["local.repositories"],
-    hidden: true,
-    userOnly: true,
+    confirm: "unpin the repository",
     args: "<repoKey>",
     input: Schema.Struct({ repo: Schema.String }),
     handler: ({ repo }) => actions.unpinRepo(repo)
+  }),
+  /*
+   * The sidebar's file tree (docs/workbench-lanes/sidebar-tree.md): a repo
+   * row's caret expands the copy's root, a directory row its own path — the
+   * row id grammar, `<copyId>#<path>`. Harmless, so every door has it; the
+   * agent reads contents with files.list and files.read, the same route.
+   */
+  flow({
+    name: "repo.tree",
+    summary: "Expand or collapse a directory of a working copy in the sidebar",
+    runtime: ["local.repositories"],
+    args: "<copyId>[#path]",
+    input: Schema.Struct({ copy: Schema.String, path: Schema.optional(Schema.String) }),
+    handler: ({ copy, path }) => actions.toggleRepoTree(copy, path)
+  }),
+  /* The workspace heading: its name, and the pencil that edits it inline. */
+  flow({
+    name: "workspace.rename",
+    summary: "Name this workspace",
+    args: "<name>",
+    input: Schema.Struct({ name: Schema.String }),
+    handler: ({ name }) => actions.renameWorkspace(name)
+  }),
+  flow({
+    name: "workspace.rename.edit",
+    summary: "Edit the workspace name in the sidebar",
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "opening the inline editor is the human's gesture; the agent names the workspace with workspace.rename",
+    input: NoPayload,
+    handler: () => actions.toggleWorkspaceRename()
   }),
   flow({
     /* The composer's `+`: add files, a connector, a flow, an agent. */
@@ -1700,6 +2213,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Open the composer's add menu",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "opening the composer's menu is the human's gesture",
     input: NoPayload,
     handler: () => actions.toggleAddMenu()
   }),
@@ -1710,22 +2224,26 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: () => actions.addFiles()
   }),
   flow({
-    /* The chrome's "Open repository": the native folder dialog, or a typed path. */
+    /*
+     * The chrome's "Open repository": the native folder dialog, or a typed
+     * path. Granting the agent a directory is consequential, so a path it
+     * names confirms; the dialog itself is the human's gesture, so without a
+     * path the agent is told to name one (controller/tabs.ts openLocalRepo).
+     */
     name: "repo.open",
-    summary: "Open a local repository",
+    summary: "Open a local repository (a path, or the folder dialog)",
     runtime: ["local.repositories"],
-    hidden: true,
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.openLocalRepo()
+    args: "[path]",
+    confirm: ({ path }) => typeof path === "string" && path.trim() !== "" ? `open the local repository at ${path}` : undefined,
+    input: Schema.Struct({ path: Schema.optional(Schema.String) }),
+    handler: ({ path }) => actions.openLocalRepo(path)
   }),
-  /* Trusted target-card actions. Both remain user-only and undisclosed. */
+  /* The target-card runs: builds and tests on the human's machine, so the agent asks and the human confirms. */
   flow({
     name: "target.run",
     summary: "Run a Smithers target",
     runtime: ["local.targets"],
-    hidden: true,
-    userOnly: true,
+    confirm: "run the Smithers target",
     args: "<repoId> [workspace] <label>",
     input: TargetRef,
     handler: ({ repoId, label, workspace }) => actions.runTarget(repoId, workspace ?? ".", label)
@@ -1734,8 +2252,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "target.run.pattern",
     summary: "Run a Smithers verb over a pattern (`ci //packages/...`)",
     runtime: ["local.targets"],
-    hidden: true,
-    userOnly: true,
+    confirm: "run the Smithers verb over the pattern",
     args: "<repoId> [workspace] <verb> <pattern>",
     input: Schema.Struct({
       repoId: Schema.String,
@@ -1746,11 +2263,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ repoId, workspace, verb, pattern }) => actions.runPattern(repoId, workspace ?? ".", verb, pattern)
   }),
   flow({
+    /* Showing a target is how the agent answers "show me //src:lint" too. */
     name: "target.open",
     summary: "Show a Smithers target in its targets card",
     runtime: ["local.targets"],
-    hidden: true,
-    userOnly: true,
     args: "<repoId> <label>",
     input: TargetRef,
     handler: ({ repoId, label }) => actions.openTarget(repoId, label)
@@ -1766,6 +2282,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the targets table's filter is the human's control; the agent lists targets with target.list",
     args: "<repoId> [mode=<featured|all|recent>] [query=<text>] [kind=<kind>] [state=<never|passed|failed|running>] [workspace=<path>]",
     input: Schema.Struct({
       repoId: Schema.String,
@@ -1790,6 +2307,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the targets table's row drawer is the human's control; the agent shows a target with target.open",
     args: "<repoId> [label]",
     input: Schema.Struct({ repoId: Schema.String, label: Schema.optional(Schema.String) }),
     handler: ({ repoId, label }) => actions.selectTarget(repoId, label)
@@ -1805,6 +2323,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "starring is the human's own ranking of the table",
     args: "<repoId> <label>",
     input: Schema.Struct({ repoId: Schema.String, label: Schema.String }),
     handler: ({ repoId, label }) => actions.starTarget(repoId, label, true)
@@ -1815,6 +2334,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "starring is the human's own ranking of the table",
     args: "<repoId> <label>",
     input: Schema.Struct({ repoId: Schema.String, label: Schema.String }),
     handler: ({ repoId, label }) => actions.starTarget(repoId, label, false)
@@ -1830,6 +2350,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the targets table's grouped rows are the human's control",
     args: "<repoId> <//...:name>",
     input: Schema.Struct({ repoId: Schema.String, group: Schema.String }),
     handler: ({ repoId, group }) => actions.expandTargetGroup(repoId, group)
@@ -1840,6 +2361,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "picking a grouped row's members is the human's control",
     args: "<repoId> <//...:name> <label|all|none>",
     input: Schema.Struct({ repoId: Schema.String, group: Schema.String, member: Schema.String }),
     handler: ({ repoId, group, member }) => actions.pickTargets(repoId, group, member)
@@ -1850,6 +2372,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "runs the members the human picked in the table; the agent runs a target by label with target.run",
     args: "<repoId> <//...:name>",
     input: Schema.Struct({ repoId: Schema.String, group: Schema.String }),
     handler: ({ repoId, group }) => actions.runTargetSet(repoId, group)
@@ -1889,6 +2412,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the graph drawer's own selection; the agent opens the graph focused with target.graph [label]",
     args: "<repoId> [label]",
     input: Schema.Struct({ repoId: Schema.optional(Schema.String), label: Schema.optional(Schema.String) }),
     handler: ({ repoId, label }) => actions.focusGraphNode(repoId, label)
@@ -1925,6 +2449,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "the replay slider is the human's gesture (time travel)",
     args: "<runId> <cursor>",
     input: Schema.Struct({ runId: Schema.String, cursor: Schema.Number }),
     handler: ({ runId, cursor }) => actions.scrubRunReplay(runId, cursor)
@@ -1952,6 +2477,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["local.targets"],
     hidden: true,
     userOnly: true,
+    userOnlyReason: "opens the declaration in the human's editor — a handoff off the app",
     args: "<repoId> <file[:line]>",
     input: Schema.Struct({ repoId: Schema.String, file: Schema.String }),
     handler: ({ repoId, file }) => {
@@ -1977,6 +2503,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     name: "admin.reset",
     summary: "Start a fresh conversation (dev tooling — nothing is kept)",
     userOnly: true,
+    userOnlyReason: "destroys the whole store with no undo; the confirm dialog is the only door",
     input: NoPayload,
     handler: () => actions.reset()
   }
@@ -1986,6 +2513,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     summary: "Ask before discarding the conversation",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "opens the human's confirm dialog for the reset",
     input: NoPayload,
     handler: () => actions.askReset()
   }),
@@ -1994,6 +2522,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     summary: "Keep the current conversation",
     hidden: true,
     userOnly: true,
+    userOnlyReason: "a confirm-dialog answer is the human's",
     input: NoPayload,
     handler: () => actions.cancelReset()
   }),
@@ -2010,6 +2539,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     summary: "Upgrade your plan (opens Stripe checkout)",
     runtime: ["billing.checkout"],
     userOnly: true,
+    userOnlyReason: "external checkout with real money; the human clicks",
     args: "[plan]",
     requires: ["signed-in"],
     input: Schema.Struct({ plan: Schema.optional(Schema.String) }),
@@ -2020,6 +2550,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     summary: "Manage billing (opens the Stripe portal)",
     runtime: ["billing.checkout"],
     userOnly: true,
+    userOnlyReason: "the external billing portal; the human clicks",
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.openBillingPortal()
@@ -2034,6 +2565,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     name: "admin.devtools",
     summary: "Toggle the dev-tools panel",
     userOnly: true,
+    userOnlyReason: "the admin panel's presentation toggle",
     input: NoPayload,
     handler: () => actions.toggleDevtools()
   }),
@@ -2046,6 +2578,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     name: "debug.backend",
     summary: "Report the agent backend",
     userOnly: true,
+    userOnlyReason: "admin diagnostics; the agent must never reason about its engine",
     input: Schema.Struct({ backend: Schema.String }),
     handler: ({ backend }) => actions.describeAgentBackend(backend)
   }),
@@ -2081,6 +2614,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     name: "debug.grants.reset",
     summary: "Revoke the chain's session grants",
     userOnly: true,
+    userOnlyReason: "revokes the chain's own session grants; the operator's act",
     input: NoPayload,
     handler: () => actions.resetGrants()
   }),
@@ -2122,6 +2656,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     args: "<cardId>",
     capabilities: ["approve:self"],
     userOnly: true,
+    userOnlyReason: "a grant confirmation is the operator's own answer (approve:self)",
     input: CardTarget,
     handler: ({ cardId }) => actions.adminGrantConfirm(cardId)
   }),
@@ -2132,6 +2667,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     hidden: true,
     args: "<cardId>",
     userOnly: true,
+    userOnlyReason: "a confirm-dialog answer is the human's",
     input: CardTarget,
     handler: ({ cardId }) => actions.adminGrantCancel(cardId)
   }),
@@ -2150,6 +2686,7 @@ export const adminFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
     args: "<login>",
     capabilities: ["approve:self"],
     userOnly: true,
+    userOnlyReason: "approving an access request is the operator's own decision (approve:self)",
     input: Schema.Struct({ login: Schema.String }),
     handler: ({ login }) => actions.adminQueueApprove(login)
   }),

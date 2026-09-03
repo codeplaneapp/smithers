@@ -9,7 +9,7 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import type { StorageApi } from "@tanstack/db"
 import { afterAll, afterEach, beforeEach, expect, test } from "bun:test"
-import type { Repo } from "smithers-shared/LocalApp"
+import type { Repo } from "@smthrs/rpc/LocalApp"
 import { TARGET_GRAPH_FIXTURE_FLAG } from "../../dev/fixtureRunStream"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import { createAppController } from "../AppController"

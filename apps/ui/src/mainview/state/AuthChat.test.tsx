@@ -3,6 +3,8 @@ import type { StorageApi } from "@tanstack/db"
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
+import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
 import App from "../App"
 import { ControllerTestProvider } from "../ControllerContext"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
@@ -90,6 +92,19 @@ const backend = (
 })
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+/** What the Worker emits (docs/web-mode/PLAN.md §1): host `cloud`, built from the same table the server calls. */
+const WEB: AppBootstrap = {
+  apiVersion: 1,
+  host: "cloud",
+  version: "test",
+  buildSha: "cloud",
+  capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: false }),
+  authFlow: "redirect",
+  sandbox: null
+}
+
+const WEB_OPENING = "This is the Smithers web app. Sign in with GitHub to open one of your repositories and read its files here."
 
 describe("auth is a conversation state — the chat is the only page", () => {
   test("signed-out: the chat renders open, with sign-in as the chrome's option (LOCAL-APP.md)", async () => {
@@ -189,6 +204,55 @@ describe("auth is a conversation state — the chat is the only page", () => {
     expect(host.querySelector(".smithers-chat-message")).toBeNull()
     const pills = [...host.querySelectorAll(".smithers-suggestion")].map((pill) => pill.textContent)
     expect(pills).toEqual([])
+  })
+
+  test("signed-out on the web (host cloud): the transcript is the one opening message whose action is sign-in", async () => {
+    /*
+     * docs/web-mode/PLAN.md §3: on the cloud host a signed-out visitor reads
+     * what this is and the one act that is theirs. The card is the auth-state
+     * shape auth.prompt renders (message + CTA bound to auth.sign-in); the
+     * transcript holds nothing else — no opening read, no pills.
+     */
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const controller = createAppController(store, unavailableRepositories, silentAgent, {
+      bootstrap: WEB,
+      ...backend({
+        "/api/auth/session": json(401, { status: "error" }),
+        "/api/auth/scopes": json(200, { scopes: [] })
+      })
+    })
+    await controller.loadSession()
+    await settled()
+
+    const { host, markup } = mount(controller)
+    const messages = [...host.querySelectorAll<HTMLElement>(".smithers-chat-message")]
+    expect(messages.map((message) => message.textContent?.includes(WEB_OPENING))).toEqual([true])
+    const cta = messages[0]?.querySelector<HTMLButtonElement>(".message-cta")
+    expect(cta?.dataset.flow).toBe("auth.sign-in")
+    expect(cta?.textContent).toBe("Sign in with GitHub")
+    expect(controller.commands.find("auth.sign-in")).toBeDefined()
+    expect(markup()).not.toContain("Smithers initialized")
+    expect([...host.querySelectorAll(".smithers-suggestion")]).toEqual([])
+    // The chat is still the only page: transcript and composer, no takeover.
+    expect(host.querySelector(".smithers-composer")).not.toBeNull()
+    expect(host.querySelector(".landing-surface")).toBeNull()
+  })
+
+  test("signed-out on the native host (host local) never reads the web opening message", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const controller = createAppController(store, unavailableRepositories, silentAgent, {
+      bootstrap: { ...WEB, host: "local", authFlow: "native-handoff", sandbox: { platform: "darwin", mode: "enforced" } },
+      ...backend({
+        "/api/auth/session": json(401, { status: "error" }),
+        "/api/auth/scopes": json(200, { scopes: [] })
+      })
+    })
+    await controller.loadSession()
+    await settled()
+
+    const { host, markup } = mount(controller)
+    expect(markup()).not.toContain(WEB_OPENING)
+    expect(host.querySelector(".smithers-chat-message .message-cta")).toBeNull()
   })
 
   test("signed-in but not allowlisted: the same chat carries the request-access message", async () => {

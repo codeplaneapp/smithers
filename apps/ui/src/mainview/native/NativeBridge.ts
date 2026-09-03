@@ -1,7 +1,7 @@
 import { Electroview } from "electrobun/view"
-import type { AgentTurnFrame, StartAgentTurnRequest, StartAgentTurnResult } from "smithers-shared/NativeAgent"
-import type { PickLocalRepositoryResult, RepositoryAccess } from "smithers-shared/NativeRepository"
-import type { SmithersNativeRPC } from "smithers-shared/NativeRPC"
+import type { AgentTurnFrame, StartAgentTurnRequest, StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
+import type { PickLocalRepositoryResult, RepositoryAccess } from "@smthrs/rpc/NativeRepository"
+import type { SmithersNativeRPC } from "@smthrs/rpc/NativeRPC"
 import { pickLocalRepositoryVia } from "./PickerRequest"
 
 const rpc = (() => {

@@ -8,7 +8,7 @@
  * self-loops, which `reachable` has to survive.
  */
 import { expect, test } from "bun:test"
-import { criticalPath, reachable } from "smithers-shared/TargetGraph"
+import { criticalPath, reachable } from "@smthrs/rpc/TargetGraph"
 import { createRunStdoutParser } from "./Targets"
 import { parseTextGraph as parseGraph } from "./TargetGraph"
 
@@ -16,25 +16,25 @@ const BASE = 1_700_000_000_000
 
 test("labels with dashes, dots and nested packages parse into nodes and edges", () => {
   const text = [
-    "//packages/build-cli:type-check",
-    "  -deps-> //packages/build-cli:srcs",
-    "  -data-> //packages/targets/src:schema.v2",
-    "//packages/build-cli:srcs",
-    "//packages/targets/src:schema.v2"
+    "//packages/smithers/build/build-cli:type-check",
+    "  -deps-> //packages/smithers/build/build-cli:srcs",
+    "  -data-> //packages/smithers/build/targets/src:schema.v2",
+    "//packages/smithers/build/build-cli:srcs",
+    "//packages/smithers/build/targets/src:schema.v2"
   ].join("\n")
   const { nodes, edges } = parseGraph(text)
   expect(nodes.map((node) => node.label).sort()).toEqual([
-    "//packages/build-cli:srcs",
-    "//packages/build-cli:type-check",
-    "//packages/targets/src:schema.v2"
+    "//packages/smithers/build/build-cli:srcs",
+    "//packages/smithers/build/build-cli:type-check",
+    "//packages/smithers/build/targets/src:schema.v2"
   ])
   expect(edges).toEqual([
-    { from: "//packages/build-cli:type-check", to: "//packages/build-cli:srcs", kind: "deps" },
-    { from: "//packages/build-cli:type-check", to: "//packages/targets/src:schema.v2", kind: "data" }
+    { from: "//packages/smithers/build/build-cli:type-check", to: "//packages/smithers/build/build-cli:srcs", kind: "deps" },
+    { from: "//packages/smithers/build/build-cli:type-check", to: "//packages/smithers/build/targets/src:schema.v2", kind: "data" }
   ])
   /* The package/name split has to survive a nested path and a dotted name. */
-  const deep = nodes.find((node) => node.label === "//packages/targets/src:schema.v2")
-  expect(deep).toMatchObject({ package: "//packages/targets/src", name: "schema.v2" })
+  const deep = nodes.find((node) => node.label === "//packages/smithers/build/targets/src:schema.v2")
+  expect(deep).toMatchObject({ package: "//packages/smithers/build/targets/src", name: "schema.v2" })
 })
 
 test("a private helper is flagged, and only by its name prefix", () => {

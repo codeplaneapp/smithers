@@ -20,7 +20,7 @@
  * verdict, so a reader that polls for the state gets one consistent answer.
  */
 import type { Server } from "bun"
-import type { CloudSession } from "smithers-shared/LocalApp"
+import type { CloudSession } from "@smthrs/rpc/LocalApp"
 
 /** What the login callback posts; the keychain entry serializes exactly this. */
 export interface CloudCredentials {

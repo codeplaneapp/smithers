@@ -1,6 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"

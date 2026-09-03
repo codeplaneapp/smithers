@@ -55,7 +55,7 @@ every act a flow). Tokens: `apps/ui/src/mainview/styles/tokens.css`.
 5. **Card headers.** `file`, `file-list`, `search-results` payloads gain
    `address: "/org/repo/path"` and `readAt: { changeId, commitId }`; the header renders
    the change id; a `head-moved` line appears when the repo row's head
-   COMMIT id differs from `readAt.commitId` (a change id survives a rebase). Shared schema in `apps/shared/src/Cards.ts`, optional fields.
+   COMMIT id differs from `readAt.commitId` (a change id survives a rebase). Shared schema in `packages/rpc/src/Cards.ts`, optional fields.
 6. **Files flows** accept a global path: `/files.read /org/repo/README.md`.
 7. **Docs.** Update `apps/ui/docs/LOCAL-APP.md` (routes table, navigation)
    and `apps/ui/docs/WORKBENCH-UX.md` §3.11 to match what shipped.
@@ -63,7 +63,7 @@ every act a flow). Tokens: `apps/ui/src/mainview/styles/tokens.css`.
 ## Exit
 
 `pnpm exec tsc --noEmit` and `bun test src` green in `apps/ui`;
-`bun test` green in `apps/shared`; T1 spec `e2e/playwright/piper.spec.ts`
+`bun test` green in `packages/rpc`; T1 spec `e2e/playwright/piper.spec.ts`
 opens `~/smithers`, sees it under its repo in the tree, reads
 `/files.read README.md`, and the card header shows the address and `readAt`.
 Do not commit; leave the working tree for review.

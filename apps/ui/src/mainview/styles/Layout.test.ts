@@ -21,6 +21,7 @@ const read = (name: string): string => readFileSync(fileURLToPath(new URL(`./${n
 const base = read("base.css")
 const cards = read("cards.css")
 const chat = read("chat.css")
+const chrome = read("chrome.css")
 
 describe("the shell tracks the dynamic viewport, not the chrome-inflated one", () => {
   test("body and #root declare 100dvh after the 100vh fallback", () => {
@@ -86,5 +87,53 @@ describe("the slash menu overlays instead of displacing the transcript", () => {
     const slashMenu = /\.composer-wrap\s*>\s*\.slash-menu\s*\{[^}]*\}/.exec(chat)?.[0] ?? ""
     expect(slashMenu).toContain("position: absolute;")
     expect(slashMenu).toMatch(/z-index:\s*\d+;/)
+  })
+})
+
+/*
+ * will, 2026-09-02, asks 6, 7 and 8: a file card must open in a panel with a
+ * reasonable max height and scroll inside it; a maximized card must start to
+ * the RIGHT of the left sidebar (its left edge was under the sidebar and
+ * unreadable); and the maximized header — which carries Restore — must stay
+ * visible while the body scrolls.
+ */
+describe("a file opens in a panel with a cap it scrolls inside (ask 6)", () => {
+  test("the file panel caps at 60vh and scrolls itself", () => {
+    const block = /\.world-card-panel\s*\{[^}]*\}/.exec(cards)?.[0] ?? ""
+    expect(block).toContain("max-height: 60vh;")
+    expect(block).toContain("overflow: auto;")
+  })
+
+  test("the panel is the one scroller: a fenced body inside it has no second cap", () => {
+    expect(cards).toMatch(/\.world-card-panel pre\s*\{[^}]*max-height: none;/)
+  })
+
+  test("maximized lifts the cap, because the card is the viewport then", () => {
+    expect(cards).toMatch(
+      /\.smithers-card\[data-maximized="true"\] \.world-card-panel\s*\{[^}]*max-height: none;/
+    )
+  })
+})
+
+describe("a maximized card starts to the right of the sidebar (ask 7)", () => {
+  test("the sidebar's width is a variable the shell owns", () => {
+    expect(chat).toMatch(/\.app-shell\s*\{[^}]*--chrome-bar-width:\s*200px;/)
+    expect(chrome).toMatch(/\.chrome-bar\s*\{[^}]*width:\s*var\(--chrome-bar-width, 200px\);/)
+  })
+
+  test("the card and its backdrop both start past that width", () => {
+    const card = /\.smithers-card\[data-maximized="true"\]\s*\{[^}]*\}/.exec(cards)?.[0] ?? ""
+    expect(card).toContain("inset: 1.5rem 1.5rem 8.5rem;")
+    expect(card).toContain("left: calc(var(--chrome-bar-width, 200px) + 1.5rem);")
+    const backdrop = /\.card-maximize-backdrop\s*\{[^}]*\}/.exec(cards)?.[0] ?? ""
+    expect(backdrop).toContain("left: var(--chrome-bar-width, 200px);")
+  })
+})
+
+describe("the maximized card keeps Restore reachable (ask 8)", () => {
+  test("the header sticks to the top of the scrolling card", () => {
+    expect(cards).toMatch(
+      /\.smithers-card\[data-maximized="true"\] \.smithers-card-header\s*\{[^}]*position: sticky;[^}]*top: 0;/
+    )
   })
 })

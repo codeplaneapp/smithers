@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { localApiGet, localApiPost } from "./localApi"
@@ -20,7 +20,7 @@ test.skip(process.env.SMITHERS_CHAT_STUB === "0", "the stub suite; the real endp
 
 const FORCE = "/Users/williamcory/artsy/force"
 // Playwright loads specs as CommonJS, so the fixture resolves from __dirname.
-const FIXTURE = resolve(__dirname, "../../../../packages/build-cli/test/fixtures/force-spec")
+const FIXTURE = resolve(__dirname, "../../../../packages/smithers/build/build-cli/test/fixtures/force-spec")
 
 const targetsCard = (page: Page) => page.locator(".smithers-card[data-kind=\"targets\"]")
 const repoCard = (page: Page) => page.locator(".smithers-card[data-kind=\"repo\"]")
@@ -206,7 +206,7 @@ test("a trusted Run button streams a target run to completion", async ({ page, r
   const tabBody = page.getByTestId(`tab-body-${cardTabId}`)
   await expect(tabBody).toBeVisible()
   await expect(tabBody.locator('[data-target-row="//.github:dangerCi"]')).toBeVisible()
-  await page.getByTestId("tab-main").click()
+  await page.getByTestId("workspace-name").click()
 
   const listed = await localApiGet(page, request, "/api/repos")
   expect(listed.status()).toBe(200)
@@ -228,39 +228,22 @@ test("a directory without Smithers files opens silently, and /target.list says w
 })
 
 /*
- * A pattern run (`lint //.github/...`): the manifest's featured "run
- * everything" form. The card renders one row per target the CLI resolved
- * with failures first, the totals, and the raw stream folded away. The copy
- * is git-initialised because the lint verb diffs against HEAD, and the
- * generated GitHub files are absent from the fixture, so `//.github:github`
- * fails on drift — a real failure the row expands to.
+ * A pattern run (`lint //.github/...`): a verb over a pattern, the "run
+ * everything" form. The Featured view's strip offers the whole-workspace
+ * sweeps; a narrower pattern is the `/target.run.pattern` command. The card
+ * renders one row per target the CLI resolved with failures first, the
+ * totals, and the raw stream folded away. The copy is git-initialised
+ * because the lint verb diffs against HEAD, and the generated GitHub files
+ * are absent from the fixture, so `//.github:github` fails on drift — a
+ * real failure the row expands to.
  */
-test("a featured pattern run renders one row per resolved target, failures first, with the totals", async ({ page }) => {
+test("a pattern run renders one row per resolved target, failures first, with the totals", async ({ page, request }) => {
   const copy = mkdtempSync(join(tmpdir(), "smithers-force-pattern-"))
   temporary.push(copy)
   cpSync(FIXTURE, copy, { recursive: true })
   execFileSync("git", ["init", "-q"], { cwd: copy })
   execFileSync("git", ["add", "-A"], { cwd: copy })
   execFileSync("git", ["-c", "user.email=e2e@smithers.sh", "-c", "user.name=e2e", "commit", "-qm", "fixture"], { cwd: copy })
-  writeFileSync(
-    join(copy, "smithers-ui.json"),
-    JSON.stringify({
-      schemaVersion: 1,
-      name: "force",
-      title: "Force",
-      summary: "The fixture's essentials.",
-      groups: [{ id: "everything", title: "Everything", kind: "check", featured: true }],
-      entries: [{
-        id: "github-lint",
-        group: "everything",
-        workspace: ".",
-        verb: "lint",
-        pattern: "//.github/...",
-        title: "Lint the GitHub files",
-        summary: "Every lint target under .github."
-      }]
-    })
-  )
 
   await page.goto("/")
   await openRepo(page, copy)
@@ -268,11 +251,17 @@ test("a featured pattern run renders one row per resolved target, failures first
   await command(page, "/target.list")
   const targets = targetsCard(page)
   await expect(targets.getByTestId("targets-count")).toHaveText(/of 8[12]$/, { timeout: 60_000 })
-  // Featured is the default when the manifest features anything; the strip lists the pattern run.
-  await expect(targets.getByTestId("targets-mode-featured")).toHaveAttribute("aria-pressed", "true")
+  // Nothing is featured or starred, so All is the default; the strip is the Featured view's.
+  await expect(targets.getByTestId("targets-mode-all")).toHaveAttribute("aria-pressed", "true")
+  await targets.getByTestId("targets-mode-featured").click()
   const strip = targets.getByTestId("targets-pattern-runs")
-  await expect(strip).toContainText("lint //.github/...")
-  await strip.getByRole("button", { name: "Run lint //.github/..." }).click()
+  await expect(strip).toContainText("ci //...")
+  await expect(strip).toContainText("lint //...")
+  const listed = await localApiGet(page, request, "/api/repos")
+  const { repos } = (await listed.json()) as { repos: Array<{ id: string; path: string }> }
+  const repoId = repos.find((repo) => repo.path === realpathSync(copy))?.id
+  expect(repoId).toBeDefined()
+  await command(page, `/target.run.pattern ${repoId} lint //.github/...`)
 
   const run = runCard(page)
   await expect(run).toBeVisible()

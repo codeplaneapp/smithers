@@ -384,8 +384,6 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
 
       await openRepository(app, repository)
       await sendMessage(app, "/target.list")
-      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo-plugin"]') !== null`))
-        .toBe(true)
       const targets = await app.waitFor<{ status: string; count: string; alert: string }>(
         `
         (() => {
@@ -401,10 +399,11 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
         60_000
       )
       expect(targets).toEqual({ status: "done", count: "2 of 2", alert: "" })
+      // The declared summary (the fixture's PACKAGE.ts `summary`) reads under the row's label.
       expect(
-        await app.eval<string>(`document.querySelector('.smithers-card[data-kind="repo-plugin"]')?.textContent ?? ''`)
+        await app.eval<string>(`document.querySelector('[data-testid="targets-summary-//:hello"]')?.textContent ?? ''`)
       )
-        .toContain("The tiny two-workspace fixture")
+        .toBe("Prints plugin-hello from the root workspace.")
       expect(
         await app.eval<string>(`document.querySelector('[data-testid="composer-repo-trigger"]')?.textContent ?? ''`)
       )
@@ -452,7 +451,7 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
         )
       ).toBe("true")
 
-      await clickTestId(app, "plugin-run-hello")
+      await clickTestId(app, "targets-run-//:hello")
       const targetRun = await app.waitFor<{ status: string; text: string; output: string }>(
         `
         (() => {
@@ -569,8 +568,8 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       await app.eval<boolean>(`
         (() => {
           const button = Array.from(document.querySelectorAll('[role="dialog"] button'))
-            .find((candidate) => candidate.textContent?.trim() === 'Close tab')
-          if (!(button instanceof HTMLButtonElement)) throw new Error('Missing Close tab confirmation')
+            .find((candidate) => candidate.textContent?.trim() === 'Close session')
+          if (!(button instanceof HTMLButtonElement)) throw new Error('Missing Close session confirmation')
           button.click()
           return true
         })()

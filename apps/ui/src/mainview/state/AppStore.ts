@@ -15,6 +15,7 @@ import { openTransactionalStorage } from "../chain/TransactionalStorage"
 import type { TransactionalStorage } from "../chain/TransactionalStorage"
 import { PALETTE_MIRROR_KEY, rememberAppearance, THEME_MIRROR_KEY } from "./Appearance"
 import {
+  AgentRoleSchema,
   BillingAccountSchema,
   BranchSchema,
   CardSchema,
@@ -48,6 +49,8 @@ import {
   MessageSchema,
   PinnedRepoSchema,
   RECOMMENDATION_ID,
+  RepoTreeRowSchema,
+  repoTreeRowId,
   StarredTargetSchema,
   RecommendationSchema,
   repoIdFromRemote,
@@ -66,6 +69,7 @@ import {
   WorldDocumentSchema
 } from "./AppState"
 import type {
+  AgentRole,
   AppTransition,
   BillingAccount,
   Branch,
@@ -86,6 +90,7 @@ import type {
   Palette,
   PinnedRepo,
   Recommendation,
+  RepoTreeRow,
   StarredTarget,
   Repo,
   RepositoryCapabilityPattern,
@@ -280,6 +285,8 @@ const PERSISTED_COLLECTION_SPECS = [
   { id: "app-chain-events", schema: ChainEventRecordSchema },
   { id: "app-tabs", schema: TabSchema },
   { id: "app-harnesses", schema: HarnessSchema },
+  /* Agents as data (custom-agents.md): the mirror of `GET /api/agents`, re-read after every mutation. */
+  { id: "app-agents", schema: AgentRoleSchema },
   { id: "app-repos", schema: RepoSchema },
   { id: "app-pinned-repos", schema: PinnedRepoSchema },
   { id: "app-starred-targets", schema: StarredTargetSchema },
@@ -520,9 +527,13 @@ export interface AppCollections {
   /* The local-app tab strip and what its `+` menu and repo chip read (docs/LOCAL-APP.md). */
   readonly tabs: ReturnType<typeof createTabCollection>
   readonly harnesses: ReturnType<typeof createHarnessCollection>
+  /** The agents (built-in and custom) the `+` menus, the Agents card, and the roles paragraph read; empty until `/api/agents` answers. */
+  readonly agents: ReturnType<typeof createAgentCollection>
   readonly repos: ReturnType<typeof createRepoCollection>
   /** The sidebar's pinned repositories; tabs nest under them (docs/LOCAL-APP.md "Tabs"). */
   readonly pinnedRepos: ReturnType<typeof createPinnedRepoCollection>
+  /** The sidebar's file tree rows, one per expanded directory of a working copy; memory-only (docs/workbench-lanes/sidebar-tree.md). */
+  readonly repoTree: ReturnType<typeof createRepoTreeCollection>
   readonly starredTargets: ReturnType<typeof createStarredTargetCollection>
   readonly workspaces: ReturnType<typeof createWorkspaceCollection>
   readonly branches: ReturnType<typeof createBranchCollection>
@@ -675,6 +686,13 @@ const createHarnessCollection = (backend: PersistenceBackend) =>
     schema: HarnessSchema
   })
 
+const createAgentCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-agents",
+    getKey: (agent: AgentRole) => agent.id,
+    schema: AgentRoleSchema
+  })
+
 const createRepoCollection = (backend: PersistenceBackend) =>
   createPersistedCollection(backend, {
     id: "app-repos",
@@ -687,6 +705,19 @@ const createPinnedRepoCollection = (backend: PersistenceBackend) =>
     id: "app-pinned-repos",
     getKey: (pin: PinnedRepo) => pin.id,
     schema: PinnedRepoSchema
+  })
+
+/*
+ * The tree rows ride the same collection machinery as everything else (the
+ * dispatcher, acceptMutations, live queries) over a store that lives only as
+ * long as this document: a checkout changes on disk between launches, so a
+ * remembered listing would be a stale one presented as current.
+ */
+const createRepoTreeCollection = () =>
+  createPersistedCollection({ kind: "localStorage", storage: memoryStorage() }, {
+    id: "app-repo-tree",
+    getKey: (row: RepoTreeRow) => row.id,
+    schema: RepoTreeRowSchema
   })
 
 const createStarredTargetCollection = (backend: PersistenceBackend) =>
@@ -857,8 +888,10 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.chainEvents.preload(),
     collections.tabs.preload(),
     collections.harnesses.preload(),
+    collections.agents.preload(),
     collections.repos.preload(),
     collections.pinnedRepos.preload(),
+    collections.repoTree.preload(),
     collections.starredTargets.preload(),
     collections.workspaces.preload(),
     collections.branches.preload(),
@@ -1098,8 +1131,10 @@ export const createAppStore = async (
     chainEvents: createChainEventCollection(resolvedBackend),
     tabs: createTabCollection(resolvedBackend),
     harnesses: createHarnessCollection(resolvedBackend),
+    agents: createAgentCollection(resolvedBackend),
     repos: createRepoCollection(resolvedBackend),
     pinnedRepos: createPinnedRepoCollection(resolvedBackend),
+    repoTree: createRepoTreeCollection(),
     starredTargets: createStarredTargetCollection(resolvedBackend),
     workspaces: createWorkspaceCollection(resolvedBackend),
     branches: createBranchCollection(resolvedBackend),
@@ -1174,8 +1209,10 @@ export const createAppStore = async (
         collections.chainEvents.utils.acceptMutations(transaction),
         collections.tabs.utils.acceptMutations(transaction),
         collections.harnesses.utils.acceptMutations(transaction),
+        collections.agents.utils.acceptMutations(transaction),
         collections.repos.utils.acceptMutations(transaction),
         collections.pinnedRepos.utils.acceptMutations(transaction),
+        collections.repoTree.utils.acceptMutations(transaction),
         collections.starredTargets.utils.acceptMutations(transaction),
         collections.workspaces.utils.acceptMutations(transaction),
         collections.branches.utils.acceptMutations(transaction),
@@ -2391,6 +2428,25 @@ export const createAppStore = async (
           break
         }
 
+        case "agents.loaded": {
+          // Same replace-in-place rule as the harnesses: update, insert, delete, never delete-then-insert one key.
+          const next = new Set<string>(transition.agents.map((agent) => agent.id))
+          const stale = [...collections.agents.keys()].filter((id) => !next.has(id))
+          if (stale.length > 0) collections.agents.delete(stale)
+          for (const agent of transition.agents) {
+            if (collections.agents.get(agent.id) === undefined) collections.agents.insert({ ...agent })
+            else {
+              collections.agents.update(agent.id, (draft) => {
+                Object.assign(draft, agent)
+              })
+            }
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+
         case "repos.loaded": {
           const next = new Set(transition.repos.map((repo) => repo.id))
           const before = new Set([...collections.repos.values()].map((repo) => repoKeyOf(repo.path)))
@@ -2738,6 +2794,8 @@ export const createAppStore = async (
           if (collections.workingCopies.get(transition.id)?.kind === "local") {
             collections.workingCopies.delete(transition.id)
           }
+          const treeKeys = [...collections.repoTree.values()].filter((row) => row.copyId === transition.id).map((row) => row.id)
+          if (treeKeys.length > 0) collections.repoTree.delete(treeKeys)
           collections.sessions.update(SESSION_ID, (draft) => {
             if (draft.activeRepoKey === transition.id) draft.activeRepoKey = null
             const selected = draft.activeRepoKey
@@ -2773,6 +2831,76 @@ export const createAppStore = async (
           })
           break
         }
+        case "repo-tree.toggled": {
+          const id = repoTreeRowId(transition.copyId, transition.path)
+          if (collections.repoTree.get(id) === undefined) return
+          collections.repoTree.update(id, (draft) => {
+            draft.expanded = transition.expanded
+          })
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "repo-tree.loading":
+        case "repo-tree.loaded":
+        case "repo-tree.failed": {
+          /*
+           * One row per directory: a first expand inserts it loading (and
+           * expanded — the caret turns at once, the listing follows); the
+           * route's answer rewrites the same row. A retry of a failed row
+           * keeps nothing of the failure; a load keeps nothing of a stale
+           * listing. `expanded` is the user's, so an answer never changes it.
+           */
+          const id = repoTreeRowId(transition.copyId, transition.path)
+          const existing = collections.repoTree.get(id)
+          const next: RepoTreeRow = transition.type === "repo-tree.loading"
+            ? { id, copyId: transition.copyId, path: transition.path, expanded: true, state: "loading", entries: existing?.entries ?? [], loadedAt: createdAt }
+            : transition.type === "repo-tree.loaded"
+            ? {
+              id,
+              copyId: transition.copyId,
+              path: transition.path,
+              expanded: existing?.expanded ?? true,
+              state: "loaded",
+              entries: [...transition.entries],
+              ...(transition.truncated ? { truncated: true } : {}),
+              loadedAt: createdAt
+            }
+            : { id, copyId: transition.copyId, path: transition.path, expanded: existing?.expanded ?? true, state: "failed", entries: [], error: transition.error, loadedAt: createdAt }
+          if (existing === undefined) {
+            collections.repoTree.insert(next)
+          } else {
+            collections.repoTree.update(id, (draft) => {
+              draft.expanded = next.expanded
+              draft.state = next.state
+              draft.entries = next.entries
+              draft.error = next.error
+              draft.truncated = next.truncated
+              draft.loadedAt = next.loadedAt
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "workspace.renamed": {
+          const name = transition.name.trim()
+          if (name === "") return
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.workspaceName = name
+            draft.workspaceRenameOpen = false
+            draft.revision = revision
+          })
+          break
+        }
+        case "workspace.rename.toggled":
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.workspaceRenameOpen = transition.open
+            draft.revision = revision
+          })
+          break
         case "target.starred":
         case "target.unstarred": {
           /*

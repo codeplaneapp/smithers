@@ -44,7 +44,7 @@ verdict is a review row, never a human's approval.
 │   "error bodies leak the absolute path"          2 replies   [ Done ]   │
 │ ◐ apps/ui/src/bun/server.ts:208 · agent · rev 5 · done at rev 5         │
 │   "strip the local session header"               1 reply    [ Ack ]    │
-│ ● apps/shared/src/LocalApp.ts:250 · will · rev 3 · stale                │
+│ ● packages/rpc/src/LocalApp.ts:250 · will · rev 3 · stale                │
 │   "cap the listing"                              resolved · Show at rev 3│
 │ Suggested reviewers · none yet (ownership not available)               │
 ```

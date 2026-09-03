@@ -5,7 +5,7 @@ import type {
   InspectLocalRepositoryResult,
   LocalRepositoryInspection,
   RepositoryAccess
-} from "smithers-shared/NativeRepository"
+} from "@smthrs/rpc/NativeRepository"
 
 const git = async (
   directory: string,

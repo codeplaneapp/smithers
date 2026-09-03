@@ -2,7 +2,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterAll, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import type { RunRecord } from "smithers-shared/TargetGraph"
+import type { RunRecord } from "@smthrs/rpc/TargetGraph"
 import type { Card } from "../state/AppState"
 import { RunHistoryCardBody } from "./RunHistoryCard"
 

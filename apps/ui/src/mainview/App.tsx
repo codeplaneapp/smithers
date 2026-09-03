@@ -20,11 +20,12 @@ import {
   Plus,
   RotateCcw,
   Sparkles,
-  Trash2
+  Trash2,
+  Workflow
 } from "lucide-react"
 import { lazy, Suspense, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
-import { CardView } from "./ChatCards"
+import { CardView, WorkflowListCardBody } from "./ChatCards"
 import { Composer } from "./Composer"
 import { ConnectorsSurface } from "./ConnectorsSurface"
 import { useController } from "./ControllerContext"
@@ -169,6 +170,18 @@ function App() {
   const conversationTabId = conversationTabIdOf(session, (id) => tabRows.find((tab) => tab.id === id))
   const messages = messageRows.filter((message) => inConversation(message, conversationTabId))
   const conversationCards = cardRows.filter((card) => inConversation(card, conversationTabId))
+  /*
+   * Ask 5 (will, 2026-09-02): the Flows pane shows what `flow.list` last
+   * answered with — the newest listing card, rendered through that card's own
+   * rows below. NO INVENTION: with no listing yet the pane holds nothing and
+   * the seam's refusal (why it could not list) stands in the chat beside it.
+   */
+  const flowsCard = cardRows
+    .filter((card): card is Extract<Card, { kind: "workflow-list" }> => card.kind === "workflow-list")
+    .reduce<Extract<Card, { kind: "workflow-list" }> | undefined>(
+      (latest, card) => (latest === undefined || card.ordinal > latest.ordinal ? card : latest),
+      undefined
+    )
   const worldDocuments = [...worldDocumentRows].sort((left, right) => left.path.localeCompare(right.path))
   const pendingWorldDelete = worldDocuments.find(
     (document) => document.id === (session.pendingWorldDeleteId ?? null)
@@ -211,8 +224,24 @@ function App() {
    * sign in, and pretending otherwise walked live users into empty choosers
    * and dead sign-in flows — so the state names itself up front, once,
    * derived like the rest (never stored, gone the moment a seam answers).
+   *
+   * Signed out on the web (docs/web-mode/PLAN.md §3) is the third definitive
+   * state: the visitor reads what this is and the one act that is theirs,
+   * in the shape auth.prompt renders (message + CTA bound to auth.sign-in).
+   * Only the cloud host: local keeps its opening read (sign-in is an option
+   * there), and a build with no identity seam is "unavailable", not this.
    */
-  const authMessage: Message | undefined = identity?.state === "signed-in" && !identity.allowlisted
+  const authMessage: Message | undefined = identity?.state === "signed-out" && controller.bootstrap?.host === "cloud"
+    ? {
+      id: "auth-state",
+      role: "smithers",
+      text: "This is the Smithers web app. Sign in with GitHub to open one of your repositories and read its files here.",
+      status: "complete",
+      action: { flow: "auth.sign-in", label: "Sign in with GitHub" },
+      createdAt: 0,
+      ordinal: 0
+    }
+    : identity?.state === "signed-in" && !identity.allowlisted
     ? {
       id: "auth-state",
       role: "smithers",
@@ -771,6 +800,28 @@ function App() {
           ) :
           session.surface === "connectors" ?
           <ConnectorsSurface /> :
+          session.surface === "flows" ?
+          (
+            <section className="flows-surface embedded-pane" aria-label="Flows on your workspace">
+              <SurfaceHeader
+                icon={<Workflow size={17} aria-hidden="true" />}
+                title="Flows"
+                subtitle={flowsCard?.payload.repo ?? ""}
+                closeCommand="chat"
+                onClose={() => controller.runCommand("chat")}
+              />
+              <div className="flows-content">
+                {flowsCard === undefined ?
+                  null :
+                  (
+                    <WorkflowListCardBody
+                      card={flowsCard}
+                      onRunWorkflow={(name) => controller.runCommandArgs("flow.run", name)}
+                    />
+                  )}
+              </div>
+            </section>
+          ) :
           null}
 
         {/* Admin-only: the panel is absent — not hidden — for everyone else. */}

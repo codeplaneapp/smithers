@@ -20,10 +20,10 @@ import {
   RunHistoryResponseSchema,
   RunReplayResponseSchema,
   TargetGraphResponseSchema
-} from "smithers-shared/TargetGraph"
-import { TargetsQueryResponseSchema } from "smithers-shared/LocalApp"
-import { LOCAL_SESSION_HEADER } from "smithers-shared/LocalSession"
-import type { RunReplayResponse, TargetGraphResponse } from "smithers-shared/TargetGraph"
+} from "@smthrs/rpc/TargetGraph"
+import { TargetsQueryResponseSchema } from "@smthrs/rpc/LocalApp"
+import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
+import type { RunReplayResponse, TargetGraphResponse } from "@smthrs/rpc/TargetGraph"
 import { findNode } from "./Node"
 import { clearTargetGraphCache } from "./TargetGraph"
 import { startLocalServer } from "./server"
@@ -33,7 +33,7 @@ const FORCE = join(homedir(), "artsy", "force")
 const FORCE_E2E = join(homedir(), "artsy-e2e", "force")
 const workspaceLoads = (path: string): boolean =>
   existsSync(join(path, "PACKAGE.ts")) &&
-  spawnSync(join(import.meta.dir, "../../../../packages/build-cli/bin/smithers-build"), ["query", "//..."], {
+  spawnSync(join(import.meta.dir, "../../../../packages/smithers/build/build-cli/bin/smithers-build"), ["query", "//..."], {
     cwd: path,
     stdio: "ignore"
   }).status === 0

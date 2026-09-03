@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { TargetRunEvent } from "smithers-shared/TargetGraph"
+import type { TargetRunEvent } from "@smthrs/rpc/TargetGraph"
 import { createTargetRunHistory } from "./TargetRunHistory"
 import type { TargetRun } from "./Targets"
 

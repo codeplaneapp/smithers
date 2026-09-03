@@ -6,7 +6,7 @@ import type { ElectrobunConfig } from "electrobun"
  * The portable smithers-build runtime a packaged bundle carries. Only the
  * packaging paths (scripts/build-native.ts, e2e/packaged/run.ts) prepare it,
  * through scripts/prepare-packaged-build-cli.ts, and both remove it again
- * afterwards. `electrobun dev` runs the checkout's packages/build-cli instead
+ * afterwards. `electrobun dev` runs the checkout's packages/smithers/build/build-cli instead
  * (src/bun/Targets.ts resolveBuildCli), so a missing runtime must not fail the
  * dev bundle with CopySourceMissing: the copy applies only when the runtime is
  * on disk. A bare `electrobun build` without that preparation ships no loader.

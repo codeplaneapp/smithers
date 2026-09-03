@@ -3,8 +3,8 @@ import {
   localSessionProtocol,
   LOCAL_SESSION_HEADER,
   LOCAL_SESSION_META
-} from "smithers-shared/LocalSession"
-import type { FetchLike } from "smithers-shared/NativeAgent"
+} from "@smthrs/rpc/LocalSession"
+import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 
 /** The local Bun host injects this meta value; cloud/static builds have none. */
 export const readLocalSessionToken = (

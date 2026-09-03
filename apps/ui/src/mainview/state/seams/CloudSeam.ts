@@ -14,7 +14,7 @@ import {
   CLOUD_AUTH_START_PATH,
   CloudAuthStartResponseSchema,
   CloudSessionSchema
-} from "smithers-shared/LocalApp"
+} from "@smthrs/rpc/LocalApp"
 import type { SeamContext } from "./SeamContext"
 
 export interface CloudSeam {

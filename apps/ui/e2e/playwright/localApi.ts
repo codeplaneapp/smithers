@@ -1,5 +1,5 @@
 import type { APIRequestContext, APIResponse, Page } from "@playwright/test"
-import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "smithers-shared/LocalSession"
+import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "@smthrs/rpc/LocalSession"
 
 const localSessionHeaders = async (page: Page): Promise<Record<string, string>> => {
   const token = await page.locator(`meta[name="${LOCAL_SESSION_META}"]`).getAttribute("content")

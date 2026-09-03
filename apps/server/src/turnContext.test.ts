@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentRuntimeContext } from "smithers-shared/AgentContext"
+import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import worker from "./index"
 import type { WorkerEnv } from "./index"
 

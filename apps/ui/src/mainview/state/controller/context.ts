@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { AgentChatMessage, FetchLike } from "smithers-shared/NativeAgent"
+import type { AgentChatMessage, FetchLike } from "@smthrs/rpc/NativeAgent"
 import { createGatewaySeam } from "./gateway"
 import type { CommandRegistry } from "../../flows/Commands"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"

@@ -1,16 +1,20 @@
 /*
  * The change and diff cards (lane change, ADR 0003 — the change is the
- * unit). The change card's body is the five facets (diff, findings, checks,
- * review, history); each facet that has no route yet renders the ADR's
- * degraded wording in place of invention (plue#450–#457). The diff card
- * renders one from → to pair pinned at the change's commit, conflicted
- * files leading; an oversized hunk rides by reference and names the re-read
- * command. Every act binds a registered command through onRunCommand and
- * carries data-flow (parity.test.ts gates this).
+ * unit; ADR 0004 — review on the change card; lane L1 — the live plue
+ * shapes). The change card's body is the facets: Diff (two revision pickers,
+ * interdiff pins), Findings (per revision, with the analyzer runs), Checks
+ * (per revision, with their work), Review (the verdict strip, the threads
+ * with Done / Ack / Reopen), History (provenance per revision, the landed
+ * row), plus Walkthrough only when an artifact exists and Owners only when
+ * the change GET carries ownership. A field the server did not state renders
+ * nothing — never a guess, never a number for confidence. Every act binds a
+ * registered command through onRunCommand and carries data-flow
+ * (parity.test.ts gates this).
  */
 import { Button, StatusPill } from "@smthrs/ui"
 import { AlertTriangle, FileDiff, GitMerge, GitPullRequest, History, Split } from "lucide-react"
-import type { ChangeFacet } from "smithers-shared/Changes"
+import { lazy, Suspense } from "react"
+import type { ChangeFacet, ChangeRevision, ChangeThread, LandingBlock } from "@smthrs/rpc/Changes"
 import type { Card } from "../state/AppState"
 
 export interface ChangeCardActions {
@@ -19,23 +23,45 @@ export interface ChangeCardActions {
 
 type ChangeCard = Extract<Card, { kind: "change" }>
 type DiffCard = Extract<Card, { kind: "diff" }>
+type ChangePayload = ChangeCard["payload"]
+
+/*
+ * Code intelligence L5 (docs/code-intel/PLAN.md §7): a hunk renders through
+ * `@pierre/diffs` CodeView behind this boundary — the file card's engine and
+ * theme mapping — so pierre and the grammars stay in an async chunk that
+ * never imports the entry. The verbatim patch is the complete first state
+ * while the chunk loads.
+ */
+const DiffSurface = lazy(() => import("./DiffSurface").then((module) => ({ default: module.DiffSurface })))
 
 /** Ids render short: jj change ids are already short words; commit hashes take the first 8. */
 const shortId = (id: string): string => (id.length > 12 ? id.slice(0, 8) : id)
-
-/* The degraded facet wording, in the ADR's own words: an absent API named, never invented. */
-const NO_REVISION_HISTORY =
-  "A change's revision history isn't recorded yet (plue#450) — this card tracks the current revision only."
-const NO_FINDINGS =
-  "Findings per revision don't exist yet (plue#454) — review findings aren't recorded here."
-const NO_STALE_TOKEN =
-  "Whether this thread still points at the current revision isn't computed yet (plue#453) — no stale marker is shown."
 
 /*
  * An unread auxiliary is null and `unread` names why; a null with no reason
  * (a payload built before the rule) says so rather than pass as "none".
  */
 const NO_REASON = "no reason recorded"
+
+/** A timestamp as the card prints it: `YYYY-MM-DD HH:MM`. */
+const when = (iso: string): string => iso.replace("T", " ").slice(0, 16)
+
+/** `rev N` when a recorded revision carries the commit, else the short commit — a lookup, never an inference. */
+const revisionLabel = (revisions: ReadonlyArray<ChangeRevision>, commitId: string | null): string | null => {
+  if (commitId === null) return null
+  const revision = revisions.find((candidate) => candidate.commitId === commitId)
+  return revision === undefined ? shortId(commitId) : `rev ${revision.seq}`
+}
+
+/** A pin token as the card prints it: `parent`, `current`, or `rev N`. */
+const pinLabel = (token: string): string => (token === "parent" || token === "current" ? token : `rev ${token}`)
+
+/** `N revision(s) since` when the current revision is past the judged one; nothing when either is unknown. */
+const revisionsSince = (currentSeq: number | null, seq: number | null): string | null => {
+  if (currentSeq === null || seq === null || currentSeq <= seq) return null
+  const count = currentSeq - seq
+  return `${count} revision${count === 1 ? "" : "s"} since`
+}
 
 /*
  * The landing request's state on this card's pill vocabulary (done / failed /
@@ -53,6 +79,41 @@ const landingPill = (state: string): { readonly status: string; readonly label?:
     ? { status: "cancelled", label: "Closed" }
     : { status: "pending" }
 
+/** One gate block in words, from the block's own fields (plue#452 `blocked_by`). */
+const blockWords = (block: LandingBlock): string => {
+  if (block.kind === "check") return `check ${block.name ?? ""}`.trim()
+  if (block.kind === "review") {
+    if (block.missing === "human_approval") return `${block.count ?? 1} human approval${(block.count ?? 1) === 1 ? "" : "s"} missing`
+    if (block.missing === "agent_lgtm") return "agent LGTM missing"
+    return `review ${block.name ?? ""}`.trim()
+  }
+  if (block.kind === "conflict") return `conflict in ${block.name ?? "a file"}`
+  if (block.kind === "owner") return `owner approval missing on ${block.path ?? "a path"}`
+  if (block.kind === "agent_policy") return `agent changes denied on ${block.path ?? "a path"}`
+  if (block.kind === "thread") return `${block.count ?? 1} thread${(block.count ?? 1) === 1 ? "" : "s"} open`
+  return block.kind
+}
+
+/** The threads the gate counts as unresolved: open, and done-but-unacked (plue counts `state <> 'resolved'`). */
+const unresolvedThreads = (threads: ReadonlyArray<ChangeThread> | null): number =>
+  (threads ?? []).filter((thread) => thread.state === "open" || thread.state === "done").length
+
+/**
+ * What the landing gate stands on, from the card's own facts: the threads
+ * still open (ADR 0004: the Land button says `2 threads open`) and the
+ * blocks the landing list stated for this change.
+ */
+const gateReasons = (payload: ChangePayload): ReadonlyArray<string> => {
+  const reasons: Array<string> = []
+  const open = unresolvedThreads(payload.threads)
+  if (open > 0) reasons.push(`${open} thread${open === 1 ? "" : "s"} open`)
+  for (const block of payload.stack?.blockedBy ?? []) {
+    if (block.kind === "thread") continue
+    reasons.push(blockWords(block))
+  }
+  return reasons
+}
+
 interface LandAct {
   readonly label: string
   readonly ariaLabel: string
@@ -67,9 +128,10 @@ interface LandAct {
  * `failed` re-lands as "Retry land" under its verbatim failure_reason. A
  * landing request lands its WHOLE stack, so the label names the scope
  * (`Land 1 → N`), only the top change may land (a prefix land is plue#452),
- * and plue lands a request only while it is open or failed.
+ * plue lands a request only while it is open or failed, and the gate's own
+ * blocks (open threads, checks, owners) read on the button.
  */
-const landAct = (payload: ChangeCard["payload"]): LandAct => {
+const landAct = (payload: ChangePayload): LandAct => {
   const { changeset, stack } = payload
   if (changeset !== null) {
     const ariaLabel = "Land the changeset"
@@ -95,67 +157,371 @@ const landAct = (payload: ChangeCard["payload"]): LandAct => {
     return { label: "Land", ariaLabel, blocked: `${stack.state} — plue lands a request only while it is open or failed` }
   }
   const verb = stack.state === "failed" ? "Retry land" : "Land"
-  return { label: stack.size <= 1 ? verb : `${verb} 1 → ${stack.size}`, ariaLabel, blocked: null }
+  const label = stack.size <= 1 ? verb : `${verb} 1 → ${stack.size}`
+  const reasons = gateReasons(payload)
+  return { label, ariaLabel, blocked: reasons.length === 0 ? null : reasons.join(" · ") }
 }
 
-const FACET_LABELS: ReadonlyArray<readonly [ChangeFacet, string]> = [
-  ["diff", "Diff"],
-  ["findings", "Findings"],
-  ["checks", "Checks"],
-  ["review", "Review"],
-  ["history", "History"]
-]
+/*
+ * The facet strip: Walkthrough leads when the current revision came from an
+ * agent session and the change touches more than 20 files (ADR 0004),
+ * otherwise it sits after History; both only when an artifact exists. Owners
+ * closes the strip only when the change GET carried ownership.
+ */
+const facetsOf = (payload: ChangePayload): ReadonlyArray<readonly [ChangeFacet, string]> => {
+  const current = payload.revisions.find((revision) => revision.seq === payload.currentSeq)
+  const hasWalkthrough = payload.walkthrough !== null && payload.walkthrough !== undefined
+  const walkthroughLeads = hasWalkthrough && current?.source === "agent" && (payload.diff?.files.length ?? 0) > 20
+  const facets: Array<readonly [ChangeFacet, string]> = []
+  if (hasWalkthrough && walkthroughLeads) facets.push(["walkthrough", "Walkthrough"])
+  facets.push(["diff", "Diff"], ["findings", "Findings"], ["checks", "Checks"], ["review", "Review"], ["history", "History"])
+  if (hasWalkthrough && !walkthroughLeads) facets.push(["walkthrough", "Walkthrough"])
+  if (payload.owners !== null && payload.owners !== undefined) facets.push(["owners", "Owners"])
+  return facets
+}
 
-/* The diff facet: the file rows of the parent → current diff, each opening the one-file diff card. */
-const ChangeDiffFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
-  const { payload } = card
-  if (payload.diff === null) {
-    return <p className="world-card-empty">diff of {payload.changeId} not read ({payload.unread?.diff ?? NO_REASON})</p>
-  }
-  if (payload.diff.files.length === 0) {
-    return <p className="world-card-empty">{payload.changeId} changes no files.</p>
-  }
+/** The owners line of the header strip (ADR 0004 row 10); null when the change GET carried no ownership. */
+const ownersLine = (payload: ChangePayload): string | null => {
+  const owners = payload.owners
+  if (owners === null || owners === undefined) return null
+  const denied = owners.touchedPaths.filter((touched) => touched.agentPolicy === "deny")
+  if (denied.length > 0) return `owners · agent changes denied on ${denied.map((touched) => touched.path).join(", ")}`
+  const missing = owners.missingApprovals.length
+  if (missing > 0) return `owners · ${missing} path${missing === 1 ? "" : "s"} missing`
+  return "owners ✓"
+}
+
+/** The Suggested reviewers slot: plue's suggestions plus every missing approval's candidates, by name. */
+const suggestedReviewers = (payload: ChangePayload): ReadonlyArray<string> | null => {
+  const owners = payload.owners
+  if (owners === null || owners === undefined) return null
+  const names = new Set(owners.suggestedReviewers)
+  for (const missing of owners.missingApprovals) for (const candidate of missing.candidates) names.add(candidate)
+  return [...names]
+}
+
+/** The Open-the-computer act for a revision that carries a workspace snapshot; nothing otherwise. */
+const OpenComputer = ({
+  changeId,
+  revision,
+  onRunCommand
+}: { readonly changeId: string; readonly revision: ChangeRevision | undefined } & ChangeCardActions) => {
+  if (revision?.workspaceSnapshotId === undefined) return null
+  const snapshotId = revision.workspaceSnapshotId
   return (
-    <ul className="world-card-list">
-      {payload.diff.files.map((file) => (
-        <li key={file.path} className="world-card-row">
-          <FileDiff size={14} aria-hidden="true" />
-          <Button
-            variant="ghost"
-            size="sm"
-            data-flow="change.diff"
-            aria-label={`Open the diff of ${file.path}`}
-            onClick={() => onRunCommand("change.diff", `${payload.changeId} parent current ${file.path}`)}
-          >
-            <span className="world-card-title">{file.path}</span>
-          </Button>
-          <span className="world-card-path">
-            {file.changeType} · +{file.additions} −{file.deletions}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <Button
+      size="sm"
+      variant="outline"
+      data-flow="change.open-computer"
+      aria-label={`Open the computer that produced rev ${revision.seq}`}
+      onClick={() => onRunCommand("change.open-computer", `${changeId} ${snapshotId}`)}
+    >
+      Open the computer
+    </Button>
   )
 }
 
-/* The checks facet: one row per context, newest answer per context. Unread (null) is never "no checks". */
-const ChangeChecksFacet = ({ card }: { readonly card: ChangeCard }) => {
+/**
+ * Whether this change is worth splitting (the brief's gate): its landing
+ * request states a landable prefix SHORTER than the stack, so part of the
+ * request cannot land as it stands. plue#489 splits one change by path, so
+ * the act lives on the diff's file rows — the only place the paths are.
+ */
+const splittable = (payload: ChangePayload): boolean => {
+  const stack = payload.stack
+  if (stack === null) return false
+  const prefix = stack.landablePrefix
+  return prefix !== null && prefix !== undefined && prefix < stack.size
+}
+
+/* The diff facet: the two revision pickers, then the file rows of the diff at those pins, each opening the one-file diff card. */
+const ChangeDiffFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
   const { payload } = card
-  if (payload.checks === null) {
-    return <p className="world-card-empty">checks not read ({payload.unread?.checks ?? NO_REASON})</p>
-  }
-  if (payload.checks.length === 0) {
-    return <p className="world-card-empty">No checks recorded at this revision.</p>
-  }
+  const canSplit = splittable(payload)
+  const diff = payload.diff
+  const from = diff?.from ?? "parent"
+  const to = diff?.to ?? "current"
+  const humanReviewed = (payload.reviews ?? []).some((review) => review.reviewerKind !== "agent" && review.lastReviewedSeq !== null)
   return (
-    <ul className="world-card-list">
-      {payload.checks.map((check) => (
-        <li key={check.context} className="world-card-row">
-          <span className="world-card-title">{check.context}</span>
-          <StatusPill
-            status={check.state === "success" ? "done" : check.state === "failure" || check.state === "error" ? "failed" : "pending"}
-          />
-          <span className="world-card-path">{check.state}</span>
+    <div className="world-card-list">
+      {payload.revisions.length > 0 ?
+        (
+          <div className="world-card-row change-pins">
+            <select
+              aria-label="Diff from"
+              data-flow="change.pins"
+              value={from}
+              onChange={(event) => onRunCommand("change.pins", `${payload.changeId} ${event.target.value} ${to}`)}
+            >
+              <option value="parent">parent</option>
+              {payload.revisions.map((revision) => <option key={revision.seq} value={String(revision.seq)}>rev {revision.seq}</option>)}
+            </select>
+            <span className="world-card-path">→</span>
+            <select
+              aria-label="Diff to"
+              data-flow="change.pins"
+              value={to}
+              onChange={(event) => onRunCommand("change.pins", `${payload.changeId} ${from} ${event.target.value}`)}
+            >
+              {payload.revisions.map((revision) => <option key={revision.seq} value={String(revision.seq)}>rev {revision.seq}</option>)}
+              <option value="current">current</option>
+            </select>
+            {diff?.sinceReview !== null && diff?.sinceReview !== undefined ?
+              (
+                <>
+                  <span className="world-card-path">since your review at rev {diff.sinceReview.seq} → {pinLabel(to)}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    data-flow="change.pins"
+                    aria-label="Show the whole diff, parent to current"
+                    onClick={() => onRunCommand("change.pins", `${payload.changeId} parent current`)}
+                  >
+                    show all
+                  </Button>
+                </>
+              ) :
+              humanReviewed ?
+              (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  data-flow="review.since-mine"
+                  aria-label="Show the diff since my last review"
+                  onClick={() => onRunCommand("review.since-mine", payload.changeId)}
+                >
+                  since my review
+                </Button>
+              ) :
+              null}
+          </div>
+        ) :
+        null}
+      {diff === null ?
+        <p className="world-card-empty">diff of {payload.changeId} not read ({payload.unread?.diff ?? NO_REASON})</p> :
+        diff.files.length === 0 ?
+        <p className="world-card-empty">{payload.changeId} changes no files {pinLabel(from)} → {pinLabel(to)}.</p> :
+        (
+          <ul className="world-card-list">
+            {diff.files.map((file) => (
+              <li key={file.path} className="world-card-row">
+                <FileDiff size={14} aria-hidden="true" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-flow="change.diff"
+                  aria-label={`Open the diff of ${file.path}`}
+                  onClick={() => onRunCommand("change.diff", `${payload.changeId} ${from} ${to} ${file.path}`)}
+                >
+                  <span className="world-card-title">{file.path}</span>
+                </Button>
+                <span className="world-card-path">
+                  {file.changeType} · +{file.additions} −{file.deletions}
+                </span>
+                {/* plue#489: move this file's diff into a new change; offered only while the stack's landable prefix is short. */}
+                {canSplit ?
+                  (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      data-flow="change.split"
+                      aria-label={`Split ${file.path} into a new change`}
+                      onClick={() => onRunCommand("change.split", `${payload.changeId} ${file.path}`)}
+                    >
+                      <Split size={12} aria-hidden="true" /> Split
+                    </Button>
+                  ) :
+                  null}
+              </li>
+            ))}
+          </ul>
+        )}
+    </div>
+  )
+}
+
+/* A check's work in words, only when the row states any (a row of zeros states no work). */
+const checkWork = (check: NonNullable<ChangePayload["checks"]>[number]): string | null => {
+  const affected = check.targetsAffected ?? 0
+  const ran = check.targetsRan ?? 0
+  const cached = check.targetsCached ?? 0
+  const duration = check.durationMs ?? 0
+  if (affected === 0 && ran === 0 && cached === 0 && duration === 0) return null
+  const seconds = duration >= 1000 ? `${Math.round(duration / 1000)}s` : `${duration}ms`
+  return `${affected} affected · ${ran} ran · ${cached} cached · ${seconds}`
+}
+
+/* The checks facet: the revision picker, one row per context (newest answer per context) with its work. Unread (null) is never "no checks". */
+const ChangeChecksFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
+  const { payload } = card
+  const at = payload.checksAt ?? payload.currentSeq
+  const revision = payload.revisions.find((candidate) => candidate.seq === at)
+  return (
+    <div className="world-card-list">
+      {payload.revisions.length > 0 ?
+        (
+          <div className="world-card-row change-pins">
+            <span className="world-card-path">at</span>
+            <select
+              aria-label="Checks at revision"
+              data-flow="change.checks"
+              value={at === null ? "" : String(at)}
+              onChange={(event) => onRunCommand("change.checks", `${payload.changeId} ${event.target.value}`)}
+            >
+              {payload.revisions.map((candidate) => <option key={candidate.seq} value={String(candidate.seq)}>rev {candidate.seq}</option>)}
+            </select>
+            <OpenComputer changeId={payload.changeId} revision={revision} onRunCommand={onRunCommand} />
+          </div>
+        ) :
+        null}
+      {payload.checks === null ?
+        <p className="world-card-empty">checks not read ({payload.unread?.checks ?? NO_REASON})</p> :
+        payload.checks.length === 0 ?
+        <p className="world-card-empty">No checks recorded at this revision.</p> :
+        (
+          <ul className="world-card-list">
+            {payload.checks.map((check) => {
+              const work = checkWork(check)
+              return (
+                <li key={check.context} className="world-card-row">
+                  <span className="world-card-title">{check.context}</span>
+                  <StatusPill
+                    status={check.state === "success" ? "done" : check.state === "failure" || check.state === "error" ? "failed" : "pending"}
+                  />
+                  <span className="world-card-path">{check.state}</span>
+                  {work !== null ? <span className="world-card-path">{work}</span> : null}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+    </div>
+  )
+}
+
+/* The findings facet: the analyzer runs as headers, then one row per finding with its revision, state, feedback, and the two acts. */
+const ChangeFindingsFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
+  const { payload } = card
+  if (payload.findings === null) {
+    return <p className="world-card-empty">findings not read ({payload.unread?.findings ?? NO_REASON})</p>
+  }
+  const analyzers = payload.analyzers ?? []
+  return (
+    <div className="world-card-list">
+      {analyzers.length > 0 ?
+        (
+          <ul className="world-card-list" aria-label="Analyzer runs">
+            {analyzers.map((run) => (
+              <li key={`${run.name}-${run.seq ?? ""}`} className="world-card-row">
+                <span className="world-card-title">{run.name}</span>
+                <span className="world-card-path">
+                  {run.state}
+                  {run.seq !== null ? ` · rev ${run.seq}` : ""}
+                  {run.pausedReason !== null ? ` · ${run.pausedReason}` : ""}
+                  {run.failureReason !== null ? ` · ${run.failureReason}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) :
+        null}
+      {payload.findings.length === 0 && analyzers.length === 0 ?
+        <p className="world-card-empty">No findings recorded for {payload.changeId}.</p> :
+        null}
+      {payload.findings.length > 0 ?
+        (
+          <ul className="world-card-list" aria-label="Findings">
+            {payload.findings.map((finding, index) => {
+              const dimmed = finding.feedback !== null && finding.feedback !== undefined
+              return (
+                <li key={finding.id ?? index} className={dimmed ? "world-card-row change-finding change-finding--dimmed" : "world-card-row change-finding"}>
+                  <span className="world-card-title">{finding.severity}</span>
+                  <span className="world-card-path">{finding.analyzer}</span>
+                  <span className="world-card-path">{finding.path}{finding.line !== null ? `:${finding.line}` : ""}</span>
+                  <span className="world-card-title">{finding.summary}</span>
+                  <span className="world-card-path">
+                    {finding.raisedAtSeq !== null ? `rev ${finding.raisedAtSeq}` : ""}
+                    {finding.state === "stale" ? " · stale" : ""}
+                    {dimmed ? ` · ${(finding.feedback ?? "").replaceAll("_", " ")}` : ""}
+                  </span>
+                  {finding.id !== null && finding.id !== undefined ?
+                    (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          data-flow="findings.please-fix"
+                          aria-label={`Dispatch the agent on finding ${finding.id}`}
+                          onClick={() => onRunCommand("findings.please-fix", `${payload.changeId} ${finding.id}`)}
+                        >
+                          Please fix
+                        </Button>
+                        {dimmed ? null : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            data-flow="findings.not-useful"
+                            aria-label={`Mark finding ${finding.id} not useful`}
+                            onClick={() => onRunCommand("findings.not-useful", `${payload.changeId} ${finding.id}`)}
+                          >
+                            Not useful
+                          </Button>
+                        )}
+                      </>
+                    ) :
+                    null}
+                </li>
+              )
+            })}
+          </ul>
+        ) :
+        null}
+    </div>
+  )
+}
+
+const THREAD_GLYPH: Readonly<Record<NonNullable<ChangeThread["state"]>, string>> = { open: "○", done: "◐", resolved: "●" }
+
+/*
+ * The Request review picker (ADR 0004 "Suggested reviewers … inside the
+ * Request review picker"; plue#488 `review_requests[]` on the landing DTO).
+ * One row per request the landing carries — a human by login or a named
+ * agent, plue's own state word, and who asked — with Unrequest on a request
+ * still standing. An unread list says so; a read empty list says nobody has
+ * been asked, which is a fact, not a blank.
+ */
+const RequestReviewPicker = ({
+  payload,
+  onRunCommand
+}: { readonly payload: ChangePayload } & ChangeCardActions) => {
+  const requests = payload.reviewRequests
+  if (requests === undefined) return null
+  if (requests === null) {
+    return <p className="world-card-empty">review requests not read ({payload.unread?.reviewRequests ?? NO_REASON})</p>
+  }
+  if (requests.length === 0) return <p className="world-card-empty">Nobody has been asked to review {payload.changeId}.</p>
+  return (
+    <ul className="world-card-list" aria-label="Review requests">
+      {requests.map((request) => (
+        <li key={request.id} className="world-card-row">
+          <span className="world-card-title">{request.reviewer ?? `agent ${request.agent ?? ""}`.trim()}</span>
+          <span className="world-card-path">
+            {request.state}
+            {request.requestedBy !== null ? ` · asked by ${request.requestedBy}` : ""}
+          </span>
+          {request.state === "requested" ?
+            (
+              <Button
+                size="sm"
+                variant="outline"
+                data-flow="review.unrequest"
+                aria-label={`Dismiss review request ${request.id}`}
+                onClick={() => onRunCommand("review.unrequest", `${payload.changeId} ${request.id}`)}
+              >
+                Unrequest
+              </Button>
+            ) :
+            null}
         </li>
       ))}
     </ul>
@@ -163,16 +529,46 @@ const ChangeChecksFacet = ({ card }: { readonly card: ChangeCard }) => {
 }
 
 /*
- * The review facet: the verdicts, then the threads; stale/moved tokens never
- * render until plue#453. An unread list (null) says so with its reason; "No
- * review is recorded" is stated only when both lists were read and are empty.
+ * The review facet: the verdict strip (each reviewer with the revision they
+ * judged, the agent's confidence WORD, revisions since), the owners line,
+ * then the threads with their lifecycle glyph, anchor token, and one-click
+ * Done / Ack / Reopen, then the Suggested reviewers slot. An unread list
+ * (null) says so with its reason; "No review is recorded" is stated only
+ * when both lists were read and are empty.
  */
-const ChangeReviewFacet = ({ card }: { readonly card: ChangeCard }) => {
+const ChangeReviewFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
   const { payload } = card
   const reviews = payload.reviews ?? []
   const threads = payload.threads ?? []
+  const owners = ownersLine(payload)
+  const suggested = suggestedReviewers(payload)
+  const since = payload.diff?.sinceReview ?? null
+  const threadActs = (thread: ChangeThread): ReadonlyArray<readonly [string, string, string]> => {
+    if (thread.id === null || thread.id === undefined || thread.state === null || thread.state === undefined) return []
+    if (thread.state === "open") return [["review.done", "Done", `Mark thread ${thread.id} done`]]
+    if (thread.state === "done") {
+      return [["review.ack", "Ack", `Acknowledge thread ${thread.id}`], ["review.reopen", "Reopen", `Reopen thread ${thread.id}`]]
+    }
+    return [["review.reopen", "Reopen", `Reopen thread ${thread.id}`]]
+  }
   return (
     <div className="world-card-list">
+      {since !== null ?
+        (
+          <p className="world-card-row">
+            <span className="world-card-path">since your review at rev {since.seq} → {pinLabel(payload.diff?.to ?? "current")}</span>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-flow="change.pins"
+              aria-label="Show the whole diff, parent to current"
+              onClick={() => onRunCommand("change.pins", `${payload.changeId} parent current`)}
+            >
+              show all
+            </Button>
+          </p>
+        ) :
+        null}
       {payload.reviews === null ?
         <p className="world-card-empty">reviews not read ({payload.unread?.reviews ?? NO_REASON})</p> :
         null}
@@ -180,28 +576,83 @@ const ChangeReviewFacet = ({ card }: { readonly card: ChangeCard }) => {
         <p className="world-card-empty">threads not read ({payload.unread?.threads ?? NO_REASON})</p> :
         null}
       {reviews.length === 0 ? null : (
-        <ul className="world-card-list">
-          {reviews.map((review, index) => (
-            <li key={index} className="world-card-row">
-              <span className="world-card-title">{review.type}</span>
-              {review.body !== "" ? <span className="world-card-path">{review.body}</span> : null}
-            </li>
-          ))}
+        <ul className="world-card-list" aria-label="Verdicts">
+          {reviews.map((review, index) => {
+            const since = revisionsSince(payload.currentSeq, review.seq)
+            return (
+              <li key={index} className="world-card-row">
+                {/* plue#500 `reviewer_login`: the login, or an agent session's title — never the id `reviewer` carries. */}
+                <span className="world-card-title">{review.reviewerLogin ?? review.reviewer ?? review.reviewerKind ?? "review"}</span>
+                <span className="world-card-path">
+                  {review.reviewerKind === "agent" && review.reviewer !== null ? "agent · " : ""}
+                  {review.verdict}
+                  {/* plue#484 `type`: how the verdict counts to the gate, stated only when it is a different word. */}
+                  {review.type !== null && review.type !== undefined && review.type !== review.verdict ? ` · ${review.type}` : ""}
+                  {review.seq !== null ? ` at rev ${review.seq}` : ""}
+                  {review.confidence !== null ? ` · ${review.confidence} confidence` : ""}
+                  {since !== null ? ` · ${since}` : ""}
+                </span>
+                {review.summary !== "" ? <span className="world-card-path">"{review.summary}"</span> : null}
+              </li>
+            )
+          })}
         </ul>
       )}
+      {owners !== null ? <p className="world-card-path">{owners}</p> : null}
       {threads.length === 0 ? null : (
-        <ul className="world-card-list">
+        <ul className="world-card-list" aria-label="Threads">
           {threads.map((thread, index) => (
-            <li key={index} className="world-card-row">
+            <li key={thread.id ?? index} className="world-card-row">
+              {thread.state !== null && thread.state !== undefined ? <span aria-label={`thread ${thread.state}`}>{THREAD_GLYPH[thread.state]}</span> : null}
               <span className="world-card-path">
                 {thread.path ?? "file"}{thread.line !== null ? `:${thread.line}` : ""}
+                {thread.anchor === "moved" && thread.currentLine !== null && thread.currentLine !== undefined ? ` → :${thread.currentLine}` : ""}
+                {/* plue#484 `user_login`: the thread's author by name (ADR 0004's `· will ·`). */}
+                {thread.author !== null ? ` · ${thread.author}` : ""}
+                {revisionLabel(payload.revisions, thread.commitId ?? null) !== null ? ` · ${revisionLabel(payload.revisions, thread.commitId ?? null)}` : ""}
+                {thread.anchor === "stale" ? " · stale" : thread.anchor === "moved" ? " · moved" : ""}
               </span>
               <span className="world-card-title">{thread.body}</span>
+              {thread.state === "done" && thread.resolvedInRevision?.seq !== null && thread.resolvedInRevision?.seq !== undefined ?
+                <span className="world-card-path">done at rev {thread.resolvedInRevision.seq}</span> :
+                null}
+              {thread.state === "resolved" ? <span className="world-card-path">resolved</span> : null}
+              {threadActs(thread).map(([flow, label, aria]) => (
+                <Button
+                  key={flow}
+                  size="sm"
+                  variant="outline"
+                  data-flow={flow}
+                  aria-label={aria}
+                  onClick={() => onRunCommand(flow, `${payload.changeId} ${thread.id}`)}
+                >
+                  {label}
+                </Button>
+              ))}
             </li>
           ))}
         </ul>
       )}
-      {threads.length > 0 ? <p className="world-card-empty">{NO_STALE_TOKEN}</p> : null}
+      <RequestReviewPicker payload={payload} onRunCommand={onRunCommand} />
+      {suggested !== null ?
+        (
+          <p className="world-card-row">
+            <span className="world-card-path">Suggested reviewers ·</span>
+            {suggested.length === 0 ? <span className="world-card-path">none</span> : suggested.map((login) => (
+              <Button
+                key={login}
+                size="sm"
+                variant="ghost"
+                data-flow="review.request"
+                aria-label={`Request review from ${login}`}
+                onClick={() => onRunCommand("review.request", `${payload.changeId} ${login}`)}
+              >
+                {login}
+              </Button>
+            ))}
+          </p>
+        ) :
+        null}
       {payload.reviews !== null && payload.threads !== null && reviews.length === 0 && threads.length === 0 ?
         <p className="world-card-empty">No review is recorded for {payload.changeId}.</p> :
         null}
@@ -209,22 +660,153 @@ const ChangeReviewFacet = ({ card }: { readonly card: ChangeCard }) => {
   )
 }
 
-/* The history facet: the revisions list post-plue#450; the degraded wording until then. */
-const ChangeHistoryFacet = ({ card }: { readonly card: ChangeCard }) => {
+/* The history facet: one row per revision with its provenance and acts, then the landed row (plue#450, #464). */
+const ChangeHistoryFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
   const { payload } = card
-  if (payload.revisions.length === 0) {
-    return <p className="world-card-empty">{NO_REVISION_HISTORY}</p>
+  const landed = payload.landed ?? null
+  if (payload.revisions.length === 0 && landed === null) {
+    return <p className="world-card-empty">No revisions recorded for {payload.changeId}.</p>
   }
   return (
-    <ul className="world-card-list">
+    <ul className="world-card-list" aria-label="Revisions">
       {payload.revisions.map((revision) => (
         <li key={revision.seq} className="world-card-row">
           <History size={14} aria-hidden="true" />
           <span className="world-card-title">rev {revision.seq}</span>
-          <span className="world-card-path">{shortId(revision.commitId)}</span>
+          <span className="world-card-path">
+            {shortId(revision.commitId)}
+            {revision.source !== undefined ? ` · ${revision.source}` : ""}
+            {revision.agentSessionId !== undefined ? ` · agent session ${shortId(revision.agentSessionId)}` : ""}
+            {revision.workspaceSnapshotId !== undefined ? ` · snapshot ${revision.workspaceSnapshotId}` : ""}
+            {revision.createdAt !== undefined ? ` · ${when(revision.createdAt)}` : ""}
+          </span>
+          {payload.currentSeq !== null && revision.seq < payload.currentSeq ?
+            (
+              <Button
+                size="sm"
+                variant="ghost"
+                data-flow="change.pins"
+                aria-label={`Diff rev ${revision.seq} to current`}
+                onClick={() => onRunCommand("change.pins", `${payload.changeId} ${revision.seq} current`)}
+              >
+                Diff to current
+              </Button>
+            ) :
+            null}
+          <OpenComputer changeId={payload.changeId} revision={revision} onRunCommand={onRunCommand} />
         </li>
       ))}
+      {landed !== null ?
+        (
+          <li className="world-card-row">
+            <GitMerge size={14} aria-hidden="true" />
+            <span className="world-card-title">landed</span>
+            <span className="world-card-path">
+              {/* plue#485: the landing request's NUMBER, which is what addresses it everywhere else. */}
+              {landed.landingRequestNumber != null ? `landing #${landed.landingRequestNumber} · ` : ""}
+              {landed.by !== null ? `by ${landed.by}` : ""}
+              {landed.approvedBy.length > 0 ?
+                ` · approved by ${landed.approvedBy.map((approver) => approver.seq === null ? approver.login : `${approver.login} at rev ${approver.seq}`).join(", ")}` :
+                ""}
+              {landed.at !== null ? ` · ${when(landed.at)}` : ""}
+            </span>
+          </li>
+        ) :
+        null}
     </ul>
+  )
+}
+
+/* The owners facet (ADR 0004 row 10): one row per touched path — its owners by name, the policy word, and who satisfied it or who is asked. */
+const ChangeOwnersFacet = ({ card, onRunCommand }: { readonly card: ChangeCard } & ChangeCardActions) => {
+  const owners = card.payload.owners
+  if (owners === null || owners === undefined) return null
+  const candidatesFor = (path: string): ReadonlyArray<string> =>
+    owners.missingApprovals.find((missing) => missing.path === path)?.candidates ?? []
+  return (
+    <div className="world-card-list">
+      {owners.touchedPaths.length === 0 ?
+        <p className="world-card-empty">No owned paths are touched.</p> :
+        (
+          <ul className="world-card-list" aria-label="Touched paths">
+            {owners.touchedPaths.map((touched) => {
+              const candidates = candidatesFor(touched.path)
+              return (
+                <li key={touched.path} className="world-card-row">
+                  <span className="world-card-title">{touched.path}</span>
+                  <span className="world-card-path">
+                    {touched.owners.length > 0 ? touched.owners.join(", ") : "no owners"}
+                    {touched.agentPolicy !== "" ? ` · ${touched.agentPolicy}` : ""}
+                    {touched.satisfiedBy !== null ?
+                      ` · approved by ${touched.satisfiedBy.login}${touched.satisfiedBy.seq !== null ? ` at rev ${touched.satisfiedBy.seq}` : ""}` :
+                      candidates.length > 0 ?
+                      ` · missing · ask` :
+                      ""}
+                  </span>
+                  {/* ADR 0004 row 10, live on plue#488: each candidate is one click of review.request. */}
+                  {touched.satisfiedBy === null ?
+                    candidates.map((candidate) => (
+                      <Button
+                        key={candidate}
+                        size="sm"
+                        variant="outline"
+                        data-flow="review.request"
+                        aria-label={`Request review of ${touched.path} from ${candidate}`}
+                        onClick={() => onRunCommand("review.request", `${card.payload.changeId} ${candidate}`)}
+                      >
+                        {candidate}
+                      </Button>
+                    )) :
+                    null}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      {owners.requiredApprovers.length > 0 ? <p className="world-card-path">Required approvers · {owners.requiredApprovers.join(", ")}</p> : null}
+      <p className="world-card-row">
+        <span className="world-card-path">Suggested reviewers ·</span>
+        {(suggestedReviewers(card.payload) ?? []).length === 0 ?
+          <span className="world-card-path">none</span> :
+          (suggestedReviewers(card.payload) ?? []).map((login) => (
+            <Button
+              key={login}
+              size="sm"
+              variant="ghost"
+              data-flow="review.request"
+              aria-label={`Request review from ${login}`}
+              onClick={() => onRunCommand("review.request", `${card.payload.changeId} ${login}`)}
+            >
+              {login}
+            </Button>
+          ))}
+      </p>
+    </div>
+  )
+}
+
+/* The walkthrough facet (plue#465): the artifact's sections, a diagram's source when one rides, and the quiz count. */
+const ChangeWalkthroughFacet = ({ card }: { readonly card: ChangeCard }) => {
+  const walkthrough = card.payload.walkthrough
+  if (walkthrough === null || walkthrough === undefined) return null
+  return (
+    <div className="world-card-list">
+      {walkthrough.seq !== null ? <p className="world-card-path">walkthrough of rev {walkthrough.seq}</p> : null}
+      {walkthrough.sections.length === 0 ? <p className="world-card-empty">The walkthrough has no sections.</p> : (
+        <ul className="world-card-list" aria-label="Walkthrough sections">
+          {walkthrough.sections.map((section, index) => (
+            <li key={index} className="world-card-list">
+              <span className="world-card-title">{section.title}</span>
+              <p className="world-card-path">{section.markdown}</p>
+              {section.diagram !== null ? <pre className="world-card-path">{section.diagram}</pre> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {walkthrough.quiz.length > 0 ?
+        <p className="world-card-path">Quiz · {walkthrough.quiz.length} question{walkthrough.quiz.length === 1 ? "" : "s"}</p> :
+        null}
+    </div>
   )
 }
 
@@ -236,27 +818,13 @@ const ChangeFacetBody = ({
   readonly card: ChangeCard
   readonly facet: ChangeFacet
 } & ChangeCardActions) => {
-  const { payload } = card
   if (facet === "diff") return <ChangeDiffFacet card={card} onRunCommand={onRunCommand} />
-  if (facet === "findings") {
-    if (payload.findings === null || payload.findings.length === 0) {
-      return <p className="world-card-empty">{NO_FINDINGS}</p>
-    }
-    return (
-      <ul className="world-card-list">
-        {payload.findings.map((finding, index) => (
-          <li key={index} className="world-card-row">
-            <span className="world-card-title">{finding.severity}</span>
-            <span className="world-card-path">{finding.path ?? "change"}{finding.line !== null ? `:${finding.line}` : ""}</span>
-            <span className="world-card-title">{finding.summary}</span>
-          </li>
-        ))}
-      </ul>
-    )
-  }
-  if (facet === "checks") return <ChangeChecksFacet card={card} />
-  if (facet === "review") return <ChangeReviewFacet card={card} />
-  return <ChangeHistoryFacet card={card} />
+  if (facet === "findings") return <ChangeFindingsFacet card={card} onRunCommand={onRunCommand} />
+  if (facet === "checks") return <ChangeChecksFacet card={card} onRunCommand={onRunCommand} />
+  if (facet === "review") return <ChangeReviewFacet card={card} onRunCommand={onRunCommand} />
+  if (facet === "owners") return <ChangeOwnersFacet card={card} onRunCommand={onRunCommand} />
+  if (facet === "walkthrough") return <ChangeWalkthroughFacet card={card} />
+  return <ChangeHistoryFacet card={card} onRunCommand={onRunCommand} />
 }
 
 export const ChangeCardBody = ({
@@ -264,26 +832,69 @@ export const ChangeCardBody = ({
   onRunCommand
 }: { readonly card: ChangeCard } & ChangeCardActions) => {
   const { payload } = card
-  const facet: ChangeFacet = payload.facet ?? "diff"
+  const facets = facetsOf(payload)
+  const wanted: ChangeFacet = payload.facet ?? "diff"
+  /* A facet whose data is absent (a walkthrough that vanished, no owners) falls back to the diff rather than an empty tab. */
+  const facet: ChangeFacet = facets.some(([name]) => name === wanted) ? wanted : "diff"
   const landed = payload.changeset?.state === "landed" || payload.stack?.state === "merged"
   const land = landAct(payload)
+  const turn = payload.turn ?? null
+  const agentReviews = (payload.reviews ?? []).filter((review) => review.reviewerKind === "agent")
+  const humanReviews = (payload.reviews ?? []).filter((review) => review.reviewerKind !== "agent")
+  const owners = ownersLine(payload)
   return (
     <div className="world-card-list">
       <p className="world-card-row">
         <span className="world-card-path">
           {payload.repo} · {payload.changeId}
+          {payload.currentSeq !== null && payload.revisionCount !== null ? ` · rev ${payload.currentSeq} of ${payload.revisionCount}` : ""}
           {payload.commitId !== null ? ` · ${shortId(payload.commitId)}` : ""}
           {payload.authorName !== null ? ` · ${payload.authorName}` : ""}
         </span>
         {payload.stack !== null ? <StatusPill {...landingPill(payload.stack.state)} /> : null}
+        {/* plue#484: the turn names its actor's LOGIN (a username, or an agent session's title); the party alone when it names none. */}
+        {turn !== null ?
+          (
+            <span className="world-card-path">
+              turn: {turn.actorLogin ?? turn.party}
+              {turn.actorLogin !== null && turn.actorLogin !== undefined ? ` · ${turn.party}` : ""}
+            </span>
+          ) :
+          null}
       </p>
-      {payload.timestamp !== null ? <p className="world-card-path">{payload.timestamp.replace("T", " ").slice(0, 16)}</p> : null}
+      {payload.timestamp !== null ? <p className="world-card-path">{when(payload.timestamp)}</p> : null}
       {payload.description !== "" ? <p className="world-card-title">{payload.description.split("\n")[0]}</p> : null}
       {payload.repos.length > 0 ?
         (
           <p className="world-card-path">
             {payload.repos.map((stat) => `${stat.repo} +${stat.additions} −${stat.deletions}`).join(" · ")}
           </p>
+        ) :
+        null}
+      {/* The three-bit review strip (ADR 0004): the agent's verdict with its confidence WORD, the human approval with revisions since, the owners line. */}
+      {agentReviews.length > 0 || humanReviews.length > 0 || owners !== null ?
+        (
+          <ul className="world-card-list" aria-label="Review strip">
+            {agentReviews.map((review, index) => (
+              <li key={`agent-${index}`} className="world-card-path">
+                agent {review.verdict}
+                {review.seq !== null ? ` at rev ${review.seq}` : ""}
+                {review.confidence !== null ? ` (${review.confidence} confidence)` : ""}
+              </li>
+            ))}
+            {humanReviews.map((review, index) => {
+              const since = revisionsSince(payload.currentSeq, review.seq)
+              return (
+                <li key={`human-${index}`} className="world-card-path">
+                  {/* plue#500: the same login the Review facet's row reads. */}
+                  {review.reviewerLogin ?? review.reviewer ?? "someone"} {review.verdict}
+                  {review.seq !== null ? ` at rev ${review.seq}` : ""}
+                  {since !== null ? ` · ${since}` : ""}
+                </li>
+              )
+            })}
+            {owners !== null ? <li className="world-card-path">{owners}</li> : null}
+          </ul>
         ) :
         null}
       {payload.conflicts === null ?
@@ -352,9 +963,13 @@ export const ChangeCardBody = ({
       {payload.stack !== null ?
         (
           <p className="world-card-path">
-            Landing #{payload.stack.landingNumber} · position {payload.stack.position} of {payload.stack.size} by request order ·{" "}
+            Landing #{payload.stack.landingNumber} · position {payload.stack.position} of {payload.stack.size}
+            {payload.stack.positionFrom === "server" ? "" : " by request order"} ·{" "}
             {payload.stack.state} → {payload.stack.targetBookmark}
             {payload.stack.conflictStatus === "conflicted" ? " · conflicted" : ""}
+            {payload.stack.landablePrefix !== null && payload.stack.landablePrefix !== undefined ?
+              ` · ${payload.stack.landablePrefix} of ${payload.stack.size} landable` :
+              ""}
           </p>
         ) :
         null}
@@ -362,7 +977,7 @@ export const ChangeCardBody = ({
         <p className="sui-approval-error" role="alert">{payload.error}</p> :
         null}
       <div className="world-card-row" role="tablist" aria-label="Change facets">
-        {FACET_LABELS.map(([name, label]) => (
+        {facets.map(([name, label]) => (
           <Button
             key={name}
             size="sm"
@@ -437,8 +1052,10 @@ export const DiffCardBody = ({
   return (
     <div className="world-card-list">
       <p className="world-card-path">
-        {payload.repo} · {payload.changeId} · {payload.from} → {payload.to}
-        {payload.pin.commitId !== null ? ` · pinned at ${shortId(payload.pin.commitId)}` : ""}
+        {payload.repo} · {payload.changeId} · {pinLabel(payload.from)} → {pinLabel(payload.to)}
+        {payload.pin.commitId !== null ?
+          ` · pinned at ${payload.pin.seq !== null ? `rev ${payload.pin.seq} · ` : ""}${shortId(payload.pin.commitId)}` :
+          ""}
       </p>
       {payload.error !== undefined ?
         <p className="sui-approval-error" role="alert">{payload.error}</p> :
@@ -468,7 +1085,11 @@ export const DiffCardBody = ({
           )
         }
         if (file.patch !== undefined) {
-          return <pre key={`patch-${file.path}`} className="world-card-path">{file.patch}</pre>
+          return (
+            <Suspense key={`patch-${file.path}`} fallback={<pre className="world-card-path">{file.patch}</pre>}>
+              <DiffSurface path={file.path} oldPath={file.oldPath} patch={file.patch} />
+            </Suspense>
+          )
         }
         if (file.patchLines !== undefined) {
           return (

@@ -2,15 +2,20 @@
  * The lane-sync cards (ADR 0005): the connector-setup card (one kind serves
  * both handoffs — the Linear wizard authorize → team → repository → confirm,
  * the same card turned connected state, and the GitHub App install/reconcile)
- * and the sync-ops card (Linear syncs and GitHub mirror syncs; the ops feed
- * is plue#468, so the degraded note renders and no op is ever faked). Every
- * act binds a registered flow through onRunCommand with data-flow set; the
- * rate-limit line follows the ADR (`… · 0 of 5 000 · resets 12:40 · Retry
- * after`, Retry disabled until the reset).
+ * and the sync-ops card (Linear sync runs and their ops, GitHub mirror runs
+ * and their per-ref results). Every act binds a registered flow through
+ * onRunCommand with data-flow set; the rate-limit line follows the ADR
+ * (`… · 0 of 5 000 · resets 12:40 · Retry after`, Retry disabled until the
+ * reset).
+ *
+ * Every state word on this card is the WIRE's own — a run state, an op
+ * status, a repository's `mirror_status` — and rides `StatusPill`, whose
+ * shared vocabulary already tints all of them. Nothing here renames a
+ * backend word, and a failed op is never filtered out of the list.
  */
-import { Badge, Button } from "@smthrs/ui"
+import { Badge, Button, StatusPill } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
-import { Check, Circle, ExternalLink, Plug, RefreshCw, Unplug, X } from "lucide-react"
+import { Check, Circle, ExternalLink, Minus, Plug, RefreshCw, Unplug, X } from "lucide-react"
 import { useCallback, useState, useSyncExternalStore } from "react"
 import { useController } from "../ControllerContext"
 import { ageLabel, timeLabel, untilLabel } from "../Timestamps"
@@ -144,6 +149,8 @@ const LinearSetupBody = ({ card, onRunCommand }: { readonly card: ConnectorSetup
           <span className="world-card-title">{`${integration.teamKey} · ${integration.teamName} → ${repo}`}</span>
           <Badge variant={integration.active ? "success" : "muted"}>{integration.active ? "active" : "inactive"}</Badge>
         </div>
+        {/* plue#491 `linear_actor`: the Linear account whose authorization this integration syncs with. */}
+        {card.payload.actor != null ? <p className="world-card-path">{`authorized as ${card.payload.actor}`}</p> : null}
         {integration.lastSyncAt !== null ?
           <p className="world-card-path">{`last sync ${ageLabel(integration.lastSyncAt)}`}</p> :
           null}
@@ -280,30 +287,86 @@ export const ConnectorSetupCardBody = ({
 
 const OP_LIMIT = 10
 
+/*
+ * The row glyph, from the WIRE's own status word (ADR 0005: "status glyph,
+ * source → target, entity and id, action, age"). A Linear op reads `pending
+ * | success | failed | skipped`, a mirror ref `pending | succeeded |
+ * failed`; both vocabularies land here and neither is renamed on screen —
+ * the word itself still rides the badge beside the glyph.
+ */
+export const opGlyph = (status: string) => {
+  switch (status) {
+    case "success":
+    case "succeeded":
+    case "done":
+      return <Check size={14} aria-hidden="true" />
+    case "failed":
+      return <X size={14} aria-hidden="true" />
+    case "skipped":
+      return <Minus size={14} aria-hidden="true" />
+    default:
+      return <Circle size={14} aria-hidden="true" fill="currentColor" />
+  }
+}
+
+/**
+ * The mirror header's count line (ADR 0005 `behind GitHub · 3 refs`), off
+ * plue#491's `behind_refs` / `failed_refs` on the repository DTO. Null when
+ * the DTO named no count — the word alone is then the whole truth, and no
+ * number is invented for it.
+ */
+export const mirrorRefsLine = (payload: SyncOpsCard["payload"]): string | null => {
+  const parts: Array<string> = []
+  const { behindRefs, failedRefs } = payload
+  if (behindRefs !== undefined && behindRefs > 0) parts.push(`behind GitHub · ${behindRefs} ref${behindRefs === 1 ? "" : "s"}`)
+  if (failedRefs !== undefined && failedRefs > 0) parts.push(`${failedRefs} failed`)
+  return parts.length === 0 ? null : parts.join(" · ")
+}
+
 export const SyncOpsCardBody = ({ card, onRunCommand }: { readonly card: SyncOpsCard } & SyncCardActions) => {
-  const { subject, runState, counts, trigger, ops, opsNote, hasOlder, expanded } = card.payload
+  const { subject, runId, runState, counts, mirrorStatus, trigger, ops, opsNote, hasOlder, expanded } = card.payload
   const shown = expanded === true ? ops : ops.slice(0, OP_LIMIT)
+  const refsLine = mirrorRefsLine(card.payload)
+  /*
+   * The Retry an op row offers is its OWN backend's: a Linear op retries
+   * through `sync.retry <opId>`, a mirror ref through plue#491's per-ref
+   * route. One row, two routes, and neither card ever offers the other's.
+   */
+  const retryFlow = card.payload.source === "github-mirror" ? "github.mirror.retry-ref" : "sync.retry"
+  const retryArgs = (opId: string): string =>
+    card.payload.source === "github-mirror" ? `${opId} ${card.payload.repo ?? ""}`.trim() : opId
   return (
     <div className="world-card-list">
       <div className="world-card-row">
         <span className="world-card-title">{subject}</span>
-        {runState !== null ?
-          <Badge variant={runState === "done" ? "success" : runState === "failed" ? "destructive" : "outline"}>{runState}</Badge> :
-          null}
+        {/* The run's own state word, and — for a mirror — the repository's. */}
+        {runState !== null ? <StatusPill status={runState} /> : null}
+        {mirrorStatus !== undefined ? <Badge variant="outline">{mirrorStatus}</Badge> : null}
       </div>
+      {refsLine !== null ? <p className="world-card-path">{refsLine}</p> : null}
       {counts != null ?
         <p className="world-card-path">{`${counts.done} of ${counts.total} · ${counts.failed} failed`}</p> :
         null}
+      {runId != null && trigger == null ? <p className="world-card-path">{`run ${runId}`}</p> : null}
       {trigger != null ? <p className="world-card-path">{trigger}</p> : null}
       {shown.map((op) => (
-        <div key={op.id} className="world-card-row">
+        <div key={op.id} className="world-card-row" data-testid={`sync-op-${op.id}`}>
+          <span className="connect-store-icon">{opGlyph(op.status)}</span>
           <span className="world-card-title">
             {`${op.source} → ${op.target} ${op.entity}${op.entityId !== null ? ` ${op.entityId}` : ""} ${op.action}`}
           </span>
-          <Badge variant={op.status === "done" ? "success" : op.status === "failed" ? "destructive" : "outline"}>{op.status}</Badge>
-          {op.status === "failed" && op.retryable ?
+          <StatusPill status={op.status} />
+          {op.at !== null ? <span className="world-card-path">{ageLabel(op.at)}</span> : null}
+          {/* A failed op keeps its error verbatim on its own line, with Retry — never hidden, never summarized. */}
+          {op.retryable ?
             (
-              <Button size="sm" variant="ghost" data-flow="sync.retry" onClick={() => onRunCommand("sync.retry", op.id)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                data-flow={retryFlow}
+                aria-label={`Retry ${op.entity} ${op.entityId ?? op.id}`}
+                onClick={() => onRunCommand(retryFlow, retryArgs(op.id))}
+              >
                 <RefreshCw size={14} /> Retry
               </Button>
             ) :
@@ -315,12 +378,21 @@ export const SyncOpsCardBody = ({ card, onRunCommand }: { readonly card: SyncOps
         (
           <div className="world-card-row">
             <Button size="sm" variant="ghost" data-flow="sync.ops.show-more" onClick={() => onRunCommand("sync.ops.show-more", card.id)}>
-              Show more
+              {`Show more (${ops.length - OP_LIMIT})`}
             </Button>
           </div>
         ) :
         null}
-      {hasOlder === true ? <p className="world-card-path">Older ops exist beyond this cut.</p> : null}
+      {/* ADR 0005: the Activity view pages the feed rather than cutting it off. */}
+      {hasOlder === true ?
+        (
+          <div className="world-card-row">
+            <Button size="sm" variant="ghost" data-flow="sync.ops.load-older" onClick={() => onRunCommand("sync.ops.load-older", card.id)}>
+              Load older
+            </Button>
+          </div>
+        ) :
+        null}
       {opsNote !== undefined ? <p className="world-card-path">{opsNote}</p> : null}
       {card.payload.rateLimit !== undefined ? <RateLimitLine rateLimit={card.payload.rateLimit} /> : null}
       {card.payload.error !== undefined ? <p className="world-card-path">{card.payload.error}</p> : null}

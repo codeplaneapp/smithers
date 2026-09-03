@@ -9,7 +9,6 @@
  * argv.
  */
 import { Smithers } from "@smthrs/targets"
-import { bunRuntime, packageManager } from "../../PACKAGE.ts"
 
 const cwd = "apps/ui"
 
@@ -43,7 +42,6 @@ const suiteSources = Smithers.glob("//apps/ui/e2e/**/*.ts")
  * @category build
  */
 const check = Smithers.Typecheck({
-  packageManager,
   /*
    * Everything this tsconfig includes: `scripts`, `e2e`, and the bundler and
    * Electrobun configs are compiled by this target, so a key made of `src`
@@ -74,7 +72,7 @@ const check = Smithers.Typecheck({
  * @category test
  */
 const unitTests = Smithers.NodeTest({
-  runtime: bunRuntime,
+  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
   runner: Smithers.testSuite(["src"]),
   srcs: [sources, componentSources, styleSources],
   deps: [],

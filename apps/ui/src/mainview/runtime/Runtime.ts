@@ -1,6 +1,6 @@
-import { APP_BOOTSTRAP_PATH, AppBootstrapSchema, hasCapability } from "smithers-shared/AppBootstrap"
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
-import type { FetchLike, StartAgentTurnResult } from "smithers-shared/NativeAgent"
+import { APP_BOOTSTRAP_PATH, AppBootstrapSchema, hasCapability } from "@smthrs/rpc/AppBootstrap"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
+import type { FetchLike, StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createWebAgent } from "../native/WebAgent"
 

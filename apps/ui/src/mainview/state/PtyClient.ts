@@ -1,4 +1,4 @@
-import type { FetchLike } from "smithers-shared/NativeAgent"
+import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 
 /*
  * The PTY transport (docs/LOCAL-APP.md "HTTP and WebSocket API"): one

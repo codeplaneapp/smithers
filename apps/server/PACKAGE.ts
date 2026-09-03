@@ -11,7 +11,6 @@
  * argv.
  */
 import { Smithers } from "@smthrs/targets"
-import { bunRuntime, packageManager } from "../../PACKAGE.ts"
 
 const cwd = "apps/server"
 
@@ -28,7 +27,6 @@ const sources = [
  * @category build
  */
 const check = Smithers.Typecheck({
-  packageManager,
   srcs: sources,
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
@@ -45,7 +43,7 @@ const check = Smithers.Typecheck({
  * @category test
  */
 const unitTests = Smithers.NodeTest({
-  runtime: bunRuntime,
+  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
   runner: Smithers.testSuite(["src", "scripts"]),
   srcs: sources,
   deps: [],

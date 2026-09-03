@@ -1,7 +1,7 @@
 /*
  * The dev fixture seam (goal lane ui/ui): while the backend's target-graph
  * routes land in parallel, the cards can be driven end-to-end from the
- * captured force fixtures (apps/shared/fixtures/force/) plus a scripted run
+ * captured force fixtures (packages/rpc/fixtures/force/) plus a scripted run
  * stream — `started` → `node` (pending → running → settled, with timings)
  * → `summary` frames on a timer. This is EXPLICIT dev tooling: it activates
  * only when the `smithers.dev.targetGraphFixtures` localStorage flag is "1"
@@ -9,8 +9,8 @@
  * product path never sees it — `createTargetGraphDevFixtures` answers
  * undefined unless the flag is on.
  */
-import graphFixture from "../../../../shared/fixtures/force/graph.json"
-import planFixture from "../../../../shared/fixtures/force/plan-typeCheck.json"
+import graphFixture from "../../../../../packages/rpc/fixtures/force/graph.json"
+import planFixture from "../../../../../packages/rpc/fixtures/force/plan-typeCheck.json"
 import type {
   AffectedResponse,
   CiMatrixResponse,
@@ -20,14 +20,14 @@ import type {
   RunReplayResponse,
   TargetGraphResponse,
   TargetRunEvent
-} from "smithers-shared/TargetGraph"
-import { criticalPath } from "smithers-shared/TargetGraph"
+} from "@smthrs/rpc/TargetGraph"
+import { criticalPath } from "@smthrs/rpc/TargetGraph"
 import {
   CliGraphEnvelopeSchema,
   CliPlanEnvelopeSchema,
   mergePlanFacts,
   targetGraphFromCli
-} from "smithers-shared/TargetGraphFixture"
+} from "@smthrs/rpc/TargetGraphFixture"
 
 export const TARGET_GRAPH_FIXTURE_FLAG = "smithers.dev.targetGraphFixtures"
 

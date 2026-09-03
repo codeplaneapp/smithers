@@ -55,10 +55,34 @@ const numbered = (args: string | undefined, reason: string): Parsed => {
   return ok(repo === undefined ? { number } : { number, repo })
 }
 
+/** The three sandbox kinds `workspace.open --kind` accepts (ADR 0002). */
+const KINDS: ReadonlyArray<string> = ["container", "vm", "desktop"]
+
 const tokensOf = (args: string | undefined): Array<string> =>
   trimmed(args)
     .split(/\s+/)
     .filter((token) => token !== "")
+
+/**
+ * `<path>:<line>:<col> [owner/repo]` (docs/code-intel/PLAN.md §4): a 1-based
+ * position in a file, both numbers required. Only the TRAILING `:n:n` comes
+ * off the token, so a path with a colon of its own keeps working, as
+ * files.read's anchor does.
+ */
+const positioned = (name: string, args: string | undefined): Parsed => {
+  const tokens = tokensOf(args)
+  const [token, repo] = tokens
+  const usage = `/${name} <path>:<line>:<col> [owner/repo]`
+  if (token === undefined) return no(`${name} needs a position: ${usage}`)
+  if (tokens.length > 2) return no(`${name} takes a position and optionally an owner/repo`)
+  const match = /^(.+):(\d+):(\d+)$/.exec(token)
+  if (match === null) return no(`${name} needs <path>:<line>:<col>: ${usage}`)
+  const [, path = "", lineText = "", columnText = ""] = match
+  const line = Number(lineText)
+  const column = Number(columnText)
+  if (line === 0 || column === 0) return no(`${name} lines and columns count from 1: ${usage}`)
+  return ok({ path, line, column, ...(repo === undefined ? {} : { repo }) })
+}
 
 /**
  * A repository id followed by an optional workspace and a target label
@@ -103,6 +127,16 @@ const targetRef = (name: string, args: string | undefined): Parsed => {
  * hint gets, since `parseSubmit` routes `/name <text>` for such a flow to the
  * agent as a prompt rather than to the flow.
  */
+/** `<changeId> <n>`: a change id followed by one positive id (a thread, a finding). */
+const numberedChangeRef = (name: string, field: string, what: string, args: string | undefined): Parsed => {
+  const [changeId, raw, ...rest] = tokensOf(args)
+  const id = Number(raw)
+  if (changeId === undefined || raw === undefined || rest.length > 0 || !Number.isInteger(id) || id <= 0) {
+    return no(`${name} takes a change id and ${what}`)
+  }
+  return ok({ changeId, [field]: id })
+}
+
 const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = {
   "appearance.theme": (args) => ok({ palette: args ?? "" }),
   "chat.send": (args) => required("text", args, "send needs the text to submit"),
@@ -228,6 +262,8 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "world.select": (args) => required("documentId", args, "world.select needs the document id"),
   "world.delete": (args) => required("documentId", args, "world.delete needs the document id"),
   "toast.dismiss": (args) => required("toastId", args, "toast.dismiss needs the toast id"),
+  /* The flow the card names as absent; blank renders the generic "That is not in the web app". */
+  "app.download.prompt": (args) => optional("flow", args),
   "repos.import": (args) => repoOnly("repos.import", args),
   "issues.list": (args) => {
     const { rest, repo } = splitTrailingRepo(args)
@@ -309,12 +345,25 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
    */
   "workspace.list": (args) => repoOnly("workspace.list", args),
   "workspace.open": (args) => {
-    const { rest, repo } = splitTrailingRepo(args)
+    /*
+     * ADR 0002: the kind IS the choice, so it rides the line as `--kind
+     * <container|vm|desktop>` wherever the caller put it — the card's three
+     * buttons append it, a human may type it anywhere. Everything left after
+     * it is the bookmark and the optional trailing owner/repo.
+     */
+    const flagged = /(?:^|\s)--kind(?:\s+(\S+))?/.exec(args ?? "")
+    if (flagged !== null && (flagged[1] === undefined || !KINDS.includes(flagged[1]))) {
+      return no("workspace.open's kind must be container, vm, or desktop")
+    }
+    const kind = flagged?.[1]
+    const line = flagged === null ? args : (args ?? "").replace(flagged[0], " ")
+    const { rest, repo } = splitTrailingRepo(line)
     const bookmark = rest.trim()
     if (/\s/.test(bookmark)) return no("workspace.open takes a bookmark and optionally an owner/repo")
     return ok({
       ...(bookmark === "" ? {} : { bookmark }),
-      ...(repo === undefined ? {} : { repo })
+      ...(repo === undefined ? {} : { repo }),
+      ...(kind === undefined ? {} : { kind })
     })
   },
   "workspace.view": (args) => required("workspaceId", args, "workspace.view needs a workspace id"),
@@ -396,6 +445,50 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     }
     return ok({ workspaceId, facet })
   },
+  /*
+   * Lane L3: the facet reads. A path is one token (plue's own listing refuses
+   * a name with a separator in it), so the workspace id, when given, trails
+   * it; the egress cursor is plue's opaque base64 keyset position and trails
+   * the workspace id.
+   */
+  "workspace.files": (args) => {
+    const [path, workspaceId, ...rest] = tokensOf(args)
+    if (rest.length > 0) return no("workspace.files takes a path and optionally a workspace id")
+    return ok({
+      ...(path === undefined ? {} : { path }),
+      ...(workspaceId === undefined ? {} : { workspaceId })
+    })
+  },
+  "workspace.file": (args) => {
+    const [path, workspaceId, ...rest] = tokensOf(args)
+    if (path === undefined) return no("workspace.file needs a path: /workspace.file <path> [workspaceId]")
+    if (rest.length > 0) return no("workspace.file takes a path and optionally a workspace id")
+    return ok(workspaceId === undefined ? { path } : { path, workspaceId })
+  },
+  "workspace.services": (args) => optional("workspaceId", args),
+  /* Lane L3b: the desktop mints a credential, so it is always addressed by id. */
+  "workspace.desktop": (args) => required("workspaceId", args, "workspace.desktop needs a workspace id"),
+  "workspace.desktop.rotate": (args) =>
+    required("workspaceId", args, "workspace.desktop.rotate needs a workspace id"),
+  "workspace.images": (args) => repoOnly("workspace.images", args),
+  "workspace.egress": (args) => {
+    const [workspaceId, cursor, ...rest] = tokensOf(args)
+    if (rest.length > 0) return no("workspace.egress takes a workspace id and optionally a page cursor")
+    return ok({
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+      ...(cursor === undefined ? {} : { cursor })
+    })
+  },
+  "egress.session": (args) => {
+    const [sessionId, repo, cursor, ...rest] = tokensOf(args)
+    if (sessionId === undefined) return no("egress.session needs an agent session id")
+    if (rest.length > 0) return no("egress.session takes a session id, optionally an owner/repo, then a page cursor")
+    return ok({
+      sessionId,
+      ...(repo === undefined ? {} : { repo }),
+      ...(cursor === undefined ? {} : { cursor })
+    })
+  },
   /* Lane change: a change id is one token; the pins and the path trail it. */
   "change.view": (args) => {
     const [changeId, rev, ...rest] = tokensOf(args)
@@ -419,6 +512,14 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   },
   "change.land": (args) => required("changeId", args, "change.land needs a change id"),
   "change.split-ready": (args) => required("changeId", args, "change.split-ready needs a change id"),
+  /* plue#489 splits by PATH, and refuses an empty list — so at least one path is the grammar. */
+  "change.split": (args) => {
+    const [changeId, ...paths] = tokensOf(args)
+    if (changeId === undefined || paths.length === 0) {
+      return no("change.split takes a change id and at least one path to move")
+    }
+    return ok({ changeId, paths })
+  },
   "change.resolve": (args) => {
     const [changeId, path, ...rest] = tokensOf(args)
     if (changeId === undefined || path === undefined || rest.length > 0) {
@@ -434,17 +535,81 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     }
     return ok({ changeId, facet })
   },
+  /* Lane L1: the pins and pickers are tokens; a thread or finding id is a positive number after the change id. */
+  "change.pins": (args) => {
+    const [changeId, from, to, ...rest] = tokensOf(args)
+    if (changeId === undefined || from === undefined || to === undefined || rest.length > 0) {
+      return no("change.pins takes a change id and two pins: parent|<rev> and <rev>|current")
+    }
+    return ok({ changeId, from, to })
+  },
+  "change.checks": (args) => {
+    const [changeId, seq, ...rest] = tokensOf(args)
+    const number = Number(seq)
+    if (changeId === undefined || seq === undefined || rest.length > 0 || !Number.isInteger(number) || number <= 0) {
+      return no("change.checks takes a change id and a revision number")
+    }
+    return ok({ changeId, seq: number })
+  },
+  "change.open-computer": (args) => {
+    const [changeId, snapshotId, ...rest] = tokensOf(args)
+    if (changeId === undefined || snapshotId === undefined || rest.length > 0) {
+      return no("change.open-computer takes a change id and the revision's snapshot id")
+    }
+    return ok({ changeId, snapshotId })
+  },
+  "review.since-mine": (args) => required("changeId", args, "review.since-mine needs a change id"),
+  "review.done": (args) => numberedChangeRef("review.done", "threadId", "a thread id", args),
+  "review.ack": (args) => numberedChangeRef("review.ack", "threadId", "a thread id", args),
+  "review.reopen": (args) => numberedChangeRef("review.reopen", "threadId", "a thread id", args),
+  /* plue#488: a login, or `agent:<name>` for a named agent — the seam sends whichever the wire expects. */
+  "review.request": (args) => {
+    const [changeId, reviewer, ...rest] = tokensOf(args)
+    if (changeId === undefined || reviewer === undefined || rest.length > 0) {
+      return no("review.request takes a change id and a login (or agent:<name>)")
+    }
+    return ok({ changeId, reviewer })
+  },
+  "review.unrequest": (args) => numberedChangeRef("review.unrequest", "requestId", "a review-request id", args),
+  "findings.please-fix": (args) => numberedChangeRef("findings.please-fix", "findingId", "a finding id", args),
+  "findings.not-useful": (args) => numberedChangeRef("findings.not-useful", "findingId", "a finding id", args),
   "files.list": (args) => {
     const tokens = tokensOf(args)
     if (tokens.length > 2) return no("files.list takes a path and optionally an owner/repo")
     const [path, repo] = tokens
     return ok(repo === undefined ? { path: path ?? "" } : { path: path ?? "", repo })
   },
+  /*
+   * The line anchor (docs/code-intel/PLAN.md §1): `<path>[:<line>[:<col>]]`.
+   * Only a TRAILING numeric suffix comes off the token, so a repository path
+   * with a colon of its own keeps working; the parser stays first-token-is-path.
+   */
   "files.read": (args) => {
     const tokens = tokensOf(args)
-    const [path, repo] = tokens
-    if (path === undefined || path === "") return no("files.read needs a file path")
+    const [token, repo] = tokens
+    if (token === undefined) return no("files.read needs a file path")
     if (tokens.length > 2) return no("files.read takes a path and optionally an owner/repo")
+    const anchor = /^(.*?):(\d+)(?::(\d+))?$/.exec(token)
+    const path = anchor === null ? token : anchor[1] ?? ""
+    if (path === "") return no("files.read needs a file path")
+    const line = anchor === null ? undefined : Number(anchor[2])
+    const column = anchor?.[3] === undefined ? undefined : Number(anchor[3])
+    if (line === 0 || column === 0) return no("files.read lines and columns count from 1: /files.read <path>[:<line>[:<col>]]")
+    return ok({
+      path,
+      ...(line === undefined ? {} : { line }),
+      ...(column === undefined ? {} : { column }),
+      ...(repo === undefined ? {} : { repo })
+    })
+  },
+  /* Code intelligence (docs/code-intel/PLAN.md §4): a position for hover and definition, a path for diagnostics. */
+  "code.hover": (args) => positioned("code.hover", args),
+  "code.definition": (args) => positioned("code.definition", args),
+  "code.diagnostics": (args) => {
+    const tokens = tokensOf(args)
+    const [path, repo] = tokens
+    if (path === undefined) return no("code.diagnostics needs a file path: /code.diagnostics <path> [owner/repo]")
+    if (tokens.length > 2) return no("code.diagnostics takes a path and optionally an owner/repo")
     return ok(repo === undefined ? { path } : { path, repo })
   },
   "repos.app": (args) => repoOnly("repos.app", args),
@@ -453,6 +618,12 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "github.app.open": (args) => repoOnly("github.app.open", args),
   "github.reconcile": (args) => repoOnly("github.reconcile", args),
   "github.mirror-sync": (args) => repoOnly("github.mirror-sync", args),
+  /* plue#491: the ref name is one token (it carries slashes) with the usual optional trailing repo. */
+  "github.mirror.retry-ref": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    if (rest === "" || /\s/.test(rest)) return no("github.mirror.retry-ref needs one ref name")
+    return ok(repo === undefined ? { ref: rest } : { ref: rest, repo })
+  },
   "repos.import.retry": (args) => required("jobId", args, "repos.import.retry needs the job id"),
   "linear.connect": (args) => repoOnly("linear.connect", args),
   "linear.connect.open": (args) => repoOnly("linear.connect.open", args),
@@ -482,6 +653,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   },
   "sync.retry": (args) => required("opId", args, "sync.retry needs an op id"),
   "sync.ops.show-more": (args) => required("cardId", args, "sync.ops.show-more needs the card id"),
+  "sync.ops.load-older": (args) => required("cardId", args, "sync.ops.load-older needs the card id"),
   "issues.link-linear": (args) => {
     const { rest, repo } = splitTrailingRepo(args)
     const [head, identifier, ...extra] = rest.split(/\s+/)
@@ -524,6 +696,8 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "admin.grant.confirm": (args) => required("cardId", args, "admin.grant.confirm needs the card id"),
   "admin.grant.cancel": (args) => required("cardId", args, "admin.grant.cancel needs the card id"),
   "admin.queue.approve": (args) => required("login", args, "admin.queue.approve needs a login"),
+  /* `[cwd]`: an OPEN working copy by path, id, name, or key; blank means the active one (the server never takes a bare path). */
+  "tab.terminal": (args) => optional("cwd", args),
   "tab.harness": (args) => required("harnessId", args, "tab.harness needs a harness id"),
   "agent.role": (args) => required("roleId", args, "agent.role needs a role id"),
   "agent.delegate": (args) => {
@@ -535,6 +709,57 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok({ roleId, task })
   },
   "agent.explain": (args) => required("what", args, "agent.explain needs something to explain: /agent.explain <what>"),
+  /*
+   * Agents as data (custom-agents.md). `agent.new` takes its prefill
+   * positionally; `agent.create` needs the three that define an agent, the
+   * purpose is the rest of the line; `agent.edit` reads `--model`,
+   * `--purpose`, `--label` anywhere on the line, each value running to the
+   * next flag; `agent.form` is a field name then the value (blank clears).
+   */
+  "agent.new": (args) => {
+    const [id, harness, model, ...rest] = tokensOf(args)
+    const purpose = rest.join(" ").trim()
+    return ok({
+      ...(id === undefined ? {} : { id }),
+      ...(harness === undefined ? {} : { harness }),
+      ...(model === undefined ? {} : { model }),
+      ...(purpose === "" ? {} : { purpose })
+    })
+  },
+  "agent.form": (args) => {
+    const [field, ...rest] = tokensOf(args)
+    if (field === undefined) return no("agent.form needs a field: label, purpose, harness, model, or cancel")
+    const value = trimmed(args).slice(field.length).trim()
+    return ok({ field, value: rest.length === 0 ? "" : value })
+  },
+  "agent.create": (args) => {
+    const [id, harness, model, ...rest] = tokensOf(args)
+    if (id === undefined || harness === undefined || model === undefined) {
+      return no("agent.create needs an id, a harness, and a model: /agent.create reviewer codex gpt-5.6-terra Reviews diffs")
+    }
+    const purpose = rest.join(" ").trim()
+    return ok(purpose === "" ? { id, harness, model } : { id, harness, model, purpose })
+  },
+  "agent.edit": (args) => {
+    const [id, ...rest] = tokensOf(args)
+    if (id === undefined) return no("agent.edit needs an agent id: /agent.edit <id> [--model <id>] [--purpose <text>] [--label <name>]")
+    const payload: Record<string, string> = { id }
+    let current: "model" | "purpose" | "label" | undefined
+    for (const token of rest) {
+      if (token === "--model" || token === "--purpose" || token === "--label") {
+        current = token.slice(2) as "model" | "purpose" | "label"
+        payload[current] = ""
+        continue
+      }
+      if (current === undefined) return no("agent.edit takes an id then --model, --purpose, or --label")
+      payload[current] = payload[current] === "" ? token : `${payload[current]} ${token}`
+    }
+    if (payload["model"] === "") return no("agent.edit's --model needs a model id")
+    if (payload["label"] === "") return no("agent.edit's --label needs a name")
+    return ok(payload)
+  },
+  "agent.remove": (args) => required("id", args, "agent.remove needs an agent id"),
+  "agent.models": (args) => required("harness", args, "agent.models needs a harness id: /agent.models opencode"),
   "tab.card": (args) => required("cardId", args, "tab.card needs the card id"),
   "tab.select": (args) => required("tab", args, "tab.select needs a tab id or a position 1-9"),
   "tab.read": (args) => required("tab", args, "tab.read needs a tab id"),
@@ -542,6 +767,20 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "tab.menu": (args) => optional("repo", args),
   "repo.select": (args) => required("repo", args, "repo.select needs a pinned repository key"),
   "repo.unpin": (args) => required("repo", args, "repo.unpin needs a pinned repository key"),
+  /* `<copyId>[#path]`: the tree row's own id, split at the first `#` (a copy id never carries one; a path may have spaces). */
+  "repo.tree": (args) => {
+    const text = trimmed(args)
+    if (text === "") return no("repo.tree needs a working copy id: /repo.tree <copyId>[#path]")
+    const hash = text.indexOf("#")
+    if (hash === -1) return ok({ copy: text })
+    const copy = text.slice(0, hash).trim()
+    const path = text.slice(hash + 1).trim()
+    if (copy === "") return no("repo.tree needs a working copy id: /repo.tree <copyId>[#path]")
+    return ok(path === "" ? { copy } : { copy, path })
+  },
+  "workspace.rename": (args) => required("name", args, "workspace.rename needs a name: /workspace.rename <name>"),
+  /* `[path]`: a typed path opens directly (where the host allows one); blank is the folder dialog, the human's door alone. */
+  "repo.open": (args) => optional("path", args),
   "target.run": (args) => targetRef("target.run", args),
   "target.open": (args) => targetRef("target.open", args),
   /* `<repoId> [workspace] <verb> <pattern>`: the last two tokens are the run; anything between is the workspace path. */

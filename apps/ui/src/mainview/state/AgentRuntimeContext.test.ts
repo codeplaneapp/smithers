@@ -1,6 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import { renderAgentRuntimeContext } from "@smthrs/rpc/AgentContext"
+import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
+import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -212,6 +214,88 @@ describe("per-turn runtime context", () => {
     controller.send("and now?")
     await settled()
     expect(requests[1]?.context?.tabs?.[1]).toMatchObject({ status: "exited", exitCode: 0 })
+  })
+
+  /*
+   * agent-parity.md: the agent tried /workspace.terminal, failed on the
+   * missing cloud session, and ran /auth.prompt — GitHub, already connected —
+   * because the context stated GitHub and never the Smithers Cloud session.
+   */
+  test("the native app's context states the Smithers Cloud session and names cloud.prompt when it is signed out", async () => {
+    const store = await webStore()
+    const requests: StartAgentTurnRequest[] = []
+    const controller = createAppController(store, unavailableRepositories, recordingAgent(requests), {
+      bootstrap: {
+        apiVersion: 1,
+        host: "local",
+        version: "test",
+        buildSha: "test",
+        capabilities: ["agent", "identity", "jjhub", "cloud.pat", "cloud.terminal"],
+        authFlow: "both",
+        sandbox: { platform: "darwin", mode: "enforced" }
+      }
+    })
+    await store.dispatch({ type: "cloud.session.loaded", actor: "system", state: "signed-out", username: null, expiresAt: null, scopes: null }).isPersisted.promise
+    controller.send("launch a terminal")
+    await settled()
+    expect(requests[0]?.context?.cloud).toEqual({ state: "signed-out", username: null })
+    const signedOut = renderAgentRuntimeContext(requests[0]?.context as AgentRuntimeContext)
+    expect(signedOut).toContain("- Smithers Cloud: signed out (workspaces, changes and sync need it; cloud.prompt renders the sign-in button).")
+
+    await store.dispatch({ type: "cloud.session.loaded", actor: "system", state: "signed-in", username: "will", expiresAt: null, scopes: null }).isPersisted.promise
+    controller.send("and now?")
+    await settled()
+    expect(requests[1]?.context?.cloud).toEqual({ state: "signed-in", username: "will" })
+    expect(renderAgentRuntimeContext(requests[1]?.context as AgentRuntimeContext)).toContain("- Smithers Cloud: signed in as will.")
+
+    await store.dispatch({ type: "cloud.session.loaded", actor: "system", state: "signed-in", username: "will", expiresAt: null, scopes: "degraded" }).isPersisted.promise
+    controller.send("workspaces?")
+    await settled()
+    expect(requests[2]?.context?.cloud).toEqual({ state: "degraded", username: "will" })
+  })
+
+  test("on the web the GitHub sign-in is the Smithers Cloud sign-in, so the cloud line follows the identity", async () => {
+    const store = await webStore()
+    const requests: StartAgentTurnRequest[] = []
+    const controller = createAppController(store, unavailableRepositories, recordingAgent(requests), {
+      bootstrap: {
+        apiVersion: 1,
+        host: "cloud",
+        version: "test",
+        buildSha: "cloud",
+        capabilities: ["agent", "identity", "jjhub"],
+        authFlow: "redirect",
+        sandbox: null
+      }
+    })
+    store.dispatch({ type: "identity.session.loaded", actor: "system", state: "signed-out", login: null, allowlisted: false, admin: false, scopesPlain: null })
+    controller.send("hi")
+    await settled()
+    expect(requests[0]?.context?.cloud).toEqual({ state: "signed-out", username: null })
+    store.dispatch({ type: "identity.session.loaded", actor: "system", state: "signed-in", login: "will", allowlisted: true, admin: false, scopesPlain: null })
+    controller.send("again")
+    await settled()
+    expect(requests[1]?.context?.cloud).toEqual({ state: "signed-in", username: "will" })
+  })
+
+  test("a host with no cloud door states the session unavailable", async () => {
+    const store = await webStore()
+    const requests: StartAgentTurnRequest[] = []
+    const controller = createAppController(store, unavailableRepositories, recordingAgent(requests), {
+      bootstrap: {
+        apiVersion: 1,
+        host: "local",
+        version: "test",
+        buildSha: "test",
+        capabilities: ["local.terminal"],
+        authFlow: "none",
+        sandbox: { platform: "darwin", mode: "enforced" }
+      }
+    })
+    controller.send("hi")
+    await settled()
+    expect(requests[0]?.context?.cloud).toEqual({ state: "unavailable", username: null })
+    expect(renderAgentRuntimeContext(requests[0]?.context as AgentRuntimeContext)).toContain("- Smithers Cloud: unavailable on this host.")
   })
 
   test("alone, the context says so and offers no tab.read", async () => {

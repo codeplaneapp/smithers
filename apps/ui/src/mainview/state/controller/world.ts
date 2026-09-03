@@ -1,6 +1,6 @@
 import { parseWikilinks, restoreWikilinks } from "@smthrs/ui/vault"
-import { MODEL_STREAM_PATH } from "smithers-shared/AgentApiRoutes"
-import type { AgentChatMessage } from "smithers-shared/NativeAgent"
+import { MODEL_STREAM_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import type { AgentChatMessage } from "@smthrs/rpc/NativeAgent"
 import { WORLD_DISPLAY_NAME } from "../AppState"
 import type { WorldDocument } from "../AppState"
 import type { AppStore } from "../AppStore"

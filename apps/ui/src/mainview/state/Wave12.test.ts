@@ -14,8 +14,8 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { Card } from "smithers-shared/Cards"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import type { Card } from "@smthrs/rpc/Cards"
+import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import type { AppServices } from "./AppController"
@@ -556,8 +556,9 @@ describe("wave 12 §2 — flow.create asks WHICH loaded repo", () => {
      * Lane runs changed flow.run.stop's stance deliberately: stopping a run
      * is consequential rather than browser mechanics, so the model may ASK
      * (confirm turns its invocation into a confirmation message; nothing runs
-     * until the human clicks) while flow.repo.choose and flow.run.retry stay
-     * user-only.
+     * until the human clicks). The three-door law (agent-parity.md) moved
+     * flow.run.retry to the same stance — a retry spends, so it confirms —
+     * while flow.repo.choose stays user-only: it is the human's ANSWER.
      */
     const store = await webStore()
     const double = relay()
@@ -567,13 +568,17 @@ describe("wave 12 §2 — flow.create asks WHICH loaded repo", () => {
     await controller.commands.run("flow.create", "summarize my open issues")
     expect(store.collections.cards.get("workflow-repo")).toBeDefined()
 
-    for (const name of ["flow.repo.choose", "flow.run.retry"]) {
-      const refused = await controller.commands.executeForAgent({
-        name: "commands",
-        arguments: JSON.stringify({ action: "execute", name, args: OTHER_REPO })
-      })
-      expect(refused).toContain("user-only")
-    }
+    const refused = await controller.commands.executeForAgent({
+      name: "commands",
+      arguments: JSON.stringify({ action: "execute", name: "flow.repo.choose", args: OTHER_REPO })
+    })
+    expect(refused).toContain("user-only")
+    expect(refused).toContain("the human's choice")
+    const retryAsked = await controller.commands.executeForAgent({
+      name: "commands",
+      arguments: JSON.stringify({ action: "execute", name: "flow.run.retry", args: OTHER_REPO })
+    })
+    expect(retryAsked).toContain("asked the user to confirm")
     // A stop the model asks for is a question, never an act: nothing was cancelled.
     const asked = await controller.commands.executeForAgent({
       name: "commands",

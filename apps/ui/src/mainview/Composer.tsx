@@ -27,13 +27,14 @@ import { activeRepoOf, parseRepoSelection, repoKeyOf, WORLD_DISPLAY_NAME } from 
 /** Stable Playwright handle; spread past ChatComposer's excess-property check. */
 const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "composer-input" }
 
-type Surface = "chat" | "world" | "connectors"
+type Surface = "chat" | "world" | "connectors" | "flows"
 
 /* The surface pill's label: what the composer is currently pointed at. */
 const SURFACE_LABELS: Readonly<Record<Surface, string>> = {
   chat: "Chat",
   world: WORLD_DISPLAY_NAME,
-  connectors: "Connect"
+  connectors: "Connect",
+  flows: "Flows"
 }
 
 /** Shorten the local host's conventional home-directory roots for display. */
@@ -96,6 +97,13 @@ function ComposerMenu({
       label: SURFACE_LABELS.world,
       icon: <BookOpen size={14} aria-hidden="true" />,
       active: surface === "world"
+    },
+    /* Ask 5 (will, 2026-09-02): the workspace's flows are a surface like the other three. */
+    {
+      flow: "flows",
+      label: SURFACE_LABELS.flows,
+      icon: <Workflow size={14} aria-hidden="true" />,
+      active: surface === "flows"
     }
   ] as const
 
@@ -221,8 +229,10 @@ function ComposerAdd({
   const controller = useController()
   const { collections } = controller.store
   const { data: harnessRows } = useLiveQuery(collections.harnesses)
+  const { data: agentRows } = useLiveQuery(collections.agents)
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const canAddFiles = controller.commands.find("files.add") !== undefined
+  const canNewAgent = controller.commands.find("agent.new") !== undefined
   const canAddConnector = controller.nativeRepositoriesAvailable &&
     controller.commands.find("connector.add") !== undefined
   const canCreateFlow = controller.commands.find("flow.create") !== undefined
@@ -273,9 +283,9 @@ function ComposerAdd({
         onChoose: () => controller.changeDraft("/flow.create ")
       }]
       : []),
-    /* The named roles (AgentRoles.ts), one model each; a raw harness follows for everything else. */
+    /* The agents (AgentRoles.ts + the app-agents mirror), one model each; a raw harness follows for everything else. */
     ...(canOpenHarness
-      ? roleMenuEntries(harnessRows).map((entry): MenuEntry => ({
+      ? roleMenuEntries(harnessRows, agentRows).map((entry): MenuEntry => ({
         key: `agent.role:${entry.role.id}`,
         flow: "agent.role",
         args: entry.role.id,
@@ -297,17 +307,32 @@ function ComposerAdd({
         testId: "composer-add-agent",
         disabled: availableHarness === undefined,
         ...(availableHarness === undefined ? {} : { args: availableHarness.id }),
+        /* The raw harness session, named the way the sidebar's `+` names it: the harness, then its account or status. */
         content: (
           <>
             <Bot size={14} aria-hidden="true" />
-            New agent…
+            {availableHarness?.displayName ?? firstHarness?.displayName ?? "Harness"}
             {availableHarness === undefined
               ? (
                 <span className="composer-connect-branch">
                   {firstHarness === undefined ? "no harness detected" : firstHarness.status}
                 </span>
               )
-              : <span className="composer-connect-branch">{availableHarness.displayName}</span>}
+              : <span className="composer-connect-branch">{availableHarness.account?.email ?? availableHarness.account?.label ?? ""}</span>}
+          </>
+        )
+      }]
+      : []),
+    /* Agents as data (custom-agents.md): the last row opens the New agent form card. */
+    ...(canNewAgent
+      ? [{
+        key: "agent.new",
+        flow: "agent.new",
+        testId: "composer-add-new-agent",
+        content: (
+          <>
+            <Bot size={14} aria-hidden="true" />
+            New agent…
           </>
         )
       }]

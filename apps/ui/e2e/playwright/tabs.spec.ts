@@ -149,10 +149,10 @@ test("the strip boots with the main tab and the + button alone", async ({ page }
   await page.goto("/")
   const strip = page.getByTestId("tab-strip")
   await expect(strip).toBeVisible()
-  await expect(page.getByTestId("tab-main")).toHaveAttribute("data-active", "true")
+  await expect(page.getByTestId("workspace-heading")).toHaveAttribute("data-active", "true")
   await expect(page.getByTestId("tab-add")).toBeVisible()
-  await expect(strip.locator(".tab")).toHaveCount(1)
-  // Main is not closable.
+  await expect(strip.locator(".tab")).toHaveCount(0)
+  // The heading is the workspace, not a closable row.
   await expect(page.getByTestId("tab-close-main")).toHaveCount(0)
   await expect(page.getByTestId("tab-body-main")).toBeVisible()
   await expect(page.getByTestId("transcript")).toBeVisible()
@@ -175,8 +175,8 @@ test("the sidebar pins the open repository as the active row and nests a new ter
   const row = section.locator(".repo-group[data-active=\"true\"]")
   await expect(row).toHaveCount(1)
   await expect(row.locator(".repo-name")).toHaveText("artsy/force")
-  // Smithers stays the first tab, above the Repos section.
-  const [main, repo] = await Promise.all([page.getByTestId("tab-main").boundingBox(), row.boundingBox()])
+  // The workspace heading stays first, above the repositories.
+  const [main, repo] = await Promise.all([page.getByTestId("workspace-heading").boundingBox(), row.boundingBox()])
   expect((repo?.y ?? 0) > (main?.y ?? 0)).toBe(true)
   await openTerminal(page)
   // The terminal nests under its repository, indented to its right.
@@ -252,7 +252,7 @@ test("the sidebar is vertical and its chrome stays visible inside a terminal tab
   await expect(page.getByTestId("tab-body-main")).toBeHidden()
   await expect(theme).toBeVisible()
   const [main, terminal] = await Promise.all([
-    page.getByTestId("tab-main").boundingBox(),
+    page.getByTestId("workspace-heading").boundingBox(),
     page.getByTestId(`tab-${SESSION_ID}`).boundingBox()
   ])
   // Stacked: the terminal tab sits BELOW main, nested (indented) under its repository row.
@@ -270,7 +270,7 @@ test("an agent from + runs in its own tab and is a subagent card in the conversa
   await expect(page.getByTestId(`tab-${SESSION_ID}`)).toHaveAttribute("data-active", "true")
   await expect(page.getByTestId(`terminal-${SESSION_ID}`)).toBeVisible()
   // Back in the conversation, the launch is a card — embedded, with the way back to the tab.
-  await page.getByTestId("tab-main").locator(".tab-select").click()
+  await page.getByTestId("workspace-name").click()
   const card = page.locator(".smithers-card[data-kind=agent]")
   await expect(card).toBeVisible()
   await expect(card).toContainText("Claude Code is running")
@@ -309,18 +309,18 @@ test("Cmd+W asks before closing a live terminal, then deletes its session; main 
   await page.keyboard.press("Meta+w")
   const dialog = page.getByRole("dialog")
   await expect(dialog).toBeVisible()
-  await dialog.getByRole("button", { name: "Close tab", exact: true }).click()
+  await dialog.getByRole("button", { name: "Close session", exact: true }).click()
 
   await expect(page.getByTestId(`tab-${tabId}`)).toHaveCount(0)
   await expect.poll(() => server.deleted).toEqual([SESSION_ID])
-  await expect(page.getByTestId("tab-main")).toHaveAttribute("data-active", "true")
+  await expect(page.getByTestId("workspace-heading")).toHaveAttribute("data-active", "true")
   await expect(page.getByTestId("tab-body-main")).toBeVisible()
 
   // Cmd+W on main: nothing to close, nothing asked.
   await page.keyboard.press("Meta+w")
   await expect(page.getByRole("dialog")).toHaveCount(0)
-  await expect(page.getByTestId("tab-main")).toBeVisible()
-  await expect(page.getByTestId("tab-strip").locator(".tab")).toHaveCount(1)
+  await expect(page.getByTestId("workspace-heading")).toBeVisible()
+  await expect(page.getByTestId("tab-strip").locator(".tab")).toHaveCount(0)
 })
 
 test("Cmd+1 selects the main tab and Cmd+T opens a terminal", async ({ page }) => {
@@ -329,7 +329,7 @@ test("Cmd+1 selects the main tab and Cmd+T opens a terminal", async ({ page }) =
   const tabId = await openTerminal(page)
 
   await page.keyboard.press("Meta+1")
-  await expect(page.getByTestId("tab-main")).toHaveAttribute("data-active", "true")
+  await expect(page.getByTestId("workspace-heading")).toHaveAttribute("data-active", "true")
   await expect(page.getByTestId("tab-body-main")).toBeVisible()
   await expect(page.getByTestId(`tab-body-${tabId}`)).toBeHidden()
 
@@ -369,6 +369,6 @@ test("a maximized card offers Open in tab; closing the tab keeps the card", asyn
   // Closing a card tab keeps the card in the transcript.
   await page.getByTestId(`tab-close-${tabId}`).click()
   await expect(page.getByTestId(`tab-${tabId}`)).toHaveCount(0)
-  await expect(page.getByTestId("tab-main")).toHaveAttribute("data-active", "true")
+  await expect(page.getByTestId("workspace-heading")).toHaveAttribute("data-active", "true")
   await expect(transcript.getByTestId("card-theme-picker")).toBeVisible()
 })

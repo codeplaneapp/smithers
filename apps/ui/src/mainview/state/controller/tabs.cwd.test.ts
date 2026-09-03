@@ -1,6 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { Harness, Repo } from "smithers-shared/LocalApp"
+import type { Harness, Repo } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { ControllerContext } from "./context"
 import { createTabsController } from "./tabs"

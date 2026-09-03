@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
-import { APP_BOOTSTRAP_PATH } from "smithers-shared/AppBootstrap"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
+import { APP_BOOTSTRAP_PATH } from "@smthrs/rpc/AppBootstrap"
 import { createRuntime, loadBootstrap } from "./Runtime"
 
 const cloud: AppBootstrap = {

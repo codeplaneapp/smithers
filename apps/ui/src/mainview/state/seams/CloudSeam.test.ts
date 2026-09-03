@@ -4,7 +4,7 @@ import {
   CLOUD_AUTH_SESSION_PATH,
   CLOUD_AUTH_SIGN_OUT_PATH,
   CLOUD_AUTH_START_PATH
-} from "smithers-shared/LocalApp"
+} from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
 import { createCloudSeam } from "./CloudSeam"

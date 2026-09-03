@@ -1,6 +1,7 @@
-import { AGENT_RUNTIME_CONTEXT_VERSION, renderAgentRuntimeContext } from "smithers-shared/AgentContext"
-import type { AgentRuntimeContext } from "smithers-shared/AgentContext"
-import type { AgentChatMessage, AgentTurnFrame } from "smithers-shared/NativeAgent"
+import { AGENT_RUNTIME_CONTEXT_VERSION, renderAgentRuntimeContext } from "@smthrs/rpc/AgentContext"
+import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
+import type { AgentChatMessage, AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import { agentVisibleCatalog } from "../../flows/agentTools"
 import type { CommandOutcome } from "../../flows/Commands"
 import { parseSubmit } from "../../flows/registry"
@@ -8,6 +9,7 @@ import { boundTurnRequest } from "../AgentTurnPolicy"
 import { CardPatchSchema, CardSchema, MAIN_TAB_ID } from "../AppState"
 import type { Card } from "../AppState"
 import { roleMenuEntries } from "../../AgentRoleMenu"
+import { currentAgentRoles } from "./agents"
 import type { ImpossibleAskClass, InstructionRole } from "../Instructions"
 import { CHAT_INSTRUCTIONS_CAP_BYTES, INSTRUCTIONS_HEADROOM_BYTES, bytesOf, smithersInstructions } from "../Instructions"
 import {
@@ -19,6 +21,7 @@ import {
   toolResultLaunchedRun
 } from "../RunClaims"
 import { worldContextDocuments } from "../WorldContext"
+import { downloadUrlOf } from "./app"
 import type { ActiveTurn, ControllerContext, PendingToolCall } from "./context"
 
 /**
@@ -102,6 +105,33 @@ export const createTurnController = (
    * product. It is never dispatched, so it never enters the persisted visible
    * transcript; it carries no secrets (only state the client already holds).
    */
+  /*
+   * The Smithers Cloud session as the model must know it (agent-parity.md):
+   * the native app holds a PAT session of its own (cloudSessions, mirrored
+   * from the Bun side); on the web the GitHub sign-in IS the Cloud sign-in
+   * (WEB_HOST_LINE), so the identity answers. A host with neither door is
+   * unavailable, and a session the host has not answered yet is too.
+   */
+  const cloudContext = (): NonNullable<AgentRuntimeContext["cloud"]> => {
+    const bootstrap = ctx.services.bootstrap
+    if (bootstrap?.host === "cloud") {
+      const identity = store.collections.identitySessions.get("identity")
+      if (identity?.state === "signed-in") return { state: "signed-in", username: identity.login }
+      return { state: identity?.state === "signed-out" ? "signed-out" : "unavailable", username: null }
+    }
+    if (bootstrap !== undefined && !hasCapability(bootstrap, "cloud.pat")) return { state: "unavailable", username: null }
+    const session = store.collections.cloudSessions.get("cloud")
+    switch (session?.state) {
+      case "signed-in":
+        return { state: session.scopes === "degraded" ? "degraded" : "signed-in", username: session.username }
+      case "signed-out":
+      case "signing-in":
+        return { state: "signed-out", username: null }
+      default:
+        return { state: "unavailable", username: null }
+    }
+  }
+
   const agentRuntimeContext = (): AgentRuntimeContext => {
     const snapshot = store.agentContextSnapshot()
     const current = store.session()
@@ -153,6 +183,7 @@ export const createTurnController = (
           ? { repositoryNames: loadedRepoIds }
           : {})
       },
+      cloud: cloudContext(),
       /*
        * §22.7: the client holds the balance; the model did not, so asked
        * for it, it answered "$0.00" one line above a card its own tool call
@@ -249,6 +280,9 @@ export const createTurnController = (
     const contextBytes = context === undefined ? 0 : bytesOf(renderAgentRuntimeContext(context)) + 2
     const budgetBytes = CHAT_INSTRUCTIONS_CAP_BYTES - INSTRUCTIONS_HEADROOM_BYTES - contextBytes
     return smithersInstructions(agentVisibleCatalog(ctx.commands.callable()), {
+      // The bootstrap is the one authority for the mode: the cloud Worker is the web app; anything else is native-shaped.
+      host: ctx.services.bootstrap?.host === "cloud" ? "web" : "native",
+      nativeDownloadable: downloadUrlOf(ctx.services) !== null,
       github: {
         connected: signedIn,
         login: signedIn ? identity.login : null,
@@ -272,7 +306,7 @@ export const createTurnController = (
   const instructionRoles = (): ReadonlyArray<InstructionRole> =>
     ctx.commands.find("agent.delegate") === undefined
       ? []
-      : roleMenuEntries([...store.collections.harnesses.values()]).map((entry) => ({
+      : roleMenuEntries([...store.collections.harnesses.values()], currentAgentRoles(store)).map((entry) => ({
         id: entry.role.id,
         label: entry.role.label,
         purpose: entry.role.purpose,
@@ -666,6 +700,14 @@ export const createTurnController = (
     if (typeof unsubscribe === "function") ctx.onDispose(unsubscribe)
   }
 
+  /** A miss the registry did not render itself, stated as the refusal the toast channel carries. */
+  const missAsFailure = (name: string, outcome: CommandOutcome): CommandOutcome =>
+    outcome.status === "unknown-command"
+      ? { status: "failed", error: `There is no /${name} flow. Type / to see everything Smithers can do.` }
+      : outcome.status === "unavailable" && outcome.action === null
+      ? { status: "failed", error: outcome.reason }
+      : outcome
+
   const send = (text: string): void => {
     const parsed = parseSubmit(text, ctx.commands.all())
     if (parsed.kind === "empty") return
@@ -674,13 +716,13 @@ export const createTurnController = (
        * §23.5: a name the app does not have used to go to the model as
        * prose, and the model reached for whatever flow it COULD see — so
        * `/reset` on a non-admin session ran `retry`. The app answers for
-       * its own registry.
+       * its own registry, through the one run path: a declared flow this
+       * host lacks the door for is refused by its door (Commands.ts settle —
+       * the download card when the native app is the answer, the sentence
+       * otherwise), and only a name no host has is "no such flow".
        */
       store.dispatch({ type: "composer.changed", actor: "user", draft: "" })
-      surfaceCommandFailure(parsed.name, {
-        status: "failed",
-        error: `There is no /${parsed.name} flow. Type / to see everything Smithers can do.`
-      })
+      void ctx.commands.run(parsed.name).then((outcome) => surfaceCommandFailure(parsed.name, missAsFailure(parsed.name, outcome)))
       return
     }
     if (parsed.kind === "command") {

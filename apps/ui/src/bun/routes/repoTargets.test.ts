@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { ReposResponseSchema, TargetRunMessageSchema, TargetsQueryResponseSchema } from "smithers-shared/LocalApp"
-import { LOCAL_SESSION_HEADER } from "smithers-shared/LocalSession"
+import { ReposResponseSchema, TargetRunMessageSchema, TargetsQueryResponseSchema } from "@smthrs/rpc/LocalApp"
+import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
 import { startLocalServer } from "../server"
 import type { LocalServer } from "../server"
 
@@ -251,8 +251,8 @@ describe("/api/targets/*", () => {
 })
 
 /*
- * One broken declaration anywhere in a checkout (a `vendor/jj` input on the
- * Smithers repository itself) fails `graph //...`; a run must still start
+ * One broken declaration anywhere in a checkout (a directory declared where
+ * a file belongs) fails `graph //...`; a run must still start
  * from the target's own `graph <label>`, and when that fails too the refusal
  * names the loader's reason instead of a bare "could not be revalidated".
  */
@@ -282,7 +282,7 @@ describe("/api/targets/run revalidates against the target's own graph when the w
         "  process.exit(0)",
         "}",
         "if (verb === \"graph\" && pattern === \"//...\") {",
-        "  console.log(JSON.stringify({ code: \"graph_failed\", message: \"declared input is not a regular file: vendor/jj\" }))",
+        "  console.log(JSON.stringify({ code: \"graph_failed\", message: \"declared input is not a regular file: packages/smithers/flows/jj/wasm\" }))",
         "  process.exit(1)",
         "}",
         "if (verb === \"graph\" && pattern === \"//:ok\") {",

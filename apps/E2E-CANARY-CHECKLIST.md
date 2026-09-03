@@ -26,14 +26,14 @@ that cannot run unattended · **GAP** nothing asserts it.
 
 |        | Required | PASS | PART | GAP |
 | ------ | -------: | ---: | ---: | --: |
-| E2E    |      132 |   40 |   45 |  47 |
+| E2E    |      129 |   40 |   44 |  45 |
 | Canary |       24 |   11 |    4 |   9 |
 
-Read that as: of 132 required e2e tests, 40 are genuinely asserted end to end
+Read that as: of 129 required e2e tests, 40 are genuinely asserted end to end
 today — and none of those 40 run in CI.
 
-Unit tests are healthy and not the problem: 687 pass, 0 fail
-(526 `apps/ui`, 108 `apps/server`, 33 `apps/shared`, 20 `apps/tui`).
+Unit tests are healthy and not the problem: 667 pass, 0 fail
+(526 `apps/ui`, 108 `apps/server`, 33 `packages/rpc`).
 
 The problem is above unit level:
 
@@ -252,16 +252,6 @@ Nothing in this group exists. The packaged binary is the shipped alpha artifact.
 | E14.3 | **A stale cached bundle after a deploy does not wedge the app**       | **GAP**          |
 | E14.4 | **Client errors reach a reporting sink, not only `console.error`**    | **GAP**          |
 | E14.5 | **Zero console errors on the signed-out and signed-in loads**         | PART (live only) |
-
-## E15. TUI
-
-|       | Test                                                                   | Status                                   |
-| ----- | ---------------------------------------------------------------------- | ---------------------------------------- |
-| E15.1 | Fixture NDJSON stream folds into the transcript; composer submit works | PART (`scripts/smoke.ts`, not in `test`) |
-| E15.2 | **A real turn against `wrangler dev` + stubs**                         | **GAP**                                  |
-| E15.3 | **Interrupt and retry from the TUI**                                   | **GAP**                                  |
-
----
 
 # Part 2 — Canary (live deployment)
 

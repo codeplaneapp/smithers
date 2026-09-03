@@ -10,8 +10,7 @@ import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { realpath, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join, relative } from "node:path"
-import type { Repo, RepoWorkspace } from "smithers-shared/LocalApp"
-import { readRepoPlugin } from "./RepoPlugin"
+import type { Repo, RepoWorkspace } from "@smthrs/rpc/LocalApp"
 import { currentSandboxHost, probePolicy, wrapSandbox } from "./Sandbox"
 
 export type SmithersDetection = Repo["smithers"]
@@ -291,7 +290,6 @@ export const inspectRepo = async (path: string): Promise<InspectRepoResult> => {
     ? await Promise.all([git(root, ["branch", "--show-current"]), git(root, ["remote", "get-url", "origin"])])
     : [null, null]
   const smithers = detectSmithers(root)
-  const manifest = readRepoPlugin(root, smithers.workspaces.map((workspace) => workspace.path))
   const jj = await probeJj(root)
   return {
     status: "ok",
@@ -301,8 +299,7 @@ export const inspectRepo = async (path: string): Promise<InspectRepoResult> => {
       name: ownerNameOf(remote) ?? basename(root),
       git: inside ? { branch, remote } : null,
       ...(jj === undefined ? {} : { jj }),
-      warnings: manifest.warnings,
-      ...(manifest.plugin === undefined ? {} : { plugin: manifest.plugin }),
+      warnings: [],
       smithers
     }
   }

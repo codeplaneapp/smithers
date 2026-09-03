@@ -8,7 +8,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { BrowserView, BrowserWindow, BuildConfig, Screen, Utils } from "electrobun/main"
-import type { SmithersNativeRPC } from "smithers-shared/NativeRPC"
+import type { SmithersNativeRPC } from "@smthrs/rpc/NativeRPC"
 import { encodeRgbaPng, startPackagedE2EBridge } from "./PackagedE2EBridge"
 import { defaultDistDir, startLocalServer } from "./server"
 

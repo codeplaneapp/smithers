@@ -6,12 +6,12 @@
  * one run's Gantt; `history` lists the recorded runs and selecting one
  * replays its events — the scrubber re-derives the timeline and the graph
  * overlay at the cursor; `affected` and `show ci` fill their cards from the
- * routes in smithers-shared/TargetGraph TARGET_GRAPH_ROUTES. Every store
+ * routes in @smthrs/rpc/TargetGraph TARGET_GRAPH_ROUTES. Every store
  * change goes through the dispatcher with its actor; while the backend's
  * routes land in parallel, an explicit dev flag (dev/fixtureRunStream.ts)
  * swaps the routes for the captured fixtures — never in the product path.
  */
-import type { TargetRunFrame } from "smithers-shared/LocalApp"
+import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
 import type {
   AffectedResponse,
   CiMatrixResponse,
@@ -20,7 +20,7 @@ import type {
   RunReplayResponse,
   RunSummary,
   TargetRunEvent
-} from "smithers-shared/TargetGraph"
+} from "@smthrs/rpc/TargetGraph"
 import {
   AffectedResponseSchema,
   CiMatrixResponseSchema,
@@ -28,7 +28,7 @@ import {
   RunReplayResponseSchema,
   TARGET_GRAPH_ROUTES,
   TargetGraphResponseSchema
-} from "smithers-shared/TargetGraph"
+} from "@smthrs/rpc/TargetGraph"
 
 import type { Card } from "../AppState"
 import { resolveOpenRepo } from "../RepoContext"

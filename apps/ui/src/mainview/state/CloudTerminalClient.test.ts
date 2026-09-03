@@ -101,7 +101,11 @@ const track = (terminal: CloudTerminalClient): CloudTerminalClient => {
   return terminal
 }
 
-const client = (server: Harness, reconnectMs = 20, extra: { readonly maxReconnectMs?: number; readonly maxReconnectsPerMinute?: number } = {}) =>
+const client = (
+  server: Harness,
+  reconnectMs = 20,
+  extra: { readonly maxReconnectMs?: number; readonly maxReconnectsPerMinute?: number; readonly earlyExitMs?: number } = {}
+) =>
   track(createCloudTerminalClient({
     socketUrl: () => server.url,
     socketProtocol: () => "smithers.local.test",
@@ -284,6 +288,56 @@ test("1011 retries once, then is final", async () => {
   expect(output[0]).toContain("failed to attach terminal")
   await Bun.sleep(120)
   expect(server.protocols.length).toBe(2)
+  terminal.dispose()
+})
+
+/*
+ * plue#504: a guest whose NixOS activation has not finished answers the login
+ * shell with exit 127, and the durable session closes NORMALLY (1000) carrying
+ * plue's own reason. plue retries that once itself; the client's redial is the
+ * renderer's half of the same instruction, and the reason is the person's only
+ * account of what happened, so it is never swallowed.
+ */
+test("an early exit-127 close redials once, then reads plue's own reason (plue#504)", async () => {
+  const server = serve({ onOpen: (socket) => socket.close(1000, "session exited: Process exited with status 127") })
+  const terminal = client(server, 10)
+  const output: Array<string> = []
+  terminal.attach("will/smithers", "sess-1", { onOutput: (data) => output.push(data) })
+  await until(() => output.length === 1)
+  /* plue's sentence, verbatim — never "session closed" in its place. */
+  expect(output[0]).toContain("session exited: Process exited with status 127")
+  await Bun.sleep(120)
+  /* Exactly one redial: the first dial and its retry, and no third. */
+  expect(server.protocols.length).toBe(2)
+  terminal.dispose()
+})
+
+test("an exit-127 close after the startup window is final: the reason still reads verbatim", async () => {
+  const server = serve({
+    onOpen: (socket) => {
+      setTimeout(() => socket.close(1000, "session exited: Process exited with status 127"), 30)
+    }
+  })
+  const terminal = client(server, 10, { earlyExitMs: 5 })
+  const output: Array<string> = []
+  terminal.attach("will/smithers", "sess-1", { onOutput: (data) => output.push(data) })
+  await until(() => output.length === 1)
+  expect(output[0]).toContain("session exited: Process exited with status 127")
+  await Bun.sleep(120)
+  /* A shell that ran past the startup window died of something else; nothing redials. */
+  expect(server.protocols.length).toBe(1)
+  terminal.dispose()
+})
+
+test("a normal close carrying another reason reads it verbatim and never redials", async () => {
+  const server = serve({ onOpen: (socket) => socket.close(1000, "session exited: Process exited with status 1") })
+  const terminal = client(server, 10)
+  const output: Array<string> = []
+  terminal.attach("will/smithers", "sess-1", { onOutput: (data) => output.push(data) })
+  await until(() => output.length === 1)
+  expect(output[0]).toContain("session closed: session exited: Process exited with status 1")
+  await Bun.sleep(120)
+  expect(server.protocols.length).toBe(1)
   terminal.dispose()
 })
 

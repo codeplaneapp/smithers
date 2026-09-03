@@ -19,8 +19,8 @@
  * fails only the error rate. An endpoint that is up and reliable but slow fails
  * only latency. Collapsing them would lose which of the three is true.
  */
-import { AUTH_SCOPES_PATH, TURN_PATH } from "smithers-shared/AgentApiRoutes"
-import { AgentTurnFrameSchema } from "smithers-shared/NativeAgent"
+import { AUTH_SCOPES_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import { AgentTurnFrameSchema } from "@smthrs/rpc/NativeAgent"
 import { resolveOrigin } from "./BuildStamp.ts"
 
 const FIRST_FRAME_MAX_BYTES = 64 * 1024
@@ -458,7 +458,7 @@ export const alertAction = (inputs: AlertInputs): AlertAction => {
 /*
  * The endpoint plan.
  *
- * Paths come from smithers-shared/AgentApiRoutes, the same module the Worker
+ * Paths come from @smthrs/rpc/AgentApiRoutes, the same module the Worker
  * dispatches on, so renaming a route breaks this probe loudly instead of
  * leaving it probing a 404 forever.
  */

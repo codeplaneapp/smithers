@@ -2,7 +2,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterAll, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
-import type { NodeTiming } from "smithers-shared/TargetGraph"
+import type { NodeTiming } from "@smthrs/rpc/TargetGraph"
 import type { Card } from "../state/AppState"
 import { barGeometry, RunTimelineCardBody, timelineExtent } from "./RunTimelineCard"
 

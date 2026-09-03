@@ -4,7 +4,7 @@ Brief: `runs.md` (the seven P0 gaps of `../UI-COVERAGE-GAPS.md` §P0). Status:
 all seven steps shipped and green. Gates: `apps/ui` tsc clean and 1323 pass /
 3 fail (the three pre-existing `TargetGraph.integration.test.ts` failures that
 need the `~/artsy/force` fixture — the lane's baseline, unchanged);
-`apps/shared` 119 pass; `apps/server` 176 pass; the T1 Playwright spec passes.
+`packages/rpc` 119 pass; `apps/server` 176 pass; the T1 Playwright spec passes.
 The relay (step 1) and the card wire schema landed as `fce5e44994` and
 `a52a987155`; the rest is this lane's working tree.
 

@@ -11,7 +11,7 @@ import {
   AUTH_SIGN_IN_PATH,
   BILLING_BALANCE_PATH,
   IDENTITY_REQUEST_ACCESS_PATH
-} from "smithers-shared/AgentApiRoutes"
+} from "@smthrs/rpc/AgentApiRoutes"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 

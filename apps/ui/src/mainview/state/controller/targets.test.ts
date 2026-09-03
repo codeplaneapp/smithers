@@ -1,6 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { expect, test } from "bun:test"
-import type { TargetRunFrame } from "smithers-shared/LocalApp"
+import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { Card } from "../AppState"
 import type { TargetRunClient } from "../TargetRunClient"
@@ -202,12 +202,12 @@ test("target.select reads the target's facts once through the graph route and ke
 
 test("a graph read the server refuses lands on the card as that target's failed detail, not a blank", async () => {
   const { controller, card } = await routed({
-    "/api/targets/graph": () => Response.json({ message: "graph_failed: declared input is not a regular file: vendor/jj" }, { status: 500 })
+    "/api/targets/graph": () => Response.json({ message: "graph_failed: declared input is not a regular file: packages/smithers/flows/jj/wasm" }, { status: 500 })
   })
   await controller.selectTarget("repo-1", "//:lint")
   expect(card().payload.details?.["//:lint"]).toEqual({
     status: "failed",
-    error: "graph_failed: declared input is not a regular file: vendor/jj"
+    error: "graph_failed: declared input is not a regular file: packages/smithers/flows/jj/wasm"
   })
 })
 

@@ -1,6 +1,6 @@
 /*
  * The frames the backend RECORDS have to satisfy the contract the UI reads
- * (smithers-shared/TargetGraph): a run-local `seq` on every frame, a graph
+ * (@smthrs/rpc/TargetGraph): a run-local `seq` on every frame, a graph
  * response that carries the declaration `digest` the card compares to decide
  * staleness, and a run store whose memory is bounded by a chatty run.
  *
@@ -10,8 +10,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { TargetRunEvent } from "smithers-shared/TargetGraph"
-import { TargetRunEventSchema } from "smithers-shared/TargetGraph"
+import type { TargetRunEvent } from "@smthrs/rpc/TargetGraph"
+import { TargetRunEventSchema } from "@smthrs/rpc/TargetGraph"
 import { createTargetRunner } from "./Targets"
 import type { TargetRun } from "./Targets"
 import { clearTargetGraphCache, queryTargetGraph } from "./TargetGraph"

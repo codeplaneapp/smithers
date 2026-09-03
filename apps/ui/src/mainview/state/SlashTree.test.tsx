@@ -127,7 +127,8 @@ describe("the slash menu is a tree", () => {
     expect(view.controller.store.session().recentCommands ?? []).toEqual([])
     await press(view, "ArrowLeft")
     expect(view.controller.store.session().draft).toBe("/")
-    // connect, world, chat, then the first namespace row.
+    // connect, world, chat, flows (the four surface leaves), then the first namespace row.
+    await press(view, "ArrowDown")
     await press(view, "ArrowDown")
     await press(view, "ArrowDown")
     await press(view, "ArrowDown")

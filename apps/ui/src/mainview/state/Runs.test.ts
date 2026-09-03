@@ -12,7 +12,7 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { Card } from "smithers-shared/Cards"
+import type { Card } from "@smthrs/rpc/Cards"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import type { AppServices } from "./AppController"

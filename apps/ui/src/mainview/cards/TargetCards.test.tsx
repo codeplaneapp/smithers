@@ -166,10 +166,10 @@ describe("trusted target cards", () => {
       payload: {
         ...targetsCard.payload,
         view: { selected: "//src:build" },
-        details: { "//src:build": { status: "failed", error: "graph_failed: vendor/jj" } }
+        details: { "//src:build": { status: "failed", error: "graph_failed: packages/smithers/flows/jj/wasm" } }
       }
     }
-    expect(render(failed).host.querySelector(".targets-drawer [role=alert]")?.textContent).toBe("graph_failed: vendor/jj")
+    expect(render(failed).host.querySelector(".targets-drawer [role=alert]")?.textContent).toBe("graph_failed: packages/smithers/flows/jj/wasm")
     const loading: TargetsCard = { ...targetsCard, payload: { ...targetsCard.payload, status: "pending", targets: [] } }
     expect(render(loading).host.querySelector('.targets-card[data-status="pending"] .targets-skeleton')).not.toBeNull()
     const broken: TargetsCard = {
@@ -186,9 +186,16 @@ describe("trusted target cards", () => {
 })
 
 describe("featured, starred, and grouped rows", () => {
+  /* `//src:build` is featured by its own declaration (PACKAGE.ts `featured: true`); `//tools:check` is starred. */
   const featuredCard: TargetsCard = {
     ...targetsCard,
-    payload: { ...targetsCard.payload, featured: ["//src:build"], starred: ["//tools:check"] }
+    payload: {
+      ...targetsCard.payload,
+      targets: targetsCard.payload.targets.map((target) =>
+        target.label === "//src:build" ? { ...target, featured: true, summary: "Emit the dist." } : target
+      ),
+      starred: ["//tools:check"]
+    }
   }
 
   test("the card opens on Featured when the repo has featured or starred targets, and the chips switch views", () => {
@@ -199,6 +206,9 @@ describe("featured, starred, and grouped rows", () => {
       "//tools:check"
     ])
     expect(host.querySelector('tr[data-target-row="//src:build"] [data-badge="featured"]')?.textContent).toBe("Featured")
+    // The declared summary reads under the label; a bare target shows none.
+    expect(host.querySelector('[data-testid="targets-summary-//src:build"]')?.textContent).toBe("Emit the dist.")
+    expect(host.querySelector('[data-testid="targets-summary-//tools:check"]')).toBeNull()
     expect(host.querySelector('[data-testid="targets-star-//tools:check"]')?.getAttribute("aria-pressed")).toBe("true")
     expect(host.querySelector('[data-testid="targets-count"]')?.textContent).toBe("2 of 3")
     click(host, '[data-testid="targets-mode-all"]')
@@ -394,24 +404,18 @@ describe("the target-run card", () => {
     expect(host.querySelector('[data-run-row="//:ci"]')?.textContent).toContain("GithubCiGen")
   })
 
-  test("the Featured view lists the manifest's pattern runs, each Run dispatching target.run.pattern", () => {
-    const { host, calls } = render({
-      ...targetsCard,
-      payload: {
-        ...targetsCard.payload,
-        featured: ["//src:lint"],
-        patternRuns: [
-          { id: "everything", title: "Run everything", summary: "The CI step.", workspace: ".", verb: "ci", pattern: "//packages/..." }
-        ]
-      }
-    })
+  test("the Featured view lists the pattern runs the targets imply, each Run dispatching target.run.pattern", () => {
+    const { host, calls } = render({ ...targetsCard, payload: { ...targetsCard.payload, starred: ["//src:lint"] } })
     const strip = host.querySelector('[data-testid="targets-pattern-runs"]')!
     expect(strip.textContent).toContain("Run everything")
-    expect(strip.textContent).toContain("ci //packages/...")
-    click(host, '[data-testid="targets-run-pattern-everything"]')
-    expect(calls).toEqual([["target.run.pattern", "force . ci //packages/..."]])
+    expect(strip.textContent).toContain("ci //...")
+    // lint, build and test targets exist; no docs target, so no docs sweep.
+    expect([...strip.querySelectorAll("[data-pattern-run]")].map((node) => node.getAttribute("data-pattern-run")))
+      .toEqual(["ci", "build", "test", "lint"])
+    click(host, '[data-testid="targets-run-pattern-ci"]')
+    expect(calls).toEqual([["target.run.pattern", "force . ci //..."]])
     // Away from Featured the strip is gone: the table is the whole card.
-    const { host: all } = render({ ...targetsCard, payload: { ...targetsCard.payload, view: { mode: "all" }, patternRuns: [] } })
+    const { host: all } = render({ ...targetsCard, payload: { ...targetsCard.payload, view: { mode: "all" } } })
     expect(all.querySelector('[data-testid="targets-pattern-runs"]')).toBeNull()
   })
 })

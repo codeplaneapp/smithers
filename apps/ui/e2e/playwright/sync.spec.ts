@@ -6,9 +6,14 @@ import type { Page } from "@playwright/test"
  * fake cloud upstream the app connects a repository to a Linear team end to
  * end — the connector-setup card walks authorize → team → repository →
  * confirm and turns into the connected state on the SAME card — a sync
- * renders the sync-ops card with the plue#468 degraded note (never a faked
- * feed), sync.retry refuses with the ADR's wording, and a GitHub import
- * tracks its job to done with the workspace link.
+ * starts a RUN whose state, counts and ops fill the sync-ops card, a failed
+ * op retries through its own row, and a GitHub import tracks its job to done
+ * with the workspace link.
+ *
+ * Every double is shaped as plue answers it (verified against `~/plue` main):
+ * the list lives at /api/integrations/linear, the create at /api/linear, the
+ * run and the ops feed under /api/linear/{id}, the op's error is
+ * `error_message` and its status one of pending|success|failed|skipped.
  *
  * The server is a double (change.spec.ts's pattern): every seam answers
  * through page.route behind /api/cloud/*. The local origin runs offline in
@@ -31,14 +36,42 @@ const INTEGRATION = {
   created_at: "2026-09-01T10:00:00Z"
 }
 
+/* plue's LinearOAuthSetupResult: teams + expires_at, and no viewer. */
 const SETUP = {
   teams: [
     { id: "team-eng", name: "Engineering", key: "ENG" },
     { id: "team-design", name: "Design", key: "DES" }
   ],
-  expires_at: "2099-09-02T12:00:00Z",
-  viewer: { id: "u1", email: "will@example.com", name: "Will" }
+  expires_at: "2099-09-02T12:00:00Z"
 }
+
+/* One op as GET /api/linear/{id}/ops answers it. */
+const OPS = [
+  {
+    id: 90,
+    run_id: 41,
+    source: "jjhub",
+    target: "linear",
+    entity: "issue",
+    entity_id: "90",
+    action: "update",
+    status: "failed",
+    error_message: "Linear API: 422 label 'infra' does not exist on team ENG",
+    created_at: "2026-09-02T09:00:00Z"
+  },
+  {
+    id: 91,
+    run_id: 41,
+    source: "linear",
+    target: "jjhub",
+    entity: "issue",
+    entity_id: "ENG-482",
+    action: "create",
+    status: "success",
+    error_message: "",
+    created_at: "2026-09-02T09:00:00Z"
+  }
+]
 
 const json = (body: unknown, status = 200) => ({
   status,
@@ -72,15 +105,13 @@ const serve = async (page: Page): Promise<void> => {
       next_cursor: ""
     })))
 
-  /* The Linear seam: the integrations list grows when the create lands. */
+  /* The Linear seam: the create lands at /api/linear, the list at /api/integrations/linear. */
   let integrations: Array<unknown> = []
   await page.route("**/api/cloud/api/linear", (route) => {
-    if (route.request().method() === "POST") {
-      integrations = [INTEGRATION]
-      return route.fulfill(json(INTEGRATION, 201))
-    }
-    return route.fulfill(json(integrations))
+    integrations = [INTEGRATION]
+    return route.fulfill(json({ id: 7, linear_team_id: "team-eng", linear_team_name: "Engineering", repo_owner: "smithersai", repo_name: "smithers", is_active: true }, 201))
   })
+  await page.route("**/api/cloud/api/integrations/linear", (route) => route.fulfill(json(integrations)))
   /* The handoff receiver (doubled — the local origin is offline in T1). */
   let polls = 0
   await page.route("**/api/linear-auth/start", (route) =>
@@ -90,7 +121,18 @@ const serve = async (page: Page): Promise<void> => {
     return route.fulfill(json(polls < 2 ? { state: "waiting" } : { state: "authorized", setupKey: "sk-123" }))
   })
   await page.route("**/api/cloud/api/linear/setup/sk-123", (route) => route.fulfill(json(SETUP)))
-  await page.route("**/api/cloud/api/linear/7/sync", (route) => route.fulfill(json({ status: "sync_started" }, 202)))
+  /* The run: started with an id, then polled until it settles, with its ops beside it. */
+  await page.route("**/api/cloud/api/linear/7/sync", (route) => route.fulfill(json({ run_id: 41 }, 202)))
+  await page.route(/\/api\/cloud\/api\/linear\/7\/sync\/41$/, (route) =>
+    route.fulfill(json({
+      state: "completed",
+      counts: { issues: { done: 1, total: 2, failed: 1 }, comments: { done: 0, total: 0, failed: 0 } },
+      started_at: "2026-09-02T09:00:00Z",
+      finished_at: "2026-09-02T09:05:00Z"
+    })))
+  await page.route(/\/api\/cloud\/api\/linear\/7\/ops(\?.*)?$/, (route) => route.fulfill(json(OPS)))
+  await page.route(/\/api\/cloud\/api\/linear\/7\/ops\/90\/retry$/, (route) =>
+    route.fulfill(json({ ...OPS[1], id: 92, retry_of_id: 90 }, 202)))
 
   /* The import seam: the job starts cloning, then answers ready with its workspace. */
   let importPolls = 0
@@ -145,7 +187,8 @@ test("T1: /linear.connect walks the wizard and turns the card connected", async 
 
   /* Step 1: the handoff — the URL went to the browser, the setup key came back. */
   await card.getByRole("button", { name: /Open Linear/ }).click()
-  await expect(card).toContainText("authorized as Will", { timeout: 15_000 })
+  /* plue names no viewer, so the row reads a bare `authorized`. */
+  await expect(card).toContainText("authorized", { timeout: 15_000 })
   const opened = await page.evaluate(() => (window as unknown as { __openedUrls: Array<string> }).__openedUrls)
   expect(opened).toEqual(["https://cloud.test/api/auth/linear?callback_port=9"])
 
@@ -162,24 +205,25 @@ test("T1: /linear.connect walks the wizard and turns the card connected", async 
   await expect(card.getByRole("button", { name: /Disconnect/ })).toBeVisible()
 })
 
-test("T1: /linear.sync renders the sync-ops card with the degraded note; sync.retry refuses honestly", async ({ page }) => {
+test("T1: /linear.sync tracks the run, lists its ops, and Retry runs on the failed row", async ({ page }) => {
   await serve(page)
   /* The integration already exists in this cut. */
-  await page.route("**/api/cloud/api/linear", (route) => {
-    if (route.request().method() === "POST") return route.fulfill(json(INTEGRATION, 201))
-    return route.fulfill(json([INTEGRATION]))
-  })
+  await page.route("**/api/cloud/api/integrations/linear", (route) => route.fulfill(json([INTEGRATION])))
   await page.goto("/")
 
   await runSlash(page, "/linear.sync")
   const syncCard = page.getByTestId("card-sync-ops-linear-7")
   await expect(syncCard).toBeVisible({ timeout: 15_000 })
   await expect(syncCard).toContainText("Linear ENG ↔ smithersai/smithers")
-  await expect(syncCard).toContainText("sync started")
-  await expect(syncCard).toContainText("plue#468")
+  await expect(syncCard).toContainText("sync started · run 41")
 
-  await runSlash(page, "/sync.retry op-3")
-  await expect(page.getByText(/Retrying one sync op doesn't exist yet \(plue#468\)/)).toBeVisible({ timeout: 15_000 })
+  /* The run poll fills the header and the rows; the failed op keeps its own words. */
+  await expect(syncCard).toContainText("1 of 2 · 1 failed", { timeout: 20_000 })
+  await expect(syncCard).toContainText("jjhub → linear issue 90 update")
+  await expect(syncCard).toContainText("Linear API: 422 label 'infra' does not exist on team ENG")
+
+  await syncCard.getByRole("button", { name: /Retry/ }).click()
+  await expect(page.getByText(/Op 90 retried/)).toBeVisible({ timeout: 15_000 })
 })
 
 test("T1: /repos.import tracks the job to done with the workspace link", async ({ page }) => {

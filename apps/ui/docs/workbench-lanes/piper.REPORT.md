@@ -49,7 +49,7 @@ changes); the docs updates in this report's commit are the only remainder.
    `ComposerLayout.test.tsx`.
 5. **Card headers.** `file` / `file-list` payloads gained optional `address`
    (`/org/repo/path`) and `readAt { changeId, commitId }` in
-   `apps/shared/src/Cards.ts`. The header renders the address and short
+   `packages/rpc/src/Cards.ts`. The header renders the address and short
    change id, and a `head moved to <id> · refresh` line when the
    inventory's head COMMIT id differs from `readAt.commitId`. Nothing
    auto-refreshes. There is no `search-results` card kind anywhere in the
@@ -89,7 +89,7 @@ tests whose subject was the retired behavior were deleted; setup-only
 - `bun test src` (apps/ui) — 1265 pass; 3 fail, all in
   `src/bun/TargetGraph.integration.test.ts` and pre-existing (they need the
   `~/artsy/force` fixture; they fail on a clean checkout).
-- `bun test` (apps/shared) — 119 pass.
+- `bun test` (packages/rpc) — 119 pass.
 - T1 `e2e/playwright/piper.spec.ts` — passes: opens `~/smithers`, sees it
   nested under `smithersai/smithers` in the tree, `/files.read README.md`,
   card header shows `/smithersai/smithers/README.md · kxyzqrpv`.

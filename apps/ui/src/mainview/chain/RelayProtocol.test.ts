@@ -1,7 +1,7 @@
 import { Model, ModelRequest } from "@smthrs/model"
 import { describe, expect, test } from "bun:test"
 import { Effect, Stream } from "effect"
-import type { FetchLike } from "smithers-shared/NativeAgent"
+import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 import { layerModel } from "./StreamModel"
 
 /*

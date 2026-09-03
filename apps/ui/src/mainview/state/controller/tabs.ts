@@ -3,10 +3,11 @@ import {
   PtyCreateResponseSchema,
   PtyOutputResponseSchema,
   ReposResponseSchema
-} from "smithers-shared/LocalApp"
-import { agentRole, agentRoleTitle } from "smithers-shared/AgentRoles"
-import type { AgentRoleId } from "smithers-shared/AgentRoles"
-import { hasCapability } from "smithers-shared/AppBootstrap"
+} from "@smthrs/rpc/LocalApp"
+import { agentRoleTitle, findAgentRole } from "@smthrs/rpc/AgentRoles"
+import type { AgentRoleId } from "@smthrs/rpc/AgentRoles"
+import { currentAgentRoles, loadAgents } from "./agents"
+import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import { activeRepoOf, MAIN_TAB_ID, parseRepoSelection, repoKeyOf } from "../AppState"
 import type { PinnedRepo, Repo, TabRow } from "../AppState"
 import type { CommandResult } from "../../flows/Flows"
@@ -21,8 +22,14 @@ import type { ControllerContext } from "./context"
  */
 
 export interface TabsController {
-  /** Cmd+T / the `+` menu's Terminal row: `POST /api/pty` then a terminal tab. */
-  readonly openTerminalTab: () => Promise<string | void>
+  /**
+   * Cmd+T / the `+` menu's Terminal row / the agent's `tab.terminal [cwd]`:
+   * `POST /api/pty` then a terminal tab. `cwd` names an OPEN working copy
+   * (path, id, name, or pin key); absent, the active one. The server takes a
+   * repository id and never a bare path, so a cwd that is not an open
+   * repository is refused with the open ones listed.
+   */
+  readonly openTerminalTab: (cwd?: string) => Promise<string | void>
   /**
    * A `+` menu harness row: `POST /api/pty { kind: "harness", harnessId }`
    * then a harness tab. With a role (AgentRoles.ts) the role's harness and
@@ -56,8 +63,13 @@ export interface TabsController {
   readonly selectRepo: (repoKey: string) => Promise<string | void>
   /** Forget a pinned repository; its open session and tabs stay until closed. */
   readonly unpinRepo: (repoKey: string) => string | void
-  /** The chrome's "Open repository": the native picker when there is one, else a typed path. */
-  readonly openLocalRepo: () => Promise<string | void>
+  /**
+   * The chrome's "Open repository" and the agent's `repo.open [path]`: a
+   * named path opens directly where the host allows one; without a path the
+   * native picker (or the typed-path prompt) is the HUMAN's door alone — the
+   * agent is told to name the path.
+   */
+  readonly openLocalRepo: (path?: string) => Promise<string | void>
   readonly loadHarnesses: () => Promise<void>
   readonly loadRepos: () => Promise<void>
   /** A `pty.exit` frame reached a tab: record the code so closing no longer asks. */
@@ -91,23 +103,41 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
   const activeTab = (): TabRow | undefined => collections.tabs.get(store.session().activeTabId ?? MAIN_TAB_ID)
 
   const activeRepo = (): Repo | undefined => activeRepoOf(store.session(), collections.repos.values())
-  /** The pin the active repository nests new tabs under (docs/LOCAL-APP.md "Tabs"). */
-  const activeRepoKey = (): { readonly repoKey: string } | Record<never, never> => {
-    const repo = activeRepo()
-    return repo === undefined ? {} : { repoKey: repoKeyOf(repo.path) }
-  }
+  /** The pin a repository nests new tabs under (docs/LOCAL-APP.md "Tabs"). */
+  const repoKeyFor = (repo: Repo | undefined): { readonly repoKey: string } | Record<never, never> =>
+    repo === undefined ? {} : { repoKey: repoKeyOf(repo.path) }
+  const activeRepoKey = (): { readonly repoKey: string } | Record<never, never> => repoKeyFor(activeRepo())
 
-  const cwd = (): string => activeRepo()?.path ?? HOME_CWD
+  const cwdOf = (repo: Repo | undefined): string => repo?.path ?? HOME_CWD
   /*
    * The tab names where its process runs. A process started with no
    * repository open lands in the home directory, and a tab that hid that
    * read as "Claude Code in the repo" while the agent sat in `~`. The
    * title says which: the repository's name, or `~`.
    */
-  const tabTitle = (base: string): string => `${base} · ${activeRepo()?.name ?? HOME_CWD}`
-  const sessionRepository = (): { readonly repoId: string } | Record<never, never> => {
-    const repo = activeRepo()
-    return repo === undefined ? {} : { repoId: repo.id }
+  const tabTitleFor = (base: string, repo: Repo | undefined): string => `${base} · ${repo?.name ?? HOME_CWD}`
+  const sessionRepositoryOf = (repo: Repo | undefined): { readonly repoId: string } | Record<never, never> =>
+    repo === undefined ? {} : { repoId: repo.id }
+
+  /**
+   * `tab.terminal [cwd]`: the open working copy the text names — its path,
+   * server id, display name, or pin key — or the refusal that lists what IS
+   * open. The server resolves the authorized directory from the repository
+   * id (src/bun/server.ts), so a path that is not an open repository has no
+   * door here; `repo.open <path>` is the act that opens one.
+   */
+  const resolveCwd = (cwd: string): Repo | string => {
+    const wanted = cwd.trim()
+    const open = [...collections.repos.values()]
+    const found = open.find((repo) =>
+      repo.path === wanted || repo.id === wanted || repo.name === wanted || repoKeyOf(repo.path) === wanted
+    )
+    if (found !== undefined) return found
+    return open.length === 0
+      ? `No repository is open, so ${wanted} cannot be a terminal's directory — open it first with repo.open <path>.`
+      : `${wanted} is not an open repository. Open repositories: ${
+        open.map((repo) => `${repo.name} (${repo.path})`).join(", ")
+      } — name one of those, or open ${wanted} first with repo.open <path>.`
   }
 
   const createSession = async (body: Record<string, unknown>): Promise<string> => {
@@ -122,11 +152,18 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     return parsed.data.sessionId
   }
 
-  const openTerminalTab: TabsController["openTerminalTab"] = async () => {
+  const openTerminalTab: TabsController["openTerminalTab"] = async (cwd) => {
+    let repo: Repo | undefined
+    if (cwd === undefined || cwd.trim() === "") repo = activeRepo()
+    else {
+      const resolved = resolveCwd(cwd)
+      if (typeof resolved === "string") return resolved
+      repo = resolved
+    }
     let sessionId: string
-    const directory = cwd()
+    const directory = cwdOf(repo)
     try {
-      sessionId = await createSession({ kind: "terminal", ...sessionRepository(), cols: DEFAULT_COLS, rows: DEFAULT_ROWS })
+      sessionId = await createSession({ kind: "terminal", ...sessionRepositoryOf(repo), cols: DEFAULT_COLS, rows: DEFAULT_ROWS })
     } catch (error) {
       return `Could not start a terminal: ${error instanceof Error ? error.message : String(error)}`
     }
@@ -134,18 +171,23 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       type: "tab.opened",
       actor: "user",
       // The session id is the tab id: unique per process, and `tab-<id>` stays a readable test id.
-      tab: { id: sessionId, kind: "terminal", title: tabTitle("Terminal"), sessionId, cwd: directory, ...activeRepoKey() }
+      tab: { id: sessionId, kind: "terminal", title: tabTitleFor("Terminal", repo), sessionId, cwd: directory, ...repoKeyFor(repo) }
     })
   }
 
   const openHarnessTab: TabsController["openHarnessTab"] = async (harnessId, launch) => {
     if (collections.harnesses.size === 0) await loadHarnesses()
     /*
-     * A role (AgentRoles.ts) names its harness and its model; the server
-     * resolves the role to the launch argv, so the renderer sends the role id
-     * and the task, never argv. Its availability is the harness's.
+     * A role (AgentRoles.ts), built-in or custom, names its harness and its
+     * model; the server resolves the role against the same agents store to
+     * the launch argv, so the renderer sends the role id and the task, never
+     * argv. Its availability is the harness's.
      */
-    const role = launch?.roleId === undefined ? undefined : agentRole(launch.roleId)
+    if (launch?.roleId !== undefined && collections.agents.size === 0) await loadAgents(ctx)
+    const role = launch?.roleId === undefined ? undefined : findAgentRole(launch.roleId, currentAgentRoles(store))
+    if (launch?.roleId !== undefined && role === undefined) {
+      return `There is no agent named ${launch.roleId}. Agents: ${currentAgentRoles(store).map((agent) => agent.id).join(", ")}.`
+    }
     const wanted = role?.harness ?? harnessId
     const harness = [...collections.harnesses.values()].find((candidate) => candidate.id === wanted)
     if (harness === undefined) return `There is no harness with id ${wanted}.`
@@ -155,12 +197,13 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       return `${displayName} is not available: ${harness.displayName} has no credential for ${role.model.label}.`
     }
     let sessionId: string
-    const directory = cwd()
+    const repo = activeRepo()
+    const directory = cwdOf(repo)
     const task = launch?.task?.trim() ?? ""
     try {
       sessionId = await createSession({
         kind: "harness",
-        ...sessionRepository(),
+        ...sessionRepositoryOf(repo),
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS,
         harnessId: harness.id,
@@ -176,7 +219,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
       tab: {
         id: sessionId,
         kind: "harness",
-        title: tabTitle(displayName),
+        title: tabTitleFor(displayName, repo),
         sessionId,
         harnessId: harness.id,
         ...(role === undefined ? {} : { roleId: role.id }),
@@ -204,7 +247,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
         payload: {
           harnessId: harness.id,
           displayName,
-          ...(role === undefined ? {} : { roleId: role.id }),
+          ...(role === undefined ? {} : { roleId: role.id, purpose: role.purpose }),
           ...(task === "" ? {} : { task }),
           tabId: sessionId,
           sessionId,
@@ -405,7 +448,24 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     store.dispatch({ type: "repo.unpinned", actor: "user", id: repoKey })
   }
 
-  const openLocalRepo: TabsController["openLocalRepo"] = async () => {
+  const openLocalRepo: TabsController["openLocalRepo"] = async (path) => {
+    const pathEntry = ctx.services.bootstrap !== undefined &&
+      hasCapability(ctx.services.bootstrap, "local.repository-path-entry")
+    const named = path?.trim() ?? ""
+    if (named !== "") {
+      /* A typed path is one door on every host that allows one: the composer's, the pin's reopen, the agent's confirmed ask. */
+      if (!pathEntry) return "Opening a repository by path is not allowed here — use the folder dialog."
+      return ctx.openRepo({ path: named })
+    }
+    /*
+     * The folder dialog is the human's gesture: the agent's bare `repo.open`
+     * never opens it (the three-door law's `userOnly` would refuse the whole
+     * flow; this refuses only the gesture). The agent names the path, and the
+     * confirm card puts the click back in the human's hands.
+     */
+    if (ctx.commandActor === "smithers") {
+      return "Name the path: repo.open <path> — the folder dialog is the human's to open."
+    }
     if (ctx.repositories.available) {
       store.dispatch({ type: "connector.local.requested", actor: "user", access: "read-write" })
       try {
@@ -432,15 +492,15 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
         return message
       }
     }
-    if (ctx.services.bootstrap === undefined || !hasCapability(ctx.services.bootstrap, "local.repository-path-entry")) {
+    if (!pathEntry) {
       return "Opening a repository needs the Smithers native app."
     }
     if (typeof window === "undefined" || typeof window.prompt !== "function") {
       return "Opening a repository needs the Smithers app."
     }
-    const path = (window.prompt("Repository path") ?? "").trim()
-    if (path === "") return
-    return ctx.openRepo({ path })
+    const typed = (window.prompt("Repository path") ?? "").trim()
+    if (typed === "") return
+    return ctx.openRepo({ path: typed })
   }
 
   const notePtyExit: TabsController["notePtyExit"] = (sessionId, code) => {

@@ -1,24 +1,31 @@
 /*
- * The Linear seam (lane sync, ADR 0005), behind the `/api/cloud/*` proxy:
+ * The Linear seam (lane sync, ADR 0005; lane L5 against the live routes),
+ * behind the `/api/cloud/*` proxy. Every path below was read off plue's own
+ * router (`cmd/server/router.go`) — the list and the delete live under
+ * `/api/integrations/linear`, the runs and the ops feed under `/api/linear`:
  *
- *   GET    /api/linear                    — the user's integrations (per team, last sync)
- *   GET    /api/linear/setup/{setupKey}   — the OAuth setup: teams[] + expires_at (plue#469)
- *   POST   /api/linear                    — create the integration { setup_key, linear_team_id, repo }
- *   POST   /api/linear/{id}/sync          — start a sync (202 sync_started / 409 sync_already_running)
- *   DELETE /api/linear/{id}               — disconnect (204)
+ *   GET    /api/integrations/linear          — the user's integrations (per team, last sync)
+ *   DELETE /api/integrations/linear/{id}     — disconnect (204)
+ *   GET    /api/linear/setup/{setupKey}      — the OAuth setup: { linear_actor, teams[], expires_at }
+ *   POST   /api/linear                       — create { setup_key, linear_team_id, repo } (201)
+ *   POST   /api/linear/{id}/sync             — start a sync run (202 { run_id })
+ *   GET    /api/linear/{id}/sync/{runId}     — the run: { state, counts, started_at, finished_at }
+ *   GET    /api/linear/{id}/ops?status=&since=&limit=&cursor= — the ops, newest
+ *          first; plue#491 pages them with the Link header's opaque
+ *          `rel="next"` cursor, the same keyset scheme the egress audit uses
+ *   POST   /api/linear/{id}/ops/{opId}/retry — retry one failed op (202, the retry op)
  *
  * The OAuth handoff opens GET /api/auth/linear through the native
  * `openExternal` door; the local origin receives the callback (the Bun
  * server's `/api/linear-auth/*` receiver, LINEAR_AUTH_* in LocalApp.ts) and
- * the seam polls it for the setup key. The settled flow (plue#469) is
- * handoff → GET setup → pick → create; the card is the wizard.
+ * the seam polls it for the setup key. The settled flow is handoff → GET
+ * setup → pick → create; the card is the wizard.
  *
- * What does NOT exist and is never faked: the ops feed, the per-op retry,
- * and the sync runs (plue#468) — the sync-ops card renders the ADR's
- * degraded wording and `sync.retry` refuses with it, and no `/ops` or
- * `/sync/{runId}` route is ever called. Every act gates on the cloud
- * session; writes carry the legacy token's write:repository, so a degraded
- * sign-in is not refused here (the server's own scope check answers).
+ * NOTHING is remapped on the way to the card: a run's state word and an op's
+ * status word are the wire's own (`pending | running | completed | failed`
+ * for a run, `pending | success | failed | skipped` for an op), the error is
+ * `error_message` verbatim, and a failed op is never filtered out of the
+ * feed. The run is polled here — a card is a projection, never a lifecycle.
  */
 import {
   CLOUD_ROUTE_PREFIX,
@@ -26,25 +33,38 @@ import {
   LINEAR_AUTH_START_PATH,
   LinearAuthSessionSchema,
   LinearAuthStartResponseSchema
-} from "smithers-shared/LocalApp"
+} from "@smthrs/rpc/LocalApp"
 import type { Card, LinearIntegrationInput, LinearIntegrationRow } from "../AppState"
 import { linearIntegrationRepo } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
+/* plue pages the ops feed with the same Link/`rel="next"` keyset scheme the egress audit uses. */
+import { nextEgressCursor } from "./EgressSeam"
 import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
 export const SIGN_OUT_REFUSAL = "Sign in to Smithers Cloud first — /cloud.sign-in."
 
-/** The degraded wordings for the routes that do not exist (ADR 0005 "Filed"). */
-export const NO_OPS_FEED_NOTE =
-  "The sync ops feed isn't recorded yet (plue#468) — each sync's ops appear here once the backend records them."
-export const NO_OP_RETRY_REFUSAL =
-  "Retrying one sync op doesn't exist yet (plue#468) — /linear.sync runs the whole sync again."
-export const NO_TEAM_PICK_NOTE =
-  "The team pick isn't available yet (plue#469) — the setup lookup has no route, so the teams this key can see aren't listed."
+/** ADR 0005: an expired setup key reads this under step 1, never a silent retry. */
 export const SETUP_EXPIRED_NOTE = "authorization expired · Open Linear again"
 const HANDOFF_TIMEOUT_NOTE =
   "The Linear authorization didn't come back to the app — the browser step was closed or timed out. Open Linear retries it."
+
+/**
+ * The run poll: one read of the run and its ops every `delayMs`, at most
+ * `maxAttempts` reads (fifteen minutes at the production cadence — plue's
+ * own initial-sync timeout). Module-level so tests shorten the wait.
+ */
+export const linearSyncPolling = {
+  delayMs: 2_000,
+  maxAttempts: 450
+}
+
+/** plue's ops feed page size; `load older` asks for its maximum (100). */
+export const OPS_PAGE_LIMIT = 50
+export const OPS_OLDER_LIMIT = 100
+
+/** The run states plue's `linear_sync_runs.state` CHECK allows that mean "no longer moving". */
+const RUN_SETTLED = new Set(["completed", "failed"])
 
 export interface LinearSeamDeps {
   /** The native system-browser door; absent in a plain browser (window.open falls back). */
@@ -53,6 +73,8 @@ export interface LinearSeamDeps {
   readonly pollMs?: number
   /** The whole handoff wait; production matches the Bun side's five-minute listener. */
   readonly timeoutMs?: number
+  /** The clock the 24-hour activity window is cut against; tests pin it. */
+  readonly now?: () => number
 }
 
 export interface LinearSeam {
@@ -68,9 +90,9 @@ export interface LinearSeam {
   readonly confirmConnect: (repo?: string) => Promise<string | void | { readonly value: string }>
   /** The integrations list load (boot and after every mutation); only definitive answers dispatch. */
   readonly refreshIntegrations: () => Promise<void>
-  /** `linear.sync [integration]`: start a sync and render the sync-ops card. */
+  /** `linear.sync [integration]`: start a sync run and track it on the sync-ops card. */
   readonly syncNow: (integration?: string) => Promise<string | void | { readonly value: string }>
-  /** `linear.activity [integration]`: the last 24 hours' ops card (the feed is plue#468 — degraded). */
+  /** `linear.activity [integration]`: the last 24 hours of ops, newest first. */
   readonly activity: (integration?: string) => Promise<string | void | { readonly value: string }>
   /**
    * `linear.disconnect <integration> <teamKey>`: delete the integration; the
@@ -79,14 +101,18 @@ export interface LinearSeam {
    * click all carry it, and only the integration's own key disconnects.
    */
   readonly disconnect: (integration: string, confirmKey?: string) => Promise<string | void | { readonly value: string }>
-  /** `sync.retry <opId>`: refuses honestly until plue#468 records ops. */
-  readonly retryOp: (opId: string) => Promise<string | void>
-  /** Hidden, card-scoped: the sync-ops card's Show more — widens the ops window. */
+  /** `sync.retry <opId>`: retry one failed op through the card that carries it. */
+  readonly retryOp: (opId: string) => Promise<string | void | { readonly value: string }>
+  /** Hidden, card-scoped: the sync-ops card's Show more — reveals the rows past the local cut. */
   readonly showMoreOps: (cardId: string) => Promise<string | void>
+  /** Hidden, card-scoped: `load older` — re-reads the feed without the window bound. */
+  readonly loadOlderOps: (cardId: string) => Promise<string | void>
 }
 
 type Step = { readonly id: string; readonly label: string; readonly state: "pending" | "active" | "done" | "error"; readonly detail: string | null; readonly error?: string }
 type SetupPayload = Extract<Card, { kind: "connector-setup" }>["payload"]
+type SyncPayload = Extract<Card, { kind: "sync-ops" }>["payload"]
+type SyncOp = SyncPayload["ops"][number]
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -120,7 +146,7 @@ const patchStep = (steps: ReadonlyArray<Step>, id: string, patch: Partial<Step>)
 const cardIdOf = (repo: string): string => `connector-setup-linear-${repo}`
 const syncCardIdOf = (integrationId: string): string => `sync-ops-linear-${integrationId}`
 
-/** One integration row off the wire (GET /api/linear); malformed rows drop. */
+/** One integration row off the wire (GET /api/integrations/linear); malformed rows drop. */
 const parseIntegration = (value: unknown): LinearIntegrationInput | null => {
   if (!isRecord(value)) return null
   const id = intOrNull(value.id)
@@ -145,7 +171,13 @@ interface SetupAnswer {
   readonly actor: string | null
 }
 
-/** The setup lookup's answer (plue#469): teams + expires_at; the viewer only when the wire names them. */
+/**
+ * The setup lookup's answer: `{ linear_actor, teams[] { id, name, key },
+ * expires_at }`. plue#491 added `linear_actor`
+ * (`services.LinearViewer` = `{ id, email, name }`), which is what
+ * `authorized as <actor>` names — the account that just authorized access.
+ * A wire that names none leaves the row reading a bare `authorized`.
+ */
 const parseSetup = (value: unknown): SetupAnswer | null => {
   if (!isRecord(value)) return null
   if (!Array.isArray(value.teams)) return null
@@ -156,14 +188,95 @@ const parseSetup = (value: unknown): SetupAnswer | null => {
     const key = str(entry.key)
     return id === null || name === null || key === null ? [] : [{ id, name, key }]
   })
-  const viewer = isRecord(value.viewer) ? str(value.viewer.name) : null
-  return { teams, expiresAt: str(value.expires_at), actor: viewer }
+  return { teams, expiresAt: str(value.expires_at), actor: linearActorName(value.linear_actor) ?? linearActorName(value.viewer) }
+}
+
+/**
+ * The name an actor DTO is rendered by: plue's `linear_actor` carries an id,
+ * an email and a name, and only one of them is a person's name. The email is
+ * the fallback because it still identifies the account; the opaque Linear id
+ * is never rendered as a name.
+ */
+const linearActorName = (value: unknown): string | null => {
+  if (!isRecord(value)) return null
+  return str(value.name) ?? str(value.email)
+}
+
+/**
+ * One op off `GET /api/linear/{id}/ops`. plue's row is `{ id, run_id?,
+ * retry_of_id?, source, target, entity, entity_id, action, status,
+ * error_message, created_at }`; the status word and the error text cross
+ * unchanged, and only a `failed` op offers Retry (plue refuses any other).
+ */
+const parseOp = (value: unknown): SyncOp | null => {
+  if (!isRecord(value)) return null
+  const id = intOrNull(value.id)
+  if (id === null) return null
+  const status = str(value.status) ?? ""
+  const error = str(value.error_message)
+  return {
+    id: String(id),
+    source: str(value.source) ?? "",
+    target: str(value.target) ?? "",
+    entity: str(value.entity) ?? "",
+    entityId: str(value.entity_id),
+    action: str(value.action) ?? "",
+    status,
+    ...(error !== null ? { error } : {}),
+    retryable: status === "failed",
+    at: str(value.created_at)
+  }
+}
+
+const parseOps = (body: unknown): ReadonlyArray<SyncOp> | null =>
+  Array.isArray(body) ? body.flatMap((entry) => { const op = parseOp(entry); return op === null ? [] : [op] }) : null
+
+/**
+ * The run's counts. plue answers them PER ENTITY (`{ issues: {done, total,
+ * failed}, comments: {…} }`) while the card header is one `N of M · K
+ * failed` line, so every bucket the wire names is summed — a third bucket
+ * lands in the total without a code change. Null when no bucket parsed.
+ */
+export const sumRunCounts = (
+  counts: unknown
+): { readonly total: number; readonly done: number; readonly failed: number } | null => {
+  if (!isRecord(counts)) return null
+  let total = 0
+  let done = 0
+  let failed = 0
+  let seen = false
+  for (const bucket of Object.values(counts)) {
+    if (!isRecord(bucket)) continue
+    const bucketDone = intOrNull(bucket.done)
+    const bucketTotal = intOrNull(bucket.total)
+    if (bucketDone === null || bucketTotal === null) continue
+    seen = true
+    done += bucketDone
+    total += bucketTotal
+    failed += intOrNull(bucket.failed) ?? 0
+  }
+  return seen ? { total, done, failed } : null
+}
+
+interface RunAnswer {
+  readonly state: string
+  readonly counts: { readonly total: number; readonly done: number; readonly failed: number } | null
+}
+
+const parseRun = (value: unknown): RunAnswer | null => {
+  if (!isRecord(value)) return null
+  const state = str(value.state)
+  if (state === null) return null
+  return { state, counts: sumRunCounts(value.counts) }
 }
 
 export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): LinearSeam => {
   const pollMs = deps.pollMs ?? 2000
   const timeoutMs = deps.timeoutMs ?? 5 * 60 * 1000
+  const now = deps.now ?? (() => Date.now())
   const cloud = (path: string): string => `${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}`
+  /* One tracking loop per integration: a re-run supersedes the loop before it. */
+  const epochs = new Map<string, number>()
 
   const gate = (): string | void => {
     const session = ctx.store.collections.cloudSessions.get("cloud")
@@ -260,7 +373,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
   /* ---- the integrations list ---- */
 
   const refreshIntegrations = async (): Promise<void> => {
-    const answer = await getJson("/linear")
+    const answer = await getJson("/integrations/linear")
     if ("error" in answer || !Array.isArray(answer.body)) return
     ctx.dispatch({
       type: "linear.integrations.loaded",
@@ -300,35 +413,133 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     }
   }
 
-  /** The sync-ops card both sync acts render; the ops feed is plue#468 — degraded, never faked. */
-  const renderSyncCard = (
+  /* ---- the sync-ops card ---- */
+
+  /**
+   * The sync-ops card for one integration, patched; unset keys keep their
+   * last values — except under two options, because two acts must REMOVE a
+   * field rather than overwrite it: `load older` leaves the 24-hour cut (a
+   * card still labelled `24h` over a wider page would be a lie), and a new
+   * run inherits nothing from the run before it.
+   */
+  const upsertSyncCard = (
     integration: LinearIntegrationRow,
-    overrides: { readonly trigger?: string | null; readonly window?: string; readonly error?: string }
+    patch: Partial<SyncPayload>,
+    options: { readonly clearWindow?: boolean; readonly reset?: boolean } = {}
   ): void => {
     const id = syncCardIdOf(integration.id)
     const existing = ctx.store.collections.cards.get(id)
+    const prior = options.reset === true
+      ? undefined
+      : existing?.kind === "sync-ops"
+      ? existing.payload
+      : undefined
     const repo = linearIntegrationRepo(integration)
+    const payload: SyncPayload = {
+      subject: `Linear ${integration.teamKey} ↔ ${repo}`,
+      source: "linear",
+      integrationId: integration.id,
+      repo,
+      runState: patch.runState !== undefined ? patch.runState : prior?.runState ?? null,
+      ops: (patch.ops ?? prior?.ops ?? []).map((op) => ({ ...op })),
+      ...(patch.runId !== undefined ? { runId: patch.runId } : prior?.runId !== undefined ? { runId: prior.runId } : {}),
+      ...(patch.counts !== undefined ? { counts: patch.counts } : prior?.counts !== undefined ? { counts: prior.counts } : {}),
+      ...(patch.trigger !== undefined ? { trigger: patch.trigger } : prior?.trigger !== undefined ? { trigger: prior.trigger } : {}),
+      ...(options.clearWindow === true
+        ? {}
+        : patch.window !== undefined
+        ? { window: patch.window }
+        : prior?.window !== undefined
+        ? { window: prior.window }
+        : {}),
+      ...(patch.expanded !== undefined ? { expanded: patch.expanded } : prior?.expanded !== undefined ? { expanded: prior.expanded } : {}),
+      ...(patch.hasOlder !== undefined ? { hasOlder: patch.hasOlder } : prior?.hasOlder !== undefined ? { hasOlder: prior.hasOlder } : {}),
+      ...(patch.opsCursor !== undefined ? { opsCursor: patch.opsCursor } : prior?.opsCursor !== undefined ? { opsCursor: prior.opsCursor } : {}),
+      ...(patch.error !== undefined ? { error: patch.error } : {})
+    }
     const card: Card = {
       id,
       kind: "sync-ops",
       title: `Sync · Linear ${integration.teamKey} ↔ ${repo}`,
-      status: overrides.error !== undefined ? "error" : "active",
+      status: payload.error !== undefined ? "error" : payload.runState === "completed" ? "acted" : "active",
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: existing?.ordinal ?? ctx.nextOrdinal(),
-      payload: {
-        subject: `Linear ${integration.teamKey} ↔ ${repo}`,
-        source: "linear",
-        integrationId: integration.id,
-        repo,
-        runState: null,
-        ops: [],
-        opsNote: NO_OPS_FEED_NOTE,
-        ...(overrides.trigger !== undefined ? { trigger: overrides.trigger } : {}),
-        ...(overrides.window !== undefined ? { window: overrides.window } : {}),
-        ...(overrides.error !== undefined ? { error: overrides.error } : {})
-      }
+      payload
     }
     ctx.dispatch({ type: "card.upsert", actor: ctx.actor(), card })
+  }
+
+  /**
+   * One page of the ops feed for an integration; the answer's own order
+   * (newest first) is kept. plue#491 pages it with the Link header's opaque
+   * `rel="next"` cursor, so the page's own position rides back with the rows
+   * and `load older` continues from it instead of re-reading a wider window.
+   * A last page carries only `rel="first"` and answers a null cursor.
+   */
+  const readOps = async (
+    integrationId: string,
+    query: { readonly since?: string; readonly limit: number; readonly cursor?: string | null }
+  ): Promise<{ readonly ops: ReadonlyArray<SyncOp>; readonly nextCursor: string | null } | { readonly error: string }> => {
+    const params = new URLSearchParams({ limit: String(query.limit) })
+    if (query.since !== undefined) params.set("since", query.since)
+    if (query.cursor !== undefined && query.cursor !== null && query.cursor !== "") params.set("cursor", query.cursor)
+    const path = `/linear/${encodeURIComponent(integrationId)}/ops?${params.toString()}`
+    let response: Response
+    try {
+      response = await ctx.http(cloud(path))
+    } catch (error) {
+      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    if (!response.ok) return { error: await readErrorMessage(response, `Reading ${path} failed (${response.status})`) }
+    const ops = parseOps(await response.json().catch(() => null))
+    if (ops === null) return { error: "Smithers Cloud's answer for the Linear sync ops was malformed." }
+    return {
+      ops,
+      nextCursor: nextEgressCursor(response.headers.get("link"), path.split("?")[0] ?? path)
+    }
+  }
+
+  /*
+   * The run poll: the run DTO carries the header's state and counts, the ops
+   * feed carries the rows, and the card is re-upserted on every pass so the
+   * counts stay live while ops arrive. The loop stops when the run settles
+   * (`completed`/`failed`), when a newer run supersedes it, or when the
+   * budget runs out — never on an ops read that refused, which only leaves
+   * the last rows standing.
+   */
+  const trackRun = async (integration: LinearIntegrationRow, runId: string, epoch: number): Promise<void> => {
+    const settle = (): void => {
+      if (epochs.get(integration.id) === epoch) epochs.delete(integration.id)
+    }
+    for (let attempt = 0; attempt < linearSyncPolling.maxAttempts; attempt += 1) {
+      await wait(linearSyncPolling.delayMs)
+      if (epochs.get(integration.id) !== epoch) return
+      const answer = await getJson(`/linear/${encodeURIComponent(integration.id)}/sync/${encodeURIComponent(runId)}`)
+      if (epochs.get(integration.id) !== epoch) return
+      if ("error" in answer) {
+        upsertSyncCard(integration, { error: answer.error })
+        settle()
+        return
+      }
+      const run = parseRun(answer.body)
+      if (run === null) {
+        upsertSyncCard(integration, { error: "Smithers Cloud's answer for the Linear sync run was malformed." })
+        settle()
+        return
+      }
+      const feed = await readOps(integration.id, { limit: OPS_PAGE_LIMIT })
+      if (epochs.get(integration.id) !== epoch) return
+      upsertSyncCard(integration, {
+        runState: run.state,
+        counts: run.counts,
+        ...("ops" in feed ? { ops: [...feed.ops], hasOlder: feed.nextCursor !== null, opsCursor: feed.nextCursor } : {})
+      })
+      if (RUN_SETTLED.has(run.state)) {
+        settle()
+        return
+      }
+    }
+    settle()
   }
 
   /* ---- the acts ---- */
@@ -406,23 +617,18 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: HANDOFF_TIMEOUT_NOTE }) })
       return HANDOFF_TIMEOUT_NOTE
     }
-    /* The setup lookup: the teams the key can see (plue#469). */
+    /* The setup lookup: the teams the key can see. */
     const answer = await getJson(`/linear/setup/${encodeURIComponent(setupKey)}`)
     if ("error" in answer) {
       const current = readCard() ?? prior
+      /* plue's own words for a spent or aged-out key: "linear oauth setup not found or expired". */
       const expired = /setup/i.test(answer.error) && /(expired|not found)/i.test(answer.error)
-      if (expired) {
-        upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: SETUP_EXPIRED_NOTE }) })
-        return SETUP_EXPIRED_NOTE
-      }
-      const routeMissing = /\(404\)$/.test(answer.error)
+      const message = expired ? SETUP_EXPIRED_NOTE : answer.error
       upsertCard(id, repoId, {
         setupKey,
-        steps: routeMissing
-          ? patchStep(patchStep(current.steps, "authorize", { state: "done", detail: "authorized" }), "team", { state: "error", error: NO_TEAM_PICK_NOTE })
-          : patchStep(current.steps, "authorize", { state: "error", error: answer.error })
+        steps: patchStep(current.steps, "authorize", { state: "error", error: message })
       })
-      return routeMissing ? NO_TEAM_PICK_NOTE : answer.error
+      return message
     }
     const setup = parseSetup(answer.body)
     if (setup === null) {
@@ -506,10 +712,14 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     const row = [...ctx.store.collections.linearIntegrations.values()].find(
       (candidate) => linearIntegrationRepo(candidate) === prior.repo && candidate.teamId === prior.teamId
     )
+    /* The create's echo names no team KEY (plue answers id/name/repo/active
+       only), so the key comes off the refreshed row, else the picked team. */
     const wire = isRecord(created.body) ? created.body : {}
     upsertCard(found.id, prior.repo, {
       phase: "connected",
       error: undefined,
+      /* plue#491: the 201 echoes `linear_actor`, so a card that skipped the wizard's step 1 still names the account. */
+      ...(linearActorName(wire.linear_actor) === null ? {} : { actor: linearActorName(wire.linear_actor) }),
       integration: {
         id: intOrNull(wire.id) ?? (row !== undefined ? Number(row.id) : 0),
         teamKey: str(wire.linear_team_key) ?? row?.teamKey ?? prior.teams?.find((team) => team.id === prior.teamId)?.key ?? "",
@@ -533,28 +743,47 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     const resolved = await resolveIntegration(integration)
     if ("error" in resolved) return resolved.error
     const row = resolved.integration
-    /* 202 sync_started and 409 sync_already_running are both states, not
-       errors; anything else is the verbatim refusal on the card. */
     let response: Response
     try {
       response = await ctx.http(cloud(`/linear/${encodeURIComponent(row.id)}/sync`), { method: "POST" })
     } catch (error) {
       const message = `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`
-      renderSyncCard(row, { error: message })
+      upsertSyncCard(row, { error: message })
       return message
     }
     const body = await response.json().catch(() => null)
-    const status = isRecord(body) ? str(body.status) : null
-    if (response.ok || (response.status === 409 && status === "sync_already_running")) {
-      renderSyncCard(row, { trigger: status === "sync_started" ? "sync started" : status === "sync_already_running" ? "already running" : null })
-      return { value: `Sync started for Linear ${row.teamKey} ↔ ${linearIntegrationRepo(row)} — the card tracks it.` }
+    if (!response.ok) {
+      /*
+       * plue refuses a second concurrent run with 409 "linear sync already
+       * running" and an inactive integration with 409 "linear integration is
+       * inactive". Both are its own sentence and both read verbatim; the
+       * card keeps whatever run it was already tracking.
+       */
+      const message = (isRecord(body) && typeof body.message === "string" && body.message !== ""
+        ? body.message.slice(0, 240)
+        : null) ?? `Starting the sync failed (${response.status})`
+      upsertSyncCard(row, { error: message })
+      return message
     }
-    /* The server's sentence leads; its machine token stands in only when no sentence came. */
-    const message = (isRecord(body) && typeof body.message === "string" && body.message !== ""
-      ? body.message.slice(0, 240)
-      : null) ?? status ?? `Starting the sync failed (${response.status})`
-    renderSyncCard(row, { error: message })
-    return message
+    const runId = isRecord(body) ? intOrNull(body.run_id) : null
+    if (runId === null) {
+      const message = "Smithers Cloud started the sync without naming a run id."
+      upsertSyncCard(row, { error: message })
+      return message
+    }
+    const id = String(runId)
+    /* A new run inherits nothing: not the last run's counts, ops, window or cut. */
+    upsertSyncCard(row, {
+      runId: id,
+      runState: null,
+      counts: null,
+      ops: [],
+      trigger: `sync started · run ${id}`
+    }, { reset: true })
+    const epoch = (epochs.get(row.id) ?? 0) + 1
+    epochs.set(row.id, epoch)
+    void trackRun(row, id, epoch)
+    return { value: `Sync run ${id} started for Linear ${row.teamKey} ↔ ${linearIntegrationRepo(row)} — the card tracks it.` }
   }
 
   const activity: LinearSeam["activity"] = async (integration) => {
@@ -562,8 +791,24 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     if (refusal !== undefined) return refusal
     const resolved = await resolveIntegration(integration)
     if ("error" in resolved) return resolved.error
-    renderSyncCard(resolved.integration, { window: "24h" })
-    return { value: `The last 24 hours of Linear ${resolved.integration.teamKey} — the feed is plue#468, the card says so.` }
+    const row = resolved.integration
+    const since = new Date(now() - 24 * 60 * 60 * 1000).toISOString()
+    const feed = await readOps(row.id, { since, limit: OPS_PAGE_LIMIT })
+    if ("error" in feed) {
+      upsertSyncCard(row, { window: "24h", error: feed.error })
+      return feed.error
+    }
+    upsertSyncCard(row, {
+      window: "24h",
+      ops: [...feed.ops],
+      hasOlder: feed.nextCursor !== null,
+      opsCursor: feed.nextCursor,
+      trigger: null,
+      error: undefined
+    })
+    return {
+      value: `${feed.ops.length} Linear ${row.teamKey} sync ops in the last 24 hours — the card lists them.`
+    }
   }
 
   const disconnect: LinearSeam["disconnect"] = async (integration, confirmKey) => {
@@ -585,8 +830,10 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     if ((confirmKey ?? "").trim() !== expected) {
       return `Disconnecting Linear ${row.teamKey} from ${repo} needs its team key typed back exactly — /linear.disconnect ${row.id} ${expected}.`
     }
-    const removed = await sendJson("DELETE", `/linear/${encodeURIComponent(row.id)}`)
+    const removed = await sendJson("DELETE", `/integrations/linear/${encodeURIComponent(row.id)}`)
     if ("error" in removed) return removed.error
+    /* A run this card was tracking has nothing left to track. */
+    epochs.delete(row.id)
     await refreshIntegrations()
     /*
      * A disconnected card leaves the transcript: any state it could show now
@@ -604,11 +851,47 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     return { value: `Linear ${row.teamKey} disconnected from ${repo}.` }
   }
 
+  /** The sync-ops card that carries one op, and the integration id it belongs to. */
+  const cardForOp = (opId: string): { readonly card: Card & { kind: "sync-ops" }; readonly integrationId: string } | undefined => {
+    for (const card of ctx.store.collections.cards.values()) {
+      if (card.kind !== "sync-ops") continue
+      const integrationId = card.payload.integrationId
+      if (integrationId === undefined) continue
+      if (card.payload.ops.some((op) => op.id === opId)) return { card, integrationId }
+    }
+    return undefined
+  }
+
   const retryOp: LinearSeam["retryOp"] = async (opId) => {
     const refusal = gate()
     if (refusal !== undefined) return refusal
-    if (opId.trim() === "") return "sync.retry needs an op id: /sync.retry <opId>"
-    return NO_OP_RETRY_REFUSAL
+    const trimmed = opId.trim()
+    if (trimmed === "") return "sync.retry needs an op id: /sync.retry <opId>"
+    /*
+     * plue's retry route is per integration (`/api/linear/{id}/ops/{opId}/
+     * retry`), and `sync.retry <opId>` names only the op — so the card that
+     * lists the op names its integration. No card, no call.
+     */
+    const found = cardForOp(trimmed)
+    if (found === undefined) {
+      return `No sync card lists op ${trimmed} — the Retry button lives on the failed op's row.`
+    }
+    const { integrationId } = found
+    const sent = await sendJson("POST", `/linear/${encodeURIComponent(integrationId)}/ops/${encodeURIComponent(trimmed)}/retry`)
+    const row = ctx.store.collections.linearIntegrations.get(integrationId)
+    if ("error" in sent) {
+      /* plue refuses a non-failed op with 409 "only failed linear sync operations can be retried". */
+      if (row !== undefined) upsertSyncCard(row, { error: sent.error })
+      return sent.error
+    }
+    if (row === undefined) return { value: `Op ${trimmed} queued for retry.` }
+    const feed = await readOps(integrationId, { limit: OPS_PAGE_LIMIT })
+    if ("error" in feed) {
+      upsertSyncCard(row, { error: feed.error })
+      return feed.error
+    }
+    upsertSyncCard(row, { ops: [...feed.ops], hasOlder: feed.nextCursor !== null, opsCursor: feed.nextCursor, error: undefined })
+    return { value: `Op ${trimmed} retried — the card lists the retry.` }
   }
 
   const showMoreOps: LinearSeam["showMoreOps"] = async (cardId) => {
@@ -619,6 +902,40 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       actor: ctx.actor(),
       card: { ...card, payload: { ...card.payload, expanded: true } }
     })
+    return undefined
+  }
+
+  const loadOlderOps: LinearSeam["loadOlderOps"] = async (cardId) => {
+    const refusal = gate()
+    if (refusal !== undefined) return refusal
+    const card = ctx.store.collections.cards.get(cardId)
+    if (card === undefined || card.kind !== "sync-ops") return `No sync card ${cardId}.`
+    const integrationId = card.payload.integrationId
+    if (integrationId === undefined) return `Sync card ${cardId} names no Linear integration.`
+    const row = ctx.store.collections.linearIntegrations.get(integrationId)
+    if (row === undefined) return `Linear integration ${integrationId} is no longer connected.`
+    /*
+     * plue#491: older means the NEXT keyset page, continued from the cursor
+     * the last page named — so the rows APPEND rather than replacing the
+     * window with a wider re-read. A card with no cursor has nothing older
+     * to fetch; that is the exhausted feed, not an error.
+     */
+    const cursor = card.payload.opsCursor ?? null
+    if (cursor === null) return `The Linear ${row.teamKey} sync feed has no older page — the card lists all of it.`
+    const feed = await readOps(integrationId, { limit: OPS_OLDER_LIMIT, cursor })
+    if ("error" in feed) {
+      upsertSyncCard(row, { error: feed.error })
+      return feed.error
+    }
+    const seen = new Set(card.payload.ops.map((op) => op.id))
+    const appended = [...card.payload.ops, ...feed.ops.filter((op) => !seen.has(op.id))]
+    upsertSyncCard(row, {
+      ops: appended,
+      expanded: true,
+      hasOlder: feed.nextCursor !== null,
+      opsCursor: feed.nextCursor,
+      error: undefined
+    }, { clearWindow: true })
     return undefined
   }
 
@@ -633,6 +950,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     activity,
     disconnect,
     retryOp,
-    showMoreOps
+    showMoreOps,
+    loadOlderOps
   }
 }

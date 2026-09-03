@@ -1,4 +1,4 @@
-import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { CatalogItem, CommandState } from "../../flows/registry"
 import type { RepoStep } from "../../Onboarding"
 import { RECOMMEND_FLOW, isMaterialTransition, parseRecommendations, recommendationPrompt, ruleSuggestions } from "../Recommend"

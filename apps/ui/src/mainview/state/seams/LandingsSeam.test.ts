@@ -251,17 +251,23 @@ describe("landings seam — prs.view", () => {
 })
 
 describe("landings seam — prs.land (queues, never a terminal claim)", () => {
-  test("PUT …/land is accepted (202) and the re-read card states \"queued\"", async () => {
+  const TIP_CHANGE = "/api/repos/will/flows/changes/chg-b"
+  const tipChange = json(200, { change_id: "chg-b", commit_id: "c0ffee42", description: "tip", parent_change_ids: ["chg-a"] })
+
+  test("PUT …/land names the tip change's commit_id, is accepted (202), and the re-read card states \"queued\"", async () => {
     let landCalls = 0
+    let landBody: unknown = null
     const { store, controller } = await ready(
       backend({
-        [`${LANDINGS}/3/land`]: (request) => {
+        [`${LANDINGS}/3/land`]: async (request) => {
           if (request.method !== "PUT") return json(405, { message: "land is a PUT" })
           landCalls += 1
+          landBody = await request.json().catch(() => null)
           return json(202, landing(3, "queued"))
         },
         [`${LANDINGS}/3`]: json(200, landing(3, "queued")),
         [`${LANDINGS}/3/reviews`]: json(200, []),
+        [TIP_CHANGE]: tipChange,
         [STATUSES]: json(200, [])
       })
     )
@@ -269,6 +275,8 @@ describe("landings seam — prs.land (queues, never a terminal claim)", () => {
     const outcome = await controller.commands.run("prs.land", "3")
     expect(outcome.status).toBe("executed")
     expect(landCalls).toBe(1)
+    /* plue's LandLandingRequestInput requires commit_id: the tip change's current commit, read right before the PUT. */
+    expect(landBody).toEqual({ commit_id: "c0ffee42" })
     await settled()
     const card = store.collections.cards.get("pr-will/flows-3")
     if (card === undefined || card.kind !== "pr") throw new Error("expected the pr card")
@@ -276,10 +284,16 @@ describe("landings seam — prs.land (queues, never a terminal claim)", () => {
   })
 
   test("even when the re-read fails the land stays a success and the card says \"queued\"", async () => {
+    let landingReads = 0
     const { store, controller } = await ready(
       backend({
         [`${LANDINGS}/3/land`]: (request) => request.method === "PUT" ? json(202, landing(3, "queued")) : json(405, {}),
-        [`${LANDINGS}/3`]: json(500, { message: "re-read exploded" })
+        /* The pre-land read answers; the re-read after the PUT explodes. */
+        [`${LANDINGS}/3`]: () => {
+          landingReads += 1
+          return landingReads === 1 ? json(200, landing(3, "open")) : json(500, { message: "re-read exploded" })
+        },
+        [TIP_CHANGE]: tipChange
       })
     )
     const outcome = await controller.commands.run("prs.land", "3")
@@ -294,12 +308,32 @@ describe("landings seam — prs.land (queues, never a terminal claim)", () => {
   test("a rejected land (409) answers the platform's honest message", async () => {
     const { controller } = await ready(
       backend({
+        [`${LANDINGS}/3`]: json(200, landing(3, "open")),
+        [TIP_CHANGE]: tipChange,
         [`${LANDINGS}/3/land`]: json(409, { message: "already queued" })
       })
     )
     const outcome = await controller.commands.run("prs.land", "3")
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") expect(outcome.error).toBe("already queued")
+  })
+
+  test("a land whose tip commit can't be read PUTs nothing and says so", async () => {
+    let landCalls = 0
+    const { controller } = await ready(
+      backend({
+        [`${LANDINGS}/3`]: json(200, landing(3, "open")),
+        [TIP_CHANGE]: json(500, { message: "repo host down" }),
+        [`${LANDINGS}/3/land`]: () => {
+          landCalls += 1
+          return json(202, landing(3, "queued"))
+        }
+      })
+    )
+    const outcome = await controller.commands.run("prs.land", "3")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toBe("repo host down")
+    expect(landCalls).toBe(0)
   })
 })
 

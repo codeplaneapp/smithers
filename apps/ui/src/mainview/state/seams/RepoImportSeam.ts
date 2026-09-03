@@ -10,7 +10,7 @@
  * src/smithersCloud/githubImport.ts (startImport/pollImport) against plue
  * internal/routes/github_import.go.
  */
-import { CLOUD_ROUTE_PREFIX } from "smithers-shared/LocalApp"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import type { GitHubRefusal, SeamContext } from "./SeamContext"

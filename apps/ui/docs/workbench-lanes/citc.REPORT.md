@@ -7,7 +7,7 @@ the tree are the three pre-existing TargetGraph integration tests plus two
 
 ## What shipped, per step
 
-1. **Shared schemas** (`apps/shared/src/Cards.ts`): the `workspace` card
+1. **Shared schemas** (`packages/rpc/src/Cards.ts`): the `workspace` card
    payload — workspaceId, repo, name, targetBookmark, the six statuses,
    provisioningStage, suspendedAt (optional so older cards parse),
    `bookmarkHead { changeId, commitId } | null` (the TARGET BOOKMARK's head,
@@ -15,7 +15,7 @@ the tree are the three pre-existing TargetGraph integration tests plus two
    terminalSessionId, error — and the `service-log` payload (lands with the
    contract; no flow produces it until plue#449). No kind, no uptime, no
    workspace head, no ahead/behind (plue#446). `CLOUD_WS_ROUTE_PREFIX`
-   (`/api/cloud-ws/`) joined `apps/shared/src/LocalApp.ts`.
+   (`/api/cloud-ws/`) joined `packages/rpc/src/LocalApp.ts`.
 2. **Model + seam.** `cloudWorkspaces` collection (`app-cloud-workspaces`,
    registered in `SchemaVersion.ts`) as the authority; `workspaces.loaded`
    (per-user or per-repo scope replace) and `workspace.updated` upsert AND
@@ -93,15 +93,15 @@ the tree are the three pre-existing TargetGraph integration tests plus two
 
 ## Gates
 
-- `pnpm exec tsc --noEmit` (apps/ui, apps/shared, packages/ui) — clean.
+- `pnpm exec tsc --noEmit` (apps/ui, packages/rpc, packages/smithers/ui) — clean.
 - `bun test src` (apps/ui) — 1362 pass; 5 fail: the 3 pre-existing
   `src/bun/TargetGraph.integration.test.ts` failures (the `~/artsy/force`
   fixture, failing on a clean checkout) and 2 `runs.rerun` tests broken by
   the concurrent runs-lane commit `75ed77754c` ("runs.rerun refuses a run
   that is not settled"), which changed `controller/runs.ts` without
   updating `Runs.test.ts` — not this lane's files, left for that lane.
-- `bun test` (apps/shared) — 123 pass; (apps/server) — 402 pass;
-  (packages/ui) — 1262 pass.
+- `bun test` (packages/rpc) — 123 pass; (apps/server) — 402 pass;
+  (packages/smithers/ui) — 1262 pass.
 - T1 `e2e/playwright/citc.spec.ts` — 2 pass: open → card → starting→running
   stream → snapshots facet → tree row; degraded refusal with the exact
   wording in the toast.
@@ -261,7 +261,7 @@ Gates: `pnpm exec tsc --noEmit` clean. `bun test src` — 1437 pass, 5 fail:
 the 3 pre-existing `TargetGraph.integration.test.ts` failures plus 2 from the
 concurrent change lane's in-flight `Composer.tsx` edit (`ComposerLayout.test.
 tsx` repo-chip copy and `parity.test.ts` Composer handler count 10 → 11),
-files this lane does not touch. `bun test` — apps/shared 130 pass, apps/server
+files this lane does not touch. `bun test` — packages/rpc 130 pass, apps/server
 402 pass. The same change lane applied the identical `WorkspaceCard.tsx` edit
 and an optional-`confirmName` flow in parallel; the flow and parser were
 tightened to required here.

@@ -1,6 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AgentChatMessage, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import type { AgentChatMessage, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { MAX_TURN_REQUEST_BYTES, turnRequestBytes } from "./AgentTurnPolicy"
 import { createAppController } from "./AppController"

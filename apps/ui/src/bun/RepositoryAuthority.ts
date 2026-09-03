@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto"
 import type {
   PickLocalRepositoryResult,
   RepositoryAccess
-} from "smithers-shared/NativeRepository"
+} from "@smthrs/rpc/NativeRepository"
 import { inspectLocalRepository } from "./LocalRepository"
 
 /** A short-lived, one-shot capability created only after a native folder pick. */

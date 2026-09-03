@@ -11,7 +11,7 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { TargetRunFrame } from "smithers-shared/LocalApp"
+import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { TargetRunClient } from "../TargetRunClient"
 import type { ControllerContext } from "./context"

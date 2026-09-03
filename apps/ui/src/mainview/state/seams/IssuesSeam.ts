@@ -6,6 +6,11 @@
  * issues.ts + issueComments.ts. Parsing is defensive: unknown JSON in, typed
  * card payload out, missing fields become null/empty, malformed rows drop.
  *
+ * Lane L5 (ADR 0005 "Link an issue to Linear"): the mapping rides the same
+ * namespace — POST/DELETE /api/repos/{o}/{r}/issues/{n}/linear-link — and the
+ * issue DTO's own `linear` field ({identifier, url} or null) is the only
+ * source of the card's `Linear ENG-482` line.
+ *
  * IMPORT-READINESS degradation (multi importReadiness.ts + githubIssues.ts):
  * a 404 off the imported namespace means "not imported", so the LIST falls
  * back to the GET-only GitHub-source read and the card says so in `body`;
@@ -28,22 +33,15 @@ export interface IssuesSeam {
     repo?: string
   ) => Promise<string | void>
   readonly commentOnIssue: (number: number, text: string, repo?: string) => Promise<string | void>
-  /** `issues.link-linear` / `issues.unlink-linear`: refuse honestly until plue#473's route exists. */
+  /** `issues.link-linear <n> <identifier>`: POST the mapping, then re-read the detail card. */
   readonly linkLinear: (number: number, identifier: string, repo?: string) => Promise<string | void>
   /**
    * `issues.unlink-linear <n> <identifier>`: the identifier typed back is the
    * confirm (a slash, an agent's confirmed invocation, and a card act all
-   * carry it); the unlink itself is plue#473 and refuses honestly.
+   * carry it); then DELETE the mapping and re-read the detail card.
    */
   readonly unlinkLinear: (number: number, identifier?: string, repo?: string) => Promise<string | void>
 }
-
-/*
- * Lane sync (ADR 0005 "Filed"): the linear-link column and its routes are
- * plue#473 — nothing is called, nothing is faked; the refusal names it.
- */
-export const NO_LINEAR_LINK_REFUSAL =
-  "Linking an issue to Linear doesn't exist yet (plue#473) — when it ships, this act runs it."
 
 type IssueListPayload = Extract<Card, { kind: "issue-list" }>["payload"]
 type IssueListRow = IssueListPayload["issues"][number]
@@ -125,8 +123,9 @@ const parseDetail = (
 ): IssuePayload | null => {
   if (!isRecord(value)) return null
   /*
-   * Lane sync (ADR 0005): the issue's Linear link when the DTO carries it
-   * (plue#473's wire field; absent until it ships — never assumed).
+   * Lane sync (ADR 0005): the issue's Linear link off the DTO's own `linear`
+   * field ({identifier, url}, null when unmapped). Absent-vs-null is not
+   * distinguished — no line renders without the field.
    */
   const linear = isRecord(value.linear) &&
     typeof value.linear.identifier === "string" && value.linear.identifier !== "" &&
@@ -465,10 +464,33 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
       return refreshDetail(`The comment was posted to issue #${number} in ${repo}`, repo, number)
     },
 
-    linkLinear: async (number, identifier) => {
-      if (identifier.trim() === "") return "issues.link-linear needs the Linear identifier: /issues.link-linear <n> <identifier>"
-      void number
-      return NO_LINEAR_LINK_REFUSAL
+    linkLinear: async (number, identifier, explicitRepo) => {
+      const trimmed = identifier.trim()
+      if (trimmed === "") return "issues.link-linear needs the Linear identifier: /issues.link-linear <n> <identifier>"
+      const target = resolveTargetRepo(ctx.store, explicitRepo)
+      if ("error" in target) return target.error
+      const { repo } = target
+      let response: Response
+      try {
+        response = await ctx.http(`${issuesPath(repo)}/${number}/linear-link`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ identifier: trimmed })
+        })
+      } catch (error) {
+        return unreachable(`link issue #${number} in ${repo} to Linear`, error)
+      }
+      if (!response.ok) {
+        // Mutations never fall back — the GitHub-source proxy is GET-only.
+        if (response.status === 404) return notImported(repo)
+        return readErrorMessage(
+          response,
+          `Linking issue #${number} in ${repo} to Linear failed (${response.status})`
+        )
+      }
+      /* The 201 echoes { identifier, url }; the re-read states the new truth on the card. */
+      await response.body?.cancel()
+      return refreshDetail(`Issue #${number} in ${repo} is linked to Linear ${trimmed}`, repo, number)
     },
 
     unlinkLinear: async (number, identifier, explicitRepo) => {
@@ -479,13 +501,30 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
        */
       const target = resolveTargetRepo(ctx.store, explicitRepo)
       if ("error" in target) return target.error
-      const detail = ctx.store.collections.cards.get(`issue-${target.repo}-${number}`)
+      const { repo } = target
+      const detail = ctx.store.collections.cards.get(`issue-${repo}-${number}`)
       const known = detail?.kind === "issue" ? detail.payload.linear?.identifier ?? null : null
       const typed = identifier?.trim() ?? ""
       if (typed === "" || (known !== null && typed !== known)) {
-        return `Unlinking issue #${number} in ${target.repo} from Linear needs its identifier typed back exactly — /issues.unlink-linear ${number} ${known ?? "<identifier>"}.`
+        return `Unlinking issue #${number} in ${repo} from Linear needs its identifier typed back exactly — /issues.unlink-linear ${number} ${known ?? "<identifier>"}.`
       }
-      return NO_LINEAR_LINK_REFUSAL
+      let response: Response
+      try {
+        response = await ctx.http(`${issuesPath(repo)}/${number}/linear-link`, { method: "DELETE" })
+      } catch (error) {
+        return unreachable(`unlink issue #${number} in ${repo} from Linear`, error)
+      }
+      if (!response.ok) {
+        // Mutations never fall back — the GitHub-source proxy is GET-only.
+        if (response.status === 404) return notImported(repo)
+        return readErrorMessage(
+          response,
+          `Unlinking issue #${number} in ${repo} from Linear failed (${response.status})`
+        )
+      }
+      /* 204: no body to read; the re-read states the new truth on the card. */
+      await response.body?.cancel()
+      return refreshDetail(`Issue #${number} in ${repo} is no longer linked to Linear`, repo, number)
     }
   }
 }

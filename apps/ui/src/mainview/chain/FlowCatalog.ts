@@ -54,6 +54,9 @@ const entryFor = (commands: CommandRegistry, entry: FlowEntry): Catalog.Entry =>
               return Effect.succeed<unknown>(outcome.value ?? `executed /${name}`)
             case "unknown-command":
               return Effect.fail(new Catalog.CallError({ name, message: `unknown-command: ${name}` }))
+            case "unavailable":
+              // A native-only flow on the web: the registry rendered the download card; the reason is the whole answer.
+              return Effect.fail(new Catalog.CallError({ name, message: outcome.reason }))
             case "failed":
               return Effect.fail(new Catalog.CallError({ name, message: outcome.error }))
           }

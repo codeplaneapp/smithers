@@ -88,6 +88,16 @@ Terminals and target execution require read-write access. Target queries mint
 opaque target ids; a run resolves the command label server-side and rechecks
 the current graph before spawning it.
 
+Language servers (`apps/ui/src/bun/lsp/`) read: `/api/lsp/*` requires read
+access. One `typescript-language-server --stdio` runs per (repository,
+language), started on the first request from a static registry that names
+the binary, its argv and its install line (the renderer names none of them),
+under the `lsp` sandbox policy (no network, scratch-only writes), with the
+PTYs' allowlisted environment. At most four run; the least recently used
+makes room; ten idle minutes, `POST /api/repo/close` and shutdown end them
+(LSP `shutdown`/`exit`, SIGKILL after two seconds). Requests are bounded:
+64 KiB bodies, 8 in flight per server, 5 s each.
+
 PTY count, target-run count, input bytes, output buffering, and WebSocket
 subscriptions are bounded. Shutdown awaits agent cancellation, process
 termination, and server close.
@@ -100,13 +110,14 @@ the CLI once per detected workspace. Each opaque target grant binds its
 workspace and label on the server; extra renderer-supplied fields cannot move a
 process to another directory or change the command.
 
-A repository may declare a strict version-1 plugin manifest at
-`smithers-ui.json` in its root (never under `.smithers/`, which rc.0 treats as
-0.x state; a manifest left there is reported as a repository warning). Groups and entries are schema-validated, every entry must
-name a detected workspace and a Smithers target label, and invalid manifests
-become visible repository warnings rather than partial UI. A valid manifest
-renders a trusted `repo-plugin` React card. Its actions use the same target
-snapshot and opaque-grant execution path as the ordinary targets card.
+A target's presentation is part of its declaration, never a separate
+manifest: a PACKAGE.ts target may carry `summary: "..."` (one line, shown
+under the label in the targets card) and `featured: true` (the target leads
+the card's Featured view beside the user's stars). The label is inferred from
+the package path and export name; the loader listing carries `summary` and
+`featured` beside `label`, `target`, and `kinds`. "Run everything" is not a
+declaration either: the Featured view's run strip is derived from the CLI's
+verbs over `//...` for the kinds the repository actually has.
 
 ## HTTP and WebSocket surface
 
@@ -119,11 +130,19 @@ All mutations require `Content-Type: application/json`; failures use
 | GET | `/api/health` | Local process, Node, and sandbox status |
 | POST | `/api/agent/turn` | NDJSON agent stream (`/api/chat/turn` is a compatibility alias) |
 | POST | `/api/agent/turn/cancel` | Cancel a turn (`/api/chat/cancel` is an alias) |
-| GET | `/api/harnesses` | Installed harness snapshot |
+| GET | `/api/harnesses` | Installed harness snapshot (each row states its verified model suggestions and whether it has a list command) |
+| GET | `/api/harnesses/:id/models` | The harness's own model list (its list command under a 5 s cap), else the table's verified suggestions; empty + reason on failure |
+| GET | `/api/agents` | The agents (built-in and custom), seeded from the built-ins into `<stateDir>/agents.json` on first read |
+| PUT | `/api/agents/:id` | Create or edit an agent `{ label, purpose, harness, model }`; the harness must take a verified model flag, the model id no spaces or leading dash; a built-in keeps its harness |
+| DELETE | `/api/agents/:id` | Remove a custom agent; a built-in answers 409 |
 | POST | `/api/repo/open` | Consume `{ authorizationId }`, or dev-only `{ path }` |
 | GET | `/api/repos` | Open repository snapshot |
 | POST | `/api/repo/close` | Close `{ repoId }` |
 | POST | `/api/repo/files` | `{ repoId, path? }`: a directory's entries or one file's text (read access; bounded; binary stated) |
+| POST | `/api/lsp/hover` | `{ repoId, path, line, character }` (1-based): the language server's hover at the position, `{ hover: { contents, range? } \| null }`, text cut at 4 KiB (read access) |
+| POST | `/api/lsp/definition` | Same body: `{ locations }`, repository-relative, at most 20; targets outside the repository are omitted |
+| POST | `/api/lsp/diagnostics` | `{ repoId, path }`: the server's publication for the file, `{ path, version, items }` (at most 50; `items: null` when none arrived within 5 s) |
+| GET | `/api/lsp/servers` | `{ servers: [{ repoId, language, state }] }`: the language servers running, `starting \| ready \| exited` |
 | POST | `/api/targets/query` | Query `{ repoId }` and mint target ids |
 | POST | `/api/targets/run` | Run `{ repoId, targetId }` |
 | POST | `/api/targets/cancel` | Cancel `{ runId }` |
@@ -138,8 +157,18 @@ All mutations require `Content-Type: application/json`; failures use
 | POST | `/api/linear-auth/start` | Begin the Linear OAuth handoff (lane sync): a loopback listener on a random port waits for the cloud's redirect; answers `{ url }` to open. 501 offline |
 | GET | `/api/linear-auth/session` | `{ state: "idle" \| "waiting" \| "authorized", setupKey? }` — the setup key once the callback lands, never the token |
 
-WebSocket subscriptions carry target-run and PTY output. Client messages are
-limited to subscription control, `target-run.attach`, and `pty.input`.
+WebSocket subscriptions carry target-run and PTY output and, on
+`lsp:<repoId>`, every diagnostics publication a language server makes for the
+repository (`{ type: "lsp.diagnostics", repoId, path, version, items }`).
+Client messages are limited to subscription control, `target-run.attach`, and
+`pty.input`.
+
+`/api/lsp/*` refusals are typed: `409 language_server_missing` carries the
+install line verbatim in `error.install` (nothing installs it),
+`400 language_unsupported` names the extension no row of the registry
+handles, `504 language_server_timeout` and `502 language_server_failed` name
+a server that did not answer or left, and path refusals reuse the files
+route's codes.
 
 ## Target presentation
 

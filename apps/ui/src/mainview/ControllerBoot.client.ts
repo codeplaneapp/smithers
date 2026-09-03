@@ -66,6 +66,8 @@ const bootProgram = (session: BootSession | undefined) =>
       if (runtime.backend.local !== undefined) {
         yield* Effect.sync(() => void controller.loadRepos())
         yield* Effect.sync(() => void controller.loadHarnesses())
+        // Agents as data (custom-agents.md): the app-agents mirror loads beside the harness list.
+        yield* Effect.sync(() => void controller.loadAgents())
       }
       // Lane piper: the jjhub session mirrors into the store; a signed-in answer pulls the inventory.
       if (runtime.bootstrap.capabilities.includes("jjhub")) {

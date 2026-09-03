@@ -137,7 +137,7 @@ describe("the review flow", () => {
   // width at all. Held open, the real width shows: all five files are asked at
   // once under `concurrency: 2`.
   //
-  // The batch shape is not what fails. `packages/flow/src/Interpreter.ts`
+  // The batch shape is not what fails. `packages/smithers/flows/flow/src/Interpreter.ts`
   // settles every dependency of a node concurrently, with
   // `concurrency: "unbounded"`, before it runs the node, so a batch chained
   // onto its predecessor with `Node.andThen` starts alongside it just as the

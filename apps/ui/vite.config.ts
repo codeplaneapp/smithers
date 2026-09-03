@@ -8,7 +8,7 @@ import { electrobunViteAliases } from "./.hutch/devkit/api/config/electrobun-vit
 
 /*
  * Every vite invocation in package.json passes `--configLoader runner`. The
- * app graph reaches `smithers-shared`, a workspace package that ships
+ * app graph reaches `@smthrs/rpc`, a workspace package that ships
  * TypeScript source; the default `bundle` loader hands bare specifiers to
  * node's ESM loader, which cannot resolve that package's extensionless
  * relative imports. The runner loader resolves the config through Vite
@@ -66,8 +66,42 @@ export const buildStamp = (): Plugin => {
   }
 }
 
+
+/*
+ * The entry chunk must never be imported back by a chunk it reaches
+ * statically. When it is, the entry's own top-level code can run before the
+ * bindings it imports exist ("unavailableBootSession is not a function", a
+ * white window; 2026-09-03, caused by the size splitter below moving
+ * src/mainview/main.tsx out of the entry). Failing the build here is cheaper
+ * than a launch checklist finding a blank page.
+ */
+const entryChunkGuard = (): Plugin => ({
+  name: "smithers-entry-chunk-guard",
+  generateBundle(_options, bundle) {
+    const chunks = Object.values(bundle).filter((item): item is Extract<typeof item, { type: "chunk" }> => item.type === "chunk")
+    const byFile = new Map(chunks.map((chunk) => [chunk.fileName, chunk]))
+    for (const entry of chunks.filter((chunk) => chunk.isEntry)) {
+      const reachable = new Set<string>()
+      const stack = [...entry.imports]
+      while (stack.length > 0) {
+        const file = stack.pop()!
+        if (reachable.has(file)) continue
+        reachable.add(file)
+        stack.push(...(byFile.get(file)?.imports ?? []))
+      }
+      const back = [...reachable].filter((file) => byFile.get(file)?.imports.includes(entry.fileName))
+      if (back.length > 0) {
+        throw new Error(
+          `entry chunk ${entry.fileName} is imported back by ${back.join(", ")}: ` +
+            "its top-level code would run before its imports exist. Check codeSplitting.groups."
+        )
+      }
+    }
+  }
+})
+
 export default defineConfig({
-  plugins: [react(), buildStamp()],
+  plugins: [react(), buildStamp(), entryChunkGuard()],
   resolve: {
     /*
      * Electrobun 2.x ships no SDK in node_modules; Hutch projects it into
@@ -106,6 +140,15 @@ export default defineConfig({
           groups: [{
             name: "initial",
             tags: ["$initial"],
+            /*
+             * Vendor code only. Left unrestricted, the size splitter moved
+             * src/mainview/main.tsx (the entry's own top-level code) into a shared
+             * initial~ chunk that the real entry chunk imports and that imports the
+             * entry chunk back; main.tsx then ran before the entry's bindings
+             * existed ("unavailableBootSession is not a function", a white window,
+             * 2026-09-03). Source modules stay in the entry chunk.
+             */
+            test: /[\\/]node_modules[\\/]/,
             entriesAware: true,
             maxSize: 400 * 1024
           }]

@@ -156,7 +156,8 @@ describe("launch-law parity: every affordance is a command", () => {
        * now that the hot path is its own module.
        */
       // 15 − the corner balance chip: the balance is one act away (/balance), never main-page chrome.
-      "../App.tsx": 13,
+      // +1 (ask 5): the Flows pane's back-to-conversation close, like World's.
+      "../App.tsx": 14,
       /* 11 = 10 + the origin chip's "rev N exists · view" (lane change step 4; renders only when both seqs are known). */
       "../Composer.tsx": 11,
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
@@ -186,20 +187,26 @@ describe("launch-law parity: every affordance is a command", () => {
        * per-team picks, the repository pick, Connect, the connected state's
        * Sync now / Activity / Disconnect (the arming click and the confirm
        * row's typed-key send), the GitHub card's Open GitHub / Re-check /
-       * Reconcile, and the sync-ops card's Retry / Show more — all through
-       * onRunCommand with data-flow set.
+       * Reconcile, and the sync-ops card's Retry / Show more / Load older —
+       * all through onRunCommand with data-flow set.
        */
-      "../cards/SyncCards.tsx": 13,
+      "../cards/SyncCards.tsx": 14,
       /* The /theme picker: nine swatches, one shared handler through onRunCommand. */
       "../cards/ThemePickerCard.tsx": 1,
       /*
-       * Lane citc: the workspace card's four facet tabs, the terminal facet's
+       * Lane citc: the workspace card's five facet tabs, the terminal facet's
        * Open and per-session Destroy, the snapshots' Fork-from, Template and
        * Delete, Suspend, Resume, Fork, Snapshot, the failed card's Retry, and
        * the typed delete confirm — all through onRunCommand; the draft input
-       * rides the allowlist above.
+       * rides the allowlist above. 15 = 13 + lane L3's ssh-host Copy (through
+       * chat.copy-message) and the Egress facet's "Load older"; the Files
+       * facet's rows belong to the imported FileListCardBody and are counted
+       * in ITS file. 17 = 15 + lane L3b's Desktop facet: Rotate session and
+       * the 409's Resume. The create affordance's three kind buttons share one
+       * handler, and so does the facet strip (the Desktop tab mints through
+       * workspace.desktop, every other tab switches through workspace.facet).
        */
-      "../cards/WorkspaceCard.tsx": 13,
+      "../cards/WorkspaceCard.tsx": 18,
       /*
        * The target-graph cards: the graph drawer's close/copy/open/run acts
        * (4), the timeline row's log toggle (1), the history row's replay
@@ -217,16 +224,21 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/RunsCards.tsx": 6,
       "../cards/RunHistoryCard.tsx": 1,
       "../cards/AffectedCard.tsx": 1,
-      /* Lane change (ADR 0003): the change card's facets and acts, the diff card's re-read. */
-      "../cards/ChangeCards.tsx": 8,
+      // Agents as data (custom-agents.md): Launch, Edit, Remove, New agent, the harness chip, Cancel, and the submit.
+      "../cards/AgentCards.tsx": 7,
+      /*
+       * Lane change (ADR 0003) + lane L1 (ADR 0004, the live plue routes):
+       * the change card's facet tabs, Land / Split ready / Revert / Full
+       * diff, the conflict rows' Resolve, the Diff facet's two pickers, its
+       * since-my-review and show-all, the file rows' one-file diff, the
+       * Checks picker, Open the computer, the findings' Please fix and Not
+       * useful, the review facet's show-all and thread acts, the history
+       * rows' Diff to current, and the diff card's re-read — all through
+       * onRunCommand with data-flow set.
+       */
+      "../cards/ChangeCards.tsx": 21,
       /* Connection, world and browser card interactions. */
       "../cards/ConversationCards.tsx": 4,
-      /*
-       * The local-app target cards (docs/LOCAL-APP.md "Cards"): one shared
-       * Run handler per file through onRunCommand — the plugin card's per-entry
-       * Run and the targets card's per-row Run both ride target.run.
-       */
-      "../cards/RepoPluginCard.tsx": 2,
       /*
        * The targets table: History in the toolbar, the view, kind and state
        * chips (target.filter), each row's star (target.star / unstar),
@@ -243,7 +255,8 @@ describe("launch-law parity: every affordance is a command", () => {
        * the admin reset, and the theme toggle (chrome that stays visible on
        * every tab).
        */
-      "../tabs/ChromeBar.tsx": 18,
+      /* 23 = 22 + the chrome-actions footer's Download the app (docs/web-mode/PLAN.md §3; renders only where app.download is registered, the cloud host). */
+      "../tabs/ChromeBar.tsx": 24,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })

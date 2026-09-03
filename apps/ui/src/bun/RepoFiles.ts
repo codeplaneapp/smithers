@@ -14,8 +14,8 @@
  */
 import { open, readdir, realpath, stat } from "node:fs/promises"
 import { join, sep } from "node:path"
-import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "smithers-shared/LocalApp"
-import type { RepoFileEntry, RepoFilesResponse } from "smithers-shared/LocalApp"
+import { REPO_FILE_READ_CAP_BYTES, REPO_LISTING_CAP_ENTRIES } from "@smthrs/rpc/LocalApp"
+import type { RepoFileEntry, RepoFilesResponse } from "@smthrs/rpc/LocalApp"
 
 export type RepoFilesResult =
   | { readonly status: "ok"; readonly body: RepoFilesResponse }

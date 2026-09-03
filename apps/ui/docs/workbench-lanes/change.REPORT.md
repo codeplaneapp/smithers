@@ -8,7 +8,7 @@ completed mechanically, below.
 
 ## What shipped, per step
 
-1. **Shared schemas** (`apps/shared/src/Changes.ts`, `Cards.ts`): the
+1. **Shared schemas** (`packages/rpc/src/Changes.ts`, `Cards.ts`): the
    `change` card payload — repo, changeId, description, commitId, currentSeq
    / revisionCount (null until plue#450), revisions[], authorName, timestamp,
    repos[] with stat, the parent → current diff, checks, findings, reviews,
@@ -80,7 +80,7 @@ completed mechanically, below.
   the degraded read-free/refuse-dispatch split. Org changeset reads route
   through the double; the canary org was not needed.
 - Gates: `tsc --noEmit` clean; `bun test src` 1428 pass / 3 fail — exactly
-  the pre-existing TargetGraph integration failures; apps/shared 130 pass;
+  the pre-existing TargetGraph integration failures; packages/rpc 130 pass;
   apps/server 402 pass; playwright 4 pass.
 
 ## Concurrent-lane completions (not this lane's scope, kept green)
@@ -138,5 +138,5 @@ swapped in, the two suites fail 27 of 56 (every new test among them); with
 the fixes, 56 of 56 pass. Gates from `apps/ui`: `tsc --noEmit` clean;
 `bun test src` 1515 pass / 4 fail — the three pre-existing TargetGraph
 integration failures plus the sync lane's in-flight `LiteralPin` failure on
-`e2e/playwright/sync.spec.ts` card-id prefixes; `apps/shared` `bun test`
+`e2e/playwright/sync.spec.ts` card-id prefixes; `packages/rpc` `bun test`
 131 pass.

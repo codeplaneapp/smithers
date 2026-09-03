@@ -4,7 +4,7 @@
  * last menu open shows up. Version probes are cached per binary in
  * Harnesses.ts, so a repeat call costs file reads, not process spawns.
  */
-import type { Harness } from "smithers-shared/LocalApp"
+import type { Harness } from "@smthrs/rpc/LocalApp"
 import { json, Router } from "../routes"
 
 export const HARNESSES_PATH = "/api/harnesses"

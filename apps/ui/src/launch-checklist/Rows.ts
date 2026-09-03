@@ -477,7 +477,7 @@ export const ROWS: ReadonlyArray<ChecklistRow> = [
       /*
        * The row's claim is numeric, so the assertion is numeric: the
        * balance payload carries totalUsd, lifetimeChargedUsd and
-       * chargeCount (apps/shared Cards.ts), and "comped, not uncounted"
+       * chargeCount (packages/rpc Cards.ts), and "comped, not uncounted"
        * means the total never drops while the lifetime cost and charge
        * tally still move. Reading only pass/fail off balanceRead let the
        * whole claim pass vacuously.

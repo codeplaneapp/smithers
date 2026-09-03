@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentToolSpec, AgentTurnFrame } from "smithers-shared/NativeAgent"
+import type { AgentToolSpec, AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import { createCloudAgent } from "./CloudAgent"
 
 /*

@@ -24,7 +24,7 @@
  * `@smthrs/agent` `AgentSession` writes: `{seat, contextDigest}`,
  * `{flowName, input}`, `{flowName, outcome, message, value}`, and the
  * approval `AgentSession.authorize` registers. A run the durable engine really
- * executes is proven separately, in `packages/gateway/test/RealEngineRun.test.ts`.
+ * executes is proven separately, in `packages/smithers/gateway/test/RealEngineRun.test.ts`.
  *
  * The load-bearing assertion is the approval: ONE call decides the gate and
  * resumes the run. The relay counts every procedure it forwards, so a second

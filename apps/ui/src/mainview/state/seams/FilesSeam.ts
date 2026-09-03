@@ -12,8 +12,8 @@
  * decodeContent :117). Parsing is defensive: unknown JSON in, typed card
  * payload out, malformed rows drop; failures are honest strings, never throws.
  */
-import { REPO_FILES_PATH, RepoFilesResponseSchema } from "smithers-shared/LocalApp"
-import type { Repo, RepoFilesResponse } from "smithers-shared/LocalApp"
+import { REPO_FILES_PATH, RepoFilesResponseSchema } from "@smthrs/rpc/LocalApp"
+import type { Repo, RepoFilesResponse } from "@smthrs/rpc/LocalApp"
 import type { Card } from "../AppState"
 import { localCopyIdOf, repoIdFromRemote } from "../AppState"
 import type { AppStore } from "../AppStore"
@@ -31,8 +31,22 @@ import type { SeamContext } from "./SeamContext"
  */
 export interface FilesSeam {
   readonly listFiles: (path: string, repo?: string) => Promise<string | void | { readonly value: string }>
-  readonly readFile: (path: string, repo?: string) => Promise<string | void | { readonly value: string }>
+  readonly readFile: (path: string, repo?: string, anchor?: FileAnchor) => Promise<string | void | { readonly value: string }>
 }
+
+/**
+ * The line anchor `files.read <path>:<line>[:<col>]` carries (docs/code-intel/
+ * PLAN.md §1), 1-based. It is recorded on the card, which scrolls to and marks
+ * the line; the read itself is the same read, so the card keeps its id.
+ */
+export interface FileAnchor {
+  readonly line: number
+  readonly column?: number
+}
+
+/** The payload fields an anchor writes; nothing when there is none, so an unanchored re-read clears a stale line. */
+const anchored = (anchor: FileAnchor | undefined): { readonly line?: number; readonly column?: number } =>
+  anchor === undefined ? {} : { line: anchor.line, ...(anchor.column === undefined ? {} : { column: anchor.column }) }
 
 /** The model's copy of a listing stops here (a node_modules has thousands of entries); the card keeps them all. */
 const LISTING_VALUE_CAP = 400
@@ -208,6 +222,64 @@ const localTarget = (
   return "repo" in open ? { repo: open.repo } : { error: open.error }
 }
 
+/**
+ * Where a file command's path resolves, by the rules the files flows apply:
+ * a global `/org/repo/path` first token names both, an unsafe path is
+ * refused, an open LOCAL repository wins over a Cloud read, and the Cloud
+ * target follows the one repo-resolution rule. Shared with the code-intel
+ * seam (CodeIntelSeam.ts), whose acts address the same files.
+ */
+export type FileTarget =
+  | { readonly kind: "local"; readonly repo: Repo; readonly path: string }
+  | { readonly kind: "cloud"; readonly repo: string; readonly path: string }
+  | { readonly error: string }
+
+export const resolveFileTarget = (store: AppStore, pathArg: string, explicitRepoArg: string | undefined): FileTarget => {
+  const global = splitGlobalPath(store, pathArg, explicitRepoArg)
+  const path = global?.path ?? pathArg
+  const explicitRepo = global?.repo ?? explicitRepoArg
+  if (unsafePath(path)) return { error: "File paths must stay inside the repository." }
+  const local = localTarget(store, explicitRepo)
+  if (local !== undefined) return "error" in local ? local : { kind: "local", repo: local.repo, path: normalizePath(path) }
+  const target = resolveTargetRepo(store, explicitRepo)
+  return "error" in target ? target : { kind: "cloud", repo: target.repo, path: normalizePath(path) }
+}
+
+/*
+ * The local route (`POST /api/repo/files`, LOCAL-APP.md): one request
+ * answers a directory or a file, already bounded and already honest about
+ * binary, so a caller only renders. Failures are the same honest strings
+ * the Cloud path answers. Shared with the sidebar's tree seam
+ * (RepoTreeSeam.ts), which lists directories through the same request.
+ */
+export const requestLocalFiles = async (
+  ctx: Pick<SeamContext, "http" | "baseUrl">,
+  repo: Repo,
+  path: string,
+  label: string,
+  verb: "list" | "read"
+): Promise<{ readonly body: RepoFilesResponse } | { readonly error: string }> => {
+  let response: Response
+  try {
+    response = await ctx.http(`${ctx.baseUrl}${REPO_FILES_PATH}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repoId: repo.id, path })
+    })
+  } catch (error) {
+    return { error: `Could not reach the local app to ${verb} ${label} in ${repo.name}: ${errorText(error)}` }
+  }
+  if (response.status === 404) return { error: await readErrorMessage(response, `Path not found: ${label} in ${repo.name}`) }
+  if (!response.ok) {
+    return {
+      error: await readErrorMessage(response, `${verb === "list" ? "Listing" : "Reading"} ${label} in ${repo.name} failed (${response.status})`)
+    }
+  }
+  const parsed = RepoFilesResponseSchema.safeParse(await response.json().catch(() => null))
+  if (!parsed.success) return { error: `The local app answered ${label} in ${repo.name} with an unreadable payload` }
+  return { body: parsed.data }
+}
+
 export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
   const contentsUrl = (repo: string, path: string): string => {
     const [owner = "", name = ""] = repo.split("/")
@@ -241,38 +313,8 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     return `${repo} isn't imported yet — run /repos.import ${repo} first`
   }
 
-  /*
-   * The local route (`POST /api/repo/files`, LOCAL-APP.md): one request
-   * answers a directory or a file, already bounded and already honest about
-   * binary, so the seam only renders. Failures are the same honest strings
-   * the Cloud path answers.
-   */
-  const localRequest = async (
-    repo: Repo,
-    path: string,
-    label: string,
-    verb: "list" | "read"
-  ): Promise<{ readonly body: RepoFilesResponse } | { readonly error: string }> => {
-    let response: Response
-    try {
-      response = await ctx.http(`${ctx.baseUrl}${REPO_FILES_PATH}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ repoId: repo.id, path })
-      })
-    } catch (error) {
-      return { error: `Could not reach the local app to ${verb} ${label} in ${repo.name}: ${errorText(error)}` }
-    }
-    if (response.status === 404) return { error: await readErrorMessage(response, `Path not found: ${label} in ${repo.name}`) }
-    if (!response.ok) {
-      return {
-        error: await readErrorMessage(response, `${verb === "list" ? "Listing" : "Reading"} ${label} in ${repo.name} failed (${response.status})`)
-      }
-    }
-    const parsed = RepoFilesResponseSchema.safeParse(await response.json().catch(() => null))
-    if (!parsed.success) return { error: `The local app answered ${label} in ${repo.name} with an unreadable payload` }
-    return { body: parsed.data }
-  }
+  const localRequest = (repo: Repo, path: string, label: string, verb: "list" | "read") =>
+    requestLocalFiles(ctx, repo, path, label, verb)
 
   const listLocal = async (repo: Repo, path: string): Promise<string | { readonly value: string }> => {
     const normalized = normalizePath(path)
@@ -302,7 +344,7 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     }
   }
 
-  const readLocal = async (repo: Repo, path: string): Promise<string | { readonly value: string }> => {
+  const readLocal = async (repo: Repo, path: string, anchor: FileAnchor | undefined): Promise<string | { readonly value: string }> => {
     const normalized = normalizePath(path)
     if (normalized === "") return "files.read needs a file path"
     const answer = await localRequest(repo, normalized, normalized, "read")
@@ -316,7 +358,8 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
       content: binary ? "" : content.slice(0, CARD_CONTENT_CAP),
       truncated,
       ...(binary ? { binary: true } : {}),
-      ...localAddressing(ctx.store, repo, normalized)
+      ...localAddressing(ctx.store, repo, normalized),
+      ...anchored(anchor)
     }
     upsert({
       id: `file-${repo.name}-${normalized}`,
@@ -383,13 +426,13 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
       return { value: listingValue(repo, normalized, entries) }
     },
 
-    readFile: async (pathArg, explicitRepoArg) => {
+    readFile: async (pathArg, explicitRepoArg, anchor) => {
       const global = splitGlobalPath(ctx.store, pathArg, explicitRepoArg)
       const path = global?.path ?? pathArg
       const explicitRepo = global?.repo ?? explicitRepoArg
       if (unsafePath(path)) return "File paths must stay inside the repository."
       const local = localTarget(ctx.store, explicitRepo)
-      if (local !== undefined) return "error" in local ? local.error : readLocal(local.repo, path)
+      if (local !== undefined) return "error" in local ? local.error : readLocal(local.repo, path, anchor)
       const target = resolveTargetRepo(ctx.store, explicitRepo)
       if ("error" in target) return target.error
       const { repo } = target
@@ -460,7 +503,8 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
         path: normalized,
         content: truncated ? content.slice(0, CARD_CONTENT_CAP) : content,
         truncated,
-        ...cloudAddressing(ctx.store, repo, normalized)
+        ...cloudAddressing(ctx.store, repo, normalized),
+        ...anchored(anchor)
       }
       upsert({
         id: `file-${repo}-${normalized}`,

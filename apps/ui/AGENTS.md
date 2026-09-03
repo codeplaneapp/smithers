@@ -15,6 +15,10 @@ The user has stated this law repeatedly; violations keep shipping. Treat any ful
 
 Nothing user-visible may be added unless the current brief or the canon (`DESIGN.md`, the vault laws) names it: no decorative chrome, no status badges, no extra pills, no helpful-seeming labels or placeholder copy. Absence is the default; an empty state is a valid state. Unrequested user-visible additions are defects, not initiative.
 
+## ⚖️ THE THREE-DOOR LAW (will, 2026-09-03, permanent)
+
+**Anything a button does, the agent can do.** Every act is ONE flow with three doors: slash, button, and agent. `userOnly` is an enumerated exception for acts that are physically the human's gesture (a folder dialog, an OAuth redirect, focus, a menu, a slider, the clipboard) or that the human alone may answer (a confirm dialog, a picker card, an approval), and every such flow names its reason in the registry as `userOnlyReason` — `flows/agent-parity.test.ts` enumerates every one and fails on a user-only flow without a reason. Consequential acts (launching Claude Code or another harness, running a target, closing a session, unpinning a repository) are agent-invocable WITH `confirm`: the agent's invocation renders the confirm card and the human's click runs the flow. They are never user-only because they are consequential. When a user-only act has an agent door (`auth.prompt`, `cloud.prompt`, `app.download.prompt` render the human's button in the chat), the refusal names it. Opening a local terminal or launching a harness is the product's main act, not browser mechanics.
+
 - Do not use React `useEffect` in application code.
 - Prefer derived values during render, event-driven updates, TanStack Query for server state, and focused hooks from a maintained hooks library for external subscriptions.
 - If synchronization truly cannot fit one of those patterns, stop and document why before introducing lifecycle synchronization.

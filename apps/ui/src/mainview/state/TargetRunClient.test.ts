@@ -7,7 +7,7 @@
  * the local backend speaks, so the seam under test is the product's seam.
  */
 import { afterEach, expect, test } from "bun:test"
-import type { TargetRunFrame } from "smithers-shared/LocalApp"
+import type { TargetRunFrame } from "@smthrs/rpc/LocalApp"
 import { createTargetRunClient } from "./TargetRunClient"
 
 interface Harness {

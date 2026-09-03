@@ -155,7 +155,7 @@ export const DEFAULT_CONCURRENCY = 8;
  * `input.concurrency` is that batch width and nothing more. It does not bound
  * the provider calls in flight, and no shape this body can build would: the
  * interpreter settles every dependency of a node concurrently before running
- * the node (`packages/flow/src/Interpreter.ts`, the `Effect.forEach` over
+ * the node (`packages/smithers/flows/flow/src/Interpreter.ts`, the `Effect.forEach` over
  * `KeyMaterial.dependencies` with `concurrency: "unbounded"` above the AST
  * switch), so a batch chained onto its predecessor with `Node.andThen` starts
  * alongside it exactly as `Node.all` does. A five-file review makes five calls

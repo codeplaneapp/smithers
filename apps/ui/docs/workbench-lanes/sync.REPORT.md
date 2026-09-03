@@ -7,7 +7,7 @@ tree are the three pre-existing TargetGraph integration tests (the
 
 ## What shipped, per step
 
-1. **Shared schemas** (`apps/shared/src/Cards.ts`, `LocalApp.ts`): the
+1. **Shared schemas** (`packages/rpc/src/Cards.ts`, `LocalApp.ts`): the
    `connector-setup` card payload (connector linear|github, repo, phase
    setup|connected, steps[] with verbatim per-step errors, setupKey /
    setupExpiresAt / actor / teams / teamId for the Linear wizard,
@@ -112,7 +112,7 @@ tree are the three pre-existing TargetGraph integration tests (the
   the degraded note, and the rate-limit line.
 - T1: 3 playwright tests, all passing.
 - Gates: `tsc --noEmit` clean; `bun test src` 1499 pass / 3 fail — exactly
-  the pre-existing TargetGraph integration failures; apps/shared 130 pass;
+  the pre-existing TargetGraph integration failures; packages/rpc 130 pass;
   apps/server 402 pass. (Full-suite runs occasionally flake the native/PTY
   integration files under parallel load; each passes in isolation, as
   before this lane.)
@@ -174,4 +174,4 @@ are plain strings now, as in every other spec.
 
 Gates after the fixes (apps/ui): `tsc --noEmit` clean; `bun test src` 1535
 pass / 3 fail, exactly the pre-existing TargetGraph integration failures
-(the `~/artsy/force` fixture); apps/shared `bun test` 131 pass.
+(the `~/artsy/force` fixture); packages/rpc `bun test` 131 pass.

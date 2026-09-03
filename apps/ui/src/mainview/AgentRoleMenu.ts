@@ -1,12 +1,14 @@
-import { AGENT_ROLES, agentRoleTitle } from "smithers-shared/AgentRoles"
-import type { AgentRole } from "smithers-shared/AgentRoles"
+import { AGENT_ROLES, agentRoleTitle, orderedAgentRoles } from "@smthrs/rpc/AgentRoles"
+import type { AgentRole } from "@smthrs/rpc/AgentRoles"
 import type { Harness } from "./state/AppState"
 
 /*
- * The named roles as the `+` menus list them (sidebar and composer): a role is
+ * The agents as the `+` menus list them (sidebar and composer): a role is
  * available exactly when its harness is installed AND carries a credential
  * for the role's model; otherwise the row is disabled with the reason. Pure,
- * so both menus and their tests read one rule.
+ * so both menus, the Agents card, the roles paragraph, and their tests read
+ * one rule. Custom agents (custom-agents.md) ride the same rule: the list is
+ * the app-agents mirror, and the built-in table stands in until it loads.
  */
 export interface RoleMenuEntry {
   readonly role: AgentRole
@@ -18,8 +20,11 @@ export interface RoleMenuEntry {
   readonly account: string
 }
 
-export const roleMenuEntries = (harnesses: ReadonlyArray<Harness>): ReadonlyArray<RoleMenuEntry> =>
-  AGENT_ROLES.map((role) => {
+export const roleMenuEntries = (
+  harnesses: ReadonlyArray<Harness>,
+  agents: ReadonlyArray<AgentRole> = AGENT_ROLES
+): ReadonlyArray<RoleMenuEntry> =>
+  orderedAgentRoles(agents).map((role) => {
     const harness = harnesses.find((candidate) => candidate.id === role.harness)
     const title = agentRoleTitle(role)
     if (harness === undefined || harness.status === "unavailable") {

@@ -1,4 +1,4 @@
-import { CLOUD_WS_ROUTE_PREFIX } from "smithers-shared/LocalApp"
+import { CLOUD_WS_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 
 /*
  * The cloud-workspace terminal transport (lane citc): one WebSocket per
@@ -44,6 +44,12 @@ export interface CloudTerminalClientOptions {
   readonly maxReconnectsPerMinute?: number
   /** A socket that stayed open this long was healthy: its drop redials promptly instead of continuing the backoff. */
   readonly healthyMs?: number
+  /**
+   * How soon after a socket opens a normal close still counts as a STARTUP
+   * failure (plue#504). A shell that ran longer than this died of something
+   * else and is never redialed.
+   */
+  readonly earlyExitMs?: number
 }
 
 /** Frames queued per session before its socket opens. */
@@ -63,6 +69,15 @@ const DEFAULT_MAX_RECONNECT_MS = 30_000
 // Each refused upgrade also costs one status-recovery GET against the SAME 20/min per-user budget, so 6 dials + 6 recoveries leaves headroom for the human's own opens.
 const DEFAULT_MAX_RECONNECTS_PER_MINUTE = 6
 const DEFAULT_HEALTHY_MS = 30_000
+/*
+ * plue#504: while a vm or desktop guest finishes its NixOS activation the
+ * login shell is missing, so the PTY exits 127 within a second or two and
+ * plue closes the durable session NORMALLY (1000) with its own reason,
+ * `session exited: Process exited with status 127`. plue retries that once on
+ * its own (its startup watch is 2 s, its retry delay 3 s); this window is the
+ * renderer's half of the same instruction, and 5 s covers plue's own pair.
+ */
+const DEFAULT_EARLY_EXIT_MS = 5_000
 const MINUTE_MS = 60_000
 
 /*
@@ -85,6 +100,14 @@ const FINAL_NOTES: Readonly<Record<number, string>> = {
 
 const RECONNECT_CODES: ReadonlySet<number> = new Set([1001, 1006])
 
+/**
+ * plue's own close reason for a guest whose login shell is not there yet:
+ * `session exited: Process exited with status 127` (the SSH `ExitError` under
+ * `terminalSession.markDead`'s `session exited: %w`). Matched on the status
+ * alone so the sentence around it stays the server's to word.
+ */
+export const namesMissingShellExit = (reason: string): boolean => /(^|\s)status 127(\s|$)/.test(reason.trim())
+
 /** The same-origin tunnel URL of the page, or undefined outside a browser. */
 export const pageCloudSocketUrl = (repo: string, sessionId: string): string | undefined => {
   if (typeof window === "undefined" || typeof WebSocket === "undefined") return undefined
@@ -102,6 +125,8 @@ interface Connection {
   attempts: number
   /** A 1011 attach failure is retried once; the second is surfaced. */
   retriedAttach: boolean
+  /** plue#504: an exit-127 startup failure is retried once; the second is surfaced. */
+  retriedEarlyExit: boolean
 }
 
 interface Entry {
@@ -121,6 +146,7 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
   const maxReconnectMs = Math.max(options.maxReconnectMs ?? DEFAULT_MAX_RECONNECT_MS, reconnectMs)
   const maxReconnectsPerMinute = options.maxReconnectsPerMinute ?? DEFAULT_MAX_RECONNECTS_PER_MINUTE
   const healthyMs = options.healthyMs ?? DEFAULT_HEALTHY_MS
+  const earlyExitMs = options.earlyExitMs ?? DEFAULT_EARLY_EXIT_MS
 
   const decode = (data: unknown): Promise<string | null> => {
     if (typeof data === "string") return Promise.resolve(data)
@@ -208,9 +234,27 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
       if (openedAt !== undefined && Date.now() - openedAt >= healthyMs) {
         conn.attempts = 0
         conn.retriedAttach = false
+        conn.retriedEarlyExit = false
       }
       if (event.code === 1011 && !conn.retriedAttach) {
         conn.retriedAttach = true
+        scheduleReconnect(sessionId, entry)
+        return
+      }
+      /*
+       * plue#504: the guest's login shell was not there yet. plue closes the
+       * durable session normally and removes it, so one more attach opens a
+       * new shell on the same session — the server's own retry, once. The
+       * second such close is the person's to read, in plue's words.
+       */
+      if (
+        event.code === 1000
+        && namesMissingShellExit(event.reason)
+        && openedAt !== undefined
+        && Date.now() - openedAt < earlyExitMs
+        && !conn.retriedEarlyExit
+      ) {
+        conn.retriedEarlyExit = true
         scheduleReconnect(sessionId, entry)
         return
       }
@@ -220,9 +264,15 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
       }
       const known = FINAL_NOTES[event.code]
       const reason = event.reason.trim()
+      /*
+       * plue#504: a normal close carries the session's own last words
+       * (`session exited: …`). They were dropped before — a person was told
+       * only "session closed" — so a 1000 now reads its reason the way an
+       * unrecognized code always has.
+       */
       const note = event.code === 1008
         ? `access revoked${reason ? `: ${reason.replace(/^access revoked:\s*/, "")}` : ""}`
-        : known !== undefined
+        : known !== undefined && event.code !== 1000
         ? `${known}${reason && event.code >= 4400 ? ` (${reason})` : ""}`
         : `session closed${reason ? `: ${reason}` : ""}`
       say(conn, note)
@@ -237,7 +287,15 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
     if (entry === undefined) {
       entry = {
         repo,
-        conn: { socket: undefined, listeners: new Set(), pending: [], reconnect: undefined, attempts: 0, retriedAttach: false }
+        conn: {
+          socket: undefined,
+          listeners: new Set(),
+          pending: [],
+          reconnect: undefined,
+          attempts: 0,
+          retriedAttach: false,
+          retriedEarlyExit: false
+        }
       }
       connections.set(sessionId, entry)
     }

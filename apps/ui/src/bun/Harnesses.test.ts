@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { HARNESS_IDS } from "smithers-shared/LocalApp"
+import { AGENT_ROLES } from "@smthrs/rpc/AgentRoles"
+import { HARNESS_IDS } from "@smthrs/rpc/LocalApp"
 import {
   decodeJwtClaims,
   DETECTORS,
   detectHarnessesWith,
   findBinary,
   harnessCandidateDirs,
+  harnessModels,
+  harnessModelSpec,
   parseVersionLine
 } from "./Harnesses"
 import type { HarnessHost } from "./Harnesses"
@@ -102,9 +105,43 @@ describe("the table", () => {
       version: null,
       status: "unavailable",
       account: null,
-      launch: { argv: ["claude"] }
+      launch: { argv: ["claude"] },
+      models: { suggestions: ["claude-fable-5", "fable", "opus", "sonnet"], listable: false }
     })
     expect(h.probed).toEqual([])
+  })
+
+  test("the model table names the verified flag per harness and only a list command's harness is listable", async () => {
+    // Each flag and suggestion is the installed binary's own --help text (custom-agents.md); a harness whose help names no model flag has no entry.
+    expect(harnessModelSpec("claude")).toEqual({ binary: "claude", flag: ["--model"] })
+    expect(harnessModelSpec("codex")).toEqual({ binary: "codex", flag: ["-m"] })
+    expect(harnessModelSpec("gemini")).toEqual({ binary: "gemini", flag: ["--model"] })
+    expect(harnessModelSpec("kimi")).toEqual({ binary: "kimi", flag: ["--model"] })
+    expect(harnessModelSpec("opencode-kimi")).toEqual({ binary: "opencode", flag: ["--model"] })
+    expect(harnessModelSpec("cursor-agent")).toEqual({ binary: "cursor-agent", flag: ["--model"] })
+    expect(harnessModelSpec("hermes")).toEqual({ binary: "hermes", flag: ["--model"] })
+    for (const id of ["crush", "amp", "pi"]) {
+      expect(harnessModelSpec(id)).toBeUndefined()
+      expect(harnessModels(id)).toBeUndefined()
+    }
+    expect(harnessModelSpec("nope")).toBeUndefined()
+    expect(harnessModels("codex")).toEqual({ flag: ["-m"], suggestions: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] })
+    expect(harnessModels("opencode")?.list).toEqual(["opencode", "models"])
+    expect(harnessModels("opencode-kimi")?.list).toEqual(["opencode", "models", "kimi-for-coding"])
+    expect(harnessModels("opencode-cerebras")?.list).toEqual(["opencode", "models", "cerebras"])
+    // Every built-in role's harness takes a model flag, and every suggestion is a model id.
+    for (const role of AGENT_ROLES) expect(harnessModelSpec(role.harness)).toBeDefined()
+    for (const detector of DETECTORS) {
+      expect(detector.models?.list?.[0] ?? detector.binary).toBe(detector.binary)
+      for (const model of detector.models?.suggestions ?? []) expect(model).toMatch(/^[A-Za-z0-9][A-Za-z0-9._/:-]{0,80}$/)
+    }
+    // The wire carries the suggestions and whether a list command exists, never the flag.
+    const all = await detectHarnessesWith(host({ binaries: ["/Users/u/.opencode/bin/opencode"] }))
+    const byId = Object.fromEntries(all.map((harness) => [harness.id, harness]))
+    expect(byId.opencode?.models).toEqual({ suggestions: ["kimi-for-coding/k3", "cerebras/gpt-oss-120b"], listable: true })
+    expect(byId.codex?.models).toEqual({ suggestions: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"], listable: false })
+    expect(byId.crush?.models).toBeUndefined()
+    expect(JSON.stringify(byId.opencode)).not.toContain("flag")
   })
 
   test("claude: oauthAccount email and organization, else .credentials.json, else ANTHROPIC_API_KEY", async () => {

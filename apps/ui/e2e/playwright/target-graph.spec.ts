@@ -17,7 +17,7 @@ import { resolve } from "node:path"
 test.skip(process.env.SMITHERS_CHAT_STUB === "0", "the stub suite; the real endpoint is the manual proof")
 
 /* The committed force spec: a repository that declares targets, on every machine. */
-const FIXTURE_REPO = resolve(__dirname, "../../../../packages/build-cli/test/fixtures/force-spec")
+const FIXTURE_REPO = resolve(__dirname, "../../../../packages/smithers/build/build-cli/test/fixtures/force-spec")
 const SHOTS = resolve(__dirname, "../../docs/screenshots")
 
 const FIXTURE_FLAG = "smithers.dev.targetGraphFixtures"

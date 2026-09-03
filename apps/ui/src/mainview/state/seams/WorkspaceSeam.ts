@@ -18,24 +18,46 @@
  *   POST   /api/repos/{o}/{r}/workspace/sessions         { workspace_id, cols, rows }
  *   GET    /api/repos/{o}/{r}/workspace/sessions/{id}
  *   POST   /api/repos/{o}/{r}/workspace/sessions/{id}/destroy
+ *   GET    /api/repos/{o}/{r}/workspaces/{id}/files?path=            — the Files facet
+ *   GET    /api/repos/{o}/{r}/workspaces/{id}/files/content?path=    — one file
+ *   GET    /api/repos/{o}/{r}/workspaces/{id}/services               — the Services facet
+ *   GET    /api/repos/{o}/{r}/workspaces/{id}/egress?limit=&cursor=  — the Egress facet
  *
- * The workspace DTO carries no kind, no uptime, no workspace head, and no
- * ahead/behind (plue#446), and neither does the card — `bookmarkHead` is the
- * TARGET BOOKMARK's head from the bookmarks call, labeled as such, never the
- * workspace's own. The Files and Services facets have no routes (plue#449)
- * and render empty. Every act refuses a degraded sign-in with the enable
- * wording, and a bare act resolves its workspace from the active working
- * copy (kind "workspace"), else the single loaded one — never a guess.
- * A workspace still settling (pending, starting) is polled until it settles
- * or is gone; a 404 mid-watch refreshes the repository's list.
+ * Lane L3: plue#446 and plue#449 landed, so the DTO's kind, environment,
+ * head, ahead/behind, persistence, ssh host and started_at are parsed and the
+ * Files, Services and Egress facets read their own routes. Every one of those
+ * fields is absent-tolerant: a field the wire omits is null on the row and
+ * renders NOTHING — no default, no guess. `bookmarkHead` stays the TARGET
+ * BOOKMARK's head from the bookmarks call, labeled as such and separate from
+ * the workspace's own `head`.
+ *
+ * Every act refuses a degraded sign-in with the enable wording, and a bare act
+ * resolves its workspace from the active working copy (kind "workspace"), else
+ * the single loaded one — never a guess. A workspace still settling (pending,
+ * starting) is polled until it settles or is gone; a 404 mid-watch refreshes
+ * the repository's list.
  */
-import { CLOUD_ROUTE_PREFIX } from "smithers-shared/LocalApp"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import {
   parseRepoSelection,
   WORKSPACE_STATUSES
 } from "../AppState"
-import type { Card, CloudWorkspaceInput, CloudWorkspaceRow } from "../AppState"
+import type {
+  Card,
+  CloudWorkspaceInput,
+  CloudWorkspaceRow,
+  EnvironmentImageRow,
+  SandboxEgressRow,
+  WorkspaceDesktop,
+  WorkspaceEnvironment,
+  WorkspaceFileEntry,
+  WorkspaceHead,
+  WorkspaceService
+} from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
+import { dropDesktopStream, holdDesktopStream } from "./DesktopStream"
+import type { DesktopStream } from "./DesktopStream"
+import { loadEgressPage, workspaceEgressPath } from "./EgressSeam"
 import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
@@ -44,15 +66,84 @@ export const DEGRADED_WORKSPACE_REFUSAL =
 
 const SIGN_OUT_REFUSAL = "Sign in to Smithers Cloud first — /cloud.sign-in."
 
-export type WorkspaceFacet = "terminal" | "files" | "services" | "snapshots"
+/*
+ * plue's contract code for a worker that could not start the per-sandbox
+ * egress proxy and refused to boot the computer without its credential
+ * boundary (internal/microsandbox/worker/server.go). The card says the code
+ * itself: a paraphrase would hide which boundary failed.
+ */
+export const EGRESS_PROXY_UNAVAILABLE = "egress_proxy_unavailable"
+
+/**
+ * plue#496: the desktop session POST answers `503 { code:
+ * "desktop_not_ready" }` with a `Retry-After` header while the guest's NixOS
+ * activation finishes (about 30 s after the VM reports `running`). The
+ * server ASKED to be retried, so the seam retries — bounded, and only on
+ * that code.
+ */
+export const DESKTOP_NOT_READY = "desktop_not_ready"
+
+/**
+ * The bounded retry the `desktop_not_ready` 503 buys: at plue's own
+ * `Retry-After: 2` that is a minute of waiting, which is the activation
+ * window. Module-level so tests shorten the wait rather than sleeping.
+ */
+export const desktopSessionRetry = {
+  maxAttempts: 30,
+  /** Used only when the refusal carried no `Retry-After` this app could read. */
+  defaultDelayMs: 2_000
+}
+
+/**
+ * plue#504: the terminal session POST answers `503 { code: "guest_not_ready" }`
+ * with a `Retry-After` header while a vm or desktop guest finishes its NixOS
+ * activation — the same shape, and the same instruction, as the desktop's
+ * `desktop_not_ready`. plue sets `RetryAfter: 3` on it.
+ */
+export const GUEST_NOT_READY = "guest_not_ready"
+
+/**
+ * The bounded retry the `guest_not_ready` 503 buys: 30 attempts, which at
+ * plue's own `Retry-After: 3` is 90 s — its activation window. Module-level so
+ * tests shorten the wait rather than sleeping.
+ */
+export const terminalSessionRetry = {
+  maxAttempts: 30,
+  /** Used only when the refusal carried no `Retry-After` this app could read. */
+  defaultDelayMs: 3_000
+}
+
+/**
+ * The `Retry-After` header in whole seconds, or null when the response named
+ * none this app can read. plue writes a delta-seconds integer; a header this
+ * app cannot parse is no instruction at all, and the caller's default delay
+ * stands in for it rather than a guess at a date.
+ */
+const retryAfterSecondsOf = (response: Response): number | null => {
+  const header = response.headers.get("retry-after")
+  if (header === null) return null
+  const seconds = Number(header.trim())
+  return Number.isInteger(seconds) && seconds >= 0 ? seconds : null
+}
+
+export type WorkspaceFacet = "terminal" | "files" | "services" | "snapshots" | "egress" | "desktop"
 
 export interface WorkspaceSeam {
   /** `workspace.list [owner/repo]`: refresh the collection and the tree; a bare call lists the per-user inventory. */
   readonly listWorkspaces: (repo?: string) => Promise<string | void | { readonly value: string }>
   /** The silent refresh (sign-in, boot): the collection and tree, no transcript line. */
   readonly refreshWorkspaces: (repo?: string) => Promise<string | void>
-  /** `workspace.open [bookmark] [owner/repo]`: create-or-reuse, render the card, watch until it settles. */
-  readonly openWorkspace: (bookmark?: string, repo?: string) => Promise<string | void | { readonly value: string }>
+  /**
+   * `workspace.open [bookmark] [owner/repo] [--kind container|vm|desktop]`:
+   * create-or-reuse, render the card, watch until it settles. ADR 0002 — the
+   * kind IS the choice; a call that names none leaves plue's own default
+   * (`container`) to stand rather than asserting one.
+   */
+  readonly openWorkspace: (
+    bookmark?: string,
+    repo?: string,
+    kind?: WorkspaceKind
+  ) => Promise<string | void | { readonly value: string }>
   /** `workspace.view <id>`: re-read one workspace and render its card. */
   readonly viewWorkspace: (workspaceId: string) => Promise<string | void | { readonly value: string }>
   /** `workspace.terminal [workspaceId]`: open (or re-attach) the workspace's terminal tab. */
@@ -71,9 +162,42 @@ export interface WorkspaceSeam {
   readonly deleteWorkspace: (workspaceId: string, confirmName: string) => Promise<string | void | { readonly value: string }>
   /** The card's body tab; hidden, card-button scoped. */
   readonly setFacet: (workspaceId: string, facet: WorkspaceFacet) => Promise<string | void>
-  /** Stop every watch timer. */
+  /** `workspace.files [path] [workspaceId]`: the Files facet at one directory (`""` is the root). */
+  readonly listFiles: (path?: string, workspaceId?: string) => Promise<string | void | { readonly value: string }>
+  /** `workspace.file <path> [workspaceId]`: read one file out of the workspace and render the file card. */
+  readonly readFile: (path: string, workspaceId?: string) => Promise<string | void | { readonly value: string }>
+  /** `workspace.services [workspaceId]`: the Services facet's rows. */
+  readonly listServices: (workspaceId?: string) => Promise<string | void | { readonly value: string }>
+  /**
+   * `workspace.egress [workspaceId] [cursor]`: one page of the egress audit.
+   * Without a cursor it replaces the facet's rows; with one it appends the
+   * older page the card's "Load older" asked for.
+   */
+  readonly listEgress: (workspaceId?: string, cursor?: string) => Promise<string | void | { readonly value: string }>
+  /**
+   * `workspace.desktop <workspaceId>`: mint a desktop session and open the
+   * facet. The answer is a credential, so it goes to the ephemeral holder in
+   * DesktopStream.ts and NEVER to a collection, a transcript row, or a card.
+   */
+  readonly openDesktop: (workspaceId?: string) => Promise<string | void | { readonly value: string }>
+  /** `workspace.desktop.rotate <workspaceId>`: mint again (the guest's VNC password changes; the old iframe drops). */
+  readonly rotateDesktop: (workspaceId?: string) => Promise<string | void | { readonly value: string }>
+  /** `workspace.images [owner/repo]`: the environment images a repository has built. */
+  readonly listEnvironmentImages: (repo?: string) => Promise<string | void | { readonly value: string }>
+  /**
+   * One event off `GET …/workspaces/{id}/stream` (RFD-004). The stream now
+   * carries `{ status, head, ahead, behind }` when the guest reports a new
+   * head, and `{ status }` alone otherwise: a status-only event must leave the
+   * head exactly as it was rather than blanking it.
+   */
+  readonly applyStatusEvent: (workspaceId: string, event: unknown) => void
+  /** Stop every watch timer, and drop any minted desktop credential. */
   readonly dispose: () => void
 }
+
+/** The three sandbox kinds ADR 0002 names; the option surface offers exactly these. */
+export const WORKSPACE_KINDS = ["container", "vm", "desktop"] as const
+export type WorkspaceKind = (typeof WORKSPACE_KINDS)[number]
 
 export interface WorkspaceSeamDeps {
   /** The watch and session-settle poll interval; tests inject ~0. */
@@ -93,14 +217,60 @@ interface SessionRow {
 }
 
 /** The auxiliaries a workspace card renders beside the DTO row. */
+/**
+ * One refused call, in the server's own terms. `status` is null when there
+ * was no HTTP answer at all (the request never reached Smithers Cloud), so a
+ * card never prints a status the wire did not state.
+ */
+interface SeamRefusal {
+  readonly error: string
+  readonly code: string | null
+  readonly status: number | null
+  readonly retryAfterSeconds: number | null
+}
+
 interface CardAux {
   readonly bookmarkHead: { readonly changeId: string | null; readonly commitId: string | null } | null
   readonly snapshots: ReadonlyArray<SnapshotRow>
   readonly sessions: ReadonlyArray<SessionRow>
+  readonly files: ReadonlyArray<WorkspaceFileEntry>
+  readonly filesPath: string
+  readonly services: ReadonlyArray<WorkspaceService>
+  readonly egress: ReadonlyArray<SandboxEgressRow>
+  /** plue's next keyset position; an explicit null says the audit is exhausted. */
+  readonly egressCursor: string | null
   readonly facet?: WorkspaceFacet | undefined
   /** The attached session; an explicit null override detaches. */
   readonly terminalSessionId?: string | null | undefined
   readonly error?: string | undefined
+  /** plue refused an act with `egress_proxy_unavailable`; the card names the code. */
+  readonly egressProxyUnavailable?: boolean | undefined
+  /**
+   * How the desktop session POST refused: plue's status beside its own words,
+   * its machine-readable `code` (which survives the 5xx message sanitizer)
+   * and the `Retry-After` seconds it asked for (lane L3b; plue#496).
+   */
+  readonly desktopRefusal?:
+    | {
+      readonly status: number
+      readonly message: string
+      readonly code?: string | null
+      readonly retryAfterSeconds?: number | null
+    }
+    | undefined
+  /**
+   * How the terminal session POST refused: the same four facts, on the
+   * terminal facet (plue#504). `guest_not_ready` is the one the seam retries
+   * on its own, because the server asked it to.
+   */
+  readonly terminalRefusal?:
+    | {
+      readonly status: number
+      readonly message: string
+      readonly code?: string | null
+      readonly retryAfterSeconds?: number | null
+    }
+    | undefined
 }
 
 const UNSETTLED: ReadonlySet<string> = new Set(["pending", "starting"])
@@ -169,6 +339,101 @@ const textOrNull = (value: unknown): string | null => (typeof value === "string"
 const isWorkspaceStatus = (value: unknown): value is CloudWorkspaceInput["status"] =>
   typeof value === "string" && (WORKSPACE_STATUSES as ReadonlyArray<string>).includes(value)
 
+/**
+ * The DTO's `head` (plue#446): the workspace's OWN head as the guest last
+ * reported it. plue writes empty strings when it has reported none, and an
+ * empty head is absent, not a head of "".
+ */
+const parseHead = (value: unknown): WorkspaceHead | null => {
+  if (!isRecord(value)) return null
+  const changeId = textOrNull(value.change_id)
+  const commitId = textOrNull(value.commit_id)
+  return changeId === null && commitId === null ? null : { changeId, commitId }
+}
+
+/**
+ * The DTO's `environment`: the Nix expression the computer was built from and
+ * — lane L3b — the registry `image` a vm or desktop workspace actually booted.
+ * `image` is empty for a container, and an empty string is absence.
+ */
+const parseEnvironment = (value: unknown): WorkspaceEnvironment | null => {
+  if (!isRecord(value)) return null
+  const source = textOrNull(value.source)
+  if (source === null) return null
+  return {
+    source,
+    revision: textOrNull(value.revision),
+    closureHash: textOrNull(value.closure_hash),
+    image: textOrNull(value.image)
+  }
+}
+
+/*
+ * The DTO's `desktop` object (lane L3b), present only when `kind` is
+ * `desktop`. `stream_url` here is plue's RELATIVE path — never credentialed —
+ * `session` is the last mint's id and expiry, or null before the first one,
+ * and — plue#496 — `ready` is true only once the guest verified noVNC. A
+ * desktop object that says none of the three is absence, not an empty desktop.
+ */
+const parseDesktop = (value: unknown): WorkspaceDesktop | null => {
+  if (!isRecord(value)) return null
+  const streamUrl = textOrNull(value.stream_url)
+  const raw = value.session
+  const sessionId = isRecord(raw) ? textOrNull(raw.id) : null
+  const session = sessionId === null || !isRecord(raw)
+    ? null
+    : { id: sessionId, expiresAt: textOrNull(raw.expires_at) }
+  /* plue#496 `ready`: the guest verified noVNC. A DTO that omits it says nothing about readiness. */
+  const ready = typeof value.ready === "boolean" ? value.ready : null
+  if (streamUrl === null && session === null && ready === null) return null
+  return { ready, streamUrl, session }
+}
+
+/*
+ * The 201 of POST …/workspaces/{id}/desktop/session. Only the absolute
+ * `stream_url` and the session's id and expiry are read; `token` and
+ * `vnc_password` are deliberately NOT read out of the body, because the URL
+ * already carries them and a second copy is a second place to leak from.
+ */
+const parseDesktopMint = (value: unknown, workspaceId: string): DesktopStream | null => {
+  if (!isRecord(value)) return null
+  const url = textOrNull(value.stream_url)
+  const raw = value.session
+  const sessionId = isRecord(raw) ? textOrNull(raw.id) : null
+  if (url === null || sessionId === null || !isRecord(raw)) return null
+  return { workspaceId, url, sessionId, expiresAt: textOrNull(raw.expires_at) }
+}
+
+/**
+ * One row of `GET /api/repos/{o}/{r}/environment-images` (lane L3b). plue's
+ * `repository_id 0` is the platform base image; an empty `golden_snapshot_id`
+ * means the first boot of that closure is a cold registry pull.
+ */
+const parseEnvironmentImage = (value: unknown): EnvironmentImageRow | null => {
+  if (!isRecord(value)) return null
+  const rawId = value.id
+  const id = typeof rawId === "number" && Number.isInteger(rawId) ? String(rawId) : str(rawId)
+  const kind = str(value.kind)
+  const source = str(value.source)
+  const status = str(value.status)
+  if (id === null || kind === null || source === null || status === null) return null
+  return {
+    id,
+    kind,
+    source,
+    sourceRevision: textOrNull(value.source_revision),
+    closureHash: textOrNull(value.closure_hash),
+    image: textOrNull(value.image),
+    status,
+    platformBase: value.repository_id === 0,
+    coldPull: textOrNull(value.golden_snapshot_id) === null
+  }
+}
+
+/** A wire count that must be a whole number to be stated at all. */
+const countOrNull = (value: unknown): number | null =>
+  typeof value === "number" && Number.isInteger(value) ? value : null
+
 /** One workspace row off the wire; malformed rows drop. */
 const parseWorkspaceWire = (value: unknown, fallbackRepo?: string): CloudWorkspaceInput | null => {
   if (!isRecord(value)) return null
@@ -182,9 +447,59 @@ const parseWorkspaceWire = (value: unknown, fallbackRepo?: string): CloudWorkspa
     name,
     targetBookmark: textOrNull(value.target_bookmark),
     status: value.status,
+    /* plue#482: why a failed workspace failed, in the provider's own words. */
+    failureCode: textOrNull(value.failure_code),
+    failureMessage: textOrNull(value.failure_message),
     provisioningStage: textOrNull(value.provisioning_stage),
     suspendedAt: textOrNull(value.suspended_at),
-    createdAt: textOrNull(value.created_at)
+    createdAt: textOrNull(value.created_at),
+    kind: textOrNull(value.kind),
+    /* RFD-004: the agent session that drove this computer, on a `kind: "agent"` workspace. */
+    agentSessionId: textOrNull(value.agent_session_id),
+    head: parseHead(value.head),
+    ahead: countOrNull(value.ahead),
+    behind: countOrNull(value.behind),
+    startedAt: textOrNull(value.started_at),
+    environment: parseEnvironment(value.environment),
+    persistence: textOrNull(value.persistence),
+    sshHost: textOrNull(value.ssh_host),
+    desktop: parseDesktop(value.desktop)
+  }
+}
+
+/** One row of the workspace file listing (plue#449); a row missing a name drops. */
+const parseFileEntry = (value: unknown): WorkspaceFileEntry | null => {
+  if (!isRecord(value)) return null
+  const name = str(value.name)
+  const type = str(value.type)
+  if (name === null || type === null) return null
+  const size = value.size
+  return {
+    name,
+    // plue always writes `path`; a row without one is still nameable under the directory the facet asked for.
+    path: str(value.path) ?? name,
+    type,
+    size: typeof size === "number" && Number.isInteger(size) && size >= 0 ? size : null
+  }
+}
+
+/**
+ * One managed-service row (plue#449, and #483's `port` / `url`). Both are
+ * `omitempty` on the wire, so a service that publishes neither carries
+ * neither and the row states a name and a state alone — an absent port is
+ * absence, never a zero.
+ */
+const parseService = (value: unknown): WorkspaceService | null => {
+  if (!isRecord(value)) return null
+  const name = str(value.name)
+  const state = str(value.state)
+  if (name === null || state === null) return null
+  const port = value.port
+  return {
+    name,
+    state,
+    port: typeof port === "number" && Number.isInteger(port) && port > 0 ? port : null,
+    url: str(value.url)
   }
 }
 
@@ -208,9 +523,29 @@ const parseUserWorkspaceWire = (value: unknown): CloudWorkspaceInput | null => {
     name,
     targetBookmark: null,
     status: value.state,
+    /* plue#482: the switcher row states the failure too, so a failed row explains itself in the list. */
+    failureCode: textOrNull(value.failure_code),
+    failureMessage: textOrNull(value.failure_message),
     provisioningStage: null,
     suspendedAt: null,
-    createdAt: textOrNull(value.created_at)
+    createdAt: textOrNull(value.created_at),
+    /*
+     * The switcher row carries none of plue#446's header facts — no kind, no
+     * head, no ahead/behind, no environment, no persistence, no ssh host, no
+     * start time. They are null HERE and the caller restores whatever the
+     * collection already knows; nothing is read out of the per-repo DTO's
+     * shape, because this route does not answer that shape.
+     */
+    kind: null,
+    agentSessionId: null,
+    head: null,
+    ahead: null,
+    behind: null,
+    startedAt: null,
+    environment: null,
+    persistence: null,
+    sshHost: null,
+    desktop: null
   }
 }
 
@@ -260,6 +595,8 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
   const timers = new Set<ReturnType<typeof setTimeout>>()
   const watching = new Set<string>()
   const watchPolls = new Map<string, number>()
+  /** One desktop mint at a time per workspace: a newer mint (or a drop) supersedes the retry loop before it. */
+  const desktopMintEpochs = new Map<string, number>()
   /** 5s cadence × 120 = ten minutes, the provisioning ceiling the workspaces spec names. */
   const MAX_WATCH_POLLS = 120
 
@@ -278,6 +615,9 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     timers.clear()
     watching.clear()
     watchPolls.clear()
+    /* The controller is going away, so no facet can be mounted: the credential goes with it. */
+    dropDesktopStream()
+    desktopMintEpochs.clear()
   }
 
   /*
@@ -290,14 +630,51 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     if (session.scopes === "degraded") return DEGRADED_WORKSPACE_REFUSAL
   }
 
-  const getJson = async (path: string): Promise<{ readonly body: unknown } | { readonly error: string }> => {
+  /*
+   * A refusal's machine-readable code beside its message. plue sanitizes a
+   * 5xx message down to the status text but KEEPS `code` (routes/auth.go
+   * writeRouteError), so the code is the only place `egress_proxy_unavailable`
+   * can reach a person — reading only the message would lose it.
+   */
+  const refusalCode = async (response: Response): Promise<string | null> => {
+    const clone = response.clone()
+    const text = (await clone.text().catch(() => "")).trim()
+    if (text === "") return null
+    try {
+      const body = JSON.parse(text) as { code?: unknown }
+      return typeof body.code === "string" && body.code !== "" ? body.code : null
+    } catch {
+      return null
+    }
+  }
+
+  /*
+   * One refusal, in the server's own terms: its sentence, its
+   * machine-readable code, its status, and the `Retry-After` it asked for.
+   * The status and the header are what let a caller answer a retryable
+   * refusal (plue#496's `desktop_not_ready`, plue#504's `guest_not_ready`)
+   * on the server's clock rather than this app's guess.
+   */
+  const failed = async (response: Response, fallback: string): Promise<SeamRefusal> => ({
+    code: await refusalCode(response),
+    error: await readErrorMessage(response, fallback),
+    status: response.status,
+    retryAfterSeconds: retryAfterSecondsOf(response)
+  })
+
+  const getJson = async (path: string): Promise<{ readonly body: unknown } | SeamRefusal> => {
     let response: Response
     try {
       response = await ctx.http(cloud(path))
     } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
+      return {
+        error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`,
+        code: null,
+        status: null,
+        retryAfterSeconds: null
+      }
     }
-    if (!response.ok) return { error: await readErrorMessage(response, `Reading ${path} failed (${response.status})`) }
+    if (!response.ok) return failed(response, `Reading ${path} failed (${response.status})`)
     return { body: await response.json().catch(() => null) }
   }
 
@@ -305,7 +682,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     method: "POST" | "DELETE",
     path: string,
     body?: Record<string, unknown>
-  ): Promise<{ readonly body: unknown } | { readonly error: string }> => {
+  ): Promise<{ readonly body: unknown } | SeamRefusal> => {
     let response: Response
     try {
       response = await ctx.http(cloud(path), {
@@ -313,9 +690,14 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
         ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       })
     } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
+      return {
+        error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`,
+        code: null,
+        status: null,
+        retryAfterSeconds: null
+      }
     }
-    if (!response.ok) return { error: await readErrorMessage(response, `The ${method} to ${path} failed (${response.status})`) }
+    if (!response.ok) return failed(response, `The ${method} to ${path} failed (${response.status})`)
     return { body: await response.json().catch(() => null) }
   }
 
@@ -389,6 +771,36 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     })
   }
 
+  const workspacePath = (repoId: string, workspaceId: string, rest: string): string =>
+    repoPath(repoId, `/workspaces/${encodeURIComponent(workspaceId)}${rest}`)
+
+  /** One directory inside the working copy (plue#449); the server's own error when it refuses. */
+  const loadFiles = async (
+    repoId: string,
+    workspaceId: string,
+    path: string
+  ): Promise<ReadonlyArray<WorkspaceFileEntry> | { readonly error: string }> => {
+    const answer = await getJson(`${workspacePath(repoId, workspaceId, "/files")}?path=${encodeURIComponent(path)}`)
+    if ("error" in answer) return { error: answer.error }
+    return arrayOf(answer.body, "entries").flatMap((entry) => {
+      const parsed = parseFileEntry(entry)
+      return parsed === null ? [] : [parsed]
+    })
+  }
+
+  /** The workspace's managed services (plue#449). */
+  const loadServices = async (
+    repoId: string,
+    workspaceId: string
+  ): Promise<ReadonlyArray<WorkspaceService> | { readonly error: string }> => {
+    const answer = await getJson(workspacePath(repoId, workspaceId, "/services"))
+    if ("error" in answer) return { error: answer.error }
+    return arrayOf(answer.body, "services").flatMap((entry) => {
+      const parsed = parseService(entry)
+      return parsed === null ? [] : [parsed]
+    })
+  }
+
   /** One workspace's sessions; null = unread. */
   const loadSessions = async (repoId: string, workspaceId: string): Promise<ReadonlyArray<SessionRow> | null> => {
     const answer = await getJson(repoPath(repoId, "/workspace/sessions"))
@@ -423,18 +835,53 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       name: current.name,
       targetBookmark: current.targetBookmark,
       status: current.status,
+      failureCode: current.failureCode ?? null,
+      failureMessage: current.failureMessage ?? null,
       provisioningStage: current.provisioningStage,
       suspendedAt: current.suspendedAt,
       bookmarkHead: overrides.bookmarkHead !== undefined ? overrides.bookmarkHead : prior?.bookmarkHead ?? null,
+      /*
+       * plue#446's header facts ride the collection, never the prior card: a
+       * poll that landed while an act's auxiliaries loaded has already
+       * advanced the row, and a field the wire stopped answering must go
+       * absent rather than linger from an older render.
+       */
+      workspaceKind: current.kind ?? null,
+      agentSessionId: current.agentSessionId ?? null,
+      head: current.head ?? null,
+      ahead: current.ahead ?? null,
+      behind: current.behind ?? null,
+      startedAt: current.startedAt ?? null,
+      environment: current.environment ?? null,
+      persistence: current.persistence ?? null,
+      sshHost: current.sshHost ?? null,
+      desktop: current.desktop ?? null,
       snapshots: overrides.snapshots !== undefined ? [...overrides.snapshots] : prior?.snapshots ?? [],
       sessions: overrides.sessions !== undefined ? [...overrides.sessions] : prior?.sessions ?? [],
+      ...(overrides.files !== undefined
+        ? { files: [...overrides.files], filesPath: overrides.filesPath ?? "" }
+        : prior?.files !== undefined ? { files: prior.files, filesPath: prior.filesPath ?? "" } : {}),
+      ...(overrides.services !== undefined
+        ? { services: [...overrides.services] }
+        : prior?.services !== undefined ? { services: prior.services } : {}),
+      ...(overrides.egress !== undefined
+        ? { egress: [...overrides.egress], egressCursor: overrides.egressCursor ?? null }
+        : prior?.egress !== undefined ? { egress: prior.egress, egressCursor: prior.egressCursor ?? null } : {}),
       ...(overrides.facet !== undefined
         ? { facet: overrides.facet }
         : prior?.facet !== undefined ? { facet: prior.facet } : {}),
       ...(overrides.terminalSessionId !== undefined
         ? overrides.terminalSessionId === null ? {} : { terminalSessionId: overrides.terminalSessionId }
         : prior?.terminalSessionId !== undefined ? { terminalSessionId: prior.terminalSessionId } : {}),
-      ...(overrides.error !== undefined ? { error: overrides.error } : {})
+      ...(overrides.error !== undefined ? { error: overrides.error } : {}),
+      ...(overrides.egressProxyUnavailable === true ? { egressProxyUnavailable: true } : {}),
+      /*
+       * Like `error`, a desktop refusal belongs to the act that just ran: it
+       * is never carried forward, so a successful mint clears the one before
+       * it without anyone having to remember to.
+       */
+      ...(overrides.desktopRefusal === undefined ? {} : { desktopRefusal: overrides.desktopRefusal }),
+      ...(overrides.terminalRefusal === undefined ? {} : { terminalRefusal: overrides.terminalRefusal })
     }
     const card: Card = {
       id,
@@ -448,10 +895,21 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     ctx.dispatch({ type: "card.upsert", actor: ctx.actor(), card })
   }
 
-  /** The failure side of an act: the refusal rides the card too, so it stays visible. */
-  const failOnCard = (workspace: CloudWorkspaceInput, error: string): string => {
-    renderWorkspace(workspace, { error })
-    return error
+  /*
+   * The failure side of an act: the refusal rides the card too, so it stays
+   * visible. A refusal plue coded `egress_proxy_unavailable` names that code
+   * as well as the message — the worker refused to boot the computer without
+   * its credential boundary, and "service unavailable" alone would hide which
+   * boundary failed.
+   */
+  const failOnCard = (
+    workspace: CloudWorkspaceInput,
+    refusal: string | { readonly error: string; readonly code: string | null }
+  ): string => {
+    const error = typeof refusal === "string" ? refusal : refusal.error
+    const proxyGone = typeof refusal !== "string" && refusal.code === EGRESS_PROXY_UNAVAILABLE
+    renderWorkspace(workspace, { error, ...(proxyGone ? { egressProxyUnavailable: true } : {}) })
+    return proxyGone ? `${EGRESS_PROXY_UNAVAILABLE} — ${error}` : error
   }
 
   /* ---- the list load (listWorkspaces, delete's aftermath, a 404 mid-watch) ---- */
@@ -522,7 +980,24 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
           targetBookmark: known.targetBookmark,
           provisioningStage: UNSETTLED.has(row.status) ? known.provisioningStage : null,
           suspendedAt: row.status === "suspended" ? known.suspendedAt : null,
-          createdAt: row.createdAt ?? known.createdAt
+          createdAt: row.createdAt ?? known.createdAt,
+          /*
+           * plue#446's header facts are not in the switcher row. What the
+           * per-repo DTO already taught the collection stands — except
+           * `startedAt`, which only describes a running VM: a status that
+           * left "running" drops it rather than reporting an uptime for a
+           * computer that is no longer up.
+           */
+          kind: known.kind ?? null,
+          agentSessionId: known.agentSessionId ?? null,
+          head: known.head ?? null,
+          ahead: known.ahead ?? null,
+          behind: known.behind ?? null,
+          startedAt: row.status === "running" ? known.startedAt ?? null : null,
+          environment: known.environment ?? null,
+          persistence: known.persistence ?? null,
+          sshHost: known.sshHost ?? null,
+          desktop: known.desktop ?? null
         }
       })
       : parsed
@@ -623,7 +1098,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     return { value: listing }
   }
 
-  const openWorkspace: WorkspaceSeam["openWorkspace"] = async (bookmark, repo) => {
+  const openWorkspace: WorkspaceSeam["openWorkspace"] = async (bookmark, repo, kind) => {
     const refusal = gate()
     if (refusal !== undefined) return refusal
     const target = resolveTargetRepo(ctx.store, repo)
@@ -635,10 +1110,41 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
      */
     const repoRow = ctx.store.collections.repositories.get(target.repo)
     const source = bookmark === undefined || bookmark === "" ? repoRow?.head?.bookmark ?? undefined : bookmark
+    /*
+     * ADR 0002: three sandbox kinds share one option surface and the kind IS
+     * the choice. A call that named one sends it; a call that named none
+     * sends none, so plue's own default (`container`) applies rather than the
+     * app asserting a kind the human never picked. There is no environment or
+     * image field — that default stands.
+     */
     const created = await sendJson("POST", repoPath(target.repo, "/workspaces"), {
-      ...(source === undefined ? {} : { source_bookmark: source })
+      ...(source === undefined ? {} : { source_bookmark: source }),
+      ...(kind === undefined ? {} : { kind })
     })
-    if ("error" in created) return created.error
+    /*
+     * The code travels in the answer itself: a creation refused for the
+     * missing egress proxy names `egress_proxy_unavailable`, exactly, beside
+     * the server's own message.
+     *
+     * The refusal ALSO lands, verbatim, on the card whose create affordance
+     * was pressed. That affordance only exists on a FAILED workspace's card
+     * (the three-kind row), so the refusal goes to exactly those cards on this
+     * repository and nowhere else — a running workspace's card said nothing
+     * about this create and must not start now. plue's 409 for a kind whose
+     * base image is still registering ("no NixOS environment image is
+     * registered for kind desktop") is the honest state of the system, so it
+     * reads as plue wrote it.
+     */
+    if ("error" in created) {
+      for (const row of ctx.store.collections.cloudWorkspaces.values()) {
+        if (row.repoId !== target.repo || row.status !== "failed") continue
+        if (ctx.store.collections.cards.get(cardIdOf(row.id)) === undefined) continue
+        renderWorkspace(row, { error: created.error })
+      }
+      return created.code === EGRESS_PROXY_UNAVAILABLE
+        ? `${EGRESS_PROXY_UNAVAILABLE} — ${created.error}`
+        : created.error
+    }
     const workspace = parseWorkspaceWire(created.body, target.repo)
     if (workspace === null) return `Smithers Cloud's answer for the new workspace on ${target.repo} was malformed.`
     ctx.dispatch({ type: "workspace.updated", actor: "system", workspace })
@@ -667,7 +1173,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     if ("error" in resolved) return resolved.error
     const { workspace } = resolved
     const answer = await getJson(repoPath(workspace.repoId, `/workspaces/${encodeURIComponent(workspace.id)}`))
-    if ("error" in answer) return failOnCard(workspace, answer.error)
+    if ("error" in answer) return failOnCard(workspace, answer)
     const fresh = parseWorkspaceWire(answer.body, workspace.repoId)
     if (fresh === null) return `Smithers Cloud's answer for workspace ${workspace.id} was malformed.`
     ctx.dispatch({ type: "workspace.updated", actor: "system", workspace: fresh })
@@ -696,7 +1202,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     if ("error" in resolved) return resolved.error
     const { workspace } = resolved
     const answer = await sendJson("POST", repoPath(workspace.repoId, `/workspaces/${encodeURIComponent(workspace.id)}/${verb}`))
-    if ("error" in answer) return failOnCard(workspace, answer.error)
+    if ("error" in answer) return failOnCard(workspace, answer)
     /*
      * The act's body is the updated workspace when plue writes one; when it
      * does not, the truth is a re-read, never an assumed status.
@@ -729,7 +1235,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const forked = await sendJson("POST", repoPath(workspace.repoId, `/workspaces/${encodeURIComponent(workspace.id)}/fork`), {
       name: name ?? ""
     })
-    if ("error" in forked) return failOnCard(workspace, forked.error)
+    if ("error" in forked) return failOnCard(workspace, forked)
     const fork = parseWorkspaceWire(forked.body, workspace.repoId)
     if (fork === null) return `Smithers Cloud's answer for the fork of ${workspace.id} was malformed.`
     ctx.dispatch({ type: "workspace.updated", actor: "system", workspace: fork })
@@ -747,7 +1253,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const taken = await sendJson("POST", repoPath(workspace.repoId, `/workspaces/${encodeURIComponent(workspace.id)}/snapshot`), {
       name: name ?? ""
     })
-    if ("error" in taken) return failOnCard(workspace, taken.error)
+    if ("error" in taken) return failOnCard(workspace, taken)
     const snapshot = parseSnapshot(taken.body)
     const snapshots = await loadSnapshots(workspace.repoId)
     renderWorkspace(workspace, snapshots === null
@@ -790,7 +1296,11 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const resolved = resolveRepo(workspaceId)
     if ("error" in resolved) return resolved.error
     const created = await sendJson("POST", repoPath(resolved.repo, "/workspaces"), { snapshot_id: snapshotId })
-    if ("error" in created) return created.error
+    if ("error" in created) {
+      return created.code === EGRESS_PROXY_UNAVAILABLE
+        ? `${EGRESS_PROXY_UNAVAILABLE} — ${created.error}`
+        : created.error
+    }
     const workspace = parseWorkspaceWire(created.body, resolved.repo)
     if (workspace === null) return `Smithers Cloud's answer for the workspace from snapshot ${snapshotId} was malformed.`
     ctx.dispatch({ type: "workspace.updated", actor: "system", workspace })
@@ -889,21 +1399,87 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       return `Deleting "${workspace.name}" (${workspace.id}) needs its name typed back exactly — /workspace.delete ${workspace.id} ${workspace.name}.`
     }
     const deleted = await sendJson("DELETE", repoPath(workspace.repoId, `/workspaces/${encodeURIComponent(workspace.id)}`))
-    if ("error" in deleted) return failOnCard(workspace, deleted.error)
+    if ("error" in deleted) return failOnCard(workspace, deleted)
     /*
      * Gone is a fact: the card, the collection row, its tree copy, and its
      * terminal tabs leave in one transaction; the list refresh after it
      * re-reads the repository's truth.
      */
+    dropDesktopStream(workspace.id)
+    /* A retry loop for a computer that no longer exists has nothing to mint. */
+    desktopMintEpochs.set(workspace.id, (desktopMintEpochs.get(workspace.id) ?? 0) + 1)
     ctx.dispatch({ type: "workspace.deleted", actor: ctx.actor(), workspaceId: workspace.id })
     const loaded = await loadList(workspace.repoId)
     if (typeof loaded === "string") return loaded
     return { value: `Workspace "${workspace.name}" (${workspace.id}) is deleted.` }
   }
 
+  /*
+   * The Files facet at one directory (plue#449). The listing REPLACES what
+   * the card held for the old path — a stale listing under a new path would
+   * describe a directory that was never read.
+   */
+  const renderFiles = async (
+    workspace: CloudWorkspaceRow,
+    path: string,
+    facet?: WorkspaceFacet
+  ): Promise<string | void> => {
+    const files = await loadFiles(workspace.repoId, workspace.id, path)
+    if ("error" in files) {
+      renderWorkspace(workspace, { ...(facet === undefined ? {} : { facet }), error: files.error })
+      return files.error
+    }
+    renderWorkspace(workspace, { ...(facet === undefined ? {} : { facet }), files, filesPath: path })
+  }
+
+  const renderServices = async (workspace: CloudWorkspaceRow, facet?: WorkspaceFacet): Promise<string | void> => {
+    const services = await loadServices(workspace.repoId, workspace.id)
+    if ("error" in services) {
+      renderWorkspace(workspace, { ...(facet === undefined ? {} : { facet }), error: services.error })
+      return services.error
+    }
+    renderWorkspace(workspace, { ...(facet === undefined ? {} : { facet }), services })
+  }
+
+  /*
+   * One page of the egress audit. A cursor APPENDS (the card's "Load older"
+   * walks backwards through plue's keyset); no cursor replaces, so re-opening
+   * the facet re-reads the newest page instead of stacking duplicates.
+   */
+  const renderEgress = async (
+    workspace: CloudWorkspaceRow,
+    cursor?: string,
+    facet?: WorkspaceFacet
+  ): Promise<string | void> => {
+    const page = await loadEgressPage(ctx, workspaceEgressPath(workspace.repoId, workspace.id), cursor)
+    if ("error" in page) {
+      renderWorkspace(workspace, { ...(facet === undefined ? {} : { facet }), error: page.error })
+      return page.error
+    }
+    const card = ctx.store.collections.cards.get(cardIdOf(workspace.id))
+    const held = card?.kind === "workspace" ? card.payload.egress ?? [] : []
+    renderWorkspace(workspace, {
+      ...(facet === undefined ? {} : { facet }),
+      egress: cursor === undefined || cursor === "" ? page.rows : [...held, ...page.rows],
+      egressCursor: page.nextCursor
+    })
+  }
+
   const setFacet: WorkspaceSeam["setFacet"] = async (workspaceId, facet) => {
     const row = ctx.store.collections.cloudWorkspaces.get(workspaceId)
     if (row === undefined) return `Workspace ${workspaceId} is not loaded — /workspace.list refreshes the inventory`
+    /*
+     * Leaving the Desktop facet unmounts the iframe, so the credential it was
+     * showing has no consumer left: it is dropped here rather than lingering
+     * in memory behind a facet nobody is looking at. Selecting the Desktop
+     * facet does NOT mint — minting is `workspace.desktop`, a confirmed act,
+     * because it hands out a live machine's password.
+     */
+    if (facet !== "desktop") {
+      dropDesktopStream(workspaceId)
+      /* Leaving the facet supersedes a pending desktop_not_ready retry: nobody is looking at it. */
+      desktopMintEpochs.set(workspaceId, (desktopMintEpochs.get(workspaceId) ?? 0) + 1)
+    }
     if (facet === "snapshots") {
       const snapshots = await loadSnapshots(row.repoId)
       renderWorkspace(row, { facet, ...(snapshots === null ? {} : { snapshots }) })
@@ -914,8 +1490,299 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       renderWorkspace(row, { facet, ...(sessions === null ? {} : { sessions }) })
       return
     }
+    /*
+     * The three facets plue#449 and the egress audit answer: opening one
+     * reads its route. The card renders what the route said, or the server's
+     * refusal verbatim — never an empty facet standing in for a failed read.
+     */
+    if (facet === "files") {
+      const card = ctx.store.collections.cards.get(cardIdOf(row.id))
+      const path = card?.kind === "workspace" ? card.payload.filesPath ?? "" : ""
+      return renderFiles(row, path, facet)
+    }
+    if (facet === "services") return renderServices(row, facet)
+    if (facet === "egress") return renderEgress(row, undefined, facet)
     renderWorkspace(row, { facet })
   }
+
+  const listFiles: WorkspaceSeam["listFiles"] = async (path, workspaceId) => {
+    const refusal = gate()
+    if (refusal !== undefined) return refusal
+    const resolved = resolveWorkspace(workspaceId)
+    if ("error" in resolved) return resolved.error
+    const { workspace } = resolved
+    // `/` is how a human spells the working copy's root; plue's own spelling is the empty path.
+    const at = path === undefined || path === "/" ? "" : path
+    const failure = await renderFiles(workspace, at, "files")
+    if (typeof failure === "string") return failure
+    const card = ctx.store.collections.cards.get(cardIdOf(workspace.id))
+    const files = card?.kind === "workspace" ? card.payload.files ?? [] : []
+    return {
+      value: files.length === 0
+        ? `Nothing under ${at === "" ? "/" : at} in "${workspace.name}" (${workspace.id}).`
+        : `${files.length} entr${files.length === 1 ? "y" : "ies"} under ${
+          at === "" ? "/" : at
+        } in "${workspace.name}" (${workspace.id}) — the card lists them.`
+    }
+  }
+
+  const readFile: WorkspaceSeam["readFile"] = async (path, workspaceId) => {
+    const refusal = gate()
+    if (refusal !== undefined) return refusal
+    const resolved = resolveWorkspace(workspaceId)
+    if ("error" in resolved) return resolved.error
+    const { workspace } = resolved
+    const answer = await getJson(
+      `${workspacePath(workspace.repoId, workspace.id, "/files/content")}?path=${encodeURIComponent(path)}`
+    )
+    if ("error" in answer) return failOnCard(workspace, answer)
+    const body = isRecord(answer.body) ? answer.body : null
+    const content = body === null || typeof body.content !== "string" ? null : body.content
+    if (content === null) return `Smithers Cloud's answer for ${path} in ${workspace.id} was malformed.`
+    /*
+     * plue answers `encoding: "base64"` when the bytes are not UTF-8. The
+     * file card states that instead of printing them — the same contract the
+     * repository file card follows.
+     */
+    const binary = body?.encoding === "base64"
+    const id = `workspace-file-${workspace.id}-${path}`
+    const existing = ctx.store.collections.cards.get(id)
+    ctx.dispatch({
+      type: "card.upsert",
+      actor: ctx.actor(),
+      card: {
+        id,
+        kind: "file",
+        title: `${path} · ${workspace.name}`,
+        status: "active",
+        createdAt: existing?.createdAt ?? Date.now(),
+        ordinal: existing?.ordinal ?? ctx.nextOrdinal(),
+        payload: {
+          repo: workspace.repoId,
+          path,
+          content,
+          truncated: false,
+          binary,
+          /* The address names the computer the bytes came from: this is not the repository's copy. */
+          address: `${workspace.repoId} · ${workspace.name} · ${path}`
+        }
+      }
+    })
+    return { value: `${path} in "${workspace.name}" (${workspace.id}) is on the card.` }
+  }
+
+  const listServices: WorkspaceSeam["listServices"] = async (workspaceId) => {
+    const refusal = gate()
+    if (refusal !== undefined) return refusal
+    const resolved = resolveWorkspace(workspaceId)
+    if ("error" in resolved) return resolved.error
+    const { workspace } = resolved
+    const failure = await renderServices(workspace, "services")
+    if (typeof failure === "string") return failure
+    const card = ctx.store.collections.cards.get(cardIdOf(workspace.id))
+    const services = card?.kind === "workspace" ? card.payload.services ?? [] : []
+    return {
+      value: services.length === 0
+        ? `"${workspace.name}" (${workspace.id}) declares no services.`
+        : `"${workspace.name}" (${workspace.id}) services: ${
+          services.map((service) => `${service.name} (${service.state})`).join(", ")
+        }.`
+    }
+  }
+
+  const listEgress: WorkspaceSeam["listEgress"] = async (workspaceId, cursor) => {
+    const refusal = gate()
+    if (refusal !== undefined) return refusal
+    const resolved = resolveWorkspace(workspaceId)
+    if ("error" in resolved) return resolved.error
+    const { workspace } = resolved
+    const failure = await renderEgress(workspace, cursor, "egress")
+    if (typeof failure === "string") return failure
+    const card = ctx.store.collections.cards.get(cardIdOf(workspace.id))
+    const rows = card?.kind === "workspace" ? card.payload.egress ?? [] : []
+    return {
+      value: rows.length === 0
+        ? `"${workspace.name}" (${workspace.id}) made no recorded calls.`
+        : `${rows.length} recorded call${rows.length === 1 ? "" : "s"} from "${workspace.name}" (${workspace.id}) — the card lists them.`
+    }
+  }
+
+  /*
+   * ---- the desktop (lane L3b) ----
+   *
+   * POST …/workspaces/{id}/desktop/session answers, once, a token, a VNC
+   * password, and an absolute `stream_url` that already carries both. That
+   * answer is a live machine's credential: it is handed to
+   * `holdDesktopStream` — module memory the facet reads through
+   * `useSyncExternalStore` — and NOTHING from it is dispatched. Not the URL,
+   * not the token, not the password, not even the session id: everything a
+   * card payload holds is written to disk by the persistence backend.
+   *
+   * plue refuses with 409 when the workspace is not running, 400 when the
+   * kind has no desktop, and — plue#496 — 503 `desktop_not_ready` with a
+   * `Retry-After` while the guest's NixOS activation finishes. All three read
+   * on the facet in the server's own words; the status and the code ride
+   * beside them so the 409 — and only the 409 — offers a Resume, and only
+   * the 503 the server asked to be retried is retried on its own.
+   *
+   * The auto-retry is the server's instruction, not this app's optimism: it
+   * runs ONLY for `desktop_not_ready`, waits exactly the `Retry-After` the
+   * refusal named, gives up after `desktopSessionRetry.maxAttempts`, and
+   * leaves plue's own words on the card the whole time. It is superseded by
+   * any later mint on the same workspace, and by leaving the facet.
+   */
+  const mintDesktopSession = async (
+    workspaceId: string | undefined,
+    verb: "open" | "rotate"
+  ): Promise<string | void | { readonly value: string }> => {
+    const refusal = gate()
+    if (refusal !== undefined) return refusal
+    const resolved = resolveWorkspace(workspaceId)
+    if ("error" in resolved) return resolved.error
+    const { workspace } = resolved
+    const epoch = (desktopMintEpochs.get(workspace.id) ?? 0) + 1
+    desktopMintEpochs.set(workspace.id, epoch)
+    let attempt = 0
+    for (;;) {
+      let response: Response
+      try {
+        response = await ctx.http(cloud(workspacePath(workspace.repoId, workspace.id, "/desktop/session")), {
+          method: "POST"
+        })
+      } catch (error) {
+        return `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`
+      }
+      if (desktopMintEpochs.get(workspace.id) !== epoch) return
+      if (!response.ok) {
+        const code = await refusalCode(response)
+        const message = await readErrorMessage(
+          response,
+          `The desktop session on ${workspace.id} was refused (${response.status}).`
+        )
+        const after = retryAfterSecondsOf(response)
+        dropDesktopStream(workspace.id)
+        renderWorkspace(workspace, {
+          facet: "desktop",
+          desktopRefusal: {
+            status: response.status,
+            message,
+            code,
+            retryAfterSeconds: after
+          }
+        })
+        attempt += 1
+        if (code !== DESKTOP_NOT_READY || attempt >= desktopSessionRetry.maxAttempts) return message
+        await sleep(after === null ? desktopSessionRetry.defaultDelayMs : after * 1_000)
+        if (desktopMintEpochs.get(workspace.id) !== epoch) return
+        continue
+      }
+      const minted = parseDesktopMint(await response.json().catch(() => null), workspace.id)
+      if (minted === null) {
+        dropDesktopStream(workspace.id)
+        return `Smithers Cloud's answer for the desktop session on ${workspace.id} was malformed.`
+      }
+      if (desktopMintEpochs.get(workspace.id) !== epoch) return
+      holdDesktopStream(minted)
+      renderWorkspace(workspace, { facet: "desktop" })
+      /* The line names the workspace and when the session lapses — never the URL that carries the password. */
+      return {
+        value: `The desktop of "${workspace.name}" (${workspace.id}) is ${
+          verb === "rotate" ? "on a new session" : "streaming on the card"
+        }${minted.expiresAt === null ? "" : ` until ${minted.expiresAt}`}.`
+      }
+    }
+  }
+
+  /*
+   * One workspace status-stream event (RFD-004). Only what the event NAMES is
+   * applied: a status-only event moves the status and leaves the head,
+   * ahead and behind exactly as the collection knows them, because a stream
+   * that stayed quiet about the head has said nothing about it. An event for
+   * a workspace nobody loaded, or one naming a status Smithers does not know,
+   * changes nothing at all.
+   */
+  const applyStatusEvent: WorkspaceSeam["applyStatusEvent"] = (workspaceId, event) => {
+    const known = ctx.store.collections.cloudWorkspaces.get(workspaceId)
+    if (known === undefined || !isRecord(event)) return
+    const status = isWorkspaceStatus(event.status) ? event.status : null
+    const head = parseHead(event.head)
+    const ahead = countOrNull(event.ahead)
+    const behind = countOrNull(event.behind)
+    /* plue#482: a `failed` event carries the reason; only a failed one does, and only then is it applied. */
+    const failureCode = textOrNull(event.failure_code)
+    const failureMessage = textOrNull(event.failure_message)
+    if (status === null && head === null && ahead === null && behind === null) return
+    const workspace: CloudWorkspaceInput = {
+      id: known.id,
+      repoId: known.repoId,
+      name: known.name,
+      targetBookmark: known.targetBookmark,
+      status: status ?? known.status,
+      failureCode: failureCode ?? known.failureCode ?? null,
+      failureMessage: failureMessage ?? known.failureMessage ?? null,
+      provisioningStage: known.provisioningStage,
+      suspendedAt: known.suspendedAt,
+      createdAt: known.createdAt,
+      kind: known.kind ?? null,
+      agentSessionId: known.agentSessionId ?? null,
+      head: head ?? known.head ?? null,
+      ahead: ahead ?? known.ahead ?? null,
+      behind: behind ?? known.behind ?? null,
+      startedAt: known.startedAt ?? null,
+      environment: known.environment ?? null,
+      persistence: known.persistence ?? null,
+      sshHost: known.sshHost ?? null,
+      desktop: known.desktop ?? null
+    }
+    ctx.dispatch({ type: "workspace.updated", actor: "system", workspace })
+    /* A card already in the transcript follows the row, so the header line moves live. */
+    if (ctx.store.collections.cards.get(cardIdOf(workspaceId)) !== undefined) renderWorkspace(workspace)
+  }
+
+  const openDesktop: WorkspaceSeam["openDesktop"] = (workspaceId) => mintDesktopSession(workspaceId, "open")
+  const rotateDesktop: WorkspaceSeam["rotateDesktop"] = (workspaceId) => mintDesktopSession(workspaceId, "rotate")
+
+  /*
+   * The environment images a repository has built (ADR 0002: the environment
+   * is stated, never chosen). A refused listing is the server's own message —
+   * an empty catalogue would read as "this repository has built nothing",
+   * which is a different fact.
+   */
+  const listEnvironmentImages: WorkspaceSeam["listEnvironmentImages"] = async (repo) => {
+    const refusal = gate()
+    if (refusal !== undefined) return refusal
+    const target = resolveTargetRepo(ctx.store, repo)
+    if ("error" in target) return target.error
+    const answer = await getJson(repoPath(target.repo, "/environment-images"))
+    if ("error" in answer) return answer.error
+    const images = arrayOf(answer.body, "images").flatMap((entry) => {
+      const parsed = parseEnvironmentImage(entry)
+      return parsed === null ? [] : [parsed]
+    })
+    const id = `environment-images-${target.repo}`
+    const existing = ctx.store.collections.cards.get(id)
+    ctx.dispatch({
+      type: "card.upsert",
+      actor: ctx.actor(),
+      card: {
+        id,
+        kind: "environment-images",
+        title: `Environment images · ${target.repo}`,
+        status: "active",
+        createdAt: existing?.createdAt ?? Date.now(),
+        ordinal: existing?.ordinal ?? ctx.nextOrdinal(),
+        payload: { repo: target.repo, images }
+      }
+    })
+    return {
+      value: images.length === 0
+        ? `${target.repo} has built no environment images.`
+        : `${images.length} environment image${images.length === 1 ? "" : "s"} on ${target.repo} — the card lists them.`
+    }
+  }
+
+  /* One terminal-open loop per workspace: a later open supersedes the one before it. */
+  const terminalOpenEpochs = new Map<string, number>()
 
   const openTerminal: WorkspaceSeam["openTerminal"] = async (workspaceId) => {
     const refusal = gate()
@@ -964,12 +1831,49 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
         return { value: `Re-attached to session ${attached} of "${workspace.name}" (${workspace.id}).` }
       }
     }
-    const created = await sendJson("POST", repoPath(workspace.repoId, "/workspace/sessions"), {
-      workspace_id: workspace.id,
-      cols: DEFAULT_COLS,
-      rows: DEFAULT_ROWS
-    })
-    if ("error" in created) return failOnCard(workspace, created.error)
+    /*
+     * The session POST, and — plue#504 — the 503 it may answer while a vm or
+     * desktop guest finishes its NixOS activation. The auto-retry is the
+     * server's instruction, not this app's optimism: it runs ONLY for
+     * `guest_not_ready`, waits exactly the `Retry-After` the refusal named,
+     * gives up after `terminalSessionRetry.maxAttempts`, and leaves plue's own
+     * words on the terminal facet the whole time. A later open on the same
+     * workspace supersedes it. Every other refusal is answered once.
+     */
+    const epoch = (terminalOpenEpochs.get(workspace.id) ?? 0) + 1
+    terminalOpenEpochs.set(workspace.id, epoch)
+    let created: { readonly body: unknown }
+    for (let attempt = 1;; attempt += 1) {
+      const answer = await sendJson("POST", repoPath(workspace.repoId, "/workspace/sessions"), {
+        workspace_id: workspace.id,
+        cols: DEFAULT_COLS,
+        rows: DEFAULT_ROWS
+      })
+      if (terminalOpenEpochs.get(workspace.id) !== epoch) return
+      if (!("error" in answer)) {
+        created = answer
+        break
+      }
+      /* No HTTP answer at all: there is no status or code to render, only the reach failure. */
+      if (answer.status === null) return failOnCard(workspace, answer)
+      /* The worker's own credential-boundary refusal keeps the card-level marker it always had. */
+      const proxyGone = answer.code === EGRESS_PROXY_UNAVAILABLE
+      renderWorkspace(workspace, {
+        facet: "terminal",
+        ...(proxyGone ? { egressProxyUnavailable: true } : {}),
+        terminalRefusal: {
+          status: answer.status,
+          message: answer.error,
+          code: answer.code,
+          retryAfterSeconds: answer.retryAfterSeconds
+        }
+      })
+      if (answer.code !== GUEST_NOT_READY || attempt >= terminalSessionRetry.maxAttempts) {
+        return proxyGone ? `${EGRESS_PROXY_UNAVAILABLE} — ${answer.error}` : answer.error
+      }
+      await sleep(answer.retryAfterSeconds === null ? terminalSessionRetry.defaultDelayMs : answer.retryAfterSeconds * 1_000)
+      if (terminalOpenEpochs.get(workspace.id) !== epoch) return
+    }
     const session = parseSession(created.body)
     if (session === null) return `Smithers Cloud's answer for the new session on ${workspace.id} was malformed.`
     /*
@@ -995,6 +1899,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       terminalSessionId: live.id,
       ...(sessions === null ? {} : { sessions })
     })
+    /* A refusal belongs to the act that just ran; this render already dropped it. */
     return { value: `Terminal open on session ${live.id} of "${workspace.name}" (${workspace.id}).` }
   }
 
@@ -1015,6 +1920,14 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     destroySession,
     deleteWorkspace,
     setFacet,
+    listFiles,
+    readFile,
+    listServices,
+    listEgress,
+    openDesktop,
+    rotateDesktop,
+    listEnvironmentImages,
+    applyStatusEvent,
     dispose
   }
 }

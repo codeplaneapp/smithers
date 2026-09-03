@@ -1,17 +1,22 @@
 import { describe, expect, test } from "bun:test"
-import type { Target } from "smithers-shared/LocalApp"
-import type { RunRecord } from "smithers-shared/TargetGraph"
+import type { Target } from "@smthrs/rpc/LocalApp"
+import type { RunRecord } from "@smthrs/rpc/TargetGraph"
 import { filterRows, kindsOf, lastRunsByLabel, runStateOf, targetRows, toggled, workspacesOf } from "./TargetsTable"
 
-const target = (label: string, kinds: ReadonlyArray<string>, workspace = "."): Target => ({
+const target = (label: string, kinds: ReadonlyArray<string>, workspace = ".", featured?: boolean): Target => ({
   id: `id-${label}`,
   label,
   target: "Shell.Test",
   kinds: [...kinds],
   package: label.split(":")[0] ?? "//",
   name: label.split(":")[1] ?? label,
-  workspace
+  workspace,
+  ...(featured === undefined ? {} : { featured })
 })
+
+/** `//a:build` is featured by its declaration; the others are bare. */
+const featured = (rows: ReadonlyArray<Target>): Array<Target> =>
+  rows.map((row) => (row.label === "//a:build" ? { ...row, featured: true } : row))
 
 const run = (runId: string, label: string, status: RunRecord["status"], startedAt: number): RunRecord => ({
   runId,
@@ -65,25 +70,31 @@ describe("the targets table's rules", () => {
   })
 })
 
-import { groupLabel, groupRows, groupSummary, pickedMembers, viewMode } from "./TargetsTable"
+import { groupLabel, groupRows, groupSummary, patternRuns, pickedMembers, viewMode } from "./TargetsTable"
 
 describe("the Featured and Recent views", () => {
-  const facts = { featured: ["//a:build"], starred: ["//b:lint"] }
+  const facts = { starred: ["//b:lint"] }
 
-  test("the default view is Featured only when the repo has something featured or starred", () => {
-    expect(viewMode(undefined, {})).toBe("all")
-    expect(viewMode(undefined, { featured: ["//a:build"] })).toBe("featured")
-    expect(viewMode(undefined, { starred: ["//b:lint"] })).toBe("featured")
-    expect(viewMode({ mode: "recent" }, facts)).toBe("recent")
-    expect(viewMode({ mode: "all" }, facts)).toBe("all")
+  test("the default view is Featured only when a declaration features something or the user starred something", () => {
+    expect(viewMode(undefined, targetRows(targets))).toBe("all")
+    expect(viewMode(undefined, targetRows(featured(targets)))).toBe("featured")
+    expect(viewMode(undefined, targetRows(targets, [], facts))).toBe("featured")
+    expect(viewMode({ mode: "recent" }, targetRows(featured(targets), [], facts))).toBe("recent")
+    expect(viewMode({ mode: "all" }, targetRows(featured(targets), [], facts))).toBe("all")
   })
 
-  test("Featured keeps the manifest's featured labels and the user's stars, in loader order", () => {
-    const rows = targetRows(targets, [], facts)
+  test("Featured keeps the declarations' featured labels and the user's stars, in loader order", () => {
+    const rows = targetRows(featured(targets), [], facts)
     expect(rows.map((row) => [row.featured, row.starred])).toEqual([[true, false], [false, false], [false, true], [false, false]])
     expect(filterRows(rows, undefined, "featured").map((row) => row.target.label)).toEqual(["//a:build", "//b:lint"])
     // The text filter still narrows inside the view.
     expect(filterRows(rows, { query: "lint" }, "featured").map((row) => row.target.label)).toEqual(["//b:lint"])
+  })
+
+  test("the query matches a declared summary too", () => {
+    const rows = targetRows([{ ...target("//a:build", ["build"]), summary: "Emit the aggregate barrel's dist." }])
+    expect(filterRows(rows, { query: "barrel" }).map((row) => row.target.label)).toEqual(["//a:build"])
+    expect(filterRows(rows, { query: "nothing" })).toEqual([])
   })
 
   test("Recent keeps only targets with a recorded run, most recent first", () => {
@@ -120,9 +131,11 @@ describe("name groups across packages", () => {
     expect(groupSummary(group!.group!.counts)).toBe("1 failed · 1 passed · 1 never run")
   })
 
-  test("featured and stars apply to the group label or a member; the filter matches a member's label", () => {
-    const rows = groupRows(targetRows(many, [], { starred: ["//packages/b:lint"] }), { featured: [groupLabel("lint")] })
+  test("a featured member features its group, stars apply to the group label or a member, and the filter matches a member's label", () => {
+    const withFeatured = many.map((row) => (row.label === "//packages/c:lint" ? { ...row, featured: true } : row))
+    const rows = groupRows(targetRows(withFeatured, [], { starred: ["//packages/b:lint"] }))
     expect(rows[0]?.featured).toBe(true)
+    expect(rows[0]?.group?.members[2]?.featured).toBe(true)
     expect(rows[0]?.group?.members[1]?.starred).toBe(true)
     expect(filterRows(rows, undefined, "featured").map((row) => row.target.label)).toEqual([groupLabel("lint")])
     // A member-only star still lights the group in Featured.
@@ -140,8 +153,15 @@ describe("name groups across packages", () => {
   })
 })
 
-test("a manifest whose only featured entry is a pattern run still opens the card on Featured", () => {
-  expect(viewMode(undefined, {}, [{ id: "everything" }])).toBe("featured")
-  expect(viewMode(undefined, {}, [])).toBe("all")
-  expect(viewMode({ mode: "all" }, {}, [{ id: "everything" }])).toBe("all")
+test("the run strip is derived from the kinds the targets carry: ci always, then one verb per present kind", () => {
+  expect(patternRuns([])).toEqual([])
+  expect(patternRuns(targets).map((run) => [run.id, run.verb, run.pattern, run.workspace])).toEqual([
+    ["ci", "ci", "//...", "."],
+    ["build", "build", "//...", "."],
+    ["test", "test", "//...", "."],
+    ["lint", "lint", "//...", "."]
+  ])
+  expect(patternRuns([target("//docs:site", ["docs"])]).map((run) => run.verb)).toEqual(["ci", "docs"])
+  // `run` targets are services, never swept.
+  expect(patternRuns([target("//web:dev", ["run"])]).map((run) => run.verb)).toEqual(["ci"])
 })

@@ -11,7 +11,7 @@ the report of the user most likely to be hitting a bug.
 
 ### rc.0, what `smithers bug` posts today
 
-`packages/cli/src/Command.ts` builds this through `Bug.report`, which scrubs
+`packages/smithers/src/Command.ts` builds this through `Bug.report`, which scrubs
 credentials out of every string, and POSTs it to `Bug.defaultEndpoint`. `runs`
 is whatever `Control.list` returned; `digest` appears only when `--run` names a
 run.

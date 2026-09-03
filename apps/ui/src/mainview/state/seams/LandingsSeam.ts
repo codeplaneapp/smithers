@@ -244,6 +244,40 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
     }
   }
 
+  /** The commit at the request's tip change — what a land names; an unreadable tip is an honest refusal, never a guessed commit. */
+  const fetchTipCommit = async (
+    repo: string,
+    number: number
+  ): Promise<{ readonly commitId: string } | { readonly error: string }> => {
+    let response: Response
+    try {
+      response = await ctx.http(`${landingsUrl(repo)}/${number}`)
+    } catch {
+      return { error: `Pull request #${number} couldn't be read before landing — the platform didn't answer; nothing was landed.` }
+    }
+    if (!response.ok) {
+      return { error: await readErrorMessage(response, `Pull request #${number} on ${repo} couldn't be read before landing — nothing was landed.`) }
+    }
+    const landing = parseLandingDetail(await response.json().catch(() => undefined))
+    const tip = landing?.changeIds.at(-1)
+    if (landing === null || tip === undefined || tip === "") {
+      return { error: `Pull request #${number} names no tip change to land — nothing was landed.` }
+    }
+    let changeResponse: Response
+    try {
+      changeResponse = await ctx.http(`${ctx.baseUrl}${repoApiRoot(repo)}/changes/${encodeURIComponent(tip)}`)
+    } catch {
+      return { error: `The tip change ${tip} of #${number} couldn't be read — the platform didn't answer; nothing was landed.` }
+    }
+    if (!changeResponse.ok) {
+      return { error: await readErrorMessage(changeResponse, `The tip change ${tip} of #${number} couldn't be read — nothing was landed.`) }
+    }
+    const body: unknown = await changeResponse.json().catch(() => undefined)
+    const commitId = isRecord(body) && typeof body.commit_id === "string" && body.commit_id !== "" ? body.commit_id : null
+    if (commitId === null) return { error: `The tip change ${tip} of #${number} carries no commit id — nothing was landed.` }
+    return { commitId }
+  }
+
   /*
    * The one detail door: GET the landing, its reviews, and its checks, then
    * upsert the "pr" card. `stateOverride` lets a mutation pin the state the
@@ -420,9 +454,22 @@ export const createLandingsSeam = (ctx: SeamContext): LandingsSeam => {
       const target = resolveTargetRepo(ctx.store, repoArg)
       if ("error" in target) return target.error
       const repo = target.repo
+      /*
+       * plue's land names the commit it lands (LandLandingRequestInput
+       * `commit_id`, required; the server refuses a land whose commit no
+       * longer matches — ADR 0003). The request's tip change is read for its
+       * current commit right before the PUT; a tip that can't be read lands
+       * nothing.
+       */
+      const tip = await fetchTipCommit(repo, number)
+      if ("error" in tip) return tip.error
       let response: Response
       try {
-        response = await ctx.http(`${landingsUrl(repo)}/${number}/land`, { method: "PUT" })
+        response = await ctx.http(`${landingsUrl(repo)}/${number}/land`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ commit_id: tip.commitId })
+        })
       } catch {
         return `Pull request #${number} couldn't be queued to land — the platform didn't answer.`
       }

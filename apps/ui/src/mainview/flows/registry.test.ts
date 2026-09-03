@@ -1,6 +1,6 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "../state/AppController"
 import { PALETTES } from "../state/AppState"
@@ -211,7 +211,7 @@ describe("command registry pure model", () => {
    */
   /*
    * The namespace tree. A flow's namespace is its dotted head; the only bare
-   * names are the three surface switches.
+   * names are the four surface switches.
    */
   test("every visible flow lives in a namespace, except the surface switches", async () => {
     const { controller } = await freshController()
@@ -466,6 +466,7 @@ describe("command registry bindings", () => {
     expect(names).toEqual([
       "connect",
       "world",
+      "flows",
       "appearance.theme",
       "appearance.dark-mode",
       "chat.surfaces",
@@ -521,6 +522,7 @@ describe("command registry bindings", () => {
       "auth.sign-out",
       "auth.request-access",
       "cloud.sign-in",
+      "cloud.prompt",
       "cloud.sign-out",
       "toast.dismiss",
       "billing.balance",
@@ -547,11 +549,15 @@ describe("command registry bindings", () => {
       "branches.list",
       "files.list",
       "files.read",
+      "code.hover",
+      "code.definition",
+      "code.diagnostics",
       // Lane sync: Linear and GitHub sync as actions (ADR 0005).
       "github.app",
       "github.app.open",
       "github.reconcile",
       "github.mirror-sync",
+      "github.mirror.retry-ref",
       "repos.import.retry",
       "linear.connect",
       "linear.connect.open",
@@ -563,6 +569,7 @@ describe("command registry bindings", () => {
       "linear.disconnect",
       "sync.retry",
       "sync.ops.show-more",
+      "sync.ops.load-older",
       "issues.link-linear",
       "issues.unlink-linear",
       // Lane citc: the cloud workspaces (ADR 0002).
@@ -581,13 +588,35 @@ describe("command registry bindings", () => {
       "workspace.session.destroy",
       "workspace.delete",
       "workspace.facet",
+      // Lane L3: the workspace facets plue#449 answers, and the sandbox egress audit.
+      "workspace.files",
+      "workspace.file",
+      "workspace.services",
+      "workspace.egress",
+      // Lane L3b: the NixOS desktop (a minted credential, so confirmed) and the environment images.
+      "workspace.desktop",
+      "workspace.desktop.rotate",
+      "workspace.images",
+      "egress.session",
       "change.view",
       "change.diff",
       "change.land",
       "change.split-ready",
+      "change.split",
       "change.resolve",
       "change.revert",
       "change.facet",
+      "change.pins",
+      "change.checks",
+      "change.open-computer",
+      "review.since-mine",
+      "review.done",
+      "review.ack",
+      "review.reopen",
+      "review.request",
+      "review.unrequest",
+      "findings.please-fix",
+      "findings.not-useful",
       "chat.reload",
       "chat.commands",
       "tab.terminal",
@@ -596,6 +625,14 @@ describe("command registry bindings", () => {
       "agent.role",
       "agent.delegate",
       "agent.explain",
+      // Agents as data (docs/workbench-lanes/custom-agents.md).
+      "agent.list",
+      "agent.new",
+      "agent.form",
+      "agent.create",
+      "agent.edit",
+      "agent.remove",
+      "agent.models",
       "tab.card",
       "tab.select",
       "tab.close",
@@ -604,6 +641,9 @@ describe("command registry bindings", () => {
       "tab.menu",
       "repo.select",
       "repo.unpin",
+      "repo.tree",
+      "workspace.rename",
+      "workspace.rename.edit",
       "composer.add",
       "files.add",
       "repo.open",

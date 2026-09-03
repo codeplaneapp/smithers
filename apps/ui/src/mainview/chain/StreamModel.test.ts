@@ -2,8 +2,8 @@ import { Author, Catalog, Chain, Journal, ScriptRunner } from "@smthrs/chain"
 import type { Outcome } from "@smthrs/chain"
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
-import { MODEL_STREAM_PATH } from "smithers-shared/AgentApiRoutes"
-import type { FetchLike } from "smithers-shared/NativeAgent"
+import { MODEL_STREAM_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 import { DEFAULT_MODEL_ID, layerAuthor } from "./StreamModel"
 
 /*

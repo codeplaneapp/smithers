@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentChatMessage } from "smithers-shared/NativeAgent"
+import type { AgentChatMessage } from "@smthrs/rpc/NativeAgent"
 import {
   boundToolResult,
   boundTurnRequest,

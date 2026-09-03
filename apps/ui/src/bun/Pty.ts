@@ -15,10 +15,10 @@ import { randomBytes } from "node:crypto"
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { delimiter, dirname, resolve } from "node:path"
-import { agentRole, roleLaunchArgv } from "smithers-shared/AgentRoles"
-import type { AgentRoleId } from "smithers-shared/AgentRoles"
-import type { Harness, PtySession } from "smithers-shared/LocalApp"
-import { harnessCandidateDirs } from "./Harnesses"
+import { AGENT_ROLES, findAgentRole, roleLaunchArgv } from "@smthrs/rpc/AgentRoles"
+import type { AgentRole, AgentRoleId } from "@smthrs/rpc/AgentRoles"
+import type { Harness, PtySession } from "@smthrs/rpc/LocalApp"
+import { harnessCandidateDirs, harnessModelSpec } from "./Harnesses"
 import { currentSandboxHost, harnessPolicy, terminalPolicy, wrapSandbox } from "./Sandbox"
 import type { SandboxHost } from "./Sandbox"
 
@@ -30,8 +30,9 @@ export interface PtyCreateInput {
   readonly rows: number
   readonly harnessId?: Harness["id"]
   /**
-   * A named role (AgentRoles.ts): the server resolves it to the role's
-   * harness and launch argv, so the renderer never supplies argv.
+   * A named role (AgentRoles.ts), built-in or custom: the server resolves it
+   * against the agents store to the role's harness and composes the launch
+   * argv, so the renderer never supplies argv.
    */
   readonly roleId?: AgentRoleId
   /** The delegated task, handed to the role's CLI as its first prompt. */
@@ -40,7 +41,18 @@ export interface PtyCreateInput {
 
 export type PtyCreateResult =
   | { readonly status: "ok"; readonly session: PtySession }
-  | { readonly status: "error"; readonly code: "bad_cwd" | "unknown_harness" | "harness_unavailable" | "capacity_reached" | "spawn_failed"; readonly message: string }
+  | {
+    readonly status: "error"
+    readonly code:
+      | "bad_cwd"
+      | "unknown_role"
+      | "role_unlaunchable"
+      | "unknown_harness"
+      | "harness_unavailable"
+      | "capacity_reached"
+      | "spawn_failed"
+    readonly message: string
+  }
 
 export interface PtyManager {
   readonly create: (input: PtyCreateInput) => Promise<PtyCreateResult>
@@ -85,6 +97,12 @@ export interface PtyManagerOptions {
   readonly publish: (topic: string, message: unknown) => void
   /** The harness table, read when a harness tab opens (its binary and launch argv). */
   readonly harnesses: () => Promise<ReadonlyArray<Harness>>
+  /**
+   * The agents (routes/agents.ts, `<stateDir>/agents.json`), read when a
+   * role launches: a custom agent resolves exactly like a built-in. Default
+   * the built-in table (tests, one-shot hosts).
+   */
+  readonly roles?: () => Promise<ReadonlyArray<AgentRole>>
   readonly home?: string
   readonly tmpdir?: string
   readonly env?: Readonly<Record<string, string | undefined>>
@@ -245,8 +263,12 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
     let argv: Array<string>
     let harnessId: Harness["id"] | undefined
     if (input.kind === "harness") {
-      // A role names its harness; the launch argv is the role's, never the renderer's.
-      const role = input.roleId === undefined ? undefined : agentRole(input.roleId)
+      // A role names its harness; the launch argv is COMPOSED from the role's model and the harness's model flag, never the renderer's.
+      let role: AgentRole | undefined
+      if (input.roleId !== undefined) {
+        role = findAgentRole(input.roleId, await (options.roles ?? (async () => AGENT_ROLES))())
+        if (role === undefined) return { status: "error", code: "unknown_role", message: `There is no agent with id ${input.roleId}.` }
+      }
       const wantedHarness = role?.harness ?? input.harnessId
       const harness = (await options.harnesses()).find((candidate) => candidate.id === wantedHarness)
       if (harness === undefined) {
@@ -256,7 +278,19 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
         return { status: "error", code: "harness_unavailable", message: `${harness.displayName} is not installed here.` }
       }
       harnessId = harness.id
-      const launch = role === undefined ? harness.launch.argv : roleLaunchArgv(role, input.task)
+      let launch: ReadonlyArray<string>
+      if (role === undefined) launch = harness.launch.argv
+      else {
+        const spec = harnessModelSpec(harness.id)
+        if (spec === undefined) {
+          return { status: "error", code: "role_unlaunchable", message: `${harness.displayName} takes no model flag, so ${role.label} cannot launch on it.` }
+        }
+        try {
+          launch = roleLaunchArgv(role, spec, input.task)
+        } catch (error) {
+          return { status: "error", code: "role_unlaunchable", message: error instanceof Error ? error.message : String(error) }
+        }
+      }
       // The resolved binary, so a Finder launch's PATH cannot lose it.
       argv = [harness.binary, ...launch.slice(1)]
     } else {

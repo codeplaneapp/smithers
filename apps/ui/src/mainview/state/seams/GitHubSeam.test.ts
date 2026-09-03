@@ -1,19 +1,25 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import { CLOUD_ROUTE_PREFIX } from "smithers-shared/LocalApp"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
-import { createGitHubSeam, lowRateLimit, NO_MIRROR_OPS_NOTE, SIGN_OUT_REFUSAL, trustedInstallUrl } from "./GitHubSeam"
+import { createGitHubSeam, lowRateLimit, mirrorSyncPolling, parseMirrorRef, SIGN_OUT_REFUSAL, trustedInstallUrl } from "./GitHubSeam"
 import type { GitHubSeamDeps } from "./GitHubSeam"
 import type { SeamContext } from "./SeamContext"
 
 /*
- * The GitHub seam (lane sync, ADR 0005): github.app renders the
- * connector-setup card from the status DTO (and files the row in the
- * collection), reconcile and mirror-sync surface the platform's own words
- * when their routes don't exist yet, and a structured 429 or a low
- * remaining budget renders the ADR's rate-limit line. Every route is a
- * double; nothing is faked.
+ * The GitHub seam (lane sync, ADR 0005; lane L5 against the live routes):
+ * github.app renders the connector-setup card from the status DTO (and
+ * files the row in the collection), reconcile posts plue's admin route and
+ * surfaces its answer verbatim, mirror-sync starts a RUN and tracks its
+ * per-ref results while the repository DTO's `mirror_status` word rides the
+ * header, and a structured 429 or a low remaining budget renders the ADR's
+ * rate-limit line.
+ *
+ * Every fixture is shaped as plue answers it (verified against `~/plue`
+ * main, `internal/routes/git_mirror_sync.go` + `internal/services/
+ * git_mirror_sync.go` + `internal/routes/repos.go`). Every route is a
+ * double.
  */
 
 const memoryStorage = (): StorageApi => {
@@ -29,6 +35,34 @@ const json = (status: number, body: unknown): (() => Response) => () =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 
 const STATUS_PATH = "api/repos/will/smithers/github-app-status"
+const REPO_PATH = "api/repos/will/smithers"
+const MIRROR_PATH = "api/repos/will/smithers/mirror-sync"
+/* plue#490: the per-repository reconcile every WRITER may run. */
+const RECONCILE_PATH = "api/repos/will/smithers/github/reconcile"
+/* plue#491: one ref's retry; the name is a single escaped segment. */
+const REF_RETRY_PATH = "api/repos/will/smithers/github/mirror/refs/refs%2Fheads%2Fwip/retry"
+
+/* The repository DTO, reduced to the one field the mirror card reads. */
+const repoDto = (mirrorStatus: string, refs: { readonly behind?: number; readonly failed?: number } = {}) => ({
+  id: 1,
+  owner: "will",
+  name: "smithers",
+  full_name: "will/smithers",
+  mirror_status: mirrorStatus,
+  /* plue#491 (routes.RepoResponse): the counts beside the word. */
+  behind_refs: refs.behind ?? 0,
+  failed_refs: refs.failed ?? 0,
+  last_mirror_at: null,
+  last_mirror_error: null
+})
+
+/* One mirror run as `GET …/mirror-sync/{run_id}` answers it. */
+const mirrorRun = (state: string, refs: ReadonlyArray<Record<string, unknown>> = []) => ({
+  state,
+  started_at: "2026-09-02T09:00:00Z",
+  finished_at: null,
+  refs
+})
 
 const INSTALLED = {
   github_app_installed: true,
@@ -96,6 +130,15 @@ const harness = async (
 
 const textOf = (result: unknown): string | undefined =>
   typeof result === "string" ? result : (result as { value?: string } | null | undefined)?.value
+
+/** Spin until a background poll has landed what the assertion needs, or give up loudly. */
+const waitUntil = async (ready: () => boolean, label = "the condition"): Promise<void> => {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (ready()) return
+    await new Promise((resolve) => setTimeout(resolve, 2))
+  }
+  throw new Error(`waitUntil gave up on ${label}`)
+}
 
 const cardOf = (store: AppStore) => store.collections.cards.get("connector-setup-github-will/smithers")
 
@@ -259,44 +302,340 @@ describe("createGitHubSeam", () => {
     expect(await seam.openInstall()).toBe("No install link for will/smithers yet — /github.app reads the status first.")
   })
 
-  test("reconcile with no route shows the platform's words and still re-reads the status", async () => {
-    const { store, seam, requests } = await harness({ [STATUS_PATH]: json(200, INSTALLED) })
-
-    const result = await seam.reconcile()
-
-    expect(requests[0]).toBe("POST api/github-app/reconcile")
-    /* The unrouted 404 fallback names the status; the status re-read still lands. */
-    expect(textOf(result)).toBe("The reconcile failed (404)")
-    expect(store.collections.githubAppStatuses.get("will/smithers")?.installed).toBe(true)
-    expect(payloadOf(store)?.error).toBe("The reconcile failed (404)")
-  })
-
-  test("reconcile answers the re-read status when the route exists", async () => {
-    const { store, seam } = await harness({
-      "POST api/github-app/reconcile": json(200, { reconciled: 1 }),
+  test("reconcile posts the repository's own route, not the operator's (plue#490)", async () => {
+    /* The pre-#502 answer: the run's own fields with no `run_id` alias beside them. */
+    const { store, seam, requests } = await harness({
+      [`POST ${RECONCILE_PATH}`]: json(202, { id: 91, state: "queued", behind_refs: 0, failed_refs: 0, refs: [] }),
       [STATUS_PATH]: json(200, INSTALLED)
     })
 
     const result = await seam.reconcile()
 
+    expect(requests[0]).toBe(`POST ${RECONCILE_PATH}`)
+    /* The admin route is an operator's; no flow in this app calls it any more. */
+    expect(requests.some((request) => request.includes("admin"))).toBe(false)
     expect(textOf(result)).toBe("Reconciled — the GitHub card for will/smithers re-read the App status.")
     expect(payloadOf(store)?.phase).toBe("connected")
     expect(store.collections.githubAppStatuses.get("will/smithers")?.installationId).toBe(5511)
+    /* An answer that names no run id is tracked as nothing: no mirror card, no poll. */
+    expect(mirrorPayloadOf(store)).toBeUndefined()
+    expect(requests.some((request) => request.includes("mirror-sync"))).toBe(false)
   })
 
-  test("mirrorSync renders the card with the run the wire names", async () => {
-    const { store, seam } = await harness({
-      "POST api/repos/will/smithers/mirror-sync": json(202, { run_id: 88 })
+  test("reconcile renders the run its 202 names and polls it to settled (plue#502)", async () => {
+    const previous = { ...mirrorSyncPolling }
+    mirrorSyncPolling.delayMs = 1
+    mirrorSyncPolling.maxAttempts = 6
+    try {
+      let mirrorStatus = "behind"
+      const { store, seam, requests } = await harness({
+        /*
+         * plue#502: the reconcile answers 202 with the whole mirror run —
+         * `run_id` beside its `id` alias — so the card has its rows before
+         * the first poll.
+         */
+        [`POST ${RECONCILE_PATH}`]: json(202, {
+          run_id: 91,
+          id: 91,
+          state: "queued",
+          behind_refs: 0,
+          failed_refs: 0,
+          started_at: null,
+          finished_at: null,
+          refs: []
+        }),
+        [STATUS_PATH]: json(200, INSTALLED),
+        [REPO_PATH]: () => json(200, repoDto(mirrorStatus, { behind: 2 }))(),
+        [`${MIRROR_PATH}/91`]: () => {
+          mirrorStatus = "synced"
+          return json(200, mirrorRun("succeeded", [
+            { name: "refs/heads/main", from: "b775d9", to: "3f2a1b", status: "succeeded", error: "" }
+          ]))()
+        }
+      })
+
+      const result = await seam.reconcile()
+
+      expect(textOf(result)).toBe(
+        "Reconciled — the GitHub card for will/smithers re-read the App status; mirror run 91 tracks the refs."
+      )
+      /* The status re-read still lands: reconcile owns both cards. */
+      expect(payloadOf(store)?.phase).toBe("connected")
+      const queued = mirrorPayloadOf(store)
+      expect(queued?.runId).toBe("91")
+      expect(queued?.trigger).toBe("reconcile started · run 91")
+      /* The 202 already named the run's state, so the card states it before polling. */
+      expect(queued?.runState).toBe("queued")
+      expect(queued?.mirrorStatus).toBe("behind")
+
+      await waitUntil(() => mirrorPayloadOf(store)?.runState === "succeeded", "the reconcile run to settle")
+      await waitUntil(() => mirrorPayloadOf(store)?.mirrorStatus === "synced", "the mirror word to follow the run")
+      expect(requests).toContain(`GET ${MIRROR_PATH}/91`)
+      expect(mirrorPayloadOf(store)?.ops).toEqual([
+        {
+          id: "refs/heads/main",
+          source: "b775d9",
+          target: "3f2a1b",
+          entity: "ref",
+          entityId: "refs/heads/main",
+          action: "push",
+          status: "succeeded",
+          retryable: false,
+          at: null
+        }
+      ])
+    } finally {
+      Object.assign(mirrorSyncPolling, previous)
+    }
+  })
+
+  test("a reconcile whose status re-read is refused still tracks the run plue started (plue#502)", async () => {
+    const previous = { ...mirrorSyncPolling }
+    mirrorSyncPolling.delayMs = 1
+    mirrorSyncPolling.maxAttempts = 6
+    try {
+      const { store, seam } = await harness({
+        [`POST ${RECONCILE_PATH}`]: json(202, { run_id: 91, id: 91, state: "queued", refs: [] }),
+        [STATUS_PATH]: json(502, { message: "github is unreachable" }),
+        [`${MIRROR_PATH}/91`]: json(200, mirrorRun("succeeded", []))
+      })
+
+      const result = await seam.reconcile()
+
+      /* The refused read is answered in the server's own words, on its own card. */
+      expect(textOf(result)).toBe("github is unreachable")
+      expect(payloadOf(store)?.error).toBe("github is unreachable")
+      /* The run the platform started is not dropped with it. */
+      expect(mirrorPayloadOf(store)?.runId).toBe("91")
+      await waitUntil(() => mirrorPayloadOf(store)?.runState === "succeeded", "the reconcile run to settle")
+    } finally {
+      Object.assign(mirrorSyncPolling, previous)
+    }
+  })
+
+  test("reconcile refused for the write scope reads plue's sentence and still re-reads the status", async () => {
+    /* plue#490 gates the route on repository write: a reader's 403 is its own sentence. */
+    const { store, seam, requests } = await harness({
+      [`POST ${RECONCILE_PATH}`]: json(403, { message: "write access required" }),
+      [STATUS_PATH]: json(200, INSTALLED)
+    })
+
+    const result = await seam.reconcile()
+
+    expect(requests[0]).toBe(`POST ${RECONCILE_PATH}`)
+    expect(textOf(result)).toBe("write access required")
+    expect(store.collections.githubAppStatuses.get("will/smithers")?.installed).toBe(true)
+    expect(payloadOf(store)?.error).toBe("write access required")
+    /* A refused reconcile started no run, so no mirror card is invented for one. */
+    expect(mirrorPayloadOf(store)).toBeUndefined()
+  })
+
+  test("mirrorSync starts a run and carries the repository's own mirror_status word", async () => {
+    const { store, seam, requests } = await harness({
+      [REPO_PATH]: json(200, repoDto("unconfigured")),
+      [`POST ${MIRROR_PATH}`]: json(202, { run_id: 88 })
     })
 
     const result = await seam.mirrorSync()
 
-    expect(textOf(result)).toBe("Mirror sync started for will/smithers — the card tracks it.")
+    expect(requests).toContain(`GET ${REPO_PATH}`)
+    expect(textOf(result)).toBe("Mirror run 88 started for will/smithers — the card tracks its refs.")
     const payload = mirrorPayloadOf(store)
     expect(payload?.subject).toBe("GitHub → will/smithers mirror")
+    expect(payload?.runId).toBe("88")
     expect(payload?.trigger).toBe("sync started · run 88")
+    /* `unconfigured` is the word prod answers today, and it rides the header unchanged. */
+    expect(payload?.mirrorStatus).toBe("unconfigured")
     expect(payload?.runState).toBeNull()
-    expect(payload?.opsNote).toBe(NO_MIRROR_OPS_NOTE)
+    expect(payload?.ops).toEqual([])
+  })
+
+  test("a repository DTO the app cannot read leaves the header with NO state word", async () => {
+    /* ADR 0005: "from the mirror status DTO once it exists, else no state word at all". */
+    const { store, seam } = await harness({ [`POST ${MIRROR_PATH}`]: json(202, { run_id: 88 }) })
+
+    await seam.mirrorSync()
+
+    expect(mirrorPayloadOf(store)?.mirrorStatus).toBeUndefined()
+  })
+
+  test("the run poll renders one row per ref and stops when the run settles", async () => {
+    const previous = { ...mirrorSyncPolling }
+    mirrorSyncPolling.delayMs = 1
+    mirrorSyncPolling.maxAttempts = 6
+    try {
+      let polls = 0
+      let mirrorStatus = "behind"
+      const { store, seam } = await harness({
+        [REPO_PATH]: () => json(200, repoDto(mirrorStatus))(),
+        [`POST ${MIRROR_PATH}`]: json(202, { run_id: 88 }),
+        [`${MIRROR_PATH}/88`]: () => {
+          polls += 1
+          if (polls < 2) return json(200, mirrorRun("running"))()
+          mirrorStatus = "synced"
+          return json(200, mirrorRun("succeeded", [
+            { name: "refs/heads/main", from: "b775d9", to: "3f2a1b", status: "succeeded", error: "" },
+            { name: "refs/heads/wip", from: "", to: "aa11bb", status: "failed", error: "remote rejected: non-fast-forward" }
+          ]))()
+        }
+      })
+
+      await seam.mirrorSync()
+      await waitUntil(() => mirrorPayloadOf(store)?.runState === "succeeded")
+      await waitUntil(() => mirrorPayloadOf(store)?.mirrorStatus === "synced")
+
+      const payload = mirrorPayloadOf(store)
+      expect(payload?.runState).toBe("succeeded")
+      expect(payload?.ops).toEqual([
+        {
+          id: "refs/heads/main",
+          source: "b775d9",
+          target: "3f2a1b",
+          entity: "ref",
+          entityId: "refs/heads/main",
+          action: "push",
+          status: "succeeded",
+          retryable: false,
+          at: null
+        },
+        {
+          id: "refs/heads/wip",
+          source: "—",
+          target: "aa11bb",
+          entity: "ref",
+          entityId: "refs/heads/wip",
+          action: "push",
+          status: "failed",
+          error: "remote rejected: non-fast-forward",
+          /* plue#491: a FAILED ref has its own retry route, so its row carries Retry. */
+          retryable: true,
+          at: null
+        }
+      ])
+      /* The settled run re-reads the repository: the header word follows the mirror. */
+      expect(payload?.mirrorStatus).toBe("synced")
+    } finally {
+      Object.assign(mirrorSyncPolling, previous)
+    }
+  })
+
+  test("parseMirrorRef keeps the wire's status word and error, and offers a retry only on a failed ref", () => {
+    /* plue#491 retries one ref, and refuses the route for any status but `failed`. */
+    const ref = parseMirrorRef({ name: "refs/heads/main", from: "b775d9", to: "", status: "pending", error: "" })
+    expect(ref).toEqual({
+      id: "refs/heads/main",
+      source: "b775d9",
+      target: "—",
+      entity: "ref",
+      entityId: "refs/heads/main",
+      action: "push",
+      status: "pending",
+      retryable: false,
+      at: null
+    })
+    expect(parseMirrorRef({ name: "refs/heads/wip", status: "failed", error: "rejected" })?.retryable).toBe(true)
+    expect(parseMirrorRef({ name: "refs/heads/wip", status: "succeeded", error: "" })?.retryable).toBe(false)
+    expect(parseMirrorRef({ from: "x" })).toBeNull()
+  })
+
+  test("the repository's behind_refs and failed_refs ride the card beside its mirror word (plue#491)", async () => {
+    const { store, seam } = await harness({
+      [REPO_PATH]: json(200, repoDto("behind", { behind: 3, failed: 1 })),
+      [`POST ${MIRROR_PATH}`]: json(202, { run_id: 88 })
+    })
+
+    await seam.mirrorSync()
+
+    const payload = mirrorPayloadOf(store)
+    expect(payload?.mirrorStatus).toBe("behind")
+    expect(payload?.behindRefs).toBe(3)
+    expect(payload?.failedRefs).toBe(1)
+  })
+
+  test("a repository DTO that names the word but no counts carries no count", async () => {
+    /* ADR 0005: a number the server did not state is never invented for the header. */
+    const { store, seam } = await harness({
+      [REPO_PATH]: json(200, {
+        id: 1,
+        owner: "will",
+        name: "smithers",
+        full_name: "will/smithers",
+        mirror_status: "behind"
+      }),
+      [`POST ${MIRROR_PATH}`]: json(202, { run_id: 88 })
+    })
+
+    await seam.mirrorSync()
+
+    expect(mirrorPayloadOf(store)?.mirrorStatus).toBe("behind")
+    expect(mirrorPayloadOf(store)?.behindRefs).toBeUndefined()
+    expect(mirrorPayloadOf(store)?.failedRefs).toBeUndefined()
+  })
+
+  test("retryMirrorRef posts the escaped ref and tracks the run plue answered (plue#491)", async () => {
+    const previous = { ...mirrorSyncPolling }
+    mirrorSyncPolling.delayMs = 1
+    mirrorSyncPolling.maxAttempts = 4
+    try {
+      const { store, seam, requests } = await harness({
+        [REPO_PATH]: json(200, repoDto("behind", { behind: 1, failed: 1 })),
+        [`POST ${REF_RETRY_PATH}`]: json(202, { run_id: 92 }),
+        [`${MIRROR_PATH}/92`]: json(200, mirrorRun("succeeded", [
+          { name: "refs/heads/wip", from: "aa11bb", to: "cc22dd", status: "succeeded", error: "" }
+        ]))
+      })
+
+      const result = await seam.retryMirrorRef("refs/heads/wip")
+
+      /* The ref name carries slashes and rides as ONE escaped segment. */
+      expect(requests).toContain(`POST ${REF_RETRY_PATH}`)
+      expect(textOf(result)).toBe(
+        "refs/heads/wip is being pushed again on will/smithers — run 92; the card tracks it."
+      )
+      expect(mirrorPayloadOf(store)?.runId).toBe("92")
+      expect(mirrorPayloadOf(store)?.trigger).toBe("refs/heads/wip retried · run 92")
+      await waitUntil(() => mirrorPayloadOf(store)?.runState === "succeeded")
+    } finally {
+      Object.assign(mirrorSyncPolling, previous)
+    }
+  })
+
+  test("a per-ref retry the platform refuses reads its own sentence and starts no run", async () => {
+    const { store, seam } = await harness({
+      [REPO_PATH]: json(200, repoDto("behind", { behind: 1, failed: 1 })),
+      [`POST ${REF_RETRY_PATH}`]: json(409, { message: "a mirror sync is already running" })
+    })
+
+    expect(textOf(await seam.retryMirrorRef("refs/heads/wip"))).toBe("a mirror sync is already running")
+    expect(mirrorPayloadOf(store)?.error).toBe("a mirror sync is already running")
+    expect(mirrorPayloadOf(store)?.runId).toBeUndefined()
+  })
+
+  test("retryMirrorRef without a ref calls nothing", async () => {
+    const { seam, requests } = await harness({})
+    expect(textOf(await seam.retryMirrorRef("  "))).toBe(
+      "github.mirror.retry-ref needs a ref: /github.mirror.retry-ref <ref> [owner/repo]"
+    )
+    expect(requests).toEqual([])
+  })
+
+  test("a run read the server refuses lands its words on the card and stops the poll", async () => {
+    const previous = { ...mirrorSyncPolling }
+    mirrorSyncPolling.delayMs = 1
+    mirrorSyncPolling.maxAttempts = 6
+    try {
+      const { store, seam } = await harness({
+        [`POST ${MIRROR_PATH}`]: json(202, { run_id: 88 }),
+        [`${MIRROR_PATH}/88`]: json(403, { message: "read:repository scope required" })
+      })
+
+      await seam.mirrorSync()
+      await waitUntil(() => mirrorPayloadOf(store)?.error !== undefined)
+
+      expect(mirrorPayloadOf(store)?.error).toBe("read:repository scope required")
+    } finally {
+      Object.assign(mirrorSyncPolling, previous)
+    }
   })
 
   test("mirrorSync with no route renders the verbatim 404 on the card", async () => {
@@ -310,7 +649,7 @@ describe("createGitHubSeam", () => {
 
   test("mirrorSync on a structured 429 carries the rate-limit facts", async () => {
     const { store, seam } = await harness({
-      "POST api/repos/will/smithers/mirror-sync": json(429, {
+      [`POST ${MIRROR_PATH}`]: json(429, {
         code: "github_rate_limited",
         message: "GitHub rate limit exhausted",
         limit: 5000,

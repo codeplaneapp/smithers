@@ -10,7 +10,7 @@
  * process environment.
  */
 
-export type SandboxPolicyId = "loader" | "harness" | "terminal" | "probe"
+export type SandboxPolicyId = "loader" | "harness" | "terminal" | "probe" | "lsp"
 
 export interface SandboxPolicy {
   readonly id: SandboxPolicyId
@@ -85,6 +85,17 @@ export const probePolicy = (paths: Pick<SandboxPaths, "tmpdir">): SandboxPolicy 
   writablePrefixes: []
 })
 
+/**
+ * A language server (`typescript-language-server --stdio`, lsp/LspHost.ts):
+ * no network (typings acquisition is off; a missing server is stated, never
+ * installed) and writes only scratch. It reads the repository; it never
+ * writes it, and the repository is not part of the policy.
+ */
+export const lspPolicy = (paths: Pick<SandboxPaths, "tmpdir">): SandboxPolicy => ({
+  ...probePolicy(paths),
+  id: "lsp"
+})
+
 /** A harness tab (claude, codex, ...): network on; writes the repo, its config dirs and scratch. */
 export const harnessPolicy = (paths: SandboxPaths): SandboxPolicy => ({
   id: "harness",
@@ -107,7 +118,8 @@ export const sandboxPolicies: Readonly<Record<SandboxPolicyId, (paths: SandboxPa
   loader: loaderPolicy,
   harness: harnessPolicy,
   terminal: terminalPolicy,
-  probe: probePolicy
+  probe: probePolicy,
+  lsp: lspPolicy
 }
 
 /** Seatbelt string literal: backslashes and double quotes escaped. */

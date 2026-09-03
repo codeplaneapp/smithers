@@ -1,8 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
-import type { Harness } from "smithers-shared/LocalApp"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/NativeAgent"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
+import type { Harness } from "@smthrs/rpc/LocalApp"
+import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -134,9 +134,10 @@ describe("agent roles — launching", () => {
       roleId: "trivial-implementation",
       task: "rename the flag to verbose"
     })
-    // The model may delegate; the plain role launch stays the human's.
+    // The model may delegate, and may ask for a plain role launch: agent.role confirms (the three-door law).
     expect(controller.commands.find("agent.delegate")?.binding.descriptor.modelInvocable).toBe(true)
-    expect(controller.commands.find("agent.role")?.binding.descriptor.modelInvocable).toBe(false)
+    expect(controller.commands.find("agent.role")?.binding.descriptor.modelInvocable).toBe(true)
+    expect(controller.commands.find("agent.role")?.metadata.confirm).toBeDefined()
   })
 
   test("a role whose harness lacks a credential refuses with the reason, and an unknown role lists the roles", async () => {
@@ -150,7 +151,8 @@ describe("agent roles — launching", () => {
     expect(failed().at(-1)?.detail).toContain("Fast UI · Cerebras gpt-oss-120b is not available")
     controller.runCommandArgs("agent.delegate", "poet write a haiku")
     await settle()
-    expect(failed().some((toast) => (toast.detail ?? "").includes("There is no agent role named poet"))).toBe(true)
+    // A well-formed id the agents store lacks is refused by the store's list (custom-agents.md), never by an enum.
+    expect(failed().some((toast) => (toast.detail ?? "").includes("There is no agent named poet"))).toBe(true)
     expect(bodies).toHaveLength(0)
   })
 })
@@ -158,24 +160,24 @@ describe("agent roles — launching", () => {
 describe("agent roles — the explainer", () => {
   test("agent.explain runs one side turn on the explainer role and streams into an embedded card", async () => {
     const { store, controller, recorder } = await boot()
-    controller.runCommandArgs("agent.explain", "why is vendor/jj not a regular file")
+    controller.runCommandArgs("agent.explain", "why is packages/smithers/flows/jj/wasm not a regular file")
     await settle()
     const launch = recorder.launches.at(-1)
     expect(launch).toBeDefined()
     expect(launch).toMatchObject({ purpose: "explain", role: "explainer" })
     expect(launch?.tools).toBeUndefined()
-    expect(launch?.messages).toEqual([{ role: "user", content: "why is vendor/jj not a regular file" }])
+    expect(launch?.messages).toEqual([{ role: "user", content: "why is packages/smithers/flows/jj/wasm not a regular file" }])
     expect(launch?.instructions).toContain("Explainer")
     // The conversation's own phase never moves for a side turn.
     expect(store.session().phase).toBe("idle")
     const cardId = `explain-${launch?.runId ?? ""}`
     expect(store.collections.cards.get(cardId)).toMatchObject({ kind: "explain", payload: { phase: "asking", answer: "" } })
-    recorder.emit({ runId: launch?.runId ?? "", type: "delta", kind: "text", text: "It is a submodule " })
-    recorder.emit({ runId: launch?.runId ?? "", type: "delta", kind: "text", text: "checkout." })
+    recorder.emit({ runId: launch?.runId ?? "", type: "delta", kind: "text", text: "It is a directory " })
+    recorder.emit({ runId: launch?.runId ?? "", type: "delta", kind: "text", text: "of build output." })
     recorder.emit({ runId: launch?.runId ?? "", type: "done", reason: "stop" })
     await settle()
     const card = store.collections.cards.get(cardId)
-    expect(card).toMatchObject({ status: "acted", payload: { phase: "answered", answer: "It is a submodule checkout." } })
+    expect(card).toMatchObject({ status: "acted", payload: { phase: "answered", answer: "It is a directory of build output." } })
     // Honest attribution: what was asked for, never a claim about who answered.
     expect(card?.kind === "explain" ? card.payload.answeredBy : "").toContain("asked for the Explainer role (Kimi K3)")
   })
@@ -201,6 +203,7 @@ describe("agent roles — the explainer", () => {
 describe("agent roles — the orchestrator's instructions", () => {
   test("the conversation is the orchestrator: it is told each role, its model, and which ones this host cannot launch", () => {
     const prompt = smithersInstructions([], {
+      host: "native",
       github: { connected: false, login: null, repositories: null },
       localRepositories: [],
       localRepositoriesAvailable: true
@@ -226,6 +229,7 @@ describe("agent roles — the orchestrator's instructions", () => {
 
   test("without local harnesses the instructions carry no role section at all", () => {
     const prompt = smithersInstructions([], {
+      host: "native",
       github: { connected: false, login: null, repositories: null },
       localRepositories: [],
       localRepositoriesAvailable: false

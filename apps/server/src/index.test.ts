@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { AppBootstrapSchema } from "smithers-shared/AppBootstrap"
-import worker, { TurnCancelRegistry } from "./index"
+import { AppBootstrapSchema } from "@smthrs/rpc/AppBootstrap"
+import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
+import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
+import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
+import worker, { PLATFORM_PROXY_RULES, TurnCancelRegistry } from "./index"
 import type { TurnCancelNamespace, TurnCancelStorage, WorkerEnv } from "./index"
 
 const assetsEnv = (html = "<html><body>smithers</body></html>"): WorkerEnv => ({
@@ -1922,7 +1925,16 @@ describe("the browser tool route (§2d)", () => {
     const paths: ReadonlyArray<readonly [string, string]> = [
       ["GET", "/api/repos/will/flows/issues?state=open"],
       ["POST", "/api/github/import"],
+      ["GET", "/api/user/repos"],
       ["GET", "/api/user/byok-keys"],
+      ["GET", "/api/user/workspaces?limit=100"],
+      ["GET", "/api/user/orgs"],
+      ["GET", "/api/orgs/smithersai/provider-connections"],
+      ["POST", "/api/orgs/smithersai/changesets/7/land"],
+      ["GET", "/api/integrations/linear"],
+      ["DELETE", "/api/integrations/linear/7"],
+      ["POST", "/api/linear"],
+      ["POST", "/api/linear/7/ops/9/retry"],
       ["GET", "/api/notifications/list"],
       ["POST", "/api/billing/checkout"],
       ["POST", "/api/billing/portal"]
@@ -1938,7 +1950,27 @@ describe("the browser tool route (§2d)", () => {
     // through to the /api/billing/ prefix, which the product billing worker owns.
     const cases: ReadonlyArray<readonly [string, string]> = [
       ["DELETE", "/api/notifications/list"],
-      ["PATCH", "/api/user/byok-keys"]
+      ["POST", "/api/user/repos"],
+      ["PATCH", "/api/user/byok-keys"],
+      ["PATCH", "/api/user/workspaces"],
+      ["PUT", "/api/orgs/smithersai/provider-connections"],
+      ["PUT", "/api/linear/7"],
+      /*
+       * Doors no product seam calls (apps/ui/src/mainview/state/seams): a PAT
+       * mint, a provider-connection write, an org delete, an integration
+       * create or patch, a Linear delete. The bridge hands the page whatever
+       * the platform answers, so a row here is a capability, and every row
+       * lands in the same commit as the seam that needs it (parity-hosts (b)).
+       */
+      ["GET", "/api/user/provider-connections"],
+      ["POST", "/api/user/provider-connections"],
+      ["GET", "/api/user/tokens"],
+      ["POST", "/api/user/tokens"],
+      ["DELETE", "/api/user/tokens/7"],
+      ["DELETE", "/api/orgs/smithersai"],
+      ["POST", "/api/integrations/linear"],
+      ["PATCH", "/api/integrations/linear/7"],
+      ["DELETE", "/api/linear/7"]
     ]
     for (const [method, path] of cases) {
       const response = await worker.fetch(new Request(`https://mvp.test${path}`, { method }), assetsEnv())
@@ -2162,6 +2194,204 @@ describe("the browser tool route (§2d)", () => {
       expect(seen[0]?.auth).toBe("Bearer cloud-token-1")
     } finally {
       globalThis.fetch = original
+    }
+  })
+})
+
+/*
+ * The `/api/cloud/<inner>` bridge (apps/ui/docs/web-mode/PLAN.md §0 correction
+ * 4, lane W0). Seven product seams call `CLOUD_ROUTE_PREFIX + path`, which the
+ * Bun origin proxies with the jjhub PAT and this Worker answered with the
+ * canonical 404, so on the web the repository list never loaded. The Worker
+ * strips the prefix and hands the inner path to the SAME allowlist and the
+ * SAME cookie-to-cloud-token bridge as the direct platform proxy; anything
+ * that is not a single absolute path is refused before a token is spent.
+ */
+describe("the /api/cloud bridge", () => {
+  const signedInEnv: WorkerEnv = {
+    ...assetsEnv(),
+    IDENTITY_UPSTREAM_URL: "https://identity.test",
+    IDENTITY_SERVICE_TOKEN: "svc",
+    SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test"
+  }
+  interface UpstreamCall {
+    readonly url: string
+    readonly method: string
+    readonly headers: Headers
+  }
+  /**
+   * Identity validates the session and mints `cloud-token-1`; every other
+   * fetch is recorded (identity calls included, so an empty log proves the
+   * Worker refused before the gate) and answered with `answer()`.
+   */
+  const withUpstreams = async <T>(
+    answer: () => Response,
+    run: (calls: Array<UpstreamCall>) => Promise<T>
+  ): Promise<T> => {
+    const calls: Array<UpstreamCall> = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+      calls.push({ url, method: init?.method ?? "GET", headers: new Headers(init?.headers) })
+      if (url.startsWith("https://identity.test/api/identity/validate")) {
+        return new Response(JSON.stringify({ login: "will", allowlisted: true, admin: false, scopes: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      }
+      if (url.startsWith("https://identity.test/api/identity/cloud-token")) {
+        return new Response(JSON.stringify({ found: true, token: "cloud-token-1" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      }
+      return answer()
+    }) as unknown as typeof fetch
+    try {
+      return await run(calls)
+    } finally {
+      globalThis.fetch = original
+    }
+  }
+  const cloudCalls = (calls: ReadonlyArray<UpstreamCall>): Array<UpstreamCall> =>
+    calls.filter((call) => call.url.startsWith("https://cloud.test"))
+  const jsonAnswer = (body: unknown): Response =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+
+  test("/api/cloud/api/user/repos bridges with the user's cloud bearer and the inner path arrives without the prefix", async () => {
+    await withUpstreams(() => jsonAnswer([{ full_name: "will/smithers" }]), async (calls) => {
+      const response = await worker.fetch(
+        new Request("https://mvp.test/api/cloud/api/user/repos?per_page=1", {
+          headers: {
+            cookie: "smithers_session=sealed",
+            // A client-supplied bearer is a forgery: the bridge mints its own.
+            authorization: "Bearer renderer_forgery",
+            [LOCAL_SESSION_HEADER]: "local-token"
+          }
+        }),
+        signedInEnv
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual([{ full_name: "will/smithers" }])
+      const cloud = cloudCalls(calls)
+      expect(cloud).toHaveLength(1)
+      expect(cloud[0]?.url).toBe("https://cloud.test/api/user/repos?per_page=1")
+      expect(cloud[0]?.method).toBe("GET")
+      expect(cloud[0]?.headers.get("authorization")).toBe("Bearer cloud-token-1")
+      expect(cloud[0]?.headers.get("cookie")).toBeNull()
+      expect(cloud[0]?.headers.get(LOCAL_SESSION_HEADER)).toBeNull()
+    })
+  })
+
+  test("every allowlisted family answers the same through the bridge as through the direct route", async () => {
+    // The table is exported for the parity matrix (PLAN.md §6); walking it
+    // here proves the bridge reuses the direct proxy instead of forking it:
+    // same status, same body, same upstream URL, for every row and method.
+    for (const rule of PLATFORM_PROXY_RULES) {
+      const inner = rule.exact ?? `${rule.prefix}x`
+      for (const method of rule.methods) {
+        await withUpstreams(() => jsonAnswer({ ok: true }), async (calls) => {
+          const direct = await worker.fetch(new Request(`https://mvp.test${inner}`, { method }), signedInEnv)
+          const bridged = await worker.fetch(
+            new Request(`https://mvp.test${CLOUD_ROUTE_PREFIX}${inner.slice(1)}`, { method }),
+            signedInEnv
+          )
+          expect(`${method} ${inner} → ${bridged.status}`).toBe(`${method} ${inner} → ${direct.status}`)
+          expect(await bridged.json()).toEqual(await direct.json())
+          const cloud = cloudCalls(calls)
+          if (cloud.length > 0) {
+            expect(cloud).toHaveLength(2)
+            expect(cloud[1]?.url).toBe(cloud[0]?.url)
+          }
+        })
+      }
+    }
+  })
+
+  test("/api/cloud/api/admin/x and any inner path outside the allowlist answer the canonical 404 before any upstream call", async () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["GET", "/api/cloud/api/admin/x"],
+      ["GET", "/api/cloud/api/admin/allowlist"],
+      ["POST", "/api/cloud/api/agent/turn"],
+      ["GET", "/api/cloud/api/identity/validate"],
+      /* The method is part of the rule. */
+      ["POST", "/api/cloud/api/user/repos"],
+      ["GET", "/api/cloud/api/billing/checkout"],
+      /* One character short of the prefix. */
+      ["GET", "/api/cloud/api/user/repo"],
+      /* An empty inner path. */
+      ["GET", "/api/cloud/"]
+    ]
+    await withUpstreams(() => jsonAnswer({}), async (calls) => {
+      for (const [method, path] of cases) {
+        const response = await worker.fetch(new Request(`https://mvp.test${path}`, { method }), signedInEnv)
+        expect(`${method} ${path} → ${response.status}`).toBe(`${method} ${path} → 404`)
+        expect(await response.json()).toEqual({ status: "error", message: "Not found." })
+      }
+      expect(calls).toEqual([])
+    })
+  })
+
+  test("a scheme-relative, dot-segment, or absolute-URL inner path answers 404 and never reaches an upstream", async () => {
+    const attacks = [
+      /* Sliced naively this is scheme-relative: the bearer would go to evil.example. */
+      "/api/cloud//evil.example/api/user/repos",
+      "/api/cloud//evil.example/x",
+      /* Dot segments that would walk an allowlisted prefix onto the admin surface. */
+      "/api/cloud/api/repos/../../admin/x",
+      "/api/cloud/api/repos/%2e%2e/%2e%2e/admin/x",
+      "/api/cloud/api/user/repos/%2E%2E/%2E%2E/admin/x",
+      /* An absolute URL, plain and encoded, and an encoded backslash pair. */
+      "/api/cloud/https://evil.example/api/user/repos",
+      "/api/cloud/https:%2F%2Fevil.example/api/user/repos",
+      "/api/cloud/%5C%5Cevil.example/api/user/repos"
+    ]
+    await withUpstreams(() => jsonAnswer({}), async (calls) => {
+      for (const path of attacks) {
+        const response = await worker.fetch(new Request(`https://mvp.test${path}`), signedInEnv)
+        expect(`${path} → ${response.status}`).toBe(`${path} → 404`)
+        expect(await response.json()).toEqual({ status: "error", message: "Not found." })
+      }
+      expect(calls).toEqual([])
+    })
+  })
+
+  test("without an identity seam the bridge answers the platform proxy's honest 503, not a 404", async () => {
+    const direct = await worker.fetch(new Request("https://mvp.test/api/user/repos"), assetsEnv())
+    const bridged = await worker.fetch(new Request("https://mvp.test/api/cloud/api/user/repos"), assetsEnv())
+    expect(direct.status).toBe(503)
+    expect(bridged.status).toBe(503)
+    expect(await bridged.json()).toEqual(await direct.json())
+  })
+
+  test("bootstrap capabilities are cloudCapabilities(...) for every env shape, and the Worker claims no cloud door yet", async () => {
+    const agentShapes: ReadonlyArray<readonly [Partial<WorkerEnv>, boolean]> = [
+      [{}, false],
+      [{ SMITHERS_CHAT_AUTH_TOKEN: "chat" }, true],
+      [{ CHAT_PRODUCT_SERVICE_TOKEN: "svc" }, true],
+      [{ SMITHERS_CHAT_AUTH_TOKEN: " " }, false]
+    ]
+    for (const identity of [false, true]) {
+      for (const jjhub of [false, true]) {
+        for (const [agentEnv, agent] of agentShapes) {
+          for (const checkout of ["1", "0", undefined]) {
+            const env: WorkerEnv = {
+              ...assetsEnv(),
+              ...agentEnv,
+              ...(identity ? { IDENTITY_UPSTREAM_URL: "https://identity.test" } : {}),
+              ...(jjhub ? { SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test" } : {}),
+              ...(checkout === undefined ? {} : { BILLING_CHECKOUT_ENABLED: checkout })
+            }
+            const response = await worker.fetch(new Request("https://mvp.test/api/bootstrap"), env)
+            const body = AppBootstrapSchema.parse(await response.json())
+            expect(body.capabilities).toEqual(
+              cloudCapabilities({ identity, jjhub, agent, checkout: checkout === "1", terminal: false })
+            )
+            expect(body.capabilities).not.toContain("cloud.terminal")
+            expect(body.capabilities).not.toContain("cloud.pat")
+          }
+        }
+      }
     }
   })
 })

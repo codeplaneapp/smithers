@@ -95,7 +95,7 @@ describe("canary probes are wired into a gate", () => {
   })
 
   it("keeps ci.yml free of step conditions (issue #176)", () => {
-    // packages/flows/test/vitestCoverageIsolation.test.ts owns this pin.
+    // packages/smithers/flows/test/vitestCoverageIsolation.test.ts owns this pin.
     // It is restated here because the apps workspaces run `bun test` and
     // never load that suite, and this file edits ci.yml.
     expect(readWorkflow("ci.yml")).not.toMatch(/^\s*if:/m)

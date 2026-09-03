@@ -3,9 +3,9 @@
  * targets. Registered on the shared router from server.ts with one call.
  */
 import type { NodeSidecar } from "../Node"
-import type { Target } from "smithers-shared/LocalApp"
-import { REPO_FILES_PATH, RepoFilesRequestSchema, TARGET_PATTERN, TargetRunVerbSchema } from "smithers-shared/LocalApp"
-import type { RepositoryAccess } from "smithers-shared/NativeRepository"
+import type { Target } from "@smthrs/rpc/LocalApp"
+import { REPO_FILES_PATH, RepoFilesRequestSchema, TARGET_PATTERN, TargetRunVerbSchema } from "@smthrs/rpc/LocalApp"
+import type { RepositoryAccess } from "@smthrs/rpc/NativeRepository"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { z } from "zod"
@@ -35,6 +35,8 @@ export interface RepoTargetRoutesOptions {
    */
   readonly stateDir?: string
   readonly cli?: string
+  /** Runs when a repository closes, before the answer: the language-server host ends the repository's servers here. */
+  readonly onRepoClosed?: (repoId: string) => Promise<void>
   readonly log?: (line: string) => void
 }
 
@@ -226,6 +228,7 @@ export const registerRepoTargetRoutes = (
     if (!repos.close(repoId)) return jsonError(404, "repo_not_found", `No open repository with id ${repoId}.`)
     targetGrants.delete(repoId)
     repoAccess.delete(repoId)
+    await options.onRepoClosed?.(repoId)
     await remember(repoAccess)
     return json({ ok: true })
   })

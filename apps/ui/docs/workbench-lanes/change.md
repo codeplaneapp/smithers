@@ -6,7 +6,7 @@ Changeset routes are LIVE in prod (ADR 0003 last section); the T1 spec
 may render org `canary-changesets-e2e` read-only through the proxy.
 
 Scope, in order:
-1. Shared schemas (`apps/shared/src/Cards.ts`, `apps/shared/src/Changes.ts`):
+1. Shared schemas (`packages/rpc/src/Cards.ts`, `packages/rpc/src/Changes.ts`):
    `change` card payload (id, currentSeq, revisions[], description, repos[]
    with stat, checks summary, findings summary, review summary, conflicts[],
    stack position, landing state), `diff` card payload (from, to, files,

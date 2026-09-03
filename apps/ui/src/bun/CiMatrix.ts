@@ -2,7 +2,7 @@ import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, symlink } from "node:f
 import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
-import type { CiMatrixResponse } from "smithers-shared/TargetGraph"
+import type { CiMatrixResponse } from "@smthrs/rpc/TargetGraph"
 import type { NodeSidecar } from "./Node"
 import { buildCliEnvironment, resolveBuildCli } from "./Targets"
 

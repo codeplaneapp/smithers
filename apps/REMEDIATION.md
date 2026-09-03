@@ -166,8 +166,7 @@ version was created 2026-08-13, and the probe reds against it today.
 | ------------- | -----: | ----: |
 | `apps/ui`     |    526 |   628 |
 | `apps/server` |    108 |   371 |
-| `apps/shared` |     33 |    33 |
-| `apps/tui`    |     20 |    27 |
+| `packages/rpc` |     33 |    33 |
 
 17 hermetic e2e suites exist where there were none. `worker-e2e.ts` went from
 red to green. No test was weakened, skipped, or deleted to reach any of it —

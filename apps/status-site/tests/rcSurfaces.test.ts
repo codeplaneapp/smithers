@@ -16,7 +16,7 @@ const status = JSON.parse(readFileSync(new URL("../site/status.json", import.met
 };
 const homeHtml = readFileSync(new URL("../site/index.html", import.meta.url), "utf8");
 const cliManifest = JSON.parse(
-  readFileSync(new URL("../../../packages/cli/package.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../packages/smithers/package.json", import.meta.url), "utf8"),
 ) as { name: string };
 const bugWorkerManifest = JSON.parse(
   readFileSync(new URL("../../bug-worker/package.json", import.meta.url), "utf8"),

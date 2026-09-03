@@ -7,10 +7,10 @@
 import { existsSync, realpathSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { delimiter, dirname, join, resolve } from "node:path"
-import type { RepoWorkspace, TargetDefinition } from "smithers-shared/LocalApp"
-import { splitLabel } from "smithers-shared/LocalApp"
-import { criticalPath } from "smithers-shared/TargetGraph"
-import type { GraphEdge, NodeTiming, RunSummary, TargetRunEvent } from "smithers-shared/TargetGraph"
+import type { RepoWorkspace, TargetDefinition } from "@smthrs/rpc/LocalApp"
+import { splitLabel } from "@smthrs/rpc/LocalApp"
+import { criticalPath } from "@smthrs/rpc/TargetGraph"
+import type { GraphEdge, NodeTiming, RunSummary, TargetRunEvent } from "@smthrs/rpc/TargetGraph"
 import type { NodeSidecar } from "./Node"
 import { currentSandboxHost, loaderPolicy, wrapSandbox } from "./Sandbox"
 import type { SandboxHost, SandboxPaths } from "./Sandbox"
@@ -20,7 +20,7 @@ export const QUERY_TIMEOUT_MS = 120_000
 
 /**
  * The build-cli entry: SMITHERS_BUILD_CLI, else the nearest
- * packages/build-cli/src/main.js above this file. In the source tree that is
+ * packages/smithers/build/build-cli/src/main.js above this file. In the source tree that is
  * four levels up (apps/ui/src/bun); under `electrobun dev` and in a built
  * bundle this file runs from apps/ui/build/<target>/<App>.app/..., so the
  * walk keeps climbing until it leaves the bundle and reaches the checkout.
@@ -86,13 +86,17 @@ export const sandboxPathsFor = (repo: string): SandboxPaths => {
   return { repo, home: homedir(), tmpdir: tmp }
 }
 
-const isTargetRow = (value: unknown): value is { label: string; target?: unknown; kinds?: unknown } =>
+const isTargetRow = (
+  value: unknown
+): value is { label: string; target?: unknown; kinds?: unknown; summary?: unknown; featured?: unknown } =>
   typeof value === "object" && value !== null && typeof (value as { label?: unknown }).label === "string"
 
 /**
- * The loader's `{ targets: [{ label, target, kinds }] }` listing as Targets
- * tagged with the workspace the loader ran in, or an error message when the
- * text is not that shape.
+ * The loader's `{ targets: [{ label, target, kinds, summary?, featured? }] }`
+ * listing as Targets tagged with the workspace the loader ran in, or an
+ * error message when the text is not that shape. `summary` and `featured`
+ * are the declaration's own presentation (PACKAGE.ts `summary: "..."`,
+ * `featured: true`); a row without them is a bare target.
  */
 export const mapTargets = (stdout: string, workspace: string): { readonly targets: Array<TargetDefinition> } | { readonly error: string } => {
   let parsed: unknown
@@ -113,7 +117,9 @@ export const mapTargets = (stdout: string, workspace: string): { readonly target
       target: typeof row.target === "string" ? row.target : "",
       kinds: Array.isArray(row.kinds) ? row.kinds.filter((kind): kind is string => typeof kind === "string") : [],
       ...splitLabel(row.label),
-      workspace
+      workspace,
+      ...(typeof row.summary === "string" && row.summary !== "" ? { summary: row.summary } : {}),
+      ...(row.featured === true ? { featured: true } : {})
     }))
   }
 }
@@ -295,7 +301,14 @@ export interface RunStdoutParser {
  * json` in the CLI's own order, so a target's first kind is the verb the
  * repository authored it for.
  */
-const VERB_BY_KIND: Readonly<Record<string, string>> = { build: "build", test: "test", lint: "lint", run: "run", docs: "docs" }
+const VERB_BY_KIND: Readonly<Record<string, string>> = {
+  build: "build",
+  test: "test",
+  lint: "lint",
+  run: "run",
+  docs: "docs",
+  review: "review"
+}
 
 /**
  * The argv that executes one target in a workspace.
@@ -428,7 +441,7 @@ export const createRunStdoutParser = (options: {
   /*
    * The executor's trailing results block (its default TOON envelope):
    *   results[7]{label,target,status,durationMs,key}:
-   *     "//packages/canonical:fmt",Dprint,ran,393.87,ce0698…
+   *     "//packages/smithers/flows/canonical:fmt",Dprint,ran,393.87,ce0698…
    * It is the one place the RULE of each target is printed, so its rows
    * re-emit the node with `rule` set; status/duration/key agree with the
    * status lines already parsed.
@@ -531,7 +544,7 @@ export const createTargetRunner = (options: TargetRunnerOptions): TargetRunner =
 
   /*
    * Every frame the backend records is stamped with a run-local monotonic
-   * `seq` (smithers-shared/TargetGraph). stdout/stderr/exit/error frames
+   * `seq` (@smthrs/rpc/TargetGraph). stdout/stderr/exit/error frames
    * carry no `at` of their own, so `seq` is the ONLY total order replay can
    * use; without it two frames in one millisecond — or any untimed frame —
    * are unordered by construction.

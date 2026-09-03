@@ -4,16 +4,16 @@
  * data itself supplies. No DOM, no store — the card component and the
  * controller both read these, and the tests pin them without React.
  */
-import type { Target } from "smithers-shared/LocalApp"
-import type { TargetRunState, TargetsView, TargetsViewMode } from "smithers-shared/Cards"
-import type { RunRecord } from "smithers-shared/TargetGraph"
+import type { Target, TargetRunVerb } from "@smthrs/rpc/LocalApp"
+import type { TargetRunState, TargetsView, TargetsViewMode } from "@smthrs/rpc/Cards"
+import type { RunRecord } from "@smthrs/rpc/TargetGraph"
 
 export interface TargetRow {
   readonly target: Target
   /** The most recent recorded run whose root is this label, if any. */
   readonly lastRun: RunRecord | undefined
   readonly state: TargetRunState
-  /** The repository's manifest marks this label featured. */
+  /** The declaration marks this label featured (PACKAGE.ts `featured: true`); a group is featured when a member is. */
   readonly featured: boolean
   /** This user starred the label (target.star). */
   readonly starred: boolean
@@ -21,25 +21,54 @@ export interface TargetRow {
   readonly group?: TargetGroup
 }
 
-/** What leads the Featured view: the manifest's featured labels and the user's stars. */
+/** What the user adds to the Featured view beside the declarations' own `featured`: their stars. */
 export interface FeaturedFacts {
-  readonly featured?: ReadonlyArray<string> | undefined
   readonly starred?: ReadonlyArray<string> | undefined
 }
 
+/** A row the Featured view keeps: featured or starred itself, or a group with such a member. */
+const lit = (row: TargetRow): boolean =>
+  row.featured || row.starred || (row.group?.members.some((member) => member.featured || member.starred) ?? false)
+
 /**
- * The view the card opens on when none was chosen: Featured when the
- * repository has anything featured or starred, otherwise All. An explicit
- * choice always wins.
+ * The view the card opens on when none was chosen: Featured when any row is
+ * featured or starred, otherwise All. An explicit choice always wins.
  */
-export const viewMode = (
-  view: TargetsView | undefined,
-  facts: FeaturedFacts,
-  /** The manifest's featured pattern runs: they lead the Featured view too (`ci //packages/...`). */
-  patternRuns: ReadonlyArray<unknown> = []
-): TargetsViewMode => {
+export const viewMode = (view: TargetsView | undefined, rows: ReadonlyArray<TargetRow>): TargetsViewMode => {
   if (view?.mode !== undefined) return view.mode
-  return (facts.featured?.length ?? 0) > 0 || (facts.starred?.length ?? 0) > 0 || patternRuns.length > 0 ? "featured" : "all"
+  return rows.some(lit) ? "featured" : "all"
+}
+
+/** One run of a verb over the whole workspace (`ci //...`): the Featured view's run strip. */
+export interface PatternRun {
+  readonly id: string
+  readonly title: string
+  readonly summary: string
+  readonly workspace: string
+  readonly verb: TargetRunVerb
+  readonly pattern: string
+}
+
+/** The strip's verbs in display order; `run` is left out because run targets are services, not a sweep. */
+const STRIP_VERBS: ReadonlyArray<{ readonly verb: TargetRunVerb; readonly title: string; readonly summary: string }> = [
+  { verb: "ci", title: "Run everything", summary: "Build, test, lint and docs over every target: the CI job's own step." },
+  { verb: "build", title: "Build everything", summary: "Every build target." },
+  { verb: "test", title: "Test everything", summary: "Every test target." },
+  { verb: "lint", title: "Lint everything", summary: "Every lint target." },
+  { verb: "docs", title: "Check every doc", summary: "Every docs target." }
+]
+
+/**
+ * The pattern runs a repository offers, derived from its targets rather than
+ * declared anywhere: `ci //...` whenever there are targets at all, and one
+ * `<verb> //...` per kind the targets actually carry, over the root workspace.
+ */
+export const patternRuns = (targets: ReadonlyArray<Target>): ReadonlyArray<PatternRun> => {
+  if (targets.length === 0) return []
+  const kinds = new Set(targets.flatMap((target) => target.kinds))
+  return STRIP_VERBS
+    .filter((entry) => entry.verb === "ci" || kinds.has(entry.verb))
+    .map((entry) => ({ id: entry.verb, title: entry.title, summary: entry.summary, workspace: ".", verb: entry.verb, pattern: "//..." }))
 }
 
 /**
@@ -82,7 +111,6 @@ export const groupRows = (rows: ReadonlyArray<TargetRow>, facts: FeaturedFacts =
     if (list === undefined) byName.set(row.target.name, [row])
     else list.push(row)
   }
-  const featured = new Set(facts.featured ?? [])
   const starred = new Set(facts.starred ?? [])
   const emitted = new Set<string>()
   const out: Array<TargetRow> = []
@@ -114,7 +142,7 @@ export const groupRows = (rows: ReadonlyArray<TargetRow>, facts: FeaturedFacts =
       },
       lastRun: latest,
       state: groupState(members),
-      featured: featured.has(label),
+      featured: members.some((member) => member.featured),
       starred: starred.has(label),
       group: { name: row.target.name, label, members, counts }
     })
@@ -165,7 +193,6 @@ export const targetRows = (
   facts: FeaturedFacts = {}
 ): ReadonlyArray<TargetRow> => {
   const latest = lastRunsByLabel(runs)
-  const featured = new Set(facts.featured ?? [])
   const starred = new Set(facts.starred ?? [])
   return targets.map((target) => {
     const lastRun = latest.get(target.label)
@@ -173,7 +200,7 @@ export const targetRows = (
       target,
       lastRun,
       state: runStateOf(lastRun),
-      featured: featured.has(target.label),
+      featured: target.featured === true,
       starred: starred.has(target.label)
     }
   })
@@ -184,18 +211,16 @@ const has = (list: ReadonlyArray<string> | undefined, value: string): boolean =>
 
 /**
  * The rows a view keeps, in the view's order. An absent or empty facet keeps
- * everything. Featured keeps the manifest's featured labels and the user's
- * stars (loader order); Recent keeps only targets with a recorded run, most
- * recent first; All keeps loader order. The mode is resolved by `viewMode`
- * so the card and the tests agree on the default.
+ * everything. Featured keeps the declarations' featured labels and the
+ * user's stars (loader order); Recent keeps only targets with a recorded
+ * run, most recent first; All keeps loader order. The mode is resolved by
+ * `viewMode` so the card and the tests agree on the default.
  */
 export const filterRows = (
   rows: ReadonlyArray<TargetRow>,
   view: TargetsView | undefined,
   mode: TargetsViewMode = view?.mode ?? "all"
 ): ReadonlyArray<TargetRow> => {
-  const lit = (row: TargetRow): boolean =>
-    row.featured || row.starred || (row.group?.members.some((member) => member.featured || member.starred) ?? false)
   const scoped = mode === "featured"
     ? rows.filter(lit)
     : mode === "recent"
@@ -208,6 +233,7 @@ export const filterRows = (
   const matchesQuery = (row: TargetRow): boolean =>
     query === "" ||
     row.target.label.toLowerCase().includes(query) ||
+    (row.target.summary?.toLowerCase().includes(query) ?? false) ||
     row.target.workspace.toLowerCase().includes(query) ||
     (row.group?.members.some((member) => member.target.label.toLowerCase().includes(query)) ?? false)
   const matchesWorkspace = (row: TargetRow): boolean =>

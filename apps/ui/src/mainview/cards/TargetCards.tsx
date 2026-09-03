@@ -1,7 +1,7 @@
 import { Badge, Button, Input, KpiStat, Skeleton, StatusPill } from "@smthrs/ui"
-import type { TargetDetail, TargetRunState, TargetsViewMode } from "smithers-shared/Cards"
-import { TARGET_RUN_STATES, TARGETS_VIEW_MODES } from "smithers-shared/Cards"
-import type { RunRecord } from "smithers-shared/TargetGraph"
+import type { TargetDetail, TargetRunState, TargetsViewMode } from "@smthrs/rpc/Cards"
+import { TARGET_RUN_STATES, TARGETS_VIEW_MODES } from "@smthrs/rpc/Cards"
+import type { RunRecord } from "@smthrs/rpc/TargetGraph"
 import { Fragment } from "react"
 import type { KeyboardEvent, ReactNode } from "react"
 import { timeLabel } from "../Timestamps"
@@ -12,6 +12,7 @@ import {
   groupRows,
   groupSummary,
   kindsOf,
+  patternRuns,
   pickedMembers,
   targetRows,
   viewMode,
@@ -282,13 +283,14 @@ export const TargetsCardBody = ({
   readonly card: Extract<Card, { kind: "targets" }>
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const { repoId, repoName, status, targets, warnings, highlighted, view, runs, featured, starred, patternRuns } = card.payload
+  const { repoId, repoName, status, targets, warnings, highlighted, view, runs, starred } = card.payload
   /* Copy rule (apps/DESIGN.md §9): the root workspace is the repository, never the "." path token. */
   const workspaceLabel = (workspace: string): string => (workspace === "." ? repoName : workspace)
-  const facts = { featured, starred }
+  const facts = { starred }
   const flat = targetRows(targets, runs, facts)
   const rows = groupRows(flat, facts)
-  const mode = viewMode(view, facts, patternRuns ?? [])
+  const mode = viewMode(view, rows)
+  const strip = patternRuns(targets)
   const shown = filterRows(rows, view, mode)
   const kinds = kindsOf(targets)
   const workspaces = workspacesOf(targets)
@@ -401,11 +403,11 @@ export const TargetsCardBody = ({
           History
         </Button>
       </div>
-      {/* The manifest's featured pattern runs (`ci //packages/...`): what "run everything" really is. */}
-      {mode === "featured" && (patternRuns?.length ?? 0) > 0 ?
+      {/* The pattern runs the targets imply (`ci //...`): what "run everything" really is. */}
+      {mode === "featured" && strip.length > 0 ?
         (
           <ul className="targets-pattern-runs" data-testid="targets-pattern-runs" aria-label="Featured runs">
-            {patternRuns!.map((entry) => (
+            {strip.map((entry) => (
               <li key={entry.id} className="targets-pattern-run" data-pattern-run={entry.id}>
                 <span className="targets-pattern-run-text">
                   <strong>{entry.title}</strong>
@@ -498,7 +500,7 @@ export const TargetsCardBody = ({
                   <tr>
                     <td colSpan={7} className="targets-table-empty">
                       {mode === "featured"
-                        ? "Nothing featured yet: star a target, or mark essentials in smithers-ui.json."
+                        ? "Nothing featured yet: star a target, or declare `featured: true` on one in PACKAGE.ts."
                         : mode === "recent"
                         ? "Nothing has run yet."
                         : "No targets match this filter."}
@@ -559,6 +561,9 @@ export const TargetsCardBody = ({
                                 {row.featured ? <Badge variant="outline" data-badge="featured">Featured</Badge> : null}
                               </span>
                               <span className="targets-card-type">{target.target}</span>
+                              {target.summary !== undefined
+                                ? <span className="targets-card-summary" data-testid={`targets-summary-${target.label}`}>{target.summary}</span>
+                                : null}
                             </button>
                           )
                           : (
@@ -723,6 +728,13 @@ export const TargetsCardBody = ({
                               {member.featured ? <Badge variant="outline" data-badge="featured">Featured</Badge> : null}
                             </span>
                             <span className="targets-card-type">{member.target.target}</span>
+                            {member.target.summary !== undefined
+                              ? (
+                                <span className="targets-card-summary" data-testid={`targets-summary-${member.target.label}`}>
+                                  {member.target.summary}
+                                </span>
+                              )
+                              : null}
                           </button>
                         </td>
                         {workspaces.length > 1

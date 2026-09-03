@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "smithers-shared/LocalSession"
+import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "@smthrs/rpc/LocalSession"
 import { createAppFetch, localSocketProtocols, readLocalSessionToken } from "./LocalSession"
 
 const TOKEN = "A".repeat(42) + "_"

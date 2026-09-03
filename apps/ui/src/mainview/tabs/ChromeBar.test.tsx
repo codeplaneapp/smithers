@@ -1,13 +1,22 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import type { StorageApi } from "@tanstack/db"
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import App from "../App"
 import { ControllerTestProvider } from "../ControllerContext"
+import { DOWNLOAD_URL } from "@smthrs/rpc/AppLinks"
+
+/** A native release as the door tests see it; the product's constant is null until one carries an asset. */
+const RELEASE_URL = "https://example.test/download"
+import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
+import type { Repo } from "@smthrs/rpc/LocalApp"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "../state/AppController"
-import type { AppController as AppControllerType } from "../state/AppController"
+import type { AppController as AppControllerType, AppServices } from "../state/AppController"
+import { repoKeyOf } from "../state/AppState"
 import { createAppStore } from "../state/AppStore"
 import type { AppStore } from "../state/AppStore"
 
@@ -64,9 +73,10 @@ const unavailableAgent: NativeAgent = {
   subscribe: () => () => {}
 }
 
-const localHarness = async (): Promise<{ store: AppStore; controller: AppControllerType }> => {
+const localHarness = async (services: AppServices = {}): Promise<{ store: AppStore; controller: AppControllerType }> => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const controller = createAppController(store, unavailableRepositories, unavailableAgent, {
+    ...services,
     bootstrap: {
       apiVersion: 1,
       host: "local",
@@ -77,6 +87,25 @@ const localHarness = async (): Promise<{ store: AppStore; controller: AppControl
       sandbox: { platform: "darwin", mode: "enforced" }
     },
     // A terminal tab attaches the PTY client; nothing listens here, so no socket is opened.
+    socketUrl: () => undefined
+  })
+  return { store, controller }
+}
+
+/** The Worker's shell (docs/web-mode/PLAN.md §1): host `cloud`, capabilities from the table the server calls. */
+const cloudHarness = async (services: AppServices = {}): Promise<{ store: AppStore; controller: AppControllerType }> => {
+  const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  const controller = createAppController(store, unavailableRepositories, unavailableAgent, {
+    ...services,
+    bootstrap: {
+      apiVersion: 1,
+      host: "cloud",
+      version: "test",
+      buildSha: "cloud",
+      capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: false }),
+      authFlow: "redirect",
+      sandbox: null
+    },
     socketUrl: () => undefined
   })
   return { store, controller }
@@ -159,9 +188,13 @@ describe("the + menu", () => {
       "agent.role",
       "agent.role",
       "tab.harness",
-      "tab.harness"
+      "tab.harness",
+      // Agents as data (custom-agents.md): the last row opens the New agent form card.
+      "agent.new"
     ])
     expect(items[0]?.textContent).toBe("Terminal")
+    expect(items.at(-1)?.getAttribute("data-testid")).toBe("tab-add-new-agent")
+    expect(items.at(-1)?.textContent).toBe("New agent…")
     expect(host.querySelector("[data-testid=tab-add-agents]")?.textContent).toBe("Agents")
     // Six role rows sit between Terminal and the first raw harness.
     expect(items[1]?.textContent).toContain("Orchestrator · Fable 5")
@@ -174,9 +207,15 @@ describe("the + menu", () => {
     // One Smithers: the menu offers no second conversation, and no tab.chat flow exists to open one.
     expect(host.querySelector("[data-testid=tab-add-chat]")).toBeNull()
     expect(controller.commands.find("tab.chat")).toBeUndefined()
+    // The three-door law: every flow this menu binds is the agent's too (the launches confirm).
+    const callable = new Set(controller.commands.callable().map((entry) => entry.binding.descriptor.name))
+    for (const name of ["tab.terminal", "agent.role", "tab.harness", "agent.new"]) expect(callable.has(name)).toBe(true)
+    expect(controller.commands.find("tab.terminal")?.metadata.confirm).toBeUndefined()
+    expect(controller.commands.find("agent.role")?.metadata.confirm).toBeDefined()
+    expect(controller.commands.find("tab.harness")?.metadata.confirm).toBeDefined()
   })
 
-  test("the sidebar is vertical: Smithers first, the tabs below it, the chrome at the bottom of every tab", async () => {
+  test("the sidebar is vertical: the workspace heading first, the sessions below it, the chrome at the bottom of every session", async () => {
     const { store, controller } = await localHarness()
     await persisted(store, {
       type: "tab.opened",
@@ -187,10 +226,15 @@ describe("the + menu", () => {
     const bar = host.querySelector<HTMLElement>(".chrome-bar")
     expect(bar?.tagName).toBe("ASIDE")
     expect(host.querySelector("[data-testid=tab-strip]")?.getAttribute("aria-orientation")).toBe("vertical")
+    // No "Smithers" row: the heading is the workspace, and the sessions are the only rows of their kind.
+    expect(host.querySelector("[data-testid=tab-main]")).toBeNull()
+    const heading = host.querySelector<HTMLElement>("[data-testid=workspace-heading]")
+    expect(heading?.parentElement?.getAttribute("data-testid")).toBe("tab-strip")
+    expect(heading?.previousElementSibling).toBeNull()
+    expect(host.querySelector("[data-testid=workspace-name]")?.textContent).toBe("Workspace")
     const tabs = [...host.querySelectorAll<HTMLElement>(".tab")]
-    expect(tabs.map((tab) => tab.getAttribute("data-kind"))).toEqual(["main", "terminal"])
-    expect(tabs[0]?.querySelector(".tab-close")).toBeNull()
-    expect(tabs[1]?.querySelector("[data-testid=tab-close-t1]")).not.toBeNull()
+    expect(tabs.map((tab) => tab.getAttribute("data-kind"))).toEqual(["terminal"])
+    expect(tabs[0]?.querySelector("[data-testid=tab-close-t1]")).not.toBeNull()
     // The `+` follows the list, inside the sidebar, outside the scrolling strip.
     const add = host.querySelector<HTMLElement>("[data-testid=tab-add]")
     expect(add?.closest(".chrome-bar")).toBe(bar)
@@ -294,9 +338,9 @@ describe("the sidebar's Repos section", () => {
     expect(empty?.getAttribute("data-flow")).toBe("repo.open")
     expect(empty?.textContent).toBe("Select a repo")
     expect(host.querySelector("[data-testid=repo-none]")).toBeNull()
-    // Smithers is still the first tab, above the section.
+    // The workspace heading is the first row, above the section.
     const strip = host.querySelector<HTMLElement>("[data-testid=tab-strip]")
-    expect(strip?.firstElementChild?.getAttribute("data-testid")).toBe("tab-main")
+    expect(strip?.firstElementChild?.getAttribute("data-testid")).toBe("workspace-heading")
   })
 
   test("opening a repository pins it as the active row; tabs nest under their repository", async () => {
@@ -449,5 +493,332 @@ describe("the sidebar's piper tree", () => {
     expect(copy).not.toBeNull()
     expect(copy?.textContent).toContain("smithers · 3 ahead")
     expect(copy?.closest("[data-testid=repo-smithersai\\/smithers]")).not.toBeNull()
+  })
+})
+
+/*
+ * The sidebar as a file tree (docs/workbench-lanes/sidebar-tree.md): a local
+ * copy's caret expands its ROOT through the same route the files flows use,
+ * one directory per fetch; the tree renders exactly what the route answered
+ * (a `.git` entry like any other, the capped listing's truncated line, an
+ * error verbatim, "empty" for nothing); a file click renders the existing
+ * file card in the chat through files.read (THE EMBED LAW).
+ */
+describe("the sidebar's file tree", () => {
+  const SMITHERS: Repo = {
+    id: "repo-smithers",
+    path: "/Users/will/smithers",
+    name: "smithersai/smithers",
+    git: { branch: "main", remote: "git@github.com:smithersai/smithers.git" },
+    warnings: [],
+    smithers: { detected: true, workspaceFile: "WORKSPACE.ts", declarationFiles: [], reason: "1 workspace detected", workspaces: [{ path: ".", title: "smithers" }] }
+  }
+  const COPY = repoKeyOf(SMITHERS.path)
+  const json = (status: number, body: unknown): Response =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+
+  const treeHarness = async () => {
+    const requests: Array<{ readonly repoId?: string; readonly path?: string }> = []
+    const answers: Record<string, () => Response> = {
+      "": () =>
+        json(200, {
+          kind: "dir",
+          path: "",
+          entries: [{ name: ".git", kind: "dir" }, { name: "boom", kind: "dir" }, { name: "packages", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "zeta.txt", kind: "file" }]
+        }),
+      ".git": () => json(200, { kind: "dir", path: ".git", entries: [{ name: "HEAD", kind: "file" }], truncated: true }),
+      "boom": () => json(500, { error: { code: "read_failed", message: "Could not list boom." } }),
+      "packages": () => json(200, { kind: "dir", path: "packages", entries: [{ name: "ui", kind: "dir" }, { name: "PACKAGE.ts", kind: "file" }] }),
+      "packages/smithers/ui": () => json(200, { kind: "dir", path: "packages/smithers/ui", entries: [] }),
+      "README.md": () => json(200, { kind: "file", path: "README.md", size: 14, content: "# Local — hi\n", truncated: false, binary: false })
+    }
+    const services: AppServices = {
+      fetchImpl: async (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const path = new URL(url, "http://local.test").pathname
+        if (path !== "/api/repo/files") return json(404, { status: "error", message: `no stub for ${url}` })
+        const body = JSON.parse(String(init?.body ?? "{}")) as { repoId?: string; path?: string }
+        requests.push(body)
+        const answer = answers[body.path ?? ""]
+        return answer === undefined ? json(404, { error: { code: "path_not_found", message: `Path not found: ${body.path}` } }) : answer()
+      }
+    }
+    const { store, controller } = await localHarness(services)
+    await persisted(store, { type: "repos.loaded", actor: "system", repos: [SMITHERS] })
+    return { store, controller, requests }
+  }
+
+  /** Click, then let the seam's fetch and its dispatch land before reading the DOM. */
+  const settle = async (act: (change: () => void) => Promise<void>, change: () => void): Promise<void> => {
+    await act(change)
+    for (let tick = 0; tick < 4; tick += 1) await act(() => {})
+  }
+
+  const names = (root: Element | null, selector: string): Array<string | null | undefined> =>
+    [...(root?.querySelectorAll<HTMLElement>(selector) ?? [])].map((el) => el.textContent)
+
+  test("the caret expands the copy's root and every deeper directory loads on its own expand; a file click renders the file card in the chat", async () => {
+    const { store, controller, requests } = await treeHarness()
+    const { host, act } = mount(controller)
+    const toggle = host.querySelector<HTMLButtonElement>(`[data-testid="repo-tree-toggle-${COPY}"]`)
+    expect(toggle?.getAttribute("data-flow")).toBe("repo.tree")
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector(`[data-testid="repo-tree-${COPY}"]`)).toBeNull()
+
+    await settle(act, () => toggle?.click())
+    expect(requests).toEqual([{ repoId: "repo-smithers", path: "" }])
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true")
+    const tree = host.querySelector<HTMLElement>(`[data-testid="repo-tree-${COPY}"]`)
+    expect(tree).not.toBeNull()
+    // Exactly the route's entries, dirs first, `.git` included: nothing filtered, nothing invented.
+    expect(names(tree, ".sui-file-tree-dir-name")).toEqual([".git", "boom", "packages"])
+    expect(names(tree, "[data-slot=file-tree-file]")).toEqual(["README.md", "zeta.txt"])
+    // Every row names its flow: directories are repo.tree, files are files.read.
+    for (const dir of tree?.querySelectorAll("[data-slot=file-tree-dir-toggle]") ?? []) expect(dir.getAttribute("data-flow")).toBe("repo.tree")
+    for (const file of tree?.querySelectorAll("[data-slot=file-tree-file]") ?? []) expect(file.getAttribute("data-flow")).toBe("files.read")
+    expect([...host.querySelectorAll(".chrome-bar button")].every((button) => button.getAttribute("data-flow") !== null)).toBe(true)
+
+    // A nested directory is one more fetch, rendered under its row; an empty one says so.
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${COPY}#packages"]`)?.click())
+    expect(requests[1]).toEqual({ repoId: "repo-smithers", path: "packages" })
+    expect(names(tree, ".sui-file-tree-dir-name")).toEqual([".git", "boom", "packages", "ui"])
+    expect(names(tree, "[data-slot=file-tree-file]")).toEqual(["PACKAGE.ts", "README.md", "zeta.txt"])
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${COPY}#packages/smithers/ui"]`)?.click())
+    expect(host.querySelector(`[data-testid="repo-tree-state-${COPY}#packages/smithers/ui"]`)?.textContent).toBe("empty")
+
+    // The capped listing shows the existing truncated line; a failure shows the route's message verbatim, in place.
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${COPY}#.git"]`)?.click())
+    expect(tree?.querySelector("[data-slot=file-tree-footer]")?.textContent).toBe("Truncated — the directory holds more entries than the listing shows.")
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${COPY}#boom"]`)?.click())
+    const failed = host.querySelector<HTMLElement>(`[data-testid="repo-tree-state-${COPY}#boom"]`)
+    expect(failed?.textContent).toBe("Could not list boom.")
+    expect(failed?.dataset.state).toBe("failed")
+
+    // A file click is files.read <path> <repo>: the existing file card lands in the chat; the sidebar does not change.
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-file-${COPY}#README.md"]`)?.click())
+    expect(requests.at(-1)).toEqual({ repoId: "repo-smithers", path: "README.md" })
+    const card = store.collections.cards.get("file-smithersai/smithers-README.md")
+    expect(card?.kind).toBe("file")
+    expect(host.querySelector("[data-testid=transcript] .smithers-card[data-kind=file]")).not.toBeNull()
+    expect(store.session().activeTabId).toBe("main")
+
+    // Collapsing the root hides the tree and keeps every loaded row for the next expand (no fetch).
+    const before = requests.length
+    await settle(act, () => toggle?.click())
+    expect(host.querySelector(`[data-testid="repo-tree-${COPY}"]`)).toBeNull()
+    await settle(act, () => toggle?.click())
+    expect(requests.length).toBe(before)
+    expect(names(host.querySelector(`[data-testid="repo-tree-${COPY}"]`), ".sui-file-tree-dir-name")).toEqual([".git", "boom", "packages", "ui"])
+  })
+
+  test("sessions nest under the copy after its files, labelled apart once the tree is open", async () => {
+    const { store, controller } = await treeHarness()
+    await persisted(store, {
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "t1", kind: "terminal", title: "Terminal · smithers", sessionId: "t1", cwd: SMITHERS.path, repoKey: COPY }
+    })
+    const { host, act } = mount(controller)
+    const group = [...host.querySelectorAll<HTMLElement>(".repo-group")].find((el) => el.dataset.testid === `repo-${COPY}`) ?? null
+    expect(group).not.toBeNull()
+    expect(group?.querySelector(".repo-sessions-label")).toBeNull()
+    await settle(act, () => group?.querySelector<HTMLButtonElement>(`[data-flow="repo.tree"]`)?.click())
+    const order = [...(group?.querySelectorAll<HTMLElement>(".repo-tree, .repo-sessions-label, .repo-tabs") ?? [])].map((el) => el.className)
+    expect(order).toEqual(["repo-tree", "repo-sessions-label", "repo-tabs"])
+    expect(group?.querySelector(".repo-sessions-label")?.textContent).toBe("sessions")
+    expect(group?.querySelector(".repo-tabs [data-testid=tab-t1]")).not.toBeNull()
+  })
+})
+
+/*
+ * The workspace heading (docs/workbench-lanes/sidebar-tree.md): its name is
+ * the way back to the chat, the pencil renames it inline (Enter commits
+ * through workspace.rename, Escape closes the editor), and it reads
+ * "Workspace" until the user names it.
+ */
+describe("the workspace heading", () => {
+  test("clicking the name selects the chat; the pencil opens an inline rename that Enter commits and Escape cancels", async () => {
+    const { store, controller } = await localHarness()
+    await persisted(store, {
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "t1", kind: "terminal", title: "Terminal · ~", sessionId: "t1", cwd: "~" }
+    })
+    const { host, act } = mount(controller)
+    expect(store.session().activeTabId).toBe("t1")
+    const heading = host.querySelector<HTMLElement>("[data-testid=workspace-heading]")
+    expect(heading?.dataset.active).toBe("false")
+    const name = host.querySelector<HTMLButtonElement>("[data-testid=workspace-name]")
+    expect(name?.textContent).toBe("Workspace")
+    expect(name?.getAttribute("data-flow")).toBe("tab.select")
+    expect(name?.getAttribute("role")).toBe("tab")
+    await act(() => name?.click())
+    expect(store.session().activeTabId).toBe("main")
+    expect(heading?.dataset.active).toBe("true")
+    expect(host.querySelector<HTMLElement>("[data-testid=tab-body-main]")?.hidden).toBe(false)
+
+    const pencil = host.querySelector<HTMLButtonElement>("[data-testid=workspace-rename]")
+    expect(pencil?.getAttribute("data-flow")).toBe("workspace.rename.edit")
+    await act(() => pencil?.click())
+    const input = host.querySelector<HTMLInputElement>("[data-testid=workspace-name-input]")
+    expect(input).not.toBeNull()
+    expect(host.querySelector("[data-testid=workspace-name]")).toBeNull()
+    await act(() => {
+      if (input === null) return
+      input.value = "Force"
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    })
+    expect(store.session().workspaceName).toBe("Force")
+    expect(host.querySelector("[data-testid=workspace-name-input]")).toBeNull()
+    expect(host.querySelector("[data-testid=workspace-name]")?.textContent).toBe("Force")
+
+    // Escape closes the editor and keeps the name.
+    await act(() => host.querySelector<HTMLButtonElement>("[data-testid=workspace-rename]")?.click())
+    const again = host.querySelector<HTMLInputElement>("[data-testid=workspace-name-input]")
+    expect(again?.value).toBe("Force")
+    await act(() => {
+      if (again === null) return
+      again.value = "Plue"
+      again.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
+    })
+    expect(host.querySelector("[data-testid=workspace-name-input]")).toBeNull()
+    expect(store.session().workspaceName).toBe("Force")
+    expect(host.querySelector("[data-testid=workspace-name]")?.textContent).toBe("Force")
+
+    // A blank name is a refusal, not a rename: the editor stays, the name stays.
+    await act(() => host.querySelector<HTMLButtonElement>("[data-testid=workspace-rename]")?.click())
+    const blank = host.querySelector<HTMLInputElement>("[data-testid=workspace-name-input]")
+    await act(() => {
+      if (blank === null) return
+      blank.value = "   "
+      blank.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))
+    })
+    expect(store.session().workspaceName).toBe("Force")
+    expect(host.querySelector("[data-testid=workspace-name-input]")).not.toBeNull()
+  })
+
+  test("nothing the sidebar, its menus, or its close confirm shows calls a session a tab", async () => {
+    const { store, controller } = await localHarness()
+    await persisted(store, {
+      type: "harnesses.loaded",
+      actor: "system",
+      harnesses: [{
+        id: "claude",
+        displayName: "Claude Code",
+        binary: "/opt/homebrew/bin/claude",
+        version: "2.1.0",
+        status: "signed-in",
+        account: { email: "will@codeplane.app" },
+        launch: { argv: ["claude"] }
+      }]
+    })
+    await persisted(store, {
+      type: "repos.loaded",
+      actor: "system",
+      repos: [{
+        id: "r1",
+        path: "/Users/will/force",
+        name: "force",
+        git: { branch: "main", remote: null },
+        smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] },
+        warnings: []
+      }]
+    })
+    await persisted(store, {
+      type: "tab.opened",
+      actor: "user",
+      tab: { id: "t1", kind: "terminal", title: "Terminal · force", sessionId: "t1", cwd: "/Users/will/force", repoKey: "local:/Users/will/force" }
+    })
+    await persisted(store, { type: "tab.close.asked", actor: "user", id: "t1" })
+    const { host, act } = mount(controller)
+    await act(() => host.querySelector<HTMLButtonElement>("[data-testid=tab-add]")?.click())
+    expect(host.querySelector("[data-testid=tab-add-menu]")).not.toBeNull()
+    const visible: Array<string> = []
+    const bar = host.querySelector<HTMLElement>(".chrome-bar")
+    visible.push(bar?.textContent ?? "")
+    for (const el of bar?.querySelectorAll<HTMLElement>("[aria-label], [title], [placeholder]") ?? []) {
+      for (const attribute of ["aria-label", "title", "placeholder"]) {
+        const value = el.getAttribute(attribute)
+        if (value !== null) visible.push(value)
+      }
+    }
+    expect(visible.filter((text) => /\btabs?\b/i.test(text))).toEqual([])
+    // The words that replaced it.
+    expect(host.querySelector("[data-testid=tab-add]")?.textContent).toBe("New session")
+    expect(host.querySelector("[data-testid=repo-add-local\\:\\/Users\\/will\\/force]")?.getAttribute("aria-label")).toBe("New session in force")
+    expect(host.querySelector("[data-testid=tab-close-t1]")?.getAttribute("title")).toBe("Close session")
+    /*
+     * The close confirm is a Radix dialog, which never portals under this
+     * file's in-file happy-dom registration (Radix captures `document` at
+     * module load; see bunfig preload notes in packages/smithers/ui). Its copy is
+     * pinned at the source: every string the ConfirmDialog is given.
+     */
+    const bodies = readFileSync(fileURLToPath(new URL("./TabBodies.tsx", import.meta.url)), "utf8")
+    const confirm = bodies.slice(bodies.indexOf("<ConfirmDialog"), bodies.indexOf("/>", bodies.indexOf("<ConfirmDialog")))
+    // Flow ids (`tab.close.confirm`) are not copy: the brief keeps them; only prose is checked.
+    const literals = [...confirm.matchAll(/(["'`])((?:(?!\1)[^\n])*)\1/g)]
+      .map((match) => match[2] ?? "")
+      .filter((text) => !/^[a-z][a-z.-]*$/.test(text))
+    expect(literals.length).toBeGreaterThan(3)
+    expect(literals.filter((text) => /\btabs?\b/i.test(text))).toEqual([])
+    expect(confirm).toContain('confirmLabel="Close session"')
+    expect(confirm).toContain('"this session"')
+  })
+})
+
+/*
+ * The download button (docs/web-mode/PLAN.md §3): the web app's one door to
+ * the native app lives in the chrome that belongs to no session, rendered
+ * exactly when the registry holds `app.download` — the cloud host — so native
+ * chrome gains nothing. The click IS the flow: `window.open` needs the user's
+ * gesture, which is why the button and not the model opens the page.
+ */
+describe("the chrome-actions footer's download button", () => {
+  test("host cloud renders it bound to app.download, and the click opens the download page in a new tab", async () => {
+    const { controller } = await cloudHarness({ downloadUrl: RELEASE_URL })
+    const { host, act } = mount(controller)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-download]")
+    expect(button).not.toBeNull()
+    expect(button?.dataset.flow).toBe("app.download")
+    expect(button?.textContent).toBe("Download the app")
+    expect(button?.querySelector("svg")).not.toBeNull()
+    expect(button?.closest("[data-testid=chrome-actions]")).not.toBeNull()
+    // Below the sign-in door, above the theme corner (the plan's footer order).
+    const order = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
+    expect(order.indexOf("app.download")).toBeGreaterThan(order.indexOf("auth.sign-in"))
+    expect(order.indexOf("app.download")).toBeLessThan(order.indexOf("appearance.dark-mode"))
+    const opened: Array<ReadonlyArray<unknown>> = []
+    const original = window.open
+    window.open = ((...args: ReadonlyArray<unknown>) => {
+      opened.push(args)
+      return null
+    }) as typeof window.open
+    try {
+      await act(() => button?.click())
+    } finally {
+      window.open = original
+    }
+    expect(opened).toEqual([[RELEASE_URL, "_blank", "noopener"]])
+  })
+
+  test("host cloud renders no download button while no native release carries an asset — the product default today", async () => {
+    // 2026-09-02: the latest GitHub Release (v0.35.0) has no assets and no apps-v* release exists.
+    expect(DOWNLOAD_URL).toBeNull()
+    const { controller } = await cloudHarness()
+    expect(controller.commands.find("app.download")).toBeDefined()
+    expect(controller.downloadUrl).toBeNull()
+    const { host } = mount(controller)
+    expect(host.querySelector("[data-testid=chrome-download]")).toBeNull()
+    expect(host.querySelector('[data-flow="app.download"]')).toBeNull()
+    // The sign-in door is untouched by the missing download.
+    expect(host.querySelector("[data-testid=chrome-sign-in]")).not.toBeNull()
+  })
+
+  test("host local renders no download button: the flow is not registered there", async () => {
+    const { controller } = await localHarness()
+    expect(controller.commands.find("app.download")).toBeUndefined()
+    const { host } = mount(controller)
+    expect(host.querySelector("[data-testid=chrome-download]")).toBeNull()
+    expect(host.querySelector('[data-flow="app.download"]')).toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import { WORKFLOW_PROVISION_PATH } from "smithers-shared/AgentApiRoutes"
+import { WORKFLOW_PROVISION_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
@@ -6,6 +6,8 @@ import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
 export interface WorkflowController {
   readonly createWorkflow: (description: string, repo?: string) => Promise<string | void | { readonly value: string }>
   readonly listWorkspaceWorkflows: () => Promise<string | void | { readonly value: string }>
+  /** The Flows pane: the surface switch, and the same listing that fills it. */
+  readonly showFlows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
   readonly chooseWorkflowRepo: (fullName: string) => Promise<string | void | { readonly value: string }>
   readonly forwardApprovalDecision: (
@@ -378,6 +380,25 @@ export const createWorkflowController = (
     }
   }
 
+  /*
+   * Ask 5 (will, 2026-09-02): "where it says connect chat and world an option
+   * should also be flows which should allow us to look at flows". The pane is
+   * the flow.list card's rows, so opening it IS running that list — one seam,
+   * one honest refusal when a repository is not loaded or the session is not
+   * signed in, and the same toggle-back the World and Connect surfaces have.
+   *
+   * User-only on purpose: the model already has flow.list, whose answer is an
+   * embedded card. THE EMBED LAW makes the pane the human's act alone.
+   */
+  const showFlows = async (): Promise<string | void | { readonly value: string }> => {
+    if (store.session().surface === "flows") {
+      store.dispatch({ type: "surface.changed", actor: "user", surface: "chat" })
+      return
+    }
+    store.dispatch({ type: "surface.changed", actor: "user", surface: "flows" })
+    return listWorkspaceWorkflows()
+  }
+
   const runWorkflow = async (name: string, repoArg?: string): Promise<string | void | { readonly value: string }> => {
     const guard = workflowIdentityGuard()
     if (guard !== undefined) return guard
@@ -515,6 +536,7 @@ export const createWorkflowController = (
   return {
     createWorkflow,
     listWorkspaceWorkflows,
+    showFlows,
     runWorkflow,
     chooseWorkflowRepo,
     forwardApprovalDecision,

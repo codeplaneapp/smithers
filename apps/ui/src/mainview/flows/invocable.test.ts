@@ -8,7 +8,8 @@
  */
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AppBootstrap } from "smithers-shared/AppBootstrap"
+import { RuntimeCapabilitySchema } from "@smthrs/rpc/AppBootstrap"
+import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
@@ -48,24 +49,17 @@ const freshController = async (bootstrap?: AppBootstrap) => {
   }
 }
 
-/** Every host capability at once, so the invariant covers every registerable flow. */
+/**
+ * Every host capability at once, so the invariant covers every registerable
+ * flow — read from the schema, so a capability added there (cloud.pat,
+ * cloud.terminal) cannot silently drop a flow out of this gate.
+ */
 const EVERYTHING: AppBootstrap = {
   apiVersion: 1,
   host: "local",
   version: "test",
   buildSha: "test",
-  capabilities: [
-    "agent",
-    "identity",
-    "jjhub",
-    "billing.checkout",
-    "keys.byok",
-    "local.repositories",
-    "local.repository-path-entry",
-    "local.targets",
-    "local.terminal",
-    "local.harnesses"
-  ],
+  capabilities: [...RuntimeCapabilitySchema.options],
   authFlow: "both",
   sandbox: { platform: "darwin", mode: "enforced" }
 }

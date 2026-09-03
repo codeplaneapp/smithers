@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test"
 import {
   harnessPolicy,
   loaderPolicy,
+  lspPolicy,
   privateAliases,
   probePolicy,
   renderProfile,
   SANDBOX_EXEC,
   sandboxEnforced,
+  sandboxPolicies,
   terminalPolicy,
   wrapSandbox
 } from "./Sandbox"
@@ -55,6 +57,24 @@ describe("sandbox policies are data", () => {
     expect(profile).toContain("(allow file-write* (subpath \"/private/tmp\"))")
     expect(profile).not.toContain("subpath \"/Users")
     expect(profile).not.toContain("subpath \"/work")
+  })
+
+  test("a language server denies the network and writes only scratch: never the repo, never $HOME", () => {
+    const policy = lspPolicy(paths)
+    expect(policy.id).toBe("lsp")
+    expect(policy.network).toBe("deny")
+    expect(policy.writableDirs).toEqual(["/var/folders/xx/T", "/private/var/folders/xx/T", "/private/tmp"])
+    expect(policy.writableFiles).toEqual([])
+    expect(policy.writablePrefixes).toEqual([])
+    expect(sandboxPolicies.lsp).toBe(lspPolicy)
+  })
+
+  test("the lsp profile is the probe's confinement under its own id", () => {
+    const profile = renderProfile(lspPolicy(paths))
+    expect(profile).toBe(renderProfile(probePolicy(paths)).replace("; smithers local app: probe", "; smithers local app: lsp"))
+    expect(profile).toContain("(deny network*)")
+    expect(profile).not.toContain("subpath \"/work")
+    expect(profile).not.toContain("subpath \"/Users")
   })
 
   test("a harness keeps the network and writes the repo, its config dirs and scratch", () => {

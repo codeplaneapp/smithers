@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import forceGraph from "../../../shared/fixtures/force/graph.json"
-import forcePlan from "../../../shared/fixtures/force/plan-typeCheck.json"
+import forceGraph from "../../../../packages/rpc/fixtures/force/graph.json"
+import forcePlan from "../../../../packages/rpc/fixtures/force/plan-typeCheck.json"
 import { foldPlan, loaderFailureText, parseTextGraph } from "./TargetGraph"
 
 describe("loaderFailureText", () => {
   test("a JSON failure envelope on stdout leads, even with an empty stderr", () => {
-    // `smithers-build graph //... --format json` on this checkout: exit 1, nothing on stderr.
-    const stdout = JSON.stringify({ code: "graph_failed", message: "declared input is not a regular file: vendor/jj" })
-    expect(loaderFailureText(stdout, "")).toBe("graph_failed: declared input is not a regular file: vendor/jj")
+    // `smithers-build graph //... --format json` on a broken checkout: exit 1, nothing on stderr.
+    const stdout = JSON.stringify({ code: "graph_failed", message: "declared input is not a regular file: packages/smithers/flows/jj/wasm" })
+    expect(loaderFailureText(stdout, "")).toBe("graph_failed: declared input is not a regular file: packages/smithers/flows/jj/wasm")
   })
   test("stderr follows the envelope, stands alone without one, and a silent exit says so", () => {
     expect(loaderFailureText(JSON.stringify({ message: "boom" }), "  trace\n")).toBe("boom\ntrace")
@@ -26,29 +26,29 @@ describe("parseTextGraph", () => {
   })
 
   test("parses a scoped `graph <label>` tree: depth by glyph column, rule from the parens, [seen] repeats folded", () => {
-    /* Verbatim from `smithers-build graph //packages/engine:check --format json` on this checkout. */
+    /* Verbatim from `smithers-build graph //packages/smithers/flows/engine:check --format json` on this checkout. */
     const tree = [
-      "//packages/engine:check (Typecheck)",
-      "├─ //packages/engine:lib (TsBuild)",
-      "│  └─ //packages/flow:lib (TsBuild)",
-      "│     └─ //packages/plan:lib (TsBuild)",
-      "└─ //packages/flow:lib (TsBuild) [seen]"
+      "//packages/smithers/flows/engine:check (Typecheck)",
+      "├─ //packages/smithers/flows/engine:lib (TsBuild)",
+      "│  └─ //packages/smithers/flows/flow:lib (TsBuild)",
+      "│     └─ //packages/smithers/flows/plan:lib (TsBuild)",
+      "└─ //packages/smithers/flows/flow:lib (TsBuild) [seen]"
     ].join("\n")
     const parsed = parseTextGraph(tree)
     expect(parsed.nodes.map((node) => node.label).sort()).toEqual([
-      "//packages/engine:check",
-      "//packages/engine:lib",
-      "//packages/flow:lib",
-      "//packages/plan:lib"
+      "//packages/smithers/flows/engine:check",
+      "//packages/smithers/flows/engine:lib",
+      "//packages/smithers/flows/flow:lib",
+      "//packages/smithers/flows/plan:lib"
     ])
     expect(parsed.edges).toEqual([
-      { from: "//packages/engine:check", to: "//packages/engine:lib", kind: "deps" },
-      { from: "//packages/engine:lib", to: "//packages/flow:lib", kind: "deps" },
-      { from: "//packages/flow:lib", to: "//packages/plan:lib", kind: "deps" },
-      { from: "//packages/engine:check", to: "//packages/flow:lib", kind: "deps" }
+      { from: "//packages/smithers/flows/engine:check", to: "//packages/smithers/flows/engine:lib", kind: "deps" },
+      { from: "//packages/smithers/flows/engine:lib", to: "//packages/smithers/flows/flow:lib", kind: "deps" },
+      { from: "//packages/smithers/flows/flow:lib", to: "//packages/smithers/flows/plan:lib", kind: "deps" },
+      { from: "//packages/smithers/flows/engine:check", to: "//packages/smithers/flows/flow:lib", kind: "deps" }
     ])
-    expect(parsed.nodes.find((node) => node.label === "//packages/engine:check")?.rule).toBe("Typecheck")
-    expect(parsed.nodes.find((node) => node.label === "//packages/plan:lib")?.rule).toBe("TsBuild")
+    expect(parsed.nodes.find((node) => node.label === "//packages/smithers/flows/engine:check")?.rule).toBe("Typecheck")
+    expect(parsed.nodes.find((node) => node.label === "//packages/smithers/flows/plan:lib")?.rule).toBe("TsBuild")
   })
 
   test("keeps private dependencies and the plain deps kind", () => {

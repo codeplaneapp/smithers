@@ -1,14 +1,13 @@
-import type { TargetRunState, TargetsView, TargetsViewMode } from "smithers-shared/Cards"
-import { TARGET_RUN_STATES, TARGETS_VIEW_MODES } from "smithers-shared/Cards"
-import type { Repo, TargetRunFrame } from "smithers-shared/LocalApp"
-import { RepoSchema, TargetRunResponseSchema, TargetsQueryResponseSchema } from "smithers-shared/LocalApp"
+import type { TargetRunState, TargetsView, TargetsViewMode } from "@smthrs/rpc/Cards"
+import { TARGET_RUN_STATES, TARGETS_VIEW_MODES } from "@smthrs/rpc/Cards"
+import type { Repo, TargetRunFrame } from "@smthrs/rpc/LocalApp"
+import { RepoSchema, TargetRunResponseSchema, TargetsQueryResponseSchema } from "@smthrs/rpc/LocalApp"
 import {
   reachable,
   RunHistoryResponseSchema,
   TARGET_GRAPH_ROUTES,
   TargetGraphResponseSchema
-} from "smithers-shared/TargetGraph"
-import { featuredLabels, featuredPatternRuns } from "smithers-shared/LocalApp"
+} from "@smthrs/rpc/TargetGraph"
 import { groupLabel, groupRows, isGroupLabel, pickedMembers, targetRows, toggled } from "../../cards/TargetsTable"
 import type { Card } from "../AppState"
 import { resolveOpenRepo } from "../RepoContext"
@@ -81,7 +80,6 @@ export interface TargetsControllerDependencies {
 }
 
 export const targetsCardId = (repoId: string): string => `targets-${repoId}`
-export const repoPluginCardId = (repoId: string): string => `repo-plugin-${repoId}`
 export const targetRunCardId = (runId: string): string => `target-run-${runId}`
 
 /** The transcript can hold the whole run; past this the card keeps the tail. */
@@ -121,22 +119,8 @@ export const createTargetsController = (
   }
 
   const loadTargets = async (repo: Repo): Promise<void> => {
-    /* A valid repository plugin leads as trusted data, ahead of the target snapshot. */
-    if (repo.plugin !== undefined) {
-      upsert({
-        id: repoPluginCardId(repo.id),
-        kind: "repo-plugin",
-        title: repo.plugin.title,
-        status: "acted",
-        createdAt: Date.now(),
-        ordinal: nextOrdinal(),
-        payload: { repoId: repo.id, manifest: repo.plugin }
-      })
-    }
     const id = targetsCardId(repo.id)
-    /* The Featured view's two sources: the manifest's featured labels and this user's stars for the path. */
-    const featured = repo.plugin === undefined ? [] : [...featuredLabels(repo.plugin)]
-    const patternRuns = repo.plugin === undefined ? [] : [...featuredPatternRuns(repo.plugin)]
+    /* The Featured view's second source beside the declarations' own `featured`: this user's stars for the path. */
     const starred = starsFor(repo.path)
     upsert({
       id,
@@ -145,7 +129,7 @@ export const createTargetsController = (
       status: "active",
       createdAt: Date.now(),
       ordinal: nextOrdinal(),
-      payload: { repoId: repo.id, repoName: repo.name, status: "pending", targets: [], warnings: [], featured, starred, patternRuns }
+      payload: { repoId: repo.id, repoName: repo.name, status: "pending", targets: [], warnings: [], starred }
     })
     let response: Response
     try {

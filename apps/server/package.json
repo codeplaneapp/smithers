@@ -26,7 +26,7 @@
     "canary:rollback": "bun scripts/canary/rollback-probe.ts"
   },
   "dependencies": {
-    "smithers-shared": "workspace:*"
+    "@smthrs/rpc": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

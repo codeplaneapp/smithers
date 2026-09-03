@@ -1,13 +1,13 @@
 import { Cause, Effect, Fiber, FiberSet, Scope } from "effect"
-import { composeAgentInstructions } from "smithers-shared/AgentContext"
-import { CardPatchSchema, CardSchema } from "smithers-shared/Cards"
-import { AgentTurnDoneReasonSchema } from "smithers-shared/NativeAgent"
+import { composeAgentInstructions } from "@smthrs/rpc/AgentContext"
+import { CardPatchSchema, CardSchema } from "@smthrs/rpc/Cards"
+import { AgentTurnDoneReasonSchema } from "@smthrs/rpc/NativeAgent"
 import type {
   AgentTurnFrame,
   FetchLike,
   StartAgentTurnRequest,
   StartAgentTurnResult
-} from "smithers-shared/NativeAgent"
+} from "@smthrs/rpc/NativeAgent"
 import { z } from "zod"
 
 const DEFAULT_CHAT_URL = "https://chat.smithers.sh/chat"
