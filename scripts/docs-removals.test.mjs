@@ -21,9 +21,28 @@ const documentedMessages = () => {
   return blocks
 }
 
-/** Every sentence the guide publishes inside a code fence, however the block is introduced. */
-const publishedSentences = () =>
-  new Set([...guide.matchAll(/^```\n([\s\S]*?)\n```$/gm)].flatMap((match) => match[1].split("\n")))
+/**
+ * Every sentence the guide publishes inside a code fence, however the block
+ * is introduced.
+ *
+ * Fences are walked in order and a line that opens one is any line that
+ * starts with three backticks, tagged (` ```sh `) or bare. A regular
+ * expression that only recognised bare openings paired the bare CLOSING fence
+ * of a tagged block with the next bare opening, so every block after an odd
+ * number of tagged ones was read inside out and its sentences went missing.
+ */
+const publishedSentences = () => {
+  const sentences = new Set()
+  let inside = false
+  for (const line of guide.split("\n")) {
+    if (line.startsWith("```")) {
+      inside = !inside
+      continue
+    }
+    if (inside) sentences.add(line)
+  }
+  return sentences
+}
 
 /** The `### <name>` headings a `#<name>` link in a refusal resolves to. */
 const guideAnchors = () => new Set([...guide.matchAll(/^###\s+(\S+)\s*$/gm)].map((match) => match[1]))
