@@ -4,7 +4,7 @@ on:
     branches: [main]
   pull_request:
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 jobs:
   test:

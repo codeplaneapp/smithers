@@ -39,6 +39,16 @@ const node = CiToolchain.Node({ runtime, release: "22.19.0" })
 const bareNode = CiToolchain.Node({ runtime, release: "22.19.0", cachePackageStore: false })
 const rust = CiToolchain.Rust({ toolchain: RustToolchain.Pinned({}) })
 
+describe("CI concurrency", () => {
+  it("cancels superseded PR runs while retaining a verdict for each pushed commit", () => {
+    const workflow = render(goldenAttrs)
+    expect(workflow).toContain(
+      "concurrency:\n  group: ci-${{ github.event.pull_request.number || github.sha }}\n  cancel-in-progress: true\n"
+    )
+    expect(render({ ...goldenAttrs, cancelInProgress: false })).toContain("cancel-in-progress: false")
+  })
+})
+
 describe("CiToolchain.Needs", () => {
   it("defaults to no runtime setup and preserves an explicit ripgrep pin", () => {
     expect(CiToolchain.Needs()).toMatchObject({ install: true, runtimes: [], submodules: false })
@@ -101,7 +111,7 @@ on:
   pull_request:
   workflow_dispatch:
 concurrency:
-  group: ci-\${{ github.ref }}
+  group: ci-\${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 jobs:
   test:

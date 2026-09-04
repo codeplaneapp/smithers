@@ -246,3 +246,7 @@ with a different argv.
 See [`packages/smithers/build/API-REVIEW.md`](../API-REVIEW.md) for the review
 order and current API questions, and [`docs/`](./docs) for the package's own
 reference material.
+
+Generated CI concurrency groups use the pull request number, or the commit SHA
+for other events. Superseded PR runs cancel by default; each pushed commit keeps
+its own run and verdict. Set `cancelInProgress: false` to disable cancellation.
