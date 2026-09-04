@@ -12,6 +12,14 @@ In this tutorial you'll build a small release flow, finish a run, fork it at a j
 
 Fork copies a run's history up to one frame so the copy can diverge from its parent, rewind trims the run's own history back to a frame, and compensation is the per-effect undo a rewind performs on what the trimmed suffix did. [Time travel](/docs/concepts/time-travel/) explains all three. In 1.0 the service is a library API: no CLI verb reaches it, so this tutorial drives it from a TypeScript program. The full operation and error tables live in the [time-travel API reference](/docs/reference/api/time-travel/).
 
+
+**Fork replay limitation:** copied attempt rows retain their parent digests.
+Actions whose keys include the run ID execute again in the child, including
+compensable and irreversible actions. An explicitly shared cache environment
+can reuse eligible sealed results, but copied attempts alone do not make the
+prefix replayable. Make repeated external effects idempotent before driving a
+fork.
+
 ## Before you begin
 
 - Node.js {versions.node} or later.
@@ -241,7 +249,7 @@ const main = Effect.gen(function*() {
     forkAtPublish.pipe(Effect.provide(shipLayer.pipe(Layer.provideMerge(timeTravelLayer("ship-fork")))))
   )
 
-  // A fresh engine drives the fork. The copied tag attempt replays, so the
+  // A fresh engine drives the fork. The shared sealed cache replays the tag, so the
   // sealed implementation never runs in this process. The publish step is
   // past the frame, so it dispatches under the implementation attached above.
   const forkResult = yield* Effect.scoped(

@@ -22,6 +22,14 @@ const program = Effect.gen(function*() {
 
 A frame is `{ lineageId, seq }`: a sequence number on one lineage of the journal. Forks create descendant lineages, so the lineage id is part of the address, and `seq: 17` names the committed prefix through entry 17 of it.
 
+
+**Fork replay limitation:** copied attempt rows retain their parent digests.
+Actions whose keys include the run ID execute again in the child, including
+compensable and irreversible actions. An explicitly shared cache environment
+can reuse eligible sealed results, but copied attempts alone do not make the
+prefix replayable. Make repeated external effects idempotent before driving a
+fork.
+
 ## Replay reads and never executes
 
 `replay` folds the committed journal prefix up to the frame through a pure projection you supply, and `inspect` is the same fold under the service defaults. The fold has no dispatcher, so a replay can never re-execute a model call or a child flow. That absence is what separates replay from an engine resume. Replay is always safe: it writes nothing, it streams, and it stops reading at the frame.

@@ -46,7 +46,7 @@ const jj = Jj.make({
   status: () => Effect.succeed("")
 })
 
-const requirements = (filename: string) => {
+const requirements = (filename: string, sharedCache: boolean) => {
   const database = Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))
   const migratedDatabase = Layer.provideMerge(Migrations.layer, database)
   const sqlServices = Layer.provideMerge(
@@ -66,16 +66,17 @@ const requirements = (filename: string) => {
     StepBoundary.layerTest(),
     OwnerIdentity.layer,
     Layer.succeed(Jj.Jj, jj),
-    // A fork replays attempt rows copied from its parent, and those rows are
-    // addressed by sealed cache key. An undeclared environment pins that key
-    // to one execution, so the fork would re-dispatch instead of replaying;
-    // declaring the environment is what lets identity cross the fork boundary.
-    Action.layerCacheEnvironment({ layers: [], capabilities: {} })
+    // Copied attempt digests still name the parent. Only an explicitly
+    // shared sealed cache identity avoids re-executing the prefix here.
+    sharedCache ? Action.layerCacheEnvironment({ layers: [], capabilities: {} }) : Layer.empty
   ).pipe(Layer.provideMerge(NodeCrypto.layer))
 }
 
 describe("SQL fork execution", () => {
-  it.effect("drives a fork after restart using copied state and attempts", () =>
+  it.effect.each([
+    { sharedCache: false, behavior: "run-scoped prefix re-execution" },
+    { sharedCache: true, behavior: "shared cache reuse" }
+  ])("drives a fork after restart with $behavior", ({ sharedCache }) =>
     Effect.gen(function*() {
       const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "flows-fork-execution-")))
       const filename = join(directory, "fork.sqlite")
@@ -138,7 +139,7 @@ describe("SQL fork execution", () => {
               ORDER BY run_id
             `
               return { fork, parentResult, states, attempts }
-            }).pipe(Effect.provide(requirements(filename)))
+            }).pipe(Effect.provide(requirements(filename, sharedCache)))
           )
         )
 
@@ -178,13 +179,13 @@ describe("SQL fork execution", () => {
               )
               const row = yield* (yield* RunStore.RunStore).get(created.fork.runId)
               return { value, row }
-            }).pipe(Effect.provide(requirements(filename)))
+            }).pipe(Effect.provide(requirements(filename, sharedCache)))
           )
         )
 
         expect(restarted.value).toBe("action-result")
         expect(restarted.row.status).toBe("completed")
-        expect(dispatches).toBe(1)
+        expect(dispatches).toBe(sharedCache ? 1 : 2)
       } finally {
         yield* Effect.promise(() => rm(directory, { recursive: true, force: true }))
       }

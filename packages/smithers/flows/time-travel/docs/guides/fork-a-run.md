@@ -10,6 +10,13 @@ parent untouched. Use it to explore an alternative from a point that already
 happened: retry a step under different inputs, branch a review, or drive a
 finished run forward again without losing the original.
 
+**Fork replay limitation:** copied attempt rows retain their parent digests.
+Actions whose keys include the run ID execute again in the child, including
+compensable and irreversible actions. An explicitly shared cache environment
+can reuse eligible sealed results, but copied attempts alone do not make the
+prefix replayable. Make repeated external effects idempotent before driving a
+fork.
+
 ## Fork the run
 
 ```ts
@@ -102,7 +109,8 @@ that drives the child.
 ## Drive the child
 
 The child is an ordinary run. Execute the same flow with the forked run id as
-its execution id, and the copied attempts replay:
+its execution id. Run-scoped prefix actions execute again; eligible sealed
+results can be reused under the shared cache environment described above:
 
 ```ts
 const driven = Effect.gen(function*() {

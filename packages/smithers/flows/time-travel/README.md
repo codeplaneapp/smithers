@@ -11,6 +11,13 @@ decisions.
 pnpm add @smthrs/time-travel
 ```
 
+**Fork replay limitation:** copied attempt rows retain their parent digests.
+Actions whose keys include the run ID execute again in the child, including
+compensable and irreversible actions. An explicitly shared cache environment
+can reuse eligible sealed results, but copied attempts alone do not make the
+prefix replayable. Make repeated external effects idempotent before driving a
+fork.
+
 ## Public API
 
 Time travel is ONE injectable service. `TimeTravel` is exported flat, because
