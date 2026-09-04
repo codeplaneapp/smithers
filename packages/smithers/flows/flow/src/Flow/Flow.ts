@@ -191,8 +191,9 @@ export interface Flow<
    *
    * Identity comes from the first source that has one: the `executionId`
    * option, the flow's declared `idempotencyKey`, then the ambient
-   * `CurrentExecutionIds` source, whose default derives an id from the flow
-   * tag and the payload's canonical form.
+   * `CurrentExecutionIds` source. Its default dies with
+   * `ExecutionIdRequired`; install `layerExecutionIds(derived)` explicitly to
+   * derive identity from the flow tag and encoded payload.
    *
    * A payload that fails the flow's own schema is a typed
    * `Schema.SchemaError` failure carrying the offending field path — caller
@@ -271,8 +272,9 @@ export interface Flow<
    *
    * That is the flow's `idempotencyKey` when it declares one, and the ambient
    * `CurrentExecutionIds` source otherwise. It dies with `ExecutionIdRequired`
-   * when the source cannot name the invocation — the default source cannot
-   * when the payload has no canonical form.
+   * when the source cannot name the invocation. The default source always
+   * raises it; the opt-in `derived` source raises it when the payload has no
+   * canonical form.
    *
    * A payload this flow's own schema refuses also dies as a defect here. This
    * differs from `execute`, which fails with a typed `Schema.SchemaError` for

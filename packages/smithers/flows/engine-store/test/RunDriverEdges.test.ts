@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import { Flow, FlowRuntime } from "@smthrs/flow"
 import { Journal } from "@smthrs/journal"
 import { Node } from "@smthrs/plan"
@@ -396,8 +397,43 @@ describe("RunDriver execute preconditions", () => {
       })))
 
       expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
-      expect(((Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined) as Error).message)
-        .toContain("already belongs to a different flow tag or encoded payload")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+      expect(defect).toMatchObject({
+        code: "execution_identity_conflict",
+        executionId: "shared-id",
+        field: "flow",
+        expected: OtherFlow._tag,
+        actual: EdgeFlow._tag
+      })
+    }))
+
+  it.effect("tags an encoded-payload conflict", () =>
+    Effect.gen(function*() {
+      const exit = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        yield* store.create(
+          "payload-conflict",
+          stateJson(ObjectPayloadFlow._tag, { data: { value: "first" } })
+        )
+        const driver = yield* makeDriver()
+        yield* driver.register(ObjectPayloadFlow, () => Effect.succeed("done"))
+        return yield* Effect.exit(driver.execute(ObjectPayloadFlow, {
+          executionId: "payload-conflict",
+          payload: { data: { value: "second" } },
+          discard: true
+        }))
+      })))
+
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+      expect(defect).toMatchObject({
+        code: "execution_identity_conflict",
+        executionId: "payload-conflict",
+        field: "payload",
+        expected: "the encoded payload the execution was admitted with",
+        actual: "a different encoded payload"
+      })
     }))
 
   it.effect("dies when run creation fails for a reason other than the row already existing", () =>

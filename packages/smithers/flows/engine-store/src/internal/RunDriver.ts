@@ -1310,20 +1310,50 @@ export const make = (
         }
         const existing = yield* store.get(options.executionId).pipe(Effect.orDie)
         const persisted = yield* decodeState(existing.stateJson)
-        const sameRound = existing.lineageId === options.lineageId &&
-          existing.roundOrdinal === options.roundOrdinal
         const sameParent = options.parentRunId === undefined ||
           existing.parentRunId === options.parentRunId
-        if (
-          persisted.flowName !== options.flowName ||
-          !samePayload(persisted.payload, options.payload) ||
-          !sameRound ||
-          !sameParent
-        ) {
+        const conflict = persisted.flowName !== options.flowName
+          ? {
+            field: "flow" as const,
+            expected: persisted.flowName,
+            actual: options.flowName
+          }
+          : !samePayload(persisted.payload, options.payload)
+          ? {
+            field: "payload" as const,
+            expected: "the encoded payload the execution was admitted with",
+            actual: "a different encoded payload"
+          }
+          : existing.lineageId !== options.lineageId
+          ? {
+            field: "lineage" as const,
+            expected: existing.lineageId ?? "no lineage",
+            actual: options.lineageId
+          }
+          : existing.roundOrdinal !== options.roundOrdinal
+          ? {
+            field: "round" as const,
+            expected: String(existing.roundOrdinal),
+            actual: String(options.roundOrdinal)
+          }
+          : !sameParent
+          ? {
+            field: "parent" as const,
+            expected: existing.parentRunId ?? "no parent",
+            // `!sameParent` implies the requested parent is present: an
+            // omitted parent is deliberately compatible with any persisted
+            // parent when joining an already-created root.
+            actual: options.parentRunId!
+          }
+          : undefined
+        if (conflict !== undefined) {
           return yield* Effect.die(
-            new Error(
-              `execution ${options.executionId} already belongs to a different flow tag or encoded payload, lineage, or round`
-            )
+            new FlowEngine.ExecutionIdentityConflict({
+              executionId: options.executionId,
+              ...conflict,
+              message: `execution ${options.executionId} already belongs to ${conflict.field} identity ` +
+                `${conflict.expected}; it cannot be reused for ${conflict.actual}`
+            })
           )
         }
       })

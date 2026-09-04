@@ -774,18 +774,28 @@ describe("flow definition surface", () => {
     })
   })
 
-  effect("executionId falls back to the ambient source when the flow has no idempotency key", () => {
+  effect("executionId requires an ambient source when the flow has no idempotency key", () => {
     const flow = Flow.make("Memory/no-key", {
       payload: { id: Schema.String },
       success: Schema.Void,
       body: () => Node.succeed(undefined)
     })
     return Effect.gen(function*() {
-      // The default source derives from the tag and the payload, so a flow
-      // that declares no key still names its execution.
-      const first = yield* flow.executionId({ id: "x" })
-      const second = yield* flow.executionId({ id: "x" })
-      const other = yield* flow.executionId({ id: "y" })
+      const missing = yield* flow.executionId({ id: "x" }).pipe(Effect.exit)
+      expect(Exit.isFailure(missing)).toBe(true)
+      expect(Exit.isFailure(missing) && Cause.hasDies(missing.cause)).toBe(true)
+
+      // This host intentionally treats equal payloads as one execution, so it
+      // opts into the derived source rather than inheriting that policy.
+      const first = yield* flow.executionId({ id: "x" }).pipe(
+        Effect.provide(Flow.layerExecutionIds(Flow.derived))
+      )
+      const second = yield* flow.executionId({ id: "x" }).pipe(
+        Effect.provide(Flow.layerExecutionIds(Flow.derived))
+      )
+      const other = yield* flow.executionId({ id: "y" }).pipe(
+        Effect.provide(Flow.layerExecutionIds(Flow.derived))
+      )
       expect(first).toBe(second)
       expect(first).not.toBe(other)
       const hosted = yield* flow.executionId({ id: "x" }).pipe(

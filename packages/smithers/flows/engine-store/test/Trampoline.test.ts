@@ -20,6 +20,7 @@ import { Jj } from "@smthrs/kernel"
 import { Node } from "@smthrs/plan"
 import { AttemptStore, RunStore } from "@smthrs/run-store"
 import { CacheStore } from "@smthrs/step-cache"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
@@ -455,36 +456,99 @@ describe("a durable lineage", () => {
       expect(Exit.isFailure(observed.successor)).toBe(true)
     }))
 
-  it.effect("rejects a derived-id collision whose persisted round metadata is not identical", () =>
+  it.effect("tags every derived-id collision in persisted round metadata", () =>
     Effect.gen(function*() {
       const observed = yield* durable(Effect.gen(function*() {
         const store = yield* RunStore.RunStore
-        // The round-1 row a re-driven handoff would find already there: same
-        // derived id, same encoded state, but no chain columns, so the tolerated
-        // create is observable.
-        const payload = yield* Schema.encodeEffect(
+        const successorPayload = yield* Schema.encodeEffect(
           Schema.toCodecJson(Counter.payloadSchema)
         )({ value: 1, target: 2 })
+        const rootPayload = yield* Schema.encodeEffect(
+          Schema.toCodecJson(Counter.payloadSchema)
+        )({ value: 0, target: 2 })
+        const cases = [
+          {
+            name: "missing-lineage",
+            metadata: undefined,
+            field: "lineage",
+            expected: "no lineage",
+            actual: "missing-lineage"
+          },
+          {
+            name: "other-lineage",
+            metadata: { lineageId: "someone-else", roundOrdinal: 1, parentRunId: "other-lineage" },
+            field: "lineage",
+            expected: "someone-else",
+            actual: "other-lineage"
+          },
+          {
+            name: "other-round",
+            metadata: { lineageId: "other-round", roundOrdinal: 2, parentRunId: "other-round" },
+            field: "round",
+            expected: "2",
+            actual: "1"
+          },
+          {
+            name: "missing-parent",
+            metadata: { lineageId: "missing-parent", roundOrdinal: 1 },
+            field: "parent",
+            expected: "no parent",
+            actual: "missing-parent"
+          },
+          {
+            name: "other-parent",
+            metadata: { lineageId: "other-parent", roundOrdinal: 1, parentRunId: "someone-else" },
+            field: "parent",
+            expected: "someone-else",
+            actual: "other-parent"
+          }
+        ] as const
+
         yield* store.create(
-          roundId("tolerated-lineage", 1),
-          JSON.stringify({ version: 1, flowName: Counter._tag, payload })
+          "someone-else",
+          JSON.stringify({ version: 1, flowName: Counter._tag, payload: rootPayload })
         )
 
-        const { calls, wiring } = yield* incarnation("tolerated-host", [Counter])
-        const exit = yield* Counter.execute({ value: 0, target: 2 }, {
-          executionId: "tolerated-lineage"
-        }).pipe(Effect.exit, Effect.provide(wiring))
+        return yield* Effect.forEach(cases, (testCase) =>
+          Effect.gen(function*() {
+            const successor = roundId(testCase.name, 1)
+            yield* store.create(
+              testCase.name,
+              JSON.stringify({ version: 1, flowName: Counter._tag, payload: rootPayload }),
+              { lineageId: testCase.name, roundOrdinal: 0 }
+            )
+            yield* testCase.metadata === undefined
+              ? store.create(
+                successor,
+                JSON.stringify({ version: 1, flowName: Counter._tag, payload: successorPayload })
+              )
+              : store.create(
+                successor,
+                JSON.stringify({ version: 1, flowName: Counter._tag, payload: successorPayload }),
+                testCase.metadata
+              )
 
-        return { calls, exit, row: yield* store.get(roundId("tolerated-lineage", 1)) }
+            const { wiring } = yield* incarnation(`${testCase.name}-host`, [Counter])
+            const exit = yield* Counter.execute({ value: 0, target: 2 }, {
+              executionId: testCase.name
+            }).pipe(Effect.exit, Effect.provide(wiring))
+            const defect = Exit.isFailure(exit)
+              ? exit.cause.reasons.find(Cause.isDieReason)?.defect
+              : undefined
+            return { testCase, defect }
+          }))
       }))
 
-      expect(Exit.isFailure(observed.exit)).toBe(true)
-      expect(Exit.isFailure(observed.exit) && observed.exit.cause.toString()).toContain(
-        "different flow tag or encoded payload, lineage, or round"
-      )
-      expect(observed.calls).toEqual([0])
-      expect(observed.row.parentRunId).toBeNull()
-      expect(observed.row.status).toBe("pending")
+      for (const { defect, testCase } of observed) {
+        expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+        expect(defect).toMatchObject({
+          code: "execution_identity_conflict",
+          executionId: roundId(testCase.name, 1),
+          field: testCase.field,
+          expected: testCase.expected,
+          actual: testCase.actual
+        })
+      }
     }))
 
   it.effect("ends the lineage with the typed refusal when the round budget is spent", () =>

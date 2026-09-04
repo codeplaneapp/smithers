@@ -63,7 +63,7 @@ export class FlowNotRegistered extends Schema.TaggedError<FlowNotRegistered>()(
 ) {}
 
 /**
- * A caller reused an execution id for a different flow or payload identity.
+ * A caller reused an execution id for different persisted run identity.
  *
  * @category errors
  * @since 1.0.0
@@ -75,7 +75,7 @@ export class ExecutionIdentityConflict extends Schema.TaggedError<ExecutionIdent
       Schema.withConstructorDefault(Effect.succeed("execution_identity_conflict"))
     ),
     executionId: Schema.String,
-    field: Schema.Literals(["flow", "payload"]),
+    field: Schema.Literals(["flow", "payload", "lineage", "round", "parent"]),
     expected: Schema.String,
     actual: Schema.String,
     message: Schema.String

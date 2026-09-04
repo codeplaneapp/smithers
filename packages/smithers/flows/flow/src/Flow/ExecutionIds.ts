@@ -8,13 +8,11 @@
  * once, for every flow it drives, which is why it is a context reference and
  * not another option on `execute`.
  *
- * The default derives the id from the flow tag and the payload's canonical
- * form, so `yield* Flow.execute(payload)` runs without ceremony and re-running
- * the same invocation lands on the same execution. A host for which two equal
- * payloads are two unrelated pieces of work — a coding agent running one
- * request per user is the case `packages/smithers/flows/engine/VENDOR.md` names — installs its
- * own source with {@link layerExecutionIds} and scopes identity to whatever
- * makes runs related there.
+ * The default dies with {@link ExecutionIdRequired}; identity must be a
+ * deliberate caller, flow-author, or host decision. A host that wants equal
+ * payloads to mean the same work installs {@link derived} explicitly with
+ * {@link layerExecutionIds}. A host for which two equal payloads are unrelated
+ * installs its own source and scopes identity to what makes runs related.
  *
  * @since 0.1.0
  */
@@ -92,15 +90,20 @@ export const derived: ExecutionIdSource = {
 }
 
 /**
- * Context reference carrying the host's execution-id source, defaulting to
- * {@link derived}.
+ * Context reference carrying the host's execution-id source. Its default dies
+ * with {@link ExecutionIdRequired}, so payload-derived identity is always
+ * opt-in.
  *
  * @category idempotency
  * @since 0.1.0
  */
 export const CurrentExecutionIds = Context.Reference<ExecutionIdSource>(
   "@smthrs/flow/Flow/CurrentExecutionIds",
-  { defaultValue: () => derived }
+  {
+    defaultValue: () => ({
+      mint: (flow) => Effect.die(new ExecutionIdRequired({ flowName: flow._tag }))
+    })
+  }
 )
 
 /**
@@ -108,10 +111,10 @@ export const CurrentExecutionIds = Context.Reference<ExecutionIdSource>(
  *
  * **When to use**
  *
- * Use it when equal payloads of one flow are NOT one piece of work in this
- * host — a session, a request, or a workspace is what separates them — and
- * scope the minted id to that. Callers that name an `executionId` and flows
- * that declare an `idempotencyKey` are unaffected: both are decided before the
+ * Use {@link derived} when equal encoded payloads of one flow are one piece of
+ * work. Use a custom source when a session, request, or workspace is what
+ * relates invocations. Callers that name an `executionId` and flows that
+ * declare an `idempotencyKey` are unaffected: both are decided before the
  * source is consulted.
  *
  * @category idempotency
