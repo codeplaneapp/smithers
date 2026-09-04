@@ -82,7 +82,6 @@
   "dependencies": {
     "@smthrs/core": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
-    "@smthrs/kernel": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108",
     "yaml": "2.9.0"
@@ -95,6 +94,7 @@
     "@smthrs/engine-store": "1.0.0-rc.0",
     "@smthrs/flows": "1.0.0-rc.0",
     "@smthrs/journal": "1.0.0-rc.0",
+    "@smthrs/kernel": "1.0.0-rc.0",
     "@smthrs/run-store": "1.0.0-rc.0",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",

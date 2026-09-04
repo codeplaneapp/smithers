@@ -129,5 +129,19 @@ const referenceDocs = Smithers.Agent.Diff({
 // --- end reference docs pipeline ------------------------------------------
 
 export const Package = Smithers.Package({
-  targets: { bunTest, check, circular, docs, docsFiles, fmt, lib, lint, test, docsSources, referenceCodeBlocks, referenceDocs, referencePages }
+  targets: {
+    bunTest,
+    check,
+    circular,
+    docs,
+    docsFiles,
+    fmt,
+    lib,
+    lint,
+    test,
+    docsSources,
+    referenceCodeBlocks,
+    referenceDocs,
+    referencePages
+  }
 })

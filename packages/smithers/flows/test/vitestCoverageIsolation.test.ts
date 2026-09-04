@@ -587,7 +587,8 @@ describe("vitest coverage isolation conformance", () => {
       circular: "pnpm --recursive --if-present run circular",
       "deploy:dry": "pnpm --filter smithers-server run deploy:dry",
       "docs:build": "pnpm --filter \"@smithers/docs-*\" --filter \"!@smithers/docs-shared\" -r run build",
-      "docs:check": "node apps/docs/shared/gen-sites.mjs --check && node apps/docs/shared/sync-content.mjs --all --check",
+      "docs:check":
+        "node apps/docs/shared/gen-sites.mjs --check && node apps/docs/shared/sync-content.mjs --all --check",
       "docs:deploy": "pnpm --filter \"@smithers/docs-*\" --filter \"!@smithers/docs-shared\" -r run deploy",
       "docs:sync": "node apps/docs/shared/sync-content.mjs --all",
       dev: "pnpm --filter smithers-ui run start",
