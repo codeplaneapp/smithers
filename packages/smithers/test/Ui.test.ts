@@ -373,3 +373,24 @@ describe("confirm", () => {
     expect(term.text()).toBe("Apply? yes (non-interactive)\nDelete? no (non-interactive)\n")
   })
 })
+
+describe("required text", () => {
+  it("collects a nonblank value through clack", async () => {
+    const term = terminal()
+    press(term, "run-1", "\r")
+    expect(await Effect.runPromise(make(term, true).text("Enter run-id"))).toEqual(Option.some("run-1"))
+    expect(term.plain()).toContain("Enter run-id")
+  })
+
+  it("does not read a pipe", async () => {
+    const term = terminal()
+    expect(await Effect.runPromise(make(term, false).text("Enter run-id"))).toEqual(Option.none())
+    expect(term.text()).toBe("")
+  })
+
+  it("cancels without selecting a value", async () => {
+    const term = terminal()
+    press(term, "\u0003")
+    expect(await Effect.runPromise(make(term, true).text("Enter run-id"))).toEqual(Option.none())
+  })
+})

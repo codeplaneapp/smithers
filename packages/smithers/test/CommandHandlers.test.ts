@@ -12,9 +12,9 @@ import { Control as ControlService, ControlError, type ControlSchema } from "@sm
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type * as Namespace from "@smthrs/memory/Namespace"
-import { Cause, Effect, Exit, Layer, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Stream } from "effect"
 import { TestConsole } from "effect/testing"
-import { Command } from "effect/unstable/cli"
+import { CliError as ParserError, Command } from "effect/unstable/cli"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -25,6 +25,7 @@ import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
 import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
 import * as Project from "../src/Project.ts"
+import * as Ui from "../src/Ui.ts"
 import { packageVersion } from "../src/Version.ts"
 
 const runCommand = Command.runWith(cli, { version: packageVersion })
@@ -229,12 +230,74 @@ describe("input decoding", () => {
     )
   })
 
-  it("plans the empty flow id when the variadic argument list is empty", async () => {
+  it("names the missing flow id and the interactive fallback", async () => {
     const error = await run(Effect.flip(runCommand(["--json", "plan"])), testControl)
 
-    // `input[0] ?? ""` is the boundary: no argument is an empty flow id, and
-    // the control plane refuses it rather than the parser guessing.
-    expect(String(error)).toContain("Flow")
+    expect(error).toBeInstanceOf(ParserError.ShowHelp)
+    const issue = (error as ParserError.ShowHelp).errors[0] as ParserError.UserError
+    expect(issue.cause).toBeInstanceOf(CliError.UsageError)
+    expect(issue.userMessage).toContain("flow-id")
+    expect(issue.userMessage).toContain("--wizard")
+  })
+
+  it("collects both the run id and message for a bare steer command", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const launched = yield* launch()
+        const prompts: Array<string> = []
+        const ui: Ui.Service = {
+          ...Ui.make({ output: process.stderr, interactive: false }),
+          interactive: true,
+          text: (message) =>
+            Effect.sync(() => {
+              prompts.push(message)
+              return Option.some(message === "Enter run-id" ? launched.runId : "continue")
+            })
+        }
+        const receipt = yield* json(["--json", "steer"]).pipe(Effect.provideService(Ui.Ui, ui))
+        return { receipt, prompts }
+      }),
+      testControl
+    )
+    expect(observed.prompts.sort()).toEqual(["Enter --message", "Enter run-id"])
+    expect(observed.receipt).toMatchObject({ _tag: "Accepted" })
+  })
+
+  it("collects a missing run id before cancelling the selected run", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const launched = yield* launch()
+        const prompts: Array<string> = []
+        const ui: Ui.Service = {
+          ...Ui.make({ output: process.stderr, interactive: false }),
+          interactive: true,
+          text: (message) =>
+            Effect.sync(() => {
+              prompts.push(message)
+              return Option.some(launched.runId)
+            })
+        }
+        const receipt = yield* json(["--json", "cancel"]).pipe(Effect.provideService(Ui.Ui, ui))
+        return { receipt, prompts, runId: launched.runId }
+      }),
+      testControl
+    )
+    expect(observed.prompts).toEqual(["Enter run-id"])
+    expect(observed.receipt).toMatchObject({ runId: observed.runId })
+  })
+
+  it("opens the flow picker when a terminal omits the flow id", async () => {
+    const ui: Ui.Service = {
+      ...Ui.make({ output: process.stdout, interactive: false }),
+      interactive: true,
+      pickSuggestion: (items) => Effect.succeed(Option.fromNullishOr(items[0]))
+    }
+    const card = await run(
+      json(["--json", "plan"]).pipe(Effect.provideService(Ui.Ui, ui)),
+      testControl
+    )
+
+    expect(card).toMatchObject({ flowId: "demo/ship" })
   })
 })
 

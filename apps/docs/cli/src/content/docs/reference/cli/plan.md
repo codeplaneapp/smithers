@@ -9,7 +9,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/doc
 ## Synopsis
 
 ```text
-smthrs plan [FLOW_ID [KEY=VALUE ...]] [--data JSON]
+smthrs plan FLOW_ID [KEY=VALUE ...] [--data JSON]
 ```
 
 ## Description
@@ -29,13 +29,13 @@ so a launch would park with nothing to run.
 
 ## Arguments
 
-The parser registers one variadic argument, `key=value`. The handler reads
-element 0 as the flow id and every later element as an input entry:
+Omitting `FLOW_ID` with terminal stdin opens the flow picker. With piped stdin,
+the command exits 2 and names `flow-id` and `--wizard` for guided input.
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| `FLOW_ID` | `string` | No | The flow to plan, spelled as `smthrs ls` lists it. An omitted flow id reaches the control plane as the empty string, which no flow matches. |
-| `KEY=VALUE` | `string` | No | One input entry, repeatable. The text before the first `=` is the key and the text after it is the value. An element with no `=` at position 1 or later becomes that key with the boolean value `true`. |
+| `FLOW_ID` | `string` | Yes | The flow to plan, spelled as `smthrs ls` lists it. |
+| `KEY=VALUE` | `string` | No | One input entry, repeatable. The text before the first `=` is the key and the text after it is the value. An element with no `=` becomes that key with the boolean value `true`. |
 
 ## Flags
 

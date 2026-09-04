@@ -130,6 +130,8 @@ export interface ConfirmOptions {
  */
 export interface Service {
   readonly interactive: boolean
+  /** A required text value; cancellation or a non-interactive session returns None. */
+  readonly text: (message: string) => Effect.Effect<Option.Option<string>>
   readonly intro: (title?: string) => Effect.Effect<void>
   readonly outro: (message: string) => Effect.Effect<void>
   readonly note: (message: string, title?: string) => Effect.Effect<void>
@@ -338,6 +340,16 @@ export const make = (options: Options): Service => {
 
   return {
     interactive,
+    text: (message) =>
+      Effect.promise(async () => {
+        if (!interactive) return Option.none()
+        const value = await clack.text({
+          ...common,
+          message,
+          validate: (value) => value === undefined || value.trim() === "" ? "Enter a value" : undefined
+        })
+        return clack.isCancel(value) ? Option.none() : Option.some(value)
+      }),
     intro: (title = brand) => interactive ? styled((text) => clack.intro(text, common), title) : plain(title),
     outro: (message) => interactive ? styled((text) => clack.outro(text, common), message) : plain(message),
     note: (message, title = "") =>
@@ -439,4 +451,16 @@ export const current: Effect.Effect<Service> = Effect.gen(function*() {
     input: process.stdin,
     interactive: isInteractive(process.stdout, process.stdin, process.env)
   })
+})
+
+/**
+ * Required-input prompts use stderr so piping a document leaves stdin usable.
+ *
+ * @category accessors
+ * @since 1.0.0-rc.0
+ */
+export const prompting: Effect.Effect<Service> = Effect.gen(function*() {
+  const provided = yield* Effect.serviceOption(Ui)
+  if (Option.isSome(provided)) return provided.value
+  return make({ output: process.stderr, input: process.stdin, interactive: process.stdin.isTTY === true })
 })

@@ -430,12 +430,32 @@ describe("an invocation that never runs a command answers before the control pla
     })
   })
 
-  it("leaves the working directory empty for a missing required argument", () => {
+  it.each(
+    [
+      [["plan"], "flow-id"],
+      [["run"], "plan-payload"],
+      [["up"], "flow"],
+      [["resume"], "run-id"],
+      [["deny"], "approval"],
+      [["memory", "get"], "key"],
+      [["memory", "set", "key"], "value"],
+      [["claude", "node-wait", "run-1"], "node-id"],
+      [["bug"], "summary"],
+      [["approve"], "approval"],
+      [["cancel"], "run-id"],
+      [["signal", "run-1"], "signal-json"],
+      [["steer", "--message", "continue"], "run-id"],
+      [["output"], "run-id"]
+    ] as const
+  )("names a missing required argument for %j without opening the project", (args, argument) => {
     inEmptyDirectory((cwd) => {
-      const result = runIn(cwd, ["output"])
+      const result = runIn(cwd, args)
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(2)
+      expect(result.stdout).toBe("")
+      expect(result.stderr).toContain(argument)
+      expect(result.stderr).toContain("--wizard")
       expect(readdirSync(cwd)).toEqual([])
     })
   })

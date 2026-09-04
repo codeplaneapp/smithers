@@ -22,6 +22,8 @@ Flow ids that start with `system/` are reserved for the control plane and carry 
 smthrs plan system/replay: system/replay is a reserved system flow id and carries no body in 1.0.0-rc.0, so a launch would park with nothing to run. Name a flow from `smthrs ls`. See https://smithers.sh/migration/1.0#flows
 ```
 
+Omitting the flow with terminal stdin opens the discovered flow picker. With piped stdin, the command exits 2 and names the missing argument and `--wizard`.
+
 ## Arguments
 
 | Name | Type | Required | Description |

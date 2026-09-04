@@ -32,6 +32,15 @@ the handler the parse selects, not to the program: `Command.provide` builds
 `NodeControl.layer` inside the chosen handler, so a typo, an unknown flag, or a
 missing argument stays file-free.
 
+## Required input
+
+When stdin is a terminal, omitting a required positional argument opens a
+clack prompt. `plan` and `up` show the discovered flow picker; other verbs ask
+for the missing value. Prompts use stderr, so stdout remains the document.
+Cancelling a prompt exits 130 without submitting the command. With piped stdin,
+a missing argument exits 2, names the argument, and points to `--wizard` for
+guided input. Optional arguments keep their documented defaults.
+
 ## The shipped list
 
 `Verb.shipped` is the catalog. Every entry carries its `--help` line, its

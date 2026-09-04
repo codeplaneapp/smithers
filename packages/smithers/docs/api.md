@@ -137,16 +137,18 @@ Interactive terminal rendering, with a plain-line fallback.
 | `Spinner` | interface | `start`, `message`, `stop`, `cancel`, `error`. Imperative by nature; the Effect boundary sits around the whole span. |
 | `StreamOptions`, `Streamed` | interfaces | How a streamed list is labelled and settled, and what the scan produced. |
 | `PickOptions`, `ConfirmOptions` | interfaces | How a pick and a confirmation are presented. `ConfirmOptions.nonInteractive` is required, because the safe answer differs per question. |
-| `Service` | interface | `interactive`, `intro`, `outro`, `note`, `info`, `success`, `step`, `warn`, `error`, `checklist`, `spinner`, `streamSuggestions`, `pickSuggestion`, `confirm`. |
+| `Service` | interface | `interactive`, `text`, `intro`, `outro`, `note`, `info`, `success`, `step`, `warn`, `error`, `checklist`, `spinner`, `streamSuggestions`, `pickSuggestion`, `confirm`. |
 | `Ui` | `Context.Service` | The service key, `/cli/Ui`. |
 | `Options` | `{ output, input?, interactive }` | The streams and the interactivity decision one service is built on. |
 | `isInteractive` | `(output, input, environment) => boolean` | Both streams are terminals, `CI` is not `"true"`, and `TERM` is not `dumb`. |
 | `make` | `(options: Options) => Service` | Builds a service on explicit streams. |
 | `layer` | `(environment) => Layer<Ui>` | Builds one on the process streams. |
+| `prompting` | `Effect<Service>` | Uses a supplied service, or prompts on stderr whenever stdin is a terminal, keeping stdout available for documents. |
 | `current` | `Effect<Service>` | The provided service, or a fallback on the process streams. |
 | `renderChecklist` | `(title, checks, { interactive, columns? }) => string` | The pure checklist rendering `smthrs doctor` prints. Non-interactive output is byte-identical to `Doctor.render`. |
 
-A cancelled `pickSuggestion` is `None` and a cancelled `confirm` is `false`.
+A cancelled `text` or `pickSuggestion` is `None` and a cancelled `confirm` is `false`.
+`text` requires a nonblank value; in a non-interactive session it returns `None` without reading stdin.
 Neither sets exit 130, because a Ctrl+C inside a raw-mode prompt is a keypress,
 not a signal.
 

@@ -18,6 +18,8 @@ smthrs up <flow> [--data <json>] [-d]
 
 Flow ids that start with `system/` are reserved and refused with exit 1, exactly as `smthrs plan` refuses them. The 0.x flags are removed rather than ignored: `--serve`, `--interactive`, `--supervise`, `--herdr`, `--monitor`, `--report`, `--force`, `--steal-ownership`, `--resume-claim-owner`, `--resume-claim-heartbeat`, `--resume-restore-owner`, `--resume-restore-heartbeat`, and `--max-concurrency` each exit 1 with a migration link.
 
+Omitting the flow with terminal stdin opens the discovered flow picker. With piped stdin, the command exits 2 and names the missing argument and `--wizard`.
+
 ## Arguments
 
 | Name | Type | Required | Description |

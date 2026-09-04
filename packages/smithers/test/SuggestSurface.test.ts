@@ -100,6 +100,7 @@ const scripted = (pick: string): Scripted => {
   const hints: Array<string | undefined> = []
   const record = (prefix: string) => (message: string) => Effect.sync(() => void lines.push(`${prefix}${message}`))
   const service: Ui.Service = {
+    text: () => Effect.succeed(Option.none()),
     interactive: true,
     intro: (title = Ui.brand) => record("intro: ")(title),
     outro: record("outro: "),

@@ -9,7 +9,7 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
 import * as Redaction from "@smthrs/journal/Redaction"
-import { Cause, Effect, Exit, Logger, Runtime } from "effect"
+import { Cause, Console, Effect, Exit, Logger, Runtime } from "effect"
 import { CliError as EffectCliError, Command } from "effect/unstable/cli"
 import * as CliError from "./CliError.ts"
 import { cli } from "./Command.ts"
@@ -180,10 +180,42 @@ const main = Effect.gen(function*() {
   // itself the resolver — no second list of verbs to drift — and leaves every
   // usage error, help document, and refusal file-free. A real command builds
   // exactly the same layer it always did, one step later.
+  // Hold parser documents until we know whether input collection failed.
+  // A typed missing-argument sentence replaces the parser's help page on
+  // pipes. Once a handler starts, documents and streams pass through live.
+  const console = yield* Console.Console
+  let parsing = process.stdin.isTTY !== true
+  const pending: Array<() => void> = []
+  const flush = () => {
+    parsing = false
+    for (const write of pending.splice(0)) write()
+  }
+  const parsedConsole = Object.assign(Object.create(console) as Console.Console, {
+    log: (...args: ReadonlyArray<unknown>) => parsing ? pending.push(() => console.log(...args)) : console.log(...args),
+    error: (...args: ReadonlyArray<unknown>) =>
+      parsing ? pending.push(() => console.error(...args)) : console.error(...args)
+  })
   yield* Command.run(
-    Command.provide(cli, () => NodeControl.layer(applicationConfig)),
+    Command.provide(cli, () => {
+      flush()
+      return NodeControl.layer(applicationConfig)
+    }),
     { version: packageVersion }
-  ).pipe(Effect.provide(NodeServices.layer))
+  ).pipe(
+    Effect.provideService(Console.Console, parsedConsole),
+    Effect.catchTag("ShowHelp", (error): Effect.Effect<never, CliError.UsageError | EffectCliError.ShowHelp> => {
+      const missing = error.errors.find((issue) =>
+        issue._tag === "UserError" && issue.cause instanceof CliError.UsageError
+      )
+      if (missing?._tag === "UserError" && missing.cause instanceof CliError.UsageError) {
+        pending.length = 0
+        return Effect.fail(missing.cause)
+      }
+      return Effect.fail(error)
+    }),
+    Effect.ensuring(Effect.sync(flush)),
+    Effect.provide(NodeServices.layer)
+  )
 })
 
 /**

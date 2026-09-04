@@ -41,15 +41,9 @@ They are not ingested into smithers.sh. When one of these pages and the
 smithers.sh page for the same verb disagree, the smithers.sh page is the one to
 follow, because it is the one the binary generates.
 
-Two disagreements are known and recorded in
-`apps/site/prompts/CLI-DIFF.md`:
-
-- `smthrs plan`'s flow id is not required by the parser. `Command.ts`
-  registers one variadic `key=value` argument and reads element 0 as the flow
-  id, so an omitted id reaches the control plane as the empty string. The page
-  in this directory states that; `--help` never names the flow id at all.
-- `--remote` is a shared global flag, not a per-verb flag. The pages in this
-  directory list it once under "Global flags", which matches the parser.
+`plan` requires a flow id. Omitting it with terminal stdin opens the flow
+picker; with piped stdin it exits 2 and names `flow-id` and `--wizard`.
+`--remote` is a shared global flag, listed under "Global flags" on these pages.
 
 ## Other reference
 

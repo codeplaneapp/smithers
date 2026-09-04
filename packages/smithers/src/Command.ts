@@ -24,7 +24,7 @@ import * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
 import { Ownership } from "@smthrs/run-store"
 import { Clock, Console, Effect, Option, Schema, SchemaIssue, Stream } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, CliError as ParserError, Command, Flag, Prompt } from "effect/unstable/cli"
 import { randomUUID } from "node:crypto"
 import { hostname } from "node:os"
 import { resolve } from "node:path"
@@ -89,7 +89,49 @@ const rootCommand = Command.make("smthrs").pipe(Command.withSharedFlags(global))
 
 const input = Argument.string("key=value").pipe(Argument.variadic())
 const data = Flag.string("data").pipe(Flag.optional)
-const common = { input, data }
+/** Required values are collected before the command opens durable services. */
+const inputPrompt = (name: string, pickFlow = false) =>
+  Effect.gen(function*() {
+    const ui = yield* Ui.prompting
+    const missing = new CliError.UsageError({
+      message: `Missing required ${
+        name.startsWith("--") ? "flag" : "argument"
+      } <${name}>; use --wizard for guided input`
+    })
+    if (!ui.interactive) {
+      return yield* Effect.fail(new ParserError.UserError({ cause: missing, userMessage: missing.message }))
+    }
+    // Discovery needs the command's Control layer. An empty value reaches
+    // only the terminal handler, which replaces it with a catalog selection.
+    if (pickFlow) return Prompt.succeed("")
+    const value = yield* ui.text(`Enter ${name}`)
+    if (Option.isNone(value)) return yield* Effect.interrupt
+    return Prompt.succeed(value.value)
+  })
+
+const requiredArgument = (name: string, pickFlow = false) =>
+  Argument.string(name).pipe(Argument.withFallbackPrompt(inputPrompt(name, pickFlow)))
+
+const selectedFlow = (value: string) =>
+  Effect.gen(function*() {
+    if (value !== "") return value
+    const ui = yield* Ui.prompting
+    const control = yield* ControlService.Control
+    const catalog = yield* flowCatalog(control)
+    const flows = catalog.items.filter((item) => !Unsupported.isReservedFlow(item.flowId))
+    if (flows.length === 0) {
+      return yield* Effect.fail(
+        new CliError.UsageError({ message: "No flows discovered; run smthrs init to create one" })
+      )
+    }
+    const selected = yield* ui.pickSuggestion(flows, {
+      message: "Choose a flow",
+      label: (flow) => flow.flowId,
+      hint: (flow) => flow.description
+    })
+    if (Option.isNone(selected)) return yield* Effect.interrupt
+    return selected.value.flowId
+  })
 
 /**
  * Removed verbs that are registered by hand instead of by the loop below,
@@ -482,17 +524,21 @@ const noticeLegacyState = Effect.gen(function*() {
 
 // == the shipped-command contract verbs
 
-const plan = Command.make("plan", common, (config) =>
-  Effect.gen(function*() {
-    yield* guardGlobals
-    const decodedInput = yield* decodeInput(config.input.slice(1), config.data)
-    const flowId = config.input[0] ?? ""
-    if (Unsupported.isReservedFlow(flowId)) {
-      return yield* Effect.fail(Unsupported.reservedFlowError("plan", flowId))
-    }
-    const control = yield* ControlService.Control
-    yield* render(yield* control.plan({ flowId, input: decodedInput }))
-  })).pipe(Command.withDescription(Verb.find("plan")!.help))
+const plan = Command.make(
+  "plan",
+  { flowId: requiredArgument("flow-id", true), input, data },
+  (config) =>
+    Effect.gen(function*() {
+      yield* guardGlobals
+      const decodedInput = yield* decodeInput(config.input, config.data)
+      const flowId = yield* selectedFlow(config.flowId)
+      if (Unsupported.isReservedFlow(flowId)) {
+        return yield* Effect.fail(Unsupported.reservedFlowError("plan", flowId))
+      }
+      const control = yield* ControlService.Control
+      yield* render(yield* control.plan({ flowId, input: decodedInput }))
+    })
+).pipe(Command.withDescription(Verb.find("plan")!.help))
 
 const runResume = (planOrRunId: string) =>
   Effect.gen(function*() {
@@ -548,7 +594,7 @@ const runLaunch = (payload: ControlService.ApprovalInput) =>
   })
 
 const run = Command.make("run", {
-  plan: Argument.string("plan-payload"),
+  plan: requiredArgument("plan-payload"),
   resume: Flag.boolean("resume")
 }, (config) =>
   Effect.gen(function*() {
@@ -557,14 +603,14 @@ const run = Command.make("run", {
     yield* runLaunch(yield* approval(config.plan))
   })).pipe(Command.withDescription(Verb.find("run")!.help))
 
-const resume = Command.make("resume", { runId: Argument.string("run-id") }, (config) =>
+const resume = Command.make("resume", { runId: requiredArgument("run-id") }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
     yield* runResume(config.runId)
   })).pipe(Command.withDescription("Alias of `run --resume`"), Command.unlisted)
 
 const upFlags = {
-  flow: Argument.string("flow"),
+  flow: requiredArgument("flow", true),
   data,
   detached: Flag.boolean("detached").pipe(Flag.withAlias("d")),
   serve: removedFlag("up", "serve"),
@@ -609,12 +655,13 @@ const up = Command.make("up", upFlags, (config) =>
         })
       )
     }
-    if (Unsupported.isReservedFlow(config.flow)) {
-      return yield* Effect.fail(Unsupported.reservedFlowError("up", config.flow))
+    const flowId = yield* selectedFlow(config.flow)
+    if (Unsupported.isReservedFlow(flowId)) {
+      return yield* Effect.fail(Unsupported.reservedFlowError("up", flowId))
     }
     const decodedInput = yield* decodeInput([], config.data)
     const control = yield* ControlService.Control
-    const card = yield* control.plan({ flowId: config.flow, input: decodedInput })
+    const card = yield* control.plan({ flowId, input: decodedInput })
     // Scope `run`: the approval authorizes this launch and its whole run, not
     // every future launch of the flow.
     yield* control.approve({ ...card.approval, scope: "run" })
@@ -652,7 +699,7 @@ const up = Command.make("up", upFlags, (config) =>
   })).pipe(Command.withDescription(Verb.find("up")!.help))
 
 const approve = Command.make("approve", {
-  approval: Argument.string("approval"),
+  approval: requiredArgument("approval"),
   // The interactive CLI is an operator affirming the whole launch, matching
   // `up`. MCP defaults to `once` because an omitted tool argument must not
   // widen a client's capabilities for the rest of the run.
@@ -680,7 +727,7 @@ const approve = Command.make("approve", {
     yield* reportSettlement(settlement)
   })).pipe(Command.withDescription(Verb.find("approve")!.help))
 
-const deny = Command.make("deny", { approval: Argument.string("approval") }, (config) =>
+const deny = Command.make("deny", { approval: requiredArgument("approval") }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const payload = yield* approval(config.approval)
@@ -692,7 +739,7 @@ const deny = Command.make("deny", { approval: Argument.string("approval") }, (co
     yield* reportSettlement(settlement)
   })).pipe(Command.withDescription(Verb.find("deny")!.help))
 
-const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, (config) =>
+const cancel = Command.make("cancel", { runId: requiredArgument("run-id") }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
@@ -717,8 +764,8 @@ export const signalKey = (runId: string, payload: ControlSchema.SignalPayload): 
 }
 
 const signalCommand = Command.make("signal", {
-  runId: Argument.string("run-id"),
-  payload: Argument.string("signal-json")
+  runId: requiredArgument("run-id"),
+  payload: requiredArgument("signal-json")
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -734,8 +781,10 @@ const signalCommand = Command.make("signal", {
   })).pipe(Command.withDescription(Verb.find("signal")!.help))
 
 const steer = Command.make("steer", {
-  runId: Argument.string("run-id"),
-  message: Flag.string("message"),
+  runId: requiredArgument("run-id"),
+  message: Flag.string("message").pipe(
+    Flag.withFallbackPrompt(inputPrompt("--message"))
+  ),
   takeover: removedFlag("steer", "takeover")
 }, (config) =>
   Effect.gen(function*() {
@@ -1027,7 +1076,7 @@ const events = Command.make("events", {
 )
 
 const output = Command.make("output", {
-  runId: Argument.string("run-id"),
+  runId: requiredArgument("run-id"),
   nodeId: Argument.string("node-id").pipe(Argument.optional)
 }, (config) =>
   Effect.gen(function*() {
@@ -1308,7 +1357,7 @@ const memoryList = Command.make("list", { ...memoryFlags, prefix: Flag.string("p
 
 const memoryGet = Command.make(
   "get",
-  { ...memoryFlags, key: Argument.string("key") },
+  { ...memoryFlags, key: requiredArgument("key") },
   (config) =>
     Effect.gen(function*() {
       yield* guardGlobals
@@ -1324,8 +1373,8 @@ const memoryGet = Command.make(
 
 const memorySet = Command.make("set", {
   ...memoryFlags,
-  key: Argument.string("key"),
-  value: Argument.string("value")
+  key: requiredArgument("key"),
+  value: requiredArgument("value")
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1350,7 +1399,7 @@ const memorySet = Command.make("set", {
 
 const memoryRm = Command.make(
   "rm",
-  { ...memoryFlags, key: Argument.string("key") },
+  { ...memoryFlags, key: requiredArgument("key") },
   (config) =>
     Effect.gen(function*() {
       yield* guardGlobals
@@ -1372,7 +1421,7 @@ const sessionId = (raw: Option.Option<string>): string =>
   Option.getOrElse(raw, () => process.env["CLAUDE_CODE_SESSION_ID"] ?? "unknown")
 
 const claudeTick = Command.make("tick", {
-  runId: Argument.string("run-id"),
+  runId: requiredArgument("run-id"),
   session: claudeSession,
   afterSeq: Flag.integer("after-seq").pipe(Flag.withDefault(0))
 }, (config) =>
@@ -1395,8 +1444,8 @@ const claudeTick = Command.make("tick", {
   })).pipe(Command.withDescription("Print one mirror frame for a run"))
 
 const claudeNodeWait = Command.make("node-wait", {
-  runId: Argument.string("run-id"),
-  nodeId: Argument.string("node-id"),
+  runId: requiredArgument("run-id"),
+  nodeId: requiredArgument("node-id"),
   timeout: Flag.integer("timeout-ms").pipe(Flag.withDefault(30_000))
 }, (config) =>
   Effect.gen(function*() {
@@ -1482,7 +1531,7 @@ const claudeMonitor = Command.make("monitor", {
   })).pipe(Command.withDescription("Print notable run transitions as NDJSON"))
 
 const claudeSubscribe = Command.make("subscribe", {
-  runId: Argument.string("run-id"),
+  runId: requiredArgument("run-id"),
   session: claudeSession
 }, (config) =>
   Effect.gen(function*() {
@@ -1495,7 +1544,7 @@ const claudeSubscribe = Command.make("subscribe", {
   })).pipe(Command.withDescription("Follow a run in this session's mirror"))
 
 const claudeUnsubscribe = Command.make("unsubscribe", {
-  runId: Argument.string("run-id"),
+  runId: requiredArgument("run-id"),
   session: claudeSession
 }, (config) =>
   Effect.gen(function*() {
@@ -1560,12 +1609,13 @@ const update = Command.make("update", {}, () =>
   })).pipe(Command.withDescription(Verb.find("update")!.help))
 
 const bug = Command.make("bug", {
-  summary: Argument.string("summary").pipe(Argument.variadic()),
+  summary: requiredArgument("summary"),
+  rest: Argument.string("summary-word").pipe(Argument.variadic()),
   runId: Flag.string("run").pipe(Flag.optional)
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
-    const summary = config.summary.join(" ").trim()
+    const summary = [config.summary, ...config.rest].join(" ").trim()
     if (summary === "") {
       return yield* Effect.fail(new CliError.UsageError({ message: "smthrs bug needs a one-line summary" }))
     }
