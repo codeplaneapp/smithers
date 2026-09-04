@@ -23,7 +23,7 @@ import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcess
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
-import type { Jj } from "@smthrs/jj"
+import type { Jj, JjError } from "@smthrs/jj"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
@@ -101,7 +101,7 @@ const reaping = (options?: ContainedOptions): ProcessReaper.Options => ({
  * @category layers
  * @since 0.1.0
  */
-export const layer: Layer.Layer<NodeHost> = Layer.mergeAll(
+export const layer: Layer.Layer<NodeHost, JjError> = Layer.mergeAll(
   platform,
   Layer.provide(NodeChildProcessSpawner.layer, platform),
   NodeHttpClient.layerUndici,
@@ -114,7 +114,7 @@ export const layer: Layer.Layer<NodeHost> = Layer.mergeAll(
  * @category layers
  * @since 1.0.0
  */
-export const layerAt = (repositoryRoot: string): Layer.Layer<NodeHost> =>
+export const layerAt = (repositoryRoot: string): Layer.Layer<NodeHost, JjError> =>
   Layer.mergeAll(
     platform,
     Layer.provide(NodeChildProcessSpawner.layer, platform),
@@ -150,7 +150,7 @@ export const layerAt = (repositoryRoot: string): Layer.Layer<NodeHost> =>
  */
 export const layerContained = (
   options?: ContainedOptions
-): Layer.Layer<NodeHost, never, ProcessLedger.ProcessLedger> => {
+): Layer.Layer<NodeHost, JjError, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
     ContainedSpawner.layer(containment(options)),
     Layer.provide(NodeChildProcessSpawner.layer, platform)
@@ -177,7 +177,7 @@ export const layerContained = (
 export const layerContainedAt = (
   repositoryRoot: string,
   options?: ContainedOptions
-): Layer.Layer<NodeHost, never, ProcessLedger.ProcessLedger> => {
+): Layer.Layer<NodeHost, JjError, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
     ContainedSpawner.layer(containment(options)),
     Layer.provide(NodeChildProcessSpawner.layer, platform)

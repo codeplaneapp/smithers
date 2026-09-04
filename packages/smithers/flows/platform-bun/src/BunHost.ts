@@ -25,7 +25,7 @@
  */
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
-import type { Jj } from "@smthrs/jj"
+import type { Jj, JjError } from "@smthrs/jj"
 import * as BunJj from "@smthrs/jj/bun/BunJj"
 import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import type { HostServiceIds } from "@smthrs/kernel/HostServices"
@@ -213,7 +213,7 @@ const layerHttpClient: Layer.Layer<HttpClient> = Layer.provide(
  * @since 1.0.0-rc.0
  * @slop
  */
-export const layer: Layer.Layer<BunHost> = Layer.mergeAll(
+export const layer: Layer.Layer<BunHost, JjError> = Layer.mergeAll(
   platform,
   Layer.provide(BunChildProcessSpawner.layer, platform),
   BunJj.layer,
@@ -230,7 +230,7 @@ export const layer: Layer.Layer<BunHost> = Layer.mergeAll(
  * @category layers
  * @since 1.0.0-rc.0
  */
-export const layerAt = (root: string): Layer.Layer<BunHost> => {
+export const layerAt = (root: string): Layer.Layer<BunHost, JjError> => {
   const repositoryRoot = absoluteRoot("layerAt", root)
   return Layer.mergeAll(
     platform,
@@ -256,7 +256,7 @@ export const layerAt = (root: string): Layer.Layer<BunHost> => {
  */
 export const layerContained = (
   options?: ContainedOptions
-): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> => {
+): Layer.Layer<BunHost, JjError, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
     ContainedSpawner.layer(containment(options)),
     Layer.provide(BunChildProcessSpawner.layer, platform)
@@ -283,7 +283,7 @@ export const layerContained = (
 export const layerContainedAt = (
   root: string,
   options?: ContainedOptions
-): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> => {
+): Layer.Layer<BunHost, JjError, ProcessLedger.ProcessLedger> => {
   const repositoryRoot = absoluteRoot("layerContainedAt", root)
   const spawner = Layer.provide(
     ContainedSpawner.layer(containment(options)),

@@ -76,7 +76,10 @@ describe("NodeHost.layerContained", () => {
   it.live("binds ordinary jj operations to the requested repository root", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "flows-node-host-bound-jj-"))
-      writeFileSync(join(directory, "jj"), "#!/bin/sh\npwd\n")
+      writeFileSync(
+        join(directory, "jj"),
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.39.0\"; exit 0; fi\npwd\n"
+      )
       chmodSync(join(directory, "jj"), 0o755)
       const previousPath = process.env["PATH"]
       process.env["PATH"] = `${directory}:${previousPath ?? ""}`
@@ -159,7 +162,10 @@ describe("NodeHost.layerContained", () => {
       // the observable difference: the invocation shows up in the ledger like
       // any other child.
       const directory = mkdtempSync(join(tmpdir(), "flows-contained-jj-"))
-      writeFileSync(join(directory, "jj"), "#!/bin/sh\npwd\n")
+      writeFileSync(
+        join(directory, "jj"),
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.39.0\"; exit 0; fi\npwd\n"
+      )
       chmodSync(join(directory, "jj"), 0o755)
       const previousPath = process.env["PATH"]
       process.env["PATH"] = directory
@@ -180,7 +186,7 @@ describe("NodeHost.layerContained", () => {
         const status = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(Effect.provide(host), Effect.scoped)
 
         expect(status.trim()).toBe(realpathSync(directory))
-        expect(recorded).toEqual(["jj status"])
+        expect(recorded).toEqual(["jj --version", "jj status"])
         // The invocation finished, so the record was retired with it.
         expect(yield* ledger.live).toEqual([])
       } finally {
@@ -203,7 +209,7 @@ describe("NodeHost.layerContained", () => {
       chmodSync(marker, 0o755)
       writeFileSync(
         join(directory, "jj"),
-        `#!/bin/sh\ntrap "" TERM\n${marker} & echo $! > ${pidFile}\nwait\n`
+        `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "jj 0.39.0"; exit 0; fi\ntrap "" TERM\n${marker} & echo $! > ${pidFile}\nwait\n`
       )
       chmodSync(join(directory, "jj"), 0o755)
       const previousPath = process.env["PATH"]

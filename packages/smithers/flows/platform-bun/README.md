@@ -79,6 +79,11 @@ from the real `process.platform` whatever it is told, so a caller-supplied value
 could only make the ledger record `pgid: null` for a child that genuinely leads
 one, which `ProcessReaper` then retires without signalling anything.
 
+The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
+layer with one version probe; construction can fail with `JjError`, including
+`not_installed` or `unsupported_version`. The contained bundles route that probe
+through their process spawner and retire its ledger entry when it exits.
+
 ## Modules
 
 | Module          | What it provides                                                                                                                                                                                                                             |

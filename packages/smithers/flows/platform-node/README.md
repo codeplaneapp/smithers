@@ -161,6 +161,11 @@ Errno is normalized to the same reasons `@effect/platform-node` reports, with
 one addition: a helper failure that carries no errno at all stays
 `PermissionDenied` so the boundary fails closed.
 
+The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
+layer with one version probe; construction can fail with `JjError`, including
+`not_installed` or `unsupported_version`. The contained bundles route that probe
+through their process spawner and retire its ledger entry when it exits.
+
 ## Modules
 
 The barrel exports three namespaces: `NodeHost`, `HostLiveness`, and

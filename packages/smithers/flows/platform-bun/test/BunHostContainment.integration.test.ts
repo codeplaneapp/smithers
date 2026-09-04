@@ -99,7 +99,10 @@ const temporaryDirectory = () => mkdtempSync(join(tmpdir(), "flows-bun-contained
 
 /** Installs `script` as an executable named `jj`, first on `PATH`. */
 const installJjShim = (directory: string, script: string): void => {
-  writeFileSync(join(directory, "jj"), script)
+  writeFileSync(
+    join(directory, "jj"),
+    script.replace("#!/bin/sh", "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.39.0\"; exit 0; fi")
+  )
   chmodSync(join(directory, "jj"), 0o755)
   // Prepended, not replaced: the shim wins while `sh` and `sleep` stay reachable.
   process.env["PATH"] = `${directory}:${process.env["PATH"] ?? ""}`
@@ -274,7 +277,7 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
         const status = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(Effect.provide(host), Effect.scoped)
 
         expect(status.trim()).toBe(realpathSync(directory))
-        expect(recorded).toEqual(["jj status"])
+        expect(recorded).toEqual(["jj --version", "jj status"])
         // The invocation finished, so the record was retired with it.
         expect(yield* ledger.live).toEqual([])
       } finally {
