@@ -34,7 +34,9 @@ if (closeMarker && mode !== "capture-cancellation") {
 }
 
 const startupDiagnostic = mode === "stderr-exit"
-  ? { text: "distinctive startup diagnostic\n", code: 17 }
+  ? { text: "distinctive startup diagnostic\ntoken=sk-ant-test-0123456789abcdef\n", code: 17 }
+  : mode === "stderr-short-exit"
+  ? { text: "token=x", code: 19 }
   : mode === "stderr-tail-exit"
   ? { text: "DROP-".repeat(400) + "KEEP-THIS-TAIL-1234567890\n", code: 18 }
   : undefined
@@ -102,6 +104,11 @@ reader?.on("line", (line) => {
   }
   if (request.method === "initialize") {
     if (mode === "hang-handshake") return
+    if (mode === "stderr-timeout") {
+      process.stderr.write("ordinary timeout diagnostic\ntoken=sk-ant-")
+      setImmediate(() => process.stderr.write("test-0123456789abcdef\n"))
+      return
+    }
     if (mode === "oversized-frame") {
       process.stdout.write("x".repeat(1024) + "\n")
       return
@@ -876,8 +883,25 @@ describe("McpClient against a real MCP server", () => {
     expect(error.code).toBe("connection_closed")
     expect(error.server).toBe("stderr-exit")
     expect(error.message).toBe(
-      "MCP server \"stderr-exit\" stdout closed (stderr: distinctive startup diagnostic)"
+      "MCP server \"stderr-exit\" stdout closed (stderr: distinctive startup diagnostic token=[REDACTED])"
     )
+  })
+
+  it("redacts credentials split across stderr chunks on a handshake timeout", async () => {
+    const error = await execute(Effect.scoped(Effect.flip(
+      connectNode("stderr-timeout", [], { handshakeTimeoutMs: 1_000 })
+    )))
+    expect(error.code).toBe("timeout")
+    expect(error.message).toContain("ordinary timeout diagnostic token=[REDACTED]")
+    expect(error.message).not.toContain("sk-ant-")
+    expect(error.message).not.toContain("0123456789abcdef")
+  })
+
+  it("caps diagnostics after redaction expands a short credential", async () => {
+    const error = await execute(Effect.scoped(Effect.flip(
+      connectNode("stderr-short-exit", [], { handshakeTimeoutMs: 2_000, maxStderrBytes: 7 })
+    )))
+    expect(error.message).toBe("MCP server \"stderr-short-exit\" stdout closed (stderr: token=[)")
   })
 
   it("keeps only the configured tail of a large stderr diagnostic", async () => {

@@ -16,7 +16,7 @@ One failure is not an `McpError` at all, and it is the most common one: see
 **Code.** `spawn_failed`.
 
 **What happened.** The process could not be started. The message carries the
-spawn error and, when the child produced any, a bounded tail of its stderr.
+spawn error and, when the child produced any, a bounded, redacted tail of its stderr.
 
 **What to change.** Check that `command` is on the parent process's `PATH`, that
 `cwd` exists, and that the entry file is readable. The child receives `PATH`
@@ -117,7 +117,7 @@ flow name ambiguous.
 **What happened.** The deadline for that method expired.
 `handshakeTimeoutMs` (10 seconds by default) bounds `initialize` and
 `tools/list`; `requestTimeoutMs` (120 seconds by default) bounds `tools/call`.
-The message carries a bounded stderr tail when the child wrote one.
+The message carries a bounded, redacted stderr tail when the child wrote one.
 
 **What to change.** For a slow tool, raise `requestTimeoutMs`. For a handshake
 that never completes, read the stderr tail in the message: a server that logs a

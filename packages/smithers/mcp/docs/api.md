@@ -94,22 +94,22 @@ The result of one `tools/call`.
 
 ### McpClient.ConnectOptions
 
-| Field                   | Type                                               | Meaning                                                                         |
-| ----------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `server`                | `string`                                           | The name this server is known by, for flow naming and error messages. Required. |
-| `command`               | `string`                                           | The executable to spawn. Required.                                              |
-| `args`                  | `ReadonlyArray<string>`                            | Its arguments. Required.                                                        |
-| `cwd`                   | `string \| undefined`                              | The child's working directory.                                                  |
-| `env`                   | `Record<string, string \| undefined> \| undefined` | Values overlaid on the bootstrap child environment.                              |
-| `handshakeTimeoutMs`    | `number \| undefined`                              | Deadline for each `initialize` and `tools/list` request. Default 10000.         |
-| `requestTimeoutMs`      | `number \| undefined`                              | Deadline for each later tool request. Default 120000.                           |
-| `queueCapacity`         | `number \| undefined`                              | Maximum outbound frames waiting to be written. Default 64.                      |
-| `maxFrameBytes`         | `number \| undefined`                              | Maximum UTF-8 bytes in one inbound JSON-RPC frame. Default 1048576.             |
-| `maxOutboundFrameBytes` | `number \| undefined`                              | Maximum UTF-8 bytes in one outbound JSON-RPC frame. Default 1048576.            |
-| `maxStderrBytes`        | `number \| undefined`                              | Maximum diagnostic stderr bytes retained in memory. Default 2048.               |
-| `maxTools`              | `number \| undefined`                              | Maximum tools accepted across every catalog page. Default 256.                  |
-| `maxToolNameBytes`      | `number \| undefined`                              | Maximum UTF-8 bytes in a tool name. Default 128.                                |
-| `maxCatalogPages`       | `number \| undefined`                              | Maximum `tools/list` pages walked. Default 32.                                  |
+| Field                   | Type                                               | Meaning                                                                                                   |
+| ----------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `server`                | `string`                                           | The name this server is known by, for flow naming and error messages. Required.                           |
+| `command`               | `string`                                           | The executable to spawn. Required.                                                                        |
+| `args`                  | `ReadonlyArray<string>`                            | Its arguments. Required.                                                                                  |
+| `cwd`                   | `string \| undefined`                              | The child's working directory.                                                                            |
+| `env`                   | `Record<string, string \| undefined> \| undefined` | Values overlaid on the bootstrap child environment.                                                       |
+| `handshakeTimeoutMs`    | `number \| undefined`                              | Deadline for each `initialize` and `tools/list` request. Default 10000.                                   |
+| `requestTimeoutMs`      | `number \| undefined`                              | Deadline for each later tool request. Default 120000.                                                     |
+| `queueCapacity`         | `number \| undefined`                              | Maximum outbound frames waiting to be written. Default 64.                                                |
+| `maxFrameBytes`         | `number \| undefined`                              | Maximum UTF-8 bytes in one inbound JSON-RPC frame. Default 1048576.                                       |
+| `maxOutboundFrameBytes` | `number \| undefined`                              | Maximum UTF-8 bytes in one outbound JSON-RPC frame. Default 1048576.                                      |
+| `maxStderrBytes`        | `number \| undefined`                              | Maximum diagnostic stderr bytes retained in memory and rendered after credential redaction. Default 2048. |
+| `maxTools`              | `number \| undefined`                              | Maximum tools accepted across every catalog page. Default 256.                                            |
+| `maxToolNameBytes`      | `number \| undefined`                              | Maximum UTF-8 bytes in a tool name. Default 128.                                                          |
+| `maxCatalogPages`       | `number \| undefined`                              | Maximum `tools/list` pages walked. Default 32.                                                            |
 
 Every numeric field must be a positive integer. Anything else fails with
 `protocol_error` naming the option, before the process is spawned.
@@ -190,11 +190,11 @@ class McpError extends Schema.TaggedError<McpError>()("flows/mcp/McpError", {
 }) {}
 ```
 
-| Field     | Type                  | Meaning                                                                                                                                        |
-| --------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code`    | `Code`                | The stable, model-facing failure code.                                                                                                         |
-| `message` | `string`              | A human-readable message naming the server and, where it exists, a bounded stderr tail or property path. Never the raw frame or the arguments. |
-| `server`  | `string \| undefined` | The server the failure belongs to.                                                                                                             |
+| Field     | Type                  | Meaning                                                                                                                                                  |
+| --------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`    | `Code`                | The stable, model-facing failure code.                                                                                                                   |
+| `message` | `string`              | A human-readable message naming the server and, where it exists, a bounded, redacted stderr tail or property path. Never the raw frame or the arguments. |
+| `server`  | `string \| undefined` | The server the failure belongs to.                                                                                                                       |
 
 The tag is `"flows/mcp/McpError"`, so `Effect.catchTag("flows/mcp/McpError", ...)`
 matches it.

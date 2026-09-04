@@ -14,6 +14,7 @@
  *
  * @since 1.0.0-rc.0
  */
+import * as Redaction from "@smthrs/journal/Redaction"
 import * as ChildProcessEnvironment from "@smthrs/kernel/ChildProcessEnvironment"
 import { Deferred, Effect, HashMap, Option, Queue, Ref, Stream } from "effect"
 import type { Scope } from "effect"
@@ -265,7 +266,12 @@ export const connect = (
     const withStderr = (error: McpError): Effect.Effect<McpError> => {
       if (!diagnosticErrorCodes.has(error.code)) return Effect.succeed(error)
       return Effect.map(Ref.get(stderrTail), (bytes) => {
-        const rendered = new TextDecoder().decode(bytes).replace(/\s+/g, " ").trim()
+        // Redact before flattening lines, then cap again because placeholders
+        // can be longer than the credentials they replace.
+        const redacted = String(Redaction.redact(new TextDecoder().decode(bytes))).replace(/\s+/g, " ").trim()
+        const rendered = new TextDecoder().decode(new TextEncoder().encode(redacted).subarray(0, maxStderrBytes), {
+          stream: true
+        })
         return rendered === ""
           ? error
           : new McpError({ code: error.code, message: `${error.message} (stderr: ${rendered})`, server: error.server })

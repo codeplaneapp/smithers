@@ -62,3 +62,8 @@ The site at https://mcp.smithers.sh is built from `docs/` in this package:
 `docs/concepts/` explains the projection model and the life of a session;
 `docs/guides/` covers connecting, filtering, authority, failures, structured
 output, limits, CLI configuration, and testing.
+
+Child stderr diagnostics in connection errors use `@smthrs/journal` credential
+redaction and remain bounded by `maxStderrBytes` (2048 by default). Ordinary
+startup diagnostics survive; credential-looking values are replaced with redaction
+markers before messages reach a model.
