@@ -144,6 +144,25 @@ test("runner temporary paths stay at step scope, where GitHub permits the runner
   assert.equal(step("Report the skipped publication").env.PUBLISH_ORDER, "${{ runner.temp }}/publish-order.txt")
 })
 
+test("publication keeps provenance and uses the repository token for first publications", () => {
+  const publish = step("Publish packages in dependency order")
+
+  assert.equal(publish.env.NODE_AUTH_TOKEN, "${{ secrets.NPM_TOKEN }}")
+  assert.equal(publish.env.NPM_CONFIG_PROVENANCE, "true")
+})
+
+test("publication tolerates tag checkouts and bounded registry throttling", () => {
+  const command = step("Publish packages in dependency order").run
+
+  assert.match(command, /pnpm publish .* --no-git-checks/)
+  assert.match(command, /publish_retry_delays=\(10 30 60\)/)
+  assert.match(command, /E404|404/)
+  assert.match(command, /429/)
+  assert.match(command, /5\[0-9\]\[0-9\]/)
+  assert.match(command, /sleep 2/)
+  assert.doesNotMatch(command, /if pnpm view .*2>&1; then/)
+})
+
 test("every gate runs on both paths; only publication is conditional", () => {
   const conditional = release.jobs.publish.steps
     .filter((candidate) => candidate.if !== undefined)

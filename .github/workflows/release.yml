@@ -303,19 +303,68 @@ jobs:
           PACK_DIR: ${{ runner.temp }}/release-packs
           PUBLISH_ORDER: ${{ runner.temp }}/publish-order.txt
           # Trusted publishing (id-token: write) is the primary credential and
-          # needs nothing here. This maps the documented token fallback, since a
-          # GitHub environment secret is not exported into the step by itself:
-          # unset, it is empty and pnpm falls back to trusted publishing.
-          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
+          # needs nothing here. First publication of a new package name needs
+          # the repository token because npm cannot preconfigure trusted
+          # publishing for a name that does not exist yet. The token remains a
+          # fallback for existing names, and provenance stays enabled below.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
         run: |
+          # One immediate attempt plus three bounded retries. npm and Sigstore
+          # share enough rate-limited infrastructure that retrying in a tight
+          # loop merely turns one throttle into four.
+          publish_retry_delays=(10 30 60)
+          first_package=true
           while read -r workspace tarball; do
+            if [ "$first_package" = true ]; then
+              first_package=false
+            else
+              sleep 2
+            fi
             spec="$workspace@$PUBLISH_VERSION"
-            if pnpm view "$spec" version --json >/dev/null 2>&1; then
+
+            view_retry=0
+            while true; do
+              if view_output="$(pnpm view "$spec" version --json 2>&1)"; then
+                published=true
+                break
+              fi
+              if printf '%s\n' "$view_output" | grep -Eq 'E404|(^|[^0-9])404([^0-9]|$)'; then
+                published=false
+                break
+              fi
+              if ! printf '%s\n' "$view_output" | grep -Eq 'E429|(^|[^0-9])429([^0-9]|$)|E5[0-9][0-9]|(^|[^0-9])5[0-9][0-9]([^0-9]|$)'; then
+                printf '%s\n' "$view_output" >&2
+                echo "Could not determine whether $spec is published; refusing to publish over an unknown registry failure." >&2
+                exit 1
+              fi
+              if [ "$view_retry" -ge "${#publish_retry_delays[@]}" ]; then
+                printf '%s\n' "$view_output" >&2
+                echo "Registry precheck for $spec exhausted its retries." >&2
+                exit 1
+              fi
+              delay="${publish_retry_delays[$view_retry]}"
+              echo "Registry precheck for $spec was throttled or unavailable; retrying in ${delay}s."
+              sleep "$delay"
+              view_retry=$((view_retry + 1))
+            done
+
+            if [ "$published" = true ]; then
               echo "$spec is already published; leaving the immutable version in place."
               continue
             fi
-            pnpm publish "$PACK_DIR/$tarball" --provenance --access public --tag "$PUBLISH_DIST_TAG"
+
+            publish_retry=0
+            while ! pnpm publish "$PACK_DIR/$tarball" --provenance --access public --tag "$PUBLISH_DIST_TAG" --no-git-checks; do
+              if [ "$publish_retry" -ge "${#publish_retry_delays[@]}" ]; then
+                echo "Publication of $spec exhausted its retries." >&2
+                exit 1
+              fi
+              delay="${publish_retry_delays[$publish_retry]}"
+              echo "Publication of $spec failed; retrying in ${delay}s."
+              sleep "$delay"
+              publish_retry=$((publish_retry + 1))
+            done
           done < "$PUBLISH_ORDER"
       - name: Report the skipped publication
         if: env.DRY_RUN == 'true'
