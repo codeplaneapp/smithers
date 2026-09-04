@@ -1016,3 +1016,78 @@ describe("the ignored census costs what a body can change", () => {
     }
   )
 })
+
+/**
+ * The census insures the developer's own gitignored state, and a toolchain's
+ * build directory is not that: cargo rebuilds every byte of `target/` on
+ * demand, exactly as a package manager rebuilds `node_modules`. Counting it
+ * turned the byte ceiling into a census of the host's build artifacts, and a
+ * checkout with a built Rust tree had 908 MiB of `.rmeta` refuse every
+ * `--write` before its body ran.
+ */
+describe("the ignored census skips the build directory a declared toolchain owns", () => {
+  const git = (cwd: string, ...args: ReadonlyArray<string>): void => {
+    ChildProcess.execFileSync("git", [...args], { cwd, stdio: "ignore" })
+  }
+  const ignoring = async (patterns: string): Promise<void> => {
+    git(root, "init", "--quiet", ".")
+    await Fs.writeFile(NodePath.join(root, ".gitignore"), patterns)
+  }
+  const file = async (relative: string, content: string): Promise<void> => {
+    const absolute = NodePath.join(root, relative)
+    await Fs.mkdir(NodePath.dirname(absolute), { recursive: true })
+    await Fs.writeFile(absolute, content)
+  }
+
+  it("counts neither the entries nor the bytes of a host tree, and still counts its siblings", async () => {
+    await ignoring("target/\n.env\n")
+    await file("target/debug/deps/libzerocopy.rmeta", "r".repeat(4096))
+    await file("target/debug/build.log", "b".repeat(4096))
+    await file(".env", "sec")
+    // Ceilings only the sibling fits under: the census refuses if one entry or
+    // one byte of `target/` counts toward either.
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows", { entries: 1, totalBytes: 3 }, undefined, [
+      "target"
+    ])
+    try {
+      expect([...snapshot.entries.keys()]).toEqual([".env"])
+      expect(snapshot.census).toEqual({ entries: 1, bytes: 3, copied: 1, copiedBytes: 3, reused: 0 })
+      // A write under the host tree is out of the guard's sight like a write
+      // under node_modules; the sibling is still judged and still restored.
+      await file("target/debug/deps/libzerocopy.rmeta", "rebuilt")
+      await file("target/debug/deps/new.rmeta", "new")
+      await file(".env", "leaked")
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual([".env"])
+      expect(await PackageTree.revertIgnored(snapshot, ".env")).toBe(true)
+      expect(await Fs.readFile(NodePath.join(root, ".env"), "utf8")).toBe("sec")
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("names host trees by path, so a source directory of the same name is still censused", async () => {
+    await ignoring("target/\nsrc/plugins/target/\n")
+    await file("target/big.rmeta", "x")
+    await file("src/plugins/target/generated.ts", "y")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows", PackageTree.ignoredLimits, undefined, ["target"])
+    try {
+      expect([...snapshot.entries.keys()]).toEqual(["src/plugins/target/generated.ts"])
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("skips a host tree beside a nested workspace manifest, not one at the root", async () => {
+    await ignoring("crates/target/\ntarget/\n")
+    await file("crates/target/big.rmeta", "x")
+    await file("target/mine.txt", "y")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows", PackageTree.ignoredLimits, undefined, [
+      "crates/target"
+    ])
+    try {
+      expect([...snapshot.entries.keys()]).toEqual(["target/mine.txt"])
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+})

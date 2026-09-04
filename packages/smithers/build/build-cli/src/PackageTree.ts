@@ -362,8 +362,21 @@ export interface TreeSnapshot {
 const hostStateSegment = (segment: string): boolean =>
   segment === "node_modules" || segment === ".git" || segment === ".jj"
 
-const skipStatusPath = (cacheDirectory: string, path: string): boolean =>
-  path === cacheDirectory || path.startsWith(`${cacheDirectory}/`) || path.split("/").some(hostStateSegment)
+/**
+ * Whether a path lies in one of the host trees a caller named: a directory a
+ * declared toolchain owns, skipped whole like `node_modules` above.
+ *
+ * These are named by path, not by segment. `node_modules` means the same
+ * thing wherever it appears; `target` does not, so only the directory the
+ * workspace's own Rust toolchain declaration puts it at is host state and a
+ * source directory of that name anywhere else is still workspace source.
+ */
+const insideHostTree = (hostTrees: ReadonlyArray<string>, path: string): boolean =>
+  hostTrees.some((tree) => path === tree || path.startsWith(`${tree}/`))
+
+const skipStatusPath = (cacheDirectory: string, path: string, hostTrees: ReadonlyArray<string> = []): boolean =>
+  path === cacheDirectory || path.startsWith(`${cacheDirectory}/`) || path.split("/").some(hostStateSegment) ||
+  insideHostTree(hostTrees, path)
 
 /**
  * Records the dirty state of a git workspace before a tool runs.
@@ -535,16 +548,24 @@ export interface IgnoredLimits {
 /**
  * The ceilings the gitignored census may not cross.
  *
- * The census records every gitignored path by `lstat` identity and holds
- * every gitignored file's bytes in a stash, so a write to one can be restored
- * exactly. A stash shared across a run ({@link IgnoredStash}) is refreshed
- * incrementally: a file whose identity the stash already holds is not read
- * again, so an unchanged file costs one `lstat` per census and only the
- * files that changed since the previous census are copied. A tree over
+ * The census records every gitignored path by `lstat` identity, and holds the
+ * bytes of the ones the body's declared write set can name so a write to one
+ * can be restored exactly. A stash shared across a run ({@link IgnoredStash})
+ * is refreshed incrementally: a file whose identity the stash already holds is
+ * not read again, so an unchanged file costs one `lstat` per census and only
+ * the files that changed since the previous census are copied. A tree over
  * either ceiling is refused with {@link IgnoredCensusError} rather than
  * guarded partially: the guard has no mode in which a claimed rollback can
  * silently fail to hold. `node_modules` at any depth, the cache directory,
  * and version-control internals never count.
+ *
+ * Both ceilings count what the guard insures, which is the developer's own
+ * gitignored state. They once counted a declared toolchain's build directory
+ * too, which made `totalBytes` a census of the host's build artifacts: a
+ * checkout with a built Rust `target/` crossed 1 GiB before any target ran
+ * and had every `--write` refused. Those directories are host state now, so
+ * the ceilings measure the guard's own work again — see
+ * {@link IgnoredSnapshot}.
  *
  * @category write sets
  * @since 0.1.0
@@ -661,10 +682,20 @@ export interface IgnoredCensus {
  * path is invisible to {@link changedSinceSnapshot}. This guard closes that
  * gap. It records each ignored path's `lstat` identity and holds each
  * ignored file's bytes in the stash, so an overwritten, deleted, or replaced
- * ignored path goes back to exactly what it was. A directory git does not
- * enter (a nested repository) is recorded by identity alone: a change under
- * it can be reported, never restored. `node_modules` at any depth, the
- * cache, and version-control internals are excluded.
+ * ignored path goes back to exactly what it was. That is what the guard is
+ * for, and it is not narrowed by the write set: the case it was built for is
+ * a tool that overwrites the developer's `.env`, which no write set names.
+ * A directory git does not enter (a nested repository) is recorded by
+ * identity alone: a change under it can be reported, never restored.
+ *
+ * What the census never measures is host state: `node_modules` at any depth,
+ * the cache, version-control internals, and the `hostTrees` a declared
+ * toolchain owns. A toolchain's build directory is the same kind of thing as
+ * an installed dependency tree — the tool that wrote it rebuilds it, and no
+ * byte in it is a developer's only copy — so insuring it bought nothing and
+ * cost everything: a checkout with a built Rust `target/` carried 908 MiB of
+ * `.rmeta` past the byte ceiling and had every `--write` refused over files
+ * no target could have named.
  *
  * @category write sets
  * @since 0.1.0
@@ -673,6 +704,12 @@ export interface IgnoredSnapshot {
   readonly root: string
   readonly entries: ReadonlyMap<string, IgnoredEntry>
   readonly stash: IgnoredStash
+  /**
+   * The toolchain-owned directories this census skipped, which
+   * {@link changedIgnored} must skip too so a build that writes one is not
+   * read as a tree of created and deleted paths.
+   */
+  readonly hostTrees: ReadonlyArray<string>
   /** Whether the snapshot opened its own stash, which {@link releaseIgnored} then removes. */
   readonly ownsStash: boolean
   readonly limits: IgnoredLimits
@@ -728,7 +765,8 @@ const walkIgnored = async (
   cacheDirectory: string,
   directory: string,
   entries: Map<string, IgnoredEntry>,
-  limits: IgnoredLimits
+  limits: IgnoredLimits,
+  hostTrees: ReadonlyArray<string>
 ): Promise<void> => {
   let dirents: Array<NodeFs.Dirent>
   try {
@@ -743,9 +781,9 @@ const walkIgnored = async (
   }
   for (const dirent of dirents) {
     const path = `${directory}/${dirent.name}`
-    if (skipStatusPath(cacheDirectory, path)) continue
+    if (skipStatusPath(cacheDirectory, path, hostTrees)) continue
     if (dirent.isDirectory()) {
-      await walkIgnored(root, cacheDirectory, path, entries, limits)
+      await walkIgnored(root, cacheDirectory, path, entries, limits, hostTrees)
       continue
     }
     const entry = await identityOf(NodePath.join(root, path))
@@ -756,7 +794,8 @@ const walkIgnored = async (
 const listIgnored = async (
   root: string,
   cacheDirectory: string,
-  limits: IgnoredLimits
+  limits: IgnoredLimits,
+  hostTrees: ReadonlyArray<string> = []
 ): Promise<Map<string, IgnoredEntry>> => {
   // The failure propagates instead of reading as an empty census. This runs
   // once before the body and once after: swallowing a failure after leaves the
@@ -779,9 +818,9 @@ const listIgnored = async (
     if (!status.status.startsWith("!!")) continue
     const directory = status.path.endsWith("/")
     const path = directory ? status.path.slice(0, -1) : status.path
-    if (path === "" || skipStatusPath(cacheDirectory, path)) continue
+    if (path === "" || skipStatusPath(cacheDirectory, path, hostTrees)) continue
     if (directory) {
-      await walkIgnored(root, cacheDirectory, path, entries, limits)
+      await walkIgnored(root, cacheDirectory, path, entries, limits, hostTrees)
       continue
     }
     const entry = await identityOf(NodePath.join(root, path))
@@ -806,6 +845,10 @@ const stashFileFor = (stash: IgnoredStash, path: string): string =>
  * in {@link releaseIgnored}. The `census` field on the result accounts for
  * both.
  *
+ * `hostTrees` names the directories a declared toolchain owns, which the
+ * census skips whole exactly as it skips `node_modules`: see
+ * {@link IgnoredSnapshot}.
+ *
  * @category write sets
  * @since 0.1.0
  */
@@ -813,9 +856,10 @@ export const snapshotIgnored = async (
   root: string,
   cacheDirectory: string,
   limits: IgnoredLimits = ignoredLimits,
-  stash?: IgnoredStash
+  stash?: IgnoredStash,
+  hostTrees: ReadonlyArray<string> = []
 ): Promise<IgnoredSnapshot> => {
-  const entries = await listIgnored(root, cacheDirectory, limits)
+  const entries = await listIgnored(root, cacheDirectory, limits, hostTrees)
   const ownsStash = stash === undefined
   const held = stash ?? await openIgnoredStash()
   try {
@@ -855,6 +899,7 @@ export const snapshotIgnored = async (
       root,
       entries,
       stash: held,
+      hostTrees,
       ownsStash,
       limits,
       census: { entries: entries.size, bytes, copied, copiedBytes, reused }
@@ -876,7 +921,7 @@ export const changedIgnored = async (
   snapshot: IgnoredSnapshot,
   cacheDirectory: string
 ): Promise<ReadonlyArray<string>> => {
-  const after = await listIgnored(snapshot.root, cacheDirectory, snapshot.limits)
+  const after = await listIgnored(snapshot.root, cacheDirectory, snapshot.limits, snapshot.hostTrees)
   const changed = new Set<string>()
   for (const [path, entry] of after) {
     const before = snapshot.entries.get(path)

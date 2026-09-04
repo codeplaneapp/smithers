@@ -3772,6 +3772,30 @@ export const execute = async (
   let ignoredStash: PackageTree.IgnoredStash | undefined
 
   /**
+   * The gitignored directories a toolchain this workspace declares owns, which
+   * the census skips whole like `node_modules`.
+   *
+   * Cargo writes every crate's build artifacts into one directory beside the
+   * workspace manifest, and rebuilds all of it on demand. Stashing it bought
+   * the guard nothing it could not regenerate and cost it the ceiling: this
+   * repository's `target/` alone is 908 MiB of `.rmeta`, which put the census
+   * over 1 GiB and refused `smithers-build target <label> --write` outright,
+   * on every target, over files no target could have written. It is read from
+   * the workspace declaration rather than from the planned graph on purpose:
+   * `//apps/site:apiDocs` resolves no cargo node, and the `target/` on disk is
+   * there all the same.
+   */
+  const hostTrees = ((): ReadonlyArray<string> => {
+    const rust = WorkspaceDeclaration.rustToolchain(index.workspace)
+    if (rust === undefined) return []
+    // Cargo puts the build directory beside the manifest it was pointed at,
+    // and defaults to the workspace root when the declaration names none.
+    const manifest = rust.workspace === undefined ? undefined : Input.resolvePath("", rust.workspace.path)
+    const directory = manifest === undefined ? "." : NodePath.posix.dirname(manifest)
+    return [directory === "." ? "target" : `${directory}/target`]
+  })()
+
+  /**
    * Runs one mutating body with mechanical write-set confinement: every
    * change the body makes to the tree is judged by its resolved location
    * against `writeSet`; out-of-set changes are reverted and fail the body,
@@ -3791,14 +3815,23 @@ export const execute = async (
     try {
       // Git omits gitignored paths, so a separate guard records them with
       // their bytes; a write to a gitignored path would otherwise be invisible
-      // to the change set and never reverted. A gitignored tree the guard
-      // cannot stash whole refuses the body here, before it runs. The stash
-      // is one per run: every guarded body re-measures the ignored tree by
-      // lstat and copies only the files whose identity moved since the stash
-      // last held them, so an unchanged ignored file costs one lstat per body
-      // rather than a copy.
+      // to the change set and never reverted. That is not narrowed by the write
+      // set: the case it exists for is a tool that overwrites the developer's
+      // `.env`, which no write set names. A gitignored tree the guard cannot
+      // stash whole refuses the body here, before it runs, with the toolchain
+      // build directories in `hostTrees` out of the count. The stash is one per
+      // run: every guarded body re-measures the ignored tree by lstat and
+      // copies only the files whose identity moved since the stash last held
+      // them, so an unchanged ignored file costs one lstat per body rather
+      // than a copy.
       ignoredStash ??= await PackageTree.openIgnoredStash()
-      ignored = await PackageTree.snapshotIgnored(root, cacheDirectory, PackageTree.ignoredLimits, ignoredStash)
+      ignored = await PackageTree.snapshotIgnored(
+        root,
+        cacheDirectory,
+        PackageTree.ignoredLimits,
+        ignoredStash,
+        hostTrees
+      )
       // Git cannot see a write that lands through an in-workspace symlink whose
       // real target leaves the workspace; those portals are measured directly,
       // with the gitignored links taken from the census just taken.

@@ -544,6 +544,183 @@ export const Package = S.Package({ targets: { fmt } })
   )
 
   /**
+   * A workspace that declares a Rust toolchain, so cargo's build directory is
+   * the host state the census skips. The manifest is declared, not built:
+   * nothing here runs cargo, and the guard's census is what is under test.
+   */
+  const cargoWorkspace = async (root: string, manifest = "//Cargo.toml"): Promise<void> => {
+    await write(root, "Cargo.toml", "[workspace]\nmembers = []\n")
+    await write(
+      root,
+      "WORKSPACE.ts",
+      workspaceModule(`  toolchains: [S.Rust.Toolchain({ workspace: S.file("${manifest}"), channel: "stable" })],`)
+    )
+  }
+
+  /** A gitignored file that reports `size` bytes and occupies none. */
+  const sparse = async (root: string, relative: string, size: number): Promise<void> => {
+    await write(root, relative, "")
+    const handle = await Fs.open(NodePath.join(root, relative), "r+")
+    try {
+      await handle.truncate(size)
+    } finally {
+      await handle.close()
+    }
+  }
+
+  const overCeiling = 1024 * 1024 * 1024 + 1
+
+  /**
+   * The defect this exclusion fixes. `smithers-build target <label> --write` is
+   * the documented way to regenerate a checked-in artifact, and on any checkout
+   * with a built Rust tree it was refused outright: the census stashed the
+   * bytes of every gitignored file on disk, so `target/` alone put the
+   * repository over the ceiling and no `--write` could run.
+   */
+  it.skipIf(process.platform === "win32")(
+    "runs a write target with a cargo build directory over the byte ceiling",
+    async () => {
+      const root = await temporaryWorkspace()
+      await cargoWorkspace(root)
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+export const Package = S.Package({ targets: { fmt } })
+`
+      )
+      await write(root, "out.txt", "a")
+      await write(root, ".gitignore", "target/\n")
+      commitAll(root)
+      await sparse(root, "target/debug/deps/libzerocopy.rmeta", overCeiling)
+      const { exitCode, logs } = await serve(root, ["//:fmt", "--write"])
+      expect(logs).not.toContain("the write-set guard cannot restore the gitignored tree")
+      expect(exitCode).toBe(0)
+      expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("b")
+      // Skipped, never cleaned: the build directory is left exactly as it was.
+      expect((await Fs.stat(NodePath.join(root, "target", "debug", "deps", "libzerocopy.rmeta"))).size)
+        .toBe(overCeiling)
+    }
+  )
+
+  /**
+   * The ceiling still binds. Only a directory a declared toolchain owns left
+   * the census, so the same bytes anywhere else still refuse the target, and
+   * so does a `target/` in a workspace that declares no Rust toolchain.
+   */
+  it.skipIf(process.platform === "win32")(
+    "still refuses a write target over a gitignored tree no toolchain owns",
+    async () => {
+      const root = await temporaryWorkspace()
+      await cargoWorkspace(root)
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+export const Package = S.Package({ targets: { fmt } })
+`
+      )
+      await write(root, "out.txt", "a")
+      await write(root, ".gitignore", "media/\n")
+      commitAll(root)
+      await sparse(root, "media/raw.mov", overCeiling)
+      const { exitCode, logs } = await serve(root, ["//:fmt", "--write"])
+      expect(exitCode).toBe(1)
+      expect(logs).toContain("the write-set guard cannot restore the gitignored tree: more than 1073741824 bytes")
+      expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("a")
+    }
+  )
+
+  it.skipIf(process.platform === "win32")(
+    "still refuses a write target over a target directory no declared toolchain owns",
+    async () => {
+      const root = await temporaryWorkspace()
+      await write(root, "WORKSPACE.ts", workspaceModule())
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+export const Package = S.Package({ targets: { fmt } })
+`
+      )
+      await write(root, "out.txt", "a")
+      await write(root, ".gitignore", "target/\n")
+      commitAll(root)
+      await sparse(root, "target/big.bin", overCeiling)
+      const { exitCode, logs } = await serve(root, ["//:fmt", "--write"])
+      expect(exitCode).toBe(1)
+      expect(logs).toContain("the write-set guard cannot restore the gitignored tree: more than 1073741824 bytes")
+    }
+  )
+
+  /**
+   * The guard's own purpose, unchanged, with a build directory past the
+   * ceiling sitting beside it: an out-of-set overwrite of the developer's
+   * `.env` still fails the target and still puts the bytes back.
+   */
+  it.skipIf(process.platform === "win32")(
+    "still restores a gitignored file out of set beside a cargo build directory over the ceiling",
+    async () => {
+      const root = await temporaryWorkspace()
+      await cargoWorkspace(root)
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const bad = S.Shell.Diff({ command: "printf b > out.txt && printf leaked > .env", changes: ["out.txt"] })
+export const Package = S.Package({ targets: { bad } })
+`
+      )
+      await write(root, "out.txt", "a")
+      await write(root, ".env", "secret")
+      await write(root, ".gitignore", "target/\n.env\n")
+      commitAll(root)
+      await sparse(root, "target/debug/deps/libzerocopy.rmeta", overCeiling)
+      const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
+      expect(exitCode).toBe(1)
+      expect(logs).toContain("wrote outside its declared write-set (reverted): .env")
+      expect(await Fs.readFile(NodePath.join(root, ".env"), "utf8")).toBe("secret")
+      expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("b")
+    }
+  )
+
+  /**
+   * A cargo build directory is host state, out of the guard's sight like a
+   * write under `node_modules`. A write beside it is still judged.
+   */
+  it("leaves a write into the cargo build directory unjudged and still judges its sibling", async () => {
+    const root = await temporaryWorkspace()
+    await cargoWorkspace(root)
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const bad = S.Shell.Diff({
+  command: "printf b > out.txt && printf o > target/leak.o && printf leak > scratch/leak.txt",
+  changes: ["out.txt"]
+})
+export const Package = S.Package({ targets: { bad } })
+`
+    )
+    await write(root, "out.txt", "a")
+    await write(root, ".gitignore", "target/\nscratch/\n")
+    await write(root, "target/keep.bin", "kept")
+    await write(root, "scratch/keep.txt", "kept")
+    commitAll(root)
+    const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
+    expect(exitCode).toBe(1)
+    expect(logs).toContain("wrote outside its declared write-set (reverted): scratch/leak.txt")
+    expect(logs).not.toContain("target/leak.o")
+    const scratchLeakGone = await Fs.access(NodePath.join(root, "scratch", "leak.txt")).then(() => false, () => true)
+    expect(scratchLeakGone).toBe(true)
+    expect(await Fs.readFile(NodePath.join(root, "target", "leak.o"), "utf8")).toBe("o")
+    expect(await Fs.readFile(NodePath.join(root, "target", "keep.bin"), "utf8")).toBe("kept")
+  })
+
+  /**
    * One stash of gitignored bytes serves every guarded body in a run. The
    * second body's census must hold what the first body wrote, so a failure
    * after it restores the first body's output, not the pre-run bytes.
