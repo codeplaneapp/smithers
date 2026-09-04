@@ -2,7 +2,7 @@ DESCRIPTION
   Show the diagnosis card for one run, or the run listing
 
 USAGE
-  smithers status [flags] [<run-id>]
+  smthrs status [flags] [<run-id>]
 
 ARGUMENTS
   run-id string     (optional)

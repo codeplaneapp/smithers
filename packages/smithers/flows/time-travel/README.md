@@ -1,5 +1,7 @@
 # @smthrs/time-travel
 
+**Documentation:** https://time-travel.smithers.sh
+
 One injectable `TimeTravel` service, with replay, inspect, fork, and rewind,
 over the journal and engine-store contracts. It owns both in-memory and SQL
 state stores and records effect-boundary evidence used to make time-travel

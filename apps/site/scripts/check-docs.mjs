@@ -126,6 +126,13 @@ for (const p of pages) {
       err(p.path, `anchor #${anchor} missing on ${norm}`)
     }
   }
+  // API reference pages should lead readers from the public contract to the
+  // implementation. Generated pages get this link from their owning sync
+  // script, which prevents a regeneration from silently dropping it.
+  if (p.route.startsWith("/docs/reference/api/") && p.route !== "/docs/reference/api/" &&
+      !p.text.includes("github.com/smithersai/smithers/")) {
+    err(p.path, "API reference has no link to its source on GitHub")
+  }
   // 6. imports in ts fences: our own packages must exist (catches typos and
   // references to removed 0.x packages); third-party imports are allowed.
   for (const fence of p.text.matchAll(/```(?:ts|tsx|js|jsx)\n([\s\S]*?)```/g)) {

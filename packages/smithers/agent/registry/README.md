@@ -1,5 +1,7 @@
 # @smthrs/registry
 
+**Documentation:** https://registry.smithers.sh
+
 Portable flow descriptor discovery and progressive-disclosure registry services. It scans ordered filesystem sources into serializable metadata, keeps prompt bodies lazy, and exposes lookup and rendering to the harness without evaluating modules during discovery.
 
 ```sh

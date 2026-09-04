@@ -1,5 +1,7 @@
 # @smthrs/platform-browser
 
+**Documentation:** https://platform-browser.smithers.sh
+
 Browser implementations of Effect platform services backed by ZenFS and
 just-bash, the two `@effect/platform-browser` does not ship.
 

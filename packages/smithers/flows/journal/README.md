@@ -1,5 +1,7 @@
 # @smthrs/journal
 
+**Documentation:** https://journal.smithers.sh
+
 The Smithers event journal: the immutable history of what happened, and nothing
 else. It owns `flows_journal_events` and `flows_journal_checkpoints` above
 `@smthrs/database`, bounded journal admission, the `OwnerId` fence its durable

@@ -1,5 +1,7 @@
 # @smthrs/capability
 
+**Documentation:** https://capability.smithers.sh
+
 Capability values and permission failures: the leaf vocabulary of the Smithers
 permission kernel.
 

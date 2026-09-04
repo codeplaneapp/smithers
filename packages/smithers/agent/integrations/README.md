@@ -1,5 +1,7 @@
 # @smthrs/integrations
 
+**Documentation:** https://integrations.smithers.sh
+
 GitHub, Linear, and Telegram adapters over the Smithers control plane.
 
 This is a private workspace package. It is not published at `1.0.0-rc.0`

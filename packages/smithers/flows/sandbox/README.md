@@ -1,5 +1,7 @@
 # @smthrs/sandbox
 
+**Documentation:** https://sandbox.smithers.sh
+
 Provisioned machines, provider-neutral remote process execution, and sandbox
 liveness for flows. A provider package adapts its SDK session to one of two
 seams: `RemoteChildProcessSpawner.Provider`, which can only run a command line,

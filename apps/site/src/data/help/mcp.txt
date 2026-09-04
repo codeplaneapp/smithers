@@ -2,7 +2,7 @@ DESCRIPTION
   Wire the Smithers MCP server into an agent
 
 USAGE
-  smithers mcp <subcommand> [flags]
+  smthrs mcp <subcommand> [flags]
 
 FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY

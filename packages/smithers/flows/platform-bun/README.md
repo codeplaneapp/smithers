@@ -1,5 +1,7 @@
 # @smthrs/platform-bun
 
+**Documentation:** https://platform-bun.smithers.sh
+
 The Bun Host bundle for Smithers.
 
 `@effect/platform-bun` re-exports the `@effect/platform-node` child-process

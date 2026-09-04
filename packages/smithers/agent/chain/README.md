@@ -1,5 +1,7 @@
 # @smthrs/chain
 
+**Documentation:** https://chain.smithers.sh
+
 The Agent Chain spine: an append-only journal of typed events, keyed
 replayable calls, and the trampoline that runs model-authored flow scripts.
 

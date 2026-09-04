@@ -1,5 +1,7 @@
 # @smthrs/database
 
+**Documentation:** https://database.smithers.sh
+
 Durable write boundary for the Smithers persistence packages. It provides the
 shared write policy (`DurableWriter`), normalized database failures, and
 Node and in-memory SQLite client layers; queries go

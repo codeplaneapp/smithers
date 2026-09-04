@@ -2,7 +2,7 @@ DESCRIPTION
   Print one registered node output
 
 USAGE
-  smithers output [flags] <run-id> [<node-id>]
+  smthrs output [flags] <run-id> [<node-id>]
 
 ARGUMENTS
   run-id string     

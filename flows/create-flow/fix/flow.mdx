@@ -15,11 +15,11 @@ their output, and the intended design.
 
 1. **Typecheck.** The project's own typecheck command over the new files. A flow
    that does not compile is not a flow.
-2. **Discovery.** `smithers ls` must list the flow by its path-derived name. A
+2. **Discovery.** `smthrs ls` must list the flow by its path-derived name. A
    flow missing from that list has metadata the registry could not read: a
    description built at runtime instead of stated literally, an entry file with
    the wrong name, or a parse error.
-3. **Plan.** `smithers plan <flow>` must compile a plan and print its card
+3. **Plan.** `smthrs plan <flow>` must compile a plan and print its card
    without executing anything. A failure here is a graph error, not a runtime
    one.
 4. **Test.** The sibling test, run through the project's test command.

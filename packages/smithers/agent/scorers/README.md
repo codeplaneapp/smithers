@@ -1,5 +1,7 @@
 # @smthrs/scorers
 
+**Documentation:** https://scorers.smithers.sh
+
 Flow-native scoring, deterministic sampling, durable observations, and asynchronous score runners. It attaches scorer declarations to target flows without changing their step identity and persists repeated score or inconclusive results.
 
 The package is workspace-private at `0.1.0`, versioned independently of the published `1.0.0-rc.0` names, and is not published to npm. Its one consumer is `@smthrs/evals`, which supplies the evaluator this package deliberately does not: `evals` filters bindings by target, calls `Sampling.decide` per candidate step, and hands the selected work to a `Runner`.

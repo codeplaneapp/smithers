@@ -1,5 +1,7 @@
 # @smthrs/engine-store
 
+**Documentation:** https://engine-store.smithers.sh
+
 Durable persistence adapter for `@smthrs/engine`. It composes journal-backed
 run ownership, attempts, cache provenance, deferreds, clocks, and workspace
 snapshot boundaries into a `FlowEngine` layer.

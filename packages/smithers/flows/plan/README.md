@@ -1,5 +1,7 @@
 # @smthrs/plan
 
+**Documentation:** https://plan.smithers.sh
+
 The persisted plan: a keyed action graph, its append-only store, its diff, and
 the step-key compiler that gives every node its identity.
 

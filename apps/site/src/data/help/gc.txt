@@ -2,7 +2,7 @@ DESCRIPTION
   Delete terminal runs older than a threshold, with the rows they own
 
 USAGE
-  smithers gc [flags]
+  smthrs gc [flags]
 
 FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY

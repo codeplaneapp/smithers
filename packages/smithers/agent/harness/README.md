@@ -1,5 +1,7 @@
 # @smthrs/harness
 
+**Documentation:** https://harness.smithers.sh
+
 Built-in agent-loop contracts and pure turn helpers for flows. Scheduling, persistence, transport, and model execution stay behind explicit service ports.
 
 ```sh

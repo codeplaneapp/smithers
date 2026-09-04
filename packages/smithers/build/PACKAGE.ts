@@ -24,6 +24,13 @@ const docs = standard.docs
 const circular = standard.circular
 
 /**
+ * The package's documentation as a file group (`docs/**`, the README, and
+ * package.json), exported so the docs-site content sync in
+ * `apps/docs/build/PACKAGE.ts` depends on it by label.
+ */
+const docsFiles = standard.docsFiles
+
+/**
  * The package suite, with every prose surface its documentation contract
  * reads declared as key material.
  *
@@ -146,5 +153,5 @@ const newPackage = Smithers.NewPackage({
 })
 
 export const Package = Smithers.Package({
-  targets: { cacheService, check, circular, docs, fmt, lib, lint, newPackage, test }
+  targets: { cacheService, check, circular, docs, docsFiles, fmt, lib, lint, newPackage, test }
 })

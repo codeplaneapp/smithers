@@ -1,5 +1,5 @@
 ---
-title: "smithers run"
+title: "smthrs run"
 description: "Run an approved plan payload, or resume a parked run"
 area: cli
 order: 10
@@ -8,22 +8,22 @@ order: 10
 ## Synopsis
 
 ```text
-smithers run PLAN_PAYLOAD
-smithers run --resume RUN_ID
+smthrs run PLAN_PAYLOAD
+smthrs run --resume RUN_ID
 ```
 
 ## Description
 
-`smithers run` submits the serialized approval payload that `smithers plan`
+`smthrs run` submits the serialized approval payload that `smthrs plan`
 printed and prints the control receipt. `Verb.ts` records `resume` as an
 alternate spelling, and the command tree registers it as a hidden
-`smithers resume RUN_ID` that runs the same handler as `smithers run --resume`.
+`smthrs resume RUN_ID` that runs the same handler as `smthrs run --resume`.
 
 The command plans nothing and approves nothing. A payload whose target is not a
 plan is rejected, and a plan that carries no approval grant parks instead of
 launching: the receipt reads `Parked` and the process exits 3.
 
-When this process owns the executor, `smithers run` stays attached after the
+When this process owns the executor, `smthrs run` stays attached after the
 receipt is accepted and waits for the run to settle, then reports the run's
 outcome as its own exit status. A `--remote` composition owns no executor, so
 it prints the receipt and returns without waiting.
@@ -42,13 +42,13 @@ it prints the receipt and returns without waiting.
 
 ## Global flags
 
-`smithers run` accepts `--root`, `--remote`, `--credential`, `--json`,
+`smthrs run` accepts `--root`, `--remote`, `--credential`, `--json`,
 `--quiet`, `--mcp-config`, and `--log-level`, listed in the
 [CLI reference index](/docs/reference/cli/).
 
 ## Output
 
-`smithers run` prints one control receipt on stdout. Object members are ordered
+`smthrs run` prints one control receipt on stdout. Object members are ordered
 by UTF-16 code unit, the human rendering indents two spaces per level, and
 `--json` prints the same document with no whitespace. The receipt is one of
 five tagged shapes: `Accepted` with `receiptId` and `runId`, `AlreadyApplied`
@@ -61,7 +61,7 @@ reads `runId` from the document whatever the run then does.
 
 When the executor declines an accepted run, the command prints the run summary
 and then fails with a sentence that names the run, its status, and
-`smithers cancel <run-id>` as the way to end it.
+`smthrs cancel <run-id>` as the way to end it.
 
 `--quiet` suppresses the document itself, not only the stderr notices its own
 description names.
@@ -80,12 +80,12 @@ description names.
 
 ## Example
 
-Launch a plan payload that `smithers approve` has already granted:
+Launch a plan payload that `smthrs approve` has already granted:
 
 ```bash
-approval="$(smithers --json plan deploy/status | jq -c '.approval')"
-smithers --json approve "$approval" --scope run
-smithers --json run "$approval"
+approval="$(smthrs --json plan deploy/status | jq -c '.approval')"
+smthrs --json approve "$approval" --scope run
+smthrs --json run "$approval"
 ```
 
 The accepted receipt, with the identifier placeholders that
@@ -97,13 +97,13 @@ The accepted receipt, with the identifier placeholders that
 
 ## See also
 
-- [`smithers plan`](/docs/reference/cli/plan/) produces the payload this
+- [`smthrs plan`](/docs/reference/cli/plan/) produces the payload this
   command takes.
-- [`smithers approve`](/docs/reference/cli/approve/) grants the payload so a
+- [`smthrs approve`](/docs/reference/cli/approve/) grants the payload so a
   submission launches instead of parking.
-- [`smithers up`](/docs/reference/cli/up/) performs plan, approve, and run in
+- [`smthrs up`](/docs/reference/cli/up/) performs plan, approve, and run in
   one call.
-- [`smithers ps`](/docs/reference/cli/ps/) lists the run this command started.
+- [`smthrs ps`](/docs/reference/cli/ps/) lists the run this command started.
 - [Plan, approve, run](/docs/guides/plan-approve-run/) shows the procedure.
 
 ## Sources

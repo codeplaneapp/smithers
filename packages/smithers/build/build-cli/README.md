@@ -1,5 +1,7 @@
 # smithers-build CLI
 
+**Documentation:** https://build-cli.smithers.sh
+
 `smithers-build` executes target graphs. A verb selects a set of targets by
 label or pattern, the CLI plans them, consults a content-addressed cache, and
 runs whatever is missing. Targets declare inputs, outputs, and permissions;

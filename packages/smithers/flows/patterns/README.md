@@ -1,5 +1,7 @@
 # @smthrs/patterns
 
+**Documentation:** https://patterns.smithers.sh
+
 Higher-order flow patterns and decorators for flows. It composes `@smthrs/core` alone and imports no Node built-ins.
 
 ```sh

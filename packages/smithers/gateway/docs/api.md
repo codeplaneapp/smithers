@@ -1,7 +1,7 @@
 A UI depends on this package and on [`@smthrs/control`](/api/control). It never
 depends on `@smthrs/engine-store`, and it never reads a store table: a
 projection is the contract, and a store row is an implementation detail.
-[`smithers serve`](/cli/serve) composes the assembly with `@smthrs/control` and
+[`smthrs serve`](/cli/serve) composes the assembly with `@smthrs/control` and
 `@smthrs/sync` to host it.
 
 ## Mounts
@@ -104,7 +104,7 @@ set a release serves is the set the schema declares.
 node, so a call's published key is the ordinal it opened on, and a settlement is
 paired with the oldest open call of the same flow name. `node-output` keys its
 rows the same way, so a node id a tree view shows is a node id
-`smithers output` accepts.
+`smthrs output` accepts.
 
 `GatewaySchema.rowSchemaFor` maps a selector to the schema of the rows it
 answers with, so a client decodes a snapshot instead of casting it.

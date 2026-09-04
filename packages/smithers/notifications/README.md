@@ -1,5 +1,7 @@
 # @smthrs/notifications
 
+**Documentation:** https://notifications.smithers.sh
+
 Durable notification queue, admission policy, and journal projection for flows. It models human and system notifications, derives queue state from journal events, and drains eligible work at harness boundaries.
 
 ```sh

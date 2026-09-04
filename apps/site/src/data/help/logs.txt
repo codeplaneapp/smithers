@@ -2,7 +2,7 @@ DESCRIPTION
   Read run events; --follow streams future events
 
 USAGE
-  smithers logs [flags] [<run-id>]
+  smthrs logs [flags] [<run-id>]
 
 ARGUMENTS
   run-id string     (optional)

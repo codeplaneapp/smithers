@@ -1,5 +1,7 @@
 # @smthrs/evals
 
+**Documentation:** https://evals.smithers.sh
+
 Fixed-suite evaluation for flows: it connects target execution and scorer runners
 to validated suites, committed baselines, regression comparison, reports, and CI
 gates.

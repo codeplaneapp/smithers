@@ -1,5 +1,7 @@
 # @smthrs/ui
 
+**Documentation:** https://ui.smithers.sh
+
 Shared component library for Smithers UIs: shadcn component anatomy (compound
 slots, CVA variant APIs, `asChild`, `data-slot` attributes) and Radix behavior,
 styled entirely through theme tokens so every component is correct in light and

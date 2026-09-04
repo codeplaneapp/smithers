@@ -1,5 +1,7 @@
 # @smthrs/gateway
 
+**Documentation:** https://gateway.smithers.sh
+
 The assembled workspace gateway: one HTTP surface carrying the control plane, the sync read path, the served projections, and a health probe. It also defines the gateway wire schemas and the stale-run supervision port, and re-exports the durable journal synchronization package gateway hosts use.
 
 ```sh

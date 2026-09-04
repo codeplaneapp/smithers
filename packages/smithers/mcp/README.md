@@ -1,5 +1,7 @@
 # @smthrs/mcp
 
+**Documentation:** https://mcp.smithers.sh
+
 Model Context Protocol client and flow adapter for Smithers.
 
 A remote MCP server's tools are not a second kind of capability the harness has

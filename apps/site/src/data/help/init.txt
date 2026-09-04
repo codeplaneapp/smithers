@@ -2,7 +2,7 @@ DESCRIPTION
   Scaffold flows/<name>/flow.mdx and ignore .flows/
 
 USAGE
-  smithers init [flags] [<name>]
+  smthrs init [flags] [<name>]
 
 ARGUMENTS
   name string     (optional)

@@ -1,214 +1,1750 @@
+---
+title: "API reference"
+description: "Every public export of @smthrs/agent: the Agent service, the AgentSession and AgentAction adapters, seats, the quota and budget policies, the capability catalog, and the durable engine port."
+---
+
+`@smthrs/agent` exports twenty modules from its root entry point, and each is
+also importable from `@smthrs/agent/<Module>`:
+
+```ts
+import { Agent, AgentAction, Seat } from "@smthrs/agent"
+// or
+import * as Agent from "@smthrs/agent/Agent"
+```
+
+`@smthrs/agent/internal/*` and `@smthrs/agent/*/index` are not public.
+`@smthrs/agent/package.json` is exported.
+
+Services and tags are Effect constructs: a `Layer` provides a service, and a
+flow body or stream reads it from context. For the authoring model behind
+flows, actions, and interpreters, see the
+[`@smthrs/flow` reference](/api/flow). For the cell contract, the controller,
+and the sandbox vocabulary the loop runs on, see the
+[`@smthrs/harness` reference](/api/harness).
+
+## Agent
+
+The agent: one service whose `run` executes one whole agent loop and returns
+the framework-neutral `Stream<AgentEvent>` the controller emits. A run must be
+started from inside a running flow body, because the engine port is built per
+execution; that is why `FlowRuntime.FlowRuntime` and `FlowRuntime.FlowInstance`
+are in the stream's requirements rather than in the service's construction.
+
+### Agent.Service
+
+```ts
+interface Service {
+  readonly run: (
+    options: Options
+  ) => Stream.Stream<
+    AgentEvent.AgentEvent,
+    HarnessError | PluginError,
+    | FlowRuntime.FlowRuntime
+    | FlowRuntime.FlowInstance
+    | Sandbox.Sandbox
+    | Steering.Source
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
+  >
+}
+```
+
+`run` assembles the run's catalog from the registry and the declared `flows`
+(plugin `cellFlows` handlers run after them, in resolution order), shows the
+model exactly the registry the boundary resolves against, and runs the cell
+controller. Duplicate flow names fail composition rather than dispatching one
+descriptor to another implementation.
+
+### Agent.Options
+
+Everything one assembled cell run declares. The required half is the run
+itself; every default on the optional half is the conservative one.
+
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `session` | `string` | The durable session or lineage every call identity is scoped to. Required. |
+| `seat` | `Seat.Seat` | The resolved seat this run streams from: model, route, and context window together. Required. |
+| `prompt` | `string` | The task the run was admitted with. Required. |
+| `registry` | `Registry.Registry` | The catalog shown to the model and the registry its calls resolve against. Required. |
+| `system` | `ReadonlyArray<string>` | Stable system teaching placed ahead of the cell contract. |
+| `flows` | `ReadonlyArray<FlowBinding.Source>` | Ordered executable-flow sources composed into the run's catalog. |
+| `implementations` | `ReadonlyMap<string, CellCalls.Implementation>` | Host implementations for module-backed flows, keyed by flow name. |
+| `promptRunner` | `CellCalls.PromptRunner` | Runs a rendered markdown flow. A host with none refuses them catchably. |
+| `authorize` | `(call: Cell.Call) => Effect<void, HarnessError>` | Decides whether a call may proceed, before its durable boundary opens. |
+| `plugins` | `PluginInput<FlowsHooks>` | Shared-kernel plugins resolved for the harness target. |
+| `config` | `FlowsConfig` | Raw config threaded through the plugin kernel's config waterfall. |
+| `memory` | `MemorySource.DeclaredText` | One explicitly selected memory snapshot. Omitting it injects no memory. |
+| `modelParams` | `ModelRequest.GenerationParams` | Generation parameters for the run's model calls. |
+| `modelRetryPolicy` | `Schedule<unknown, Model.ModelFailure>` | Overrides the bounded transport retry schedule at the model boundary. |
+| `layers` | `ReadonlyArray<string>` | The resolved composition identity folded into every durable key. |
+| `capabilityEnvelope` | `ReadonlyArray<Capability.CapabilityPattern>` | The run's complete authority. The default is nothing granted. |
+| `placement` | `Option<Descriptor.Placement>` | The run's placement identity. |
+| `maxFrames` | `number` | Bounds one loop's frames. |
+| `readOnlyCap` | `number` | Caps consecutive read-only frames. Armed for task runs only; see `CellTurn.make` in [`@smthrs/harness`](/api/harness). |
+| `modelCallMs` | `number` | Caps the wall clock one model call may spend. Armed by default at `CellTurn.defaultModelCallMs` (300,000 ms); zero disarms it. |
+| `repeatCap` | `number` | Caps consecutive repeat-observation frames. Armed by default at `CellTurn.defaultRepeatFrames`; zero disarms it. |
+| `narrowingCap` | `number` | Caps completions bounced for narrowed evidence. Armed by default at `CellTurn.defaultNarrowingDemands`. |
+| `unmovedCap` | `number` | Caps completions bounced for an unmoved tree. Armed by default at `CellTurn.defaultUnmovedDemands`. |
+| `unresolvedCap` | `number` | Caps completions bounced for a failing check the run replaced rather than answered. Armed by default at `CellTurn.defaultUnresolvedDemands`. |
+| `approvalChannel` | `boolean` | Whether a human can answer this run. Defaults to false; a run that claims it wrongly buys a run that waits forever. |
+| `limits` | `Sandbox.Limits` | The sandbox budget every cell runs under. |
+
+### Agent.Agent
+
+```ts
+class Agent extends Context.Service<Agent, Service>()("@smthrs/agent/Agent")
+```
+
+The `Service` tag.
+
+### Agent.make
+
+```ts
+const make: (implementation: Service) => Service
+```
+
+Builds a `Service` from an implementation of its one method. A future agent
+that drives a foreign CLI is another implementation built here, not a second
+loop.
+
+### Agent.makeNoop
+
+```ts
+const makeNoop: (overrides?: Partial<Service>) => Service
+```
+
+A `Service` that emits nothing and runs no model.
+
+### Agent.layer
+
+```ts
+const layer: Layer.Layer<Agent, never, QuotaPolicy.QuotaClassifier | Budget.Budget>
+```
+
+Provides the production agent. The policy services are requirements of the
+layer so a composition cannot erase them before `run` reaches the model
+boundary.
+
+### Agent.layerNoop
+
+```ts
+const layerNoop: (overrides?: Partial<Service>) => Layer.Layer<Agent>
+```
+
+Provides `makeNoop`.
+
+### Agent.layerDefaults
+
+```ts
+const layerDefaults: Layer.Layer<Sandbox.Sandbox | Steering.Source, Sandbox.SandboxError>
+```
+
+The browser-safe defaults for the two services a run leaves to the host: the
+QuickJS single-file sandbox build, which runs unchanged in Node and in a
+browser, and an empty steering source. A host that accepts mid-run messages
+provides its own `Steering.layer` instead.
+
+### Agent.layerDefaultsWithVariant
+
+```ts
+const layerDefaultsWithVariant: Layer.Layer<
+  Sandbox.Sandbox | Steering.Source,
+  Sandbox.SandboxError,
+  QuickJSSandbox.Variant
+>
+```
+
+`layerDefaults` over the QuickJS build the host names. A runtime that refuses
+to compile WebAssembly from bytes, such as Cloudflare's workerd, provides
+`QuickJSSandbox.layerVariant(variant)` beneath this and builds that variant
+from a `.wasm` module import.
+
+## AgentSession
+
+The production `ControlExecutor` for [`@smthrs/control`](/api/control). When
+the control plane accepts a launch, the session looks the flow up in the
+registry, loads its markdown prompt body, resolves its declared seat through
+`SeatResolver`, and runs `Agent` as the body of one durable flow execution
+whose id is the control run id. Run-status writes stay fenced: the executor
+waits for the control plane's own `running` transition, writes
+`waiting-approval` when the execution parks, and writes the terminal status
+when it settles.
+
+### AgentSession.Options
+
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `limits` | `Sandbox.Limits` | The explicit sandbox budget every cell runs under. Required; never unlimited. |
+| `quotaPolicy` | `Layer<QuotaPolicy.QuotaClassifier>` | The required quota park/retry policy every model call in the run is decided under. |
+| `budget` | `(envelope: Envelope) => Layer<Budget.Budget>` | Builds the run-local spending policy from the plan that was approved. Provided inside each body invocation. |
+| `flows` | `ReadonlyArray<FlowBinding.Source>` | Host executable-flow sources composed into every run's catalog. The durable wait and the control-wired approval are composed by the session itself. |
+| `system` | `ReadonlyArray<string>` | Stable system teaching placed ahead of the cell contract. |
+| `maxFrames` | `number` | The cell-loop bound. |
+| `readOnlyCap` | `number` | Consecutive read-only frames a task run may spend. Defaults to `CellTurn.defaultReadOnlyFrames`. |
+| `modelCallMs` | `number` | Wall-clock milliseconds one model call may spend. Defaults to `CellTurn.defaultModelCallMs`; zero disarms it. |
+| `repeatCap` | `number` | Consecutive repeat-observation frames. Defaults to `CellTurn.defaultRepeatFrames`; zero disarms it. |
+| `narrowingCap` | `number` | Completions bounced for narrowed evidence. Defaults to `CellTurn.defaultNarrowingDemands`; zero disarms it. |
+| `unmovedCap` | `number` | Completions bounced for an unmoved tree. Defaults to `CellTurn.defaultUnmovedDemands`; zero disarms it. |
+| `unresolvedCap` | `number` | Completions bounced for a failing check the run replaced. Defaults to `CellTurn.defaultUnresolvedDemands`; zero disarms it. |
+| `approvalChannel` | `boolean` | Whether a human answers this executor's runs. Defaults to false; a run that claims false has its `park` transitions refused and answered in-frame. |
+| `reasoningEffort` | `ModelRequest.ReasoningEffort` | The reasoning effort agent seats run at when their flow declares none. The flow's own `effort:` frontmatter wins; the built-in default is `high`. |
+
+### AgentSession.make
+
+```ts
+const make: (
+  options: Options
+) => Effect.Effect<ControlExecutor.Service, never, Services | Scope.Scope>
+```
+
+Constructs the production executor. It must be built in a scope: the scope owns
+the registered agent flow, every forked run driver, and the resume bridge that
+follows the journal. Its requirements are `Agent`, `ControlRuntime`,
+`Crypto.Crypto`, `DurableEngineState`, `FlowRuntime`, `Journal`,
+`NotificationQueue`, `Registry`, `RunStore`, and `SeatResolver`.
+
+### AgentSession.layer
+
+```ts
+const layer: (options: Options) => Layer.Layer<ControlExecutor.ControlExecutor, never, Services>
+```
+
+Provides the production `ControlExecutor`.
+
+### AgentSession.trace
+
+```ts
+const trace: (
+  event: AgentEvent.AgentEvent
+) => { readonly eventType: string; readonly payload: unknown } | undefined
+```
+
+The journal projection of one agent event: `model-settled` becomes
+`control.agent.model-settled`, and so on for the run's whole trail.
+`model-delta` is the one omission, returning `undefined`, because deltas are
+the token-by-token prefix of `model-settled` and journaling them would multiply
+a run's event count by its token count. Free-text and value fields larger than
+`maxTracedBytes` are replaced with a deterministic truncation marker carrying
+the field's byte count and digest.
+
+### AgentSession.traceIdentity
+
+```ts
+const traceIdentity: (
+  frame: number,
+  ordinal: number,
+  cell: string,
+  eventType: string,
+  payload: Readonly<Record<string, unknown>>
+) => JournalEvent.SourceSeq
+```
+
+The producer identity of one journaled agent event, derived from where the
+event sits and what it says: the frame, its ordinal within that frame, the cell
+that frame produced, the event type, and the event's payload minus the
+observation-only fields `at` and `durationMillis`. A resumed attempt
+republishes its whole prefix, and this identity is what lets the journal's
+`UNIQUE (run_id, source_id, source_seq)` index refuse the duplicates while
+admitting events produced after a divergence.
+
+### AgentSession.maxTracedBytes
+
+```ts
+const maxTracedBytes = 65_536
+```
+
+The largest free-text or value field one trail record carries.
+
+### AgentSession.patterns
+
+```ts
+const patterns: (
+  capabilities: ReadonlyArray<string>
+) => ReadonlyArray<Capability.CapabilityPattern>
+```
+
+Parses a run envelope's formatted capabilities, dropping every entry the
+capability grammar cannot name. Dropping narrows authority, which is the
+fail-closed direction.
+
+### AgentSession.settlementFailure
+
+```ts
+const settlementFailure: (error: unknown) => unknown
+```
+
+Renders the failure the engine persists as the agent flow's settlement. Values
+the JSON codec already accepts keep their identity; other objects are
+round-tripped through JSON so their enumerable fields, `_tag` above all,
+survive; anything else falls back to a text rendering. The mapper never throws:
+a cycle, a `BigInt` field, or excessive depth still settles as text.
+
+### Wait and driver helpers
+
+The pieces the session builds itself out of, public because a host that runs
+the agent its own way needs the same ones:
+
+| Export | Signature | Behavior |
+| --- | --- | --- |
+| `waitForRunning` | `(status, runId, attempts, retryDelay?) => Effect<boolean, unknown>` | Waits for the control plane to publish its `running` transition before a driver starts the engine. Fails with `LaunchFailed` when the admission budget expires at `accepted`; answers false for any other status. |
+| `waitForParked` | `(poll, attempts) => Effect<boolean, unknown>` | Polls a durable execution until it is published as parked. A missing poll is a still-live execution, so retries are bounded. |
+| `preserveDriverInterrupt` | `(interrupt) => Effect<void, never, R>` | Keeps a control cancellation durable even when its engine interrupt fails: a non-interrupt cause is logged, and an interrupt-only cause is re-thrown. |
+| `registerDriver` | `(register, runId) => Effect<void, LaunchFailed>` | Translates a failed driver registration into the executor's launch error. |
+| `settleDriverFailure` | `(cause, runId, writeFailed) => Effect<void, E, R>` | Re-throws a cancelled driver while logging a non-interrupt engine failure and writing the run's `failed` status. |
+| `requestCancel` | `(input: CancelRequest) => Effect<CancelRecord, PersistenceError, RunStore>` | Records a cancellation on the engine row, whichever process owns the run. A settled row answers `Terminal`; a missing row answers `unknown`; a repeat answers `already-requested`. |
+| `deliverSignal` | `(input: Signal) => Effect<SignalDelivery, PersistenceError, ...>` | Completes the `WaitFor` wait point a run is parked on with a signal's payload. Answers `delivered`, `no-match` (parked on something else), or `unknown` (no open wait point visible). |
+| `drainRecordedSignals` | `Effect<void, never, ...>` | Delivers every signal recorded while no executor was running, replayed at start against each non-terminal run's wait point. |
+
 ## AgentAction
 
-`AgentAction.make(tag, options)` declares an ordinary action, with the same tag,
-payload schema, `.call()`, plan node, and durable replay as any other, and ships
-its implementation. The composition half is `AgentAction.Host` (the registry,
-the sandbox budget, the catalog, and the defaults below) plus `SeatResolver`,
-which turns a declared seat string into a live model.
+The authoring surface for a model-backed step. `make` declares an ordinary
+`Action`, with the same tag, payload schema, `.call()`, plan node, and durable
+replay as any other, and ships the implementation with it. An author never
+writes `toLayer` for a model call, because there is only one implementation.
 
-A step fails with `AgentAction.AgentFailure`: a `StructuredOutputFailure` when
-the answer never fit the schema, a `BudgetExceeded` when the run has spent what
-it was approved for, a `Budget.Skipped` when an earlier step already broke a
-`skip-remaining` budget, a `SeatUnresolved` when the host has no model for the
-declared seat, and `HarnessError` or `PluginError` when the composition failed
-underneath it.
+### AgentAction.make
 
-`AgentAction.Host` is the composition half, provided once through
-`AgentAction.layerHost`:
+```ts
+const make: <Tag extends string, Payload, Output>(
+  tag: Tag,
+  options: Options<Payload, Output>
+) => AgentAction<Tag, PayloadSchemaOf<Payload>, Output>
+```
 
-| Field                                           | What it decides                                                                                                      |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `registry`                                      | The catalog a cell is shown and the registry its calls resolve against.                                              |
-| `limits`                                        | The sandbox budget every cell runs under. Never unlimited.                                                           |
-| `flows`, `implementations`, `plugins`, `config` | The executable flows, module-backed implementations, plugins, and configuration composed into every run.             |
-| `system`                                        | Stable teaching placed ahead of every action's own.                                                                  |
-| `capabilityEnvelope`                            | What the composition grants, and what its sealed step keys are computed under.                                       |
-| `maxFrames`                                     | The default cell-loop bound for steps that declare none.                                                             |
-| `defaultCorrections`                            | The correction budget for steps that declare none.                                                                   |
-| `modelRetryPolicy`                              | The transport retry ladder one model call runs under. Defaults to the port's own; `Schedule.recurs(0)` turns it off. |
-| `maxQuotaParks`                                 | How many quota waits one step may take. Defaults to `QuotaPolicy.defaultMaxParks`, which is eight.                   |
+Declares a model-backed action and ships its implementation. The returned value
+is used exactly like any other declared action: `.call()` in a flow body,
+`.layer` in the composition. The layer resolves the seat through `SeatResolver`,
+runs one agent loop through `Agent` inside the current flow execution, and
+decodes the run's final answer with the declared output schema, spending
+`Options.corrections` re-prompts before it reports a typed
+`StructuredOutputFailure`.
 
-The plugin kernel treats `configResolved` as a nonfatal observer boundary.
-Production `Agent.run` logs one warning per observer failure with its stable
-error code, plugin name, and hook name. It deliberately omits the failure cause,
-which may contain provider or application configuration.
+### AgentAction.Options
 
-## Structured-output corrections
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `payload` | `Schema.Struct.Fields \| Flow.AnyStructSchema` | The step's typed input, exactly as `Action.make` takes it. Required. |
+| `output` | `Schema.Top` | The schema the answer must satisfy. Rendered into the prompt and enforced. Required. |
+| `seat` | `string` | The seat id the host's `SeatResolver` resolves. An opaque string here: the resolver owns the vocabulary. Required. |
+| `prompt` | `(payload) => string` | The task, built from the decoded payload. Required. |
+| `system` | `ReadonlyArray<string>` | Stable system teaching for this step, after the host's and before the schema's. |
+| `corrections` | `number` | How many times a decode miss may be re-prompted. Falls back to `Host.defaultCorrections`, then to one. Zero declares a first miss terminal and beats a generous host default. |
+| `repair` | `Repair<Payload>` | One bounded repair ask made after the correction budget is spent, decoded by the same schema. |
+| `modelParams` | `ModelRequest.GenerationParams` | Generation parameters for the step's model calls. |
+| `maxFrames` | `number` | The cell-loop bound for this step, ahead of the host's. |
 
-The declared output schema is rendered into the run's system teaching and
-enforced against the run's final answer. A decode miss spends a correction slot
-on a re-prompt that repeats the task verbatim and appends the validation issues.
+### AgentAction.Repair
 
-| Where                     | What it decides                                       |
-| ------------------------- | ----------------------------------------------------- |
-| `Options.corrections`     | This step's budget. Zero makes a first miss terminal. |
-| `Host.defaultCorrections` | The composition's budget for steps that declare none. |
-| `Options.repair`          | One bounded ask after the budget is spent.            |
+```ts
+interface Repair<Payload> {
+  readonly prompt: (
+    failure: StructuredOutput.StructuredOutputFailure,
+    payload: Payload
+  ) => string
+  readonly seat?: string | undefined
+  readonly system?: ReadonlyArray<string> | undefined
+}
+```
 
-Neither declared leaves the budget at one. The declaration always beats the
-composition default, including when it is zero: a step that declared a first
-miss terminal stays terminal under a generous host.
+The bounded repair ask made after a correction budget is spent. The failure
+carries the declared schema's digest, the issues the last candidate raised, and
+how many corrections were spent. `seat` and `system` default to the step's own.
 
-A repair is not another rung of the correction ladder. A correction assumes the
-model can still answer the question it was asked; a repair is the author's own
-prompt, written from the failure, asked once, on its own seat and with its own
-teaching if the declaration says so, and decoded by the same schema.
+### AgentAction.AgentAction
 
-Every rejection writes a `flows.agent.structured-output-rejected.v1` record on
-the journal's lossy channel with the action, the attempt, the budget, the schema
-digest, and `StructuredOutput.issuesDigest`. The record carries a digest rather
-than the issues themselves, so two runs that spent their budget the same way are
-distinguishable without the answers being journaled. A composition with no
-journal writes nothing and behaves the same otherwise.
+```ts
+interface AgentAction<Tag, Payload, Output> extends Action.Declared<Tag, Payload, Output, typeof AgentFailure> {
+  readonly layer: Layer.Layer<Action.Requirement<Tag>, never, ...>
+}
+```
 
-**The record is evidence, not a decision.** It is what an operator reads to see
-which correction was spent and why; nothing in the ladder reads it back.
-Compaction may drop it, and a composition without a journal never writes it, and
-the run behaves identically either way. What makes the ladder durable is the
-step record underneath it: each attempt is a whole cell run under its own
-session and prompt, so its model call is a distinct sealed step with its own
-content key and its own attempt row on the journal's durable channel. A settled
-ladder replays whole across a process restart, over a second engine on the same
-database, and pays the provider nothing.
+A declared model-backed action, plus the layer that implements it. The layer's
+requirements are `Agent`, `FlowRuntime`, `Host`, `Sandbox.Sandbox`,
+`SeatResolver`, `Steering.Source`, `Crypto.Crypto`, `Budget.Budget`, and
+`QuotaPolicy.QuotaClassifier`.
 
-Distinct is not the same as readable. A session is key material and is hashed
-into the step key, so three distinct keys say a ladder ran and not which call
-was the ask. `AgentAction` sets `FlowEngineLike.Correction` around each rung and
-the port stamps the ordinal onto that rung's `RecordedModelStep`, so a
-projection reading the run's sealed steps gets `correction: 0` for the ask and
-`1`, `2` for its re-prompts. The field is optional: a model call outside a
-ladder has no ordinal, and a record written before the field existed still
-decodes for a parked run resuming onto a newer package.
+### AgentAction.Host
 
-## Quota parks
+The host composition every model-backed action in a run shares, provided once
+through `layerHost`:
 
-`QuotaPolicy` classifies a provider refusal as a wait. It answers one question,
-whether this is a wait and until when, in order of how much the provider said:
-`resetAtEpochMillis`, then `retryAfterMillis`, then a delay parsed out of the
-message text, then `Config.defaultWaitMillis`. Above `Config.maxWaitMillis` it
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `registry` | `Registry.Registry` | The catalog a cell is shown and the registry its calls resolve against. Required. |
+| `limits` | `Sandbox.Limits` | The explicit sandbox budget every cell runs under. Required; never unlimited. |
+| `flows` | `ReadonlyArray<FlowBinding.Source>` | Host executable-flow sources composed into every run's catalog. |
+| `implementations` | `ReadonlyMap<string, CellCalls.Implementation>` | Host implementations for module-backed flows, keyed by flow name. |
+| `plugins` | `PluginInput<FlowsHooks>` | Plugins composed into every run. |
+| `config` | `FlowsConfig` | Configuration composed into every run. |
+| `system` | `ReadonlyArray<string>` | Stable system teaching placed ahead of every action's own. |
+| `capabilityEnvelope` | `ReadonlyArray<Capability.CapabilityPattern>` | What the composition grants, and what its sealed step keys are computed under. |
+| `maxFrames` | `number` | The default cell-loop bound for steps that declare none. |
+| `defaultCorrections` | `number` | The correction budget for steps that declare none. Omitting both leaves the budget at one. |
+| `modelRetryPolicy` | `Schedule<unknown, Model.ModelFailure>` | The transport retry ladder one model call runs under. Defaults to the port's own; `Schedule.recurs(0)` turns it off. |
+| `maxQuotaParks` | `number` | How many quota waits one ask may take. Defaults to `QuotaPolicy.defaultMaxParks` (8). The bound is per ask: a corrected step starts its next ask with a full allowance. |
+
+### AgentAction.makeHost
+
+```ts
+const makeHost: (host: Host) => Host
+```
+
+Constructs a host composition value. A `defaultCorrections` that is not a
+non-negative safe integer is refused here with `InvalidCorrectionBudget`
+rather than at the first decode miss.
+
+### AgentAction.layerHost
+
+```ts
+const layerHost: (host: Host) => Layer.Layer<Host>
+```
+
+Provides one host composition to every model-backed action in a run.
+
+### AgentAction.AgentFailure
+
+```ts
+const AgentFailure = Schema.Union([
+  StructuredOutput.StructuredOutputFailure,
+  Seat.SeatUnresolved,
+  Budget.BudgetExceeded,
+  Budget.Skipped,
+  HarnessError,
+  PluginError
+])
+```
+
+Everything a model-backed action can fail with. `StructuredOutputFailure` is
+the one an author handles: the model answered and the answer did not fit the
+declared schema after its correction budget. `SeatUnresolved` is the host
+having no model for the declared seat. `BudgetExceeded` is the run having spent
+what it was approved for, and `Budget.Skipped` is every later model call in a
+run whose budget declared `skip-remaining`. `HarnessError` and `PluginError`
+are the composition failing underneath the step.
+
+### AgentAction.structuredOutputRejectedEvent
+
+```ts
+const structuredOutputRejectedEvent = "flows.agent.structured-output-rejected.v1"
+```
+
+The journal event one rejected answer writes on the lossy channel, carrying the
+action, the attempt, the budget, the schema digest, and a digest of the issues.
+The record is evidence, not a decision: nothing in the ladder reads it back,
+and a composition without a journal writes nothing and behaves the same
+otherwise.
+
+### AgentAction.InvalidCorrectionBudget
+
+```ts
+class InvalidCorrectionBudget extends Schema.TaggedError<InvalidCorrectionBudget>()(
+  "flows/agent/InvalidCorrectionBudget",
+  { corrections: Schema.Number, message: Schema.String }
+)
+```
+
+Raised synchronously when an action declaration or a host composition has an
+unbounded correction budget: not a non-negative safe integer.
+
+## Seat
+
+The seat: what a flow or an action declares to pick the model it runs on. The
+declared half is an ordinary string this module deliberately ships no schema
+for; the resolved half is `Seat`, the only thing `Agent.run` accepts. For the
+mental model, see [Seats](./concepts/seats.md).
+
+### Seat.Seat
+
+```ts
+interface Seat {
+  readonly id: string
+  readonly model: Model.Model
+  readonly route: FlowEngineLike.RouteResolver
+  readonly contextWindowTokens: number
+}
+```
+
+One resolved seat: the id it was declared as, the model to stream from, the
+route that seals its requests, and the model's context window in tokens so
+compaction has a real budget. `contextWindowTokens` must never be zero: zero is
+the controller's "compaction disabled".
+
+### Seat.make
+
+```ts
+const make: (seat: Seat) => Seat
+```
+
+Constructs a resolved seat. A `SeatResolver` implementation is what calls it; a
+caller reaches a seat through the resolver, never by assembling one from a
+model and a route it happened to hold.
+
+### Seat.SeatUnresolved
+
+```ts
+class SeatUnresolved extends Schema.TaggedError<SeatUnresolved>()(
+  "@smthrs/agent/Seat/SeatUnresolved",
+  { seat: Schema.String, message: Schema.String }
+)
+```
+
+A seat the host could not turn into a model route: an unknown provider, a
+missing API key, an invalid endpoint. Typed, so the run refuses at the seam
+rather than failing halfway through.
+
+### Seat.modelIdOf
+
+```ts
+const modelIdOf: (id: string) => string
+```
+
+The model id half of a seat string: the part after the first `:`. A seat with
+no separator is its own model id.
+
+## SeatResolver
+
+The host seam that turns a declared seat string into a live model. The
+credentialed half of the composition lives here and nowhere else.
+
+### SeatResolver.Service
+
+```ts
+interface Service {
+  readonly resolve: (id: string) => Effect.Effect<Seat.Seat, Seat.SeatUnresolved>
+}
+```
+
+One seat string in, one resolved seat out. Because the resolver owns the seat
+vocabulary, a host may define its own: `provider:modelId` is the convention the
+Node CLI resolver understands, not a rule the agent enforces.
+
+### SeatResolver.SeatResolver
+
+```ts
+class SeatResolver extends Context.Service<SeatResolver, Service>()("@smthrs/agent/SeatResolver")
+```
+
+The `Service` tag.
+
+### SeatResolver.make, SeatResolver.layer
+
+```ts
+const make: (implementation: Service) => Service
+const layer: (implementation: Service) => Layer.Layer<SeatResolver>
+```
+
+Builds or provides a `Service` from an implementation of its one method.
+
+### SeatResolver.makeNoop, SeatResolver.layerNoop
+
+```ts
+const makeNoop: (overrides?: Partial<Service>) => Service
+const layerNoop: (overrides?: Partial<Service>) => Layer.Layer<SeatResolver>
+```
+
+A resolver that resolves nothing. Refusing is the honest default: a composition
+with no configured resolver has no credentials, and inventing a model here
+would turn a missing key into a failed provider call halfway through a run.
+The refusal is `SeatUnresolved` with the message "No seat resolver is
+configured".
+
+### SeatResolver.contextWindowTokensFor
+
+```ts
+const contextWindowTokensFor: (modelId: string) => number
+```
+
+The context window, in tokens, of a known model id, with a conservative floor
+of 128,000 for models the catalog has not met. Never zero.
+
+| Pattern | Tokens |
+| --- | --- |
+| `claude` | 200,000 |
+| `gpt-5` | 400,000 |
+| `gpt-4.1` | 1,000,000 |
+| `gpt-4o` | 128,000 |
+| `o1`, `o3`, `o4` | 200,000 |
+| anything else | 128,000 |
+
+## QuotaPolicy
+
+The classification half of quota-aware waits: it answers one question, "is
+this refusal a wait, and until when?", and nothing else. The park itself
+belongs to `AgentAction`. For the full behavior, see
+[Park on quota refusals and cap run spend](./guides/quota-and-budgets.md).
+
+### QuotaPolicy.QuotaClassifier and QuotaPolicy.Service
+
+```ts
+interface Service {
+  readonly classify: (error: unknown, nowMillis: number) => Option.Option<Park>
+}
+
+class QuotaClassifier extends Context.Service<QuotaClassifier, Service>()(
+  "@smthrs/agent/QuotaPolicy/QuotaClassifier"
+)
+```
+
+Decides whether a failure is a quota wait. `now` is passed in rather than read:
+the classifier is pure, so a caller inside a flow takes the instant from the
+injected clock and a test states it outright.
+
+### QuotaPolicy.Park and QuotaPolicy.ParkSource
+
+```ts
+const Park = Schema.Struct({
+  wakeAt: Schema.Number,
+  source: ParkSource
+})
+
+const ParkSource = Schema.Literals(["reset", "retry-after", "text", "default"])
+```
+
+One classified refusal: the absolute epoch instant the run may ask again, and
+on whose authority. It is a schema rather than an interface because the
+decision is recorded: a replayed body waits out the deadline the first pass
+chose.
+
+### QuotaPolicy.makeDefault, QuotaPolicy.layerDefault
+
+```ts
+const makeDefault: (config?: Config) => Service
+const layerDefault: (config?: Config) => Layer.Layer<QuotaClassifier>
+```
+
+The production classifier. It classifies a `ModelError` whose code is
+`rate_limited` or `quota_exceeded`, or whose HTTP status is 429, and decides
+the deadline in order of how much the provider said: `resetAtEpochMillis`,
+then `retryAfterMillis`, then a delay parsed out of the message text, then
+`Config.defaultWaitMillis`. A deadline more than `Config.maxWaitMillis` away
 answers `None` and the original `ModelError` propagates, because a run parked
-for a day is indistinguishable from a run that hung.
+for a day is indistinguishable from a run that hung. A deadline already past is
+a park of zero, not a refusal to park.
 
-The classifier is required. A composition that binds none is a type error, and
-`QuotaPolicy.layerUnclassified()` is how one opts out in writing.
+### QuotaPolicy.Config, QuotaPolicy.defaultWaitMillis, QuotaPolicy.maxWaitMillis
 
-What it opts out of is parking, not the recording floor. `FlowEngineLike` fails
-every capacity refusal it normalizes, whichever classifier is composed:
-`rate_limited`, `quota_exceeded`, `provider_internal`, and any refusal carrying
-HTTP 429, 503, 504, or 529. Under `layerUnclassified` such a refusal fails the
-step instead of parking it, and it is still never written as the sealed step's
-durable value. Policy decides what happens on top of that floor; no policy
-weakens it.
+```ts
+interface Config {
+  readonly defaultWaitMillis?: number | undefined
+  readonly maxWaitMillis?: number | undefined
+}
 
-A classified refusal parks for real:
+const defaultWaitMillis = 60_000
+const maxWaitMillis = 3_600_000
+```
 
-- the decision is a **recorded step**, so a replay waits out the deadline the
-  first pass chose rather than computing a new one;
-- `annotateWaiting({ reason: "quota", wakeAt })` and `DurableClock.sleep`
-  suspend the run, so `waitingRuns({ reason: "quota" })` finds it and an
-  operator sees a park with a wake time instead of a stall;
-- the retry runs under `Action.retry`, so the re-issued model call is a new
-  attempt of the same step rather than a replay of the one the provider
-  refused, and the step's correction budget is untouched, because a quota wait
-  is not a failed attempt;
-- `Host.maxQuotaParks` bounds it: a window still closed after its own deadline
-  is not one a run waits out forever.
+`defaultWaitMillis` is how long a refusal that names no deadline parks for.
+`maxWaitMillis` is the longest wait a refusal may buy before it stays a
+failure.
 
-One thing changes at the engine port. `FlowEngineLike` records a provider
-refusal as the sealed step's _result_, which is right for every failure but this
-one: a capacity refusal says nothing about the request, so recording it under a
-content key would pin "this prompt is refused" into the shared cache and make
-the wake pointless. A capacity refusal fails the sealed action instead, which
-records an attempt rather than a result, and nothing outlives the window. That
-is the recorder's own floor, applied before any classifier is consulted. The
-classifier then decides whether the failed step parks and waits or ends the run.
+### QuotaPolicy.makeUnclassified, QuotaPolicy.layerUnclassified
 
-## Budgets
+```ts
+const makeUnclassified: () => Service
+const layerUnclassified: () => Layer.Layer<QuotaClassifier>
+```
 
-`Sandbox.Limits` bounds one cell and `Agent.Options.maxFrames` bounds one loop.
-Neither accumulates, so `Envelope.budget`, the tokens and milliseconds a control
-plane approved, bound nothing until `Budget` existed.
-`Budget.layerFromEnvelope(envelope)` turns the approval into enforcement;
-`Budget.layer(policy)` states one directly.
+A classifier that classifies nothing, so every refusal stays a failure. This is
+an explicit safety-policy decision, not a default: the recorder's independent
+capacity-refusal floor still prevents those failures from becoming durable
+sealed values.
 
-Enforcement sits at the model boundary, which every model call passes through,
-so a step that assembles its own loop cannot evade a run-wide budget. Four
-rules make it usable:
+### QuotaPolicy.parseDelay
 
-- **The accumulator is keyed by the model step's content key, and it is
-  projected from the journal.** Every accounted call writes a
-  `flows.agent.usage.v1` record, a run's first decision writes its latency
-  clock zero as a `flows.agent.budget-started.v1` record, and a budget built
-  inside a resumed run folds both back before it decides anything. Without the
-  projection a restart would start the accounting at zero, hand the run a
-  second full token allowance, and re-arm its whole latency window, because
-  the engine resumes from recorded node results and never re-enters a settled
-  step. The content key stops the two sources double counting: a recovered
-  record and its own live call are the same key. The earliest recorded clock
-  zero wins, so a duplicate write cannot move a latency allowance forward.
-- **Refusal is a projection.** The check runs before a call and projects its
-  cost as the largest call the run has made. A budget that noticed afterwards
-  would always be exceeded by the call that exceeded it.
-- **The first call is never refused.** With nothing recorded, the only honest
-  projection is zero.
-- **The accounting fails closed.** A usage record that could not be written, a
-  ledger that could not be read, and a ledger longer than
-  `Budget.defaultRecoveryEntries` all raise `Budget.AccountingUnavailable`
-  instead of answering. Each is a run whose spend is unknown, not zero, and a
-  budget that read the difference as zero would give a resumed run its whole
-  allowance back and report itself healthy. The step that made the call fails;
-  its sealed model step replays from the recorded answer, so re-dispatching it
-  pays the ledger again and not the provider.
-  `Budget.layer(policy, { recoveryEntries })` sets the bound.
+```ts
+const parseDelay: (message: string) => number | undefined
+```
 
-`onExceeded` decides what running out means:
+The delay a refusal's message names, in milliseconds, read from prose forms
+such as "try again in 30 seconds", "retry-after: 2 minutes", and "resets in 1
+hour". `undefined` means the text named none, which is not the same as naming
+zero: the caller falls back to its configured default.
 
-| Setting          | Behavior                                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `fail`           | The step fails with `BudgetExceeded { scope, used, max, next }`.                                       |
-| `warn`           | A `flows.agent.budget-warning.v1` record is written and the call proceeds.                             |
+### QuotaPolicy.modelErrorOf
+
+```ts
+const modelErrorOf: (error: unknown) => Option.Option<ModelError>
+```
+
+The `ModelError` a failure is, or wraps. Walks the `cause` chain, up to eight
+levels, and accepts a plain object with the right shape as well as a class
+instance, because a failure that has been through a journal round trip is
+decoded, not reconstructed.
+
+### QuotaPolicy.quotaParkedEvent
+
+```ts
+const quotaParkedEvent = "flows.agent.quota-parked.v1"
+```
+
+The journal event one park writes.
+
+### QuotaPolicy.defaultMaxParks
+
+```ts
+const defaultMaxParks = 8
+```
+
+The most times one ask parks before its refusal is reported. The bound is per
+ask: a step that parks, answers, and is corrected starts again from zero.
+
+### QuotaPolicy.current
+
+```ts
+const current: Effect.Effect<Service, never, QuotaClassifier>
+```
+
+Reads the classifier a composition explicitly provided. There is deliberately
+no fallback: omitting the decision is a type error.
+
+## Budget
+
+What a run may spend across its model calls, and what happens when it has
+spent it. Enforcement sits at the model boundary in `FlowEngineLike`, which
+every model call passes through, so a step that assembles its own loop cannot
+evade a budget declared for the run.
+
+### Budget.Policy, Budget.TokenBudget, Budget.LatencyBudget, Budget.OnExceeded
+
+```ts
+const OnExceeded = Schema.Literals(["fail", "warn", "skip-remaining"])
+
+interface Policy {
+  readonly tokens?: TokenBudget | undefined
+  readonly latency?: LatencyBudget | undefined
+}
+
+interface TokenBudget {
+  readonly max: number
+  readonly onExceeded?: OnExceeded | undefined
+}
+
+interface LatencyBudget {
+  readonly maxMillis: number
+  readonly onExceeded?: OnExceeded | undefined
+}
+```
+
+Everything one composition declares about spending. An empty policy is a real
+policy: it accumulates usage and refuses nothing. A latency budget bounds when
+a call may start, not how long one may take; cutting a call off is
+`Agent.Options.modelCallMs`, a different budget. Its zero is the run's first
+budget question and is durable, so a park or restart does not grant the run the
+whole interval again.
+
+`onExceeded` decides what running out means, and defaults to `fail`:
+
+| Setting | Behavior |
+| --- | --- |
+| `fail` | The step fails with `BudgetExceeded { scope, used, max, next }`. |
+| `warn` | A `flows.agent.budget-warning.v1` record is written and the call proceeds. |
 | `skip-remaining` | The budget latches. Every later model call in the run fails typed `skipped` without asking a provider. |
 
-A latched refusal is `Budget.Skipped`, not another `BudgetExceeded`. It is
-quarantine-compatible: it names a verdict no retry can change, so a supervisor
-can hold the run rather than re-dispatch it, and `Budget.neverRetrySkipped`
-adds the tag to a retry policy so a ladder that would otherwise re-dispatch the
-step gives up on the first refusal.
+### Budget.Budget and Budget.Service
 
-One budget instance serves a whole composition. The accumulator is keyed by
-execution id, so a layer built above the engine gives every run its own
-allowance and its own latency clock, and `Budget.usageOf(runId)` reads one run's
-spend. `Budget.defaultMaxRuns` bounds how many tallies it holds in memory, and
-`Budget.layer(policy, { maxRuns })` sets it.
+```ts
+interface Service {
+  readonly check: (stepKey: string | undefined) => Effect.Effect<Verdict, AccountingUnavailable>
+  readonly record: (stepKey: string, usage: ModelEvent.Usage) => Effect.Effect<void, AccountingUnavailable>
+  readonly usage: Effect.Effect<Usage, AccountingUnavailable>
+  readonly usageOf: (runId: string) => Effect.Effect<Usage, AccountingUnavailable>
+}
 
-`Budget.usageEvent` and `Budget.budgetStartedEvent` are the records this
-module writes to be READ BACK rather than read by an operator. Both go on the
-journal's durable channel for that reason, and a write failure on either is
-reported rather than ignored. A composition
-with no journal at all, such as the reference memory engine, accounts within one
-process and recovers nothing across a restart: that absence is the one this
-module reads as "nothing recorded" rather than as "spend unknown", because such
-a composition never recorded anything to lose.
-`Budget.budgetWarningEvent` is the opposite record and stays on the lossy
-channel: nothing reads it back, so losing one costs a line in an operator view.
+class Budget extends Context.Service<Budget, Service>()("@smthrs/agent/Budget")
+```
 
-The budget is required too. A composition that binds none is a type error, and
-`Budget.layerUnbounded()` is how one gives up token and latency ceilings in
-writing. The local CLI binds `Budget.layerFromEnvelope`, so a flow that declares
-`budget: { tokens, milliseconds }` in its frontmatter is held to what it
-declared and a flow that declares nothing runs unbounded.
+- `check` decides whether the model call keyed by `stepKey` may be made. A step
+  the ledger has already counted proceeds, whatever the ceiling says, because
+  its replay costs nothing. `undefined` gets the projection, because a call the
+  ledger cannot recognize is a call the run has not made.
+- `record` accounts one model step's usage, idempotently in its step key.
+- `usage` is what the current run has spent.
+- `usageOf` reads one named run's spend, from its live accumulator when this
+  process is driving it and from its durable records when it is not.
 
-## Where these live
+### Budget.Verdict and Budget.Usage
 
-`packages/smithers/agent/src/AgentAction.ts` holds the correction ladder, the repair
-slot, and the park loop; `QuotaPolicy.ts` and `Budget.ts` hold the two injected
-policies; `FlowEngineLike.ts` is the enforcement point for the budget check, the
-usage accounting, and the refusal that is not recorded. The package README
-carries the composition examples.
+```ts
+type Verdict =
+  | { readonly _tag: "proceed" }
+  | { readonly _tag: "warn"; readonly exceeded: BudgetExceeded }
+  | { readonly _tag: "refuse"; readonly exceeded: BudgetExceeded; readonly failure: BudgetExceeded | Skipped }
 
-`examples/src/39-agent-policies.ts` runs one step through all three policies on
-the durable engine: the provider refuses, the run parks, the engine is killed
-while it waits, a second engine over the same file waits out the recorded
-deadline, spends a correction, and finishes. Its test pins the counters: three
-provider calls in all, one before the restart, one park decision, and one
-correction.
+interface Usage {
+  readonly tokens: number
+  readonly calls: number
+  readonly largestCall: number
+}
+```
+
+The answer to "may this call be made", and what one run has spent so far.
+`largestCall` is what the next call is projected to cost. `calls` counts
+distinct model steps, replays included exactly once.
+
+### Budget.make, Budget.layer
+
+```ts
+const make: (policy: Policy, options?: Options) => Effect.Effect<Service>
+const layer: (policy: Policy, options?: Options) => Layer.Layer<Budget>
+```
+
+Builds a budget over one policy. One instance serves a whole composition: the
+accumulator is keyed by execution id, so a layer built once above an engine
+accounts every run it drives separately. Every accounted call writes a
+`flows.agent.usage.v1` record on the journal's durable channel, and the run's
+first decision writes its latency clock zero as a
+`flows.agent.budget-started.v1` record; a budget entering a resumed run folds
+both back before it decides anything.
+
+### Budget.Options, Budget.defaultMaxRuns, Budget.defaultRecoveryEntries, Budget.looseRunId
+
+```ts
+interface Options {
+  readonly maxRuns?: number | undefined
+  readonly recoveryEntries?: number | undefined
+}
+
+const defaultMaxRuns = 256
+const defaultRecoveryEntries = 1_000_000
+const looseRunId = ""
+```
+
+`maxRuns` bounds how many runs' tallies one budget keeps in memory; an evicted
+run projects both its spend and its original latency zero back from its own
+durable records the next time it asks. `recoveryEntries` bounds how many
+journal entries one recovery reads before it fails closed: a recovery pages to
+the end of the run's journal, so the bound is the point at which the budget
+declares the ledger unreadable, not a stopping point. `looseRunId` names the
+tally of calls recorded outside any run, held apart from the run map so no
+bound evicts it.
+
+### Budget.makeUnbounded, Budget.layerUnbounded
+
+```ts
+const makeUnbounded: () => Service
+const layerUnbounded: () => Layer.Layer<Budget>
+```
+
+A budget that accounts nothing and refuses nothing. This is an explicit
+decision to give up plan-envelope spending enforcement, never a production
+default.
+
+### Budget.policyFromEnvelope, Budget.layerFromEnvelope
+
+```ts
+const policyFromEnvelope: (
+  envelope: ControlSchema.Envelope,
+  options?: { readonly onExceeded?: OnExceeded | undefined }
+) => Policy
+
+const layerFromEnvelope: (
+  envelope: ControlSchema.Envelope,
+  options?: { readonly onExceeded?: OnExceeded | undefined }
+) => Layer.Layer<Budget>
+```
+
+Turns an approved plan envelope into a policy or a layer. A missing field is
+not a zero budget; it is no budget at all, so an envelope that approves neither
+tokens nor milliseconds produces an empty policy.
+
+### Budget.current
+
+```ts
+const current: Effect.Effect<Service, never, Budget>
+```
+
+Reads the budget a composition explicitly provided. There is deliberately no
+fallback.
+
+### Budget.tokensOf
+
+```ts
+const tokensOf: (usage: ModelEvent.Usage) => number
+```
+
+The tokens one model call cost. The provider's total wins when present;
+otherwise the input, output, and reasoning parts are summed.
+
+### Budget errors
+
+```ts
+class BudgetExceeded extends Schema.TaggedError<BudgetExceeded>()(
+  "flows/agent/BudgetExceeded",
+  {
+    scope: Schema.Literals(["tokens", "latency"]),
+    onExceeded: OnExceeded,
+    used: Schema.Number,
+    max: Schema.Number,
+    next: Schema.Number,
+    message: Schema.String
+  }
+)
+
+class Skipped extends Schema.TaggedError<Skipped>()(
+  "flows/agent/Skipped",
+  { budget: BudgetExceeded, message: Schema.String }
+)
+
+class AccountingUnavailable extends Schema.TaggedError<AccountingUnavailable>()(
+  "flows/agent/BudgetAccountingUnavailable",
+  {
+    phase: Schema.Literals(["record", "recover"]),
+    runId: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown)
+  }
+)
+```
+
+- `BudgetExceeded`: a run that would exceed what it was approved for. `used` is
+  what the run has spent, `max` what it was allowed, and `next` the projected
+  cost of the refused call.
+- `Skipped`: a model call refused because the run's budget already latched.
+  Carries the `BudgetExceeded` it latched on, so the numbers are the ones the
+  first refusal reported. Quarantine-compatible: a verdict no retry can change.
+- `AccountingUnavailable`: the budget could not account a run, so it will not
+  say what the run may spend. `phase` says which half broke: `record` is the
+  write after a call, `recover` is the read a run makes before its first
+  decision. The accounting fails closed because each of these is a run whose
+  spend is unknown, not zero.
+
+### Budget.neverRetrySkipped, Budget.nonRetryableTags, Budget.skippedTag
+
+```ts
+const skippedTag = "flows/agent/Skipped"
+const nonRetryableTags: ReadonlyArray<string> = [skippedTag]
+const neverRetrySkipped: (policy: RetryPolicy.RetryPolicy) => RetryPolicy.RetryPolicy
+```
+
+Adds the `Skipped` tag to a retry policy's non-retryable list, so a ladder that
+would otherwise re-dispatch a skipped step gives up on the first refusal.
+
+### Budget records
+
+| Constant | Value | Channel |
+| --- | --- | --- |
+| `usageEvent` | `flows.agent.usage.v1` | Durable. Read back on resume; a write failure raises `AccountingUnavailable`. Payload schema: `UsageRecord` (`{ stepKey, spent }`). |
+| `budgetStartedEvent` | `flows.agent.budget-started.v1` | Durable. The run's latency clock zero; the earliest recorded value wins. Payload schema: `BudgetStartedRecord` (`{ startedAt }`). |
+| `budgetWarningEvent` | `flows.agent.budget-warning.v1` | Lossy. Evidence only; nothing reads it back. |
+
+A composition with no journal at all, such as the reference memory engine,
+accounts within one process and recovers nothing across a restart.
+
+## EventSink
+
+The host seam that watches one model-backed step while it runs. `AgentAction`
+consumes the whole event stream itself to owe its caller one decoded value; a
+provided sink is handed each event on the way past, and the step's answer,
+correction budget, and failures are the same with a sink as without one.
+
+### EventSink.Service and EventSink.EventSink
+
+```ts
+interface Service {
+  readonly emit: (event: AgentEvent.AgentEvent) => Effect.Effect<void>
+}
+
+class EventSink extends Context.Service<EventSink, Service>()("@smthrs/agent/EventSink")
+```
+
+The method cannot fail: a host's rendering is not the run's business. One
+constraint governs an implementation: `emit` runs inside the frame that
+produced the event, and that frame holds the engine's write transaction. A sink
+pushes onto a queue, writes to a socket, or resolves a deferred; a sink that
+waits on a durable write stalls the run.
+
+### EventSink.make, EventSink.layer, EventSink.makeNoop, EventSink.layerNoop
+
+```ts
+const make: (implementation: Service) => Service
+const layer: (implementation: Service) => Layer.Layer<EventSink>
+const makeNoop: (overrides?: Partial<Service>) => Service
+const layerNoop: (overrides?: Partial<Service>) => Layer.Layer<EventSink>
+```
+
+Builds or provides a sink from an implementation. The noop forms drop every
+event, which is what a composition that provides no sink already does, written
+down so a test can provide the absence explicitly. The service is optional:
+`AgentAction` resolves it with `Effect.serviceOption`.
+
+## StandardFlows
+
+The built-in host capabilities, expressed as ordinary executable flows. There
+is no `ctx.fs`, no `ctx.shell`, no `ctx.memory`, and no `ctx.wait`: a cell
+finds a flow in `ctx.flows` and calls it. Each helper pairs a declaration that
+already exists with the handler that already exists, and takes the `Context`
+the host built, because a handler's requirements are the host's to supply.
+
+### StandardFlows.filesystem
+
+```ts
+const filesystem: (
+  services: Context.Context<FileSystem.FileSystem | Path.Path>,
+  search?: Search.Search
+) => FlowBinding.Source
+```
+
+The standard filesystem capabilities, all seven bound: `read`, `write`,
+`edit`, `apply_patch`, `ls`, `glob`, and `grep` from
+[`@smthrs/std`](/api/std). The search implementation defaults to
+`PortableSearch.make(services)`.
+
+### StandardFlows.shell
+
+```ts
+const shell: (
+  services: Context.Context<ChildProcessSpawner.ChildProcessSpawner | Path.Path>,
+  container?: Container.Container
+) => FlowBinding.Source
+```
+
+Shell execution as one ordinary flow, `bash`. The container transport defaults
+to `Container.makeCommand()`, the docker or podman CLI; a composition that
+supplies none refuses a containerised call.
+
+### StandardFlows.tests
+
+```ts
+const tests: (
+  services: Context.Context<ChildProcessSpawner.ChildProcessSpawner | TestRunner.TestRunner>
+) => FlowBinding.Source
+```
+
+The repository's own test runner as one ordinary flow. A host that has no
+runner binds `TestRunner.layerNoop` and the flow says so when it is called.
+
+### StandardFlows.memory
+
+```ts
+const memory: (
+  services: Context.Context<MemoryStore.MemoryStore | Recall.Recall>
+) => FlowBinding.Source
+```
+
+Durable memory as two ordinary flows, `remember` and `recall` from
+[`@smthrs/memory`](/api/memory).
+
+### StandardFlows.clock
+
+```ts
+const clock: (
+  services: Context.Context<Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
+  options?: { readonly maxSeconds?: number | undefined }
+) => FlowBinding.Source
+```
+
+A durable wait as one ordinary flow, `wait`. The sleep is the engine's
+`DurableClock`, so a replay does not re-wait. The clock's name is the call
+identity, not the duration, so two waits of equal length in one cell stay
+distinct. `maxSeconds` may only lower the ceiling: a non-finite or larger value
+is clamped to `defaultMaxWaitSeconds`, and a value at or below zero means "no
+waiting". A wait past the ceiling is refused with a catchable message naming
+the host's ceiling. This is the one helper whose context is the engine; nothing
+in `Agent` imports it.
+
+### StandardFlows.waitFlow, StandardFlows.WaitInput, StandardFlows.WaitOutput, StandardFlows.defaultMaxWaitSeconds
+
+```ts
+const defaultMaxWaitSeconds = 3_600
+
+const WaitInput = Schema.Struct({
+  seconds: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+  reason: Schema.optional(Schema.String)
+})
+
+const WaitOutput = Schema.Struct({ waitedSeconds: Schema.Number })
+
+const waitFlow: /* Flow "wait", effects tier "irreversible" */
+```
+
+The durable wait declaration and its schemas. One hour is the default ceiling:
+long enough for an intentional backoff, short enough that a parked run remains
+distinguishable from one that hung.
+
+### StandardFlows.approval, StandardFlows.Asker, StandardFlows.askFlow, StandardFlows.askerNoop
+
+```ts
+interface Asker {
+  readonly ask: (
+    input: typeof AskInput.Type
+  ) => Effect.Effect<typeof AskOutput.Type, HarnessError | ApprovalUnavailable>
+}
+
+const approval: (asker: Asker) => FlowBinding.Source
+const askerNoop: () => Asker
+```
+
+Human approval as one ordinary flow, `ask`. The port is one method, because a
+host with nobody to ask must refuse honestly rather than fake an answer:
+`askerNoop` refuses with `ApprovalUnavailable`, which the cell may catch. A host
+that wants the run to wait for a person fails with a `HarnessError` carrying a
+`Permission.PermissionRequired`, or gates the call in `Agent.Options.authorize`.
+
+### StandardFlows.AskInput, StandardFlows.AskOutput
+
+```ts
+const AskInput = Schema.Struct({
+  question: Schema.String,
+  options: Schema.optional(Schema.Array(Schema.String))
+})
+
+const AskOutput = Schema.Struct({
+  answer: Schema.String,
+  approved: Schema.Boolean
+})
+```
+
+### StandardFlows.ApprovalUnavailable
+
+```ts
+class ApprovalUnavailable extends Schema.TaggedError<ApprovalUnavailable>()(
+  "@smthrs/agent/StandardFlows/ApprovalUnavailable",
+  { message: Schema.String }
+)
+```
+
+A host that has nobody to ask. Separate from `HarnessError` on purpose: this is
+a refusal the agent can see and route around, turned into an ordinary catchable
+call failure.
+
+## ChildFlows
+
+Detached child agents as three ordinary flows. There is no `ctx.spawn`, no
+`ctx.send`, and no `ctx.await`: a cell delegates the way it does anything else.
+Attached children need nothing here; a dynamic or markdown flow called with
+`ctx.call` already runs inside its own durable boundary.
+
+### ChildFlows.source
+
+```ts
+const source: (children: Children) => FlowBinding.Source
+```
+
+Detached child lifecycle as three ordinary flows, bound over the injected
+`Children` port: `agent/spawn`, `agent/send`, and `agent/await`, all at the
+`irreversible` tier.
+
+### ChildFlows.Children
+
+```ts
+interface Children {
+  readonly spawn: (input: typeof SpawnInput.Type) => Effect.Effect<typeof SpawnOutput.Type, HarnessError | ChildError>
+  readonly send: (input: typeof SendInput.Type) => Effect.Effect<typeof SendOutput.Type, HarnessError | ChildError>
+  readonly await: (input: typeof AwaitInput.Type) => Effect.Effect<typeof AwaitOutput.Type, HarnessError | ChildError>
+}
+
+const Children: Context.Service<Children, Children>
+```
+
+The narrow child-run port a host supplies. `EngineChildren` is the durable
+implementation over an engine.
+
+### ChildFlows.makeNoop
+
+```ts
+const makeNoop: (overrides?: Partial<Children>) => Children
+```
+
+A child port that refuses every operation with
+`ChildError { code: "unsupported" }`, whose refusal the cell can see and route
+around.
+
+### ChildFlows.ChildError
+
+```ts
+class ChildError extends Schema.TaggedError<ChildError>()(
+  "@smthrs/agent/ChildFlows/ChildError",
+  {
+    code: Schema.Literals(["unsupported", "not_found", "failed"]),
+    message: Schema.String
+  }
+)
+```
+
+A child lifecycle refusal the agent can see. Separate from `HarnessError` on
+purpose: an unsupported operation or a child that failed is data the cell may
+catch, while a `HarnessError` is a park or an abort the cell must never
+swallow.
+
+### ChildFlows flow declarations and schemas
+
+| Export | Declaration |
+| --- | --- |
+| `spawnFlow`, `SpawnInput`, `SpawnOutput` | `agent/spawn`: start a child agent and return its id without waiting. Input `{ flow, input?, label? }`; the label is the child's identity within the run, so two concurrent children of one flow need two labels. Output `{ child }`. |
+| `sendFlow`, `SendInput`, `SendOutput` | `agent/send`: send a steering message to a running child. Input `{ child, message }`. Output `{ delivered }`. |
+| `awaitFlow`, `AwaitInput`, `AwaitOutput` | `agent/await`: wait for a child to finish and return its output. Input `{ child }`. Output `{ child, output }`. |
+
+## EngineChildren
+
+The durable implementation of `ChildFlows.Children`: detached children as real
+runs. It touches three services and no more: `FlowRuntime`, `RunStore`, and
+`Control`.
+
+### EngineChildren.make, EngineChildren.layer
+
+```ts
+const make: (
+  options: Options
+) => Effect.Effect<ChildFlows.Children, never, Control | Crypto.Crypto | FlowRuntime.FlowRuntime | RunStore.RunStore>
+
+const layer: (
+  options: Options
+) => Layer.Layer<ChildFlows.Children, never, Control | Crypto.Crypto | FlowRuntime.FlowRuntime | RunStore.RunStore>
+```
+
+Builds or provides the durable child port:
+
+- `spawn` starts the named flow as a run of its own, linked to the caller
+  through the engine's parent-edge table and spawned with the result discarded,
+  which records `onParentExit: "detach"` so the child outlives its parent. It
+  answers once the child's run row exists.
+- `await` reads the child's settled result out of the run store, so it works
+  from a different engine, a different process, and a later incarnation. It
+  waits by re-reading the child's run row on an interval rather than suspending
+  the run, so a cell that awaits a long child holds its round open.
+- `send` steers the child through `Control.steer`, naming the message with the
+  calling step's canonical key so a re-driven round delivers it once. The
+  message carries a timestamp read inside a sealed step, so a re-drive submits
+  the same bytes. `Accepted` and `AlreadyApplied` receipts answer
+  `delivered: true`; every other receipt fails the call.
+
+### EngineChildren.Options
+
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `flows` | `ReadonlyArray<Flow.Any>` | The flows a child may run, by `_tag`. Anything else is `ChildError { code: "not_found" }`. Registering the flow with the runtime is separate and still required. |
+| `pollInterval` | `Duration.Input` | How long `await` waits before re-reading an unsettled child, and how long `spawn` waits between checks for the child's run row. Defaults to 250 ms. |
+| `startTimeout` | `Duration.Input` | How long `spawn` waits for the child's run row before reporting the child never started. Defaults to 30 seconds. |
+
+### EngineChildren.childExecutionId
+
+```ts
+const childExecutionId: (parentExecutionId: string, label: string) => string
+```
+
+The execution id a labelled child runs under, `${parentExecutionId}/child/${label}`.
+Derived rather than minted, so a parent that is re-driven spawns the same child
+rather than a second one.
+
+### EngineChildren.ChildState
+
+```ts
+const ChildState = Schema.Struct({ flowName: Schema.String })
+```
+
+The one key this port reads out of a child run's state document: the name of
+the flow the child is running, because `FlowRuntime.poll` addresses an
+execution by declaration and a cell only ever has the child's id.
+
+## CellPlugin
+
+Cell-harness hooks hosted by the shared plugin kernel from
+[`@smthrs/plugin`](/api/plugin). This module augments the kernel's open hook
+catalog with three dispatch points and resolves a cell host's plugin list for
+the harness target.
+
+### The hooks
+
+Registered on `FlowsHooks` by module augmentation:
+
+| Hook | Kind | What it transforms |
+| --- | --- | --- |
+| `cellRegistry` | waterfall | The one registry used for disclosure and call resolution. |
+| `cellFlows` | waterfall | The executable flow bindings the host composes. The last handler's array is both the descriptors disclosed to the model and the implementations the boundary resolves against. |
+| `cellModelRequest` | waterfall | A provider-neutral request, immediately before its sealed model step. A plugin may rewrite what is asked; it does not change how long the run waits for the answer. |
+
+### CellPlugin.hooks
+
+```ts
+const hooks: /* engineHooks plus the three cell waterfalls, frozen */
+```
+
+The runtime hook catalog supplied when the plugin kernel resolves for a cell
+host.
+
+### CellPlugin.make
+
+```ts
+const make: (
+  input?: PluginInput<FlowsHooks>,
+  config?: FlowsConfig
+) => Effect.Effect<Kernel.Kernel<FlowsHooks>, PluginError>
+```
+
+Resolves a cell host's plugin list through the shared kernel, for the harness
+target.
+
+### CellPlugin.registry, CellPlugin.flows, CellPlugin.modelRequest
+
+```ts
+const registry: (plugins: Plugins.Service<FlowsHooks>, initial: Registry.Registry) => ...
+const flows: (plugins: Plugins.Service<FlowsHooks>, initial: ReadonlyArray<FlowBinding.Binding>) => ...
+const modelRequest: (plugins: Plugins.Service<FlowsHooks>, initial: ModelRequest.ModelRequest) => ...
+```
+
+Run the three ordered waterfalls.
+
+### CellPlugin.fromBindings
+
+```ts
+const fromBindings: (options: {
+  readonly name: string
+  readonly bindings: ReadonlyArray<FlowBinding.Binding>
+  readonly enforce?: "pre" | "post" | undefined
+  readonly apply?: Apply | undefined
+}) => FlowsPlugin<FlowsHooks>
+```
+
+The one-liner for authoring a harness plugin that contributes executable flows.
+Ordering, `apply` filtering, and the config waterfall are the kernel's,
+unchanged; a plugin that needs to transform other plugins' flows writes the
+`cellFlows` hook itself.
+
+### CellPlugin.identity
+
+```ts
+const identity: (
+  layers: ReadonlyArray<string>,
+  plugins: Plugins.Service<FlowsHooks>,
+  config: ResolvedConfig
+) => Effect.Effect<string, PluginError>
+```
+
+Computes the order-sensitive identity of a resolved host composition, as
+`flows/cell-composition/v1:<digest>`. Plugin and layer order can change request
+and registry semantics, so the ordered declarations and resolved config are
+folded into one digest inside the otherwise set-like layer material.
+
+## PromoteFlows
+
+Turning the script the model just ran into a saved flow, as two ordinary flows.
+For the walkthrough, see [Save the script a run wrote as a flow](./guides/promote-flows.md).
+
+### PromoteFlows.source
+
+```ts
+const source: (
+  services: Context.Context<CellHistory.CellHistory | FlowStore.FlowStore>,
+  options?: Options
+) => FlowBinding.Source
+```
+
+Promotion as two ordinary flows:
+
+- `flows/show-script` hands the model its own turn back: the source of every
+  cell it executed, in order, plus the rules a saved flow has to follow and the
+  file skeleton to fill in. It reads the `CellHistory` the controller records
+  into, so a host that keeps no history reports an empty script.
+- `flows/write-flow` takes the three files that come back and writes them
+  through a `FlowStore`. When a `Registry` is in context it is refreshed
+  afterwards, which is what makes the saved flow appear in `ctx.flows` on the
+  next frame rather than the next run. The id is validated before the store is
+  asked, so a bad id is never misread as "nowhere to save".
+
+### PromoteFlows.Options
+
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `bestPractices` | `string` | Replaces the rules a saved flow has to follow. |
+| `template` | `string` | Replaces the `flow.ts` skeleton the model fills in. |
+
+### PromoteFlows.bestPractices, PromoteFlows.flowTemplate
+
+The house rules and the `flow.ts` skeleton `flows/write-flow` expects back. A
+host whose flows are laid out differently replaces both through `Options`.
+
+### PromoteFlows flow declarations and schemas
+
+| Export | Declaration |
+| --- | --- |
+| `showScriptFlow`, `ShowScriptInput`, `ShowScriptOutput` | `flows/show-script`: return the source of every cell this turn has executed, plus the rules and the skeleton. Input `{ bestPractices? }` (extra guidance appended after the house rules). Output `{ cells, bestPractices, template }`. |
+| `writeFlowFlow`, `WriteFlowInput`, `WriteFlowOutput` | `flows/write-flow`: write `flow.ts`, `flow.e2e.ts`, and the fixture under `flows/<id>/`. Input `{ id, description, flowSource, testSource, fixtureJson }`. Output `{ files }`, the root-relative paths written. Declares `writes: ["flows/**"]`. |
+
+## FlowStore
+
+Where a saved flow's files land: one contract a checkout, a browser host, and
+a test all satisfy, so `PromoteFlows` never learns which one it is talking to.
+
+### FlowStore.Service and FlowStore.FlowStore
+
+```ts
+interface Service {
+  readonly write: (id: string, files: Record<string, string>) => Effect.Effect<WriteResult, FlowStoreError>
+  readonly list: () => Effect.Effect<ReadonlyArray<SavedFlow>, FlowStoreError>
+}
+
+class FlowStore extends Context.Service<FlowStore, Service>()("@smthrs/agent/FlowStore")
+```
+
+`write` keys files by their root-relative paths and reports them back
+unchanged. `list` answers every flow the store holds, by id.
+
+### FlowStore.SavedFlow, FlowStore.WriteResult
+
+```ts
+interface SavedFlow {
+  readonly id: string
+  readonly files: ReadonlyArray<string>
+}
+
+interface WriteResult {
+  readonly files: ReadonlyArray<string>
+}
+```
+
+### FlowStore.makeFileSystem, FlowStore.layerFileSystem
+
+```ts
+const makeFileSystem: (fs: FileSystem.FileSystem, path: Path.Path, root: string) => Service
+const layerFileSystem: (root: string) => Layer.Layer<FlowStore, never, FileSystem.FileSystem | Path.Path>
+```
+
+A store over a directory on the host filesystem. Every path is checked before
+the first byte is written, so a rejected file cannot leave a half-saved flow on
+disk. `PromoteFlows` writes `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`.
+
+### FlowStore.makeMemory, FlowStore.layerMemory
+
+```ts
+const makeMemory: (written?: Map<string, string>) => Service
+const layerMemory: (written?: Map<string, string>) => Layer.Layer<FlowStore>
+```
+
+A store over an in-memory map, keyed by path. The map is the caller's, so a
+test writes through the store and reads the bytes back without a filesystem.
+
+### FlowStore.makeNoop, FlowStore.layerNoop
+
+```ts
+const makeNoop: (overrides?: Partial<Service>) => Service
+const layerNoop: (overrides?: Partial<Service>) => Layer.Layer<FlowStore>
+```
+
+A store that saves nothing, refusing with
+`FlowStoreError { code: "unsupported" }` and a message the model can read.
+
+### FlowStore.validateId, FlowStore.idPattern
+
+```ts
+const idPattern = /^[a-z][a-z0-9-]*$/
+const validateId: (id: string) => Effect.Effect<void, FlowStoreError>
+```
+
+Refuses an id no flow directory could be named. The store is the last place an
+id is still text: every path a write builds comes from it, so the check runs
+before any of them are built, and `../escape` is refused as a bad id rather
+than caught as a surprising write outside the root.
+
+### FlowStore.FlowStoreError, FlowStore.FlowStoreErrorCode
+
+```ts
+const FlowStoreErrorCode = Schema.Literals(["invalid_id", "invalid_path", "write_failed", "unsupported"])
+
+class FlowStoreError extends Schema.TaggedError<FlowStoreError>()(
+  "@smthrs/agent/FlowStore/FlowStoreError",
+  { code: FlowStoreErrorCode, message: Schema.String, cause: Schema.optional(Schema.Unknown) }
+)
+```
+
+Every message is written for the model that will read it back as a call
+failure, because the cell that asked to save a flow is the only thing that can
+correct the id or reissue the write.
+
+## FlowEngineLike
+
+The production `EngineLike` binding: the harness engine port executed on the
+durable flow engine from [`@smthrs/engine`](/api/engine). It is deliberately
+not `@smthrs/testing`'s `FlowEngineLike`, which adapts the same engine to the
+testing library's `EngineSubject` conformance contract; the two share a backing
+engine and nothing else. For the port mapping and the key rules, see
+[The engine port](./concepts/engine-port.md).
+
+### FlowEngineLike.make, FlowEngineLike.layer
+
+```ts
+const make: (
+  options: Options
+) => Effect.Effect<
+  EngineLike.EngineLike,
+  never,
+  Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Budget.Budget | QuotaPolicy.QuotaClassifier
+>
+
+const layer: (options: Options) => Layer.Layer<EngineLike.EngineLike, never, ...>
+```
+
+Constructs or provides the durable harness engine port. `FlowInstance` is
+per-execution, so this must be built inside a running flow body. The captured
+services are supplied back to every activity, which is what keeps the port's
+streams requirement-free the way `EngineLike` declares them.
+
+### FlowEngineLike.Options
+
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `model` | `Model.Model` | The model sealed steps stream from. Required. |
+| `route` | `RouteResolver` | Resolves the route one sealed request is prepared under. Required. |
+| `calls` | `CallRunner` | The cell loop's flow-call seam. Without one, a cell call is refused with a typed engine failure. |
+| `modelRetryPolicy` | `Schedule<unknown, Model.ModelFailure>` | Bounded model-boundary retry policy. Defaults to `defaultModelRetryPolicy`. |
+| `layers` | `ReadonlyArray<string>` | The resolved composition identity every durable key folds in: the layer set the host actually built, plus the resolved plugin list in resolution order. |
+| `capabilities` | `Readonly<Record<string, ReadonlyArray<string>>>` | The composition's complete effective authority, if the host knows it. Omitting it is the honest "unknown", and the engine pins every sealed key to the current execution. |
+
+### FlowEngineLike.RouteResolver, FlowEngineLike.routeResolver
+
+```ts
+interface RouteResolver {
+  readonly prepare: (
+    request: ModelRequest.ModelRequest
+  ) => Effect.Effect<Route.PreparedRequest, ModelError.ModelError>
+}
+
+const routeResolver: <Body, Frame, Event, State>(
+  route: Route.Route<Body, Frame, Event, State>
+) => RouteResolver
+```
+
+The port needs `Route.prepare` and nothing else, so a consumer can supply a
+configured route, a router, or a recorded resolver in tests.
+
+### FlowEngineLike.CallRunner, FlowEngineLike.WorkspaceCallRunner
+
+```ts
+interface CallRunner {
+  readonly authorize?: (call: Cell.Call) => Effect.Effect<void, HarnessError.HarnessError>
+  readonly run: (call: Cell.Call) => Effect.Effect<Cell.CallResult, HarnessError.HarnessError>
+}
+
+interface WorkspaceCallRunner {
+  readonly authorize?: (call: Cell.Call) => Effect.Effect<void, HarnessError.HarnessError>
+  readonly run: (call: Cell.Call) => Effect.Effect<Cell.CallResult, HarnessError.HarnessError, WorkspaceSandbox.Workspace>
+}
+```
+
+Executes one flow call issued from inside a running cell. The runner owns
+lookup, decoding, attenuation, and placement; the port owns only durability.
+`authorize` is checked before the durable boundary opens: an activity's outcome
+is journaled, so a permission requirement raised from inside one would replay
+forever and no later grant could unblock it. A `WorkspaceCallRunner` may also
+touch the workspace it runs inside; a plain `CallRunner` satisfies it too.
+
+### FlowEngineLike.sandboxed
+
+```ts
+const sandboxed: (
+  sandbox: WorkspaceSandbox.Service,
+  runner: WorkspaceCallRunner,
+  options?: { readonly layers?: ReadonlyArray<string> | undefined }
+) => Effect.Effect<CallRunner, never, Crypto.Crypto>
+```
+
+Runs every cell call inside an outer workspace transaction. A call's declared
+effects are checked, not trusted: a call that reads or writes outside what the
+cell chose comes back `Invalidated`, and the adapter turns that into a catchable
+call failure with the speculative changes discarded. Materialization is
+explicit, so a conflicting concurrent write is a typed refusal instead of a
+lost update. It is a `CallRunner` decorator rather than an option on `make`, so
+a host chooses the transaction boundary by composition.
+
+### FlowEngineLike.RecordedModelStep
+
+```ts
+const RecordedModelStep = Schema.Union([
+  Schema.Array(ModelEvent.ModelEvent),
+  Schema.Struct({
+    events: Schema.Array(ModelEvent.ModelEvent),
+    error: Schema.optional(ModelError.ModelError),
+    correction: Schema.optional(Schema.Int)
+  })
+])
+```
+
+The durable outcome of one sealed model step. The array branch is the format
+written before model-boundary retries existed and stays decodable so a parked
+run can resume onto a newer package. New records use the object branch, so a
+terminal typed model failure replays after its retry events, and the
+`correction` ordinal names which structured-output correction the call belonged
+to.
+
+### FlowEngineLike.Correction
+
+```ts
+const Correction: Context.Reference<number | undefined>
+```
+
+The correction ordinal the model calls made under it belong to. `AgentAction`
+sets it around each rung of its ladder and the port stamps it onto the rung's
+sealed record. It is deliberately not key material: the session already
+distinguishes the rungs. Absent by default, which is the honest reading of a
+model call made outside any ladder.
+
+### FlowEngineLike retry policy constants
+
+| Constant | Value | What it bounds |
+| --- | --- | --- |
+| `defaultModelRetryBaseMillis` | 1,000 | The first transport retry delay. |
+| `defaultModelRetryFactor` | 2 | The factor each successive delay multiplies by. |
+| `defaultModelRetryTimes` | 5 | How many times one sealed step retries. |
+| `defaultModelRetryWindowMillis` | 45,000 | The wall clock the ladder may span. Whichever of the count and the window arrives first ends the ladder. |
+| `defaultModelRetryPolicy` | jittered exponential | The production transport retry budget, composed from the four values. Sleeps are taken on the injected clock and jitter on the injected `Random`. |
+| `defaultModelOverruns` | 1 | How many times one sealed step re-issues a call its `modelCallMs` budget cut off, with overrun teaching prepended. An overrun costs a whole armed ceiling, so it does not share the transport retry budget. |
+
+### FlowEngineLike.workspaceRelative, FlowEngineLike.callBoundary, FlowEngineLike.callMaterial
+
+```ts
+const workspaceRelative: (path: string) => string
+const callBoundary: (call: Cell.Call) => FileBoundary
+const callMaterial: (call: Cell.Call, layers?: ReadonlyArray<string>) => KeyMaterial.KeyMaterial
+```
+
+The conversions between the agent-side declaration and the engine's file
+boundary, and the workspace sandbox's content key over the declared call
+material. `workspaceRelative` strips the leading `/`: the declaration's
+"anywhere" (`/**`) and the boundary's "everything under the root" name the same
+set. `callBoundary` maps a hermetic mode to a hard boundary. `callMaterial` is
+the sandbox's separate content key, intentionally not equal to the durable
+activity key, which nests effects under the body and includes the composition
+digest.
+
+## Checkpointed
+
+Running one cell call against a pinned tree instead of the live one.
+`@smthrs/harness` decides whether a call may name a checkpoint; this module is
+the other half, the `CallRunner` decorator that asks the store for that tree as
+a directory, points the call at it, and gives the directory back when the call
+ends.
+
+### Checkpointed.decorate, Checkpointed.checkpointed, Checkpointed.unpinned
+
+```ts
+const decorate: (runner: FlowEngineLike.CallRunner) => Effect.Effect<FlowEngineLike.CallRunner>
+const checkpointed: (store: Checkpoints.Checkpoints, runner: FlowEngineLike.CallRunner) => FlowEngineLike.CallRunner
+const unpinned: (runner: FlowEngineLike.CallRunner) => FlowEngineLike.CallRunner
+```
+
+`decorate` wraps a runner with checkpoint materialization when the composition
+has a `Checkpoints` store, and with `unpinned` when it does not. A composition
+that pins nothing is still wrapped: a call carrying an `at` must never quietly
+read the live tree instead, so `unpinned` refuses it with
+`checkpoint_unavailable`. A store that cannot hand the tree back is also a
+catchable `checkpoint_unavailable` refusal, not a failed run.
+
+### Checkpointed.unsupported, Checkpointed.absolute, Checkpointed.outside
+
+```ts
+const unsupported: (flow: string) => Cell.CallResult
+const absolute: (flow: string, path: string) => Cell.CallResult
+const outside: (flow: string, path: string) => Cell.CallResult
+```
+
+The three `checkpoint_unsupported` refusals: a flow that names what it touches
+rather than where it runs, an absolute path, and a path that climbs out of the
+checkpoint with `..`. Each message names the remedy, because a refusal without
+a next action costs the run a frame.
+
+## WorkspaceObservation
+
+Measuring the workspace a run is changing, so the loop's mutation accounting is
+a fact about the tree rather than a claim a declaration made. `bash` is why it
+exists: a spawned process writes wherever it likes and tells nobody.
+
+### WorkspaceObservation.Observer
+
+```ts
+interface Observer {
+  readonly observe: Effect.Effect<EngineLike.Observation, HarnessError>
+}
+
+const Observer: Context.Service<Observer, Observer>
+```
+
+The port `EngineLike.observe` is produced through. A service rather than an
+option, because it is host equipment: whoever composed a workspace is the only
+party that knows where its root is. A composition that provides none leaves the
+loop on declared writes, and the journal says so.
+
+### WorkspaceObservation.observe, WorkspaceObservation.make, WorkspaceObservation.layer
+
+```ts
+const observe: (
+  fs: FileSystem.FileSystem,
+  root: string,
+  options?: Options
+) => Effect.Effect<EngineLike.Observation>
+
+const make: (fs: FileSystem.FileSystem, root: string, options?: Options) => Observer
+
+const layer: (root: string, options?: Options) => Layer.Layer<Observer, never, FileSystem.FileSystem>
+```
+
+A pruned walk of the workspace root that folds every kept file's path, size,
+and modification time into one digest. The listing is depth-first in sorted
+order, so two measurements of an unchanged tree are byte-identical. Hand it the
+host's own `FileSystem`, not the kernel-guarded one: the walk is stat-only,
+never follows a symlink, and every path it builds starts from the root it was
+constructed with, while a guarded filesystem bills one helper process per file.
+
+### WorkspaceObservation.Options
+
+| Field | Type | What it decides |
+| --- | --- | --- |
+| `prune` | `ReadonlyArray<string>` | Directory names never descended into. Defaults to `defaultPrune`. |
+| `ignoreSuffixes` | `ReadonlyArray<string>` | Name suffixes left out of a measurement. Defaults to `defaultIgnoreSuffixes`. |
+| `maxPaths` | `number` | The largest number of files one measurement covers. Defaults to 50,000. A walk that stops there reports `complete: false`, and the controller decides changed-ness from what the frame's calls declared. |
+
+### WorkspaceObservation.defaultPrune, WorkspaceObservation.defaultIgnoreSuffixes
+
+`defaultPrune` skips version-control internals, dependency trees, and the
+caches Python, Node, Rust, and their test runners keep beside the sources:
+`.git`, `.jj`, `.hg`, `.svn`, `.flows`, `node_modules`, `__pycache__`,
+`.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`, `.venv`, `venv`,
+`.eggs`, `.gradle`, `.turbo`, `.next`, `target`. `defaultIgnoreSuffixes` skips
+compiled output: `.pyc`, `.pyo`, `.pyd`, `.so`, `.o`, `.a`, `.dylib`, `.class`,
+`.egg-info`.
+
+### WorkspaceObservation.layerNoop
+
+```ts
+const layerNoop: Layer.Layer<Observer>
+```
+
+Provides an observer that reports a failure rather than a measurement. This
+exists so a host can prove the failing path; a composition that wants "measures
+nothing" provides no observer at all.
+
+## WorkspaceSandbox
+
+The engine-store workspace transaction contract, re-exported from
+[`@smthrs/engine-store`](/api/engine-store) so the harness and the engine stay
+on one transaction seam. See that package's reference for the full surface.
+
+## InMemoryWorkspaceSandbox
+
+The deterministic in-memory implementation of the workspace sandbox.
+
+### InMemoryWorkspaceSandbox.make
+
+```ts
+const make = WorkspaceSandbox.makeMemory
+```
+
+Creates the engine-store conformance sandbox over an in-memory host.
+`InitialFiles`, `HostFile`, and `InMemoryWorkspaceSandbox` are type aliases for
+the engine-store models.
+
+## MemorySnapshotRecorder
+
+The durable implementation of `@smthrs/memory`'s `SnapshotRecorder` port: it
+translates a snapshot identity into an `EngineLike.record` boundary, so a
+memory snapshot a run takes is journaled and replays with it.
+
+### MemorySnapshotRecorder.make, MemorySnapshotRecorder.layer
+
+```ts
+const make: (engine: EngineLike.EngineLike) => SnapshotRecorder.Service
+const layer: Layer.Layer<SnapshotRecorder.SnapshotRecorder, never, EngineLike.EngineLike>
+```
+
+Builds the memory recorder backed by a harness engine, or provides durable
+opening-memory snapshots through the current harness engine. A recorder failure
+is fatal rather than continued past: continuing with a live value would
+recreate the replay divergence the adapter exists to prevent.

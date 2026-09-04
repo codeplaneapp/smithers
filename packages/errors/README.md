@@ -1,5 +1,7 @@
 # @smthrs/errors
 
+**Documentation:** https://errors.smithers.sh
+
 `SmithersError` and the error codes the Smithers integration adapters raise.
 
 This is a private workspace package. It is not published to npm at

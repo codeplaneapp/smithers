@@ -2,7 +2,7 @@ DESCRIPTION
   Convert a Smithers 0.x project to the 1.0 authoring model
 
 USAGE
-  smithers migrate [flags] [<path>]
+  smthrs migrate [flags] [<path>]
 
 ARGUMENTS
   path string     (optional)

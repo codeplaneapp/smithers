@@ -31,25 +31,25 @@ The body must tell an agent, in this order:
 3. How to run it:
 
    ```sh
-   smithers up <flowName> --data '{"...":"..."}' --json
+   smthrs up <flowName> --data '{"...":"..."}' --json
    ```
 
    and the three-step form for a run that a person should see first:
 
    ```sh
-   smithers plan <flowName> --data '{"...":"..."}'
-   smithers approve '<payload>' --scope run
-   smithers run '<payload>'
+   smthrs plan <flowName> --data '{"...":"..."}'
+   smthrs approve '<payload>' --scope run
+   smthrs run '<payload>'
    ```
 
-4. How to detach and watch it: `-d` to detach, then `smithers ps`,
-   `smithers logs <run-id> --follow`, and `smithers status <run-id>`.
-5. How to read a result: `smithers output <run-id> <node-id>` for one node, and
+4. How to detach and watch it: `-d` to detach, then `smthrs ps`,
+   `smthrs logs <run-id> --follow`, and `smthrs status <run-id>`.
+5. How to read a result: `smthrs output <run-id> <node-id>` for one node, and
    what the flow settles with.
-6. How to handle a park: `smithers ps --status waiting-approval` to find it,
-   `smithers status <run-id>` to see what is being asked,
-   `smithers approve <payload>` or `smithers deny <payload>` to resolve it, and
-   `smithers cancel <run-id>` to stop the run. A park is waiting, not failure;
+6. How to handle a park: `smthrs ps --status waiting-approval` to find it,
+   `smthrs status <run-id>` to see what is being asked,
+   `smthrs approve <payload>` or `smthrs deny <payload>` to resolve it, and
+   `smthrs cancel <run-id>` to stop the run. A park is waiting, not failure;
    the CLI exits 3.
 7. One line naming the single next action the operator should take.
 

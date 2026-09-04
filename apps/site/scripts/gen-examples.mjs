@@ -42,6 +42,10 @@ const firstSentence = (text) => {
   return (m ? m[1] : text).replace(/`/g, "").replace(/"/g, "'")
 }
 
+const packageReferences = (code) => [...new Set(
+  [...code.matchAll(/from\s+["'](@smthrs\/[^/"']+)/g)].map((match) => match[1])
+)].sort()
+
 const outputs = new Map()
 for (const name of primary) {
   const stem = name.replace(/\.ts$/, "")
@@ -63,7 +67,11 @@ for (const name of primary) {
   lines.push(
     "## Run it",
     "",
-    `The program is \`examples/src/${name}\`. \`pnpm run test:examples\` runs it with every other example against the real packages.`,
+    `The program is [\`examples/src/${name}\`](https://github.com/smithersai/smithers/blob/main/examples/src/${name}). \`pnpm run test:examples\` runs it with every other example against the real packages.`,
+    "",
+    "## Related reference",
+    "",
+    packageReferences(code).map((pkg) => `[\`${pkg}\`](/docs/reference/api/${pkg.replace("@smthrs/", "")}/)`).join(" · "),
     "",
     "## Source",
     "",

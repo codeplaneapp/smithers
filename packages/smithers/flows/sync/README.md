@@ -1,5 +1,7 @@
 # @smthrs/sync
 
+**Documentation:** https://sync.smithers.sh
+
 Browser-safe, read-only replication of canonical `@smthrs/journal` entries.
 It defines the wire protocol, RPC group, server, and replay-then-follow client;
 journal mutation remains outside this package.

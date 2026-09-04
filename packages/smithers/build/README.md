@@ -1,5 +1,7 @@
 # @smthrs/build
 
+**Documentation:** https://smithers-build.smithers.sh
+
 `@smthrs/build` is a Bazel-style build orchestrator for TypeScript
 workspaces.
 `PACKAGE.ts` files are ordinary TypeScript modules whose named exports are

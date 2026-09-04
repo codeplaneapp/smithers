@@ -2,7 +2,7 @@ DESCRIPTION
   Cancel a durable run
 
 USAGE
-  smithers cancel [flags] <run-id>
+  smthrs cancel [flags] <run-id>
 
 ARGUMENTS
   run-id string    

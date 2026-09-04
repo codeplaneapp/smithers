@@ -1,5 +1,7 @@
 # @smthrs/model
 
+**Documentation:** https://model.smithers.sh
+
 Schema-first Effect model protocols, routes, and streaming events for flows. It separates provider-neutral model requests from provider framing, authentication, endpoint selection, transport execution, and event normalization.
 
 ```sh

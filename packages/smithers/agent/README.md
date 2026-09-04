@@ -1,5 +1,7 @@
 # @smthrs/agent
 
+**Documentation:** https://agent.smithers.sh
+
 The Smithers agent, and the two ways to run it.
 
 `Agent` **is** the agent: one service whose single method runs one whole cell

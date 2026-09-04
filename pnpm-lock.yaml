@@ -79,6 +79,1182 @@ importers:
         specifier: ~6.0.3
         version: 6.0.3
 
+  apps/docs/agent:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@6.4.3(@types/node@26.1.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/artifacts:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/build-cli:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/canonical:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/capability:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/chain:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/cli:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/control:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/core:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/create-app:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/crypto:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/database:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/engine:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/engine-store:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/errors:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/evals:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/flow:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/flows:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/fs:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/gateway:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/harness:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/integrations:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/jj:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/journal:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/kernel:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/keys:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/mcp:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/memory:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/migrate:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/model:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/notifications:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/observability:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/patterns:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/plan:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/platform-browser:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/platform-bun:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/platform-node:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/plugin:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/registry:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/run-store:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/sandbox:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/scorers:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/shared:
+    dependencies:
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+    devDependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+
+  apps/docs/smithers-build:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/smthrs:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/std:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/step-cache:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/sync:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/targets:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/testing:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/time-travel:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/triggers:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/ui:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
+  apps/docs/ui-styleguide:
+    dependencies:
+      '@astrojs/starlight':
+        specifier: ^0.36.0
+        version: 0.36.3(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(supports-color@10.2.2)
+      astro:
+        specifier: ^5.13.2
+        version: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+    devDependencies:
+      '@astrojs/check':
+        specifier: ^0.9.4
+        version: 0.9.10(prettier@3.9.6)(typescript@6.0.3)
+      '@smithers/docs-shared':
+        specifier: workspace:*
+        version: link:../shared
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
   apps/review:
     dependencies:
       '@effect/platform-node':
@@ -243,6 +1419,9 @@ importers:
       '@smthrs/time-travel':
         specifier: workspace:*
         version: link:../../packages/smithers/flows/time-travel
+      alchemy:
+        specifier: ^0.93.12
+        version: 0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1)
       effect:
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108
@@ -3636,25 +4815,22 @@ importers:
 
   packages/smithers/flows/platform-node:
     dependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
-      '@effect/platform-node-shared':
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@smthrs/jj':
         specifier: 1.0.0-rc.0
         version: link:../jj
       '@smthrs/kernel':
         specifier: 1.0.0-rc.0
         version: link:../kernel
-      effect:
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108
     devDependencies:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
+      '@effect/platform-node-shared':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)
       '@effect/vitest':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
@@ -3673,6 +4849,9 @@ importers:
       dprint:
         specifier: 0.55.2
         version: 0.55.2
+      effect:
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
@@ -18242,6 +19421,73 @@ snapshots:
       fast-uri: 3.1.5
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
+
+  alchemy@0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@6.4.3(@types/node@26.1.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1):
+    dependencies:
+      '@aws-sdk/credential-providers': 3.1110.0
+      '@cloudflare/unenv-preset': 2.7.7(unenv@2.0.0-rc.21)(workerd@1.20260826.1)
+      '@cloudflare/workers-types': 4.20260702.1
+      '@iarna/toml': 2.2.5
+      '@octokit/rest': 21.1.1
+      '@smithy/node-config-provider': 4.6.0
+      '@smithy/types': 4.17.0
+      aws4fetch: 1.0.20
+      drizzle-orm: 0.45.2(@cloudflare/workers-types@4.20260702.1)(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(bun-types@1.4.0)
+      env-paths: 3.0.0
+      esbuild: 0.25.12
+      execa: 9.6.1
+      fast-json-patch: 3.1.1
+      fast-xml-parser: 5.10.1
+      find-process: 2.1.1
+      glob: 10.5.0
+      jszip: 3.10.1
+      libsodium-wrappers: 0.8.4
+      miniflare: 4.20260424.0
+      neverthrow: 8.2.0
+      open: 10.2.0
+      openapi-types: 12.1.3
+      pathe: 2.0.3
+      picocolors: 1.1.1
+      proper-lockfile: 4.1.2
+      signal-exit: 4.1.0
+      unenv: 2.0.0-rc.21
+      wrangler: 4.127.0(@cloudflare/workers-types@4.20260702.1)
+      ws: 8.21.3
+      yaml: 2.9.0
+    optionalDependencies:
+      astro: 5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0)
+      vite: 6.4.3(@types/node@26.1.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0)
+    transitivePeerDependencies:
+      - '@aws-sdk/client-rds-data'
+      - '@electric-sql/pglite'
+      - '@libsql/client-wasm'
+      - '@neondatabase/serverless'
+      - '@op-engineering/op-sqlite'
+      - '@opentelemetry/api'
+      - '@planetscale/database'
+      - '@prisma/client'
+      - '@tidbcloud/serverless'
+      - '@types/better-sqlite3'
+      - '@types/pg'
+      - '@types/sql.js'
+      - '@upstash/redis'
+      - '@vercel/postgres'
+      - '@xata.io/client'
+      - better-sqlite3
+      - bufferutil
+      - bun-types
+      - expo-sqlite
+      - gel
+      - knex
+      - kysely
+      - mysql2
+      - pg
+      - postgres
+      - prisma
+      - sql.js
+      - sqlite3
+      - utf-8-validate
+      - workerd
 
   alchemy@0.93.12(@electric-sql/pglite@0.3.15)(@opentelemetry/api@1.9.0)(astro@5.18.2(@types/node@26.1.0)(aws4fetch@1.0.20)(ioredis@5.11.1(supports-color@10.2.2))(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.62.4)(supports-color@10.2.2)(terser@5.50.0)(tsx@4.23.12)(typescript@6.0.3)(yaml@2.9.0))(bun-types@1.4.0)(vite@8.2.1(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(workerd@1.20260826.1):
     dependencies:

@@ -1,5 +1,7 @@
 # @smthrs/jj
 
+**Documentation:** https://jj.smithers.sh
+
 Jujutsu version control as a portable Effect host service. Smithers snapshots the
 working copy around every step, so jj is host access — it goes through a layer
 like the filesystem does, not through an ad-hoc `spawn`.

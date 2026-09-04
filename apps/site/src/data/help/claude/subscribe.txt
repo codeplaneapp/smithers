@@ -2,7 +2,7 @@ DESCRIPTION
   Follow a run in this session's mirror
 
 USAGE
-  smithers claude subscribe [flags] <run-id>
+  smthrs claude subscribe [flags] <run-id>
 
 ARGUMENTS
   run-id string    

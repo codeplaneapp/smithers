@@ -75,7 +75,7 @@ const link = (p) => `- [${p.title}](${origin}${p.route})${p.description ? `: ${p
 const sections = []
 sections.push("# Smithers\n")
 sections.push(
-  "> Smithers is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history. The CLI binary is `smithers` (npm `@smthrs/cli`, dist-tag `@next`). Node.js 22.19.0 or later.\n"
+  "> Smithers is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history. The CLI binary is `smthrs` (npm `@smthrs/cli`, dist-tag `@next`). Node.js 22.19.0 or later.\n"
 )
 sections.push("## Start here\n\n" + root.map(link).join("\n"))
 for (const g of groups) {

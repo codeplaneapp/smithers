@@ -1,5 +1,7 @@
 # @smthrs/flow
 
+**Documentation:** https://flow.smithers.sh
+
 The flow authoring model. It defines typed flows, actions, durable waits
 and queues, retry policy, step identity, and the runtime port those APIs are
 executed against. `@smthrs/engine` implements that port; `@smthrs/engine-store`

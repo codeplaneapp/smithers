@@ -2,7 +2,7 @@ DESCRIPTION
   Print notable run transitions as NDJSON
 
 USAGE
-  smithers claude monitor [flags]
+  smthrs claude monitor [flags]
 
 FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY

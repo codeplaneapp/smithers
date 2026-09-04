@@ -2,7 +2,7 @@ DESCRIPTION
   Delete one fact
 
 USAGE
-  smithers memory rm [flags] <key>
+  smthrs memory rm [flags] <key>
 
 ARGUMENTS
   key string    

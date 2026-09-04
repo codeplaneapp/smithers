@@ -1,5 +1,7 @@
 # @smthrs/step-cache
 
+**Documentation:** https://step-cache.smithers.sh
+
 Durable, content-addressed storage for sealed step results. Entries are
 reusable execution evidence, but the mutable head remains a cache: it may be
 expired or evicted without rewriting the append-only provenance ledger.

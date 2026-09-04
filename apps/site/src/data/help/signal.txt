@@ -2,7 +2,7 @@ DESCRIPTION
   Deliver a durable JSON signal to a run
 
 USAGE
-  smithers signal [flags] <run-id> <signal-json>
+  smthrs signal [flags] <run-id> <signal-json>
 
 ARGUMENTS
   run-id string         

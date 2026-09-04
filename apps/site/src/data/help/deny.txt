@@ -2,7 +2,7 @@ DESCRIPTION
   Deny the complete serialized approval payload
 
 USAGE
-  smithers deny [flags] <approval>
+  smthrs deny [flags] <approval>
 
 ARGUMENTS
   approval string    

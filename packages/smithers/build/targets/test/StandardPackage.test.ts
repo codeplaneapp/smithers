@@ -23,7 +23,12 @@ describe("StandardPackage docsFiles", () => {
   })
 
   it("follows a readme override", () => {
-    const overridden = StandardPackage({ packageManager, deps: [], cwd: "packages/x", readme: { _tag: "File", path: "docs/README.md" } })
+    const overridden = StandardPackage({
+      packageManager,
+      deps: [],
+      cwd: "packages/x",
+      readme: { _tag: "File", path: "docs/README.md" }
+    })
     expect(Filegroup.sources(Target.metadata(overridden.docsFiles).attrs as Filegroup.Attrs)).toContainEqual(
       { _tag: "File", path: "packages/x/docs/README.md" }
     )

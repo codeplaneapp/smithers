@@ -1,5 +1,7 @@
 # @smthrs/control
 
+**Documentation:** https://control.smithers.sh
+
 Control services and RPC projections for flows. It defines the
 transport-independent Control service, its runtime and execution ports, local
 and RPC implementations, verified ingress channels, credentials, and the shared

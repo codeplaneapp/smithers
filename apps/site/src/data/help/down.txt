@@ -2,7 +2,7 @@ DESCRIPTION
   Cancel every non-terminal run
 
 USAGE
-  smithers down [flags]
+  smthrs down [flags]
 
 FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY

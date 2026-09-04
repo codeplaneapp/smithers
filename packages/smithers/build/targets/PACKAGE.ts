@@ -85,6 +85,17 @@ const docsSources = Smithers.Filegroup({
   cwd
 })
 
+/**
+ * The package's documentation as a file group (`docs/**`, the README, and
+ * package.json), matching the filegroup StandardPackage emits. The docs-site
+ * content sync in `apps/docs/targets/PACKAGE.ts` depends on it by label, the
+ * one way an input reaches across a package boundary.
+ */
+const docsFiles = Smithers.Filegroup({
+  srcs: [Smithers.glob("docs/**/*.md"), Smithers.file("README.md"), Smithers.file("package.json")],
+  cwd
+})
+
 /** The committed reference pages, as a set other packages depend on. */
 const referencePages = Smithers.Filegroup({ srcs: [Smithers.glob("docs/reference/*.md")], cwd })
 
@@ -141,6 +152,7 @@ export const Package = Smithers.Package({
     check,
     circular,
     docs,
+    docsFiles,
     fmt,
     lib,
     lint,

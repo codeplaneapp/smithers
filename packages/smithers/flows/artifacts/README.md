@@ -1,5 +1,7 @@
 # `@smthrs/artifacts`
 
+**Documentation:** https://artifacts.smithers.sh
+
 The content-addressed artifact store: bytes addressed by their own SHA-256
 digest.
 

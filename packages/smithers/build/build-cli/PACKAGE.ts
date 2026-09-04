@@ -95,6 +95,17 @@ const docs = Smithers.DocsParity({
 })
 
 /**
+ * The package's documentation as a file group (`docs/**`, the README, and
+ * package.json), matching the filegroup StandardPackage emits. The docs-site
+ * content sync in `apps/docs/build-cli/PACKAGE.ts` depends on it by label,
+ * the one way an input reaches across a package boundary.
+ */
+const docsFiles = Smithers.Filegroup({
+  srcs: [Smithers.glob("docs/**/*.md"), Smithers.file("README.md"), Smithers.file("package.json")],
+  cwd
+})
+
+/**
  * The package's circular-dependency guard, run under the declared runtime.
  *
  * @since 0.1.0
@@ -108,5 +119,5 @@ const circular = Smithers.NodeTest({
 })
 
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, fmt, lib, lint, test }
+  targets: { check, circular, docs, docsFiles, fmt, lib, lint, test }
 })

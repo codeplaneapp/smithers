@@ -1,5 +1,7 @@
 # @smthrs/flows
 
+**Documentation:** https://flows.smithers.sh
+
 Convenience barrel for the complete durable flows architecture. Each package
 is re-exported as a namespace so consumers can opt into one dependency
 without flattening neighboring service constructors; `namespaces` lists those

@@ -1,5 +1,7 @@
 # @smthrs/testing
 
+**Documentation:** https://testing.smithers.sh
+
 Testing and conformance library for flows. It provides layered engine and model doubles, pure plan and journal assertions, restart and parity suites, Vitest adapters, and deterministic score gates.
 
 ```sh

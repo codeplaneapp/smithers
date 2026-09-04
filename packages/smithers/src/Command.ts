@@ -1585,7 +1585,7 @@ const doctor = Command.make("doctor", {}, () =>
     yield* render(
       root.json
         ? report
-        : Ui.renderChecklist(`smithers doctor: ${report.root}`, report.checks, { interactive: ui.interactive })
+        : Ui.renderChecklist(`smthrs doctor: ${report.root}`, report.checks, { interactive: ui.interactive })
     )
     if (Doctor.failed(report)) {
       yield* Effect.fail(new CliError.UnsupportedError({ message: "doctor found a blocking problem" }))

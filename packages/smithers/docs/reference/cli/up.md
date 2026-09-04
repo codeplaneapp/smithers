@@ -1,5 +1,5 @@
 ---
-title: "smithers up"
+title: "smthrs up"
 description: "Plan, approve, and run one flow; -d launches it detached"
 area: cli
 order: 20
@@ -8,19 +8,19 @@ order: 20
 ## Synopsis
 
 ```text
-smithers up FLOW_ID [--data JSON] [--detached]
+smthrs up FLOW_ID [--data JSON] [--detached]
 ```
 
 ## Description
 
-`smithers up` plans one flow, grants the plan's own approval at `run` scope,
+`smthrs up` plans one flow, grants the plan's own approval at `run` scope,
 and submits it, in one invocation. The approval authorizes this launch and its
 whole run, not every future launch of the flow.
 
 Without `--detached` the command stays attached: it prints the launch receipt,
 waits for the run to settle when this process owns the executor, and reports
 the run's outcome as its own exit status. With `--detached` it re-executes the
-CLI as `smithers run <payload>` in a process of its own, waits for that child
+CLI as `smthrs run <payload>` in a process of its own, waits for that child
 to prove the run row is durable, then prints the run id and the child's log
 path. The child runs with the project root as its working directory and
 inherits this process's environment; of the flags, only `--mcp-config`
@@ -29,14 +29,14 @@ inherits this process's environment; of the flags, only `--mcp-config`
 A flow id that starts with `system/` is refused, because the control catalog
 reserves those ids and 1.0.0-rc.0 ships a body for none of them. `--detached`
 is refused alongside `--remote` or `SMITHERS_REMOTE`, because a detached launch
-spawns a local executor. `smithers up` takes no `KEY=VALUE` positional entries;
+spawns a local executor. `smthrs up` takes no `KEY=VALUE` positional entries;
 `--data` is its only input channel.
 
 ## Arguments
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| `FLOW_ID` | `string` | Yes | The flow to plan and run, spelled as `smithers ls` lists it. |
+| `FLOW_ID` | `string` | Yes | The flow to plan and run, spelled as `smthrs ls` lists it. |
 
 ## Flags
 
@@ -47,14 +47,14 @@ spawns a local executor. `smithers up` takes no `KEY=VALUE` positional entries;
 
 ## Global flags
 
-`smithers up` accepts `--root`, `--remote`, `--credential`, `--json`,
+`smthrs up` accepts `--root`, `--remote`, `--credential`, `--json`,
 `--quiet`, `--mcp-config`, and `--log-level`, listed in the
 [CLI reference index](/docs/reference/cli/).
 
 ## Output
 
 An attached launch prints one control receipt, the same document
-`smithers run` prints: `Accepted` with `receiptId` and `runId`,
+`smthrs run` prints: `Accepted` with `receiptId` and `runId`,
 `AlreadyApplied` with the same two members, `Parked` with `receiptId`,
 `planId`, and `status: "waiting-approval"`, `Conflict` with `message`, or
 `Terminal` with `runId` and `status`. Members are ordered by UTF-16 code unit,
@@ -97,7 +97,7 @@ Each removed flag exits 1 with a sentence naming its replacement and a link to
 Launch the `deploy/status` flow detached and read back its machine document:
 
 ```bash
-smithers up deploy/status --data '{"branch":"main"}' -d --json
+smthrs up deploy/status --data '{"branch":"main"}' -d --json
 ```
 
 The compact document, with a run id and project root standing in for yours:
@@ -108,13 +108,13 @@ The compact document, with a run id and project root standing in for yours:
 
 ## See also
 
-- [`smithers plan`](/docs/reference/cli/plan/) performs the planning half
+- [`smthrs plan`](/docs/reference/cli/plan/) performs the planning half
   alone.
-- [`smithers run`](/docs/reference/cli/run/) submits a payload that is already
+- [`smthrs run`](/docs/reference/cli/run/) submits a payload that is already
   approved, and resumes a parked run.
-- [`smithers logs`](/docs/reference/cli/logs/) reads the events of the run this
+- [`smthrs logs`](/docs/reference/cli/logs/) reads the events of the run this
   command started.
-- [`smithers cancel`](/docs/reference/cli/cancel/) ends a run no executor
+- [`smthrs cancel`](/docs/reference/cli/cancel/) ends a run no executor
   takes.
 - [Plan, approve, run](/docs/guides/plan-approve-run/) shows the procedure.
 

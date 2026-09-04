@@ -1,5 +1,7 @@
 # @smthrs/platform-node
 
+**Documentation:** https://platform-node.smithers.sh
+
 The Node.js Host bundle for Smithers.
 
 `@effect/platform-node` already ships `FileSystem`, `Path`,

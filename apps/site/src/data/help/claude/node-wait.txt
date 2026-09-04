@@ -2,7 +2,7 @@ DESCRIPTION
   Block until one node settles
 
 USAGE
-  smithers claude node-wait [flags] <run-id> <node-id>
+  smthrs claude node-wait [flags] <run-id> <node-id>
 
 ARGUMENTS
   run-id string     

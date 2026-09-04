@@ -1,5 +1,7 @@
 # `@smthrs/crypto`
 
+**Documentation:** https://crypto.smithers.sh
+
 Strict SHA-256 hashing for Smithers. The package accepts well-formed JavaScript
 text or `Uint8Array`, hashes a byte snapshot, and returns one branded wire form:
 64 lowercase hexadecimal characters.

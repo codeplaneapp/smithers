@@ -37,6 +37,758 @@
         "typescript": "~6.0.3",
       },
     },
+    "apps/docs/agent": {
+      "name": "@smithers/docs-agent",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/artifacts": {
+      "name": "@smithers/docs-artifacts",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/build-cli": {
+      "name": "@smithers/docs-build-cli",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/canonical": {
+      "name": "@smithers/docs-canonical",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/capability": {
+      "name": "@smithers/docs-capability",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/chain": {
+      "name": "@smithers/docs-chain",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/cli": {
+      "name": "@smithers/docs-cli",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/control": {
+      "name": "@smithers/docs-control",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/core": {
+      "name": "@smithers/docs-core",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/create-app": {
+      "name": "@smithers/docs-create-app",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/crypto": {
+      "name": "@smithers/docs-crypto",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/database": {
+      "name": "@smithers/docs-database",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/engine": {
+      "name": "@smithers/docs-engine",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/engine-store": {
+      "name": "@smithers/docs-engine-store",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/errors": {
+      "name": "@smithers/docs-errors",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/evals": {
+      "name": "@smithers/docs-evals",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/flow": {
+      "name": "@smithers/docs-flow",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/flows": {
+      "name": "@smithers/docs-flows",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/fs": {
+      "name": "@smithers/docs-fs",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/gateway": {
+      "name": "@smithers/docs-gateway",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/harness": {
+      "name": "@smithers/docs-harness",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/integrations": {
+      "name": "@smithers/docs-integrations",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/jj": {
+      "name": "@smithers/docs-jj",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/journal": {
+      "name": "@smithers/docs-journal",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/kernel": {
+      "name": "@smithers/docs-kernel",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/keys": {
+      "name": "@smithers/docs-keys",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/mcp": {
+      "name": "@smithers/docs-mcp",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/memory": {
+      "name": "@smithers/docs-memory",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/migrate": {
+      "name": "@smithers/docs-migrate",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/model": {
+      "name": "@smithers/docs-model",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/notifications": {
+      "name": "@smithers/docs-notifications",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/observability": {
+      "name": "@smithers/docs-observability",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/patterns": {
+      "name": "@smithers/docs-patterns",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/plan": {
+      "name": "@smithers/docs-plan",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/platform-browser": {
+      "name": "@smithers/docs-platform-browser",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/platform-bun": {
+      "name": "@smithers/docs-platform-bun",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/platform-node": {
+      "name": "@smithers/docs-platform-node",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/plugin": {
+      "name": "@smithers/docs-plugin",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/registry": {
+      "name": "@smithers/docs-registry",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/run-store": {
+      "name": "@smithers/docs-run-store",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/sandbox": {
+      "name": "@smithers/docs-sandbox",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/scorers": {
+      "name": "@smithers/docs-scorers",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/shared": {
+      "name": "@smithers/docs-shared",
+      "version": "0.0.1",
+      "dependencies": {
+        "alchemy": "^0.93.12",
+      },
+      "devDependencies": {
+        "@astrojs/starlight": "^0.36.0",
+      },
+    },
+    "apps/docs/smithers-build": {
+      "name": "@smithers/docs-smithers-build",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/smthrs": {
+      "name": "@smithers/docs-smthrs",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/std": {
+      "name": "@smithers/docs-std",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/step-cache": {
+      "name": "@smithers/docs-step-cache",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/sync": {
+      "name": "@smithers/docs-sync",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/targets": {
+      "name": "@smithers/docs-targets",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/testing": {
+      "name": "@smithers/docs-testing",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/time-travel": {
+      "name": "@smithers/docs-time-travel",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/triggers": {
+      "name": "@smithers/docs-triggers",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/ui": {
+      "name": "@smithers/docs-ui",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
+    "apps/docs/ui-styleguide": {
+      "name": "@smithers/docs-ui-styleguide",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/starlight": "^0.36.0",
+        "astro": "^5.13.2",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.4",
+        "@smithers/docs-shared": "workspace:*",
+        "alchemy": "^0.93.12",
+        "typescript": "~6.0.3",
+      },
+    },
     "apps/review": {
       "name": "@smthrs/review",
       "version": "1.0.0-rc.0",
@@ -89,6 +841,32 @@
       },
       "devDependencies": {
         "@astrojs/check": "^0.9.4",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
+        "@smthrs/agent": "workspace:*",
+        "@smthrs/capability": "workspace:*",
+        "@smthrs/database": "workspace:*",
+        "@smthrs/engine": "workspace:*",
+        "@smthrs/engine-store": "workspace:*",
+        "@smthrs/flow": "workspace:*",
+        "@smthrs/flows": "workspace:*",
+        "@smthrs/harness": "workspace:*",
+        "@smthrs/journal": "workspace:*",
+        "@smthrs/kernel": "workspace:*",
+        "@smthrs/mcp": "workspace:*",
+        "@smthrs/memory": "workspace:*",
+        "@smthrs/model": "workspace:*",
+        "@smthrs/observability": "workspace:*",
+        "@smthrs/plan": "workspace:*",
+        "@smthrs/registry": "workspace:*",
+        "@smthrs/run-store": "workspace:*",
+        "@smthrs/sandbox": "workspace:*",
+        "@smthrs/std": "workspace:*",
+        "@smthrs/sync": "workspace:*",
+        "@smthrs/testing": "workspace:*",
+        "@smthrs/time-travel": "workspace:*",
+        "alchemy": "^0.93.12",
+        "effect": "4.0.0-rc.108",
         "typescript": "~6.0.3",
       },
     },
@@ -311,8 +1089,10 @@
       "version": "1.0.0-rc.0",
       "bin": {
         "smithers": "./bin/smithers.mjs",
+        "smthrs": "./bin/smithers.mjs",
       },
       "dependencies": {
+        "@clack/prompts": "1.7.0",
         "@effect/platform-node": "4.0.0-rc.108",
         "@effect/platform-node-shared": "4.0.0-rc.108",
         "@smthrs/agent": "1.0.0-rc.0",
@@ -1577,20 +2357,20 @@
       "name": "@smthrs/platform-node",
       "version": "1.0.0-rc.0",
       "dependencies": {
-        "@effect/platform-node": "4.0.0-rc.108",
-        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@smthrs/jj": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@smthrs/journal": "1.0.0-rc.0",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1601,6 +2381,11 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/run-store": {
@@ -3067,6 +3852,114 @@
     "@sindresorhus/is": ["@sindresorhus/is@7.2.0", "", {}, "sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw=="],
 
     "@sindresorhus/merge-streams": ["@sindresorhus/merge-streams@4.0.0", "", {}, "sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ=="],
+
+    "@smithers/docs-agent": ["@smithers/docs-agent@workspace:apps/docs/agent"],
+
+    "@smithers/docs-artifacts": ["@smithers/docs-artifacts@workspace:apps/docs/artifacts"],
+
+    "@smithers/docs-build-cli": ["@smithers/docs-build-cli@workspace:apps/docs/build-cli"],
+
+    "@smithers/docs-canonical": ["@smithers/docs-canonical@workspace:apps/docs/canonical"],
+
+    "@smithers/docs-capability": ["@smithers/docs-capability@workspace:apps/docs/capability"],
+
+    "@smithers/docs-chain": ["@smithers/docs-chain@workspace:apps/docs/chain"],
+
+    "@smithers/docs-cli": ["@smithers/docs-cli@workspace:apps/docs/cli"],
+
+    "@smithers/docs-control": ["@smithers/docs-control@workspace:apps/docs/control"],
+
+    "@smithers/docs-core": ["@smithers/docs-core@workspace:apps/docs/core"],
+
+    "@smithers/docs-create-app": ["@smithers/docs-create-app@workspace:apps/docs/create-app"],
+
+    "@smithers/docs-crypto": ["@smithers/docs-crypto@workspace:apps/docs/crypto"],
+
+    "@smithers/docs-database": ["@smithers/docs-database@workspace:apps/docs/database"],
+
+    "@smithers/docs-engine": ["@smithers/docs-engine@workspace:apps/docs/engine"],
+
+    "@smithers/docs-engine-store": ["@smithers/docs-engine-store@workspace:apps/docs/engine-store"],
+
+    "@smithers/docs-errors": ["@smithers/docs-errors@workspace:apps/docs/errors"],
+
+    "@smithers/docs-evals": ["@smithers/docs-evals@workspace:apps/docs/evals"],
+
+    "@smithers/docs-flow": ["@smithers/docs-flow@workspace:apps/docs/flow"],
+
+    "@smithers/docs-flows": ["@smithers/docs-flows@workspace:apps/docs/flows"],
+
+    "@smithers/docs-fs": ["@smithers/docs-fs@workspace:apps/docs/fs"],
+
+    "@smithers/docs-gateway": ["@smithers/docs-gateway@workspace:apps/docs/gateway"],
+
+    "@smithers/docs-harness": ["@smithers/docs-harness@workspace:apps/docs/harness"],
+
+    "@smithers/docs-integrations": ["@smithers/docs-integrations@workspace:apps/docs/integrations"],
+
+    "@smithers/docs-jj": ["@smithers/docs-jj@workspace:apps/docs/jj"],
+
+    "@smithers/docs-journal": ["@smithers/docs-journal@workspace:apps/docs/journal"],
+
+    "@smithers/docs-kernel": ["@smithers/docs-kernel@workspace:apps/docs/kernel"],
+
+    "@smithers/docs-keys": ["@smithers/docs-keys@workspace:apps/docs/keys"],
+
+    "@smithers/docs-mcp": ["@smithers/docs-mcp@workspace:apps/docs/mcp"],
+
+    "@smithers/docs-memory": ["@smithers/docs-memory@workspace:apps/docs/memory"],
+
+    "@smithers/docs-migrate": ["@smithers/docs-migrate@workspace:apps/docs/migrate"],
+
+    "@smithers/docs-model": ["@smithers/docs-model@workspace:apps/docs/model"],
+
+    "@smithers/docs-notifications": ["@smithers/docs-notifications@workspace:apps/docs/notifications"],
+
+    "@smithers/docs-observability": ["@smithers/docs-observability@workspace:apps/docs/observability"],
+
+    "@smithers/docs-patterns": ["@smithers/docs-patterns@workspace:apps/docs/patterns"],
+
+    "@smithers/docs-plan": ["@smithers/docs-plan@workspace:apps/docs/plan"],
+
+    "@smithers/docs-platform-browser": ["@smithers/docs-platform-browser@workspace:apps/docs/platform-browser"],
+
+    "@smithers/docs-platform-bun": ["@smithers/docs-platform-bun@workspace:apps/docs/platform-bun"],
+
+    "@smithers/docs-platform-node": ["@smithers/docs-platform-node@workspace:apps/docs/platform-node"],
+
+    "@smithers/docs-plugin": ["@smithers/docs-plugin@workspace:apps/docs/plugin"],
+
+    "@smithers/docs-registry": ["@smithers/docs-registry@workspace:apps/docs/registry"],
+
+    "@smithers/docs-run-store": ["@smithers/docs-run-store@workspace:apps/docs/run-store"],
+
+    "@smithers/docs-sandbox": ["@smithers/docs-sandbox@workspace:apps/docs/sandbox"],
+
+    "@smithers/docs-scorers": ["@smithers/docs-scorers@workspace:apps/docs/scorers"],
+
+    "@smithers/docs-shared": ["@smithers/docs-shared@workspace:apps/docs/shared"],
+
+    "@smithers/docs-smithers-build": ["@smithers/docs-smithers-build@workspace:apps/docs/smithers-build"],
+
+    "@smithers/docs-smthrs": ["@smithers/docs-smthrs@workspace:apps/docs/smthrs"],
+
+    "@smithers/docs-std": ["@smithers/docs-std@workspace:apps/docs/std"],
+
+    "@smithers/docs-step-cache": ["@smithers/docs-step-cache@workspace:apps/docs/step-cache"],
+
+    "@smithers/docs-sync": ["@smithers/docs-sync@workspace:apps/docs/sync"],
+
+    "@smithers/docs-targets": ["@smithers/docs-targets@workspace:apps/docs/targets"],
+
+    "@smithers/docs-testing": ["@smithers/docs-testing@workspace:apps/docs/testing"],
+
+    "@smithers/docs-time-travel": ["@smithers/docs-time-travel@workspace:apps/docs/time-travel"],
+
+    "@smithers/docs-triggers": ["@smithers/docs-triggers@workspace:apps/docs/triggers"],
+
+    "@smithers/docs-ui": ["@smithers/docs-ui@workspace:apps/docs/ui"],
+
+    "@smithers/docs-ui-styleguide": ["@smithers/docs-ui-styleguide@workspace:apps/docs/ui-styleguide"],
 
     "@smithers/site": ["@smithers/site@workspace:apps/site"],
 

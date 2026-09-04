@@ -2,7 +2,7 @@ DESCRIPTION
   Stop following a run in this session's mirror
 
 USAGE
-  smithers claude unsubscribe [flags] <run-id>
+  smthrs claude unsubscribe [flags] <run-id>
 
 ARGUMENTS
   run-id string    

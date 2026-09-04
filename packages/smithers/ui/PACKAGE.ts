@@ -70,6 +70,17 @@ const unitTests = Smithers.NodeTest({
   cwd
 })
 
+/**
+ * The package's documentation as a file group (`docs/**`, the README, and
+ * package.json), matching the filegroup StandardPackage emits. The docs-site
+ * content sync in `apps/docs/ui/PACKAGE.ts` depends on it by label, the one
+ * way an input reaches across a package boundary.
+ */
+const docsFiles = Smithers.Filegroup({
+  srcs: [Smithers.glob("docs/**/*.md"), Smithers.file("README.md"), Smithers.file("package.json")],
+  cwd
+})
+
 export const Package = Smithers.Package({
-  targets: { check, unitTests }
+  targets: { check, docsFiles, unitTests }
 })

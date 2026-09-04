@@ -4,7 +4,7 @@
  * `16-fan-out-fan-in.ts` names its gate in code. A project names it here, in
  * `flows/<name>/flow.ts`, and the name is the directory: `gate`. Discovery
  * reads this file's metadata without evaluating it, so what an operator sees in
- * `smithers ls` costs one file read.
+ * `smthrs ls` costs one file read.
  *
  * Two fields carry the decisions the runtime acts on.
  *

@@ -2,7 +2,7 @@ DESCRIPTION
   Read one fact
 
 USAGE
-  smithers memory get [flags] <key>
+  smthrs memory get [flags] <key>
 
 ARGUMENTS
   key string    

@@ -1,0 +1,29 @@
+---
+title: "API reference"
+description: "Private metadata routing and schema-checked command projections for Smithers flows"
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/fs/docs/api.md"
+---
+
+The root barrel exposes one namespace for each supported module. The same
+module is reachable through its named workspace subpath.
+
+| Namespace     | Responsibility                                                               |
+| ------------- | ---------------------------------------------------------------------------- |
+| `Command`     | Agent-facing list, parse, execute, and typed exact-call projection.          |
+| `CommandTree` | Bounded immutable route trie, longest-prefix lookup, and exact lookup.       |
+| `Directive`   | Registry placement literals compiled into core placement annotations.        |
+| `FileRouter`  | Metadata-only filesystem discovery with absolute path-derived routes.        |
+| `FlowInvoker` | Injected seam that owns actual flow execution.                               |
+| `FsError`     | Sanitized stable failure taxonomy for every projection.                      |
+| `Incur`       | Lazy schema-aware CLI and HTTP projection.                                   |
+| `Route`       | Immutable route metadata, generated manifest types, and lazy module loading. |
+
+`FileRouter` is discovery. It retains module, Markdown, and skill metadata.
+`Command` and `Incur` are execution surfaces and therefore filter to module
+routes whose `modelInvocable` flag is true. `Route.load` refuses every other
+body kind.
+
+`Command.call` uses the augmentable `Route.Manifest`. When generated code
+declares manifest members, names and their input/output types narrow to those
+members. Without a generated manifest, the private adapter retains a string
+fallback so development discovery can proceed.

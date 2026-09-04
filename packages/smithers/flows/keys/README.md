@@ -1,5 +1,7 @@
 # `@smthrs/keys`
 
+**Documentation:** https://keys.smithers.sh
+
 Derive canonical flow keys and validate keys read from storage without
 accidentally hashing them again.
 

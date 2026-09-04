@@ -1,5 +1,7 @@
 # @smthrs/ui-styleguide
 
+**Documentation:** https://ui-styleguide.smithers.sh
+
 Shared CSS tokens and layout primitives for Smithers browser UIs.
 
 Eight color palettes, each with a light and a dark variant, emitted as CSS

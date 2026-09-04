@@ -2,7 +2,7 @@ DESCRIPTION
   Plan, approve, and run one flow; -d launches it detached
 
 USAGE
-  smithers up [flags] <flow>
+  smthrs up [flags] <flow>
 
 ARGUMENTS
   flow string    

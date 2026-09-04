@@ -2,7 +2,7 @@ DESCRIPTION
   Write one fact
 
 USAGE
-  smithers memory set [flags] <key> <value>
+  smthrs memory set [flags] <key> <value>
 
 ARGUMENTS
   key string      

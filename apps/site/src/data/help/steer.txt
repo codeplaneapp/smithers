@@ -2,7 +2,7 @@ DESCRIPTION
   Send a durable, attributed steering message to a run
 
 USAGE
-  smithers steer [flags] <run-id>
+  smthrs steer [flags] <run-id>
 
 ARGUMENTS
   run-id string    

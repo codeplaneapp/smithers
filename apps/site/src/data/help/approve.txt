@@ -2,7 +2,7 @@ DESCRIPTION
   Approve the complete serialized approval payload
 
 USAGE
-  smithers approve [flags] <approval>
+  smthrs approve [flags] <approval>
 
 ARGUMENTS
   approval string    

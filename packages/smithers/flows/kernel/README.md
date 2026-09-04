@@ -1,5 +1,7 @@
 # @smthrs/kernel
 
+**Documentation:** https://kernel.smithers.sh
+
 The closed host boundary and the capability kernel over it. This package owns
 the closed list of platform ports every side effect enters through, monotone
 authority, typed permission/grant decisions, journal-backed grants, and

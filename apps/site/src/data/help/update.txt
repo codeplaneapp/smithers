@@ -2,7 +2,7 @@ DESCRIPTION
   Check npm for a newer @smthrs/cli
 
 USAGE
-  smithers update [flags]
+  smthrs update [flags]
 
 FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY

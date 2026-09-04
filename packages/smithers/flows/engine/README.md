@@ -1,5 +1,7 @@
 # @smthrs/engine
 
+**Documentation:** https://engine.smithers.sh
+
 The runtime that executes `@smthrs/flow` flows, plus the transport
 projections that expose them. It implements `FlowRuntime` — the port
 `@smthrs/flow` declares — over a low-level encoded contract, and ships a

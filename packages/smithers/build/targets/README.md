@@ -1,5 +1,7 @@
 # @smthrs/targets
 
+**Documentation:** https://targets.smithers.sh
+
 `@smthrs/targets` defines the pure authoring surface used by `PACKAGE.ts` files.
 Target calls perform no filesystem reads and start no processes. They return
 Flow declarations with planner metadata attached.

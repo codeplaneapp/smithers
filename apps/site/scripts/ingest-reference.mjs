@@ -136,8 +136,10 @@ const toMdx = (body) => {
     .join("")
 }
 
-const renderPage = (page) =>
-  [
+const renderPage = (page) => {
+  const packageRoot = page.sourcePath.split("/docs/reference/")[0]
+  const sourceLinks = `> **Source:** [implementation](${editBase.replace("/edit/", "/tree/")}${packageRoot}/src) · [reference source](${editBase.replace("/edit/", "/blob/")}${page.sourcePath})`
+  return [
     "---",
     `${owner} edit ${page.sourcePath} and run:`,
     `#   ${regenerate}`,
@@ -150,8 +152,11 @@ const renderPage = (page) =>
     "",
     `{/* Generated from ${page.sourcePath}. Edit the source, then run \`${regenerate}\`. */}`,
     "",
+    sourceLinks,
+    "",
     page.body
   ].join("\n")
+}
 
 const renderIndex = (areaKey, pages) => {
   const area = areas[areaKey]

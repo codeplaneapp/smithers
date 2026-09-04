@@ -2,7 +2,7 @@ DESCRIPTION
   Render a flow plan and its complete approval payload
 
 USAGE
-  smithers plan [flags] [<key=value...>]
+  smthrs plan [flags] [<key=value...>]
 
 ARGUMENTS
   key=value... string     (optional)

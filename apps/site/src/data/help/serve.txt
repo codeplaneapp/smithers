@@ -2,7 +2,7 @@ DESCRIPTION
   Host the control server for this project
 
 USAGE
-  smithers serve [flags]
+  smthrs serve [flags]
 
 FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY

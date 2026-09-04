@@ -2,7 +2,7 @@ DESCRIPTION
   Run an approved plan payload, or resume a parked run
 
 USAGE
-  smithers run [flags] <plan-payload>
+  smthrs run [flags] <plan-payload>
 
 ARGUMENTS
   plan-payload string    

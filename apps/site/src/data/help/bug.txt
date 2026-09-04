@@ -2,7 +2,7 @@ DESCRIPTION
   Report a bug with a run digest attached
 
 USAGE
-  smithers bug [flags] [<summary...>]
+  smthrs bug [flags] [<summary...>]
 
 ARGUMENTS
   summary... string     (optional)

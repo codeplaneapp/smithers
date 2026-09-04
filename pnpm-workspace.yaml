@@ -22,6 +22,7 @@ packages:
   - "packages/smithers/ui/*"
   - "examples"
   - "apps/*"
+  - "apps/docs/*"
   - "evals/*"
 
 allowBuilds:

@@ -1,3 +1,5 @@
+**Documentation:** https://canonical.smithers.sh
+
 <!-- Deep reviewed and polished by a human. -->
 
 # `@smthrs/canonical`

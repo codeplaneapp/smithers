@@ -1,5 +1,7 @@
 # @smthrs/create-app
 
+**Documentation:** https://create-app.smithers.sh
+
 Declare a Smithers app in one `PACKAGE.ts`. Everything else is named by where
 it sits: pages, panes, flows, and the three layer files a flow inherits.
 
