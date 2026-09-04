@@ -9,7 +9,7 @@ const workspaceConfig = S.file("//pnpm-workspace.yaml")
 // generated CI workflow disagree with what is declared here.
 export const runtime = S.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
-export const bunRuntime = S.Runtime.Bun({ version: ">=1.3.0" })
+export const bunRuntime = S.Runtime.Bun({ version: ">=1.4.0" })
 export const bunPackageManager = S.PackageManager.BunPackages({ runtime: bunRuntime })
 
 // The same toolchain as one Nix closure: flake.nix pins pnpm at exactly

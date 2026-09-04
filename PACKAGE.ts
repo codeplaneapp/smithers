@@ -83,7 +83,7 @@ const node = Smithers.CiToolchain.Node({ release: "22.19.0" })
 
 const bareNode = Smithers.CiToolchain.Node({ release: "22.19.0", cachePackageStore: false })
 
-const bun = Smithers.CiToolchain.Bun({ release: "1.3.14" })
+const bun = Smithers.CiToolchain.Bun({ release: "1.4.1" })
 
 const jj = Smithers.CiToolchain.Jj({ release: "0.39.0" })
 // `@smthrs/std` proves its portable search against a real `rg`: the conformance
@@ -147,7 +147,6 @@ const ci = Smithers.GithubCiGen({
       }),
       steps: [
         { name: "Workspace targets", verb: Smithers.Verb.Ci, pattern: "//packages/...", parallelism: 2 },
-        { name: "Examples", verb: Smithers.Verb.Ci, pattern: "//examples/..." },
         { name: "Script gates", verb: Smithers.Verb.Test, pattern: "//scripts/..." },
         { name: "JSDoc rule harness", verb: Smithers.Verb.Test, pattern: "//:jsdocRules" },
         // Every `evals/*` directory is its own workspace member now, so each

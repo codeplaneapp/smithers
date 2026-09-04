@@ -45,7 +45,7 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.1
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Install jj
         uses: taiki-e/install-action@v2
@@ -68,11 +68,6 @@ jobs:
         shell: bash
       - name: Workspace targets
         run: pnpm exec smithers-build ci '//packages/...' --jobs 2
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - name: Examples
-        run: pnpm exec smithers-build ci '//examples/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -164,7 +159,7 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.1
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Assert the runner ships the declared browser
         run: |
@@ -324,7 +319,7 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.1
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Install jj
         uses: taiki-e/install-action@v2

@@ -205,10 +205,10 @@ describe("install engine boundary", () => {
 describe("runInstall option normalization", () => {
   const toolchain = {
     manager: "bun" as const,
-    managerVersion: "1.3.14",
+    managerVersion: "1.4.1",
     managerExecutable: undefined,
     runtime: "bun" as const,
-    runtimeVersion: "1.3.14",
+    runtimeVersion: "1.4.1",
     runtimeExecutable: undefined
   }
 

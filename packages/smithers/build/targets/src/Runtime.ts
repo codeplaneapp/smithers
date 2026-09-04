@@ -78,7 +78,7 @@ export type NodeVersion = typeof NodeVersion.Type
  * @category schemas
  * @since 0.1.0
  */
-export const BunVersion = Schema.Literals([">=1.3.0"])
+export const BunVersion = Schema.Literals([">=1.4.0"])
 
 /**
  * The Bun version requirements this workspace supports.
@@ -323,7 +323,7 @@ export const npx = Reference.runtimeNpx
  * ```ts
  * import { Smithers } from "@smthrs/targets"
  *
- * export const runtime = Smithers.Runtime.Bun({ version: ">=1.3.0" })
+ * export const runtime = Smithers.Runtime.Bun({ version: ">=1.4.0" })
  * ```
  *
  * @category constructors
@@ -332,7 +332,7 @@ export const npx = Reference.runtimeNpx
 export const Bun = (options: Options<BunVersion>): BunRuntime => {
   const version = usable(options.version, "runtime version")
   const executable = executableFor("bun", options.executable)
-  if (version === ">=1.3.0") return BunRuntime.make({ name: "bun", version, executable })
+  if (version === ">=1.4.0") return BunRuntime.make({ name: "bun", version, executable })
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
     throw new Error(`unsupported Bun runtime requirement: ${version}`)
   }

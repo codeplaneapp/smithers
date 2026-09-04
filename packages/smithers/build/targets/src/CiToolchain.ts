@@ -58,7 +58,7 @@ export type NodeRelease = typeof NodeRelease.Type
  * @category schemas
  * @since 0.1.0
  */
-export const BunRelease = Schema.Literals(["1.3.14"])
+export const BunRelease = Schema.Literals(["1.4.1"])
 
 /**
  * The Bun releases a runner may install.
