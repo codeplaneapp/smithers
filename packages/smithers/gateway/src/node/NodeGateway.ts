@@ -137,10 +137,9 @@ export const listenOptions = (options: ServerOptions): Effect.Effect<ListenOptio
  */
 export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.ControlAuth> =>
   options.credential === undefined || options.credential === ""
-    // The bypass is safe only because `listenOptions` refuses any bind but
-    // loopback when no credential is configured, so nothing off this machine
-    // can reach the RPC mount that runs as the local operator. Changing that
-    // bind rule without changing this branch reopens the control plane.
+    // No-credential mode needs both the loopback bind and the ingress
+    // Host/Origin checks: a loopback socket alone does not stop a browser
+    // from handing the local operator's authority to a foreign web page.
     // eslint-disable-next-line no-restricted-syntax -- loopback-only bind, see above
     ? ControlRpcs.layerNoopAuth({ id: "local", kind: "operator", stampedAt: 0 })
     : ControlRpcs.layerBearerAuth({
@@ -152,7 +151,10 @@ export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.Contr
 const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions => {
   const maxRequestBodyBytes = options.maxRequestBodyBytes
   if (options.credential === undefined || options.credential === "") {
-    return maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }
+    return {
+      loopbackOnly: true,
+      ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes })
+    }
   }
   const authenticator = ControlRpcs.bearerAuthenticator({
     token: options.credential,

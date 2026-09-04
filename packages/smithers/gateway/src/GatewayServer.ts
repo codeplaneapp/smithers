@@ -355,6 +355,8 @@ export const defaultMaxRequestBodyBytes = 1024 * 1024
  */
 export interface IngressOptions {
   readonly maxRequestBodyBytes?: number | undefined
+  /** Confine requests to loopback Host values and browser origins. */
+  readonly loopbackOnly?: boolean | undefined
   readonly authorize?: (
     headers: Readonly<Record<string, string>>
   ) => Effect.Effect<boolean>
@@ -372,6 +374,12 @@ const malformedRequest = (path: string) =>
 const unauthorizedRequest = () =>
   new GatewayError({ code: "unauthorized", message: "A valid bearer credential is required" })
 
+const invalidHostRequest = () =>
+  new GatewayError({ code: "invalid_host", message: "This local gateway accepts only loopback Host values" })
+
+const invalidOriginRequest = () =>
+  new GatewayError({ code: "invalid_origin", message: "This local gateway accepts only loopback browser origins" })
+
 const requestTooLarge = (path: string, maxBytes: number) =>
   new GatewayError({
     code: "request_too_large",
@@ -380,6 +388,21 @@ const requestTooLarge = (path: string, maxBytes: number) =>
 
 /** The message `@effect/platform-node-shared` `NodeStream` gives a size overflow. */
 const maxBytesExceeded = "maxBytes exceeded"
+
+const loopbackHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i
+const loopbackOrigin = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i
+
+/** A Host header naming exactly one admitted loopback spelling and an optional valid port. */
+const acceptsLoopbackHost = (host: string | undefined): boolean => {
+  if (host === undefined || !loopbackHost.test(host)) return false
+  return URL.parse(`http://${host}`) !== null
+}
+
+/** A browser Origin naming HTTP(S) on an admitted loopback spelling. */
+const acceptsLoopbackOrigin = (origin: string): boolean => {
+  if (!loopbackOrigin.test(origin)) return false
+  return URL.parse(origin) !== null
+}
 
 /**
  * Whether a failed request-body read hit the configured size limit rather than
@@ -474,7 +497,8 @@ export const carriesRpcRequest = (
 }
 
 /**
- * Refuses a body that carries no RPC request message with 400.
+ * Enforces local Host/Origin policy and edge authentication before reading a
+ * body or upgrading a socket, then validates RPC body size and framing.
  *
  * `effect/unstable/rpc` hands every decoded message to the server loop, and a
  * body that decodes to something else — `{}`, `[]`, prose, nothing at all —
@@ -500,6 +524,13 @@ export const layerIngress = (options: IngressOptions = {}) => {
         Effect.gen(function*() {
           const request = yield* HttpServerRequest.HttpServerRequest
           const path = routedPath(request.url)
+          if (options.loopbackOnly === true) {
+            if (!acceptsLoopbackHost(request.headers.host)) return refuse(invalidHostRequest(), 421)
+            const origin = request.headers.origin
+            if (origin !== undefined && !acceptsLoopbackOrigin(origin)) {
+              return refuse(invalidOriginRequest(), 403)
+            }
+          }
           if (protectedPaths.includes(path) && options.authorize !== undefined) {
             const authorized = yield* options.authorize(request.headers)
             if (!authorized) return refuse(unauthorizedRequest(), 401)

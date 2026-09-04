@@ -98,7 +98,8 @@ const raw = (
   return new Promise((resolve, reject) => {
     let received = ""
     const socket = connect({ host: url.hostname, port: Number(url.port) }, () => {
-      socket.write(`${[...head, `Host: ${url.host}`, "", ""].join("\r\n")}${body}`)
+      const requestHead = head.some((line) => /^host:/i.test(line)) ? head : [...head, `Host: ${url.host}`]
+      socket.write(`${[...requestHead, "", ""].join("\r\n")}${body}`)
     })
     const answer = () => {
       const separator = received.indexOf("\r\n\r\n")
@@ -418,6 +419,92 @@ describe("the assembled gateway over a real loopback bind", () => {
       const url = yield* baseUrl
       const response = yield* Effect.promise(() => fetch(`${url}/nope`))
       expect(response.status).toBe(404)
+    }).pipe(Effect.provide(served())))
+
+  test("confines a credential-less gateway to loopback Host and browser Origin values", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const postRpc = (headers: ReadonlyArray<string>) =>
+        raw(`${url}/rpc`, [
+          "POST /rpc HTTP/1.1",
+          "Content-Type: application/json",
+          `Content-Length: ${exactBodyBytes}`,
+          ...headers
+        ], exactBody)
+      const upgradeRpc = (headers: ReadonlyArray<string>) =>
+        raw(`${url}/rpc/ws`, [
+          "GET /rpc/ws HTTP/1.1",
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Version: 13",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+          ...headers
+        ])
+
+      const hostileHttp = yield* Effect.promise(() => postRpc(["Origin: https://evil.example"]))
+      expect(hostileHttp.status).toBe(403)
+      expect(JSON.parse(hostileHttp.body)).toEqual({
+        _tag: "flows/gateway/GatewayError",
+        code: "invalid_origin",
+        message: "This local gateway accepts only loopback browser origins"
+      })
+
+      const hostileUpgrade = yield* Effect.promise(() => upgradeRpc(["Origin: https://evil.example"]))
+      expect(hostileUpgrade.status).toBe(403)
+      expect(JSON.parse(hostileUpgrade.body)).toMatchObject({ code: "invalid_origin" })
+
+      for (
+        const origin of [
+          "null",
+          "file://localhost",
+          "http://localhost.evil.example",
+          "http://localhost@evil.example",
+          "http://evil.example@localhost",
+          "http://127.0.0.1.evil.example",
+          "http://localhost/",
+          "http://localhost:65536",
+          "http://localhost, https://evil.example"
+        ]
+      ) {
+        for (const send of [postRpc, upgradeRpc]) {
+          const response = yield* Effect.promise(() => send([`Origin: ${origin}`]))
+          expect([origin, response.status, JSON.parse(response.body).code]).toEqual([origin, 403, "invalid_origin"])
+        }
+      }
+
+      const foreignHost = yield* Effect.promise(() => postRpc(["Host: gateway.example"]))
+      expect(foreignHost.status).toBe(421)
+      expect(JSON.parse(foreignHost.body)).toEqual({
+        _tag: "flows/gateway/GatewayError",
+        code: "invalid_host",
+        message: "This local gateway accepts only loopback Host values"
+      })
+
+      for (const host of ["gateway.example", "localhost.evil.example", "localhost@evil.example", "localhost:65536"]) {
+        for (const send of [postRpc, upgradeRpc]) {
+          const response = yield* Effect.promise(() => send([`Host: ${host}`]))
+          expect([host, response.status, JSON.parse(response.body).code]).toEqual([host, 421, "invalid_host"])
+        }
+      }
+
+      for (const host of ["localhost", "LOCALHOST:3000", "127.0.0.1", "[::1]", "[::1]:3000"]) {
+        expect([host, (yield* Effect.promise(() => postRpc([`Host: ${host}`]))).status]).toEqual([host, 200])
+        expect([host, (yield* Effect.promise(() => upgradeRpc([`Host: ${host}`]))).status]).toEqual([host, 101])
+      }
+
+      for (
+        const origin of [
+          "http://localhost",
+          "https://localhost:8443",
+          "http://127.0.0.1:3000",
+          "https://[::1]"
+        ]
+      ) {
+        expect([origin, (yield* Effect.promise(() => postRpc([`Origin: ${origin}`]))).status]).toEqual([origin, 200])
+        expect([origin, (yield* Effect.promise(() => upgradeRpc([`Origin: ${origin}`]))).status]).toEqual([origin, 101])
+      }
+      expect((yield* Effect.promise(() => postRpc([]))).status).toBe(200)
+      expect((yield* Effect.promise(() => upgradeRpc([]))).status).toBe(101)
     }).pipe(Effect.provide(served())))
 
   /**
@@ -1312,6 +1399,30 @@ describe("gateway error vocabulary", () => {
           })
           return (await response.json() as { readonly code: string }).code
         })
+      const localIngressCode = (headers: Readonly<Record<string, string>>) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() =>
+            HttpRouter.toWebHandler(
+              Layer.mergeAll(
+                HttpRouter.add("POST", "/rpc", HttpServerResponse.text("served")),
+                GatewayServer.layerIngress({ loopbackOnly: true })
+              ).pipe(Layer.provide(RpcSerialization.layerNdjson)),
+              { disableLogger: true }
+            )
+          ),
+          ({ handler }) =>
+            Effect.promise(async () => {
+              const response = await handler(
+                new Request("http://127.0.0.1/rpc", {
+                  method: "POST",
+                  headers: { host: "127.0.0.1", "content-type": "application/json", ...headers },
+                  body: exactBody
+                })
+              )
+              return ((await response.json()) as { readonly code: string }).code
+            }),
+          ({ dispose }) => Effect.promise(dispose)
+        )
       const unavailable = Effect.runSync(makeProjections({
         list: () => Effect.fail(new Unavailable({ code: "unavailable", feature: "list", ticket: "T-errors" })),
         watch: () => Stream.empty
@@ -1342,6 +1453,8 @@ describe("gateway error vocabulary", () => {
           "bind_failed",
           Effect.sync(() => NodeGateway.bindRefusal({ host: "0.0.0.0", port: 0 })?.code)
         ],
+        ["invalid_host", localIngressCode({ host: "gateway.example" })],
+        ["invalid_origin", localIngressCode({ origin: "https://evil.example" })],
         // `/projections`, because `/rpc` is authenticated in band and answers
         // `@smthrs/control`'s typed `Unauthorized` rather than this code.
         ["unauthorized", postCode("{}", undefined, "/projections")],

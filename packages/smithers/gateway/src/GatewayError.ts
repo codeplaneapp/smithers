@@ -13,6 +13,8 @@ import { Schema } from "effect"
  */
 export const GatewayErrorCode = Schema.Literals([
   "bind_failed",
+  "invalid_host",
+  "invalid_origin",
   "unauthorized",
   "malformed_request",
   "request_too_large",

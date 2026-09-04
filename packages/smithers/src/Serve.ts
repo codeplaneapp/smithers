@@ -9,8 +9,9 @@
  * whether the requested bind is allowed at all, and what it says it is
  * serving.
  *
- * The bind rule is strict: loopback needs nothing,
- * anything else needs both an explicit `--listen` and a bearer token. It is
+ * The bind rule is strict: loopback needs no bearer and accepts only loopback
+ * Host values and browser origins; anything else needs both an explicit
+ * `--listen` and a bearer token. It is
  * spelled out here, as data, because the failure mode it prevents,
  * an unauthenticated control plane on a laptop's LAN address, able to launch
  * agents with the operator's credentials, is silent when it happens.
@@ -193,7 +194,9 @@ export const banner = (bind: Bind): string => {
     ...mounts.map((mount) =>
       `  ${mount.path.padEnd(width)}  ${mount.protocol === "ws" ? socket : base}${mount.path}  ${mount.serves}`
     ),
-    bind.credential === undefined ? "  auth  none (loopback only)" : "  auth  bearer token"
+    bind.credential === undefined
+      ? "  auth  no bearer (loopback Host; loopback browser Origin)"
+      : "  auth  bearer token"
   ].join("\n")
 }
 
