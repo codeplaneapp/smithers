@@ -123,6 +123,10 @@ One evaluation settles with one of three `Cell.Outcome` members:
 | `raised`   | The cell ran and threw. The thrown value is projected into stable `name` and `message` text.                                                                                                                                             |
 | `rejected` | The cell never ran, or produced no transition. The `code` is a `Cell.RejectionCode`: `no_cell`, `output_truncated`, `imports_forbidden`, `compile_failed`, `invalid_transition`, `unsupported_language`, `limit_exceeded`, or `stalled`. |
 
+A provider `length` stop or an unterminated cell fence rejects the entire reply
+as `output_truncated`. No earlier block executes; the next request asks for a
+shorter, complete program.
+
 `ctx.done` and `ctx.park` take effect where they are called: the run is over
 at that line, and a later `ctx.call` in the same cell resolves
 `{ ok: false, error: { code: "run_completed" } }` without running. The latch
@@ -151,6 +155,14 @@ ceiling is refused before it runs and told which names to free. For the full
 semantics, see the [limits reference](../api.md#limits). A flow result larger
 than the heap still available is not copied into the realm: the frame records a
 `limit_exceeded` rejection with `reason: "heap"` instead.
+
+Flow-result heap checks conservatively include value and property storage plus
+bridge scratch space, not just serialized JSON bytes. A reply can be refused
+when its estimated allocation exceeds the remaining heap.
+
+Bridge replies are also limited to 128 levels of JSON nesting so a refusal can
+release partial handles safely. Exceeding this limit produces a typed
+`limit_exceeded` frame.
 
 ## Print to the next turn
 
@@ -203,7 +215,3 @@ module syntax, so `import` and `require` are not a back door.
   [Drive the cell loop](./drive-the-loop.md).
 - For the failure modes this surface raises, see
   [Troubleshooting](../troubleshooting.md).
-
-A provider `length` stop or an unterminated cell fence rejects the entire reply
-as `output_truncated`. No earlier block executes; the next request asks for a
-shorter, complete program.

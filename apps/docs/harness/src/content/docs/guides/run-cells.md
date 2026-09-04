@@ -118,11 +118,15 @@ The failure split is the contract `EngineLike.call` declares:
 
 One evaluation settles with one of three `Cell.Outcome` members:
 
-| Tag        | Meaning                                                                                                                                                                                                              |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settled`  | The cell ran and produced a well-formed transition: `continue` when it called neither `ctx.done` nor `ctx.park`, `complete` for `ctx.done(output)`, `park` for `ctx.park(reason, message)`.                          |
-| `raised`   | The cell ran and threw. The thrown value is projected into stable `name` and `message` text.                                                                                                                         |
-| `rejected` | The cell never ran, or produced no transition. The `code` is a `Cell.RejectionCode`: `no_cell`, `imports_forbidden`, `compile_failed`, `invalid_transition`, `unsupported_language`, `limit_exceeded`, or `stalled`. |
+| Tag        | Meaning                                                                                                                                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settled`  | The cell ran and produced a well-formed transition: `continue` when it called neither `ctx.done` nor `ctx.park`, `complete` for `ctx.done(output)`, `park` for `ctx.park(reason, message)`.                                              |
+| `raised`   | The cell ran and threw. The thrown value is projected into stable `name` and `message` text.                                                                                                                                             |
+| `rejected` | The cell never ran, or produced no transition. The `code` is a `Cell.RejectionCode`: `no_cell`, `output_truncated`, `imports_forbidden`, `compile_failed`, `invalid_transition`, `unsupported_language`, `limit_exceeded`, or `stalled`. |
+
+A provider `length` stop or an unterminated cell fence rejects the entire reply
+as `output_truncated`. No earlier block executes; the next request asks for a
+shorter, complete program.
 
 `ctx.done` and `ctx.park` take effect where they are called: the run is over
 at that line, and a later `ctx.call` in the same cell resolves
@@ -134,14 +138,14 @@ is per frame: the host clears it as the next frame opens.
 `Sandbox.defaultLimits` fills every ceiling a caller omits, and a partial
 override cannot disable the others:
 
-| Limit         | Default | Scope                                                                                |
-| ------------- | ------- | ------------------------------------------------------------------------------------ |
-| `calls`       | 64      | Per frame. A `ctx.checkpoint()` mint counts.                                         |
-| `memoryBytes` | 128 MiB | Per run, weighed by the panel probe at each frame's close.                           |
-| `steps`       | 1,000   | Per frame; interrupt checks, not bytecode operations.                                |
-| `timeMs`      | 30,000  | Per frame; the cell's own JavaScript time, excluding time suspended in a `ctx.call`. |
-| `totalMs`     | 900,000 | Per frame; whole-evaluation time, host calls included.                               |
-| `callMs`      | 120,000 | Per call; settles an overrunning call as a catchable `timeout`.                      |
+| Limit         | Default | Scope                                                                                                      |
+| ------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `calls`       | 64      | Per frame. A `ctx.checkpoint()` mint counts.                                                               |
+| `memoryBytes` | 128 MiB | Per run, weighed by the panel probe at each frame's close.                                                 |
+| `steps`       | 1,000   | Per frame; interrupt checks, not bytecode operations.                                                      |
+| `timeMs`      | 30,000  | Per frame; the cell's own JavaScript time, excluding time suspended in a `ctx.call` or `ctx.checkpoint()`. |
+| `totalMs`     | 900,000 | Per frame; whole-evaluation time, host calls included.                                                     |
+| `callMs`      | 120,000 | Per call; settles an overrunning call as a catchable `timeout`.                                            |
 
 `steps` and `timeMs` have typed floors (`Sandbox.minimumSteps`,
 `Sandbox.minimumTimeMs`), and `memoryBytes` has `Sandbox.minimumMemoryBytes`:
@@ -149,7 +153,17 @@ a budget of zero interrupts the binding's own scaffolding rather than the
 cell, so the boundary refuses it as `unsupported`. `memoryBytes` is a run
 budget because the realm outlives its frames; a frame that opens over the
 ceiling is refused before it runs and told which names to free. For the full
-semantics, see the [limits reference](/reference/api/#limits).
+semantics, see the [limits reference](/reference/api/#limits). A flow result larger
+than the heap still available is not copied into the realm: the frame records a
+`limit_exceeded` rejection with `reason: "heap"` instead.
+
+Flow-result heap checks conservatively include value and property storage plus
+bridge scratch space, not just serialized JSON bytes. A reply can be refused
+when its estimated allocation exceeds the remaining heap.
+
+Bridge replies are also limited to 128 levels of JSON nesting so a refusal can
+release partial handles safely. Exceeding this limit produces a typed
+`limit_exceeded` frame.
 
 ## Print to the next turn
 

@@ -15,7 +15,7 @@ nothing.
 
 ## Classify a refusal as a wait
 
-A `rate_limited` or `quota_exceeded` answer is not a defect report: the
+A `rate_limited`, `quota_exceeded`, or HTTP 529 overload answer is not a defect report: the
 provider is saying when to come back. `QuotaPolicy.layerDefault()` installs the
 classifier:
 

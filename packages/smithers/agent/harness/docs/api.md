@@ -46,7 +46,7 @@ behavior and signatures.
 | `Plan`                       | `Child`, `Batch`, `ChildResult`, `ChildProgress`, `ChildSettled`, `SpliceEvent`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Local structural plan nodes used at the harness-to-engine boundary.                                      |
 | `EngineLike`                 | `SuspendReasonCode`, `SuspendReason`, `SealedModelStep`, `BoundaryIdentity`, `DurableSchema`, `RecordBoundary`, `Observation`, `Snapshot`, `CaptureRequest`, `EngineLike`, `make`, `layer`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                                                                                                                                     | Narrow engine port consumed by the built-in harness.                                                     |
 | `Tokens`                     | `Count`, `Segment`, `Accounting`, `Estimator`, `estimate`, `count`, `combine`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Deterministic token accounting for context windows.                                                      |
-| `ContextWindow`              | `TypeId`, `SegmentKind`, `SegmentZone`, `Content`, `ContextWindowErrorCode`, `ContextWindowError`, `Segment`, `ContextWindow`, `SegmentInput`, `MakeOptions`, `makeSegment`, `make`, `empty`, `appendTurn`, `activateTools`, `prefixDigest`, `compactPrefix`, `compact`, `render`                                                                                                                                                                                                                                                                                                                       | The immutable, provider-neutral context assembled for one model request.                                 |
+| `ContextWindow`              | `TypeId`, `SegmentKind`, `SegmentZone`, `Content`, `ContextWindowErrorCode`, `ContextWindowError`, `Segment`, `ContextWindow`, `SegmentInput`, `MakeOptions`, `makeSegment`, `make`, `empty`, `appendTurn`, `activateTools`, `prefixDigest`, `compactPrefix`, `compact`, `render`, `contextWindowTokensFor`                                                                                                                                                                                                                                                                                             | The immutable, provider-neutral context assembled for one model request.                                 |
 | `Transcript`                 | `TranscriptErrorCode`, `TranscriptError`, `ProjectedMessage`, `ProjectedState`, `CellEvidence`, `projectStateResult`, `projectResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Transcript projection from durable journal entries.                                                      |
 | `Compaction`                 | `summaryInstruction`, `InvalidStep`, `Summarizer`, `CompactionStep`, `TokenAccounting`, `shouldCompact`, `selectPrefix`, `declare`, `summaryRequest`, `apply`                                                                                                                                                                                                                                                                                                                                                                                                                                           | Declarations for sealed transcript-summary steps.                                                        |
 | `Steering`                   | `Delivery`, `SteerInsert`, `QueueInsert`, `Insert`, `SeatChange`, `ThinkingChange`, `ActivateTools`, `Item`, `Queue`, `Drain`, `BoundaryInput`, `DrainRecord`, `drainRecord`, `PromotionState`, `empty`, `enqueue`, `drainAtClose`, `promoteAtIdle`, `Source`, `SourceInput`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                                                                                                                                                                                  | Turn-boundary steering values and their source contract.                                                 |
@@ -385,6 +385,14 @@ ran, or produced no transition). `Cell.RejectionCode` is `no_cell`, `output_trun
 fit in the remaining QuickJS heap is rejected before materialization with
 `code: "limit_exceeded"` and `reason: "heap"`, so the frame remains recordable.
 
+Flow-result heap checks conservatively include value and property storage plus
+bridge scratch space, not just serialized JSON bytes. A reply can be refused
+when its estimated allocation exceeds the remaining heap.
+
+Bridge replies are also limited to 128 levels of JSON nesting so a refusal can
+release partial handles safely. Exceeding this limit produces a typed
+`limit_exceeded` frame.
+
 **The catalog.** `Cell.FlowProjection` is the read-only projection of one
 callable flow handed to a cell: `name`, `description`, `capabilities`,
 `tier`, `placement`, and an optional inline `input` JSON Schema document.
@@ -482,6 +490,12 @@ export interface EngineLike {
 
 Turn-boundary steering values and their source contract. Human steering
 reaches a run only at safe turn boundaries.
+
+Every frame exit records its steering decision, including rejected and raised
+cells, refused parks, and completions. A completion promotes a queued follow-up
+and continues when delivery has work for the next frame. At an exhausted frame
+limit, the decision is empty and notifications remain pending at the source;
+they are never acknowledged without a frame available to consume them.
 
 `Steering.Queue` is an immutable FIFO of `Steering.Item`s: transcript inserts
 (`SteerInsert` for the next boundary, `QueueInsert` for when the run would
@@ -769,6 +783,10 @@ segment, failing with a `ContextWindowError` when the declared prefix does not
 match. `render` projects the window into the `ModelRequest` of
 [`@smthrs/model`](/api/model).
 
+`ContextWindow.contextWindowTokensFor(modelId)` supplies the shared context-limit
+catalog used by seat resolution and seat steering (128,000 tokens for unknown
+models). A thinking-only steer preserves the current budget.
+
 ## Tokens
 
 `import * as Tokens from "@smthrs/harness/Tokens"`
@@ -944,7 +962,3 @@ renders it for one frame's prompt, printing at most `bound` (64) names before it
 counts instead. A binding rewritten to a value of the same type and size
 reads as unchanged: the panel is a roster, and the run's own prints are what
 say a value moved.
-
-`ContextWindow.contextWindowTokensFor(modelId)` supplies the shared context-limit
-catalog used by seat resolution and seat steering (128,000 tokens for unknown
-models). A thinking-only steer preserves the current budget.

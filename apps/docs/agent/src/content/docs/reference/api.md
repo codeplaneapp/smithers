@@ -560,7 +560,8 @@ of 128,000 for models the catalog has not met. Never zero.
 
 | Pattern          | Tokens    |
 | ---------------- | --------- |
-| `claude`         | 200,000   |
+| `claude-*-haiku` | 200,000   |
+| other `claude`   | 1,000,000 |
 | `gpt-5`          | 400,000   |
 | `gpt-4.1`        | 1,000,000 |
 | `gpt-4o`         | 128,000   |
@@ -614,7 +615,7 @@ const layerDefault: (config?: Config) => Layer.Layer<QuotaClassifier>
 ```
 
 The production classifier. It classifies a `ModelError` whose code is
-`rate_limited` or `quota_exceeded`, or whose HTTP status is 429, and decides
+`rate_limited` or `quota_exceeded`, or whose HTTP status is 429 or 529, and decides
 the deadline in order of how much the provider said: `resetAtEpochMillis`,
 then `retryAfterMillis`, then a delay parsed out of the message text, then
 `Config.defaultWaitMillis`. A deadline more than `Config.maxWaitMillis` away

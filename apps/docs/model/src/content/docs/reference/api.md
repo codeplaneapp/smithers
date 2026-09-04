@@ -352,11 +352,13 @@ next request as a unit, because replaying a provider-interrupted turn can
 make the request permanently invalid. Thinking blocks replay only with their
 signature; a redacted block round-trips through a `redacted:` signature
 prefix. Tool-call argument text that is not a JSON object fails preparation
-as `invalid_request`. Stop reasons map `end_turn`, `stop_sequence`, and
+as `invalid_request`. A non-empty request whose first lowered message is an
+assistant message also fails preparation as `invalid_request`, with path
+`messages[0].role`, before any network call. Stop reasons map `end_turn`, `stop_sequence`, and
 `pause_turn` to `"stop"`; `max_tokens` to `"length"`; `tool_use` to
 `"tool-calls"`; `refusal` to `"content-filter"`. Classification recognizes
 Anthropic's HTTP 400 "credit balance is too low" wording as
-`quota_exceeded`, and `overloaded` and 529 as `provider_internal`.
+`quota_exceeded`, and `overloaded` and 529 as `rate_limited` so the agent can park durably.
 
 ## `OpenAIResponses`
 

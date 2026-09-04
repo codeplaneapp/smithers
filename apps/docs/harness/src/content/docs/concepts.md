@@ -118,6 +118,10 @@ The volatile block, the frame's state section, sits in one trailing user
 message after the transcript rather than inside the system context, so the whole
 stable span is byte-identical for the life of a run.
 
+Compaction summaries are rendered as user messages, including summaries read
+from older journal records. This keeps every compacted request anchored by a
+leading user turn on providers that reject assistant-first conversations.
+
 Implemented by `ContextWindow.ts`, `Tokens.ts`, `Compaction.ts`.
 
 ## Structured output
@@ -138,6 +142,11 @@ decides which notifications a boundary may deliver; the harness folds what it
 promoted into inserts and seat changes, journals the drain as a record so a
 resumed run does not drain an already-drained queue, and never lets an
 un-actionable steer look delivered.
+
+Steering is considered after raised and rejected cells as well as successful
+transitions. A completion is an idle boundary: queued follow-ups can keep the
+run going. When the frame budget is exhausted, undeliverable notifications stay
+pending in the durable queue for the host to carry forward.
 
 Implemented by `Notifications.ts`, `Steering.ts`.
 
