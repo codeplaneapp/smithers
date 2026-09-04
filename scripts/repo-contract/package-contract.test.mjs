@@ -183,4 +183,27 @@ describe("the workspace package contract", () => {
       }
     }
   })
+
+  it("keeps the Node Effect runtime as one exact peer set", () => {
+    const platform = publishable.find((entry) => entry.manifest.name === "@smthrs/platform-node")
+    assert.ok(platform, "@smthrs/platform-node must be publishable")
+
+    for (const name of ["effect", "@effect/platform-node", "@effect/platform-node-shared"]) {
+      assert.equal(
+        platform.manifest.peerDependencies?.[name],
+        "4.0.0-rc.108",
+        `@smthrs/platform-node must constrain ${name} as an exact peer`
+      )
+      assert.equal(
+        platform.manifest.dependencies?.[name],
+        undefined,
+        `@smthrs/platform-node must not install a private ${name} copy`
+      )
+      assert.equal(
+        platform.manifest.devDependencies?.[name],
+        "4.0.0-rc.108",
+        `@smthrs/platform-node must install ${name} for its own checks`
+      )
+    }
+  })
 })
