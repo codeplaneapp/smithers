@@ -300,9 +300,11 @@ export const projectStateResult = (
   if (compaction !== undefined) {
     messages.push({
       kind: "summary",
-      message: ModelRequest.Message.user(
-        compaction.payload.summary.content.filter((part): part is ModelRequest.TextPart => part.type === "text")
-      )
+      message: compaction.payload.summary.role === "user"
+        ? compaction.payload.summary
+        : ModelRequest.Message.user(
+          compaction.payload.summary.content.filter((part): part is ModelRequest.TextPart => part.type === "text")
+        )
     })
   }
   // Set only after emitting a print and cleared whenever another message is

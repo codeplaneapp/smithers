@@ -219,7 +219,8 @@ describe("the sealed cell-call key", () => {
     // token `flows/agent/composition/v1:<digest of the layer set>`, so a rename
     // of that prefix, or a change to how the layer set is digested, moves this
     // string while leaving the sealed model key above untouched.
-    expect(observed.host).toBe("key1_f80eeedbeaf0fccddf7c98a8cbf54d478d39012007a77aaf7eddded0e88fd722")
+    // The failure schema now includes incompatible_journal for harness format 2.
+    expect(observed.host).toBe("key1_8ab2962732794ee8d8b3bf550657b41d475fd082ec9c8c7073b1d24a8d77d4b9")
     // The composition really is in the key: the same call resolved under a
     // different layer set is a different boundary, not a cache hit.
     expect(observed.other).not.toBe(observed.host)

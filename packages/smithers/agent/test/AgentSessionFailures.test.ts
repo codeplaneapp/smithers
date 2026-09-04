@@ -190,6 +190,7 @@ const journalLayer = (
 ): Layer.Layer<Journal.Journal> =>
   Layer.succeed(Journal.Journal)(
     Journal.makeNoop({
+      entries: () => Effect.succeed({ entries: [], hasMore: false }),
       emitDurableUnfenced: (input) =>
         Effect.sync(() => {
           record.journaled.push({ eventType: input.eventType, payload: input.payload })
