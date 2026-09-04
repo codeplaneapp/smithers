@@ -28,6 +28,7 @@ import {
   maxSubscribeCredit,
   type ReadResponse,
   type Resync,
+  type RunCursor,
   type Scope,
   type WorkspaceCursor
 } from "./SyncProtocol.ts"
@@ -172,13 +173,12 @@ const transportError = (cause: unknown): SyncError =>
       cause: causeText(cause)
     })
 
-type Cursors = Map<JournalEvent.RunId, JournalEvent.Seq>
+type Cursors = Map<JournalEvent.RunId, RunCursor>
 
-const cursorMap = (cursors: WorkspaceCursor): Cursors =>
-  new Map(cursors.map((cursor) => [cursor.runId, cursor.afterSeq]))
+const cursorMap = (cursors: WorkspaceCursor): Cursors => new Map(cursors.map((cursor) => [cursor.runId, { ...cursor }]))
 
-const canonicalCursors = (cursors: ReadonlyMap<JournalEvent.RunId, JournalEvent.Seq>): WorkspaceCursor =>
-  Array.from(cursors, ([runId, afterSeq]) => ({ runId, afterSeq })).sort((left, right) =>
+const canonicalCursors = (cursors: ReadonlyMap<JournalEvent.RunId, RunCursor>): WorkspaceCursor =>
+  Array.from(cursors.values(), (cursor) => ({ ...cursor })).sort((left, right) =>
     // A Map has one value per key, so this comparator never receives equal
     // run IDs. `cursorMap` and the acknowledged cursor state both establish
     // that invariant before reaching this boundary.
@@ -191,14 +191,15 @@ const canonicalCursors = (cursors: ReadonlyMap<JournalEvent.RunId, JournalEvent.
  * backward past another subscription's progress.
  */
 const advance = (
-  cursors: ReadonlyMap<JournalEvent.RunId, JournalEvent.Seq>,
+  cursors: ReadonlyMap<JournalEvent.RunId, RunCursor>,
   runId: JournalEvent.RunId,
-  throughSeq: JournalEvent.Seq
-): ReadonlyMap<JournalEvent.RunId, JournalEvent.Seq> => {
+  throughSeq: JournalEvent.Seq,
+  generation: number
+): ReadonlyMap<JournalEvent.RunId, RunCursor> => {
   const current = cursors.get(runId)
-  if (current !== undefined && current >= throughSeq) return cursors
+  if (current !== undefined && current.afterSeq >= throughSeq) return cursors
   const next = new Map(cursors)
-  next.set(runId, throughSeq)
+  next.set(runId, { runId, afterSeq: throughSeq, ...(generation === 0 ? {} : { generation }) })
   return next
 }
 
@@ -219,6 +220,12 @@ const isTransportCause = (cause: Cause.Cause<SyncError | SyncGapError>): boolean
   cause.reasons.filter(Cause.isFailReason).some((reason) =>
     SyncError.is(reason.error) && reason.error.code === "transport_failed"
   )
+
+const lineageChanged = (runId: JournalEvent.RunId): SyncError =>
+  new SyncError({
+    code: "lineage_changed",
+    message: `Run ${runId} was rewound; rebuild from its archive boundary with a fresh sync client`
+  })
 
 const entriesByteLength = (entries: ReadonlyArray<JournalEvent.Entry>): number =>
   entries.reduce((bytes, entry) => bytes + encodedByteLength(entry), 0)
@@ -283,16 +290,22 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
  */
 const pageViolation = (
   scope: Scope,
-  requested: ReadonlyMap<JournalEvent.RunId, JournalEvent.Seq>,
+  requested: ReadonlyMap<JournalEvent.RunId, RunCursor>,
   response: ReadResponse
 ): SyncError | undefined => {
   const violation = (message: string): SyncError => new SyncError({ code: "protocol_violation", message })
+  for (const cursor of response.cursors) {
+    const previous = requested.get(cursor.runId)
+    if (previous !== undefined && (previous.generation ?? 0) !== (cursor.generation ?? 0)) {
+      return lineageChanged(cursor.runId)
+    }
+  }
   const highest = new Map<JournalEvent.RunId, JournalEvent.Seq>()
   for (const entry of response.entries) {
     if (!covers(scope, entry.runId)) {
       return violation(`Read page carried an entry for run ${entry.runId}, which the request's scope excludes`)
     }
-    const floor = requested.get(entry.runId)
+    const floor = requested.get(entry.runId)?.afterSeq
     if (floor !== undefined && entry.seq <= floor) {
       return violation(
         `Read page carried sequence ${entry.seq} for run ${entry.runId}, at or below the requested cursor ${floor}`
@@ -372,7 +385,7 @@ export const make = ({
   readonly bootstrapLimit?: number | undefined
 }): Effect.Effect<Service> =>
   Effect.sync(() => {
-    const acknowledged = Ref.makeUnsafe<ReadonlyMap<JournalEvent.RunId, JournalEvent.Seq>>(new Map())
+    const acknowledged = Ref.makeUnsafe<ReadonlyMap<JournalEvent.RunId, RunCursor>>(new Map())
 
     const cursors = Effect.map(Ref.get(acknowledged), canonicalCursors)
 
@@ -409,19 +422,26 @@ export const make = ({
         // projection from an older position is a different object, and it has
         // an exact answer: construct a fresh client, whose acknowledged map is
         // empty, so the caller's cursor is the only one there is.
-        for (const [runId, afterSeq] of yield* Ref.get(acknowledged)) {
+        for (const [runId, position] of yield* Ref.get(acknowledged)) {
           const supplied = cursor.get(runId)
-          if (supplied === undefined || supplied < afterSeq) cursor.set(runId, afterSeq)
+          if (supplied !== undefined && (supplied.generation ?? 0) !== (position.generation ?? 0)) {
+            return yield* Effect.fail(lineageChanged(runId))
+          }
+          if (supplied === undefined || supplied.afterSeq < position.afterSeq) cursor.set(runId, position)
         }
 
         const snapshot = (): WorkspaceCursor => canonicalCursors(cursor)
 
-        const commit = (runId: JournalEvent.RunId, throughSeq: JournalEvent.Seq) =>
-          Effect.sync(() => {
-            cursor.set(runId, throughSeq)
-          }).pipe(
-            Effect.andThen(Ref.update(acknowledged, (shared) => advance(shared, runId, throughSeq)))
-          )
+        const commit = (runId: JournalEvent.RunId, throughSeq: JournalEvent.Seq, generation: number) =>
+          Effect.gen(function*() {
+            const accepted = yield* Ref.modify(acknowledged, (shared) => {
+              const previous = shared.get(runId)
+              if (previous !== undefined && (previous.generation ?? 0) !== generation) return [false, shared] as const
+              return [true, advance(shared, runId, throughSeq, generation)] as const
+            })
+            if (!accepted) return yield* Effect.fail(lineageChanged(runId))
+            cursor.set(runId, { runId, afterSeq: throughSeq, ...(generation === 0 ? {} : { generation }) })
+          })
 
         const applyEntry = options.apply
 
@@ -441,14 +461,15 @@ export const make = ({
          */
         const deliver = (
           runId: JournalEvent.RunId,
-          entry: JournalEvent.Entry
+          entry: JournalEvent.Entry,
+          generation: number
         ): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> => {
           const through = entry.seq
           return Stream.concat(
             Stream.drain(Stream.fromEffect(
               applyEntry === undefined
-                ? commit(runId, through)
-                : Effect.andThen(applyEntry(entry), commit(runId, through))
+                ? commit(runId, through, generation)
+                : Effect.andThen(applyEntry(entry), commit(runId, through, generation))
             )),
             Stream.succeed(entry)
           )
@@ -459,7 +480,12 @@ export const make = ({
           if (frameBytes > maxFrameBytes) return Stream.fail(oversized(frameBytes, maxFrameBytes))
           const violation = frameViolation(frame)
           if (violation !== undefined) return Stream.fail(violation)
-          const afterSeq: number = cursor.get(frame.runId) ?? -1
+          const position = cursor.get(frame.runId)
+          const generation = frame.generation ?? 0
+          if (position !== undefined && (position.generation ?? 0) !== generation) {
+            return Stream.fail(lineageChanged(frame.runId))
+          }
+          const afterSeq: number = position?.afterSeq ?? -1
           // `fromSeq` is the start of the server-declared covered interval. It is
           // intentionally compared to the cursor, not to the first entry's seq:
           // dropped journal admissions legitimately leave holes inside that range.
@@ -475,7 +501,7 @@ export const make = ({
           if (frame.toSeq <= afterSeq) return Stream.empty
 
           const entries = frame.entries.filter((entry) => entry.seq > afterSeq)
-          return Stream.flatMap(Stream.fromIterable(entries), (entry) => deliver(frame.runId, entry))
+          return Stream.flatMap(Stream.fromIterable(entries), (entry) => deliver(frame.runId, entry, generation))
         }
 
         const livePage = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
@@ -543,9 +569,15 @@ export const make = ({
                   if (pageBytes > maxFrameBytes) return Stream.fail(oversized(pageBytes, maxFrameBytes))
                   const violation = pageViolation(options.scope, cursorMap(requested), response)
                   if (violation !== undefined) return Stream.fail(violation)
+                  const generations = new Map(response.cursors.map((cursor) => [cursor.runId, cursor.generation ?? 0]))
                   const page = Stream.flatMap(
                     Stream.fromIterable(response.entries),
-                    (entry) => deliver(entry.runId, entry)
+                    (entry) =>
+                      deliver(
+                        entry.runId,
+                        entry,
+                        generations.get(entry.runId) ?? 0
+                      )
                   )
                   if (response.done) return Stream.concat(page, follow())
                   if (response.entries.length === 0) {
@@ -580,7 +612,7 @@ export const make = ({
           if (!SyncError.is(failure) || failure.code !== "compacted" || failure.resync === undefined) {
             return undefined
           }
-          const covered: number = cursor.get(failure.resync.runId) ?? -1
+          const covered: number = cursor.get(failure.resync.runId)?.afterSeq ?? -1
           return covered >= failure.resync.checkpointSeq ? undefined : failure.resync
         }
 
@@ -625,7 +657,7 @@ export const make = ({
               onResync(resync).pipe(
                 // The cursor must move BEFORE the restart reads it: the
                 // bootstrap snapshots the cursors as it is issued.
-                Effect.andThen(commit(runId, checkpointSeq)),
+                Effect.andThen(commit(runId, checkpointSeq, cursor.get(runId)?.generation ?? 0)),
                 Effect.map(resynced)
               )
             )

@@ -200,3 +200,11 @@ See the [API reference](https://journal.smithers.sh/reference/api/),
 [the owner fence](https://journal.smithers.sh/concepts/owner-fence/),
 [checkpoints and compaction](https://journal.smithers.sh/concepts/compaction/),
 and [troubleshooting](https://journal.smithers.sh/troubleshooting/).
+
+Rewinding SQL histories expose `Journal.Service.generation(runId)`, which reads
+`{ generation, afterSeq }` from `flows_journal_generations` (initially zero and
+`-1`). The SQL layer installs this table idempotently on existing databases.
+Time travel increments the generation in the archive transaction. Append-only
+adapters may omit the operation; truncating adapters must implement it. The
+`JournalGeneration.initialize` subpath shares the table installation with time
+travel without adding a migration below an already applied migration block.

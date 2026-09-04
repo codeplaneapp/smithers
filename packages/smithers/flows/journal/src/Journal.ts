@@ -440,6 +440,17 @@ export type Compacted = typeof Compacted.Type
  * @since 0.1.0
  */
 export interface Service {
+  /**
+   * The durable rewind generation and its archive boundary. An append-only
+   * adapter may omit this operation, which means generation zero forever.
+   * Rewinding adapters must advance the generation atomically with truncation.
+   */
+  readonly generation?:
+    | ((runId: RunId) => Effect.Effect<{
+      readonly generation: number
+      readonly afterSeq: number
+    }, JournalError>)
+    | undefined
   readonly emitLossy: (input: Input) => Effect.Effect<EmitReceipt, JournalError>
   readonly emitDurable: (input: Input, owner: OwnerId) => Effect.Effect<DurableReceipt, JournalError>
   /**

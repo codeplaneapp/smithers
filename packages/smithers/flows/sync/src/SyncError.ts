@@ -19,6 +19,7 @@ const errorCodes = [
   "decode_failed",
   "transport_failed",
   "protocol_violation",
+  "lineage_changed",
   "optimistic_timeout",
   "compacted",
   "closed",
@@ -50,12 +51,22 @@ const codes: ReadonlySet<string> = new Set(errorCodes)
  */
 export type ErrorCode = typeof ErrorCode.Type
 
+const Rewind = Schema.Struct({
+  runId: JournalEvent.RunId,
+  generation: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  afterSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(-1))
+})
+
 /**
  * Error raised by sync validation, transport, framing, or subscription work.
  *
  * `resync` is set only on `compacted`, and names the run and the checkpoint
  * sequence a follower resumes from. It is optional so every other code keeps
  * the shape it already had on the wire.
+ *
+ * `rewind` is set on server-side `lineage_changed` refusals and names the
+ * current generation and archive boundary. The caller rebuilds its projection
+ * from retained history and creates a fresh client; the client never retries this failure.
  *
  * `cause` is a bounded STRING, not the host object that failed. This error is
  * the declared error schema of every RPC in both groups, so whatever it
@@ -72,7 +83,8 @@ export class SyncError extends Schema.TaggedError<SyncError>()("@smthrs/sync/Syn
   code: ErrorCode,
   message: Schema.String,
   cause: Schema.optional(Schema.String),
-  resync: Schema.optional(Resync)
+  resync: Schema.optional(Resync),
+  rewind: Schema.optional(Rewind)
 }) {
   /**
    * Returns `true` when a value carries this error's shape: the tag, a `code`
@@ -98,9 +110,18 @@ export class SyncError extends Schema.TaggedError<SyncError>()("@smthrs/sync/Syn
   static readonly is = (value: unknown): value is SyncError => {
     try {
       if (!Predicate.isTagged(value, "@smthrs/sync/SyncError")) return false
-      const candidate = value as { readonly code?: unknown; readonly message?: unknown; readonly resync?: unknown }
+      const candidate = value as {
+        readonly code?: unknown
+        readonly message?: unknown
+        readonly resync?: unknown
+        readonly rewind?: unknown
+      }
       if (typeof candidate.message !== "string") return false
       if (typeof candidate.code !== "string" || !codes.has(candidate.code)) return false
+      if (
+        candidate.rewind !== undefined &&
+        (candidate.code !== "lineage_changed" || !Schema.is(Rewind)(candidate.rewind))
+      ) return false
       if (candidate.resync === undefined) return true
       return candidate.code === "compacted" && Schema.is(Resync)(candidate.resync)
     } catch {

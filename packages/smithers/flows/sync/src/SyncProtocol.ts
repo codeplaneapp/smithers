@@ -53,12 +53,18 @@ export type Scope = typeof Scope.Type
  * moves. Stating the rule here keeps the schema and the client from meaning
  * two different things by the same field.
  *
+ * `generation` identifies the run's current history after rewinds. Its absence
+ * means generation zero; persist a returned generation with its sequence.
+ * Sequence ordering is meaningful only within one generation.
+ *
  * @category models
  * @since 0.1.0
  */
 export const RunCursor = Schema.Struct({
   runId: JournalEvent.RunId,
-  afterSeq: JournalEvent.Seq
+  afterSeq: JournalEvent.Seq,
+  // Omitted only for generation zero (persisted cursors from before rewind support).
+  generation: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
 })
 
 /**
@@ -257,12 +263,15 @@ export type SubscribeRequest = typeof SubscribeRequest.Type
  *
  * `fromSeq` and `toSeq` describe the interval the server covered, not the
  * sequences actually carried: dropped admissions leave legitimate holes.
+ * `generation` identifies the history covering the interval; omission means
+ * zero. Clients must compare it before deduplicating by sequence.
  *
  * @category models
  * @since 0.1.0
  */
 export const EntriesFrame = Schema.TaggedStruct("Entries", {
   runId: JournalEvent.RunId,
+  generation: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   fromSeq: JournalEvent.Seq,
   toSeq: JournalEvent.Seq,
   entries: Schema.Array(JournalEvent.Entry)

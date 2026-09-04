@@ -23,6 +23,7 @@
  */
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import { RunState } from "@smthrs/engine-store/RunState"
+import * as JournalGeneration from "@smthrs/journal/JournalGeneration"
 import { isTerminalRunStatus, type RunStatus } from "@smthrs/run-store/RunStore"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
@@ -61,6 +62,7 @@ const isDuplicateColumn = (cause: unknown): boolean => {
  * @category migrations
  */
 export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+  yield* JournalGeneration.initialize
   const sql = yield* Effect.service(SqlClient.SqlClient)
   /**
    * Names the object a failing statement was creating.
@@ -841,6 +843,11 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
             FROM flows_journal_events
             WHERE run_id = ${runId} AND seq > ${frame.seq}
           `
+                yield* sql`
+                  INSERT INTO flows_journal_generations (run_id, generation, after_seq)
+                  VALUES (${runId}, 1, ${frame.seq})
+                  ON CONFLICT (run_id) DO UPDATE SET generation = generation + 1, after_seq = excluded.after_seq
+                `
                 yield* deleteProjectedWaits(runId, frame.seq)
                 yield* sql`
             DELETE FROM flows_journal_events
@@ -890,6 +897,11 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
                      event_type, payload_json, meta_json, ${nowMs}
               FROM flows_journal_events WHERE run_id = ${childRunId}
             `
+                  yield* sql`
+                    INSERT INTO flows_journal_generations (run_id, generation, after_seq)
+                    VALUES (${childRunId}, 1, -1)
+                    ON CONFLICT (run_id) DO UPDATE SET generation = generation + 1, after_seq = -1
+                  `
                   yield* deleteProjectedWaits(childRunId, -1)
                   yield* sql`DELETE FROM flows_journal_events WHERE run_id = ${childRunId}`
                 }

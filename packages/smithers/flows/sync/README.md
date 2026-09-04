@@ -101,3 +101,25 @@ latency and never state.
 
 See [sync concepts](https://smithers.sh/concepts/sync) for the protocol, and
 `docs/README.md` in this package for where each published sentence lives.
+
+## Rewinds and cursor generations
+
+`RunCursor` and `EntriesFrame` carry a `generation`; omission means generation
+zero for existing append-only histories and persisted cursors. SQL journals
+persist it independently of sequence numbers. Rewind increments it atomically
+with truncation, so a follower at 100 cannot silently discard a replacement
+entry at 51 after rewinding to 50.
+
+Both reads and subscriptions fail with `SyncError.code = "lineage_changed"`
+when generations differ. Live run and workspace subscriptions also check while
+idle, within `tailIntervalMs`. This failure is terminal: rebuild the projection from the current retained
+history through the archive boundary, create a fresh sync client, and resume
+from the server error's
+`rewind: { runId, generation, afterSeq }`. For `afterSeq: -1`, omit the cursor
+to replay the entire current history. Keep the generation with every persisted
+cursor. Compaction recovery remains separate.
+
+Append-only journal adapters may omit `Journal.Service.generation`. Any adapter
+that truncates or replaces history must implement it and advance the generation
+in its truncation transaction. Upgrade sync clients and servers together;
+older clients cannot detect generation changes.

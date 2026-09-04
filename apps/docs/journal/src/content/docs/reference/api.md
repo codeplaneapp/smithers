@@ -482,3 +482,12 @@ caller who disables redaction.
   the run store and the step cache.
 - [`@smthrs/chain`](https://chain.smithers.sh/reference/api/) has a journal of its own with a different
   contract; see [the chain journal](https://chain.smithers.sh/concepts/journal/).
+
+### Journal generations
+
+`Journal.Service.generation?(runId)` returns an Effect of
+`{ generation: number, afterSeq: number }` with `JournalError` failures.
+Append-only adapters may omit it (generation zero). A truncating adapter must
+advance it atomically with truncation so followers detect reused sequences.
+`SqlJournal.layer` persists it in `flows_journal_generations`, installed through
+`JournalGeneration.initialize`; a fresh run reports `{ generation: 0, afterSeq: -1 }`.

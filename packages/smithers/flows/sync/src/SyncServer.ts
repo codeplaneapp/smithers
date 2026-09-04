@@ -452,6 +452,25 @@ const makeWith = (
       )
     }
 
+    // Compare around every durable read as well as while idle: a rewind can
+    // happen in another process and can reuse every sequence in the next page.
+    const generationOf = (runId: JournalEvent.RunId, expected?: number) =>
+      Effect.gen(function*() {
+        const current = journal.generation === undefined
+          ? { generation: 0, afterSeq: -1 }
+          : yield* journal.generation(runId).pipe(Effect.mapError(journalFailure(runId)))
+        if (expected !== undefined && current.generation !== expected) {
+          return yield* Effect.fail(
+            new SyncError({
+              code: "lineage_changed",
+              message: `Run ${runId} was rewound; rebuild from the archive boundary`,
+              rewind: { runId, ...current }
+            })
+          )
+        }
+        return current.generation
+      })
+
     const read = (request: SyncProtocol.ReadRequest): Effect.Effect<SyncProtocol.ReadResponse, SyncError> =>
       Effect.gen(function*() {
         yield* requireUniqueCursors(request.cursors)
@@ -469,6 +488,7 @@ const makeWith = (
         const { runIds } = yield* runIdsFor(request.scope, request.capability)
         const entries: Array<JournalEvent.Entry> = []
         const cursors = new Map(request.cursors.map((cursor) => [cursor.runId, cursor.afterSeq]))
+        const generations = new Map(request.cursors.map((cursor) => [cursor.runId, cursor.generation ?? 0]))
         let done = true
         let frameBytes = 0
         let oversized: number | undefined
@@ -493,11 +513,14 @@ const makeWith = (
         const serve = (runId: JournalEvent.RunId, cap: number) =>
           Effect.gen(function*() {
             const after = cursors.get(runId)
+            const generation = yield* generationOf(runId, generations.get(runId))
+            generations.set(runId, generation)
             const page = yield* journal.entries({
               runId,
               ...(after === undefined ? {} : { after }),
               limit: cap
             }).pipe(Effect.mapError(journalFailure(runId)))
+            yield* generationOf(runId, generation)
             for (const accepted of page.entries) {
               const bytes = SyncProtocol.encodedByteLength(accepted)
               if (bytes > maxFrameBytes) {
@@ -539,7 +562,11 @@ const makeWith = (
         if (truncated || entries.length >= limit || behind.length > 0) done = false
         return {
           entries,
-          cursors: Array.from(cursors, ([runId, afterSeq]) => ({ runId, afterSeq })),
+          cursors: Array.from(cursors, ([runId, afterSeq]) => ({
+            runId,
+            afterSeq,
+            ...(generations.get(runId) === 0 ? {} : { generation: generations.get(runId)! })
+          })),
           done
         }
       })
@@ -547,30 +574,41 @@ const makeWith = (
     const runStream = (
       runId: JournalEvent.RunId,
       cursors: SyncProtocol.WorkspaceCursor
-    ): Stream.Stream<SyncProtocol.Frame, SyncError> => {
-      const after = cursorOf(cursors, runId)
-      return journal.stream({ runId, ...(after === undefined ? {} : { afterSequence: after }) }).pipe(
-        Stream.mapError(journalFailure(runId)),
-        Stream.chunks,
-        Stream.tap(guardEntryChunk),
-        Stream.flattenArray,
-        Stream.mapAccum(
-          () => after === undefined ? -1 : after,
-          (previous, entry) => [
-            entry.seq,
-            [
-              {
-                _tag: "Entries",
-                runId,
-                fromSeq: (previous + 1) as JournalEvent.Seq,
-                toSeq: entry.seq,
-                entries: [entry]
-              } satisfies SyncProtocol.Frame
+    ): Stream.Stream<SyncProtocol.Frame, SyncError> =>
+      Stream.unwrap(Effect.gen(function*() {
+        const supplied = cursors.find((cursor) => cursor.runId === runId)
+        const after = supplied?.afterSeq
+        const generation = yield* generationOf(runId, supplied === undefined ? undefined : supplied.generation ?? 0)
+        const entries = journal.stream({ runId, ...(after === undefined ? {} : { afterSequence: after }) }).pipe(
+          Stream.mapError(journalFailure(runId)),
+          Stream.chunks,
+          Stream.tap((chunk) => Effect.andThen(generationOf(runId, generation), guardEntryChunk(chunk))),
+          Stream.flattenArray,
+          Stream.mapAccum(
+            () => after === undefined ? -1 : after,
+            (previous, entry) => [
+              entry.seq,
+              [
+                {
+                  _tag: "Entries",
+                  runId,
+                  ...(generation === 0 ? {} : { generation }),
+                  fromSeq: (previous + 1) as JournalEvent.Seq,
+                  toSeq: entry.seq,
+                  entries: [entry]
+                } satisfies SyncProtocol.Frame
+              ]
             ]
-          ]
+          )
         )
-      )
-    }
+        if (journal.generation === undefined) return entries
+        // Journal.stream can stay silent when its sequence cursor is beyond a
+        // rewound head. Poll independently so even an idle follower fails typed.
+        const guard = Stream.drain(Stream.fromEffectRepeat(
+          generationOf(runId, generation).pipe(Effect.delay(tailIntervalMs))
+        ))
+        return Stream.merge(entries, guard, { haltStrategy: "either" })
+      }))
 
     /**
      * The live tail of a whole workspace.
@@ -606,6 +644,7 @@ const makeWith = (
         // do. The map is bounded by the runs one subscription sees, which is
         // what it has always been.
         const served = new Map<JournalEvent.RunId, JournalEvent.Seq | undefined>()
+        const generations = new Map(request.cursors.map((cursor) => [cursor.runId, cursor.generation ?? 0]))
         // Runs the catalog names that this request may not read. Remembered so
         // one refusal costs one signature check for the life of the
         // subscription rather than one per round per run.
@@ -698,11 +737,14 @@ const makeWith = (
         const tail = (runId: JournalEvent.RunId): Stream.Stream<SyncProtocol.Frame, SyncError> =>
           Stream.unwrap(Effect.gen(function*() {
             const after = served.get(runId)
+            const generation = yield* generationOf(runId, generations.get(runId))
+            generations.set(runId, generation)
             const page = yield* journal.entries({
               runId,
               ...(after === undefined ? {} : { after }),
               limit: tailBatchSize
             }).pipe(Effect.mapError(journalFailure(runId)))
+            yield* generationOf(runId, generation)
             yield* guardEntryChunk(page.entries)
             const frames: Array<SyncProtocol.Frame> = []
             let previous = after === undefined ? -1 : after
@@ -710,6 +752,7 @@ const makeWith = (
               frames.push({
                 _tag: "Entries",
                 runId,
+                ...(generation === 0 ? {} : { generation }),
                 fromSeq: (previous + 1) as JournalEvent.Seq,
                 toSeq: accepted.seq,
                 entries: [accepted]

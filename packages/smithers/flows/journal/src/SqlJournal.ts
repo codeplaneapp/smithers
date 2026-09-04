@@ -60,6 +60,7 @@ import {
   type SourceId,
   type SourceSeq
 } from "./JournalEvent.ts"
+import * as JournalGeneration from "./JournalGeneration.ts"
 import * as JournalMetrics from "./JournalMetrics.ts"
 import { OwnerId } from "./OwnerId.ts"
 import type { Projection } from "./Projection.ts"
@@ -575,6 +576,9 @@ export const layer = (
       const { batchSize, maxEntryBytes, redact, sourceEventCache } = yield* validateOptions(options)
       const sql = yield* Effect.service(SqlClient.SqlClient)
       const writer = yield* DurableWriter
+      yield* JournalGeneration.initialize.pipe(
+        Effect.mapError((cause) => error("read_failed", "could not initialize journal generations", cause))
+      )
       /** One encoder for the layer: constructing one per emit measured slower. */
       const byteCounter = new TextEncoder()
 
@@ -2426,6 +2430,13 @@ export const layer = (
         )
 
       return makeJournal({
+        generation: (runId) =>
+          sql<{ readonly generation: number; readonly afterSeq: number }>`
+          SELECT generation, after_seq AS "afterSeq" FROM flows_journal_generations WHERE run_id = ${runId}
+        `.pipe(
+            Effect.map((rows) => rows[0] ?? { generation: 0, afterSeq: -1 }),
+            Effect.mapError((cause) => error("read_failed", "could not read journal generation", cause))
+          ),
         emitLossy,
         emitDurable,
         emitDurableUnfenced,

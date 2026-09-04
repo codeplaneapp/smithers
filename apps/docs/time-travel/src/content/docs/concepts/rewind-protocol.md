@@ -126,3 +126,11 @@ reported and left, and because its name is never reused it blocks nothing.
   and what it returns.
 - [Effect tiers](/concepts/effect-tiers/): why an effect blocks.
 - [Troubleshooting](/troubleshooting/): what each refusal means.
+
+Rewind advances a durable journal generation in the same SQL transaction as
+archiving and truncating the history, including attached children. Sync cursors
+from the previous generation fail with `lineage_changed`, even when the new
+journal head is below the old cursor. The error's `rewind` payload names the
+new generation and archive boundary; rebuild the projection from the current
+retained history and start a fresh sync client from that boundary. The frame's structural lineage ID itself
+does not change.
