@@ -91,6 +91,13 @@ executed, so a broken explicit path is reported rather than a different binary
 being quietly substituted. An override that names nothing falls through to
 `PATH`, and `smthrs doctor` says so. This package vendors no `jj` binaries.
 
+Node and Bun require **jj 0.39.0 or newer**, pinned by the exported
+`NodeJj.minimumVersion` constant. Each layer build probes `jj --version` once
+through its own process runner before exposing `Jj`. An older or unrecognized
+version fails construction with `JjError.code = "unsupported_version"` and the
+required minimum; a missing binary fails construction with `not_installed`.
+All four CLI layers therefore have `JjError` in their layer error channel.
+
 Node and Bun snapshots disable jj's default new-file size limit with
 `--config snapshot.max-new-file-size=0`, so new artifacts larger than 1 MiB are
 included. Any command that still warns `Refused to snapshot some files` fails

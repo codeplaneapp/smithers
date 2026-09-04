@@ -42,7 +42,10 @@ writeFileSync(
   `#!/bin/sh\necho started > ${startedFile}\nwhile true; do sleep 0.2; done\n`
 )
 chmodSync(marker, 0o755)
-writeFileSync(join(directory, "jj"), `#!/bin/sh\nexec ${marker} "$@"\n`)
+writeFileSync(
+  join(directory, "jj"),
+  `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "jj 0.39.0"; exit 0; fi\nexec ${marker} "$@"\n`
+)
 chmodSync(join(directory, "jj"), 0o755)
 
 process.on("exit", () => rmSync(directory, { recursive: true, force: true }))

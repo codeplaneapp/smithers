@@ -26,7 +26,9 @@ import type { PlatformError } from "effect/PlatformError"
  *
  * `not_installed` — no usable jj on this host. `conflict` — the repository
  * refused because the operation would conflict. `invalid_ref` — the change id
- * or revision does not resolve. `unknown` — everything else jj reported.
+ * or revision does not resolve. `snapshot_refused` — jj skipped files while
+ * capturing the working copy. `unsupported_version` — the CLI is older than
+ * the required minimum or its version is unrecognized. `unknown` — everything else.
  *
  * These codes are public contract: callers branch on them, step keys digest
  * them, and UIs map them to remediation. Add a code; never repurpose one.
@@ -35,7 +37,14 @@ import type { PlatformError } from "effect/PlatformError"
  * @since 0.1.0
  * @slop
  */
-export const JjErrorCode = Schema.Literals(["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unknown"])
+export const JjErrorCode = Schema.Literals([
+  "not_installed",
+  "conflict",
+  "invalid_ref",
+  "snapshot_refused",
+  "unsupported_version",
+  "unknown"
+])
 
 /**
  * The value form of {@link JjErrorCode}.

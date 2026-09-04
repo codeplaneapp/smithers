@@ -32,6 +32,7 @@ import * as NodeJj from "../src/node/NodeJj.ts"
 
 const script = `#!/bin/sh
 case "$1" in
+  --version) echo "jj \${FLOWS_JJ_TEST_VERSION:-0.39.0}"; exit 0 ;;
   restore) echo "Warning: Refused to snapshot some files:" 1>&2; exit 0 ;;
   status) echo "the working copy is clean"; exit 0 ;;
   root) echo "/scripted/root"; exit 0 ;;
@@ -42,6 +43,7 @@ esac
 
 /** A second binary, reachable only by name, for the override case. */
 const overrideScript = `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "jj 0.39.0"; exit 0; fi
 echo "answered by the override"
 exit 0
 `
@@ -111,8 +113,9 @@ const realSpawner = Layer.succeed(ChildProcessSpawner)(
  * than a real child could produce them.
  */
 const flood = Layer.succeed(ChildProcessSpawner)(
-  makeSpawner(() =>
+  makeSpawner((command) =>
     Effect.sync(() => {
+      const version = (command as EffectChildProcess.StandardCommand).args.includes("--version")
       const chunk = new Uint8Array(1024 * 1024).fill("x".charCodeAt(0))
       return makeHandle({
         pid: ProcessId(0),
@@ -120,7 +123,7 @@ const flood = Layer.succeed(ChildProcessSpawner)(
         isRunning: Effect.succeed(false),
         kill: () => Effect.void,
         stdin: Sink.drain,
-        stdout: Stream.fromIterable(Array.from({ length: 80 }, () => chunk)),
+        stdout: version ? encode("jj 0.39.0") : Stream.fromIterable(Array.from({ length: 80 }, () => chunk)),
         stderr: Stream.empty,
         all: Stream.empty,
         getInputFd: () => Sink.drain,
@@ -146,6 +149,18 @@ const run = <A, E>(effect: Effect.Effect<A, E, Jj>, spawner: Layer.Layer<ChildPr
 process.on("exit", () => rmSync(directory, { recursive: true, force: true }))
 
 describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
+  it.live("rejects an old version through the host spawner before exposing Jj", () =>
+    Effect.gen(function*() {
+      process.env.FLOWS_JJ_TEST_VERSION = "0.38.0"
+      try {
+        const error = yield* Effect.flip(run(Jj, realSpawner))
+        expect(error).toMatchObject({ code: "unsupported_version", method: "version", command: "jj --version" })
+        expect(error.message).toContain("0.39.0")
+      } finally {
+        delete process.env.FLOWS_JJ_TEST_VERSION
+      }
+    }))
+
   it.live("fails typed on refused-file warnings through the host spawner", () =>
     Effect.gen(function*() {
       const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.restore("saved"))), realSpawner)
@@ -184,7 +199,7 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
 
   it.effect("reports a jj the host cannot find as `not_installed`", () =>
     Effect.gen(function*() {
-      const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())), missingBinary)
+      const error = yield* Effect.flip(run(Jj, missingBinary))
       expect(error.code).toBe("not_installed")
       expect(error.message).toBe("jj: command not found on PATH")
     }))
@@ -209,12 +224,10 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       // the same way, so without the directory probe a bound layer pointed at a
       // directory that is gone answers `not_installed` with jj on PATH.
       const missing = join(directory, "absent-root")
-      const error = yield* Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())).pipe(
-        Effect.provide(Layer.provide(NodeJj.layerSpawnerAt(missing), missingBinary))
-      )
+      const error = yield* Effect.flip(Effect.provide(Jj, Layer.provide(NodeJj.layerSpawnerAt(missing), missingBinary)))
 
       expect(error.code).toBe("unknown")
-      expect(error.message).toBe(`jj status: cannot run in ${missing}: not a directory`)
+      expect(error.message).toBe(`jj version: cannot run in ${missing}: not a directory`)
     }))
 
   it.effect("refuses output past the same ceiling the self-spawning layer applies", () =>
@@ -244,9 +257,9 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
           )
         )
       )
-      const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())), refused)
+      const error = yield* Effect.flip(run(Jj, refused))
       expect(error.code).toBe("unknown")
-      expect(error.message).toContain("jj status:")
+      expect(error.message).toContain("jj version:")
     }))
 })
 

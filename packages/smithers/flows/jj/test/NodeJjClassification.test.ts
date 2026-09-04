@@ -22,6 +22,7 @@ import { isJjError, Jj, type JjError } from "../src/Jj.ts"
 import * as NodeJj from "../src/node/NodeJj.ts"
 
 const script = `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "jj 0.39.0"; exit 0; fi
 if [ "$FLOWS_FAKE_JJ" = "describe-fails" ]; then
   if [ "$1" = "describe" ]; then echo "Error: description refused" 1>&2; exit 1; fi
   if [ "$1" = "log" ]; then echo "snapshotid"; fi
@@ -260,12 +261,10 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       // reports a missing binary, so a bound layer pointed at a directory that
       // is gone used to answer `not_installed` with jj sitting on PATH.
       const missing = join(directory, "gone")
-      const error = yield* Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())).pipe(
-        Effect.provide(NodeJj.layerAt(missing))
-      )
+      const error = yield* Effect.flip(Effect.provide(Jj, NodeJj.layerAt(missing)))
 
       expect(error.code).toBe("unknown")
-      expect(error.message).toBe(`jj status: cannot run in ${missing}: not a directory`)
+      expect(error.message).toBe(`jj version: cannot run in ${missing}: not a directory`)
     }))
 
   it.live("bounds the command it records so a caller's message cannot ride into the journal", () =>
@@ -418,9 +417,9 @@ describe.skipIf(process.platform === "win32")("NodeJj spawn errors", () => {
 
   it.live("reports a non-ENOENT spawn failure as `unknown` rather than `not_installed`", () =>
     Effect.gen(function*() {
-      const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())))
+      const error = yield* Effect.flip(run(Jj))
 
       expect(error.code).toBe("unknown")
-      expect(error.message).toMatch(/^jj status: /)
+      expect(error.message).toMatch(/^jj version: /)
     }))
 })

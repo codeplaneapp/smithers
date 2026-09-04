@@ -463,14 +463,14 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       process.env.PATH = join(repository, "empty-bin")
       delete process.env.SMITHERS_JJ_PATH
       try {
-        const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())))
+        const error = yield* Effect.flip(run(Jj))
         expect(error.code).toBe("not_installed")
         // The resolver already knows why nothing was found, so the failure says
         // it rather than leaving an operator to run `doctor` for the same fact.
         expect(error.message).toBe(
           "jj: No jj on PATH. Install jj (https://jj-vcs.github.io) or set SMITHERS_JJ_PATH."
         )
-        expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status" })
+        expect(error).toMatchObject({ module: "NodeJj", method: "version", command: "jj --version" })
         // The spawn failure travels on `cause` as data that survives a journal
         // round-trip, rather than as a live `Error` that stringifies to `{}`.
         expect(error.cause).toMatchObject({ code: "ENOENT" })

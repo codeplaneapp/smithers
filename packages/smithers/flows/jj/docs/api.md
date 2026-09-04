@@ -121,16 +121,16 @@ Both optional operations are capability-checked like every other one:
 
 ### Failures
 
-| Export                | Signature                                                                                                              | Meaning                                                                                                                  |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unknown"]>` and the type            | The closed reason vocabulary.                                                                                            |
-| `JjError`             | `class JjError` with `_tag` `"@smthrs/jj/JjError"`                                                                     | A jj failure, shaped after `effect/PlatformError`.                                                                       |
-| `jjError(options)`    | `(options: { code: JjErrorCode; module?: string; method: string; description?: string; command?: string }) => JjError` | Composes the human message from the code, the failing `module.method`, and the description. `module` defaults to `"Jj"`. |
-| `isJjError(error)`    | `(error: unknown) => error is JjError`                                                                                 | Tells "jj said no" from "the capability kernel said no" without matching `_tag` by hand.                                 |
-| `JjFailure`           | `type JjFailure = JjError \| Permission.PermissionError`                                                               | Everything a `Jj` operation can fail with.                                                                               |
-| `JjErrorCause`        | `Schema.Struct<{ name?: string; code?: string; message: string }>` and the type                                        | The plain-data projection of an underlying host failure.                                                                 |
-| `jjErrorCause(cause)` | `(cause: unknown) => JjErrorCause`                                                                                     | Projects an arbitrary host failure onto that shape, truncating each field to fit.                                        |
-| `causeMessageLimit`   | `1024`                                                                                                                 | How many characters each string in a `JjErrorCause` keeps.                                                               |
+| Export                | Signature                                                                                                                          | Meaning                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unsupported_version", "unknown"]>` and the type | The closed reason vocabulary.                                                                                            |
+| `JjError`             | `class JjError` with `_tag` `"@smthrs/jj/JjError"`                                                                                 | A jj failure, shaped after `effect/PlatformError`.                                                                       |
+| `jjError(options)`    | `(options: { code: JjErrorCode; module?: string; method: string; description?: string; command?: string }) => JjError`             | Composes the human message from the code, the failing `module.method`, and the description. `module` defaults to `"Jj"`. |
+| `isJjError(error)`    | `(error: unknown) => error is JjError`                                                                                             | Tells "jj said no" from "the capability kernel said no" without matching `_tag` by hand.                                 |
+| `JjFailure`           | `type JjFailure = JjError \| Permission.PermissionError`                                                                           | Everything a `Jj` operation can fail with.                                                                               |
+| `JjErrorCause`        | `Schema.Struct<{ name?: string; code?: string; message: string }>` and the type                                                    | The plain-data projection of an underlying host failure.                                                                 |
+| `jjErrorCause(cause)` | `(cause: unknown) => JjErrorCause`                                                                                                 | Projects an arbitrary host failure onto that shape, truncating each field to fit.                                        |
+| `causeMessageLimit`   | `1024`                                                                                                                             | How many characters each string in a `JjErrorCause` keeps.                                                               |
 
 `JjError` carries a stable `code`, the `module` and `method` that failed, a
 human `message`, the `command` that produced it, and an optional `cause`.
@@ -139,8 +139,10 @@ The codes are a stable public contract: callers branch on them, step keys
 digest them, and user interfaces map them to remediation, so a code is added
 and never repurposed. `not_installed` means no usable jj on this host,
 `conflict` that the repository refused because the operation would conflict,
-`invalid_ref` that the change id or revision does not resolve, and `unknown`
-everything else jj reported. Both adapters classify onto the same four, and
+`invalid_ref` that the change id or revision does not resolve, `snapshot_refused`
+that jj skipped files, `unsupported_version` that the CLI does not meet the
+minimum, and `unknown` everything else. Node and Bun produce the two CLI-specific
+codes; both adapters agree on their shared failures, and
 [test/LayerParity.test.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/test/LayerParity.test.ts)
 drives one table of inputs through both and asserts they agree.
 
@@ -162,12 +164,12 @@ bundles for the browser; each implementation is imported from its own subpath.
 `NodeJj` shells out to the `jj` CLI with argv arrays and never a shell string.
 It ships four layers, and they differ along two axes.
 
-| Export                           | Signature                                                           | Process ownership | Repository      |
-| -------------------------------- | ------------------------------------------------------------------- | ----------------- | --------------- |
-| `layer`                          | `Layer<Jj>`                                                         | Its own child     | The process cwd |
-| `layerAt(repositoryRoot)`        | `(repositoryRoot: string) => Layer<Jj>`                             | Its own child     | Bound, absolute |
-| `layerSpawner`                   | `Layer<Jj, never, ChildProcessSpawner>`                             | The host spawner  | The process cwd |
-| `layerSpawnerAt(repositoryRoot)` | `(repositoryRoot: string) => Layer<Jj, never, ChildProcessSpawner>` | The host spawner  | Bound, absolute |
+| Export                           | Signature                                                             | Process ownership | Repository      |
+| -------------------------------- | --------------------------------------------------------------------- | ----------------- | --------------- |
+| `layer`                          | `Layer<Jj, JjError>`                                                  | Its own child     | The process cwd |
+| `layerAt(repositoryRoot)`        | `(repositoryRoot: string) => Layer<Jj, JjError>`                      | Its own child     | Bound, absolute |
+| `layerSpawner`                   | `Layer<Jj, JjError, ChildProcessSpawner>`                             | The host spawner  | The process cwd |
+| `layerSpawnerAt(repositoryRoot)` | `(repositoryRoot: string) => Layer<Jj, JjError, ChildProcessSpawner>` | The host spawner  | Bound, absolute |
 
 Who owns the child process: `layer` spawns through `node:child_process`
 directly, because a host must be able to checkpoint work where a spawner is
@@ -199,6 +201,13 @@ exclusive `.jj/smithers.lock` owner directory across processes. The snapshot's
 CLI calls therefore cannot interleave with another state operation. A caller
 reclaims a lock whose owner process has exited, so an abruptly killed host does
 not strand the repository.
+
+Node and Bun require **jj 0.39.0 or newer**, pinned by the exported
+`NodeJj.minimumVersion` constant. Each layer build probes `jj --version` once
+through its own process runner before exposing `Jj`. An older or unrecognized
+version fails construction with `JjError.code = "unsupported_version"` and the
+required minimum; a missing binary fails construction with `not_installed`.
+All four CLI layers therefore have `JjError` in their layer error channel.
 
 Node and Bun snapshots disable jj's default new-file size limit with
 `--config snapshot.max-new-file-size=0`, so new artifacts larger than 1 MiB are

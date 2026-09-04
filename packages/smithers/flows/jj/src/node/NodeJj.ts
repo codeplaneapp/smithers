@@ -40,6 +40,14 @@ import { resolveJjBinary } from "./resolveJjBinary.ts"
 /** The `module` every failure this adapter produces names. */
 const MODULE = "NodeJj"
 
+/**
+ * Minimum jj CLI version supported by the Node and Bun adapters.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const minimumVersion = "0.39.0"
+
 interface Output {
   readonly stdout: string
   readonly stderr: string
@@ -657,6 +665,30 @@ const operations = (run: Run, repositoryRoot?: string) => {
   return { snapshot, restore, diff, workspaceAdd, workspaceForget, status, root, revert }
 }
 
+/** Probe once when a layer is built, before exposing repository operations. */
+const checkedOperations = (run: Run, repositoryRoot?: string): Effect.Effect<Jj, JjError> =>
+  Effect.flatMap(run("version", ["--version"], repositoryRoot), (output) => {
+    const actual = /^jj (\d+)\.(\d+)\.(\d+)(?:[-+\s]|$)/.exec(output.trim())
+    const required = minimumVersion.split(".").map(Number)
+    let comparison = 0
+    if (actual !== null) {
+      for (let index = 0; index < required.length && comparison === 0; index += 1) {
+        comparison = Number(actual[index + 1]) - required[index]!
+      }
+    }
+    return actual !== null && comparison >= 0
+      ? Effect.succeed(operations(run, repositoryRoot))
+      : Effect.fail(
+        new JjError({
+          code: "unsupported_version",
+          module: MODULE,
+          method: "version",
+          command: "jj --version",
+          message: `jj requires version ${minimumVersion} or newer; found ${output.trim()}`
+        })
+      )
+  })
+
 /**
  * Provides the `Jj` service backed by the `jj` CLI, spawning its own children.
  *
@@ -683,7 +715,7 @@ const operations = (run: Run, repositoryRoot?: string) => {
  * @category layers
  * @since 1.0.0
  */
-export const layer: Layer.Layer<Jj> = Layer.succeed(Jj)(operations(jj))
+export const layer: Layer.Layer<Jj, JjError> = Layer.effect(Jj, checkedOperations(jj))
 
 /**
  * Provides `Jj` bound to one absolute repository root.
@@ -701,11 +733,11 @@ export const layer: Layer.Layer<Jj> = Layer.succeed(Jj)(operations(jj))
  * @category layers
  * @since 1.0.0
  */
-export const layerAt = (repositoryRoot: string): Layer.Layer<Jj> => {
+export const layerAt = (repositoryRoot: string): Layer.Layer<Jj, JjError> => {
   if (!isAbsolute(repositoryRoot)) {
     throw new TypeError(`NodeJj.layerAt requires an absolute repository root: ${repositoryRoot}`)
   }
-  return Layer.succeed(Jj)(operations(jj, repositoryRoot))
+  return Layer.effect(Jj, checkedOperations(jj, repositoryRoot))
 }
 
 /**
@@ -721,9 +753,9 @@ export const layerAt = (repositoryRoot: string): Layer.Layer<Jj> => {
  * @category layers
  * @since 1.0.0
  */
-export const layerSpawner: Layer.Layer<Jj, never, ChildProcessSpawner> = Layer.effect(
+export const layerSpawner: Layer.Layer<Jj, JjError, ChildProcessSpawner> = Layer.effect(
   Jj,
-  Effect.map(ChildProcessSpawner, (spawner) => operations(viaSpawner(spawner)))
+  Effect.flatMap(ChildProcessSpawner, (spawner) => checkedOperations(viaSpawner(spawner)))
 )
 
 /**
@@ -737,12 +769,12 @@ export const layerSpawner: Layer.Layer<Jj, never, ChildProcessSpawner> = Layer.e
  */
 export const layerSpawnerAt = (
   repositoryRoot: string
-): Layer.Layer<Jj, never, ChildProcessSpawner> => {
+): Layer.Layer<Jj, JjError, ChildProcessSpawner> => {
   if (!isAbsolute(repositoryRoot)) {
     throw new TypeError(`NodeJj.layerSpawnerAt requires an absolute repository root: ${repositoryRoot}`)
   }
   return Layer.effect(
     Jj,
-    Effect.map(ChildProcessSpawner, (spawner) => operations(viaSpawner(spawner), repositoryRoot))
+    Effect.flatMap(ChildProcessSpawner, (spawner) => checkedOperations(viaSpawner(spawner), repositoryRoot))
   )
 }
