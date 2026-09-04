@@ -36,10 +36,18 @@ export const Workspace = S.Workspace("fixture", {
 })
 `
 
+/**
+ * The fixture package. The `rendered` gate reads the page the writer lands, so
+ * it declares that file: the sandbox binds a target's declared reads and
+ * nothing else, and an undeclared path is denied under seatbelt and absent
+ * under bubblewrap. The gate reads the file's contents rather than stating its
+ * path for the same reason. Seatbelt allows metadata anywhere under the
+ * workspace, so a `test -f` gate passes on macOS and fails on Linux CI.
+ */
 const packageModule = `import { Smithers as S } from "@smthrs/targets"
 const references = S.Filegroup({ srcs: S.glob(["references/**"]) })
 const unit = S.Shell.Test({ command: "true" })
-const rendered = S.Shell.Test({ command: "test -f docs/flow.md" })
+const rendered = S.Shell.Test({ command: "grep -q flow docs/flow.md", data: [S.file("//docs/flow.md")] })
 const page = S.Docs.Page({
   brief: S.file("//pages/flow/brief.md"),
   prompt: S.file("//prompts/reference.md"),

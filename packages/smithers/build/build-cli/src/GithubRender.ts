@@ -551,6 +551,31 @@ const renderJobPolicy = (
   if (workflow.environment !== undefined) lines.push(`    environment: ${scalar(workflow.environment)}`)
 }
 
+/**
+ * Renders one pull-request-shaped trigger under `on:`.
+ *
+ * `pull_request` and `pull_request_target` accept the same branch and activity
+ * filters, so one writer serves both and a trigger the schema accepts cannot
+ * reach the YAML for only one of them.
+ */
+const pushPullRequestEvent = (
+  lines: Array<string>,
+  event: "pull_request" | "pull_request_target",
+  on: (typeof GithubTarget.On)["Type"]["pullRequest"]
+): void => {
+  if (on === undefined || on === false) return
+  lines.push(`  ${event}:`)
+  if (on === true) return
+  if (on.branches !== undefined) {
+    lines.push("    branches:")
+    for (const branch of on.branches) lines.push(`      - ${scalar(branch)}`)
+  }
+  if (on.types !== undefined) {
+    lines.push("    types:")
+    for (const activity of on.types) lines.push(`      - ${scalar(activity)}`)
+  }
+}
+
 /** Renders one workflow YAML for a validated `Github.Workflow` target. */
 const renderWorkflow = (
   label: string,
@@ -564,18 +589,8 @@ const renderWorkflow = (
   const lines: Array<string> = [header(label)]
   lines.push(`name: ${scalar(workflow.name)}`)
   lines.push("on:")
-  if (workflow.on.pullRequest === true) lines.push("  pull_request:")
-  if (typeof workflow.on.pullRequest === "object") {
-    lines.push("  pull_request:")
-    if (workflow.on.pullRequest.branches !== undefined) {
-      lines.push("    branches:")
-      for (const branch of workflow.on.pullRequest.branches) lines.push(`      - ${scalar(branch)}`)
-    }
-    if (workflow.on.pullRequest.types !== undefined) {
-      lines.push("    types:")
-      for (const activity of workflow.on.pullRequest.types) lines.push(`      - ${scalar(activity)}`)
-    }
-  }
+  pushPullRequestEvent(lines, "pull_request", workflow.on.pullRequest)
+  pushPullRequestEvent(lines, "pull_request_target", workflow.on.pullRequestTarget)
   if (workflow.on.issues !== undefined) {
     lines.push("  issues:")
     if (workflow.on.issues.types !== undefined) {
