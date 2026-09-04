@@ -2682,6 +2682,7 @@ const frame = (
     if (transition._tag === "complete" && carries(drained)) {
       printed += `\n\nThe completed answer before this follow-up:\n${transition.output}`
       const step = resumed(drained, {
+        bouncedCompletion: transition.output,
         workspace: closed,
         readOnlyFrames,
         repeatFrames,

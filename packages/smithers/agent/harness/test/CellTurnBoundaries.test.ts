@@ -2015,9 +2015,10 @@ describe("CellTurn delivery through the durable notification queue", () => {
     first: ScriptedModel.Step,
     approvalChannel: boolean,
     maxFrames: number,
-    delivery: "steer" | "queue"
+    delivery: "steer" | "queue",
+    second = emits("ctx.done(\"follow-up answered\")")
   ) => {
-    const model = ScriptedModel.make([first, emits("ctx.done(\"follow-up answered\")")])
+    const model = ScriptedModel.make([first, second])
     const engine = ScriptedEngine.make(model.model)
     const events: Array<AgentEvent.AgentEvent> = []
     const journal = TestJournal.layer()
@@ -2060,6 +2061,13 @@ describe("CellTurn delivery through the durable notification queue", () => {
     expect(JSON.stringify(model.recorder.requests[1]?.messages)).toContain("Please handle the follow-up")
     expect(resolvedText(events)).toBe("follow-up answered")
     expect(pending).toEqual([])
+  })
+
+  it("keeps a completed answer when its carried steer reaches the frame budget", async () => {
+    const { model, events } = await deliver(emits("ctx.done(\"first answer\")"), false, 2, "steer", emits("console.log(\"working\")"))
+    expect(model.recorder.requests).toHaveLength(2)
+    expect(resolvedText(events)).toContain("frame budget of 2 is exhausted")
+    expect(resolvedText(events)).toContain("first answer")
   })
 
   it("promotes a queued follow-up when a frame completes", async () => {

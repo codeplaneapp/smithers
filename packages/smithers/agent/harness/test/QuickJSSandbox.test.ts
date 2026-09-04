@@ -549,7 +549,7 @@ describe("QuickJSSandbox memory pressure", () => {
     const outcome = await outcomeOf("const listed = await ctx.call(\"fs/list\", {}); ctx.done(\"received\")", {
       call: () => Effect.succeed(result)
     })
-    expect(outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded", reason: "heap" })
     expect(await outcomeOf("ctx.done(\"still usable\")")).toMatchObject({
       _tag: "settled",
       transition: { _tag: "complete", output: "still usable" }

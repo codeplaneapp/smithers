@@ -1057,6 +1057,7 @@ const openRealm = (
           // rejected frame remains recordable and realm disposal stays safe.
           exhausted = new Cell.Rejected({
             code: "limit_exceeded",
+            reason: "heap",
             message: "Materializing the flow result exceeded the realm's limits."
           })
           deferred.resolve(context.undefined)
