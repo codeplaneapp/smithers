@@ -3,6 +3,8 @@ title: "0.31.0"
 description: "Smithers 0.31.0 lets you mark task and tool side effects with revert handlers so rewind, fork, and replay compensate or block instead of silently re-firing real-world actions, and makes Claude Opus 5 the default implementer and orchestrator."
 ---
 
+import Frame from "../../../components/Frame.astro"
+
 Smithers 0.31.0 makes time travel side-effect-safe. Rewind, fork, and
 replay have always restored run state and worktree files, but they knew
 nothing about what a run did to the outside world: rewinding past a task

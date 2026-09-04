@@ -98,7 +98,8 @@ const releaseCut = Smithers.NodeTest({
 const releaseRehearsal = Smithers.NodeTest({
   runner: Smithers.testRunner([
     Smithers.file("//scripts/release-rehearsal.test.mjs"),
-    Smithers.file("//scripts/release-publish.test.mjs")
+    Smithers.file("//scripts/release-publish.test.mjs"),
+    Smithers.file("//scripts/release-graph.test.mjs")
   ]),
   srcs: [...sources, Smithers.file("//.github/workflows/release.yml")],
   deps: []

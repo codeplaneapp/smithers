@@ -11,6 +11,7 @@
  * `node`.
  */
 import { Smithers } from "@smthrs/targets"
+import { Package as sitePackage } from "../../apps/site/PACKAGE.ts"
 
 /** Every gate in this directory, digested as the input of each target. */
 const sources = Smithers.glob("//scripts/repo-contract/**/*.mjs")
@@ -95,13 +96,17 @@ const machinePaths = Smithers.NodeTest({
  * Every smithers.sh URL shipped by a package reaches the built documentation,
  * directly or through one production redirect whose destination is real.
  *
+ * The emitted HTML under `apps/site/dist` is the route oracle. Depending on
+ * its producer makes this gate work on a clean checkout, including when the
+ * release workflow selects it through `//scripts/...` before the site step.
+ *
  * @since 1.0.0
  * @category test
  */
 const smithersLinks = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/smithers-links.test.mjs")]),
   srcs: [sources],
-  deps: []
+  deps: [sitePackage.build]
 })
 
 /**

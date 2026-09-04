@@ -95,6 +95,11 @@ publication; 429 and 5xx responses retry, while other precheck failures stop.
 Publication and transient prechecks get an initial attempt followed by at most
 three retries after 10, 30, and 60 seconds.
 
+The Script gates invocation (`smithers-build test '//scripts/...'`) builds
+the site before checking shipped links: `//scripts/repo-contract:smithersLinks`
+depends on `//apps/site:build`. The link gate can also run by its own label
+from a clean checkout; no earlier workflow step must supply `apps/site/dist`.
+
 ## Known test pins
 
 A **pin** is a test the default gate does not run to a pass. Three forms count:

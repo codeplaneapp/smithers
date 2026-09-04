@@ -3,6 +3,8 @@ title: "0.22.0"
 description: "Major release: Smithers ships Smithers Studio 2, a ground-up dark agent operations console with three-tier progressive-disclosure navigation, a…"
 ---
 
+import Frame from "../../../components/Frame.astro"
+
 Major release: Smithers ships **Smithers Studio 2**, a ground-up dark agent operations console with three-tier progressive-disclosure navigation, a Cmd-K/Cmd-P command palette, a color-equals-run-state design system, and a full suite of live data surfaces (Runs, Workflows, terminal, chat, JJHub, and DevTools) all wired to real Gateway and workspace-API backends. Studio 2 now defaults to a **chat-first shell**: one conversation that drives issues, runs, PRs, and workflows, with the tabbed shell one toggle away. Alongside Studio 2, this release de-mocks every e2e test onto real seeded backends, adds a live Gateway Run Chronicle plus init-pack-generated per-workflow UIs and a new `bunx smthrs ui` command, grows the CLI with a starter gallery and GEPA-style prompt optimization, and ships a drop-in agent-facing `smithers` skill so a coding agent can drive Smithers without reading the whole docs site. A focused security pass closes XSS, local-RCE, path-traversal, DoS, and auth-bypass vectors, and a broad correctness sweep hardens the engine, time-travel, DB, graph, and observability stacks.
 
 ---

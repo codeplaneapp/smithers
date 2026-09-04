@@ -3,6 +3,8 @@ title: "0.27.0"
 description: "The workspace Gateway becomes a hardened singleton daemon, the UI data layer moves to TanStack DB collections, `up --interactive` opens a full-screen TUI monitor, a create-workflow builder turns plain-English descriptions into runnable workflows, runs heal themselves with a post-failure autopsy, and Claude Code & Codex plugins mirror live runs into the chat."
 ---
 
+import Frame from "../../../components/Frame.astro"
+
 Smithers 0.27.0 is one of the largest releases yet. It rebuilds the control plane around a single per-workspace Gateway daemon (autostarted by the CLI, idle-aware, hardened against DNS rebinding, and tested under 50 concurrent runs with no mocks) and replaces the bespoke gateway-WS sync stack with a TanStack DB collection engine that runs over REST + SSE locally and ElectricSQL for multiplayer. Around that core: a workflow-UI toolkit with a create-workflow builder that turns plain-English descriptions into runnable workflows, a full-screen TUI monitor behind `up --interactive`, [Claude Code and Codex plugins](https://plugins.smithers.sh) that mirror every run into the chat, [self-healing runs](https://self-healing.smithers.sh) with an automatic post-failure autopsy, [docs-driven development](https://ddd.smithers.sh), serverless execution on Cloudflare, Telegram approvals, an interactive init wizard, `smithers update`, HTML run reports, and a batch of security and correctness fixes.
 
 <Frame caption="Smithers 0.27.0: one Gateway per workspace, a TanStack DB sync engine, a full-screen TUI monitor, and a security-hardening pass.">

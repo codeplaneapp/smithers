@@ -2,18 +2,19 @@
  * Every smithers.sh URL shipped in package source or a package README resolves
  * against the static site or one of its production redirects.
  *
- * Build the site before running this gate. It stays offline: emitted HTML is
- * the route oracle, and `public/_redirects` supplies the compatibility routes.
+ * The target builds the site before running this gate. It stays offline:
+ * emitted HTML is the route oracle, and `public/_redirects` supplies the
+ * compatibility routes.
  * Redirects are resolved once, then their destination must be an emitted route.
  * A redirect chain therefore fails the gate; rejecting chains keeps the test
  * deterministic and makes every compatibility destination independently real.
  * Test fixture URL literals are excluded because TypeScript scanning is limited
  * to comments; parser and renderer inputs are not shipped documentation links.
  *
- * Run it with `pnpm -C apps/site build && node --test scripts/repo-contract/smithers-links.test.mjs`.
+ * Run it with `pnpm exec smithers-build test '//scripts/repo-contract:smithersLinks'`.
  */
 import assert from "node:assert/strict"
-import { existsSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { extname, join, relative, resolve, sep } from "node:path"
 import { describe, it } from "node:test"
 import { fileURLToPath } from "node:url"
@@ -25,40 +26,45 @@ const output = join(site, "dist")
 const urlPattern = /https?:\/\/smithers\.sh[^\s<>"'`)\]}]*/g
 const ignoredDirectories = new Set(["dist", "node_modules", "test"])
 
-const walk = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-  const path = join(directory, entry.name)
-  if (entry.isDirectory()) return ignoredDirectories.has(entry.name) ? [] : walk(path)
-  return [path]
-})
+const walk = (directory) =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return ignoredDirectories.has(entry.name) ? [] : walk(path)
+    return [path]
+  })
 
-const shippingFiles = () => walk(packages).filter((path) => {
-  const extension = extname(path)
-  if (extension === ".ts" || extension === ".tsx") return true
-  if (path.endsWith(`${sep}docs${sep}README.md`)) return false
-  if (path.endsWith(`${sep}README.md`)) return existsSync(join(path, "..", "package.json"))
-  return false
-})
+const shippingFiles = () =>
+  walk(packages).filter((path) => {
+    const extension = extname(path)
+    if (extension === ".ts" || extension === ".tsx") return true
+    if (path.endsWith(`${sep}docs${sep}README.md`)) return false
+    if (path.endsWith(`${sep}README.md`)) return existsSync(join(path, "..", "package.json"))
+    return false
+  })
 
 const routes = () => {
   assert.ok(existsSync(output), "apps/site/dist is missing; run `pnpm -C apps/site build` first")
-  return new Set(walk(output).flatMap((path) => {
-    if (!path.endsWith(".html")) return []
-    const emitted = `/${relative(output, path).split(sep).join("/")}`
-    if (emitted === "/index.html") return ["/"]
-    if (emitted.endsWith("/index.html")) return [emitted.slice(0, -"index.html".length)]
-    return [emitted.slice(0, -".html".length), emitted]
-  }))
+  return new Set(
+    walk(output).flatMap((path) => {
+      if (!path.endsWith(".html")) return []
+      const emitted = `/${relative(output, path).split(sep).join("/")}`
+      if (emitted === "/index.html") return ["/"]
+      if (emitted.endsWith("/index.html")) return [emitted.slice(0, -"index.html".length)]
+      return [emitted.slice(0, -".html".length), emitted]
+    })
+  )
 }
 
-const redirects = () => readFileSync(join(site, "public", "_redirects"), "utf8")
-  .split("\n")
-  .map((line) => line.trim())
-  .filter((line) => line.length > 0 && !line.startsWith("#"))
-  .map((line) => {
-    const [source, destination] = line.split(/\s+/)
-    const splat = source.endsWith("/*")
-    return { source: splat ? source.slice(0, -1) : source, destination, splat }
-  })
+const redirects = () =>
+  readFileSync(join(site, "public", "_redirects"), "utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .map((line) => {
+      const [source, destination] = line.split(/\s+/)
+      const splat = source.endsWith("/*")
+      return { source: splat ? source.slice(0, -1) : source, destination, splat }
+    })
 
 const redirectedPath = (pathname, rule) => {
   if (rule.splat && pathname.startsWith(rule.source)) {
@@ -73,6 +79,14 @@ const redirectedPath = (pathname, rule) => {
 const normalize = (pathname) => pathname === "/" || pathname.endsWith("/") ? pathname : `${pathname}/`
 
 describe("smithers.sh links in shipping packages", () => {
+  it("renders archived changelog media with their captions", () => {
+    const html = readFileSync(join(output, "changelogs", "0230", "index.html"), "utf8")
+    assert.match(
+      html,
+      /<figure[^>]*>[\s\S]*?<img[^>]*src="\/images\/why\/crash-resume.gif"[\s\S]*?<figcaption[^>]*>Durability is the whole point:/
+    )
+  })
+
   it("resolve against the built site or one direct production redirect", () => {
     const builtRoutes = routes()
     const rules = redirects()

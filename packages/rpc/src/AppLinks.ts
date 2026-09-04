@@ -7,7 +7,10 @@
  * and no `apps-v*` release exists — so there is nothing to link, and the app
  * renders no download door (docs/web-mode/PLAN.md §3: the download page
  * renders only rows present in the release manifest). Lane W6 stamps the URL
- * (the site's `/download` route once `apps/site` serves it, else the
- * `apps-v*` GitHub Release) in the same commit as the artifact upload.
+ * (the native download page once `apps/site` serves it, else the `apps-v*`
+ * GitHub Release) in the same commit as the artifact upload.
+ *
+ * @since 1.0.0
+ * @category constants
  */
 export const DOWNLOAD_URL: string | null = null
