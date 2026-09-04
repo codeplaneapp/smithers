@@ -104,6 +104,19 @@ const smithersLinks = Smithers.NodeTest({
   deps: []
 })
 
+/**
+ * CLI reference pages name exactly the commands the shipped command tree
+ * accepts, excluding the built-in flags that are not subcommands.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const cliVerbs = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/cli-verbs.test.mjs")]),
+  srcs: [sources],
+  deps: []
+})
+
 export const Package = Smithers.Package({
-  targets: { barrels, faultSkips, machinePaths, packageContract, smithersLinks, testScriptWiring }
+  targets: { barrels, cliVerbs, faultSkips, machinePaths, packageContract, smithersLinks, testScriptWiring }
 })
