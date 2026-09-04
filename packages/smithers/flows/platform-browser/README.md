@@ -26,6 +26,13 @@ Network access is not one of them: `BrowserHost.layer` provides Effect's own
 behind `@smthrs/kernel`'s grant check. There is no Smithers wrapper around
 `fetch`.
 
+A tab supports the memory engine, these adapters, and the capability kernel.
+The durable engine is not supported: the shipped SqlClient uses `node:sqlite`
+and NodeRuntime is Node-only. Five Host services alone do not provide a database.
+BrowserHost exposes only `layer`. Compose browser Crypto separately for artifact
+hashing; best-effort/process artifact publication requires `rename` and `utimes`.
+Isolation requires one workspace per mount, with workspace root `/`.
+
 ## Public API
 
 | Export                                      | Meaning                                                                                                      |
@@ -41,8 +48,10 @@ behind `@smthrs/kernel`'s grant check. There is no Smithers wrapper around
 **Composing `BrowserFileSystem.layer` is an assertion about `fs`.** The service
 it provides carries `@smthrs/kernel`'s whole-filesystem isolation attestation,
 which the kernel accepts on trust: it says the promises object cannot name any
-path outside its own volume, so the guarded surface may resolve paths directly.
-A mounted ZenFS volume satisfies that. A host-backed `node:fs/promises` does
+path outside its own volume. The workspace must occupy the entire mount;
+subtree grants can race with symlink changes. `layer(fs, { workspaceRoot })`
+fails with PermissionDenied unless workspaceRoot is `/`.
+A mounted ZenFS volume satisfies that only when its workspace occupies the whole mount. A host-backed `node:fs/promises` does
 not, so passing one is a test-time convenience for a process that is itself the
 sandbox, never a production composition. `BrowserFileSystem.make` makes no such
 claim.
@@ -102,13 +111,13 @@ The `stdout`/`stderr` options are _not_ in that table: `"inherit"` and
 under `NodeChildProcessSpawner`. They are simply applied to captured text
 rather than to a live readable.
 
-## What ZenFS cannot do
+## Operations this adapter refuses
 
 `BrowserFileSystem` wires up only what a promises-shaped virtual filesystem can
 serve. The slice has no writable file handle, no symlink creation, and no
 watcher, so `chmod`, `chown`, `copy`, `copyFile`, `glob`, `link`, `symlink`,
-`readLink`, `open`, `rename`, `sink`, `truncate`, `utimes`, `watch`, and the
-`makeTemp*` family all fail with a `NotFound` `PlatformError` rather than
+`readLink`, `open`, `sink`, `truncate`, `watch`, and the
+`makeTemp*` family all fail with a `PermissionDenied` `PlatformError` rather than
 pretend. Each gap that turns out to matter becomes a ticket, not a
 silently-wrong implementation.
 
@@ -119,7 +128,7 @@ What is served honours its options rather than dropping them:
 | `readDirectory({ recursive })`               | Walked here, since the slice has no recursive `readdir`. A symlinked directory is listed but not descended into when the backend can `lstat`, as under Node; a backend with only `stat` follows the link, and the walk refuses to revisit a directory it has already canonicalized. A 128-level ceiling applies only to a backend supplying neither `lstat` nor `realpath`, which can neither avoid a directory link nor recognize one it has already visited; a backend with either member is walked to whatever depth the tree has. |
 | `access({ readable, writable })`             | Answered from the reported `mode` bits, since a mounted volume has no user identity. A path without the permission fails `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                          |
 | `makeDirectory({ mode })`                    | Forwarded, so `0o700` is not created as `0o755`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `realPath`                                   | Canonicalized: symlinks are followed when the backend has `realpath`, and a `..` after a link names the parent of the link's target the way POSIX names it, rather than being collapsed lexically first. Without `realpath` the answer is lexical and a link resolves to its own name. The kernel's workspace boundary is only as strong as this, so a volume that can hold symlinks must supply `realpath`.                                                                                                                          |
+| `realPath`                                   | Uses backend `realpath`, preserving symlink resolution order. Fails with `PermissionDenied` when unavailable.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `writeFile({ flag, mode })`                  | Forwarded, so `"a"` appends and `"wx"` over an existing path fails `AlreadyExists`.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `exists`                                     | `false` only for an absent path; every other failure propagates rather than being reported as absence.                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `stream({ offset, bytesToRead, chunkSize })` | Honoured, and refused when they are not whole byte counts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |

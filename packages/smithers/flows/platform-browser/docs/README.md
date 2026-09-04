@@ -16,10 +16,19 @@ plus `BrowserHost`: the complete closed Host bundle Smithers runs on.
 
 ## Who uses this package
 
-A page that runs the Smithers runtime in the browser composes `BrowserHost`.
-A page that only needs Effect's filesystem, path, and command services composes
-`BrowserServices`. A library that wants one of the two adapters on its own
-composes `BrowserFileSystem` or `BrowserChildProcessSpawner`.
+A tab can run the memory engine, the platform adapters, and the capability
+kernel. Compose `BrowserHost` for the five host services, `BrowserServices`
+for filesystem/path/commands, or either adapter individually.
+
+The durable engine does **not** run in a tab today. The shipped `SqlClient`
+uses `node:sqlite`, and `NodeRuntime` is Node-only. Providing the five Host
+services does not supply a browser database or make durable execution portable.
+
+`BrowserHost` exposes only `layer`, with injected backends; it has no `layerAt`
+or contained-host factories. Crypto is not bundled. Supply
+`@effect/platform-browser/BrowserCrypto.layer` alongside it when using artifact
+hashing. The artifact filesystem mode is `durability: "best-effort"` and
+`coordination: "process"`; the mount must implement `rename` and `utimes`.
 
 ## Install
 
@@ -84,19 +93,18 @@ refusal below is a typed `PlatformError` rather than a silent wrong answer:
   [Run a command in a tab](./guides/run-a-command.md).
 - The filesystem serves what a promises-shaped volume can serve. Symlink
   creation, writable handles, watchers, and the `makeTemp*` family fail with
-  `NotFound`. See
+  `PermissionDenied`. See
   [Read and write files on a mounted volume](./guides/work-with-files.md).
 - A redirect is never followed behind the capability kernel's back. In a tab it
-  fails closed, because Fetch hands back an opaque redirect. See
+  returns an opaque response with status 0, because Fetch hides redirect details. See
   [The closed Host surface](./concepts/host-bundle.md).
 
 ## The sibling hosts
 
 `BrowserHost` provides the same five service tags as
 [`@smthrs/platform-node`](/api/platform-node)'s `NodeHost` and
-[`@smthrs/platform-bun`](/api/platform-bun)'s `BunHost`. A program written
-against the tags runs on any of the three, which is what makes a flow portable
-between a server and a page.
+[`@smthrs/platform-bun`](/api/platform-bun)'s `BunHost`. Host-level programs can use those tags across all three. Durable execution
+still requires the Node database and runtime described above.
 
 ## Where to go next
 
