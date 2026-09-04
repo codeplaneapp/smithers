@@ -12,9 +12,10 @@ Across the full `v0.28.0..HEAD` range that is 225 commits, 726 files changed,
 84,604 insertions and 7,564 deletions, including 52 feature commits, 70 bug-fix
 commits, 4 refactors, 22 test commits, and 47 docs commits.
 
-<Frame caption="Smithers 0.29.0: first-class memory, XState folded over durable rows, an open source microVM sandbox provider, and a shared UI component library.">
- <img src="/images/0.29.0/hero.svg" alt="Smithers 0.29.0 release card listing the headline features" />
-</Frame>
+<figure>
+<img src="/images/0.29.0/hero.svg" alt="Smithers 0.29.0 release card listing the headline features" />
+  <figcaption>Smithers 0.29.0: first-class memory, XState folded over durable rows, an open source microVM sandbox provider, and a shared UI component library.</figcaption>
+</figure>
 
 ## Upgrading
 
@@ -198,9 +199,10 @@ Each run boots a local microVM with its own kernel, writes the sandbox
 request through the host-to-guest filesystem channel, and reads the result
 back the same way. No daemon or hosted sandbox service is required.
 
-<Frame caption="One microVM per run: the sandbox request crosses the host-to-guest filesystem channel into a guest with its own Linux kernel, and the result comes back the same way.">
- <img src="/images/0.29.0/microsandbox.svg" alt="Diagram of a Smithers run passing a sandbox request over the host-to-guest filesystem channel into a microVM with its own Linux kernel" />
-</Frame>
+<figure>
+<img src="/images/0.29.0/microsandbox.svg" alt="Diagram of a Smithers run passing a sandbox request over the host-to-guest filesystem channel into a microVM with its own Linux kernel" />
+  <figcaption>One microVM per run: the sandbox request crosses the host-to-guest filesystem channel into a guest with its own Linux kernel, and the result comes back the same way.</figcaption>
+</figure>
 
 ```tsx
 import { Sandbox } from "smthrs";
@@ -266,9 +268,10 @@ Most of this release went where you will not see a single feature callout:
 32 emoji-prefixed bug-fix commits and 6 test commits closing gaps that only show
 up under real load or a misbehaving client.
 
-<Frame caption="Where the 213 commits went: 67 fixes and 22 tests against 48 features. Reliability is the feature.">
- <img src="/images/0.29.0/release-shape.svg" alt="Stacked bar breaking 213 commits into 67 fixes, 48 features, 43 docs, 22 tests, 22 chores, and 11 other" />
-</Frame>
+<figure>
+<img src="/images/0.29.0/release-shape.svg" alt="Stacked bar breaking 213 commits into 67 fixes, 48 features, 43 docs, 22 tests, 22 chores, and 11 other" />
+  <figcaption>Where the 213 commits went: 67 fixes and 22 tests against 48 features. Reliability is the feature.</figcaption>
+</figure>
 
 Two commits are explicitly security-scoped:
 

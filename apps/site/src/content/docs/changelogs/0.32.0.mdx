@@ -38,9 +38,10 @@ bunx smthrs monitor --host 0.0.0.0
 # or: SMITHERS_GATEWAY_HOST=0.0.0.0 bunx smthrs ui RUN_ID
 ```
 
-<Frame caption="The Monitor following a live run end to end: the run appears with a running status pill, the health banner reads Healthy while the execution tree progresses and events stream in, and it ends on Completed with 4/4 tasks done.">
-  <img src="/images/0.32.0/monitor-live.gif" alt="The Smithers Monitor following a live release-canary run from running to completed" />
-</Frame>
+<figure>
+<img src="/images/0.32.0/monitor-live.gif" alt="The Smithers Monitor following a live release-canary run from running to completed" />
+  <figcaption>The Monitor following a live run end to end: the run appears with a running status pill, the health banner reads Healthy while the execution tree progresses and events stream in, and it ends on Completed with 4/4 tasks done.</figcaption>
+</figure>
 
 - A non-loopback bind mints a login token automatically, and a wildcard bind
   prints one dialable URL per interface, Tailscale first, then LAN.
@@ -138,9 +139,10 @@ Each ships with its own live UI:
   of that workflow. The background monitor also breaks silence on retry churn
   and otherwise-quiet runs.
 
-<Frame caption="Touring a finished run in the Monitor: the execution tree with per-node ok pills and durations, the Timeline and Usage panels with rate-limit gauges, the Debug XML view of the workflow, the Frames scrubber, and the Notable/All/Activity event tabs.">
-  <img src="/images/0.32.0/monitor-tour.gif" alt="Touring a completed release-canary run in the Smithers Monitor, including the debug XML view and frames scrubber" />
-</Frame>
+<figure>
+<img src="/images/0.32.0/monitor-tour.gif" alt="Touring a completed release-canary run in the Smithers Monitor, including the debug XML view and frames scrubber" />
+  <figcaption>Touring a finished run in the Monitor: the execution tree with per-node ok pills and durations, the Timeline and Usage panels with rate-limit gauges, the Debug XML view of the workflow, the Frames scrubber, and the Notable/All/Activity event tabs.</figcaption>
+</figure>
 
 ## Reliability fixes
 

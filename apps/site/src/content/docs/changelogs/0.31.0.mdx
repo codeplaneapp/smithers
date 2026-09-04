@@ -14,9 +14,10 @@ time-travel operation compensates for them, blocks, or reports exactly
 what it crossed. Claude Opus 5 also takes the default implementer, smart,
 and orchestrator seats in the model registry.
 
-<Frame caption="A release-canary run streaming through the Monitor: the health banner, execution tree, and event feed update live until the run lands on Completed with 4/4 tasks done.">
-  <img src="/images/0.31.0/monitor-live.gif" alt="The Smithers Monitor following a live run from running to completed" />
-</Frame>
+<figure>
+<img src="/images/0.31.0/monitor-live.gif" alt="The Smithers Monitor following a live run from running to completed" />
+  <figcaption>A release-canary run streaming through the Monitor: the health banner, execution tree, and event feed update live until the run lands on Completed with 4/4 tasks done.</figcaption>
+</figure>
 
 ## Upgrading
 
@@ -98,9 +99,10 @@ bunx smthrs rewind RUN_ID <frame> --no-revert  # keep the effects; skip compensa
   side-effect journal event types, so dashboards and OTLP exporters see
   effect transitions as they happen.
 
-<Frame caption="Inspecting a finished run in the Monitor: the execution tree, the node inspector with transcript and output, Debug power tools with the engine XML view, and frame-by-frame scrubbing with the Frames control.">
-  <img src="/images/0.31.0/monitor-tour.gif" alt="Touring a finished run in the Monitor, opening the node inspector, the XML debug view, and the frame scrubber" />
-</Frame>
+<figure>
+<img src="/images/0.31.0/monitor-tour.gif" alt="Touring a finished run in the Monitor, opening the node inspector, the XML debug view, and the frame scrubber" />
+  <figcaption>Inspecting a finished run in the Monitor: the execution tree, the node inspector with transcript and output, Debug power tools with the engine XML view, and frame-by-frame scrubbing with the Frames control.</figcaption>
+</figure>
 
 Marking is checkable: a new `authoring-side-effects` eval suite (70
 fixture workflows plus handwritten cases and a harness) and a

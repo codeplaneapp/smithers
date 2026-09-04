@@ -13,9 +13,10 @@ Major release: Smithers ships **Smithers Studio 2**, a ground-up dark agent oper
 
 The headline of 0.22.0 is **Smithers Studio 2** (`apps/smithers-studio-2`), a ground-up rebuild of the agent operations console. The original "spaceship" studio put all ~25 views on one flat sidebar with equal weight, and color everywhere meant nothing stood out. Studio 2 inverts that: a dark, near-monochrome console where saturated color only ever signals *run state*, and where the surfaces you reach for daily are the only ones permanently visible. It is built on Vite, React 19, and Zustand, and ships as a web app today with a desktop shell in the wings. The design and information-architecture contracts are written down first, in `apps/smithers-studio-2/docs/DESIGN.md` and `docs/UX.md`.
 
-<Frame caption="The Home / WELCOME screen: two verbs, recent workspaces, and a live Operations strip whose running / waiting / pending-approval counts come from the same Gateway RPCs as the Runs surface.">
-  <img src="/images/studio-2/home.png" alt="Smithers Studio 2 home screen with recent workspaces and a live operations strip" />
-</Frame>
+<figure>
+<img src="/images/studio-2/home.png" alt="Smithers Studio 2 home screen with recent workspaces and a live operations strip" />
+  <figcaption>The Home / WELCOME screen: two verbs, recent workspaces, and a live Operations strip whose running / waiting / pending-approval counts come from the same Gateway RPCs as the Runs surface.</figcaption>
+</figure>
 
 - **Three-tier progressive-disclosure navigation.** The shell exposes exactly four primary surfaces that are always visible (Home, Runs, Workspace, Workflows) backed by a single nav registry in `src/shell/navRegistry.tsx`. Six secondary surfaces (Issues, Landings, Workspaces, Memory, Scores, Search) live in a collapsed-by-default "More" group, and three developer surfaces (DevTools, SQL Browser, Logs) hide entirely until opted in. Every surface registers exactly one entry in `buildNavRegistry`, so a new view appears in the right sidebar section and the palette automatically without touching `AppShell` or `Sidebar`.
 
@@ -25,9 +26,10 @@ The headline of 0.22.0 is **Smithers Studio 2** (`apps/smithers-studio-2`), a gr
 
 - **Cmd-K / Cmd-P command palette.** A universal accelerator (`src/shell/CommandPalette`) reaches every registered surface across all three tiers plus contextual commands, so the rail can stay tiny without trapping power users. Prefix pills switch modes (`>` commands, `/` run workflow, `@` open file, `?` ask AI) parsed by `parseQuery.ts`, and results are grouped by section ("Go to", "More", "Developer", "Commands"). Developer surfaces only surface in the palette when developer mode is on, since the palette is built from the same gated registry.
 
-<Frame caption="Cmd-K / Cmd-P reaches every surface. Filtering is synchronous, so type-then-Enter always runs the command you just typed.">
-  <img src="/images/studio-2/command-palette.gif" alt="Opening the command palette and navigating to a surface" />
-</Frame>
+<figure>
+<img src="/images/studio-2/command-palette.gif" alt="Opening the command palette and navigating to a surface" />
+  <figcaption>Cmd-K / Cmd-P reaches every surface. Filtering is synchronous, so type-then-Enter always runs the command you just typed.</figcaption>
+</figure>
 
 - **Dark design system where color equals state.** All visual tokens live as CSS custom properties in `src/theme.css` and are mirrored as a single TypeScript export in `src/theme/themeTokens.ts`, so no component hardcodes a hex value. Three stacked surfaces (`--bg`, `--surface-1`, `--surface-2`) carry depth, text is white at three opacities, and the only saturated colors are run-state signals: `--accent` blue for live/running, `--success` green for completed/approved, `--warning` amber for waiting/pending-approval gates, and `--danger` red for failed/denied. Motion is limited to 120 to 150ms ease-out feedback on real state changes and collapses to zero under `prefers-reduced-motion`.
 
@@ -49,9 +51,10 @@ Behind the shell, every surface is a real, live view over the Gateway and worksp
 
 - **Live Runs inspection surface.** The `Runs` view pairs a run-history rail (with an approvals filter and a live nav badge) against a responsive tree-plus-inspector layout that splits with a draggable divider above 800px and falls back to a modal inspector sheet on narrow widths. It streams `run.event` frames over the Gateway's real WebSocket protocol (a `connect` + `streamRunEvents` subscription routed through `/v1/rpc`), debouncing event bursts into a single `getRun` + `getDevToolsSnapshot` refresh of only the selected run so a chatty run never hammers the list RPCs. The `RunToolbar` exposes the lifecycle actions valid for the current state (cancel a live run, resume a terminal one) plus a frame scrubber for time-travel rewind.
 
-<Frame caption="The Runs surface: a history rail of color-coded run states beside a tree + inspector that streams live event frames over the Gateway WebSocket. Saturated color only ever means run state: blue running, green succeeded, amber waiting, red failed.">
-  <img src="/images/studio-2/runs-live.gif" alt="Studio 2 Runs surface streaming live run events into a tree and inspector" />
-</Frame>
+<figure>
+<img src="/images/studio-2/runs-live.gif" alt="Studio 2 Runs surface streaming live run events into a tree and inspector" />
+  <figcaption>The Runs surface: a history rail of color-coded run states beside a tree + inspector that streams live event frames over the Gateway WebSocket. Saturated color only ever means run state: blue running, green succeeded, amber waiting, red failed.</figcaption>
+</figure>
 
 - **Inline approval gates.** When a selected node has a pending approval, an `ApprovalGate` renders directly inside the inspector with an optional note and approve/deny buttons that post `submitApproval`. Approvals are surfaced three ways from one source of truth: the history-list filter, the inline gate, and the sidebar badge count driven by `runsBadgeStore`.
 
@@ -61,9 +64,10 @@ Behind the shell, every surface is a real, live view over the Gateway and worksp
 
 - **In-app workspace terminal and agent chat.** The `Workspace` surface is segmented between a Ghostty-rendered terminal and an agent chat. Each terminal pane owns its own `GhosttyCore` WASM instance keyed by tab id, and the core is evicted on tab close so WASM linear memory is reclaimed instead of leaking on every open/close. Terminals are backed by a JSON-RPC-over-WebSocket PTY server (`scripts/pty-server.ts`) with scrollback replay on attach, a concurrent-session cap, frame-size limits, and an orphan reaper. The agent-chat segment renders streaming markdown/code responses with a model/mode indicator and a calm auto-scroll that only pins to the newest block when the viewer is already near the bottom; it stays mounted across segment switches so history is preserved.
 
-<Frame caption="The Workspace terminal renders a real PTY through the Ghostty WASM core: live shell I/O, scrollback replay on attach, and one WASM instance per tab evicted on close.">
-  <img src="/images/studio-2/workspace-terminal.png" alt="In-app workspace terminal running a real shell via the Ghostty renderer" />
-</Frame>
+<figure>
+<img src="/images/studio-2/workspace-terminal.png" alt="In-app workspace terminal running a real shell via the Ghostty renderer" />
+  <figcaption>The Workspace terminal renders a real PTY through the Ghostty WASM core: live shell I/O, scrollback replay on attach, and one WASM instance per tab evicted on close.</figcaption>
+</figure>
 
 - **Home welcome and operations strip.** `Home` is a calm welcome column with recent workspaces and a live Operations strip that derives running / waiting / pending-approval counts from the same `listRuns` + `listApprovals` RPCs as the Runs surface, polled on a lighter 5s cadence. When the workspace backend is unreachable it shows a connect/boot panel instead of empty recents.
 
@@ -73,9 +77,10 @@ Behind the shell, every surface is a real, live view over the Gateway and worksp
 
 - **DevTools, SQL Browser, and Logs.** Behind the developer toggle, `DevTools` renders the raw, unfiltered DevTools snapshot tree and node props for a run picked from `listRuns`; the `SqlBrowser` is a read-only query surface over the workspace SQLite database that lists tables, shows a selected table's schema, and runs ad-hoc queries; `Logs` is a dense, filterable event-log firehose (by level, category, and free text) with error/warning counts.
 
-<Frame caption="DevTools is hidden until you opt into developer mode, which reveals the third nav tier. It renders the raw run snapshot tree and per-node props.">
-  <img src="/images/studio-2/devtools.png" alt="Studio 2 DevTools surface showing the raw run snapshot tree and node inspector" />
-</Frame>
+<figure>
+<img src="/images/studio-2/devtools.png" alt="Studio 2 DevTools surface showing the raw run snapshot tree and node inspector" />
+  <figcaption>DevTools is hidden until you opt into developer mode, which reveals the third nav tier. It renders the raw run snapshot tree and per-node props.</figcaption>
+</figure>
 
 ## Studio 2: Real Backends, De-Mocking, and Hardening
 
@@ -105,9 +110,10 @@ Behind the shell, every surface is a real, live view over the Gateway and worksp
 
 - **Scaffolded a bespoke React UI for every init-pack workflow.** `bunx smthrs init` now emits a `.smithers/ui/<key>.tsx` standalone React app for each workflow (`apps/cli/src/workflow-pack.js`, sources in `apps/cli/src/workflowUiSources.js`), covering `plan`, `implement`, `research-plan-implement`, `review`, `research`, `ticket-create`, `tickets-create`, `ralph`, `improve-test-coverage`, `debug`, `grill-me`, `write-a-prd`, `feature-enum`, `audit`, `mission`, `workflow-skill`, plus dedicated `kanban` and `plan` renderers. Each UI is built on the `gateway-react` hooks (`useGatewayRuns`, `useGatewayRunEvents`, `useGatewayNodeOutput`, `useGatewayActions`, `useGatewayApprovals`) and renders a live, workflow-specific view. For example `review.tsx` shows a per-reviewer approval verdict bar driven by the run's real `review:N` node outputs. The generated `.smithers/gateway.ts` mounts each workflow and its UI independently via a `UI_WORKFLOWS` table, logging a `/workflows/<key>` mount URL; a workflow that fails to import (e.g. broken MDX) disables only its own UI while the rest of the Gateway stays up.
 
-<Frame caption="A generated init-pack workflow UI: the Review workflow's per-reviewer approval verdict bar, driven by the run's real review:N node outputs. Each seeded workflow gets its own bespoke React app served at /workflows/<key>.">
-  <img src="/images/workflow-ui/review.png" alt="Generated Review workflow UI showing per-reviewer approval verdicts" />
-</Frame>
+<figure>
+<img src="/images/workflow-ui/review.png" alt="Generated Review workflow UI showing per-reviewer approval verdicts" />
+  <figcaption>A generated init-pack workflow UI: the Review workflow's per-reviewer approval verdict bar, driven by the run's real review:N node outputs. Each seeded workflow gets its own bespoke React app served at /workflows/&lt;key&gt;.</figcaption>
+</figure>
 
 - **Added `bunx smthrs ui [runId]` to open a run's workflow UI.** The new command (`apps/cli/src/index.js`) resolves a run to its workflow and the Gateway's `uiPath` over `/v1/rpc` (`listWorkflows`, `listRuns`, `getRun`), then opens `<gateway><uiPath>?runId=<id>` in the browser. With no `runId` it attaches to the most recent run; `--workflow` opens a workflow UI directly, `--gateway`/`--port` target a specific Gateway, and `--no-open` just prints the URL. It fails clearly when no Gateway is reachable or the resolved workflow has no UI mounted.
 

@@ -15,9 +15,10 @@ The persistence layer now runs on **SQLite, PGlite, or PostgreSQL** behind a SQL
 
 The durable control plane is no longer tied to bun:sqlite. 0.25.0 adds a backend abstraction (SQLite, PGlite, or Postgres), a one-command migration path that copies legacy run history forward, and a fail-loud gate so an old store is never silently abandoned. New schema-signature and DB-backed docs primitives, plus a SIGKILL/resume durability fault case, round out the backend hardening.
 
-<Frame caption="Durability is the whole point: a run that crashes mid-flight resumes from its last checkpoint. With 0.25.0 that guarantee holds whether the durable store is SQLite, PGlite, or PostgreSQL.">
- <img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
-</Frame>
+<figure>
+<img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
+  <figcaption>Durability is the whole point: a run that crashes mid-flight resumes from its last checkpoint. With 0.25.0 that guarantee holds whether the durable store is SQLite, PGlite, or PostgreSQL.</figcaption>
+</figure>
 
 - **Backend choice resolution with a fail-loud migration gate.** resolveSmithersBackendChoice in packages/smithers/src/resolveSmithersBackendChoice.js resolves the storage backend in precedence order (explicit option, then SMITHERS_BACKEND, then `backend` in.smithers/smithers.config.ts, then the default `pglite`). When a legacy bun:sqlite store still holds runs and the resolved backend is pglite or postgres with no.smithers/migrated.json marker, it throws SMITHERS_MIGRATION_REQUIRED rather than silently switching stores. createSmithers in packages/smithers/src/create.js rejects an explicit pglite or postgres backend with INVALID_INPUT (pointing at the async openSmithersBackend factory) rather than degrading to bun:sqlite; createSmithersPostgres is the PGlite/Postgres factory.
 - **New `migrate` command copies legacy run history forward.** `bunx smthrs migrate` (apps/cli/src/index.js) copies the legacy bun:sqlite smithers.db into PGlite or Postgres and writes the.smithers/migrated.json marker. It accepts `--to pglite|postgres` (default pglite), `--url` for a Postgres connection string, and `--keepSqlite` (default true), backed by migrateSmithersStore in packages/smithers/src/migrateSmithersStore.js which orders tables so _smithers_runs is copied first and emits per-table progress events. A SmithersError during migration exits with code 4 (other failures exit 1), and a `--backend` flag is honored on read commands so the SMITHERS_MIGRATION_REQUIRED remediation works.
@@ -31,9 +32,10 @@ The durable control plane is no longer tied to bun:sqlite. 0.25.0 adds a backend
 
 0.25.0 turns the Gateway into a control plane for live UIs. Workspace surfaces (runs, approvals, crons, memory, scores, tickets, prompts, accounts, docs) each get a typed RPC plus a reactive TanStack DB collection, the same collections can persist to the browser across reloads, and they can be fed either by the local RPC+WS transport or by a hardened cloud Electric proxy with no change to the consuming component.
 
-<Frame caption="The upcoming Smithers UI (preview at ui-preview.smithers.sh): a live run tree streaming node props, exact prompts, and outputs over the Gateway's new RPC and sync surface.">
- <img src="/images/0.25.0/watch-runs.png" alt="A live run tree and node inspector served over the Smithers Gateway" />
-</Frame>
+<figure>
+<img src="/images/0.25.0/watch-runs.png" alt="A live run tree and node inspector served over the Smithers Gateway" />
+  <figcaption>The upcoming Smithers UI (preview at ui-preview.smithers.sh): a live run tree streaming node props, exact prompts, and outputs over the Gateway's new RPC and sync surface.</figcaption>
+</figure>
 
 - **New read RPCs expose every workspace surface.** `listMemoryFacts` (scope `memory:read`), `listScores` (`score:read`), `listPrompts` (`prompt:read`), `listAccounts` (`account:read`), `listDocs` and `getSchemaSignature` (`run:read`) were added to `GATEWAY_RPC_DEFINITIONS` in packages/gateway/src/rpc/index.ts, bringing the contract to 29 methods (the `check-docs` gate asserts exactly 29). `listAccounts` reads the real `~/.smithers/accounts.json` registry via `@smthrs/accounts/listAccounts` and redacts secrets over the wire, carrying `hasApiKey`/`hasConfigDir` posture flags instead of the plaintext key.
 - **Tickets became a full CRUD surface backed by a docs table.** `listTickets`/`createTicket`/`updateTicket`/`deleteTicket` (scopes `ticket:read`/`ticket:write`, with a `TicketNotFound` 404 declared on update/delete) write to a new `_smithers_docs` table (migration `0018_add_docs`) holding tickets, plans, specs, and proposals with a `status` column and a `deleted_at_ms` soft-delete tombstone. `SmithersDb` gained `listDocs`/`getDoc`/`upsertDoc`/`softDeleteDoc` in packages/db/src/adapter.js, and `listDocs` filters tombstones rather than returning them.
@@ -48,17 +50,20 @@ The durable control plane is no longer tied to bun:sqlite. 0.25.0 adds a backend
 
 The product UI moved to its own repository, so 0.25.0 deletes the local POC UI apps that were dead weight and never passed CI on a clean, browser-free box. This release also pays down a large dead-code backlog and hardens the build, test, and publish gates so a single CI run reports every failing package at once.
 
-<Frame caption="The real Smithers UI, now in preview at ui-preview.smithers.sh: chat to build, watch the work happen live, review every change, rewind any run, and pair with teammates and an AI in the same room.">
- <img src="/images/0.25.0/ui-preview.png" alt="The upcoming Smithers UI: a home for your coding agents" />
-</Frame>
+<figure>
+<img src="/images/0.25.0/ui-preview.png" alt="The upcoming Smithers UI: a home for your coding agents" />
+  <figcaption>The real Smithers UI, now in preview at ui-preview.smithers.sh: chat to build, watch the work happen live, review every change, rewind any run, and pair with teammates and an AI in the same room.</figcaption>
+</figure>
 
-<Frame caption="Time travel in the upcoming UI: scrub a run's snapshots like a video, jump to any frame, replay, or fork from there, all backed by the durable snapshot store that now runs on Postgres.">
- <img src="/images/0.25.0/time-travel.png" alt="The upcoming UI time-travel scrubber for rewind, replay, and fork" />
-</Frame>
+<figure>
+<img src="/images/0.25.0/time-travel.png" alt="The upcoming UI time-travel scrubber for rewind, replay, and fork" />
+  <figcaption>Time travel in the upcoming UI: scrub a run's snapshots like a video, jump to any frame, replay, or fork from there, all backed by the durable snapshot store that now runs on Postgres.</figcaption>
+</figure>
 
-<Frame caption="Every run produces a real, syntax-highlighted diff, reviewable file by file like a teammate's pull request.">
- <img src="/images/0.25.0/review-diff.png" alt="The upcoming UI diff review of an agent run" />
-</Frame>
+<figure>
+<img src="/images/0.25.0/review-diff.png" alt="The upcoming UI diff review of an agent run" />
+  <figcaption>Every run produces a real, syntax-highlighted diff, reviewable file by file like a teammate's pull request.</figcaption>
+</figure>
 
 - **The proof-of-concept UI apps are gone.** Removed `apps/smithers` (the Cerebras PWA POC), `apps/smithers-studio-2` (studio shell POC), and `apps/smithers-demo` in one commit, then `apps/smithers-tui-demo` in a follow-up once its only remaining importer (smithers-demo) was deleted. The `app-e2e` CI job that ran their browser e2e (it installed `playwright`/chromium on the runner, which contradicts the repo's clean-box, no-browser CI philosophy) was dropped, along with the `dev`, `dev:studio`, `demo:smithers`, `demo:smithers:tui`, and `test:e2e:apps` scripts and their package-configuration.mdx rows. All four apps were `"private": true` and were never published to npm. The real UI is previewable at https://ui-preview.smithers.sh.
 - **A 1,764-line legacy engine body was deleted.** `runWorkflowBodyLegacy` in packages/engine/src/engine.js was the pre-driver implementation, reachable only via the `__smithersEngineMode === "legacy"` option and the `SMITHERS_LEGACY_ENGINE=1` env var, neither set in production nor documented anywhere. `runWorkflowBody` now passes straight through to `runWorkflowBodyDriver`, dropping engine.js from 7,775 to 6,011 lines at the time of the change, with the full 646-test engine suite green. The engine's legacy-mode tests still pass that option, so it is now a silent no-op that resolves to the driver path.
@@ -85,9 +90,10 @@ This release sharpens the durable control plane from the type layer down to the 
 
 0.25.0 turns the agents package into a real toolbox. Five new AI SDK-compatible tool factories ship in `packages/agents/src`, all built on a provider-boundary pattern so a workflow never hard-codes a single vendor, and the agent runtime itself gets preflight checks, quota-aware suspension, and honest error reporting.
 
-<Frame caption="Smithers stays agent-agnostic: a Task can be backed by Claude Code, Codex, Antigravity, Amp, and more, each behind the same durable engine and the same new tool primitives.">
- <img src="/images/why/any-agent.png" alt="Smithers running any coding agent behind the same durable workflow engine" />
-</Frame>
+<figure>
+<img src="/images/why/any-agent.png" alt="Smithers running any coding agent behind the same durable workflow engine" />
+  <figcaption>Smithers stays agent-agnostic: a Task can be backed by Claude Code, Codex, Antigravity, Amp, and more, each behind the same durable engine and the same new tool primitives.</figcaption>
+</figure>
 
 - **Grounded multi-provider web search.** `createGroundedWebSearchToolset({ providers, maxResultsPerProvider })` (exported from `@smthrs/agents`, source at packages/agents/src/web-search/createGroundedWebSearchToolset.js) exposes a single `grounded_web_search` tool that fans a query across Exa semantic retrieval plus a fresh/SERP provider (Tavily, Brave, or Serper, built via `createExaSearchProvider`/`createTavilySearchProvider`/`createBraveSearchProvider`/`createSerperSearchProvider`). It throws unless given Exa as the semantic provider plus at least one fresh provider, runs them with `Promise.allSettled` so one failure does not sink the call, dedupes by normalized URL (hash stripped), and returns numbered `citation` results with a `freshness` filter of day/week/month/year (#319).
 - **Generic HTTP escape-hatch tool.** `createHttpTool(options)` (packages/agents/src/http/createHttpTool.js, re-exported from the `smthrs` facade at packages/smithers/src/index.js) lets an agent call any REST endpoint with no OpenAPI spec. The Zod input accepts method, url, headers, query, body, an optional `timeoutMs` (wired to an `AbortController`), and a discriminated `auth` union keyed on `type` with `bearer`, `basic`, or `header` variants; non-string JSON bodies auto-set `content-type: application/json`, and it returns `{ ok, status, statusText, headers, body }` (#318).

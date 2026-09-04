@@ -15,9 +15,10 @@ The persistence layer now runs unchanged on **PostgreSQL or an embedded PGlite**
 
 The headline of 0.23.0 is a **PostgreSQL and PGlite dialect for the persistence layer** (`packages/db/src/dialect.js`). Smithers' storage layer is hand-written SQL, and a new dialect seam lets that exact SQL run on SQLite or Postgres without rewriting a query. The dialect handles placeholder translation (`?` to `$1`, literal and comment aware), DDL type and autoincrement mapping (`INTEGER` to `BIGINT`, `REAL` to `DOUBLE PRECISION`, `BLOB` to `BYTEA`, `INTEGER PRIMARY KEY AUTOINCREMENT` to `BIGSERIAL PRIMARY KEY`), `information_schema` introspection, `BEGIN` vs `BEGIN IMMEDIATE` transaction semantics, and `json_extract` to `->>` rewriting.
 
-<Frame caption="Durability is the whole point: a run that crashes mid-flight resumes from its last checkpoint. With 0.23.0 that same guarantee holds whether the snapshot store is SQLite, PGlite, or PostgreSQL.">
-  <img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
-</Frame>
+<figure>
+<img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
+  <figcaption>Durability is the whole point: a run that crashes mid-flight resumes from its last checkpoint. With 0.23.0 that same guarantee holds whether the snapshot store is SQLite, PGlite, or PostgreSQL.</figcaption>
+</figure>
 
 - **`createSmithersPostgres` boots node-postgres or an embedded PGlite.** A new async API stands up the engine against a real Postgres server or an in-process PGlite over a local socket, so you can develop against an embedded database and deploy against managed Postgres with the same code. `opts` is a discriminated union (`{ provider: 'postgres', connectionString?, connection? }` or `{ provider: 'pglite', dataDir? }`), the result extends the `createSmithers` API with a `close()` teardown, and `BIGINT` values are parsed back to JS numbers so timestamps and counters match SQLite behavior. `pg`, `@electric-sql/pglite`, and `@electric-sql/pglite-socket` are optional dependencies, and the synchronous `bun:sqlite` path is untouched, so existing SQLite users see no change.
 
@@ -41,9 +42,10 @@ A new engine substrate snapshots an agent's worktree **as it works**, so a crash
 
 This release introduces **Smithers** (`apps/smithers`), a streaming chat PWA powered by Cerebras `gpt-oss-120b` through TanStack AI and deployable to Cloudflare via Alchemy infrastructure-as-code. The browser streams replies from a Cloudflare Worker over Server-Sent Events and never holds the API key; the Worker runs Cerebras server-side with the key bound as a Worker secret. `bun dev` at the repo root now boots this app (the old Studio 2 dev script moved to `bun dev:studio`).
 
-<Frame caption="The Smithers chat PWA: a calm 'How can I help you?' hero, a composer that lays its input on the top line beside the theme, split, mode, and voice controls, and a live workflow toast. Dark mode resolves before first paint, so there is no flash.">
-  <img src="/images/0.23.0/smithers-pwa.png" alt="The Smithers Cerebras chat PWA in dark mode showing the welcome hero and composer" />
-</Frame>
+<figure>
+<img src="/images/0.23.0/smithers-pwa.png" alt="The Smithers Cerebras chat PWA in dark mode showing the welcome hero and composer" />
+  <figcaption>The Smithers chat PWA: a calm 'How can I help you?' hero, a composer that lays its input on the top line beside the theme, split, mode, and voice controls, and a live workflow toast. Dark mode resolves before first paint, so there is no flash.</figcaption>
+</figure>
 
 - **Streaming chat with a command menu, voice dictation, and a grill-workflow graph.** The frontend renders streaming Markdown replies, a Cmd-K command menu, toast notifications, voice dictation, and an "ask me" grill workflow graph drawn with ReactFlow. The chat backend is a single Cloudflare Worker route (`POST /api/chat`) that runs Cerebras through TanStack AI's `chat()` and returns a Server-Sent-Events response.
 
@@ -139,9 +141,10 @@ Smithers can now run on a jj binary it ships itself, and it tells you up front w
 
 - **Vibe (Mistral) CLI agent.** A new `VibeAgent` drives Mistral's `vibe` CLI with stream-json output parsing, session resume, and the standard build-command flags (`--resume`, `-c`, `--agent`, `--max-turns`, `--max-price`, `--max-tokens`, `--enabled-tools`, `--trust`, `--output streaming`, `--workdir`), plus CLI detection via `VIBE_HOME` / `MISTRAL_API_KEY`, a capability-registry entry, a surface-manifest entry, and a slot in the `cheapFast` tier order.
 
-<Frame caption="Smithers stays agent-agnostic: a <Task> can be backed by Claude Code, Codex, Gemini, Antigravity, Hermes, and now Vibe (Mistral), each behind the same durable engine.">
-  <img src="/images/why/any-agent.png" alt="Smithers running any coding agent behind the same durable workflow engine" />
-</Frame>
+<figure>
+<img src="/images/why/any-agent.png" alt="Smithers running any coding agent behind the same durable workflow engine" />
+  <figcaption>Smithers stays agent-agnostic: a &lt;Task&gt; can be backed by Claude Code, Codex, Gemini, Antigravity, Hermes, and now Vibe (Mistral), each behind the same durable engine.</figcaption>
+</figure>
 
 - **Connect any MCP server with `createMcpToolset`.** A new `createMcpToolset(config, options?)` connects to any stdio MCP server (GitHub, Linear, and the like) and projects its tools as AI SDK tools you drop straight into an SDK agent's `tools`. `McpServerConfig` is `{ command, args?, env?, cwd? }`, options mirror the OpenAPI curation knobs (`include`/`exclude`/`namePrefix`), and the returned `{ tools, toolNames, close }` requires calling `close()` to terminate the spawned server. It is the inbound half of MCP-as-integration, imported from a deep path (it is not re-exported from the package index), and a worked example ships under `examples/`.
 
@@ -177,9 +180,10 @@ This release adds four self-contained benchmark harnesses, a vulnerability-disco
 
 - **The `Task fork` prop is now in the public types.** `<Task fork="...">` already worked at runtime, but the hand-maintained components type declaration omitted the prop, so TypeScript rejected it. `TaskProps` now declares `fork?: string` with a doc comment and a JSX type-test.
 
-<Frame caption="Task fork starts a new agent task from a copy of another task's final session context, so plan to implement to verify chains and parallel branches all begin from the same base. The prop is now first-class in the TypeScript surface.">
-  <img src="/images/why/task-fork.gif" alt="A task forking from another task's session context into parallel follow-up branches" />
-</Frame>
+<figure>
+<img src="/images/why/task-fork.gif" alt="A task forking from another task's session context into parallel follow-up branches" />
+  <figcaption>Task fork starts a new agent task from a copy of another task's final session context, so plan to implement to verify chains and parallel branches all begin from the same base. The prop is now first-class in the TypeScript surface.</figcaption>
+</figure>
 
 ## Plue Local E2E Harness
 

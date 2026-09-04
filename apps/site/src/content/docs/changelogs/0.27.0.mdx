@@ -7,9 +7,10 @@ import Frame from "../../../components/Frame.astro"
 
 Smithers 0.27.0 is one of the largest releases yet. It rebuilds the control plane around a single per-workspace Gateway daemon (autostarted by the CLI, idle-aware, hardened against DNS rebinding, and tested under 50 concurrent runs with no mocks) and replaces the bespoke gateway-WS sync stack with a TanStack DB collection engine that runs over REST + SSE locally and ElectricSQL for multiplayer. Around that core: a workflow-UI toolkit with a create-workflow builder that turns plain-English descriptions into runnable workflows, a full-screen TUI monitor behind `up --interactive`, [Claude Code and Codex plugins](https://plugins.smithers.sh) that mirror every run into the chat, [self-healing runs](https://self-healing.smithers.sh) with an automatic post-failure autopsy, [docs-driven development](https://ddd.smithers.sh), serverless execution on Cloudflare, Telegram approvals, an interactive init wizard, `smithers update`, HTML run reports, and a batch of security and correctness fixes.
 
-<Frame caption="Smithers 0.27.0: one Gateway per workspace, a TanStack DB sync engine, a full-screen TUI monitor, and a security-hardening pass.">
- <img src="/images/0.27.0/hero.svg" alt="Smithers 0.27.0 release card listing the headline features" />
-</Frame>
+<figure>
+<img src="/images/0.27.0/hero.svg" alt="Smithers 0.27.0 release card listing the headline features" />
+  <figcaption>Smithers 0.27.0: one Gateway per workspace, a TanStack DB sync engine, a full-screen TUI monitor, and a security-hardening pass.</figcaption>
+</figure>
 
 ---
 
@@ -47,9 +48,10 @@ Workflow UIs are now a first-class authoring surface:
 - **A create-workflow builder UI** with a code editor and live graph preview backs `bunx smthrs make-workflow`: describe a workflow in plain English and watch it get designed, scaffolded, and graph-verified.
 - **Experimental:** `bunx smthrs ui --app` serves a local UI app preview with a concierge chat that can create and launch workflows ([ui.smithers.sh](https://ui.smithers.sh)). It requires an LLM API key and is not yet part of the supported product surface.
 
-<Frame caption="A run streaming live step transitions into the UI as each task starts and finishes. The same live collections now power the web UI, the TUI monitor, and the chat plugins.">
- <img src="/images/why/runs-live.gif" alt="A Smithers run streaming live step transitions into a tree as each task starts and finishes" />
-</Frame>
+<figure>
+<img src="/images/why/runs-live.gif" alt="A Smithers run streaming live step transitions into a tree as each task starts and finishes" />
+  <figcaption>A run streaming live step transitions into the UI as each task starts and finishes. The same live collections now power the web UI, the TUI monitor, and the chat plugins.</figcaption>
+</figure>
 
 ## Full-screen TUI monitor
 
@@ -70,9 +72,10 @@ When a run fails, Smithers now [investigates itself](https://self-healing.smithe
 - **Fleet medic:** the `monitor-smithers` sweep gains an auto-remediation medic stage that proposes and applies fixes for stuck or degraded runs.
 - **`bunx smthrs supervise`** continues to watch for stale running runs and auto-resume them.
 
-<Frame caption="Durability is the point: a run that crashes mid-flight resumes from its last checkpoint, and in 0.27.0 a run that fails gets an automatic autopsy.">
- <img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
-</Frame>
+<figure>
+<img src="/images/why/crash-resume.gif" alt="A Smithers run crashing and resuming from its last durable checkpoint" />
+  <figcaption>Durability is the point: a run that crashes mid-flight resumes from its last checkpoint, and in 0.27.0 a run that fails gets an automatic autopsy.</figcaption>
+</figure>
 
 ## Serverless and sandboxes
 
@@ -117,9 +120,10 @@ A new [docs-driven development](https://ddd.smithers.sh) family of workflows tre
 - **System workflows:** internal durable processes (like re-init) are marked `system: true` and hidden from default listings while staying explicitly runnable, so frontends show only your workflows.
 - Cron and event triggers turn a push into a pipeline: see [automate.smithers.sh](https://automate.smithers.sh).
 
-<Frame caption="Seeded workflows ship with their own UIs: the implement workflow's live view, one of the per-workflow UIs installed by smithers init.">
- <img src="/images/workflow-ui/implement.png" alt="The implement workflow's custom browser UI showing a live run" />
-</Frame>
+<figure>
+<img src="/images/workflow-ui/implement.png" alt="The implement workflow's custom browser UI showing a live run" />
+  <figcaption>Seeded workflows ship with their own UIs: the implement workflow's live view, one of the per-workflow UIs installed by smithers init.</figcaption>
+</figure>
 
 ## Code review service
 
