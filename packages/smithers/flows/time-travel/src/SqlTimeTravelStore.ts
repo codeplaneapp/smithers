@@ -487,6 +487,42 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
       )
 
     /**
+     * Removes the mutable durable-wait projections explained by a journal
+     * suffix that is about to be archived. Sequence numbers do not live on
+     * either projection table, so the event payload is the only durable link
+     * between a truncated record and the row it created.
+     */
+    const deleteProjectedWaits = (runId: string, afterSeq: number) =>
+      Effect.gen(function*() {
+        yield* sql`
+          DELETE FROM flows_deferred_completions
+          WHERE execution_id = ${runId}
+            AND EXISTS (
+              SELECT 1 FROM flows_journal_events AS event
+              WHERE event.run_id = ${runId}
+                AND event.seq > ${afterSeq}
+                AND event.event_type = 'flows.engine.deferred-completed'
+                AND json_extract(event.payload_json, '$.flowName') = flows_deferred_completions.flow_name
+                AND json_extract(event.payload_json, '$.executionId') = flows_deferred_completions.execution_id
+                AND json_extract(event.payload_json, '$.deferredName') = flows_deferred_completions.deferred_name
+            )
+        `
+        yield* sql`
+          DELETE FROM flows_clock_deadlines
+          WHERE execution_id = ${runId}
+            AND EXISTS (
+              SELECT 1 FROM flows_journal_events AS event
+              WHERE event.run_id = ${runId}
+                AND event.seq > ${afterSeq}
+                AND event.event_type = 'flows.engine.clock-scheduled'
+                AND json_extract(event.payload_json, '$.flowName') = flows_clock_deadlines.flow_name
+                AND json_extract(event.payload_json, '$.executionId') = flows_clock_deadlines.execution_id
+                AND json_extract(event.payload_json, '$.clockName') = flows_clock_deadlines.clock_name
+            )
+        `
+      }).pipe(Effect.mapError(mapError))
+
+    /**
      * The id the next fork off this frame carries.
      *
      * The ordinal counts the edges already hanging off `(parent, seq)` PLUS
@@ -805,6 +841,7 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
             FROM flows_journal_events
             WHERE run_id = ${runId} AND seq > ${frame.seq}
           `
+                yield* deleteProjectedWaits(runId, frame.seq)
                 yield* sql`
             DELETE FROM flows_journal_events
             WHERE run_id = ${runId} AND seq > ${frame.seq}
@@ -853,6 +890,7 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
                      event_type, payload_json, meta_json, ${nowMs}
               FROM flows_journal_events WHERE run_id = ${childRunId}
             `
+                  yield* deleteProjectedWaits(childRunId, -1)
                   yield* sql`DELETE FROM flows_journal_events WHERE run_id = ${childRunId}`
                 }
                 for (const edge of descendants.attached) {

@@ -77,6 +77,11 @@ nothing), `invalid` (a malformed option or an undecodable durable payload),
 superseded before a mutation committed), `limit_exceeded` (the operation would
 read more journal entries than `maxHistoryEntries` allows), and `unknown`.
 
+A rewind removes the mutable deferred completions and clock deadlines whose
+completion or schedule records lie in the archived suffix. Reaching those
+awaits again therefore parks or schedules them from the rewound history; a
+discarded future cannot answer them.
+
 ## Limits
 
 - The SQL store is SQLite dialect only. PostgreSQL and PGlite are unsupported.

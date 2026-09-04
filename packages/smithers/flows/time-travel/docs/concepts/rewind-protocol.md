@@ -40,6 +40,9 @@ the process dies at this exact line, what does the next process see?
 10. **Archive and truncate the suffix atomically**, fenced on the parent's owner
     and on every non-terminal attached child's exact owner. Archiving is not
     deletion: the records move aside so a forensic reader can still reach them.
+    Mutable deferred completions and clock deadlines named by those records are
+    removed in the same transaction, so the rewound run cannot consume an
+    answer or deadline from the discarded future.
 11. **Cancel the claimed children**, recording each on the audit as it lands.
 12. **Suspend the run with the state derived at the frame**, not the state the
     truncated future left on the row, and close the audit as `completed`.

@@ -23,12 +23,13 @@ import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
 import * as Jj from "@smthrs/jj"
 import * as Journal from "@smthrs/journal/Journal"
-import type * as JournalEvent from "@smthrs/journal/JournalEvent"
+import * as JournalEvent from "@smthrs/journal/JournalEvent"
 import * as SqlJournal from "@smthrs/journal/SqlJournal"
 import * as AttemptStore from "@smthrs/run-store/AttemptStore"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -165,12 +166,27 @@ const engineLayer = (harness: Harness, handlers: ReadonlyArray<CompensationHandl
   )
 }
 
+/**
+ * What driving the flow asks of the environment. Inferred from the flow rather
+ * than spelled out, so a body that re-executes the run after a rewind does not
+ * have to name the interpreter's own services — and does not go stale when they
+ * change.
+ */
+type LedgerServices = ReturnType<typeof Ledger.execute> extends Effect.Effect<infer _A, infer _E, infer R> ? R
+  : never
+
 const drive = <A, E>(
   handlers: ReadonlyArray<CompensationHandlers.Handler>,
   body: (harness: Harness) => Effect.Effect<
     A,
     E,
-    DurableWriter.DurableWriter | Journal.Journal | RunStore.RunStore | SqlClient.SqlClient | TimeTravel
+    | DurableWriter.DurableWriter
+    | DurableEngineState.DurableEngineState
+    | Journal.Journal
+    | LedgerServices
+    | RunStore.RunStore
+    | SqlClient.SqlClient
+    | TimeTravel
   >
 ) => {
   const harness: Harness = { notifications: [], jjCalls: [] }
@@ -344,5 +360,60 @@ describe("time travel over an engine-written journal", () => {
       expect(result.rewound.assessments.some((assessment) => assessment.classification === "revertible")).toBe(true)
       expect(result.rewound.archive.archived).toBeGreaterThan(0)
       expect(result.remaining).toBeLessThan(result.total)
+    }))
+
+  it.effect("parks a re-reached deferred after rewinding its completion", () =>
+    Effect.gen(function*() {
+      const result = yield* drive([], () =>
+        Effect.gen(function*() {
+          const beforeCompletion = yield* entries
+          const frame = { lineageId: ledgerLineage, seq: beforeCompletion.at(-1)!.seq }
+          const state = yield* DurableEngineState.DurableEngineState
+          const journal = yield* Journal.Journal
+          yield* journal.transact(
+            Effect.gen(function*() {
+              yield* state.completeDeferred({
+                flowName: Ledger._tag,
+                executionId: "ledger-1",
+                deferredName: Settled.name,
+                exit: Exit.succeed("discarded-future"),
+                completedAtMs: 1
+              })
+              yield* journal.emitDurableUnfenced(
+                new JournalEvent.Input({
+                  runId: "ledger-1" as JournalEvent.RunId,
+                  sourceId: "time-travel-test:discarded-completion" as JournalEvent.SourceId,
+                  sourceSeq: 0 as JournalEvent.SourceSeq,
+                  eventType: "flows.engine.deferred-completed",
+                  payload: {
+                    flowName: Ledger._tag,
+                    executionId: "ledger-1",
+                    deferredName: Settled.name,
+                    exit: Exit.succeed("discarded-future")
+                  },
+                  meta: { lineageId: ledgerLineage }
+                })
+              )
+            })
+          )
+          yield* journal.flush
+
+          const timeTravel = yield* TimeTravel
+          yield* timeTravel.rewind({ runId: "ledger-1", frame })
+          yield* Ledger.execute({}, { executionId: "ledger-1", discard: true })
+
+          const runs = yield* RunStore.RunStore
+          const sql = yield* SqlClient.SqlClient
+          return {
+            row: yield* runs.get("ledger-1"),
+            completions: yield* sql<{ readonly deferred_name: string }>`
+              SELECT deferred_name FROM flows_deferred_completions
+              WHERE execution_id = 'ledger-1'
+            `
+          }
+        }))
+
+      expect(result.row.status).toBe("suspended")
+      expect(result.completions).toEqual([])
     }))
 })

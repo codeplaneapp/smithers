@@ -57,6 +57,10 @@ The result is the accounting:
 Records are archived, not deleted: they move aside so a forensic reader can
 still reach them. After the truncation the run is suspended carrying the state
 derived at the frame, not the state its truncated future had left on the row.
+Deferred completions and clock deadlines whose journal records moved into the
+archive are removed atomically with that truncation. If the resumed run reaches
+the same deferred or timer again, it waits again instead of consuming the
+discarded future's value or deadline.
 
 ## Choose what happens to detached children
 

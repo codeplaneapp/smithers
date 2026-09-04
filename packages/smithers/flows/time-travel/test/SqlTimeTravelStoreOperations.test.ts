@@ -581,8 +581,38 @@ describe("SqlTimeTravelStore persistence fault matrix", () => {
               (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
                event_type, payload_json, meta_json)
             VALUES ('run', ${seq}, ${`event-${seq}`}, 'source', ${seq}, 0, 'test', '{}', '{}')
-          `
+            `
           }
+          yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json)
+            VALUES
+              ('run', 3, 'deferred-3', 'source', 3, 0,
+               'flows.engine.deferred-completed',
+               ${JSON.stringify({ flowName: "Demo", executionId: "run", deferredName: "answer" })}, '{}'),
+              ('run', 4, 'clock-4', 'source', 4, 0,
+               'flows.engine.clock-scheduled',
+               ${
+            JSON.stringify({
+              flowName: "Demo",
+              executionId: "run",
+              clockName: "wake",
+              deferredName: "wake-deferred",
+              dueAtMs: 10
+            })
+          }, '{}')
+          `
+          yield* sql`
+            INSERT INTO flows_deferred_completions
+              (flow_name, execution_id, deferred_name, exit_json, completed_at_ms)
+            VALUES ('Demo', 'run', 'answer', '{"_tag":"Success"}', 0)
+          `
+          yield* sql`
+            INSERT INTO flows_clock_deadlines
+              (flow_name, execution_id, clock_name, deferred_name, due_at_ms, completed_at_ms)
+            VALUES ('Demo', 'run', 'wake', 'wake-deferred', 10, NULL)
+          `
           yield* store.recordReceipt({
             id: "duplicate",
             auditId: "audit",
@@ -607,14 +637,22 @@ describe("SqlTimeTravelStore persistence fault matrix", () => {
           const receipts = yield* sql<{ readonly id: string; readonly effect_id: string }>`
           SELECT id, effect_id FROM flows_time_travel_receipts ORDER BY id
         `
-          return { failure, journal, archive, receipts }
+          const deferreds = yield* sql<{ readonly deferred_name: string }>`
+            SELECT deferred_name FROM flows_deferred_completions WHERE execution_id = 'run'
+          `
+          const clocks = yield* sql<{ readonly clock_name: string }>`
+            SELECT clock_name FROM flows_clock_deadlines WHERE execution_id = 'run'
+          `
+          return { failure, journal, archive, receipts, deferreds, clocks }
         })
       )
 
       expect(result.failure).toMatchObject({ code: "unknown", message: "time-travel persistence failed" })
-      expect(result.journal).toEqual([{ seq: 0 }, { seq: 2 }])
+      expect(result.journal).toEqual([{ seq: 0 }, { seq: 2 }, { seq: 3 }, { seq: 4 }])
       expect(result.archive).toEqual([])
       expect(result.receipts).toEqual([{ id: "duplicate", effect_id: "existing" }])
+      expect(result.deferreds).toEqual([{ deferred_name: "answer" }])
+      expect(result.clocks).toEqual([{ clock_name: "wake" }])
     }))
 })
 
@@ -680,6 +718,122 @@ describe("SqlTimeTravelStore.archiveAndTruncate attempts", () => {
       )
 
       expect(rows).toEqual([{ run_id: "attempt-parent", step_key_digest: "survives", attempt: 1 }])
+    }))
+})
+
+describe("SqlTimeTravelStore.archiveAndTruncate durable waits", () => {
+  it.effect("removes only archived wait projections and lets a re-reached clock schedule anew", () =>
+    Effect.gen(function*() {
+      const result = yield* run((store, sql) =>
+        Effect.gen(function*() {
+          yield* insertOwnedRun(sql, "wait-run")
+          for (
+            const record of [
+              {
+                seq: 1,
+                eventType: "flows.engine.deferred-completed",
+                payload: { flowName: "Demo", executionId: "wait-run", deferredName: "kept-deferred" }
+              },
+              {
+                seq: 2,
+                eventType: "flows.engine.clock-scheduled",
+                payload: {
+                  flowName: "Demo",
+                  executionId: "wait-run",
+                  clockName: "kept-clock",
+                  deferredName: "kept-clock-deferred",
+                  dueAtMs: 10
+                }
+              },
+              {
+                seq: 3,
+                eventType: "flows.engine.deferred-completed",
+                payload: { flowName: "Demo", executionId: "wait-run", deferredName: "future-deferred" }
+              },
+              {
+                seq: 4,
+                eventType: "flows.engine.clock-scheduled",
+                payload: {
+                  flowName: "Demo",
+                  executionId: "wait-run",
+                  clockName: "future-clock",
+                  deferredName: "future-clock-deferred",
+                  dueAtMs: 20
+                }
+              }
+            ] as const
+          ) {
+            yield* sql`
+              INSERT INTO flows_journal_events
+                (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                 event_type, payload_json, meta_json)
+              VALUES (
+                'wait-run', ${record.seq}, ${`wait-${record.seq}`}, 'source', ${record.seq}, 0,
+                ${record.eventType}, ${JSON.stringify(record.payload)}, ${JSON.stringify({ lineageId: "main" })}
+              )
+            `
+          }
+          for (const deferredName of ["kept-deferred", "future-deferred", "unrecorded-deferred"]) {
+            yield* sql`
+              INSERT INTO flows_deferred_completions
+                (flow_name, execution_id, deferred_name, exit_json, completed_at_ms)
+              VALUES ('Demo', 'wait-run', ${deferredName}, '{"_tag":"Success"}', 0)
+            `
+          }
+          for (
+            const [clockName, deferredName] of [
+              ["kept-clock", "kept-clock-deferred"],
+              ["future-clock", "future-clock-deferred"],
+              ["unrecorded-clock", "unrecorded-clock-deferred"]
+            ] as const
+          ) {
+            yield* sql`
+              INSERT INTO flows_clock_deadlines
+                (flow_name, execution_id, clock_name, deferred_name, due_at_ms, completed_at_ms)
+              VALUES ('Demo', 'wait-run', ${clockName}, ${deferredName}, 10, NULL)
+            `
+          }
+
+          yield* store.archiveAndTruncate("wait-run", { lineageId: "main", seq: 2 }, [], owner)
+
+          const deferreds = yield* sql<{ readonly deferred_name: string }>`
+              SELECT deferred_name FROM flows_deferred_completions
+              WHERE execution_id = 'wait-run' ORDER BY deferred_name
+            `
+          const clocks = yield* sql<{ readonly clock_name: string }>`
+              SELECT clock_name FROM flows_clock_deadlines
+              WHERE execution_id = 'wait-run' ORDER BY clock_name
+            `
+          // Reaching the clock again must insert a fresh deadline. Before the
+          // cleanup this loses the primary-key race to the discarded future's
+          // old row and the sleep is immediately due once wall time passes it.
+          yield* sql`
+            INSERT INTO flows_clock_deadlines
+              (flow_name, execution_id, clock_name, deferred_name, due_at_ms, completed_at_ms)
+            VALUES ('Demo', 'wait-run', 'future-clock', 'future-clock-deferred', 999, NULL)
+            ON CONFLICT (flow_name, execution_id, clock_name) DO NOTHING
+          `
+          const rescheduled = yield* sql<{ readonly due_at_ms: number }>`
+            SELECT due_at_ms FROM flows_clock_deadlines
+            WHERE execution_id = 'wait-run' AND clock_name = 'future-clock'
+          `
+          return {
+            deferreds,
+            clocks,
+            rescheduled
+          }
+        })
+      )
+
+      expect(result.deferreds).toEqual([
+        { deferred_name: "kept-deferred" },
+        { deferred_name: "unrecorded-deferred" }
+      ])
+      expect(result.clocks).toEqual([
+        { clock_name: "kept-clock" },
+        { clock_name: "unrecorded-clock" }
+      ])
+      expect(result.rescheduled).toEqual([{ due_at_ms: 999 }])
     }))
 })
 
