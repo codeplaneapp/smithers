@@ -121,6 +121,12 @@ The usual causes, in the order they turn up:
 | An input glob that matches a file you did not expect | `inputs.declared`               |
 | A dependency that itself re-keyed                    | `inputs.dependencies`           |
 
+Execution keys hash declared environment values and resolved executable identities.
+Inherited `HOME`, `TMPDIR`, `TEMP`, and `TMP` do not affect the key; other inherited
+allowlisted names contribute presence only. Declare an environment value in `env`
+when outputs depend on it, and name tools with `bin`/`using` so their resolved
+binary bytes participate in the key.
+
 The implementation fingerprint is deliberate: editing the executor re-keys
 every target, so a rule fix is never served a result the old rule produced.
 
@@ -148,7 +154,7 @@ Bubblewrap cannot expose only the host loopback interface. Sharing it requires
 sharing the host network namespace, which also grants egress, so the executor
 fails closed instead. Declare `{ network: true }` only if full network access
 is acceptable. A target with `services` must make one of these network choices
-explicit; listing a service does not silently open the network.
+explicit, or declare `sandbox: "none"` to opt out of confinement; listing a service does not silently open the network.
 
 ## A target wrote outside its write set
 

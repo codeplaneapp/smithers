@@ -1231,7 +1231,7 @@ export const Package = S.Package({ targets: { dist } })
     }
   })
 
-  it("misses a build when the PATH-resolved executable changes", async () => {
+  it("misses a command build when the PATH-resolved executable changes", async () => {
     const root = await temporaryWorkspace()
     const tools = await temporaryWorkspace()
     const originalPath = process.env["PATH"] ?? ""
@@ -1239,12 +1239,12 @@ export const Package = S.Package({ targets: { dist } })
       await write(tools, `${name}/cache-compiler`, `#!/bin/sh\nmkdir -p dist\nprintf '${name}:%s' "$CI" > dist/a.txt\n`)
       await Fs.chmod(NodePath.join(tools, name, "cache-compiler"), 0o755)
     }
-    await write(root, "WORKSPACE.ts", workspaceModule(`  host: S.Host({ bins: ["cache-compiler"] }),`))
+    await write(root, "WORKSPACE.ts", workspaceModule())
     await write(
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const dist = S.Shell.Build({ bin: S.Host.bin("cache-compiler"), outDirs: ["dist"] })
+const dist = S.Shell.Build({ command: "cache-compiler", outDirs: ["dist"] })
 export const Package = S.Package({ targets: { dist } })
 `
     )

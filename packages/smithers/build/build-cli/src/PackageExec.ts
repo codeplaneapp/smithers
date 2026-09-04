@@ -2836,13 +2836,21 @@ const visit = async (
       .filter((name) => name in declaredEnvironment || !["HOME", "TMPDIR", "TEMP", "TMP"].includes(name))
       .map((name) => [name, name in declaredEnvironment ? spawnEnvironment[name] : true])
   ))
-  let executable: unknown = null
-  const command = argv?.[0]
-  if (command !== undefined && !command.includes(workspaceRootToken)) {
+  const executableCommands = argv === undefined ? [] : [argv[0]!]
+  // A command-form target spawns a shell, but its leading literal program
+  // can change independently of that shell. Dynamic commands still need
+  // declared bin/using tools to identify their executable dependencies.
+  if (argv?.[0] === "/bin/sh" && argv[1] === "-c") {
+    const program = argv[2]?.match(/^\s*(?:exec\s+)?([A-Za-z0-9_./+-]+)(?:\s|$)/)?.[1]
+    if (program !== undefined) executableCommands.push(program)
+  }
+  const executable: Array<unknown> = []
+  for (const command of executableCommands) {
+    if (command.includes(workspaceRootToken)) continue
     const path = NodePath.isAbsolute(command)
       ? command
       : PackageTree.findOnPath(command, spawnEnvironment)
-    if (path !== undefined && NodeFs.existsSync(path)) executable = await binaryIdentity(context, path)
+    if (path !== undefined && NodeFs.existsSync(path)) executable.push(await binaryIdentity(context, path))
   }
 
   const keyMaterial: Planner.KeyMaterial = {
