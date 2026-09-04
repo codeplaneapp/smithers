@@ -1541,6 +1541,22 @@ describe("the smthrs init scaffold, launched as written", processBudget, () => {
     }
   }
 
+  it("passes doctor immediately after init with a fresh Smithers home", () => {
+    const cwd = stageEmptyProject()
+    const home = mkdtempSync(join(tmpdir(), "smithers-doctor-home-"))
+    try {
+      const environment = { ...withoutSeats(), SMITHERS_HOME: home }
+      expect(smithers(cwd, ["init", "hello", "--json"], environment).status).toBe(0)
+      const result = smithers(cwd, ["doctor", "--json"], environment)
+      const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; level: string; detail: string }> }
+      expect(report.checks.filter((check) => check.level === "fail")).toEqual([])
+      expect(result.status).toBe(0)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
   it("writes a seat the host can resolve, chosen from the environment doctor reads", () => {
     const cwd = stageEmptyProject()
     try {
