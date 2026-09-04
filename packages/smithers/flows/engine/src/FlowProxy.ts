@@ -19,8 +19,6 @@ import * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup"
 import * as Rpc from "effect/unstable/rpc/Rpc"
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
 
-const OptionalExecutionId = Schema.optional(Schema.String)
-
 /**
  * Raised before proxy construction when two flow operations share one wire
  * identity.
@@ -101,7 +99,7 @@ export const assertNoCollisions = (
 
 type ExecutePayload<Payload extends Flow.AnyStructSchema> = Schema.Struct<{
   readonly payload: Payload
-  readonly executionId: typeof OptionalExecutionId
+  readonly executionId: typeof Schema.String
 }>
 
 const executePayload = <Payload extends Flow.AnyStructSchema>(
@@ -109,7 +107,7 @@ const executePayload = <Payload extends Flow.AnyStructSchema>(
 ): ExecutePayload<Payload> =>
   Schema.Struct({
     payload,
-    executionId: OptionalExecutionId
+    executionId: Schema.String
   })
 
 /**

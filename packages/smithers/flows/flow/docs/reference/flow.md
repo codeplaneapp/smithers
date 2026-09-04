@@ -394,7 +394,7 @@ Creates a token from an explicit flow and execution id, for a resolver outside t
 - **Signature:** `tokenFromPayload(self: DurableDeferred<Success, Error>, options: { readonly flow: W; readonly payload: Flow.PayloadSchema<W>["~type.make.in"] }): Effect.Effect<Token, never, Crypto.Crypto>`
 - **Since:** `0.1.0`
 
-Creates a token by deriving the execution id from the flow payload.
+Creates a token by deriving the execution id from the flow payload. The flow must declare `idempotencyKey`; without it, the default execution-id source dies. Use `tokenFromExecutionId` for an explicitly named execution.
 
 ### `DurableDeferred.done`
 

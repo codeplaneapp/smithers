@@ -11,11 +11,11 @@ those definitions to a running engine.
 Every flow gets three operations, and their names are derived from the flow tag
 in one place, `FlowProxy.operationAddresses`:
 
-| Operation | Name           | Request                                           |
-| --------- | -------------- | ------------------------------------------------- |
-| Execute   | `<tag>`        | The flow payload, plus an optional `executionId`. |
-| Discard   | `<tag>Discard` | The same, run without waiting for a result.       |
-| Resume    | `<tag>Resume`  | An `executionId` alone.                           |
+| Operation | Name           | Request                                          |
+| --------- | -------------- | ------------------------------------------------ |
+| Execute   | `<tag>`        | The flow payload, plus a required `executionId`. |
+| Discard   | `<tag>Discard` | The same, run without waiting for a result.      |
+| Resume    | `<tag>Resume`  | An `executionId` alone.                          |
 
 ## Start from a flow
 

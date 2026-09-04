@@ -73,7 +73,8 @@ that means the resolver and the engine share a store.
 
 `DurableDeferred.tokenFromPayload(gate, { flow, payload })` derives the same token
 from a payload, for a resolver that knows what was asked for but not which id it
-was admitted under.
+was admitted under. This requires the flow to declare `idempotencyKey`; use
+`tokenFromExecutionId` when the caller supplied an execution id explicitly.
 
 ## Name exactly one target
 

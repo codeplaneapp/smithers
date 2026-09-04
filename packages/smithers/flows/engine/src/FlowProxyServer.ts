@@ -121,7 +121,7 @@ export const layerHttpApi = <
             ({ payload: request }: {
               payload: {
                 payload: any
-                executionId?: string | undefined
+                executionId: string
               }
             }) =>
               flow.execute(request.payload, {
@@ -144,7 +144,7 @@ export const layerHttpApi = <
             ({ payload: request }: {
               payload: {
                 payload: any
-                executionId?: string | undefined
+                executionId: string
               }
             }) =>
               flow.execute(request.payload, {

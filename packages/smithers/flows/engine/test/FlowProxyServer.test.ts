@@ -174,7 +174,7 @@ describe("FlowProxyServer.layerRpcHandlers", () => {
         payload: { value: 41 },
         executionId: "ignore-this-id"
       })
-      const repeat = yield* client["Proxy/Echo"]({ payload: { value: 41 } })
+      const repeat = yield* client["Proxy/Echo"]({ payload: { value: 41 }, executionId: "ignore-repeat-id" })
 
       expect([first, repeat]).toEqual([42, 42])
       expect(calls()).toBe(1)
@@ -188,7 +188,7 @@ describe("FlowProxyServer.layerRpcHandlers", () => {
         {
           flowTag: "Proxy/Echo",
           operation: "execute",
-          clientValue: undefined,
+          clientValue: "ignore-repeat-id",
           payload: { value: 41 }
         }
       ])
@@ -366,23 +366,28 @@ describe("FlowProxyServer.layerRpcHandlers", () => {
     )
   })
 
-  effect("derives the execution identity from the flow's idempotency key when the request omits executionId", () => {
-    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
-    return Effect.gen(function*() {
-      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
-      const first = yield* client["Proxy/Echo"]({ payload: { value: 41 } })
-      const repeat = yield* client["Proxy/Echo"]({ payload: { value: 41 } })
-      expect([first, repeat]).toEqual([42, 42])
-      // Echo declares `idempotencyKey: String(value)`, so both requests
-      // derive one identity and the second replays instead of re-running.
-      expect(calls()).toBe(1)
-      // A different payload derives a different identity and runs.
-      expect(yield* client["Proxy/Echo"]({ payload: { value: 10 } })).toBe(11)
-      expect(calls()).toBe(2)
-    }).pipe(
-      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
-    )
-  })
+  effect(
+    "derives the execution identity from the flow's idempotency key when the server scope chooses derivation",
+    () => {
+      const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+      return Effect.gen(function*() {
+        const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+        const first = yield* client["Proxy/Echo"]({ payload: { value: 41 }, executionId: "ignore-repeat-id" })
+        const repeat = yield* client["Proxy/Echo"]({ payload: { value: 41 }, executionId: "ignore-repeat-id" })
+        expect([first, repeat]).toEqual([42, 42])
+        // Echo declares `idempotencyKey: String(value)`, so both requests
+        // derive one identity and the second replays instead of re-running.
+        expect(calls()).toBe(1)
+        // A different payload derives a different identity and runs.
+        expect(yield* client["Proxy/Echo"]({ payload: { value: 10 }, executionId: "ignore-other-id" })).toBe(11)
+        expect(calls()).toBe(2)
+      }).pipe(
+        Effect.provide(
+          FlowProxyServer.layerRpcHandlers(flows, { executionId: () => undefined }).pipe(Layer.provide(layer))
+        )
+      )
+    }
+  )
 
   effect("resume with an unknown or empty execution id is a no-op success", () => {
     const { calls, layer } = makeLayer((value) => Effect.succeed(value))
@@ -528,7 +533,7 @@ describe("FlowProxyServer.layerHttpApi", () => {
         payload: { payload: { value: 41 }, executionId: "ignore-http-id" }
       })
       const repeat = yield* api.flows["Proxy/Echo"]({
-        payload: { payload: { value: 41 } }
+        payload: { payload: { value: 41 }, executionId: "ignore-repeat-id" }
       })
       const scoped = yield* api.flows["Proxy/Echo"]({
         payload: { payload: { value: 10 }, executionId: "http-raw" }
@@ -548,7 +553,7 @@ describe("FlowProxyServer.layerHttpApi", () => {
         {
           flowTag: "Proxy/Echo",
           operation: "execute",
-          clientValue: undefined,
+          clientValue: "ignore-repeat-id",
           payload: { value: 41 }
         },
         {
@@ -865,4 +870,17 @@ describe("FlowProxyServer over a real HTTP listener", () => {
       expect(calls()).toBe(1)
     }).pipe(Effect.provide(served))
   })
+})
+
+it("requires an execution id in both execute and discard proxy payload schemas", () => {
+  const group = FlowProxy.toRpcGroup(flows)
+  for (const operation of ["Proxy/Echo", "Proxy/EchoDiscard"]) {
+    const rpc = group.requests.get(operation)!
+    const decode = Schema.decodeUnknownSync(rpc.payloadSchema)
+    expect(() => decode({ payload: { value: 1 } })).toThrow()
+    expect(decode({ payload: { value: 1 }, executionId: "explicit" })).toEqual({
+      payload: { value: 1 },
+      executionId: "explicit"
+    })
+  }
 })

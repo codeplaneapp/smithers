@@ -512,6 +512,10 @@ export const tokenFromExecutionId: {
  * Creates a durable deferred token by deriving the flow execution ID from
  * the supplied flow payload.
  *
+ * The flow must declare `idempotencyKey` so the payload deterministically
+ * identifies an execution. Without it, the default execution-id source dies.
+ * For an explicitly named execution, use {@link tokenFromExecutionId} instead.
+ *
  * @category token
  * @since 0.1.0
  */

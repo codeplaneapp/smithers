@@ -290,7 +290,7 @@ Derives an `RpcGroup` from a list of flows, giving every flow execute, discard, 
 - **Type:** ``type ConvertRpcs<Flows extends Flow.Any, Prefix extends string> = Flows extends Flow.Flow<infer _Name, infer _Payload, infer _Success, infer _Error, infer _Requires> ? Rpc.Rpc<`${Prefix}${_Name}`, ExecutePayload<_Payload>, _Success, _Error> | Rpc.Rpc<`${Prefix}${_Name}Discard`, ExecutePayload<_Payload>> | Rpc.Rpc<`${Prefix}${_Name}Resume`, typeof ResumePayload> : never``
 - **Since:** `0.1.0`
 
-The RPC definitions generated for one flow's execute, discard, and resume operations. `ExecutePayload<Payload>` and `ResumePayload` are internal: the first is `Schema.Struct({ payload, executionId: Schema.optional(Schema.String) })`, and the second is `Schema.Struct({ executionId: Schema.String })`.
+The RPC definitions generated for one flow's execute, discard, and resume operations. `ExecutePayload<Payload>` and `ResumePayload` are internal: the first is `Schema.Struct({ payload, executionId: Schema.String })`, and the second is `Schema.Struct({ executionId: Schema.String })`.
 
 ### `FlowProxy.toHttpApiGroup`
 
