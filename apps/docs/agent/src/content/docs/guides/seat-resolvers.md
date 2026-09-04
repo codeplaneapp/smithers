@@ -46,15 +46,17 @@ A resolved seat carries three things, and they arrive together:
 `SeatResolver.contextWindowTokensFor` is the catalog for known model ids, with
 a conservative floor of 128,000 for models it has not met:
 
-| Model id         | Tokens    |
-| ---------------- | --------- |
-| `claude-*-haiku` | 200,000   |
-| other `claude`   | 1,000,000 |
-| `gpt-5`          | 400,000   |
-| `gpt-4.1`        | 1,000,000 |
-| `gpt-4o`         | 128,000   |
-| `o1`, `o3`, `o4` | 200,000   |
-| anything else    | 128,000   |
+| Model id                                                                     | Tokens    |
+| ---------------------------------------------------------------------------- | --------- |
+| `claude-opus-5`, `claude-sonnet-5`                                           | 1,000,000 |
+| `claude-fable-5*`, `claude-mythos-5*` (numeric version suffixes)             | 1,000,000 |
+| `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-sonnet-4-6` | 1,000,000 |
+| Other `claude` ids, including Haiku and Bedrock/Vertex-prefixed ids          | 200,000   |
+| `gpt-5`                                                                      | 400,000   |
+| `gpt-4.1`                                                                    | 1,000,000 |
+| `gpt-4o`                                                                     | 128,000   |
+| `o1`, `o3`, `o4`                                                             | 200,000   |
+| anything else                                                                | 128,000   |
 
 ## Refuse honestly
 
@@ -90,3 +92,8 @@ A test installs a resolver that answers with a scripted model and never touches
 the network. That resolver is the whole difference between a deterministic run
 and a live one, which is the pattern the [Quickstart](/quickstart/) builds
 and [Test a model-backed step](/guides/testing/) generalizes.
+
+`SeatResolver.contextWindowResolver(service)` adapts a host resolver to the
+harness's `contextWindowTokensFor(seat)` callback. The session and action
+adapters use it when steering, so logical seats such as `reviewer` retain the
+host's context budget. A refused seat becomes a typed harness assembly failure.

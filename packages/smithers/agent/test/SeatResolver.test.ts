@@ -111,6 +111,19 @@ describe("SeatResolver.contextWindowTokensFor", () => {
 })
 
 describe("SeatResolver service", () => {
+  it("resolves logical context budgets and preserves a typed host refusal", async () => {
+    const unresolved = SeatResolver.contextWindowResolver(SeatResolver.makeNoop())
+    expect(await Effect.runPromise(Effect.flip(unresolved("reviewer")))).toMatchObject({
+      code: "assembly_failed",
+      cause: { seat: "reviewer" }
+    })
+    const resolve = SeatResolver.contextWindowResolver(SeatResolver.make({
+      resolve: (id) =>
+        Effect.succeed(Seat.make({ id, model: {} as never, route: {} as never, contextWindowTokens: 40_000 }))
+    }))
+    expect(await Effect.runPromise(resolve("reviewer"))).toBe(40_000)
+  })
+
   it("refuses every seat by default, because an unconfigured host holds no credential", async () => {
     const failure = await Effect.runPromise(
       Effect.flip(SeatResolver.makeNoop().resolve("anthropic:claude-sonnet-4-5"))

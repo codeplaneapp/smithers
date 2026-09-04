@@ -77,7 +77,7 @@ import { EventSink } from "./EventSink.ts"
 import * as FlowEngineLike from "./FlowEngineLike.ts"
 import * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
-import { SeatResolver } from "./SeatResolver.ts"
+import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
 
 /**
  * The host composition every model-backed action in a run shares.
@@ -660,13 +660,7 @@ export const make = <
             const resolved = seatId === options.seat ? seat : yield* seats.resolve(seatId)
             const events: Array<AgentEvent.AgentEvent> = []
             yield* agent.run({
-              contextWindowTokensFor: (id) =>
-                seats.resolve(id).pipe(
-                  Effect.map((resolved) => resolved.contextWindowTokens),
-                  Effect.mapError((cause) =>
-                    new HarnessError({ code: "assembly_failed", message: cause.message, cause })
-                  )
-                ),
+              contextWindowTokensFor: contextWindowResolver(seats),
               session,
               seat: resolved,
               prompt,

@@ -17,6 +17,7 @@
  * @since 1.0.0-rc.0
  */
 import * as ContextWindow from "@smthrs/harness/ContextWindow"
+import { HarnessError } from "@smthrs/harness/HarnessError"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -94,3 +95,15 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<SeatRes
  * @since 1.0.0-rc.0
  */
 export const contextWindowTokensFor = ContextWindow.contextWindowTokensFor
+
+/**
+ * Resolves steered context budgets through the host's seat vocabulary.
+ *
+ * @category resolvers
+ * @since 1.0.0-rc.0
+ */
+export const contextWindowResolver = (self: Service): (id: string) => Effect.Effect<number, HarnessError> => (id) =>
+  self.resolve(id).pipe(
+    Effect.map((seat) => seat.contextWindowTokens),
+    Effect.mapError((cause) => new HarnessError({ code: "assembly_failed", message: cause.message, cause }))
+  )

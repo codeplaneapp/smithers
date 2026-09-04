@@ -1753,3 +1753,8 @@ Builds the memory recorder backed by a harness engine, or provides durable
 opening-memory snapshots through the current harness engine. A recorder failure
 is fatal rather than continued past: continuing with a live value would
 recreate the replay divergence the adapter exists to prevent.
+
+`SeatResolver.contextWindowResolver(service)` adapts a host resolver to the
+harness's `contextWindowTokensFor(seat)` callback. The session and action
+adapters use it when steering, so logical seats such as `reviewer` retain the
+host's context budget. A refused seat becomes a typed harness assembly failure.

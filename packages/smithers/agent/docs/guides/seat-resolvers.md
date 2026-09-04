@@ -91,3 +91,8 @@ A test installs a resolver that answers with a scripted model and never touches
 the network. That resolver is the whole difference between a deterministic run
 and a live one, which is the pattern the [Quickstart](../quickstart.md) builds
 and [Test a model-backed step](./testing.md) generalizes.
+
+`SeatResolver.contextWindowResolver(service)` adapts a host resolver to the
+harness's `contextWindowTokensFor(seat)` callback. The session and action
+adapters use it when steering, so logical seats such as `reviewer` retain the
+host's context budget. A refused seat becomes a typed harness assembly failure.

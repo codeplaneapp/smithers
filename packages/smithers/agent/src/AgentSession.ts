@@ -92,7 +92,7 @@ import { Agent } from "./Agent.ts"
 import type * as Budget from "./Budget.ts"
 import type * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
-import { SeatResolver } from "./SeatResolver.ts"
+import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
 import * as StandardFlows from "./StandardFlows.ts"
 
 /**
@@ -1461,13 +1461,7 @@ export const make = (
           Effect.forever(Effect.andThen(Effect.sleep(Duration.millis(250)), flush))
         )
         yield* agent.run({
-          contextWindowTokensFor: (id) =>
-            seats.resolve(id).pipe(
-              Effect.map((resolved) => resolved.contextWindowTokens),
-              Effect.mapError((cause) =>
-                new HarnessError.HarnessError({ code: "assembly_failed", message: cause.message, cause })
-              )
-            ),
+          contextWindowTokensFor: contextWindowResolver(seats),
           session: payload.runId,
           seat,
           modelParams: ModelRequest.GenerationParams.make({
