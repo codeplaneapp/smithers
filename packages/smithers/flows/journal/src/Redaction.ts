@@ -85,12 +85,18 @@ export const defaultRules: ReadonlyArray<Rule> = [
   },
   {
     id: "jwt",
-    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
-    replace: "[REDACTED_TOKEN]"
+    // Check the three segments once per token before looking for a header.
+    // Starting at every `-eyJ` would rescan a malformed token's entire tail.
+    // Preserve any prefix so a JWT following a hyphen still gets redacted.
+    pattern:
+      /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-])([A-Za-z0-9_-]*?)\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+    replace: "$1[REDACTED_TOKEN]"
   },
   {
     id: "private-key-block",
-    pattern: /-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?-----END[^-]*-----/g
+    // Stop an unterminated block at the next header so repeated headers cannot
+    // each rescan the remaining input. A valid PEM body contains no headers.
+    pattern: /-----BEGIN[^-]*PRIVATE KEY-----(?:(?!-----BEGIN)[\s\S])*?-----END[^-]*-----/g
   },
   {
     id: "api-key",
@@ -131,8 +137,10 @@ export const defaultRules: ReadonlyArray<Rule> = [
     id: "assignment",
     // The output drops quotes consistently. Excluding that exact output keeps
     // repeated journal and export passes at a fixed point.
+    // Start once per identifier, including leading underscores, so a name
+    // containing many underscores cannot force repeated scans of its suffix.
     pattern:
-      /(?<![A-Za-z0-9-])([A-Za-z0-9_-]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?)(\s*[:=]\s*)(?!\[REDACTED\])("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(?!["'])\S+)/gi,
+      /(?<![A-Za-z0-9_-])([A-Za-z0-9_-]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?)(\s*[:=]\s*)(?!\[REDACTED\])("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(?!["'])\S+)/gi,
     replace: "$1$2[REDACTED]"
   },
   {

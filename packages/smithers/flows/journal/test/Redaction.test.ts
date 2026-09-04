@@ -622,6 +622,41 @@ describe("Redaction", () => {
     expect(redacted).toContain(`api_key=${Redaction.placeholder}`)
   })
 
+  it("scans repeated private-key headers in linear time", () => {
+    // An unterminated header must stop scanning at the next header. Otherwise
+    // each one rescans the tail and a truncated key dump stalls journal writes.
+    const line = "-----BEGIN OPENSSH PRIVATE KEY-----\n".repeat(48_000)
+    expect(line.length).toBeGreaterThan(1_000_000)
+    const redact = Redaction.make()
+    const started = Date.now()
+    expect(String(redact(line))).toBe(line)
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  it("redacts each key in a file holding several", () => {
+    const file = [
+      "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----",
+      "-----BEGIN OPENSSH PRIVATE KEY-----\nBBBB\n-----END OPENSSH PRIVATE KEY-----"
+    ].join("\n")
+    expect(Redaction.redact(file)).toBe(`${Redaction.placeholder}\n${Redaction.placeholder}`)
+  })
+
+  it.each([
+    ["assignment separators", "_".repeat(48_000)],
+    ["JWT prefixes without dots", "eyJabcdefghijk-".repeat(8_000)],
+    ["JWT prefixes without a signature", "eyJabcdefghijk-".repeat(8_000) + ".payload"]
+  ])("scans repeated %s without rescanning the tail", (_name, line) => {
+    const redact = Redaction.make()
+    const started = Date.now()
+    expect(redact(line)).toBe(line)
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  it.each(["", "prefix-", "eyJshort.", "a.b."])("redacts a JWT after %j", (prefix) => {
+    expect(Redaction.redact(`${prefix}eyJabcdefghijk.payload.signature`))
+      .toBe(`${prefix}[REDACTED_TOKEN]`)
+  })
+
   it("names a binary view that refuses to describe itself", () => {
     // The description reads two properties off the view, and either can be an
     // own accessor that throws or a prototype the caller removed. Neither is a
