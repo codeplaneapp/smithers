@@ -66,6 +66,35 @@ runtime is still a noop. The
 explains the status of each; in particular, the published OTLP layer is
 application-wired rather than a shipped default.
 
+## Cutting a release
+
+Start from a clean `main` checkout and run
+`node scripts/cut-release.mjs <version> --commit`, without a `v` prefix.
+The cut refuses detached HEADs, existing release tags, and branches other than
+`main` unless `--allow-branch` explicitly permits a named branch.
+
+The sequence bumps manifests and internal ranges, generates the changelog,
+refreshes `pnpm-lock.yaml` with `pnpm install --lockfile-only --ignore-scripts`,
+and refreshes a tracked `bun.lock` with
+`bun install --lockfile-only --ignore-scripts`. It then checks the version and
+runs `node scripts/generate-changelog.mjs --check --version <version>`.
+`--commit` records the manifests and lockfiles, checks the changelog again on
+the exact release commit, and creates an annotated `v<version>` tag locally.
+
+The generated changelog must be regenerated for the exact release commit;
+do not refresh it on a preparation branch and assume its commit count will
+still match after integration. A stale block fails the cut before tagging.
+Without `--commit`, the script prints the remaining commit, check, and tag
+commands. Publishing requires a separate operator push.
+
+The tag workflow uses `secrets.NPM_TOKEN` for `NODE_AUTH_TOKEN`, including the
+first publication of names that cannot yet configure trusted publishing.
+It retains provenance, publishes detached tag checkouts with `--no-git-checks`,
+and waits two seconds between packages. Registry 404 responses allow a first
+publication; 429 and 5xx responses retry, while other precheck failures stop.
+Publication and transient prechecks get an initial attempt followed by at most
+three retries after 10, 30, and 60 seconds.
+
 ## Known test pins
 
 A **pin** is a test the default gate does not run to a pass. Three forms count:

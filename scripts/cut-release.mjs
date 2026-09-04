@@ -51,7 +51,7 @@ export const releaseTag = (version) => `v${version}`
  *
  * The first is spelled for jj because this tree is jj-colocated and that is
  * what a maintainer types; `git commit -am` is what `--commit` runs, and both
- * record the same commit. The second is the irreversible one: pushing the tag
+ * record the same commit. The last is the irreversible one: pushing the tag
  * is what triggers `.github/workflows/release.yml`.
  *
  * @since 1.0.0
@@ -60,7 +60,9 @@ export const releaseTag = (version) => `v${version}`
 export const nextCommands = (version) => [
   `jj commit -m ${JSON.stringify(releaseMessage(version))}`,
   `node scripts/generate-changelog.mjs --check --version ${version}`,
-  `git tag -a ${releaseTag(version)} -m ${JSON.stringify(releaseMessage(version))} && git push origin main ${releaseTag(version)}`
+  `git tag -a ${releaseTag(version)} -m ${JSON.stringify(releaseMessage(version))} && git push origin main ${
+    releaseTag(version)
+  }`
 ]
 
 /**
@@ -110,8 +112,7 @@ export const steps = (version, options = { bunLock: true }) => [
   }
 ]
 
-const run = (root, command, args) =>
-  execFileSync(command, args, { cwd: root, stdio: ["ignore", "inherit", "inherit"] })
+const run = (root, command, args) => execFileSync(command, args, { cwd: root, stdio: ["ignore", "inherit", "inherit"] })
 
 /**
  * The tracked paths git reports as modified, staged, or deleted.
@@ -146,7 +147,9 @@ export const parseArguments = (argv) => {
       continue
     }
     if (argument.startsWith("-")) throw new Error(`unknown option ${argument}`)
-    if (options.version !== undefined) throw new Error(`cut one version at a time, not ${options.version} and ${argument}`)
+    if (options.version !== undefined) {
+      throw new Error(`cut one version at a time, not ${options.version} and ${argument}`)
+    }
     options.version = argument
   }
   if (options.version === undefined) {
@@ -201,12 +204,13 @@ export const main = (argv, root = repoRoot) => {
     const dirty = dirtyPaths(root)
     if (dirty.length > 0) {
       throw new Error(
-        `--commit stages every tracked modification and the working copy carries ${dirty.length}: ${
-          dirty.join(", ")
-        }`
+        `--commit stages every tracked modification and the working copy carries ${dirty.length}: ${dirty.join(", ")}`
       )
     }
   }
+  process.stdout.write(
+    "\nThe generated changelog must be regenerated for the exact release commit and checked before tagging.\n"
+  )
   for (const step of steps(options.version, { bunLock: trackedPath(root, "bun.lock") })) {
     process.stdout.write(`\n=== ${step.name}\n`)
     if (step.command !== "bun") {

@@ -30,7 +30,11 @@ const copiedScripts = [
 ]
 
 const git = (root, args, env) =>
-  execFileSync("git", args, { cwd: root, encoding: "utf8", env: env === undefined ? process.env : { ...process.env, ...env } })
+  execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    env: env === undefined ? process.env : { ...process.env, ...env }
+  })
     .trim()
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`
@@ -151,6 +155,8 @@ test("a cut bumps every manifest, retargets internal ranges, and writes the sect
   withFixture((root) => {
     const output = cut(root, ["0.2.0"])
 
+    assert.match(output, /changelog must be regenerated for the exact release commit/)
+
     assert.equal(manifest(root, "packages/smithers/package.json").version, "0.2.0")
     assert.equal(manifest(root, "packages/smithers/package.json").dependencies["@smthrs/kernel"], "0.2.0")
     assert.equal(manifest(root, "packages/kernel/package.json").version, "0.2.0")
@@ -224,7 +230,11 @@ test("--commit refuses a dirty working copy rather than sweeping it into the rel
     writeFileSync(join(root, "a.txt"), "someone else's edit")
 
     assert.throws(() => cut(root, ["0.2.0", "--commit"]), /--commit stages every tracked modification/)
-    assert.equal(manifest(root, "packages/kernel/package.json").version, "0.1.0", "the refusal is before the first write")
+    assert.equal(
+      manifest(root, "packages/kernel/package.json").version,
+      "0.1.0",
+      "the refusal is before the first write"
+    )
   })
 })
 
@@ -265,7 +275,9 @@ test("--commit checks the generated block on the exact release commit before tag
       hook,
       [
         "#!/bin/sh",
-        `${JSON.stringify(process.execPath)} -e 'const fs=require(\"node:fs\"); const path=\"CHANGELOG.md\"; const text=fs.readFileSync(path,\"utf8\"); fs.writeFileSync(path,text.replace(\"2 commits since\",\"999 commits since\"))'`,
+        `${
+          JSON.stringify(process.execPath)
+        } -e 'const fs=require(\"node:fs\"); const path=\"CHANGELOG.md\"; const text=fs.readFileSync(path,\"utf8\"); fs.writeFileSync(path,text.replace(\"2 commits since\",\"999 commits since\"))'`,
         ""
       ].join("\n")
     )
