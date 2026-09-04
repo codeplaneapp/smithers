@@ -45,7 +45,7 @@ const cursorHonouringServer = (total: number, pageSize: number) => {
       )
       const last = entries.at(-1)
       return {
-        cursors: last === undefined ? request.cursors : [{ afterSeq: last.seq, runId: target }],
+        cursors: last === undefined ? request.cursors : [{ generation: 0, afterSeq: last.seq, runId: target }],
         done: after + entries.length + 1 >= total,
         entries
       }
@@ -92,8 +92,8 @@ describe("SyncClient bootstrap paging", () => {
       // Three pages, and each one asks from where the last one ended.
       expect(requested).toHaveLength(3)
       expect(requested[0]).toEqual([])
-      expect(requested[1]).toEqual([{ runId: target, afterSeq: 255 }])
-      expect(requested[2]).toEqual([{ runId: target, afterSeq: 511 }])
+      expect(requested[1]).toEqual([{ generation: 0, runId: target, afterSeq: 255 }])
+      expect(requested[2]).toEqual([{ generation: 0, runId: target, afterSeq: 511 }])
     }))
 
   it.effect("asks for the configured bootstrap page size", () =>
@@ -147,7 +147,10 @@ describe("SyncClient bootstrap page validation", () => {
       })
       const failure = yield* Effect.flip(
         Stream.runCollect(
-          Stream.take(sync.subscribe({ cursors: [{ runId: target, afterSeq: 5 as JournalEvent.Seq }], scope }), 1)
+          Stream.take(
+            sync.subscribe({ cursors: [{ generation: 0, runId: target, afterSeq: 5 as JournalEvent.Seq }], scope }),
+            1
+          )
         )
       )
 
@@ -160,8 +163,8 @@ describe("SyncClient bootstrap page validation", () => {
       const sync = yield* SyncClient.make({
         client: fixedPage({
           cursors: [
-            { runId: target, afterSeq: 0 as JournalEvent.Seq },
-            { runId: target, afterSeq: 1 as JournalEvent.Seq }
+            { generation: 0, runId: target, afterSeq: 0 as JournalEvent.Seq },
+            { generation: 0, runId: target, afterSeq: 1 as JournalEvent.Seq }
           ],
           done: true,
           entries: [entry(target, 0)]
@@ -278,7 +281,7 @@ describe("SyncClient consumer acknowledgement", () => {
       expect(applied).toEqual([0])
       // Sequence 1 was never applied, so it is never acknowledged either: the
       // next subscription from these cursors delivers it again.
-      expect(yield* sync.cursors).toEqual([{ runId: target, afterSeq: 0 }])
+      expect(yield* sync.cursors).toEqual([{ generation: 0, runId: target, afterSeq: 0 }])
     }))
 
   it.effect("advances the cursor through an apply step that succeeds", () =>
@@ -301,7 +304,7 @@ describe("SyncClient consumer acknowledgement", () => {
       )
 
       expect(applied).toEqual([0, 1])
-      expect(yield* sync.cursors).toEqual([{ runId: target, afterSeq: 1 }])
+      expect(yield* sync.cursors).toEqual([{ generation: 0, runId: target, afterSeq: 1 }])
     }))
 })
 

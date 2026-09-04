@@ -471,8 +471,19 @@ const makeWith = (
         return current.generation
       })
 
+    const requireProtocolVersion = (version: number | undefined) =>
+      version === SyncProtocol.protocolVersion
+        ? Effect.void
+        : Effect.fail(
+          new SyncError({
+            code: "protocol_violation",
+            message: `Expected sync protocol version ${SyncProtocol.protocolVersion}; received ${version}`
+          })
+        )
+
     const read = (request: SyncProtocol.ReadRequest): Effect.Effect<SyncProtocol.ReadResponse, SyncError> =>
       Effect.gen(function*() {
+        yield* requireProtocolVersion(request.protocolVersion)
         yield* requireUniqueCursors(request.cursors)
         // The schema bounds `limit` at the wire; this bounds it again for an
         // in-process caller that constructed the request directly, so no path
@@ -565,7 +576,7 @@ const makeWith = (
           cursors: Array.from(cursors, ([runId, afterSeq]) => ({
             runId,
             afterSeq,
-            ...(generations.get(runId) === 0 ? {} : { generation: generations.get(runId)! })
+            generation: generations.get(runId)!
           })),
           done
         }
@@ -592,7 +603,7 @@ const makeWith = (
                 {
                   _tag: "Entries",
                   runId,
-                  ...(generation === 0 ? {} : { generation }),
+                  generation,
                   fromSeq: (previous + 1) as JournalEvent.Seq,
                   toSeq: entry.seq,
                   entries: [entry]
@@ -752,7 +763,7 @@ const makeWith = (
               frames.push({
                 _tag: "Entries",
                 runId,
-                ...(generation === 0 ? {} : { generation }),
+                generation,
                 fromSeq: (previous + 1) as JournalEvent.Seq,
                 toSeq: accepted.seq,
                 entries: [accepted]
@@ -845,6 +856,7 @@ const makeWith = (
     const subscribe = (request: SyncProtocol.SubscribeRequest): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.unwrap(
         Effect.gen(function*() {
+          yield* requireProtocolVersion(request.protocolVersion)
           yield* requireUniqueCursors(request.cursors)
           // The schema bounds `credit` at the wire; this bounds it again for
           // an in-process caller that constructed the request directly.

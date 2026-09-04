@@ -85,7 +85,7 @@ import * as Effect from "effect/Effect"
 
 const page = Effect.gen(function*() {
   const server = yield* SyncServer.SyncServer
-  return yield* server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 100 })
+  return yield* server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 100 })
 }).pipe(Effect.provide(SyncPrincipal.layerWorkspace("host")))
 ```
 

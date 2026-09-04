@@ -11,6 +11,15 @@ import * as Schema from "effect/Schema"
 import { ShareCapability } from "./BranchProtocol.ts"
 
 /**
+ * Wire revision requiring explicit generations in server positions.
+ * Missing request versions decode so the server can return a typed refusal.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const protocolVersion = 1
+
+/**
  * Selects every run in the workspace.
  *
  * @category models
@@ -53,8 +62,9 @@ export type Scope = typeof Scope.Type
  * moves. Stating the rule here keeps the schema and the client from meaning
  * two different things by the same field.
  *
- * `generation` identifies the run's current history after rewinds. Its absence
- * means generation zero; persist a returned generation with its sequence.
+ * `generation` identifies the run's current history after rewinds. Requests may
+ * omit it for persisted generation-zero cursors. Server responses must include
+ * it, and clients refuse its absence; persist a returned generation with its sequence.
  * Sequence ordering is meaningful only within one generation.
  *
  * @category models
@@ -191,6 +201,7 @@ export const maxSubscribeCredit = 4096
  * @since 0.1.0
  */
 export const ReadRequest = Schema.Struct({
+  protocolVersion: Schema.optional(Schema.Int),
   scope: Scope,
   cursors: WorkspaceCursor,
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(maxReadLimit)),
@@ -244,6 +255,7 @@ export type ReadResponse = typeof ReadResponse.Type
  * @since 0.1.0
  */
 export const SubscribeRequest = Schema.Struct({
+  protocolVersion: Schema.optional(Schema.Int),
   scope: Scope,
   cursors: WorkspaceCursor,
   credit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(maxSubscribeCredit)),
@@ -263,8 +275,9 @@ export type SubscribeRequest = typeof SubscribeRequest.Type
  *
  * `fromSeq` and `toSeq` describe the interval the server covered, not the
  * sequences actually carried: dropped admissions leave legitimate holes.
- * `generation` identifies the history covering the interval; omission means
- * zero. Clients must compare it before deduplicating by sequence.
+ * `generation` identifies the history covering the interval and is mandatory
+ * on server responses, including zero. Clients refuse its omission before
+ * deduplicating by sequence. The optional schema permits a typed refusal.
  *
  * @category models
  * @since 0.1.0

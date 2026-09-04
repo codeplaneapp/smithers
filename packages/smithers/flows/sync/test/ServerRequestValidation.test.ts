@@ -34,13 +34,15 @@ describe("SyncServer request validation", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
           const cursors = [
-            { runId, afterSeq: seq(0) },
-            { runId, afterSeq: seq(2) }
+            { generation: 0, runId, afterSeq: seq(0) },
+            { generation: 0, runId, afterSeq: seq(2) }
           ]
           return [
-            yield* Effect.flip(server.read({ scope: { _tag: "Run", runId }, cursors, limit: 10 })),
+            yield* Effect.flip(server.read({ protocolVersion: 1, scope: { _tag: "Run", runId }, cursors, limit: 10 })),
             yield* Effect.flip(
-              Stream.runCollect(server.subscribe({ scope: { _tag: "Run", runId }, cursors, credit: 4 }))
+              Stream.runCollect(
+                server.subscribe({ protocolVersion: 1, scope: { _tag: "Run", runId }, cursors, credit: 4 })
+              )
             )
           ] as const
         }).pipe(
@@ -73,6 +75,7 @@ describe("SyncServer request validation", () => {
       expect(
         Result.isFailure(
           Schema.decodeUnknownResult(SyncProtocol.ReadRequest)({
+            protocolVersion: 1,
             scope: { _tag: "Run", runId },
             cursors: [],
             limit: oversized
@@ -86,7 +89,12 @@ describe("SyncServer request validation", () => {
           const server = yield* SyncServer.makeLive
           // Constructed directly, bypassing the schema, the way an in-process
           // caller can. The journal must still never see an unbounded page.
-          return yield* server.read({ scope: { _tag: "Run", runId }, cursors: [], limit: oversized })
+          return yield* server.read({
+            protocolVersion: 1,
+            scope: { _tag: "Run", runId },
+            cursors: [],
+            limit: oversized
+          })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -107,6 +115,7 @@ describe("SyncServer request validation", () => {
       expect(page.entries).toHaveLength(1)
       expect(
         Schema.decodeUnknownSync(SyncProtocol.ReadRequest)({
+          protocolVersion: 1,
           scope: { _tag: "Run", runId },
           cursors: [],
           limit: SyncProtocol.maxReadLimit
@@ -126,7 +135,7 @@ describe("SyncServer request validation", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
           const refuse = (limit: number) =>
-            Effect.flip(server.read({ scope: { _tag: "Run", runId }, cursors: [], limit }))
+            Effect.flip(server.read({ protocolVersion: 1, scope: { _tag: "Run", runId }, cursors: [], limit }))
           return [
             yield* refuse(Number.NaN),
             yield* refuse(0),

@@ -158,7 +158,7 @@ describe("branch convergence", () => {
         "sent while disconnected"
       ])
       expect(resumedSeqs).toHaveLength(1)
-      expect(cursors).toEqual([{ runId, afterSeq: afterReconnect.seq }])
+      expect(cursors).toEqual([{ generation: 0, runId, afterSeq: afterReconnect.seq }])
     }))
 
   it.effect("holds a duplicate submission to one applied command across both clients", () =>

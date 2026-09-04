@@ -227,8 +227,12 @@ assertion in the other suites, so these are the tests that see it.
 
 ### Rewind generations
 
-`RunCursor.generation` and `EntriesFrame.generation` are optional nonnegative
-integers; absence means the initial generation, zero. Persist the returned
+`ReadRequest` and `SubscribeRequest` carry `protocolVersion: 1`. The server
+refuses a missing or different version with typed `protocol_violation`.
+Server cursors and entry frames always carry a nonnegative `generation`,
+including zero; a client refuses missing response generations with the same
+error before delivery. Persisted request cursors may omit generation for zero.
+Persist the returned
 generation alongside `afterSeq`. A mismatch raises `lineage_changed` before
 sequence deduplication. Server errors carry
 `rewind: { runId, generation, afterSeq }`, where `afterSeq` is the archive

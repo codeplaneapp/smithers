@@ -62,11 +62,7 @@ const writeEntry = (runId: JournalEvent.RunId, text: string) =>
       })
     ))
 
-const workspaceRead = {
-  scope: { _tag: "Workspace" },
-  cursors: [],
-  limit: 10
-} as const
+const workspaceRead = { protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 10 } as const
 
 const program = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
@@ -84,7 +80,9 @@ describe("SyncAuth", () => {
           const client = yield* RpcTest.makeClient(SyncRpcs)
           const read = yield* Effect.flip(client["Sync.Read"](workspaceRead))
           const subscribed = yield* Effect.flip(
-            Stream.runCollect(client["Sync.Subscribe"]({ scope: { _tag: "Workspace" }, cursors: [], credit: 1 }))
+            Stream.runCollect(
+              client["Sync.Subscribe"]({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 1 })
+            )
           )
           return [read, subscribed] as const
         })
@@ -160,13 +158,20 @@ describe("SyncAuth", () => {
           })
           const client = yield* RpcTest.makeClient(SyncRpcs)
           const branch = yield* client["Sync.Read"]({
+            protocolVersion: 1,
             scope: { _tag: "Run", runId: branchRun },
             cursors: [],
             limit: 10,
             capability
           })
           const refused = yield* Effect.flip(
-            client["Sync.Read"]({ scope: { _tag: "Run", runId: engineRun }, cursors: [], limit: 10, capability })
+            client["Sync.Read"]({
+              protocolVersion: 1,
+              scope: { _tag: "Run", runId: engineRun },
+              cursors: [],
+              limit: 10,
+              capability
+            })
           )
           return [
             branch.entries.map((entry) => (entry.payload as { readonly text: string }).text),

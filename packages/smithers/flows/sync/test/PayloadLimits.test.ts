@@ -105,7 +105,7 @@ describe("sync payload and frame limits", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
           return yield* Effect.exit(
-            server.read({ scope: { _tag: "Run", runId }, cursors: [], limit: 1 })
+            server.read({ protocolVersion: 1, scope: { _tag: "Run", runId }, cursors: [], limit: 1 })
           )
         }).pipe(
           Effect.provide(
@@ -138,7 +138,12 @@ describe("sync payload and frame limits", () => {
       const read = (cursors: SyncProtocol.WorkspaceCursor) =>
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          return yield* server.read({ scope: { _tag: "Run", runId }, cursors, limit: entries.length })
+          return yield* server.read({
+            protocolVersion: 1,
+            scope: { _tag: "Run", runId },
+            cursors,
+            limit: entries.length
+          })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -159,7 +164,7 @@ describe("sync payload and frame limits", () => {
       const second = yield* read(first.cursors)
 
       expect(first.entries.map((value) => value.seq)).toEqual([0, 1])
-      expect(first.cursors).toEqual([{ runId, afterSeq: 1 }])
+      expect(first.cursors).toEqual([{ generation: 0, runId, afterSeq: 1 }])
       expect(first.done).toBe(false)
       expect(second.entries.map((value) => value.seq)).toEqual([2, 3])
       expect(second.done).toBe(true)
@@ -171,7 +176,7 @@ describe("sync payload and frame limits", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.SyncServer
           return yield* Effect.exit(
-            server.read({ scope: { _tag: "Run", runId }, cursors: [], limit: 1 })
+            server.read({ protocolVersion: 1, scope: { _tag: "Run", runId }, cursors: [], limit: 1 })
           )
         }).pipe(
           Effect.provide(
@@ -203,7 +208,7 @@ describe("sync payload and frame limits", () => {
           const server = yield* SyncServer.makeLive
           return yield* Effect.exit(
             Stream.runCollect(
-              server.subscribe({ scope: { _tag: "Run", runId }, cursors: [], credit: 1 })
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Run", runId }, cursors: [], credit: 1 })
             )
           )
         }).pipe(
@@ -228,6 +233,7 @@ describe("sync payload and frame limits", () => {
           "Sync.Read": () => Effect.succeed({ entries: [], cursors: [], done: true }),
           "Sync.Subscribe": () =>
             Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               _tag: "Entries",
               runId,
               fromSeq: 0 as JournalEvent.Seq,
@@ -257,7 +263,7 @@ describe("sync payload and frame limits", () => {
           "Sync.Read": () =>
             Effect.succeed({
               entries: [entry(0, "x".repeat(512))],
-              cursors: [{ runId, afterSeq: 0 as JournalEvent.Seq }],
+              cursors: [{ generation: 0, runId, afterSeq: 0 as JournalEvent.Seq }],
               done: true
             }),
           "Sync.Subscribe": () => Stream.empty

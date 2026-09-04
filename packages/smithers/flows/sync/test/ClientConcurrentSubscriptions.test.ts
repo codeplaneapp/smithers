@@ -39,6 +39,7 @@ describe("one SyncClient with concurrent subscriptions", () => {
             while (frames.length < request.credit && produced < total) {
               const sequence = seq(produced)
               frames.push({
+                generation: 0,
                 _tag: "Entries",
                 runId,
                 fromSeq: sequence,
@@ -78,6 +79,7 @@ describe("one SyncClient with concurrent subscriptions", () => {
             while (frames.length < request.credit && produced < total) {
               const sequence = seq(produced)
               frames.push({
+                generation: 0,
                 _tag: "Entries",
                 runId,
                 fromSeq: sequence,
@@ -144,13 +146,13 @@ describe("one SyncClient with concurrent subscriptions", () => {
 
             yield* Deferred.succeed(secondRead, {
               entries: [entry(2)],
-              cursors: [{ runId, afterSeq: seq(2) }],
+              cursors: [{ generation: 0, runId, afterSeq: seq(2) }],
               done: true
             })
             yield* Fiber.join(higher)
             yield* Deferred.succeed(firstRead, {
               entries: [entry(1)],
-              cursors: [{ runId, afterSeq: seq(1) }],
+              cursors: [{ generation: 0, runId, afterSeq: seq(1) }],
               done: true
             })
             yield* Fiber.join(lower)
@@ -168,8 +170,8 @@ describe("one SyncClient with concurrent subscriptions", () => {
         )
       )
 
-      expect(result.cursorAfterRace).toEqual([{ runId, afterSeq: 2 }])
-      expect(observedRequests[2]).toEqual([{ runId, afterSeq: 2 }])
+      expect(result.cursorAfterRace).toEqual([{ generation: 0, runId, afterSeq: 2 }])
+      expect(observedRequests[2]).toEqual([{ generation: 0, runId, afterSeq: 2 }])
       expect(result.redeliveryExit).toBeUndefined()
     }))
 })

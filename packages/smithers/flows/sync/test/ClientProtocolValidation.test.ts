@@ -31,24 +31,24 @@ interface Case {
 const cases: ReadonlyArray<Case> = [
   {
     name: "rejects an entry for a different run",
-    frame: { _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(0), entries: [entry(0, foreignRunId)] }
+    frame: { generation: 0, _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(0), entries: [entry(0, foreignRunId)] }
   },
   {
     name: "rejects descending entry sequences",
-    frame: { _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(1), entries: [entry(1), entry(0)] }
+    frame: { generation: 0, _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(1), entries: [entry(1), entry(0)] }
   },
   {
     name: "rejects duplicate entry sequences",
-    frame: { _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(0), entries: [entry(0), entry(0)] }
+    frame: { generation: 0, _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(0), entries: [entry(0), entry(0)] }
   },
   {
     name: "rejects entries outside the declared covered interval",
-    frame: { _tag: "Entries", runId, fromSeq: seq(1), toSeq: seq(2), entries: [entry(0), entry(1)] },
-    cursors: [{ runId, afterSeq: seq(0) }]
+    frame: { generation: 0, _tag: "Entries", runId, fromSeq: seq(1), toSeq: seq(2), entries: [entry(0), entry(1)] },
+    cursors: [{ generation: 0, runId, afterSeq: seq(0) }]
   },
   {
     name: "rejects a toSeq below an included entry",
-    frame: { _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(0), entries: [entry(1)] }
+    frame: { generation: 0, _tag: "Entries", runId, fromSeq: seq(0), toSeq: seq(0), entries: [entry(1)] }
   }
 ]
 

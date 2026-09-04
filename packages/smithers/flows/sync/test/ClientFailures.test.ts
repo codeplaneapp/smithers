@@ -58,6 +58,7 @@ describe("SyncClient failure paths", () => {
       const client = stubClient({
         subscribe: () =>
           Stream.succeed<SyncProtocol.Frame>({
+            generation: 0,
             _tag: "Entries",
             runId: id,
             fromSeq: seq(5),
@@ -83,6 +84,7 @@ describe("SyncClient failure paths", () => {
       const client = stubClient({
         subscribe: () =>
           Stream.succeed<SyncProtocol.Frame>({
+            generation: 0,
             _tag: "Entries",
             runId: id,
             // the server covered 0..7 but only entry 7 survived admission
@@ -107,6 +109,7 @@ describe("SyncClient failure paths", () => {
           calls++
           return calls === 1
             ? Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               _tag: "Entries",
               runId: id,
               fromSeq: seq(0),
@@ -114,6 +117,7 @@ describe("SyncClient failure paths", () => {
               entries: [entry("failures", 0), entry("failures", 1)]
             })
             : Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               // a redelivery of an already-consumed interval
               _tag: "Entries",
               runId: id,
@@ -130,7 +134,7 @@ describe("SyncClient failure paths", () => {
       const cursors = yield* (client.cursors)
 
       expect(Array.from(entries).map((value) => value.seq)).toEqual([0, 1])
-      expect(cursors).toEqual([{ runId: id, afterSeq: 1 }])
+      expect(cursors).toEqual([{ generation: 0, runId: id, afterSeq: 1 }])
     }))
 
   it.effect("emits only the entries after the supplied cursor", () =>
@@ -138,6 +142,7 @@ describe("SyncClient failure paths", () => {
       const client = stubClient({
         subscribe: () =>
           Stream.succeed<SyncProtocol.Frame>({
+            generation: 0,
             _tag: "Entries",
             runId: id,
             fromSeq: seq(0),
@@ -147,7 +152,7 @@ describe("SyncClient failure paths", () => {
       })
 
       const entries = yield* (
-        client.subscribe({ scope, cursors: [{ runId: id, afterSeq: seq(2) }] }).pipe(
+        client.subscribe({ scope, cursors: [{ generation: 0, runId: id, afterSeq: seq(2) }] }).pipe(
           Stream.take(1),
           Stream.runCollect
         )
@@ -183,6 +188,7 @@ describe("SyncClient failure paths", () => {
           return calls === 1
             ? Stream.succeed<SyncProtocol.Frame>({ _tag: "Heartbeat" })
             : Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               _tag: "Entries",
               runId: id,
               fromSeq: seq(0),
@@ -210,6 +216,7 @@ describe("SyncClient failure paths", () => {
           seen.push(request.cursors)
           if (calls === 1) {
             return Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               _tag: "Entries",
               runId: id,
               fromSeq: seq(0),
@@ -221,6 +228,7 @@ describe("SyncClient failure paths", () => {
             return Stream.fail(new Error("socket reset"))
           }
           return Stream.succeed<SyncProtocol.Frame>({
+            generation: 0,
             _tag: "Entries",
             runId: id,
             fromSeq: seq(1),
@@ -243,7 +251,7 @@ describe("SyncClient failure paths", () => {
 
       expect(Array.from(entries).map((value) => value.seq)).toEqual([0, 1])
       // the retry after the transport failure resumes at the acknowledged cursor
-      expect(seen[2]).toEqual([{ runId: id, afterSeq: 0 }])
+      expect(seen[2]).toEqual([{ generation: 0, runId: id, afterSeq: 0 }])
     }))
 
   it.effect("does not spin through repeated live disconnects before retry time advances", () =>
@@ -331,12 +339,12 @@ describe("SyncClient failure paths", () => {
           return reads === 1
             ? Effect.succeed({
               entries: [entry("failures", 0)],
-              cursors: [{ runId: id, afterSeq: seq(0) }],
+              cursors: [{ generation: 0, runId: id, afterSeq: seq(0) }],
               done: false
             })
             : Effect.succeed({
               entries: [entry("failures", 1)],
-              cursors: [{ runId: id, afterSeq: seq(1) }],
+              cursors: [{ generation: 0, runId: id, afterSeq: seq(1) }],
               done: true
             })
         }
@@ -422,7 +430,7 @@ describe("SyncClient failure paths", () => {
         "compacted:13",
         "healthy:0"
       ])
-      expect(requested).toEqual([[], [{ runId: compacted, afterSeq: 12 }]])
+      expect(requested).toEqual([[], [{ generation: 0, runId: compacted, afterSeq: 12 }]])
     }))
 
   // A resync that cannot move the cursor forward would re-read the same
@@ -437,7 +445,7 @@ describe("SyncClient failure paths", () => {
         },
         {
           name: "a checkpoint the subscription already covers",
-          cursors: [{ runId: id, afterSeq: seq(12) }],
+          cursors: [{ generation: 0, runId: id, afterSeq: seq(12) }],
           failure: new SyncError({
             code: "compacted",
             message: "compacted through sequence 12",
@@ -490,6 +498,7 @@ describe("SyncClient failure paths", () => {
         return calls === 1
           ? Stream.fail(new Error("socket reset"))
           : Stream.succeed<SyncProtocol.Frame>({
+            generation: 0,
             _tag: "Entries",
             runId: id,
             fromSeq: seq(0),
@@ -535,6 +544,7 @@ describe("SyncClient failure paths", () => {
       subscribe: () => {
         calls++
         return Stream.succeed<SyncProtocol.Frame>({
+          generation: 0,
           _tag: "Entries",
           runId: id,
           fromSeq: seq(5),
@@ -565,6 +575,7 @@ describe("SyncClient failure paths", () => {
           // The lagging subscription: entry 0 now, entry 1 once the gate opens.
           return Stream.concat(
             Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               _tag: "Entries",
               runId: id,
               fromSeq: seq(0),
@@ -574,6 +585,7 @@ describe("SyncClient failure paths", () => {
             Stream.concat(
               Stream.drain(Stream.fromEffect(Latch.open(laggingStarted).pipe(Effect.andThen(Latch.await(gate))))),
               Stream.succeed<SyncProtocol.Frame>({
+                generation: 0,
                 _tag: "Entries",
                 runId: id,
                 fromSeq: seq(1),
@@ -585,6 +597,7 @@ describe("SyncClient failure paths", () => {
         }
         // The fast subscription: catches the run up to seq 5.
         return Stream.succeed<SyncProtocol.Frame>({
+          generation: 0,
           _tag: "Entries",
           runId: id,
           fromSeq: seq(1),
@@ -610,6 +623,6 @@ describe("SyncClient failure paths", () => {
       })
     )
 
-    expect(cursors).toEqual([{ runId: id, afterSeq: 5 }])
+    expect(cursors).toEqual([{ generation: 0, runId: id, afterSeq: 5 }])
   })
 })

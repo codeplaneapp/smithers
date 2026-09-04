@@ -50,16 +50,17 @@ describe("SyncServer", () => {
         Effect.gen(function*() {
           const server = yield* makeServer([entry(2), entry(5), entry(8)])
           return yield* server.subscribe({
+            protocolVersion: 1,
             scope: { _tag: "Run", runId },
-            cursors: [{ runId, afterSeq: seq(0) }],
+            cursors: [{ generation: 0, runId, afterSeq: seq(0) }],
             credit: 2
           }).pipe(Stream.runCollect)
         })
       )
 
       expect(Array.from(frames)).toMatchObject([
-        { _tag: "Entries", fromSeq: 1, toSeq: 2, entries: [{ seq: 2 }] },
-        { _tag: "Entries", fromSeq: 3, toSeq: 5, entries: [{ seq: 5 }] }
+        { generation: 0, _tag: "Entries", fromSeq: 1, toSeq: 2, entries: [{ seq: 2 }] },
+        { generation: 0, _tag: "Entries", fromSeq: 3, toSeq: 5, entries: [{ seq: 5 }] }
       ])
     }))
 
@@ -74,7 +75,9 @@ describe("SyncServer", () => {
           const server = yield* makeServer([entry(0)])
           const attempt = (credit: number) =>
             Effect.flip(
-              Stream.runCollect(server.subscribe({ scope: { _tag: "Run", runId }, cursors: [], credit }))
+              Stream.runCollect(
+                server.subscribe({ protocolVersion: 1, scope: { _tag: "Run", runId }, cursors: [], credit })
+              )
             )
           return [yield* attempt(0), yield* attempt(-1), yield* attempt(Number.NaN)] as const
         })
@@ -87,6 +90,7 @@ describe("SyncServer", () => {
       expect(
         Result.isFailure(
           Schema.decodeUnknownResult(SyncProtocol.SubscribeRequest)({
+            protocolVersion: 1,
             scope: { _tag: "Run", runId },
             cursors: [],
             credit: 0
@@ -105,6 +109,7 @@ describe("SyncServer", () => {
           const server = yield* makeServer([entry(0), entry(1)])
           return yield* Stream.runCollect(
             server.subscribe({
+              protocolVersion: 1,
               scope: { _tag: "Run", runId },
               cursors: [],
               credit: SyncProtocol.maxSubscribeCredit * 10
@@ -117,6 +122,7 @@ describe("SyncServer", () => {
       expect(
         Result.isFailure(
           Schema.decodeUnknownResult(SyncProtocol.SubscribeRequest)({
+            protocolVersion: 1,
             scope: { _tag: "Run", runId },
             cursors: [],
             credit: SyncProtocol.maxSubscribeCredit + 1

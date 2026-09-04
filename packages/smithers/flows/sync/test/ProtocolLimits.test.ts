@@ -54,15 +54,15 @@ describe("SyncProtocol cursor uniqueness", () => {
     expect(SyncProtocol.duplicateCursorRunId([])).toBeUndefined()
     expect(
       SyncProtocol.duplicateCursorRunId([
-        { runId: runId("a"), afterSeq: seq(0) },
-        { runId: runId("b"), afterSeq: seq(0) }
+        { generation: 0, runId: runId("a"), afterSeq: seq(0) },
+        { generation: 0, runId: runId("b"), afterSeq: seq(0) }
       ])
     ).toBeUndefined()
     expect(
       SyncProtocol.duplicateCursorRunId([
-        { runId: runId("a"), afterSeq: seq(0) },
-        { runId: runId("b"), afterSeq: seq(1) },
-        { runId: runId("a"), afterSeq: seq(2) }
+        { generation: 0, runId: runId("a"), afterSeq: seq(0) },
+        { generation: 0, runId: runId("b"), afterSeq: seq(1) },
+        { generation: 0, runId: runId("a"), afterSeq: seq(2) }
       ])
     ).toBe("a")
   })

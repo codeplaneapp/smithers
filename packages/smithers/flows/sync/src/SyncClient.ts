@@ -26,6 +26,7 @@ import {
   type EntriesFrame,
   maxReadLimit,
   maxSubscribeCredit,
+  protocolVersion,
   type ReadResponse,
   type Resync,
   type RunCursor,
@@ -199,7 +200,7 @@ const advance = (
   const current = cursors.get(runId)
   if (current !== undefined && current.afterSeq >= throughSeq) return cursors
   const next = new Map(cursors)
-  next.set(runId, { runId, afterSeq: throughSeq, ...(generation === 0 ? {} : { generation }) })
+  next.set(runId, { runId, afterSeq: throughSeq, generation })
   return next
 }
 
@@ -295,8 +296,9 @@ const pageViolation = (
 ): SyncError | undefined => {
   const violation = (message: string): SyncError => new SyncError({ code: "protocol_violation", message })
   for (const cursor of response.cursors) {
+    if (cursor.generation === undefined) return violation("Read response lacks a generation")
     const previous = requested.get(cursor.runId)
-    if (previous !== undefined && (previous.generation ?? 0) !== (cursor.generation ?? 0)) {
+    if (previous !== undefined && (previous.generation ?? 0) !== cursor.generation) {
       return lineageChanged(cursor.runId)
     }
   }
@@ -424,7 +426,7 @@ export const make = ({
         // empty, so the caller's cursor is the only one there is.
         for (const [runId, position] of yield* Ref.get(acknowledged)) {
           const supplied = cursor.get(runId)
-          if (supplied !== undefined && (supplied.generation ?? 0) !== (position.generation ?? 0)) {
+          if (supplied !== undefined && (supplied.generation ?? 0) !== position.generation) {
             return yield* Effect.fail(lineageChanged(runId))
           }
           if (supplied === undefined || supplied.afterSeq < position.afterSeq) cursor.set(runId, position)
@@ -436,11 +438,11 @@ export const make = ({
           Effect.gen(function*() {
             const accepted = yield* Ref.modify(acknowledged, (shared) => {
               const previous = shared.get(runId)
-              if (previous !== undefined && (previous.generation ?? 0) !== generation) return [false, shared] as const
+              if (previous !== undefined && previous.generation !== generation) return [false, shared] as const
               return [true, advance(shared, runId, throughSeq, generation)] as const
             })
             if (!accepted) return yield* Effect.fail(lineageChanged(runId))
-            cursor.set(runId, { runId, afterSeq: throughSeq, ...(generation === 0 ? {} : { generation }) })
+            cursor.set(runId, { runId, afterSeq: throughSeq, generation })
           })
 
         const applyEntry = options.apply
@@ -476,12 +478,17 @@ export const make = ({
         }
 
         const batch = (frame: EntriesFrame): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> => {
+          if (frame.generation === undefined) {
+            return Stream.fail(
+              new SyncError({ code: "protocol_violation", message: "Entries frame lacks a generation" })
+            )
+          }
           const frameBytes = entriesByteLength(frame.entries)
           if (frameBytes > maxFrameBytes) return Stream.fail(oversized(frameBytes, maxFrameBytes))
           const violation = frameViolation(frame)
           if (violation !== undefined) return Stream.fail(violation)
           const position = cursor.get(frame.runId)
-          const generation = frame.generation ?? 0
+          const generation = frame.generation
           if (position !== undefined && (position.generation ?? 0) !== generation) {
             return Stream.fail(lineageChanged(frame.runId))
           }
@@ -508,6 +515,7 @@ export const make = ({
           Stream.unwrap(
             Effect.sync(() =>
               client["Sync.Subscribe"]({
+                protocolVersion,
                 scope: options.scope,
                 cursors: snapshot(),
                 credit,
@@ -558,6 +566,7 @@ export const make = ({
             Effect.suspend(() => {
               const requested = snapshot()
               return client["Sync.Read"]({
+                protocolVersion,
                 scope: options.scope,
                 cursors: requested,
                 limit: bootstrapLimit,
@@ -569,7 +578,7 @@ export const make = ({
                   if (pageBytes > maxFrameBytes) return Stream.fail(oversized(pageBytes, maxFrameBytes))
                   const violation = pageViolation(options.scope, cursorMap(requested), response)
                   if (violation !== undefined) return Stream.fail(violation)
-                  const generations = new Map(response.cursors.map((cursor) => [cursor.runId, cursor.generation ?? 0]))
+                  const generations = new Map(response.cursors.map((cursor) => [cursor.runId, cursor.generation!]))
                   const page = Stream.flatMap(
                     Stream.fromIterable(response.entries),
                     (entry) =>

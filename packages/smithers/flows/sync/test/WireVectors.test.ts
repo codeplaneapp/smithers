@@ -46,6 +46,7 @@ describe("frame vectors", () => {
   it("freezes the encoding of every Frame variant", () => {
     expect(
       wire(SyncProtocol.Frame, {
+        generation: 0,
         _tag: "Entries",
         runId,
         fromSeq: 7 as JournalEvent.Seq,
@@ -53,7 +54,7 @@ describe("frame vectors", () => {
         entries: [entry]
       })
     ).toBe(
-      `{"_tag":"Entries","runId":"vector-run","fromSeq":7,"toSeq":7,"entries":[{"runId":"vector-run","seq":7,"eventId":"vector-event","sourceId":"vector-source","sourceSeq":3,"emittedAtMs":1700000000000,"eventType":"run.started","payload":{"note":"hello"},"meta":null}]}`
+      `{"_tag":"Entries","runId":"vector-run","generation":0,"fromSeq":7,"toSeq":7,"entries":[{"runId":"vector-run","seq":7,"eventId":"vector-event","sourceId":"vector-source","sourceSeq":3,"emittedAtMs":1700000000000,"eventType":"run.started","payload":{"note":"hello"},"meta":null}]}`
     )
 
     expect(wire(SyncProtocol.Frame, { _tag: "Heartbeat" })).toBe(`{"_tag":"Heartbeat"}`)
@@ -68,11 +69,11 @@ describe("frame vectors", () => {
     expect(
       wire(SyncProtocol.ReadResponse, {
         entries: [entry],
-        cursors: [{ runId, afterSeq: 7 as JournalEvent.Seq }],
+        cursors: [{ generation: 0, runId, afterSeq: 7 as JournalEvent.Seq }],
         done: false
       })
     ).toBe(
-      `{"entries":[{"runId":"vector-run","seq":7,"eventId":"vector-event","sourceId":"vector-source","sourceSeq":3,"emittedAtMs":1700000000000,"eventType":"run.started","payload":{"note":"hello"},"meta":null}],"cursors":[{"runId":"vector-run","afterSeq":7}],"done":false}`
+      `{"entries":[{"runId":"vector-run","seq":7,"eventId":"vector-event","sourceId":"vector-source","sourceSeq":3,"emittedAtMs":1700000000000,"eventType":"run.started","payload":{"note":"hello"},"meta":null}],"cursors":[{"runId":"vector-run","afterSeq":7,"generation":0}],"done":false}`
     )
   })
 

@@ -99,7 +99,7 @@ describe("SyncServer fan-out budgets", () => {
           return yield* Effect.all(
             Array.from({ length: 5 }, () =>
               Stream.runCollect(
-                server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 12 })
+                server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 12 })
               )),
             { concurrency: "unbounded" }
           )
@@ -139,7 +139,7 @@ describe("SyncServer fan-out budgets", () => {
           // that is never released shows up as a monotonically rising `open`.
           for (let cycle = 0; cycle < 200; cycle++) {
             yield* Stream.runDrain(
-              server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 6 })
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 6 })
             )
           }
         }).pipe(
@@ -175,14 +175,14 @@ describe("SyncServer fan-out budgets", () => {
           // The permanently slow subscriber: it accepts its first frame and
           // then never pulls again until the case releases it.
           const slow = yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1_000 }).pipe(
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 1_000 }).pipe(
               Stream.tap(() => Deferred.await(release))
             )
           ).pipe(Effect.forkChild)
           // A second follower drains the same workspace to completion, so the
           // fan-out is known to have run in full before the peak is read.
           yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1_000 })
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 1_000 })
           )
           const peakWhileStalled = tracker.peak
           yield* Deferred.succeed(release, undefined)
@@ -213,7 +213,7 @@ describe("SyncServer fan-out budgets", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
           yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: ids.length })
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: ids.length })
           )
         }).pipe(
           Effect.provide(Layer.mergeAll(
@@ -245,7 +245,7 @@ describe("SyncServer fan-out budgets", () => {
             yield* Effect.all(
               Array.from({ length: 5 }, () =>
                 Stream.runDrain(
-                  server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 40 })
+                  server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 40 })
                 )),
               { concurrency: "unbounded" }
             )

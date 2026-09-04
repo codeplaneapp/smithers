@@ -57,17 +57,17 @@ describe("SyncClient cursors", () => {
         client.subscribe({
           scope: { _tag: "Run", runId: runId("duplicate") },
           cursors: [
-            { runId: runId("duplicate"), afterSeq: seq(3) },
-            { runId: runId("duplicate"), afterSeq: seq(4) }
+            { generation: 0, runId: runId("duplicate"), afterSeq: seq(3) },
+            { generation: 0, runId: runId("duplicate"), afterSeq: seq(4) }
           ]
         }).pipe(Stream.take(1), Stream.runCollect)
       )
 
       // Both cursor ingestion and acknowledgement use Map keys, so a canonical
       // snapshot has one cursor per run and sorting never compares equal run IDs.
-      expect(reads).toEqual([[{ runId: "duplicate", afterSeq: 4 }]])
+      expect(reads).toEqual([[{ generation: 0, runId: "duplicate", afterSeq: 4 }]])
       expect(Array.from(values).map((value) => value.seq)).toEqual([5])
-      expect(yield* (client.cursors)).toEqual([{ runId: "duplicate", afterSeq: 5 }])
+      expect(yield* (client.cursors)).toEqual([{ generation: 0, runId: "duplicate", afterSeq: 5 }])
     }))
 
   it.effect("returns acknowledged cursors in canonical run order regardless of arrival order", () =>
@@ -94,9 +94,9 @@ describe("SyncClient cursors", () => {
       const cursors = yield* (client.cursors)
 
       expect(cursors).toEqual([
-        { runId: "alpha", afterSeq: 3 },
-        { runId: "mid", afterSeq: 1 },
-        { runId: "zeta", afterSeq: 0 }
+        { generation: 0, runId: "alpha", afterSeq: 3 },
+        { generation: 0, runId: "mid", afterSeq: 1 },
+        { generation: 0, runId: "zeta", afterSeq: 0 }
       ])
     }))
 
@@ -126,7 +126,7 @@ describe("SyncClient cursors", () => {
       )
 
       expect(reads[0]).toEqual([])
-      expect(reads[1]).toEqual([{ runId: "run", afterSeq: 1 }])
+      expect(reads[1]).toEqual([{ generation: 0, runId: "run", afterSeq: 1 }])
       expect(Array.from(second).map((value) => value.seq)).toEqual([2])
     }))
 
@@ -155,13 +155,13 @@ describe("SyncClient cursors", () => {
 
       yield* Stream.runDrain(client.subscribe({ scope, cursors: [] }).pipe(Stream.take(1)))
       yield* Stream.runDrain(
-        client.subscribe({ scope, cursors: [{ runId: runId("ahead"), afterSeq: seq(9) }] }).pipe(
+        client.subscribe({ scope, cursors: [{ generation: 0, runId: runId("ahead"), afterSeq: seq(9) }] }).pipe(
           Stream.take(1)
         )
       )
 
       expect(reads[0]).toEqual([])
-      expect(reads[1]).toEqual([{ runId: "ahead", afterSeq: 9 }])
+      expect(reads[1]).toEqual([{ generation: 0, runId: "ahead", afterSeq: 9 }])
     }))
 
   // The other direction of the same contract. A warm client cannot re-serve
@@ -188,7 +188,7 @@ describe("SyncClient cursors", () => {
         } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
       })
       const scope = { _tag: "Run", runId: runId("rebuild") } as const
-      const behind = [{ runId: runId("rebuild"), afterSeq: seq(0) }]
+      const behind = [{ generation: 0, runId: runId("rebuild"), afterSeq: seq(0) }]
 
       yield* Stream.runDrain(warm.subscribe({ scope, cursors: [] }).pipe(Stream.take(2)))
       yield* Stream.runDrain(warm.subscribe({ scope, cursors: behind }).pipe(Stream.take(1)))
@@ -205,7 +205,7 @@ describe("SyncClient cursors", () => {
       })
       yield* Stream.runDrain(fresh.subscribe({ scope, cursors: behind }).pipe(Stream.take(1)))
 
-      expect(warmReads[1]).toEqual([{ runId: "rebuild", afterSeq: 1 }])
-      expect(freshReads[0]).toEqual([{ runId: "rebuild", afterSeq: 0 }])
+      expect(warmReads[1]).toEqual([{ generation: 0, runId: "rebuild", afterSeq: 1 }])
+      expect(freshReads[0]).toEqual([{ generation: 0, runId: "rebuild", afterSeq: 0 }])
     }))
 })

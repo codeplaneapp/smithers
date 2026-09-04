@@ -61,11 +61,7 @@ describe("SyncServer workspace scope", () => {
       const response = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          return yield* server.read({
-            scope: { _tag: "Workspace" },
-            cursors: [],
-            limit: 10
-          })
+          return yield* server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 10 })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -79,8 +75,8 @@ describe("SyncServer workspace scope", () => {
 
       expect(response.entries.map((value) => `${value.runId}:${value.seq}`)).toEqual(["a:0", "a:1", "b:0"])
       expect(response.cursors).toEqual([
-        { runId: "a", afterSeq: 1 },
-        { runId: "b", afterSeq: 0 }
+        { generation: 0, runId: "a", afterSeq: 1 },
+        { generation: 0, runId: "b", afterSeq: 0 }
       ])
       expect(response.done).toBe(true)
     }))
@@ -90,11 +86,7 @@ describe("SyncServer workspace scope", () => {
       const response = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          return yield* server.read({
-            scope: { _tag: "Workspace" },
-            cursors: [],
-            limit: 2
-          })
+          return yield* server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 2 })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -119,10 +111,11 @@ describe("SyncServer workspace scope", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
           return yield* server.read({
+            protocolVersion: 1,
             scope: { _tag: "Workspace" },
             cursors: [
-              { runId: runId("a"), afterSeq: seq(0) },
-              { runId: runId("ghost"), afterSeq: seq(4) }
+              { generation: 0, runId: runId("a"), afterSeq: seq(0) },
+              { generation: 0, runId: runId("ghost"), afterSeq: seq(4) }
             ],
             limit: 10
           })
@@ -139,8 +132,8 @@ describe("SyncServer workspace scope", () => {
 
       expect(response.entries.map((value) => value.seq)).toEqual([1])
       expect(response.cursors).toEqual([
-        { runId: "a", afterSeq: 1 },
-        { runId: "ghost", afterSeq: 4 }
+        { generation: 0, runId: "a", afterSeq: 1 },
+        { generation: 0, runId: "ghost", afterSeq: 4 }
       ])
     }))
 
@@ -150,6 +143,7 @@ describe("SyncServer workspace scope", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
           return yield* server.read({
+            protocolVersion: 1,
             scope: { _tag: "Run", runId: runId("a") },
             cursors: [],
             limit: 10
@@ -184,7 +178,7 @@ describe("SyncServer workspace scope", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
           return yield* Stream.runCollect(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 3 })
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 3 })
           )
         }).pipe(
           Effect.provide(
@@ -214,7 +208,7 @@ describe("SyncServer workspace scope", () => {
           )
           const fiber = yield* Effect.forkChild(
             Stream.runCollect(
-              server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1 })
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 1 })
             ),
             { startImmediately: true }
           )
@@ -233,17 +227,17 @@ describe("SyncServer workspace scope", () => {
 
       expect(Exit.isSuccess(frames)).toBe(true)
       if (Exit.isSuccess(frames)) {
-        expect(Array.from(frames.value)).toMatchObject([{ _tag: "Entries", runId: "late", toSeq: 0 }])
+        expect(Array.from(frames.value)).toMatchObject([{ generation: 0, _tag: "Entries", runId: "late", toSeq: 0 }])
       }
     }))
 
   it.effect("makeNoop reports an empty read and a closed subscription", () =>
     Effect.gen(function*() {
       const noop = SyncServer.makeNoop()
-      expect(yield* (noop.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 1 })))
+      expect(yield* (noop.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 1 })))
         .toEqual({ entries: [], cursors: [], done: true })
       const frames = yield* (
-        Stream.runCollect(noop.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1 }))
+        Stream.runCollect(noop.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 1 }))
       )
       expect(Array.from(frames)).toMatchObject([{ _tag: "Closed" }])
     }))
@@ -311,7 +305,7 @@ describe("RunCatalog", () => {
       const response = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          return yield* server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 8 })
+          return yield* server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 8 })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -353,7 +347,7 @@ describe("RunCatalog", () => {
       const response = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLiveWith({ maxFrameBytes: 6_000 })
-          return yield* server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 8 })
+          return yield* server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 8 })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -379,7 +373,9 @@ describe("RunCatalog", () => {
       const failure = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLiveWith({ maxFrameBytes: 512 })
-          return yield* Effect.flip(server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 8 }))
+          return yield* Effect.flip(
+            server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 8 })
+          )
         }).pipe(
           Effect.provide(
             Layer.mergeAll(

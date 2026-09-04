@@ -35,6 +35,7 @@ describe("SyncClient covered-frame boundaries", () => {
           "Sync.Read": () => Effect.succeed({ entries: [], cursors: [], done: true }),
           "Sync.Subscribe": () =>
             Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               _tag: "Entries",
               runId: runId("boundary"),
               fromSeq: seq(2),
@@ -47,12 +48,12 @@ describe("SyncClient covered-frame boundaries", () => {
       const entries = yield* (
         client.subscribe({
           scope: { _tag: "Run", runId: runId("boundary") },
-          cursors: [{ runId: runId("boundary"), afterSeq: seq(2) }]
+          cursors: [{ generation: 0, runId: runId("boundary"), afterSeq: seq(2) }]
         }).pipe(Stream.take(1), Stream.runCollect)
       )
 
       expect(Array.from(entries).map((value) => value.seq)).toEqual([3])
-      expect(yield* (client.cursors)).toEqual([{ runId: "boundary", afterSeq: 3 }])
+      expect(yield* (client.cursors)).toEqual([{ generation: 0, runId: "boundary", afterSeq: 3 }])
     }))
 
   it.effect("forwards a share capability when the durable bootstrap enters live follow", () =>
@@ -74,6 +75,7 @@ describe("SyncClient covered-frame boundaries", () => {
           "Sync.Subscribe": (request: { readonly capability?: BranchProtocol.ShareCapability }) => {
             received = request.capability
             return Stream.succeed<SyncProtocol.Frame>({
+              generation: 0,
               _tag: "Entries",
               runId: runId("boundary"),
               fromSeq: seq(0),

@@ -6,6 +6,7 @@
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Queue from "effect/Queue"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
 import * as RpcServer from "effect/unstable/rpc/RpcServer"
@@ -82,20 +83,34 @@ export const connect = (pair: Pair) =>
     const handlers = SyncServer.layerHandlers.pipe(
       Layer.provide(Layer.succeed(SyncServer.SyncServer, sync))
     )
-    const server = yield* RpcServer.makeNoSerialization(SyncRpcs.SyncRpcs, {
-      onFromServer: (response) => {
-        const encoded = serverSerialization.encode(response)
-        // The RPC server only emits values described by SyncRpcs; the JSON
-        // serializer therefore always produces a frame for this boundary.
-        return Effect.orDie(serverWriter(encoded!))
-      },
-      disableFatalDefects: true
-    }).pipe(Effect.provide(handlers))
-
-    yield* pair.server.runRaw((bytes) => {
-      const messages = serverSerialization.decode(bytes)
-      return Effect.forEach(messages, (message) => server.write(0, message as never), { discard: true })
-    }).pipe(Effect.forkScoped)
+    // Use the production schema boundary: raw server exits contain Effect
+    // causes, whose JSON representation is not the RPC wire encoding.
+    const serverProtocol = yield* RpcServer.Protocol.make((writeRequest) =>
+      Effect.gen(function*() {
+        yield* pair.server.runRaw((bytes) =>
+          Effect.forEach(
+            serverSerialization.decode(bytes),
+            (message) => writeRequest(0, message as never),
+            { discard: true }
+          )
+        ).pipe(Effect.forkScoped)
+        return {
+          disconnects: yield* Queue.make<number>(),
+          send: (_clientId, response) => Effect.orDie(serverWriter(serverSerialization.encode(response)!)),
+          end: () => Effect.void,
+          clientIds: Effect.succeed(new Set([0])),
+          initialMessage: Effect.succeedNone,
+          supportsAck: true,
+          supportsTransferables: false,
+          supportsSpanPropagation: true
+        }
+      })
+    )
+    yield* RpcServer.make(SyncRpcs.SyncRpcs, { disableFatalDefects: true }).pipe(
+      Effect.provide(handlers),
+      Effect.provideService(RpcServer.Protocol, serverProtocol),
+      Effect.forkScoped
+    )
 
     const protocol = yield* RpcClient.makeProtocolSocket().pipe(
       Effect.provideService(Socket.Socket, pair.client),

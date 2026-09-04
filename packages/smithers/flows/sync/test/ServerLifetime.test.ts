@@ -62,6 +62,7 @@ describe("subscription lifetime", () => {
             Effect.flip(
               Stream.runDrain(
                 server.subscribe({
+                  protocolVersion: 1,
                   capability,
                   credit: 4096,
                   cursors: [],
@@ -107,7 +108,12 @@ describe("subscription lifetime", () => {
           const collected = yield* Effect.forkChild(
             Stream.runCollect(
               Stream.take(
-                server.subscribe({ credit: 4096, cursors: [], scope: { _tag: "Run", runId: engineRun } }),
+                server.subscribe({
+                  protocolVersion: 1,
+                  credit: 4096,
+                  cursors: [],
+                  scope: { _tag: "Run", runId: engineRun }
+                }),
                 1
               )
             ),
@@ -140,7 +146,9 @@ describe("subscription lifetime", () => {
           const server = yield* SyncServer.makeLive
           const following = yield* Effect.forkChild(
             Effect.flip(
-              Stream.runDrain(server.subscribe({ credit: 4096, cursors: [], scope: { _tag: "Workspace" } }))
+              Stream.runDrain(
+                server.subscribe({ protocolVersion: 1, credit: 4096, cursors: [], scope: { _tag: "Workspace" } })
+              )
             ),
             { startImmediately: true }
           )
@@ -187,6 +195,7 @@ describe("subscription lifetime", () => {
               Stream.runDrain(
                 Stream.tap(
                   server.subscribe({
+                    protocolVersion: 1,
                     capability,
                     credit: 4096,
                     cursors: [],
@@ -269,7 +278,10 @@ describe("workspace tail catalog reconciliation", () => {
           const server = yield* SyncServer.makeLiveWith({ tailIntervalMs: 50 })
           const collected = yield* Effect.forkChild(
             Stream.runCollect(
-              Stream.take(server.subscribe({ credit: 4096, cursors: [], scope: { _tag: "Workspace" } }), 2)
+              Stream.take(
+                server.subscribe({ protocolVersion: 1, credit: 4096, cursors: [], scope: { _tag: "Workspace" } }),
+                2
+              )
             ),
             { startImmediately: true }
           )
@@ -309,7 +321,9 @@ describe("workspace tail catalog reconciliation", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLiveWith({ tailIntervalMs: 10 })
           const following = yield* Effect.forkChild(
-            Stream.runDrain(server.subscribe({ credit: 4096, cursors: [], scope: { _tag: "Workspace" } })),
+            Stream.runDrain(
+              server.subscribe({ protocolVersion: 1, credit: 4096, cursors: [], scope: { _tag: "Workspace" } })
+            ),
             { startImmediately: true }
           )
           yield* Effect.sleep("100 millis")
@@ -365,7 +379,7 @@ describe("workspace tail catalog reconciliation", () => {
           return yield* Stream.runCollect(
             Stream.take(
               Stream.filter(
-                server.subscribe({ credit: 4096, cursors: [], scope: { _tag: "Workspace" } }),
+                server.subscribe({ protocolVersion: 1, credit: 4096, cursors: [], scope: { _tag: "Workspace" } }),
                 (frame) => frame._tag === "Entries" && frame.runId === cold
               ),
               1

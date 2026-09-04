@@ -195,6 +195,7 @@ describe("sync recovery across a killed server process", () => {
           const projection = BranchProjection.project(branchId, all)
           expect(first.entries).toHaveLength(firstPageConsumption)
           expect(first.cursors).toEqual([{
+            generation: 0,
             runId,
             afterSeq: first.entries[first.entries.length - 1]?.seq
           }])

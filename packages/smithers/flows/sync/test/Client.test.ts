@@ -82,7 +82,7 @@ describe("SyncClient", () => {
           "Sync.Read": () =>
             Effect.succeed({
               entries: [entry(id, 0), entry(id, 1), entry(id, 2)],
-              cursors: [{ runId: id, afterSeq: seq(2) }],
+              cursors: [{ generation: 0, runId: id, afterSeq: seq(2) }],
               done: true
             }),
           "Sync.Subscribe": () => Stream.empty
@@ -98,6 +98,6 @@ describe("SyncClient", () => {
       const cursors = yield* (client.cursors)
 
       expect(Array.from(values).map((value) => value.seq)).toEqual([0])
-      expect(cursors).toEqual([{ runId: id, afterSeq: 0 }])
+      expect(cursors).toEqual([{ generation: 0, runId: id, afterSeq: 0 }])
     }))
 })

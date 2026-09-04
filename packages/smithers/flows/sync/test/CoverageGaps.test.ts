@@ -104,6 +104,7 @@ describe("sync malformed and terminal boundaries", () => {
           "Sync.Subscribe": () =>
             Stream.succeed({
               _tag: "Entries" as const,
+              generation: 0,
               runId: runId("boundary"),
               fromSeq: seq(1),
               toSeq: seq(1),
@@ -129,6 +130,7 @@ describe("sync malformed and terminal boundaries", () => {
             Stream.concat(
               Stream.succeed({
                 _tag: "Entries" as const,
+                generation: 0,
                 runId: runId("boundary"),
                 fromSeq: seq(0),
                 toSeq: seq(1),
@@ -140,7 +142,9 @@ describe("sync malformed and terminal boundaries", () => {
       })
 
       const exit = yield* Effect.exit(
-        Stream.runCollect(client.subscribe({ scope, cursors: [{ runId: runId("boundary"), afterSeq: seq(1) }] }))
+        Stream.runCollect(
+          client.subscribe({ scope, cursors: [{ runId: runId("boundary"), afterSeq: seq(1) }] })
+        )
       )
 
       expect(Exit.isFailure(exit)).toBe(true)
@@ -155,7 +159,7 @@ describe("sync malformed and terminal boundaries", () => {
       const failure = yield* (
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          return yield* Effect.flip(server.read({ scope, cursors: [], limit: 1 }))
+          return yield* Effect.flip(server.read({ protocolVersion: 1, scope, cursors: [], limit: 1 }))
         }).pipe(
           Effect.provide(
             Layer.mergeAll(

@@ -115,19 +115,21 @@ describe("SQL rewind through the sync server", () => {
           )
           expect(receipt.seq).toBe(51)
           const cursors = [{ runId, afterSeq: seq(100) }]
-          const readFailure = yield* Effect.flip(server.read({ scope, cursors, limit: 10 }))
+          const readFailure = yield* Effect.flip(server.read({ protocolVersion: 1, scope, cursors, limit: 10 }))
           const followFailure = yield* Effect.flip(
-            server.subscribe({ scope, cursors, credit: 1 }).pipe(Stream.runDrain)
+            server.subscribe({ protocolVersion: 1, scope, cursors, credit: 1 }).pipe(Stream.runDrain)
           )
           for (const failure of [readFailure, followFailure]) {
             expect(SyncError.is(failure)).toBe(true)
             expect(failure).toMatchObject({ code: "lineage_changed", rewind: { runId, generation: 1, afterSeq: 50 } })
           }
           const recovered = [{ runId, afterSeq: seq(50), generation: 1 }]
-          const page = yield* server.read({ scope, cursors: recovered, limit: 10 })
+          const page = yield* server.read({ protocolVersion: 1, scope, cursors: recovered, limit: 10 })
           expect(page.entries.map((entry) => entry.seq)).toEqual([51])
           expect(page.cursors).toEqual([{ runId, afterSeq: seq(51), generation: 1 }])
-          const frames = yield* server.subscribe({ scope, cursors: recovered, credit: 1 }).pipe(Stream.runCollect)
+          const frames = yield* server.subscribe({ protocolVersion: 1, scope, cursors: recovered, credit: 1 }).pipe(
+            Stream.runCollect
+          )
           expect(frames[0]).toMatchObject({ generation: 1, toSeq: 51 })
           const client = yield* SyncClient.make({
             client: {
@@ -162,7 +164,12 @@ describe("SQL rewind through the sync server", () => {
               journal.generation!(id).pipe(Effect.tap(() => Deferred.succeed(ready, undefined)))
           }
           const server = yield* SyncServer.makeLive.pipe(Effect.provideService(Journal.Journal, observed))
-          const fiber = yield* server.subscribe({ scope, cursors: [{ runId, afterSeq: seq(100) }], credit: 10 }).pipe(
+          const fiber = yield* server.subscribe({
+            protocolVersion: 1,
+            scope,
+            cursors: [{ runId, afterSeq: seq(100) }],
+            credit: 10
+          }).pipe(
             Stream.runDrain,
             Effect.flip,
             Effect.forkScoped

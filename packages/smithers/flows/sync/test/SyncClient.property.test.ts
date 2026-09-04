@@ -85,6 +85,7 @@ describe("SyncClient properties", () => {
         let covered = -1
         const push = (from: number, to: number) => {
           frames.push({
+            generation: 0,
             _tag: "Entries",
             runId,
             fromSeq: seq(from),
@@ -102,7 +103,7 @@ describe("SyncClient properties", () => {
         const client = yield* stubClient(frames)
         const { acknowledged, delivered, failure } = yield* collect(
           client,
-          initialCursor < 0 ? [] : [{ runId, afterSeq: seq(initialCursor) }]
+          initialCursor < 0 ? [] : [{ generation: 0, runId, afterSeq: seq(initialCursor) }]
         )
 
         // The subscription ends at the Closed frame with a typed error.
@@ -112,7 +113,7 @@ describe("SyncClient properties", () => {
         expect(delivered).toEqual(
           Array.from({ length: total - 1 - initialCursor }, (_, offset) => initialCursor + 1 + offset)
         )
-        expect(acknowledged).toEqual([{ runId, afterSeq: total - 1 }])
+        expect(acknowledged).toEqual([{ generation: 0, runId, afterSeq: total - 1 }])
       }),
     { fastCheck: params }
   )
@@ -124,12 +125,12 @@ describe("SyncClient properties", () => {
       Effect.gen(function*() {
         const from = initialCursor + 1 + gap
         const client = yield* stubClient([
-          { _tag: "Entries", runId, fromSeq: seq(from), toSeq: seq(from), entries: [entry(from)] },
+          { generation: 0, _tag: "Entries", runId, fromSeq: seq(from), toSeq: seq(from), entries: [entry(from)] },
           closed
         ])
         const { acknowledged, delivered, failure } = yield* collect(
           client,
-          initialCursor < 0 ? [] : [{ runId, afterSeq: seq(initialCursor) }]
+          initialCursor < 0 ? [] : [{ generation: 0, runId, afterSeq: seq(initialCursor) }]
         )
 
         expect(failure).toBeInstanceOf(SyncGapError)
@@ -168,6 +169,7 @@ describe("SyncClient properties", () => {
           ? base.map((value, position) => position === index ? entry(position, foreignRunId) : value)
           : base
         const frame: SyncProtocol.Frame = {
+          generation: 0,
           _tag: "Entries",
           runId,
           fromSeq: seq(0),

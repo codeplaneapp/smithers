@@ -76,6 +76,7 @@ const rig: Effect.Effect<Rig, SyncError, Journal.Journal | BranchShare.BranchSha
 
 const readBranch = (server: SyncServer.Service, capability?: ShareCapability) =>
   server.read({
+    protocolVersion: 1,
     scope: { _tag: "Run", runId: branchRun },
     cursors: [],
     limit: 10,
@@ -109,7 +110,9 @@ describe("branch read authorization", () => {
         Effect.gen(function*() {
           const { server } = yield* rig
           return yield* Effect.flip(
-            Stream.runCollect(server.subscribe({ scope: { _tag: "Run", runId: branchRun }, cursors: [], credit: 1 }))
+            Stream.runCollect(
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Run", runId: branchRun }, cursors: [], credit: 1 })
+            )
           )
         })
       )
@@ -162,14 +165,18 @@ describe("branch read authorization", () => {
           const { capability, register, server } = yield* rig
           yield* register(engineRun)
           yield* writeEntry(engineRun, "engine")
-          const bare = yield* Effect.flip(server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 10 }))
+          const bare = yield* Effect.flip(
+            server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 10 })
+          )
           // A branch share link authorizes exactly its branch's run — it never
           // upgrades a caller to workspace listings.
           const withLink = yield* Effect.flip(
-            server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 10, capability })
+            server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 10, capability })
           )
           const subscribed = yield* Effect.flip(
-            Stream.runCollect(server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1 }))
+            Stream.runCollect(
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 1 })
+            )
           )
           return [bare.code, withLink.code, (subscribed as SyncError).code]
         })
@@ -185,7 +192,12 @@ describe("branch read authorization", () => {
           const { register, server } = yield* rig
           yield* register(engineRun)
           yield* writeEntry(engineRun, "engine")
-          const scoped = { scope: { _tag: "Run", runId: engineRun }, cursors: [], limit: 10 } as const
+          const scoped = {
+            protocolVersion: 1,
+            scope: { _tag: "Run", runId: engineRun },
+            cursors: [],
+            limit: 10
+          } as const
           const refused = yield* Effect.flip(server.read(scoped))
           const served = yield* asWorkspace(server.read(scoped))
           return [
@@ -208,8 +220,19 @@ describe("branch read authorization", () => {
           yield* register(branchRun)
           yield* writeEntry(engineRun, "engine")
           yield* writeEntry(branchRun, "branch")
-          const denied = yield* server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 10 })
-          const granted = yield* server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 10, capability })
+          const denied = yield* server.read({
+            protocolVersion: 1,
+            scope: { _tag: "Workspace" },
+            cursors: [],
+            limit: 10
+          })
+          const granted = yield* server.read({
+            protocolVersion: 1,
+            scope: { _tag: "Workspace" },
+            cursors: [],
+            limit: 10,
+            capability
+          })
           return [
             denied.entries.map((entry) => entry.runId),
             granted.entries.map((entry) => entry.runId)
@@ -227,7 +250,10 @@ describe("branch read authorization", () => {
         asWorkspace(Effect.gen(function*() {
           const { register, server } = yield* rig
           const followed = yield* Stream.runCollect(
-            Stream.take(server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 4 }), 1)
+            Stream.take(
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 4 }),
+              1
+            )
           ).pipe(Effect.forkChild({ startImmediately: true }))
           // Let the subscription attach to the catalog change feed first.
           yield* Effect.yieldNow

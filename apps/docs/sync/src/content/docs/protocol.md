@@ -31,7 +31,7 @@ not "expect the next number to be exactly one greater".
 
 ## Read
 
-`Sync.Read` accepts a scope, a cursor set, and a limit, and returns journal
+`Sync.Read` accepts `protocolVersion: 1`, a scope, a cursor set, and a limit, and returns journal
 entries plus the cursor set the page served through. `RunCatalog` supplies the
 run list for workspace reads; `SyncServer.layer` combines it with `Journal`.
 
@@ -46,7 +46,7 @@ Persist the returned cursors only after applying the returned batch.
 
 ## Subscribe
 
-`Sync.Subscribe` streams `Entries` frames, each carrying one run's entries and
+`Sync.Subscribe` requires the same `protocolVersion: 1` and streams `Entries` frames, each carrying one run's entries and
 the interval the server covered (`runId`, `fromSeq`, `toSeq`), and a terminal
 `Closed` frame when the server ends the subscription. `fromSeq` and `toSeq`
 describe the covered interval, not the sequences actually carried: dropped

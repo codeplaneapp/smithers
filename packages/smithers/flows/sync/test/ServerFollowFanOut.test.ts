@@ -97,7 +97,7 @@ describe("SyncServer bounded fan-out liveness", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLiveWith({ concurrency: 2 })
           return yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 3 }).pipe(
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 3 }).pipe(
               Stream.tap(record)
             )
           )
@@ -142,7 +142,7 @@ describe("SyncServer bounded fan-out liveness", () => {
           }
           const server = yield* SyncServer.makeLiveWith({ concurrency: 2 })
           return yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 3 }).pipe(
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 3 }).pipe(
               Stream.tap(record)
             )
           )
@@ -195,9 +195,10 @@ describe("SyncServer bounded fan-out liveness", () => {
           const server = yield* SyncServer.makeLiveWith({ concurrency, tailIntervalMs: 25 })
           const follower = yield* Effect.forkChild(
             Stream.runDrain(
-              server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: runs * 2 }).pipe(
-                Stream.tap(record)
-              )
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: runs * 2 })
+                .pipe(
+                  Stream.tap(record)
+                )
             ),
             { startImmediately: true }
           )
@@ -260,9 +261,10 @@ describe("SyncServer bounded fan-out liveness", () => {
           const server = yield* SyncServer.makeLiveWith({ concurrency: 2, tailIntervalMs })
           const follower = yield* Effect.forkChild(
             Stream.runDrain(
-              server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: runs * 2 }).pipe(
-                Stream.tap(record)
-              )
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: runs * 2 })
+                .pipe(
+                  Stream.tap(record)
+                )
             ),
             { startImmediately: true }
           )
@@ -303,7 +305,7 @@ describe("SyncServer bounded fan-out liveness", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLiveWith({ concurrency: 2 })
           return yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 5 }).pipe(
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 5 }).pipe(
               Stream.tap(record)
             )
           )
@@ -339,7 +341,7 @@ describe("SyncServer bounded fan-out liveness", () => {
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLiveWith({ concurrency: 2, tailIntervalMs: 25 })
           return yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 1 }).pipe(
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 1 }).pipe(
               Stream.tap(record)
             )
           )
@@ -391,7 +393,7 @@ describe("SyncServer bounded fan-out liveness", () => {
             )
           )
           return yield* Stream.runDrain(
-            server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 2 }).pipe(
+            server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 2 }).pipe(
               Stream.tap(record)
             )
           )
@@ -421,7 +423,7 @@ describe("SyncServer bounded fan-out liveness", () => {
           )
           const follower = yield* Effect.forkChild(
             Stream.runDrain(
-              server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 3 }).pipe(
+              server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 3 }).pipe(
                 Stream.tap(record)
               )
             ),

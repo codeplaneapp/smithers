@@ -79,7 +79,7 @@ describe("SyncServer against a catalog that repeats a run", () => {
     Effect.gen(function*() {
       const response = yield* Effect.gen(function*() {
         const server = yield* SyncServer.makeLive
-        return yield* server.read({ scope: { _tag: "Workspace" }, cursors: [], limit: 10 })
+        return yield* server.read({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], limit: 10 })
       }).pipe(
         Effect.provide(Layer.mergeAll(
           followingJournal(byRun),
@@ -107,7 +107,7 @@ describe("SyncServer against a catalog that repeats a run", () => {
           // ends the subscription before the repeat is ever reached, which
           // reports the absence of a bound rather than the absence of a
           // duplicate.
-          server.subscribe({ scope: { _tag: "Workspace" }, cursors: [], credit: 16 }).pipe(
+          server.subscribe({ protocolVersion: 1, scope: { _tag: "Workspace" }, cursors: [], credit: 16 }).pipe(
             Stream.tap((frame: SyncProtocol.Frame) =>
               Effect.sync(() => {
                 if (frame._tag === "Entries") {

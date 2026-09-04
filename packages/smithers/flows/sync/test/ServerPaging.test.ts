@@ -73,12 +73,12 @@ describe("SyncServer.read across a workspace", () => {
             [empty, busy],
             pagesOf(new Map([[busy, [entry(busy, 0), entry(busy, 1)]]]))
           )
-          return yield* server.read({ scope: workspace, cursors: [], limit: 10 })
+          return yield* server.read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 10 })
         })
       )
 
       expect(response.entries.map((value) => value.seq)).toEqual([0, 1])
-      expect(response.cursors).toEqual([{ runId: busy, afterSeq: 1 }])
+      expect(response.cursors).toEqual([{ generation: 0, runId: busy, afterSeq: 1 }])
       expect(response.done).toBe(true)
     }))
 
@@ -91,8 +91,9 @@ describe("SyncServer.read across a workspace", () => {
             pagesOf(new Map([[empty, [entry(empty, 7)]], [busy, [entry(busy, 0)]]]))
           )
           return yield* server.read({
+            protocolVersion: 1,
             scope: workspace,
-            cursors: [{ runId: empty, afterSeq: seq(7) }],
+            cursors: [{ generation: 0, runId: empty, afterSeq: seq(7) }],
             limit: 10
           })
         })
@@ -100,8 +101,8 @@ describe("SyncServer.read across a workspace", () => {
 
       expect(response.entries.map((value) => value.runId)).toEqual([busy])
       expect(response.cursors).toEqual([
-        { runId: empty, afterSeq: 7 },
-        { runId: busy, afterSeq: 0 }
+        { generation: 0, runId: empty, afterSeq: 7 },
+        { generation: 0, runId: busy, afterSeq: 0 }
       ])
     }))
 
@@ -121,7 +122,7 @@ describe("SyncServer.read across a workspace", () => {
               ])
             )
           )
-          return yield* server.read({ scope: workspace, cursors: [], limit: 2 })
+          return yield* server.read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 2 })
         })
       )
 
@@ -137,13 +138,13 @@ describe("SyncServer.read across a workspace", () => {
             [busy],
             pagesOf(new Map([[busy, [entry(busy, 0), entry(busy, 1), entry(busy, 2)]]]))
           )
-          return yield* server.read({ scope: { _tag: "Run", runId: busy }, cursors: [], limit: 2 })
+          return yield* server.read({ protocolVersion: 1, scope: { _tag: "Run", runId: busy }, cursors: [], limit: 2 })
         })
       )
 
       expect(response.entries.map((value) => value.seq)).toEqual([0, 1])
       expect(response.done).toBe(false)
-      expect(response.cursors).toEqual([{ runId: busy, afterSeq: 1 }])
+      expect(response.cursors).toEqual([{ generation: 0, runId: busy, afterSeq: 1 }])
     }))
 
   // The journal's own message is the SQLite driver's: it carries SQL text,
@@ -156,7 +157,7 @@ describe("SyncServer.read across a workspace", () => {
       const failure = yield* (
         Effect.gen(function*() {
           const server = yield* makeServer([busy], { entries: () => Effect.fail(cause) })
-          return yield* Effect.flip(server.read({ scope: workspace, cursors: [], limit: 10 }))
+          return yield* Effect.flip(server.read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 10 }))
         })
       )
       expect(failure).toBeInstanceOf(SyncError)
@@ -180,7 +181,7 @@ describe("SyncServer.read across a workspace", () => {
           const server = yield* makeServer([busy], {
             entries: () => Effect.fail(new Journal.JournalError({ code: "fence_lost", message: "fence lost" }))
           })
-          return yield* Effect.flip(server.read({ scope: workspace, cursors: [], limit: 10 }))
+          return yield* Effect.flip(server.read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 10 }))
         })
       )
 
@@ -197,12 +198,12 @@ describe("SyncServer.read across a workspace", () => {
           const overflow = yield* Effect.flip(
             (yield* makeServer([busy], {
               entries: () => Effect.fail(new Journal.JournalError({ code: "queue_overflow", message: "full" }))
-            })).read({ scope: workspace, cursors: [], limit: 10 })
+            })).read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 10 })
           )
           const decode = yield* Effect.flip(
             (yield* makeServer([busy], {
               entries: () => Effect.fail(new Journal.JournalError({ code: "decode_failed", message: "bad row" }))
-            })).read({ scope: workspace, cursors: [], limit: 10 })
+            })).read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 10 })
           )
           return [overflow.code, decode.code]
         })
@@ -224,7 +225,7 @@ describe("SyncServer.read across a workspace", () => {
       const failure = yield* (
         Effect.gen(function*() {
           const server = yield* makeServer([busy], { entries: () => Effect.fail(cause) })
-          return yield* Effect.flip(server.read({ scope: workspace, cursors: [], limit: 10 }))
+          return yield* Effect.flip(server.read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 10 }))
         })
       )
 
@@ -245,7 +246,7 @@ describe("SyncServer.read across a workspace", () => {
           const server = yield* makeServer([busy], {
             entries: () => Effect.fail(new Journal.JournalError({ code: "compacted", message: "no floor recorded" }))
           })
-          return yield* Effect.flip(server.read({ scope: workspace, cursors: [], limit: 10 }))
+          return yield* Effect.flip(server.read({ protocolVersion: 1, scope: workspace, cursors: [], limit: 10 }))
         })
       )
 
@@ -269,7 +270,7 @@ describe("SyncServer.subscribe over a workspace scope", () => {
               })
           })
           return yield* Stream.runCollect(
-            server.subscribe({ scope: workspace, cursors: [], credit: 3 })
+            server.subscribe({ protocolVersion: 1, scope: workspace, cursors: [], credit: 3 })
           )
         })
       )
