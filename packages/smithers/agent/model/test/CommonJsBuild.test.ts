@@ -32,7 +32,9 @@ describe("CommonJS build", () => {
         stdio: "pipe"
       })
     },
-    30_000
+    // Declaration generation traverses workspace dependencies; a loaded
+    // checkout can spend more than 30 seconds building before tests start.
+    120_000
   )
 
   it("shares ModelError identity across independently imported subpaths", () => {
