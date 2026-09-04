@@ -39,9 +39,11 @@ const cliPages = (directory) =>
     .map((name) => name.slice(0, -4))
 
 const markdownFiles = (directory) =>
-  readdirSync(directory, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.mdx?$/.test(entry.name))
-    .map((entry) => join(entry.parentPath, entry.name))
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (["node_modules", "dist", "coverage", ".git", ".flows"].includes(entry.name)) return []
+    const path = join(directory, entry.name)
+    return entry.isDirectory() ? markdownFiles(path) : entry.isFile() && /\.mdx?$/.test(entry.name) ? [path] : []
+  })
 
 describe("the CLI reference", () => {
   const verbSource = readFileSync(join(root, "packages/smithers/src/Verb.ts"), "utf8")
@@ -91,4 +93,29 @@ describe("the CLI reference", () => {
 
     assert.deepEqual(stale, [], `update documentation must name the next dist-tag:\n${stale.join("\n")}`)
   })
+
+  it("keeps installation commands on a published CLI tag", () => {
+    const files = [
+      ...markdownFiles(join(root, "packages")),
+      ...markdownFiles(join(root, "apps/site/src/content/docs"))
+    ]
+    const stale = files.flatMap((file) => readFileSync(file, "utf8").split("\n")
+      .filter((line) => /(?:npm (?:install|i)|npx|pnpm (?:add|dlx)|bun (?:add|x))\b/.test(line) && !line.includes("--filter"))
+      .filter((line) => /@smthrs\/cli(?=[\s`";]|$)/.test(line))
+      .map(() => file.slice(root.length + 1)))
+    assert.deepEqual(stale, [], `CLI install commands need an explicit tag: ${stale.join(", ")}`)
+  })
+
+  it("documents the built-in input and logging flags", () => {
+    const page = readFileSync(join(pagesDirectory, "index.mdx"), "utf8")
+    for (const flag of ["--wizard", "--log-level"]) assert.ok(page.includes(`| \`${flag}\` |`))
+  })
+
+  it("identifies the review service separately from the removed CLI verb", () => {
+    const page = readFileSync(join(root, "apps/site/src/content/docs/docs/guides/pr-review-action.mdx"), "utf8")
+    assert.ok(page.includes("`smithers-review`"))
+    assert.ok(page.includes("review` subcommand was removed"))
+    assert.ok(!page.includes("`smthrs review` runs"))
+  })
+
 })
