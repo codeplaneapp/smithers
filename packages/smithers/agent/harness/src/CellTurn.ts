@@ -649,6 +649,8 @@ const advance = (state: State, changes: Partial<ConstructorParameters<typeof Sta
  */
 export interface Input {
   readonly state: State
+  /** Resolves the host's seat vocabulary; kept outside serializable state. */
+  readonly contextWindowTokensFor?: ((seat: string) => Effect.Effect<number, HarnessError>) | undefined
   /** The flows this frame may call, already narrowed by seat visibility. */
   readonly flows: ReadonlyArray<Descriptor.FlowDescriptor>
   readonly limits?: Sandbox.Limits | undefined
@@ -1008,36 +1010,40 @@ const carries = (drained: Steering.DrainRecord): boolean =>
  */
 const steered = (
   state: State,
-  changes: Steering.DrainRecord["seatChanges"]
-): {
+  changes: Steering.DrainRecord["seatChanges"],
+  resolve: Input["contextWindowTokensFor"]
+): Effect.Effect<{
   readonly seat: string
   readonly modelParams: ModelRequest.GenerationParams
   readonly contextWindowTokens: number
-} => {
-  let seat = state.seat
-  let modelParams = state.modelParams
-  for (const change of changes) {
-    if (change._tag === "SeatChange") seat = change.seat
-    else {
-      modelParams = ModelRequest.GenerationParams.make({
-        maxTokens: modelParams.maxTokens,
-        temperature: modelParams.temperature,
-        topP: modelParams.topP,
-        topK: modelParams.topK,
-        stopSequences: modelParams.stopSequences,
-        thinkingBudget: modelParams.thinkingBudget,
-        reasoningEffort: change.thinking
-      })
+}, HarnessError> =>
+  Effect.gen(function*() {
+    let seat = state.seat
+    let modelParams = state.modelParams
+    for (const change of changes) {
+      if (change._tag === "SeatChange") seat = change.seat
+      else {
+        modelParams = ModelRequest.GenerationParams.make({
+          maxTokens: modelParams.maxTokens,
+          temperature: modelParams.temperature,
+          topP: modelParams.topP,
+          topK: modelParams.topK,
+          stopSequences: modelParams.stopSequences,
+          thinkingBudget: modelParams.thinkingBudget,
+          reasoningEffort: change.thinking
+        })
+      }
     }
-  }
-  return {
-    seat,
-    modelParams,
-    contextWindowTokens: seat === state.seat
-      ? state.contextWindowTokens
-      : ContextWindow.contextWindowTokensFor(modelIdFromSeat(seat))
-  }
-}
+    return {
+      seat,
+      modelParams,
+      contextWindowTokens: seat === state.seat
+        ? state.contextWindowTokens
+        : resolve === undefined
+        ? ContextWindow.contextWindowTokensFor(modelIdFromSeat(seat))
+        : yield* resolve(seat)
+    }
+  })
 
 /**
  * The window the next frame renders, re-keyed when a steer moved the seat.
@@ -1949,7 +1955,11 @@ const frame = (
       Effect.gen(function*() {
         const drained = yield* drain(!hasNextFrame)
         if (!hasNextFrame) return { _tag: "Done" }
-        const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
+        const { contextWindowTokens, modelParams, seat } = yield* steered(
+          state,
+          drained.seatChanges,
+          input.contextWindowTokensFor
+        )
         const context = appended(
           contextWindow,
           answer.message,
@@ -1981,27 +1991,32 @@ const frame = (
     const resumed = (
       drained: Steering.DrainRecord,
       changes: Partial<ConstructorParameters<typeof State>[0]> = {}
-    ): Extract<Step, { readonly _tag: "Continue" }> => {
-      const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
-      const context = appended(
-        contextWindow,
-        answer.message,
-        [ModelRequest.Message.user(printed), ...drained.inserts],
-        liveCellEcho
-      )
-      return {
-        _tag: "Continue",
-        state: advance(state, {
-          frame: state.frame + 1,
-          seat,
-          modelParams,
-          contextWindowTokens,
-          contextWindow: windowOn(state, seat, context),
-          truncatedOutputs: TruncatedOutput.retain(ledger),
-          ...changes
-        })
-      }
-    }
+    ): Effect.Effect<Extract<Step, { readonly _tag: "Continue" }>, HarnessError> =>
+      Effect.gen(function*() {
+        const { contextWindowTokens, modelParams, seat } = yield* steered(
+          state,
+          drained.seatChanges,
+          input.contextWindowTokensFor
+        )
+        const context = appended(
+          contextWindow,
+          answer.message,
+          [ModelRequest.Message.user(printed), ...drained.inserts],
+          liveCellEcho
+        )
+        return {
+          _tag: "Continue",
+          state: advance(state, {
+            frame: state.frame + 1,
+            seat,
+            modelParams,
+            contextWindowTokens,
+            contextWindow: windowOn(state, seat, context),
+            truncatedOutputs: TruncatedOutput.retain(ledger),
+            ...changes
+          })
+        }
+      })
 
     if (produced === undefined) {
       const rejection = refused!
@@ -2606,7 +2621,7 @@ const frame = (
         // an answer it has already been given. The frame is judged as an
         // honored park still is — waiting is not evasion — so the read-only
         // streak is carried rather than advanced.
-        const step = resumed(answered, {
+        const step = yield* resumed(answered, {
           pendingReadOnlyDemand: undefined,
           workspace: closed,
           repeatFrames,
@@ -2681,7 +2696,7 @@ const frame = (
     const drained = yield* drain(transition._tag === "complete" || !hasNextFrame)
     if (transition._tag === "complete" && carries(drained)) {
       printed += `\n\nThe completed answer before this follow-up:\n${transition.output}`
-      const step = resumed(drained, {
+      const step = yield* resumed(drained, {
         bouncedCompletion: transition.output,
         workspace: closed,
         readOnlyFrames,
@@ -2921,7 +2936,11 @@ const frame = (
         outcome: "continue"
       })
     )
-    const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
+    const { contextWindowTokens, modelParams, seat } = yield* steered(
+      state,
+      drained.seatChanges,
+      input.contextWindowTokensFor
+    )
     // The intervention. At the cap the next frame is told, structurally, that
     // it must write something or say why it cannot; a justification is typed
     // data on the transition, is recorded, and buys a bounded quiet spell

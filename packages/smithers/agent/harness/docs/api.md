@@ -238,6 +238,13 @@ serializes into the journal; the realm itself is not in it and cannot be,
 because a live JavaScript context is rebuilt on resume by re-executing the
 cells that built it.
 
+`CellTurn.run` accepts an optional `contextWindowTokensFor(seat)` effect on
+its runtime `Input`. A seat steer resolves its next compaction budget through
+this callback. The agent adapters supply their host `SeatResolver`, including
+logical seats such as `reviewer`; direct harness callers without a callback use
+the model-id catalog. The callback lives outside serializable `State`; the
+resolved token count is carried in state across frames.
+
 `CellTurn.teach(contextWindow, flows)` prepends the cell contract and the
 callable-flow catalog to a context window as prefix segments, so the teaching
 is stable for the life of the run.

@@ -99,6 +99,8 @@ export interface Options {
    * holds a credential of its own.
    */
   readonly seat: Seat.Seat
+  /** Resolves context budgets after a steer, using the host seat vocabulary. */
+  readonly contextWindowTokensFor?: CellTurn.Input["contextWindowTokensFor"]
   /** The task the run was admitted with. */
   readonly prompt: string
   /** Stable system teaching placed ahead of the cell contract. */
@@ -438,7 +440,12 @@ const runProductionUnmeasured: Service["run"] = (options) =>
             unresolvedCap: options.unresolvedCap,
             approvalChannel: options.approvalChannel
           })
-          return CellTurn.run({ state, flows, limits: options.limits }).pipe(
+          return CellTurn.run({
+            state,
+            flows,
+            limits: options.limits,
+            contextWindowTokensFor: options.contextWindowTokensFor
+          }).pipe(
             Stream.provideService(EngineLike.EngineLike, withRequestPlugins(port, kernel.plugins))
           )
         })

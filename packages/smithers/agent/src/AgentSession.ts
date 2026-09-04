@@ -1443,6 +1443,13 @@ export const make = (
           Effect.forever(Effect.andThen(Effect.sleep(Duration.millis(250)), flush))
         )
         yield* agent.run({
+          contextWindowTokensFor: (id) =>
+            seats.resolve(id).pipe(
+              Effect.map((resolved) => resolved.contextWindowTokens),
+              Effect.mapError((cause) =>
+                new HarnessError.HarnessError({ code: "assembly_failed", message: cause.message, cause })
+              )
+            ),
           session: payload.runId,
           seat,
           modelParams: ModelRequest.GenerationParams.make({

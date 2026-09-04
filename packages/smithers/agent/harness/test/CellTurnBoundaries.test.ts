@@ -1125,6 +1125,31 @@ describe("CellTurn steering boundaries", () => {
     expect(model.recorder.requests[1]?.modelId).toBe("second-model")
   })
 
+  it("uses the host context budget for a logical steered seat", async () => {
+    let drained = false
+    const steering = source(() => {
+      if (drained) return nothing
+      drained = true
+      return { ...nothing, seatChanges: [{ _tag: "SeatChange", delivery: "steer", admittedAt: 1, seat: "reviewer" }] }
+    })
+    const model = ScriptedModel.make([emits(`console.log("next")`), prose("Summary."), emits(`ctx.done("done")`)])
+    const engine = ScriptedEngine.make(model.model)
+    const resolved: Array<string> = []
+    const { events, failure } = await collect({
+      state: state({ contextWindow: crowded, contextWindowTokens: 1_000_000 }),
+      flows: [],
+      contextWindowTokensFor: (seat) =>
+        Effect.sync(() => {
+          resolved.push(seat)
+          return 40_000
+        })
+    }, { engine: engine.layer, steering })
+    expect(failure).toBeUndefined()
+    expect(of(events, "compaction-settled")).toHaveLength(1)
+    expect(resolved).toEqual(["reviewer"])
+    expect(model.recorder.requests).toHaveLength(3)
+  })
+
   it("recomputes the compaction budget when steering to a smaller seat", async () => {
     let drained = false
     const steering = source(() => {
@@ -2064,7 +2089,13 @@ describe("CellTurn delivery through the durable notification queue", () => {
   })
 
   it("keeps a completed answer when its carried steer reaches the frame budget", async () => {
-    const { model, events } = await deliver(emits("ctx.done(\"first answer\")"), false, 2, "steer", emits("console.log(\"working\")"))
+    const { model, events } = await deliver(
+      emits("ctx.done(\"first answer\")"),
+      false,
+      2,
+      "steer",
+      emits("console.log(\"working\")")
+    )
     expect(model.recorder.requests).toHaveLength(2)
     expect(resolvedText(events)).toContain("frame budget of 2 is exhausted")
     expect(resolvedText(events)).toContain("first answer")
