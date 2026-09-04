@@ -584,6 +584,10 @@ describe("vitest coverage isolation conformance", () => {
     // JSDoc rule harness; pinning it here keeps that non-workspace gate from
     // appearing or disappearing without conformance review.
     //
+    // `lint:jsdoc` is the operator alias for CI's `//:jsdocTree`: it enforces
+    // public-export JSDoc across all three package depths with the root config.
+    // Keep its source globs aligned with the target below.
+    //
     // `test:e2e` is the macOS developer entry point for the packaged
     // Electrobun lane. It builds a stable bundle and drives that bundle with
     // Bun; CI does not invoke it because the package graph has no macOS host.
@@ -609,11 +613,19 @@ describe("vitest coverage isolation conformance", () => {
       "docs:sync": "node apps/docs/shared/sync-content.mjs --all",
       dev: "pnpm --filter smithers-ui run start",
       lint: "pnpm --recursive --if-present run lint",
+      "lint:jsdoc":
+        "eslint --config eslint.config.js \"packages/*/src/**/*.ts\" \"packages/*/*/src/**/*.ts\" \"packages/*/*/*/src/**/*.ts\" --max-warnings=0",
       test: "pnpm --recursive --if-present run test",
       "test:e2e": "bun apps/ui/e2e/packaged/run.ts",
       "test:examples": "pnpm --filter @smthrs/examples run test",
       "test:jsdoc": "node --test eslint.jsdoc.test.mjs"
     })
+    const targets = readFileSync(join(packagesDir, "..", "PACKAGE.ts"), "utf8")
+    const jsdocTree = targets.match(/const jsdocTree = Smithers\.EsLint\(\{([\s\S]*?)\n\}\)/)?.[1]
+    expect(jsdocTree).toBeDefined()
+    const targetGlobs = Array.from(jsdocTree!.matchAll(/Smithers\.glob\("([^"]+)"\)/g), (match) => match[1])
+    const scriptGlobs = Array.from(root.scripts!["lint:jsdoc"]!.matchAll(/"([^"]+)"/g), (match) => match[1])
+    expect(targetGlobs).toEqual(scriptGlobs)
   })
 
   it("pins the CI steps that reach the target graph and the jj install (issue #166)", () => {
