@@ -141,7 +141,7 @@ const missingBinary = Layer.succeed(ChildProcessSpawner)(
 )
 
 const run = <A, E>(effect: Effect.Effect<A, E, Jj>, spawner: Layer.Layer<ChildProcessSpawner>) =>
-  Effect.provide(effect, Layer.provide(NodeJj.layerSpawner, spawner))
+  Effect.provide(effect, Layer.provide(NodeJj.layerSpawnerAt(directory), spawner))
 
 process.on("exit", () => rmSync(directory, { recursive: true, force: true }))
 

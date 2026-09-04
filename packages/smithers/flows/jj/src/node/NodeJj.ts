@@ -541,30 +541,28 @@ const operations = (run: Run, repositoryRoot?: string) => {
   const repositoryCritical = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
     Effect.suspend(() => withRepositoryLock(method, repositoryRoot ?? process.cwd(), effect))
 
-  /**
-   * `jj` snapshots the working copy on every command, so a snapshot is a
-   * describe of the current change followed by a `new` to open a fresh one.
-   * The change id returned is the one just closed, the state callers will
-   * `restore` to.
-   *
-   * With no message there is no describe at all. `jj describe` without `-m`
-   * starts `$JJ_EDITOR` (`nano` when unset) and waits for it, even with stdout
-   * on a pipe and stdin on `/dev/null`, which would make an unnamed snapshot
-   * hold an interactive child process. The describe is not needed to take the
-   * snapshot either: every jj command snapshots the working copy, so the `log`
-   * below does it, and skipping the describe leaves the existing description
-   * alone where `-m ""` would erase it.
-   */
+  /** Close the current change before labeling it, and preserve any operator description. */
   const snapshot = (message?: string) =>
     repositoryCritical(
       "snapshot",
-      (message === undefined
-        ? Effect.void
-        : Effect.asVoid(inRepository("snapshot", ["describe", "-m", message, "--quiet"]))).pipe(
-          Effect.andThen(inRepository("snapshot", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"])),
-          Effect.tap(() => inRepository("snapshot", ["new", "--quiet"])),
-          Effect.map((changeId) => ({ changeId: changeId.trim() }))
-        )
+      Effect.gen(function*() {
+        const output = yield* inRepository("snapshot", [
+          "log",
+          "-r",
+          "@",
+          "--no-graph",
+          "-T",
+          "change_id.short() ++ \"\\n\" ++ description"
+        ])
+        const [changeId, ...description] = output.split("\n")
+        yield* inRepository("snapshot", ["new", "--quiet"])
+        // Describing @ would overwrite the operator's active work. Only add an
+        // engine label to an unnamed, closed change; never erase existing notes.
+        if (message !== undefined && description.join("\n") === "") {
+          yield* inRepository("snapshot", ["describe", "-r", changeId!, "-m", message, "--quiet"])
+        }
+        return { changeId: changeId!.trim() }
+      })
     )
 
   const restore = (changeId: string) =>

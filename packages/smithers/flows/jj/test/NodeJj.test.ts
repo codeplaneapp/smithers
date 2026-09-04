@@ -95,6 +95,35 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       expect(status).toContain("Working copy")
     }))
 
+  it.effect("preserves the operator's description when closing a snapshot", () =>
+    Effect.gen(function*() {
+      const description = "operator's work\n\nKeep these notes.\n"
+      execFileSync("jj", ["describe", `--message=${description}`], { cwd: repository, stdio: "ignore" })
+      const { changeId } = yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("engine checkpoint")))
+      const readDescription = (revision: string) =>
+        execFileSync(
+          "jj",
+          ["log", "--no-graph", "-r", revision, "-T", "description"],
+          { cwd: repository, encoding: "utf8" }
+        )
+      expect(readDescription(changeId)).toBe(description)
+      expect(readDescription("@")).toBe("")
+    }))
+
+  it.effect("labels an unnamed closed snapshot and leaves the fresh working copy unnamed", () =>
+    Effect.gen(function*() {
+      execFileSync("jj", ["describe", "--message="], { cwd: repository, stdio: "ignore" })
+      const { changeId } = yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("engine checkpoint")))
+      expect(execFileSync("jj", ["log", "--no-graph", "-r", changeId, "-T", "description"], {
+        cwd: repository,
+        encoding: "utf8"
+      })).toBe("engine checkpoint\n")
+      expect(execFileSync("jj", ["log", "--no-graph", "-r", "@", "-T", "description"], {
+        cwd: repository,
+        encoding: "utf8"
+      })).toBe("")
+    }))
+
   it.effect("captures and restores a new 2 MiB artifact", () =>
     Effect.gen(function*() {
       const file = join(repository, "large-artifact.bin")

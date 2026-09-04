@@ -22,6 +22,11 @@ import { isJjError, Jj, type JjError } from "../src/Jj.ts"
 import * as NodeJj from "../src/node/NodeJj.ts"
 
 const script = `#!/bin/sh
+if [ "$FLOWS_FAKE_JJ" = "describe-fails" ]; then
+  if [ "$1" = "describe" ]; then echo "Error: description refused" 1>&2; exit 1; fi
+  if [ "$1" = "log" ]; then echo "snapshotid"; fi
+  exit 0
+fi
 case "$FLOWS_FAKE_JJ" in
   refused) echo "Warning: Refused to snapshot some files:" 1>&2; echo "  artifact.bin: 2.0MiB (2097152 bytes); the maximum size allowed is 1.0MiB (1048576 bytes)" 1>&2; exit 0 ;;
   conflict) echo "Error: would leave conflicts in note.txt" 1>&2; exit 1 ;;
@@ -77,7 +82,9 @@ const waitForExit = (pid: number) =>
     { times: 500, schedule: Schedule.spaced(10) }
   )
 
-const run = <A, E>(effect: Effect.Effect<A, E, Jj>) => Effect.provide(effect, NodeJj.layer)
+let directory: string
+
+const run = <A, E>(effect: Effect.Effect<A, E, Jj>) => Effect.provide(effect, NodeJj.layerAt(directory))
 
 /** `Jj`'s channel names the kernel's failures too; an undecorated layer produces only jj's own. */
 const asJjError = (error: unknown): JjError => {
@@ -91,7 +98,6 @@ const status = (mode: string) => {
 }
 
 describe.skipIf(process.platform === "win32")("NodeJj failure classification", () => {
-  let directory: string
   let previousPath: string | undefined
 
   beforeAll(async () => {
@@ -266,12 +272,12 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
     Effect.gen(function*() {
       // `command` is journaled with the error and the argv holds whatever the
       // caller passed as a snapshot message.
-      process.env.FLOWS_FAKE_JJ = "stdout-only"
+      process.env.FLOWS_FAKE_JJ = "describe-fails"
       const error = asJjError(yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.snapshot("m".repeat(2000))))))
 
       expect(error.command!.length).toBeLessThan(600)
       expect(error.command!.endsWith("…")).toBe(true)
-      expect(error.command!.startsWith("jj describe -m mmm")).toBe(true)
+      expect(error.command!.startsWith("jj describe -r snapshotid -m mmm")).toBe(true)
     }))
 
   it.live("names a starting path that is not there when asked for its root", () =>
@@ -395,7 +401,6 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
 })
 
 describe.skipIf(process.platform === "win32")("NodeJj spawn errors", () => {
-  let directory: string
   let previousPath: string | undefined
 
   beforeAll(async () => {

@@ -72,7 +72,8 @@ a hand-written test double may leave them out.
 | `revert(changeId)` (optional)         | `(changeId: ChangeId) => Effect<{ readonly reverted: ReadonlyArray<string> }, JjFailure>`       |
 
 `snapshot` commits the working copy and returns the change id to restore to
-later: it describes the current change, reads its id, and opens a fresh one.
+later: it closes the current change and opens a fresh one. Node and Bun only
+label a closed change that has no existing description.
 With no message there is no `describe` at all, because `jj describe` without
 `-m` starts `$JJ_EDITOR` and waits for it.
 
@@ -185,6 +186,12 @@ restores, or diffs into another checkout. A relative `path` handed to
 directory, so pass absolute lane paths. `root(from)` is exempt from the binding
 by design, because its argument names the directory jj must run in. A relative
 root is a wiring mistake and throws a `TypeError` at construction.
+
+Node and Bun `snapshot(message)` first close the current change, then describe
+that closed change only if it was unnamed. Existing operator descriptions are
+preserved; the fresh working copy remains unnamed. Without a message, no
+`describe` or editor runs. The browser's frozen WASM ABI still replaces the
+closed change's description when a message is supplied.
 
 Repository state operations are fenced as a unit. `snapshot`, `restore`, and
 `diff` share one single-permit semaphore per repository inside a process and an

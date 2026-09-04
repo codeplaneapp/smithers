@@ -79,14 +79,11 @@ const program = Effect.gen(function*() {
 Effect.runPromise(program)
 ```
 
-`snapshot(message)` describes the current change with that message and then
-opens a fresh one. With no message it takes the snapshot and leaves the
-description alone: it runs no `jj describe` at all, because `jj describe`
-without `-m` starts `$JJ_EDITOR` and waits for it, and because `-m ""` would
-erase a description the caller never asked to change. The change id still
-comes back, since every jj command snapshots the working copy first.
-[NodeJj.test.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/test/NodeJj.test.ts)
-pins that with a marker editor on `JJ_EDITOR`.
+`snapshot(message)` closes the current change and opens a fresh one, then labels
+only the closed change if it had no description. Existing operator descriptions
+are preserved even when the engine supplies a message. With no message, no
+`describe` runs and no editor opens. The returned change id always identifies
+the closed change, and the new working copy remains unnamed.
 
 `SMITHERS_JJ_PATH` names the `jj` binary the Node and Bun layers spawn. An
 override that names an existing file stays authoritative even when it cannot be
@@ -172,6 +169,10 @@ equivalent) after jj operations before assuming reload-survival. The layer
 does not own the mount and never syncs for you.
 
 **The divergences from `NodeJj` are real and are not hidden:**
+
+- **Snapshot descriptions.** The browser's frozen WASM ABI replaces the closed
+  change's description when a message is supplied. Node and Bun preserve an
+  existing description and only label unnamed closed changes.
 
 - **Simple backend, no git.** Repos are created with jj's Simple backend
   (`Workspace::init_simple`), not the git backend, because `gix` is compiled
