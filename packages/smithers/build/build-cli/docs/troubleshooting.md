@@ -147,7 +147,7 @@ Bubblewrap cannot expose only the host loopback interface. Sharing it requires
 sharing the host network namespace, which also grants egress, so the executor
 fails closed instead. Declare `{ network: true }` only if full network access
 is acceptable. A target with `services` must make one of these network choices
-explicit; listing a service does not silently open the network.
+explicit, or declare `sandbox: "none"` to opt out of confinement; listing a service does not silently open the network.
 
 ## A target wrote outside its write set
 

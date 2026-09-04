@@ -1613,7 +1613,7 @@ const visit = async (
   const services = attrTargets(attrs, "services")
   const declaredSandbox = attrMember(attrs, "sandbox") as PackageNode["sandbox"]
   if (
-    services.length > 0 &&
+    services.length > 0 && declaredSandbox !== "none" &&
     (typeof declaredSandbox !== "object" ||
       (declaredSandbox.network !== "loopback" && declaredSandbox.network !== true))
   ) {
