@@ -2007,6 +2007,7 @@ describe("CellTurn delivery through the durable notification queue", () => {
     ["refused park", emits("ctx.park(\"waiting-input\", \"which branch?\")"), false],
     ["honored park", emits("ctx.park(\"waiting-input\", \"which branch?\")"), true],
     ["complete", emits("ctx.done(\"first answer\")"), false],
+    ["mutating completion", emits("await ctx.call(\"edit\", {}); ctx.done(\"edited\")"), false],
     ["continue", emits("console.log(\"continue\")"), false]
   ] as const
 
