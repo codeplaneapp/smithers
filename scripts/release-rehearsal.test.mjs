@@ -1,5 +1,7 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
@@ -242,5 +244,35 @@ test("release rebuilds and byte-compares the committed wasm before packing", () 
     assert.ok(steps.indexOf(install) < steps.indexOf(actual))
     assert.ok(steps.indexOf(actual) < pack)
     assert.equal(actual.if, undefined)
+  }
+})
+
+test("a colocated rehearsal skips initialization and continues to the next gate", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "release-colocated-")))
+  try {
+    mkdirSync(join(root, "scripts"))
+    mkdirSync(join(root, ".jj"))
+    cpSync(join(repoRoot, "scripts/release-rehearsal.mjs"), join(root, "scripts/release-rehearsal.mjs"))
+    writeFileSync(join(root, "workflow.yml"), [
+      "name: Fixture", "jobs:", "  publish:", "    steps:",
+      "      - name: Initialize colocated jj repository",
+      "        run: exit 23",
+      "      - name: Following gate",
+      "        run: echo gate passed"
+    ].join("\n"))
+    const run = () => spawnSync(process.execPath, [
+      join(root, "scripts/release-rehearsal.mjs"), "--workflow", "workflow.yml",
+      "--transcript", join(root, "transcript.json")
+    ], { encoding: "utf8", timeout: 30_000 })
+    const colocated = run()
+    assert.equal(colocated.status, 0, colocated.stdout + colocated.stderr)
+    const transcript = JSON.parse(readFileSync(join(root, "transcript.json"), "utf8"))
+    assert.deepEqual(transcript.steps.map((entry) => entry.status), ["skipped", "passed"])
+    assert.match(colocated.stdout, /already colocated/)
+    rmSync(join(root, ".jj"), { recursive: true })
+    assert.equal(run().status, 1, "a fresh checkout must still attempt initialization")
+    assert.equal(JSON.parse(readFileSync(join(root, "transcript.json"), "utf8")).steps[0].exitCode, 23)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

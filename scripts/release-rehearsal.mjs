@@ -13,6 +13,8 @@
  * DRY_RUN to true through the same expression the dispatched workflow uses, so
  * publication is skipped by the workflow's own condition, not by this driver.
  *
+ * Existing `.jj` colocation skips repository initialization automatically.
+ *
  * usage:
  *   node scripts/release-rehearsal.mjs --tag v1.0.0-rc.0 [options]
  *
@@ -31,7 +33,7 @@
  *   --log <path>        write the combined step output here
  */
 import { spawn } from "node:child_process"
-import { appendFileSync, createWriteStream, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync, createWriteStream, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -525,6 +527,10 @@ export const main = async (argv) => {
     }
     if (options.only.length > 0 && !options.only.some((fragment) => name.includes(fragment))) {
       announce("skipped", "--only")
+      continue
+    }
+    if (name === "Initialize colocated jj repository" && existsSync(join(repoRoot, ".jj"))) {
+      announce("skipped", "repository is already colocated")
       continue
     }
     if (step.uses !== undefined) {
