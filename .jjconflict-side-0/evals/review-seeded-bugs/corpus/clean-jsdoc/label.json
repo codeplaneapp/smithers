@@ -1,5 +1,0 @@
-{
-  "fixture": "clean-jsdoc",
-  "clean": true,
-  "description": "JSDoc-only documentation addition; a review should not surface findings."
-}

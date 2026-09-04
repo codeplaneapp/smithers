@@ -1,9 +1,0 @@
-// Deep reviewed and polished by a human on 2026-08-10.
-
-/**
- * Runtime identity shared by action interfaces and constructors.
- *
- * @private
- * @since 0.1.0
- */
-export const TypeId = "@smthrs/flow/Action"

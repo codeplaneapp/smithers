@@ -1,1 +1,0 @@
-data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_abort","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"par"}}]},"index":0}],"created":1787801954,"id":"chatcmpl_abort","model":"qwen2.5:3b","object":"chat.completion.chunk"}

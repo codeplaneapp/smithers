@@ -1,5 +1,0 @@
-event: response.output_item.added
-data: {"type":"response.output_item.added","item_id":"fc_abort","item":{"type":"function_call","id":"fc_abort","call_id":"call_abort","name":"write","arguments":""}}
-
-event: response.function_call_arguments.delta
-data: {"type":"response.function_call_arguments.delta","item_id":"fc_abort","delta":"{\"path\":"}

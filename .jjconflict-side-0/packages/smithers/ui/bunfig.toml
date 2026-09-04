@@ -1,8 +1,0 @@
-# Radix primitives capture `globalThis.document` at module-load time (their
-# SSR-safe useLayoutEffect shim resolves to a no-op when no document exists),
-# and ESM imports are hoisted above any in-file GlobalRegistrator.register()
-# call. Registering happy-dom in a preload guarantees the DOM exists before
-# radix-ui loads, so portals and layout effects run in tests. Follows the
-# gateway-react preload precedent (happy-dom-ws-guard).
-[test]
-preload = ["./tests/happy-dom-preload.ts"]

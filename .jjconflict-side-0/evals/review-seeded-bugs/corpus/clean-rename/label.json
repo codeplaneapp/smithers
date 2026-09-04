@@ -1,5 +1,0 @@
-{
-  "fixture": "clean-rename",
-  "clean": true,
-  "description": "Local variable rename only; a review should not surface findings."
-}

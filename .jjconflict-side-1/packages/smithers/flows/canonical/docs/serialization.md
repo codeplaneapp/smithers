@@ -1,1 +1,0 @@
-Decoding through `Canonical` produces RFC 8785 JSON. The wrapped `canonicalize` library sorts object keys, preserves array order, uses deterministic number formatting, and rejects inputs that cannot produce valid canonical JSON. The wrapper additionally rejects lone Unicode surrogates.

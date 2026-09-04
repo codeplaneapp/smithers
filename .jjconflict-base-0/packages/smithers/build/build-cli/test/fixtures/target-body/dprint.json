@@ -1,8 +1,0 @@
-{
-  "includes": ["src/**/*.ts"],
-  "plugins": ["https://plugins.dprint.dev/typescript-0.93.4.wasm"],
-  "typescript": {
-    "semiColons": "asi",
-    "quoteStyle": "alwaysDouble"
-  }
-}

@@ -1,2 +1,0 @@
-{"name":"adds numbers","input":{"left":1,"right":2},"expected":3}
-{"name":"multiplies numbers","input":{"left":2,"right":4},"expected":8}

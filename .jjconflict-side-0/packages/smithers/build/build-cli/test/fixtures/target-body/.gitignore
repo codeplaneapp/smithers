@@ -1,6 +1,0 @@
-.flows/
-.github/
-dist/
-generated-tsconfig.json
-generated.txt
-node_modules/
