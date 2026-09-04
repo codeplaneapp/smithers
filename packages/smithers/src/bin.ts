@@ -183,17 +183,18 @@ const main = Effect.gen(function*() {
   // Hold parser documents until we know whether input collection failed.
   // A typed missing-argument sentence replaces the parser's help page on
   // pipes. Once a handler starts, documents and streams pass through live.
-  const console = yield* Console.Console
+  const terminal = yield* Console.Console
   let parsing = process.stdin.isTTY !== true
   const pending: Array<() => void> = []
   const flush = () => {
     parsing = false
     for (const write of pending.splice(0)) write()
   }
-  const parsedConsole = Object.assign(Object.create(console) as Console.Console, {
-    log: (...args: ReadonlyArray<unknown>) => parsing ? pending.push(() => console.log(...args)) : console.log(...args),
+  const parsedConsole = Object.assign(Object.create(terminal) as Console.Console, {
+    log: (...args: ReadonlyArray<unknown>) =>
+      parsing ? pending.push(() => terminal.log(...args)) : terminal.log(...args),
     error: (...args: ReadonlyArray<unknown>) =>
-      parsing ? pending.push(() => console.error(...args)) : console.error(...args)
+      parsing ? pending.push(() => terminal.error(...args)) : terminal.error(...args)
   })
   yield* Command.run(
     Command.provide(cli, () => {
