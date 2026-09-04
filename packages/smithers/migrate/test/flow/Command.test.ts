@@ -272,7 +272,7 @@ describe("Command.render", () => {
     const report = reportWith("apply", [{ id: "workflow:a", status: "migrated" }])
     const text = Command.render(report, "human", "/work/.smithers-migrate")
 
-    expect(text).toContain("smithers migrate apply: /work")
+    expect(text).toContain("smthrs migrate apply: /work")
     expect(text).toContain("1 migrated")
     expect(text).toContain("Run state: clean")
     expect(text).toContain("Report: /work/.smithers-migrate/report.md")

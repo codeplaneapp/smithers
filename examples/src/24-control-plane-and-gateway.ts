@@ -39,7 +39,7 @@
  * after the receipt is in hand orders the two writes.
  *
  * **Two databases, one journal.** The plane and the engine keep their own run
- * tables, which is what `smithers` itself does: `.flows/control.db` holds plans,
+ * tables, which is what `smthrs` itself does: `.flows/control.db` holds plans,
  * approvals, and the plane's projection of each run, `.flows/engine.db` holds
  * the durable execution state. They cannot share one, because a plane run row
  * and an engine run row are different documents under the same key. They DO

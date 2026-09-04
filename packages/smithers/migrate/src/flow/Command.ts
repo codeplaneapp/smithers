@@ -51,7 +51,7 @@ export const MigrateOptions = Options.MigrateOptions
 export type MigrateOptions = Options.MigrateOptions
 
 /**
- * The name the control plane knows this flow by, so `smithers plan migrate`,
+ * The name the control plane knows this flow by, so `smthrs plan migrate`,
  * `approve`, and `run` reach the same execution the CLI verb does.
  *
  * @category models
@@ -243,7 +243,7 @@ export const layerNode = (config: {
  * The migration's own registrations, for a host that already has an engine.
  *
  * A durable host — `@smthrs/flows`' `NodeRuntime` — takes this as its
- * `registerFlows` layer, and then `smithers plan migrate` / `approve` / `run`
+ * `registerFlows` layer, and then `smthrs plan migrate` / `approve` / `run`
  * execute the same flow under the same journal as everything else.
  *
  * @category layers
@@ -280,7 +280,7 @@ export const render = (
   const byStatus = (status: Report.UnitReport["status"]): number =>
     report.units.filter((unit) => unit.status === status).length
   const lines: Array<string> = [
-    `smithers migrate ${report.mode}: ${report.root}`,
+    `smthrs migrate ${report.mode}: ${report.root}`,
     "",
     `Units: ${byStatus("planned")} planned, ${byStatus("migrated")} migrated, ${byStatus("failed")} failed, ${
       byStatus("blocked")

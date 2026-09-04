@@ -41,12 +41,12 @@ describe("Archive.rewriteManifest", () => {
       .toBe("4.0.0-rc.108")
   })
 
-  it("rewrites `smithers up <file>` into `smithers run <flow>`", () => {
+  it("rewrites `smithers up <file>` into `smthrs run <flow>`", () => {
     const { scripts } = Archive.rewriteManifest(read("jsx-single", "package.json"), { remove: [], add: [] })
     const start = scripts.find((entry) => entry.name === "start")
 
     expect(start?.before).toContain("smithers up simple-workflow.jsx")
-    expect(start?.after).toBe("smithers run simple-workflow --input '{\"topic\":\"x\"}'")
+    expect(start?.after).toBe("smthrs run simple-workflow --input '{\"topic\":\"x\"}'")
     expect(start?.unsupported).toBeUndefined()
   })
 
@@ -54,7 +54,7 @@ describe("Archive.rewriteManifest", () => {
     const { scripts } = Archive.rewriteManifest(read("plue-pack", "package.json"), { remove: [], add: [] })
 
     expect(scripts.find((entry) => entry.name === "ci")?.after)
-      .toBe("smithers run pipelines/ci-fast -d")
+      .toBe("smthrs run pipelines/ci-fast -d")
     expect(scripts.find((entry) => entry.name === "wf")?.after).toBe("smithers workflow run")
     expect(scripts.find((entry) => entry.name === "wf")?.unsupported).toBeUndefined()
   })
@@ -335,7 +335,7 @@ describe("Archive.run", () => {
       }
       expect(manifest.dependencies["smthrs"]).toBeUndefined()
       expect(manifest.dependencies["effect"]).toBe(Archive.effectVersion)
-      expect(manifest.scripts["start"]).toContain("smithers run simple-workflow")
+      expect(manifest.scripts["start"]).toContain("smthrs run simple-workflow")
       const tsconfig = JSON.parse(readFileSync(join(root, "tsconfig.json"), "utf8")) as {
         compilerOptions: Record<string, unknown>
       }

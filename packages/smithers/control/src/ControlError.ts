@@ -246,7 +246,7 @@ export class NoMatchingWait extends Schema.TaggedError<NoMatchingWait>()("/contr
    */
   override get message(): string {
     return `no wait point named "${this.waitName}" is open on run ${this.runId}. ` +
-      `Read \`smithers status ${this.runId}\` to see what that run is waiting for.`
+      `Read \`smthrs status ${this.runId}\` to see what that run is waiting for.`
   }
 }
 

@@ -132,7 +132,7 @@ export interface ScriptRewrite {
  * Rewrites the old CLI invocations in a script map.
  *
  * `smithers up <file>` and `smithers workflow run <file>` become
- * `smithers run <flow>`, because that is the verb that exists. A verb with no
+ * `smthrs run <flow>`, because that is the verb that exists. A verb with no
  * 1.0 counterpart is left exactly as it is and reported: silently deleting a
  * script an operator depends on would be worse than leaving one that fails
  * loudly.
@@ -147,7 +147,7 @@ export const rewriteScripts = (
     const match = oldCliPattern.exec(before)
     if (match !== null) {
       const flow = Units.flowName(match[2]!)
-      const after = before.replace(match[0], `${match[0].startsWith(" ") ? " " : ""}smithers run ${flow}`)
+      const after = before.replace(match[0], `${match[0].startsWith(" ") ? " " : ""}smthrs run ${flow}`)
       return { name, before, after }
     }
     const other = otherVerb.exec(before)

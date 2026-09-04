@@ -496,7 +496,7 @@ const table: ReadonlyArray<MappingRow> = [
   ),
   row(
     "docs",
-    "Text pointing at flows/, smithers plan/approve/run, and report.md",
+    "Text pointing at flows/, smthrs plan/approve/run, and report.md",
     null,
     "Documentation that teaches `smithers up` or JSX authoring is rewritten.",
     "guided"
@@ -581,10 +581,10 @@ const familyRow = (construct: Constructs.Construct): MappingRow => {
       )
     case "cli": {
       const mapped: Record<string, string> = {
-        "smithers up": "smithers plan <flow> [k=v] then smithers approve <payload> then smithers run <payload>",
-        "smithers workflow": "smithers plan <flow> then smithers run <payload>",
-        "smithers ps": "smithers ps",
-        "smithers cancel": "smithers cancel"
+        "smithers up": "smthrs plan <flow> [k=v] then smthrs approve <payload> then smthrs run <payload>",
+        "smithers workflow": "smthrs plan <flow> then smthrs run <payload>",
+        "smithers ps": "smthrs ps",
+        "smithers cancel": "smthrs cancel"
       }
       const target = mapped[construct.name]
       return target === undefined
@@ -1459,7 +1459,7 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
       }
       if (hit.construct === "smithers up" || hit.construct === "smithers workflow") {
         const command = detail["command"] ?? "smithers up <workflow>"
-        return `# ${command}\nsmithers plan <flow> [key=value]\nsmithers approve <payload>\nsmithers run <payload>`
+        return `# ${command}\nsmthrs plan <flow> [key=value]\nsmthrs approve <payload>\nsmthrs run <payload>`
       }
       return undefined
     }

@@ -6,7 +6,7 @@
  * Smithers 1.0 yet: `npx @smthrs/migrate` is the first command an operator
  * types, before `@smthrs/cli` is anywhere near the tree. Once the project is
  * migrated the same flow is reachable as `smithers migrate` and as a durable
- * `smithers plan migrate` / `approve` / `run`.
+ * `smthrs plan migrate` / `approve` / `run`.
  *
  * The default mode is `plan`. Editing is never the default: `--apply` is a
  * thing the operator types after reading `report.md`.
@@ -114,7 +114,7 @@ export const command = Command.make("smithers-migrate", flags, (config) =>
       // A refused gate is not a crash. It prints the operator's own
       // instructions, exits 3, and leaves the project untouched.
       yield* Console.error(
-        `smithers migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
+        `smthrs migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
       )
       process.exitCode = error.code === "run-state-blocked" || error.code === "unsafe-blocked" ? 3 : 1
       return

@@ -432,9 +432,9 @@ describe("Mapping.snippet", () => {
   it("rewrites an old CLI invocation as the plan, approve, run triple", () => {
     const text = Mapping.snippet(hit("smithers up", [], { command: "smithers up review.tsx" }))
 
-    expect(text).toContain("smithers plan")
-    expect(text).toContain("smithers approve")
-    expect(text).toContain("smithers run")
+    expect(text).toContain("smthrs plan")
+    expect(text).toContain("smthrs approve")
+    expect(text).toContain("smthrs run")
   })
 
   it("gives no snippet for a construct with no safe translation", () => {
