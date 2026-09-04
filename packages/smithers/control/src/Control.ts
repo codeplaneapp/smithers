@@ -18,6 +18,7 @@ import type {
   PlanDigestMismatch,
   PlanNotFound,
   RunNotFound,
+  Unauthorized,
   Unavailable
 } from "./ControlError.ts"
 import { Unavailable as UnavailableError } from "./ControlError.ts"
@@ -176,6 +177,7 @@ export interface Service {
     | PlanNotFound
     | RunNotFound
     | InvalidInput
+    | Unauthorized
     | PersistenceError
     | Unavailable
   >
@@ -189,6 +191,7 @@ export interface Service {
     | PlanNotFound
     | RunNotFound
     | InvalidInput
+    | Unauthorized
     | PersistenceError
     | Unavailable
   >

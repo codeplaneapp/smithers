@@ -61,7 +61,8 @@ import {
   PlanDenied,
   PlanDigestMismatch,
   PlanNotFound,
-  RunNotFound
+  RunNotFound,
+  Unauthorized
 } from "./ControlError.ts"
 import type { ApprovalToken, BulkGrant, LaunchResult, MemoryFlow, Service, StoredPlan } from "./ControlRuntime.ts"
 import { ControlRuntime, make } from "./ControlRuntime.ts"
@@ -1217,6 +1218,9 @@ const makeRuntime = (
         decision: "approved" | "denied",
         principal: Principal
       ) {
+        if (principal.kind === "agent") {
+          return yield* new Unauthorized({ message: "Approval decisions are operator-only" })
+        }
         const identity = approvalIdentity(token.target)
         // Exactly once: the guard is in the UPDATE, so two concurrent decisions
         // cannot both observe an unresolved token.

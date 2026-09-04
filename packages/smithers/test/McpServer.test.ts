@@ -267,15 +267,17 @@ describe("the envelope", () => {
       }).pipe(Effect.provide(control), Effect.orDie)
     )
 
-  it("grants an omitted approval scope once, never for the whole run", async () => {
+  it("refuses approval when MCP omits scope", async () => {
     const observed = await approveWithScope({})
 
-    expect(observed.result).toMatchObject({ ok: true })
-    expect(observed.scopes).toEqual(["once"])
+    expect(observed.result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED" } })
+    expect(observed.scopes).toEqual([])
   })
 
-  it("keeps an explicit approval scope", async () => {
-    expect((await approveWithScope({ scope: "remembered" })).scopes).toEqual(["remembered"])
+  it.each(["once", "run", "remembered"])("refuses explicit approval scope %s", async (scope) => {
+    const observed = await approveWithScope({ scope })
+    expect(observed.result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED" } })
+    expect(observed.scopes).toEqual([])
   })
 
   it("refuses an approval scope it does not recognise instead of widening it", async () => {
@@ -289,6 +291,51 @@ describe("the envelope", () => {
       expect([scope, observed.scopes]).toEqual([scope, []])
     }
   })
+
+  it.each(["approve", "deny"])(
+    "refuses MCP %s of a parked action and preserves operator approval",
+    async (decision) => {
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const service = yield* ControlService.Control
+          const runtime = yield* ControlRuntime.ControlRuntime
+          const operator = { id: "human", kind: "operator", stampedAt: 0 } as const
+          const card = yield* service.plan({ flowId: "system/test", input: {} })
+          yield* service.approve({ ...card.approval, principal: operator })
+          const receipt = yield* service.run({
+            _tag: "Plan",
+            planId: card.planId,
+            digest: card.digest,
+            envelope: card.envelope,
+            idempotencyKey: "launch",
+            principal: operator
+          })
+          if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected run")
+          const target = {
+            _tag: "Node",
+            runId: receipt.runId,
+            requestId: "irreversible",
+            digest: "ask",
+            envelope: card.envelope
+          } as const
+          yield* runtime.registerApproval(target)
+          yield* runtime.resume(receipt.runId)
+          const fence = yield* runtime.claimFence(receipt.runId)
+          yield* runtime.writeStatus(receipt.runId, fence, "waiting-approval")
+          const before = yield* runtime.grants
+          const approval = { target, scope: "remembered", idempotencyKey: "decide" } as const
+          const result = yield* find("resolve_approval").call({ approval, decision, scope: "remembered" })
+          expect(result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED" } })
+          expect(yield* runtime.grants).toEqual(before)
+          expect((yield* runtime.lookupApproval(target)).resolved).toBe(false)
+          expect((yield* runtime.getRun(receipt.runId)).status).toBe("waiting-approval")
+          expect(yield* find("list_pending_approvals").call({})).toMatchObject({ ok: true })
+          expect(yield* find("get_run").call({ runId: receipt.runId })).toMatchObject({ ok: true })
+          expect((yield* service.approve({ ...approval, principal: operator }))._tag).toBe("Accepted")
+        }).pipe(Effect.provide(control))
+      )
+    }
+  )
 
   it("reports a run the control plane does not know", async () => {
     expect(await call(find("get_run"), { runId: "absent" }))
@@ -485,16 +532,16 @@ describe("what each tool answers on the path through", () => {
         }))
     ).pipe(Layer.provide(projectControl))
 
-  it("plans, approves for the run, and launches a project flow", async () => {
-    const result = await callWith(projectControl, find("run_workflow"), {
-      flowId: "demo/ship",
-      input: { target: "main" }
-    }) as { readonly ok: true; readonly data: { readonly runId: string } }
-
-    // One call does all three steps, because an agent that could plan without
-    // approving would leave a plan nobody can launch.
-    expect(result.ok).toBe(true)
-    expect(result.data.runId).toBeTypeOf("string")
+  it("refuses self-approval through run_workflow and leaves no launched run", async () => {
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime.ControlRuntime
+        const result = yield* find("run_workflow").call({ flowId: "demo/ship", input: { target: "main" } })
+        expect(result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED" } })
+        expect(yield* runtime.grants).toEqual([])
+        expect(yield* runtime.listRuns).toEqual([])
+      }).pipe(Effect.provide(projectControl))
+    )
   })
 
   it("answers a watch with the run's status and the events past the cursor", async () => {

@@ -140,7 +140,7 @@ export class InvalidInput extends Schema.TaggedError<InvalidInput>()("/control/I
 }) {}
 
 /**
- * The caller presented no usable credential for this operation.
+ * The caller lacks a usable credential or authority for this operation.
  *
  * @category errors
  * @since 0.1.0

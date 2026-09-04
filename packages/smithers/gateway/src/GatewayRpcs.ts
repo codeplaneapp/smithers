@@ -89,6 +89,7 @@ const submitErrors = Schema.Union([
   ControlError.PlanNotFound,
   ControlError.RunNotFound,
   ControlError.InvalidInput,
+  ControlError.Unauthorized,
   ControlError.PersistenceError,
   ControlError.Unavailable
 ])

@@ -74,6 +74,9 @@ export const maximumHistoryBytes = 1024 * 1024
  */
 export type Surface = "raw" | "semantic" | "both"
 
+// MCP tools are callable by models, so they never inherit operator authority.
+const principal: ControlSchema.Principal = Object.freeze({ id: "mcp", kind: "agent", stampedAt: 0 })
+
 /**
  * The `{ ok, data?, error? }` envelope every tool answers with.
  *
@@ -308,7 +311,8 @@ export const supportedTools: ReadonlyArray<Tool> = [
   }),
   makeTool({
     name: "run_workflow",
-    description: "Plan a flow, approve it for this run, and launch it. Returns the run id.",
+    description:
+      "Operator-only: planning and launching a flow requires approval. MCP calls return UNAUTHORIZED; use smthrs up as an operator.",
     readOnly: false,
     schema: runWorkflowArguments,
     call: (args) => {
@@ -324,13 +328,14 @@ export const supportedTools: ReadonlyArray<Tool> = [
         Effect.gen(function*() {
           const control = yield* ControlService.Control
           const card = yield* control.plan({ flowId, input })
-          yield* control.approve({ ...card.approval, scope: "run" })
+          yield* control.approve({ ...card.approval, scope: "run", principal })
           return yield* control.run({
             _tag: "Plan",
             planId: card.planId,
             digest: card.digest,
             envelope: card.envelope,
-            idempotencyKey: card.approval.idempotencyKey
+            idempotencyKey: card.approval.idempotencyKey,
+            principal
           })
         }),
         (receipt) => succeeded(receipt)
@@ -448,7 +453,8 @@ export const supportedTools: ReadonlyArray<Tool> = [
   }),
   makeTool({
     name: "resolve_approval",
-    description: "Approve or deny a parked run with its serialized approval payload.",
+    description: "Operator-only: approve or deny a serialized approval payload. MCP calls return UNAUTHORIZED for all "
+      + "scopes, including remembered; an operator must use smthrs approve or smthrs deny.",
     readOnly: false,
     schema: resolveApprovalArguments,
     call: (args) => {
@@ -470,7 +476,10 @@ export const supportedTools: ReadonlyArray<Tool> = [
       return envelope(
         Effect.flatMap(
           ControlService.Control,
-          (control) => decision === "approve" ? control.approve({ ...payload, scope }) : control.deny(payload)
+          (control) =>
+            decision === "approve"
+              ? control.approve({ ...payload, scope, principal })
+              : control.deny({ ...payload, principal })
         ),
         (receipt) => succeeded(receipt)
       )

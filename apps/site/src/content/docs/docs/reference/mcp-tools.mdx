@@ -8,14 +8,14 @@ description: "The tools smthrs --mcp serves over stdio: eleven supported control
 | Tool | Read-only | Returns | CLI equivalent |
 | --- | --- | --- | --- |
 | `list_workflows` | yes | The flows discovered under this project | [`smthrs ls`](/docs/reference/cli/ls/) |
-| `run_workflow` | no | The launch receipt with the run id | [`smthrs up`](/docs/reference/cli/up/) |
+| `run_workflow` | no | `UNAUTHORIZED`: automatic approval is operator-only | [`smthrs up`](/docs/reference/cli/up/) |
 | `list_runs` | yes | Run summaries, optionally filtered | [`smthrs ps`](/docs/reference/cli/ps/) |
 | `get_run` | yes | One run's summary | [`smthrs status`](/docs/reference/cli/status/) |
 | `watch_run` | yes | Events of one run after a sequence | [`smthrs logs --follow`](/docs/reference/cli/logs/) |
 | `get_run_events` | yes | Every recorded event of one run | [`smthrs logs --json`](/docs/reference/cli/logs/) |
 | `explain_run` | yes | The run's forensic digest and diagnosis card | [`smthrs status`](/docs/reference/cli/status/) |
 | `list_pending_approvals` | yes | Parked runs with the payload that releases each | [`smthrs ps --status waiting-approval`](/docs/reference/cli/ps/) |
-| `resolve_approval` | no | The decision receipt | [`smthrs approve`](/docs/reference/cli/approve/), [`smthrs deny`](/docs/reference/cli/deny/) |
+| `resolve_approval` | no | `UNAUTHORIZED`: approval and denial are operator-only | [`smthrs approve`](/docs/reference/cli/approve/), [`smthrs deny`](/docs/reference/cli/deny/) |
 | `get_node_detail` | yes | One node's recorded output | [`smthrs output`](/docs/reference/cli/output/) |
 | `get_chat_transcript` | yes | The run's turn-by-turn transcript | [`smthrs logs`](/docs/reference/cli/logs/) |
 
@@ -45,14 +45,14 @@ CLI equivalent: [`smthrs ls`](/docs/reference/cli/ls/).
 
 ### run_workflow
 
-Plans a flow, approves the plan with scope `run`, and launches it.
+Attempts to plan, approve, and launch a flow. MCP uses an `agent` principal, so the approval step is refused and no run launches.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `flowId` | string | yes | The flow to run, as `smthrs ls` names it. |
 | `input` | object | no | The flow's input. |
 
-Returns: `data` is the launch receipt, carrying the run id. A reserved `system/*` flow id answers `{ ok: false, error: { code: "unsupported" } }`, matching `smthrs up`.
+Returns: `UNAUTHORIZED` when the plan requires approval. An operator can launch it with `smthrs up`. A reserved `system/*` flow id answers `{ ok: false, error: { code: "unsupported" } }`, matching `smthrs up`.
 
 CLI equivalent: [`smthrs up`](/docs/reference/cli/up/), which plans, approves with scope `run`, and launches in one invocation.
 
@@ -132,7 +132,7 @@ CLI equivalent: [`smthrs ps --status waiting-approval`](/docs/reference/cli/ps/)
 
 ### resolve_approval
 
-Approves or denies a parked run with its serialized approval payload.
+Approval and denial are operator-only. This tool carries an `agent` principal and cannot resolve approvals at any scope, including `remembered`.
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -140,7 +140,9 @@ Approves or denies a parked run with its serialized approval payload.
 | `decision` | `"approve"` or `"deny"` | yes | What to do. |
 | `scope` | `"once"`, `"run"`, or `"remembered"` | no | How long the grant lasts. Omitted means `once`. |
 
-Returns: `data` is the decision receipt. A payload that does not decode, a `decision` outside the two values, or a `scope` outside the three answers `INVALID_INPUT`. The `once` default is deliberate: `smthrs approve` defaults its `--scope` to `run` interactively, while an argument an MCP client never sent must not widen what it may do.
+Returns: `UNAUTHORIZED` for a valid approval request. Invalid payloads, decisions,
+or scopes still answer `INVALID_INPUT`. The accepted scopes are `once`, `run`,
+and `remembered`; the default is `once`. An operator must decide through the CLI.
 
 CLI equivalent: [`smthrs approve`](/docs/reference/cli/approve/) and [`smthrs deny`](/docs/reference/cli/deny/).
 

@@ -31,6 +31,7 @@ import {
   type PlanDigestMismatch,
   type PlanNotFound,
   type RunNotFound,
+  Unauthorized,
   Unavailable
 } from "./ControlError.ts"
 import type { CancelRecord } from "./ControlExecutor.ts"
@@ -433,6 +434,11 @@ export const layer: Layer.Layer<
     ) =>
       Effect.gen(function*() {
         const input = yield* snapshotApproval(decision, submitted)
+        // Check the authenticated identity before replay or any grant writes.
+        const principal = yield* runtime.stampPrincipal(input.principal)
+        if (principal.kind === "agent") {
+          return yield* new Unauthorized({ message: "Approval decisions are operator-only" })
+        }
         // A decision on a settled run decides nothing, and it is read BEFORE
         // the idempotency replay for `resume`'s reason: the recorded receipt
         // describes the earlier call, not the run. Answering `Accepted` sent
@@ -462,7 +468,6 @@ export const layer: Layer.Layer<
           fingerprint(decision, input.principal, input),
           Effect.gen(function*() {
             const token = yield* runtime.lookupApproval(input.target)
-            const principal = yield* runtime.stampPrincipal(input.principal)
             if (decision === "approved") {
               yield* runtime.installBulkGrant(token, input.target.envelope, input.scope)
             }

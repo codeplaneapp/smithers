@@ -4,8 +4,8 @@ description: "Register smthrs --mcp with Claude Code or Codex, scope the tool li
 ---
 
 `smthrs --mcp` serves the Smithers MCP server on stdio, over the same control
-plane the verbs use. An agent that speaks MCP can then plan, launch, watch, and
-approve runs without shelling out.
+plane the verbs use. An agent that speaks MCP can list flows, watch runs, and
+inspect pending approvals without shelling out.
 
 ## Register it
 
@@ -98,9 +98,12 @@ authority for that list.
 Reserved `system/*` flows are not listed and cannot be launched, matching
 `smthrs up` and `smthrs ls`.
 
-`resolve_approval` defaults its `scope` to `once`, unlike the CLI's `run`,
-because an argument a client never sent must not widen what that client may do
-for the rest of the run.
+Every MCP mutation is attributed to an `agent` principal. Approval and denial
+are operator-only: `resolve_approval` returns `UNAUTHORIZED` at every scope,
+including `remembered`. `run_workflow` also returns `UNAUTHORIZED` when it
+attempts to approve its plan, and launches no run. Operators use `smthrs up`
+to launch a flow and `smthrs approve` or `smthrs deny` to decide an approval.
+Read tools, including `list_pending_approvals`, remain available.
 
 ## Bounds
 

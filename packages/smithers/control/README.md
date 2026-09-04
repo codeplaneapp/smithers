@@ -132,3 +132,8 @@ above are empty there.
 
 A `steer` whose `message.runId` disagrees with the run the call names is
 refused with `InvalidInput` before anything is admitted to the queue.
+
+Approval and denial are operator-only. Agent principals receive the typed
+`Unauthorized` error (`code: "unauthorized"`) before any approval or grant
+mutation, for both plan and node targets and every scope, including `remembered`.
+Read operations remain available to agents.

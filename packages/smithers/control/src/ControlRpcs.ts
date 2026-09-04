@@ -102,6 +102,7 @@ export const ControlRpcs = RpcGroup.make(
       PlanNotFound,
       RunNotFound,
       InvalidInput,
+      Unauthorized,
       PersistenceError,
       Unavailable
     ])
@@ -116,6 +117,7 @@ export const ControlRpcs = RpcGroup.make(
       PlanNotFound,
       RunNotFound,
       InvalidInput,
+      Unauthorized,
       PersistenceError,
       Unavailable
     ])

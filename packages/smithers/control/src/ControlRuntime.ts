@@ -23,7 +23,8 @@ import {
   PlanDenied,
   PlanDigestMismatch,
   PlanNotFound,
-  RunNotFound
+  RunNotFound,
+  Unauthorized
 } from "./ControlError.ts"
 import type {
   Envelope,
@@ -261,7 +262,7 @@ export interface Service {
     token: ApprovalToken,
     decision: "approved" | "denied",
     principal: Principal
-  ) => Effect.Effect<void, AlreadyResolved | PersistenceError>
+  ) => Effect.Effect<void, AlreadyResolved | Unauthorized | PersistenceError>
   readonly launch: (
     planId: string,
     digest: string,
@@ -649,6 +650,9 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           })
         ),
         resolveApproval: Effect.fn("ControlRuntime.resolveApproval")(function*(token, decision, principal) {
+          if (principal.kind === "agent") {
+            return yield* new Unauthorized({ message: "Approval decisions are operator-only" })
+          }
           const requested = snapshot(token)
           const mutable = tokens.get(approvalKey(requested.target))
           if (mutable === undefined || mutable.resolved) {

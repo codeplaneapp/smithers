@@ -147,6 +147,34 @@ describe("ControlClient", () => {
     expect((error as RunNotFound).runId).toBe("missing-run")
   })
 
+  it.each(["approve", "deny"] as const)(
+    "does not elevate an agent %s through operator RPC credentials",
+    async (decision) => {
+      await run(Effect.gen(function*() {
+        const url = yield* baseUrl
+        yield* withClient(url, token, (control) =>
+          Effect.gen(function*() {
+            const malformed = yield* Effect.flip(control[decision](null as never))
+            expect(malformed).toBeInstanceOf(TransportError)
+            const card = yield* control.plan({ flowId: "system/test", input: {} })
+            const error = yield* Effect.flip(control[decision]({
+              ...card.approval,
+              scope: "remembered",
+              principal: { id: "mcp", kind: "agent", stampedAt: 0 }
+            }))
+            expect(error).toBeInstanceOf(Unauthorized)
+            expect(error.code).toBe("unauthorized")
+            const receipt = yield* control[decision]({
+              ...card.approval,
+              principal: { id: "operator", kind: "operator", stampedAt: 0 }
+            })
+            expect(receipt._tag).toBe("Accepted")
+            expect((yield* control.list({ _tag: "flows" }))._tag).toBe("flows")
+          }))
+      }))
+    }
+  )
+
   it("projects every unary method through its request schema", async () => {
     const tags = await run(Effect.gen(function*() {
       const url = yield* baseUrl

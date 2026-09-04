@@ -7,7 +7,7 @@ import { Cause, Effect, Layer, Result, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { RpcClient, RpcClientError } from "effect/unstable/rpc"
 import { Control, make, type Service } from "./Control.ts"
-import { type ControlError, ControlErrorSchema, TransportError } from "./ControlError.ts"
+import { type ControlError, ControlErrorSchema, TransportError, Unauthorized } from "./ControlError.ts"
 import { ControlRpcs } from "./ControlRpcs.ts"
 import {
   ApprovalInputSchema,
@@ -265,10 +265,20 @@ export const layer = (config: ClientConfig) => {
       return make({
         plan: Effect.fn("Control.plan")((input) => normalizeRequest(planEncoder, input, () => unary.Plan(input))),
         run: Effect.fn("Control.run")((input) => normalizeRequest(runEncoder, input, () => unary.Run(input))),
+        // RPC authenticates with this client's credential and does not carry
+        // local attribution. Refuse here before an agent becomes that operator.
         approve: Effect.fn("Control.approve")((input) =>
-          normalizeRequest(approvalEncoder, input, () => unary.Approve(input))
+          normalizeRequest(approvalEncoder, input, () =>
+            input.principal?.kind === "agent"
+              ? Effect.fail(new Unauthorized({ message: "Approval decisions are operator-only" }))
+              : unary.Approve(input))
         ),
-        deny: Effect.fn("Control.deny")((input) => normalizeRequest(approvalEncoder, input, () => unary.Deny(input))),
+        deny: Effect.fn("Control.deny")((input) =>
+          normalizeRequest(approvalEncoder, input, () =>
+            input.principal?.kind === "agent"
+              ? Effect.fail(new Unauthorized({ message: "Approval decisions are operator-only" }))
+              : unary.Deny(input))
+        ),
         steer: Effect.fn("Control.steer")((input) => normalizeRequest(steerEncoder, input, () => unary.Steer(input))),
         signal: Effect.fn("Control.signal")((input) =>
           normalizeRequest(signalEncoder, input, () => unary.Signal(input))

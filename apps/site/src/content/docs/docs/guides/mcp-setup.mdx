@@ -1,11 +1,11 @@
 ---
 title: "Drive Smithers from your agent"
-description: "Register the Smithers MCP server with Claude Code or Codex, scope the tool surface it exposes, and let the agent list flows, launch runs, and resolve approvals."
+description: "Register the Smithers MCP server with Claude Code or Codex, scope the tool surface it exposes, and let the agent list flows, watch runs, and inspect approvals."
 sidebar:
   order: 10
 ---
 
-`smthrs --mcp` serves the control plane as a Model Context Protocol server over stdio, and `smthrs mcp add` writes that server into your agent's own configuration, so the agent can list this project's flows, launch runs, watch them, and resolve their approvals through the MCP tool surface.
+`smthrs --mcp` serves the control plane as a Model Context Protocol server over stdio, and `smthrs mcp add` writes that server into your agent's own configuration, so the agent can list this project's flows, watch runs, and inspect their approvals through the MCP tool surface.
 
 ## Before you start
 
@@ -30,9 +30,13 @@ The output prints one entry per target agent with `agent`, the configuration `pa
 The server speaks newline-delimited JSON-RPC 2.0 over stdio (MCP protocol revision 2025-06-18) until standard input closes. On the default surface the agent holds eleven control tools. It can:
 
 - List the flows discovered under the project with `list_workflows`.
-- Launch one with `run_workflow`, which plans the flow, approves the plan with scope `run`, and returns the run id.
 - Follow the run with `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`, `get_node_detail`, and `get_chat_transcript`.
-- Resolve a parked run with `list_pending_approvals` and `resolve_approval`, whose `decision` is `approve` or `deny` and whose `scope` is `once`, `run`, or `remembered`, defaulting to `once`.
+- Inspect parked runs with `list_pending_approvals` and pass the approval payload to an operator.
+
+Every MCP mutation carries an `agent` principal. Approval and denial are operator-only:
+`resolve_approval` returns `UNAUTHORIZED` for `once`, `run`, and `remembered` scopes.
+`run_workflow` returns `UNAUTHORIZED` when it tries to approve the plan and launches
+no run. Operators use `smthrs up`, `smthrs approve`, and `smthrs deny`.
 
 Every tool answers the `{ ok, data?, error? }` envelope, serialized into the text content block and repeated as structured content. Ten 0.x tool names remain on the surface and answer `{ ok: false, error: { code: "unsupported" } }` with the reason, so the agent learns that time travel, checkpoints, and human questions are features this release does not have instead of hitting an unknown tool. [MCP tools](/docs/reference/mcp-tools/) lists every tool with its parameters and error codes.
 
@@ -85,13 +89,13 @@ None of them changes run state: the only writes are this session's subscription 
 
 ## Verify it worked
 
-Start the agent in the project root and ask it to list this project's flows. It answers through `list_workflows` with the same flow ids `smthrs ls` prints. Then ask it to run one: it calls `run_workflow` and returns a run id, which you confirm outside the agent:
+Start the agent in the project root and ask it to list this project's flows. It answers through `list_workflows` with the same flow ids `smthrs ls` prints. Launch a flow as an operator with `smthrs up`, then ask the agent to inspect its run id and compare it with:
 
 ```bash
 smthrs status <run-id>
 ```
 
-The diagnosis card describes the run the agent launched. To confirm a scoped session, call `run_workflow` on a `--read-only` registration: the answer is `unknown_tool`, and no run appears in `smthrs ps`.
+The diagnosis card describes the run the operator launched. A call to `run_workflow` on the default registration answers `UNAUTHORIZED`. To confirm a scoped session, call `run_workflow` on a `--read-only` registration: the answer is `unknown_tool`, and no run appears in `smthrs ps`.
 
 ## See also
 
