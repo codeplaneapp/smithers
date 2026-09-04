@@ -1009,7 +1009,11 @@ const carries = (drained: Steering.DrainRecord): boolean =>
 const steered = (
   state: State,
   changes: Steering.DrainRecord["seatChanges"]
-): { readonly seat: string; readonly modelParams: ModelRequest.GenerationParams } => {
+): {
+  readonly seat: string
+  readonly modelParams: ModelRequest.GenerationParams
+  readonly contextWindowTokens: number
+} => {
   let seat = state.seat
   let modelParams = state.modelParams
   for (const change of changes) {
@@ -1026,7 +1030,13 @@ const steered = (
       })
     }
   }
-  return { seat, modelParams }
+  return {
+    seat,
+    modelParams,
+    contextWindowTokens: seat === state.seat
+      ? state.contextWindowTokens
+      : ContextWindow.contextWindowTokensFor(modelIdFromSeat(seat))
+  }
 }
 
 /**
@@ -1938,7 +1948,7 @@ const frame = (
       changes: Partial<ConstructorParameters<typeof State>[0]> = {}
     ): Step => {
       if (state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
-      const { modelParams, seat } = steered(state, drained.seatChanges)
+      const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
       const context = appended(
         contextWindow,
         answer.message,
@@ -1951,6 +1961,7 @@ const frame = (
           frame: state.frame + 1,
           seat,
           modelParams,
+          contextWindowTokens,
           contextWindow: windowOn(state, seat, context),
           truncatedOutputs: TruncatedOutput.retain(ledger),
           ...changes
@@ -2859,7 +2870,7 @@ const frame = (
         outcome: "continue"
       })
     )
-    const { modelParams, seat } = steered(state, drained.seatChanges)
+    const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
     // The intervention. At the cap the next frame is told, structurally, that
     // it must write something or say why it cannot; a justification is typed
     // data on the transition, is recorded, and buys a bounded quiet spell
@@ -2960,6 +2971,7 @@ const frame = (
         frame: state.frame + 1,
         seat,
         modelParams,
+        contextWindowTokens,
         contextWindow: windowOn(state, seat, context),
         truncatedOutputs: TruncatedOutput.retain(ledger),
         workspace: closed,

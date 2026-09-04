@@ -569,3 +569,28 @@ export const render = (self: ContextWindow): ModelRequest.ModelRequest => {
     params: ModelRequest.GenerationParams.make()
   })
 }
+
+const contextWindows: ReadonlyArray<readonly [RegExp, number]> = [
+  [/claude.*haiku/i, 200_000],
+  [/claude/i, 1_000_000],
+  [/gpt-5/i, 400_000],
+  [/gpt-4\.1/i, 1_000_000],
+  [/gpt-4o/i, 128_000],
+  [/^o[134]/i, 200_000]
+]
+
+/**
+ * The context window, in tokens, of a known model id, with a conservative
+ * floor for models the catalog has not met. Never zero: zero is `CellTurn`'s
+ * "compaction disabled", and a resolver that resolves a window must not
+ * silently disable it.
+ *
+ * @category resolvers
+ * @since 1.0.0-rc.0
+ */
+export const contextWindowTokensFor = (modelId: string): number => {
+  for (const [pattern, tokens] of contextWindows) {
+    if (pattern.test(modelId)) return tokens
+  }
+  return 128_000
+}

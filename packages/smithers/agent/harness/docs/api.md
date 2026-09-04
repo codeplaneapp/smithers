@@ -194,6 +194,7 @@ export const make: (options: {
   readonly capabilityEnvelope: ReadonlyArray<Capability.CapabilityPattern>
   readonly placement: Option.Option<Descriptor.Placement>
   readonly contextWindow: ContextWindow.ContextWindow
+  /** Initial budget; a seat steer recomputes it from the model catalog. */
   readonly contextWindowTokens?: number | undefined
   readonly frame?: number | undefined
   readonly maxFrames?: number | undefined
@@ -941,3 +942,7 @@ renders it for one frame's prompt, printing at most `bound` (64) names before it
 counts instead. A binding rewritten to a value of the same type and size
 reads as unchanged: the panel is a roster, and the run's own prints are what
 say a value moved.
+
+`ContextWindow.contextWindowTokensFor(modelId)` supplies the shared context-limit
+catalog used by seat resolution and seat steering (128,000 tokens for unknown
+models). A thinking-only steer preserves the current budget.

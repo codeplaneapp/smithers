@@ -809,3 +809,17 @@ describe("ContextWindow", () => {
     })
   })
 })
+
+describe("ContextWindow.contextWindowTokensFor", () => {
+  it.each([
+    ["claude-haiku-4-5", 200_000],
+    ["CLAUDE-OPUS-5", 1_000_000],
+    ["gpt-5", 400_000],
+    ["gpt-4.1-mini", 1_000_000],
+    ["gpt-4o", 128_000],
+    ["o3-mini", 200_000],
+    ["unknown", 128_000]
+  ])("budgets %s at %i tokens", (model, tokens) => {
+    expect(ContextWindow.contextWindowTokensFor(model)).toBe(tokens)
+  })
+})

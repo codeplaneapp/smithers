@@ -1107,6 +1107,35 @@ describe("CellTurn steering boundaries", () => {
     // the window it re-keys is the one the next frame actually renders.
     expect(model.recorder.requests[1]?.modelId).toBe("second-model")
   })
+
+  it("recomputes the compaction budget when steering to a smaller seat", async () => {
+    let drained = false
+    const steering = source(() => {
+      if (drained) return nothing
+      drained = true
+      return {
+        ...nothing,
+        seatChanges: [{ _tag: "SeatChange", delivery: "steer", admittedAt: 1, seat: "openai:gpt-4o" }]
+      }
+    })
+    const contextWindow = ContextWindow.make({
+      modelId: "claude-opus-5",
+      segments: [...crowded.segments, ...crowded.segments]
+    })
+    const { events, model, failure } = await run({
+      state: state({ seat: "anthropic:claude-opus-5", contextWindow, contextWindowTokens: 1_000_000 }),
+      steering,
+      script: [emits(`console.log("next")`), prose("Earlier work summarized."), emits(`ctx.done("done")`)]
+    })
+    expect(failure).toBeUndefined()
+    expect(of(events, "compaction-settled")).toHaveLength(1)
+    expect(model.recorder.requests.map((request) => request.modelId)).toEqual([
+      "claude-opus-5",
+      "gpt-4o",
+      "gpt-4o"
+    ])
+    expect(resolvedText(events)).toBe("done")
+  })
 })
 
 describe("CellTurn defaults and refusals a shipped binding cannot reach", () => {
