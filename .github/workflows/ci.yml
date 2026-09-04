@@ -76,6 +76,11 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Public export JSDoc
+        run: pnpm exec smithers-build lint '//:jsdocTree'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: JSDoc rule harness
         run: pnpm exec smithers-build test '//:jsdocRules'
         env:

@@ -16,7 +16,8 @@
     "check": "tsc -b tsconfig.json --force",
     "deploy": "node scripts/deploy.ts --stage prod",
     "deploy:dev": "node scripts/deploy.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint worker scripts deployment.ts alchemy.run.ts --max-warnings=0 && dprint check"
   },
   "dependencies": {
     "alchemy": "2.0.0-beta.72",
@@ -28,6 +29,9 @@
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "typescript": "6.0.3",
-    "vitest": "4.1.9"
+    "vitest": "4.1.9",
+    "eslint": "9.39.1",
+    "typescript-eslint": "8.65.0",
+    "dprint": "0.55.2"
   }
 }

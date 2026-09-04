@@ -1,3 +1,8 @@
+/**
+ * Scrubs cache credentials from persisted deployment state.
+ *
+ * @since 0.1.0
+ */
 import { isRecord } from "@smthrs/canonical/Record"
 import { createHash, randomUUID } from "node:crypto"
 import * as NodeFs from "node:fs"
@@ -68,7 +73,6 @@ interface FileIdentity {
   readonly mtimeNs: bigint
   readonly ctimeNs: bigint
 }
-
 
 /**
  * What one redaction run walks and what it may leave in place.

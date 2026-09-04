@@ -148,6 +148,7 @@ const ci = Smithers.GithubCiGen({
       steps: [
         { name: "Workspace targets", verb: Smithers.Verb.Ci, pattern: "//packages/...", parallelism: 2 },
         { name: "Script gates", verb: Smithers.Verb.Test, pattern: "//scripts/..." },
+        { name: "Public export JSDoc", verb: Smithers.Verb.Lint, pattern: "//:jsdocTree" },
         { name: "JSDoc rule harness", verb: Smithers.Verb.Test, pattern: "//:jsdocRules" },
         // Every `evals/*` directory is its own workspace member now, so each
         // one's targets carry the standard `check`/`test` names and run from
@@ -431,6 +432,24 @@ const jsdocTruthfulness = Smithers.JsdocTruthfulness({
 })
 
 /**
+ * Lints public package sources under the repository-default JSDoc convention.
+ *
+ * @since 1.0.0
+ * @category lint
+ */
+const jsdocTree = Smithers.EsLint({
+  sources: [
+    Smithers.glob("packages/*/src/**/*.ts"),
+    Smithers.glob("packages/*/*/src/**/*.ts"),
+    Smithers.glob("packages/*/*/*/src/**/*.ts")
+  ],
+  configs: [Smithers.file("eslint.config.js"), rootJSDocConfig],
+  deps: [],
+  maxWarnings: 0,
+  fix: false
+})
+
+/**
  * The repository's custom JSDoc rule harness: `eslint.jsdoc.js` exports the
  * module-header rule and the convention config, and this suite runs both
  * through ESLint's `Linter` against sample sources. It sits at the root
@@ -442,7 +461,11 @@ const jsdocTruthfulness = Smithers.JsdocTruthfulness({
  */
 const jsdocRules = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//eslint.jsdoc.test.mjs")]),
-  srcs: [Smithers.file("//eslint.jsdoc.test.mjs"), Smithers.file("//eslint.jsdoc.js")],
+  srcs: [
+    Smithers.file("//eslint.jsdoc.test.mjs"),
+    Smithers.file("//eslint.jsdoc.js"),
+    Smithers.file("//eslint.config.js")
+  ],
   deps: []
 })
 
@@ -490,5 +513,15 @@ export const packageDefaults = Smithers.PackageDefaults({
 })
 
 export const Package = Smithers.Package({
-  targets: { changelog, ci, docsReferenceSync, jsdocRules, jsdocTruthfulness, lockfile, nodeModules, tsconfig }
+  targets: {
+    changelog,
+    ci,
+    docsReferenceSync,
+    jsdocRules,
+    jsdocTree,
+    jsdocTruthfulness,
+    lockfile,
+    nodeModules,
+    tsconfig
+  }
 })

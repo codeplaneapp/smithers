@@ -1,3 +1,8 @@
+/**
+ * Cloudflare Worker entry point for the hosted build cache.
+ *
+ * @since 0.1.0
+ */
 import {
   type ActionCache,
   type ActionCachePublication,

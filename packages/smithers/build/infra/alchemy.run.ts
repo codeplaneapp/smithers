@@ -1,3 +1,8 @@
+/**
+ * Cloudflare resource declarations for the hosted build cache.
+ *
+ * @since 0.1.0
+ */
 import * as Alchemy from "alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
 import { Stack } from "alchemy/Stack"

@@ -5,7 +5,9 @@ import { pathToFileURL } from "node:url"
 import { jsdocConvention, moduleHeader } from "./eslint.jsdoc.js"
 
 const require = createRequire(import.meta.url)
-const eslintPath = require.resolve("eslint", { paths: [new URL("./packages/smithers/flows/flow", import.meta.url).pathname] })
+const eslintPath = require.resolve("eslint", {
+  paths: [new URL("./packages/smithers/flows/flow", import.meta.url).pathname]
+})
 const { Linter } = await import(pathToFileURL(eslintPath).href)
 
 const messages = (source) => {
@@ -28,14 +30,30 @@ test("a standalone leading JSDoc is a module header", () => {
 })
 
 test("the first export's JSDoc is not mistaken for a module header", () => {
-  assert.equal(messages("/** Export prose.\n * @category values\n * @since 0.1.0\n */\nexport const value = 1\n")[0]?.ruleId, "flows-jsdoc/module-header")
+  assert.equal(
+    messages("/** Export prose.\n * @category values\n * @since 0.1.0\n */\nexport const value = 1\n")[0]?.ruleId,
+    "flows-jsdoc/module-header"
+  )
 })
 
 test("default function and class declarations follow the export JSDoc convention", () => {
   const header = "/** Module prose.\n * @since 0.1.0\n */\n\n"
-  assert.ok(conventionMessages(`${header}export default function value() {}`).some((message) => message.ruleId === "jsdoc/require-jsdoc"))
-  assert.ok(conventionMessages(`${header}export default class Value {}`).some((message) => message.ruleId === "jsdoc/require-jsdoc"))
-  assert.equal(conventionMessages(`${header}/** Value prose.\n * @category values\n * @since 0.1.0\n */\nexport default function value() {}`).length, 0)
+  assert.ok(
+    conventionMessages(`${header}export default function value() {}`).some((message) =>
+      message.ruleId === "jsdoc/require-jsdoc"
+    )
+  )
+  assert.ok(
+    conventionMessages(`${header}export default class Value {}`).some((message) =>
+      message.ruleId === "jsdoc/require-jsdoc"
+    )
+  )
+  assert.equal(
+    conventionMessages(
+      `${header}/** Value prose.\n * @category values\n * @since 0.1.0\n */\nexport default function value() {}`
+    ).length,
+    0
+  )
 })
 
 test("default expressions remain outside the declaration convention", () => {
@@ -44,6 +62,16 @@ test("default expressions remain outside the declaration convention", () => {
 })
 
 test("slop is an accepted declaration marker", () => {
-  const source = "/** Module prose.\n * @since 0.1.0\n */\n\n/** Value prose.\n * @category values\n * @since 0.1.0\n * @slop\n */\nexport const value = 1\n"
+  const source =
+    "/** Module prose.\n * @since 0.1.0\n */\n\n/** Value prose.\n * @category values\n * @since 0.1.0\n * @slop\n */\nexport const value = 1\n"
   assert.equal(conventionMessages(source).length, 0)
+})
+
+test("the repository default rejects undocumented RPC exports", async () => {
+  const { ESLint } = await import(pathToFileURL(eslintPath).href)
+  const eslint = new ESLint({ cwd: new URL(".", import.meta.url).pathname })
+  const [result] = await eslint.lintText("export const undocumented = 1\n", {
+    filePath: "packages/rpc/src/Regression.ts"
+  })
+  assert.ok(result.messages.some((message) => message.ruleId === "jsdoc/require-jsdoc"))
 })

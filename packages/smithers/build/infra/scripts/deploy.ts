@@ -1,3 +1,8 @@
+/**
+ * Deployment entry point for the hosted build cache.
+ *
+ * @since 0.1.0
+ */
 import { type ChildProcess, spawn } from "node:child_process"
 import * as NodePath from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"

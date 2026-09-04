@@ -397,3 +397,7 @@ The cut is an operator command, and `//scripts:releaseCut` is its gate.
 - **Re-exports are not gated.** `export { x }` and `export * as Ns from "…"` document the module they point at; their prose belongs at the definition site.
 
 The full contributor guide lives with the rest of the documentation under [`apps/site/src/content/docs`](apps/site/src/content/docs). It covers what each gate proves, the prose rules for docs pages, the commit conventions including the `Docs:` and `Depends-on:` trailers, and the epic plan.
+
+### Repository JSDoc gate
+
+`pnpm test:jsdoc` tests the rule; `pnpm lint:jsdoc` lints package source exports with the root `eslint.config.js`. CI runs both. New packages inherit the root source patterns automatically; explicit exclusions for the frontend UI packages live in that config with their scope rationale. Package ESLint configs continue to use `jsdocConvention` for local lint runs.
