@@ -91,18 +91,18 @@ what replaces it.
 ### Validation
 
 - Release validation ran seventeen gates from a clean checkout with real
-  backends and real persisted data. Sixteen passed.
+  backends and real persisted data. Sixteen passed; the one failure,
+  `docs-generation-links`, is described below.
 - The manual smoke ran all eight items end to end and the consumer validation gate
   passes every item that runs without the published registry. The recursive
   test fan-out is `2 fails, 61 passes` over 63 projects and 14,649 tests; the
   five failing tests all need live external state.
-- One gate fails, `docs-generation-links`, on three findings: a removed-verb
-  refusal opens both SQLite databases before it prints, the built docs site
-  serves vocs' own `llms-full.txt` instead of the curated bundle, and
-  `https://github.com/smithersai/plugins` does not exist yet. The first two
-  have finished fix lanes staged on `land/wave-7`. This candidate is not
-  publishable until the gate is green or the maintainer accepts the findings in
-  writing.
+- The three findings that failed `docs-generation-links` are resolved. A removed
+  verb prints its refusal to stderr and exits 1 without opening either SQLite
+  database. The site is Starlight rather than vocs and serves the curated
+  bundles from `apps/site/public/llms.txt` and `llms-full.txt`.
+  `https://github.com/smithersai/plugins` now resolves. The validation run has
+  not been repeated, so the gate's recorded result predates these fixes.
 
 ### Known limitations
 
