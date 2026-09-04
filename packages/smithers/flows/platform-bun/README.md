@@ -110,3 +110,11 @@ on Node. What it does not do is bundle for a browser.
 ## Runtimes
 
 Bun >=1.3.0 and Node.js >=22.19.0.
+
+The host exports `implementationIds` for its five service slots. Its rooted
+factories reject invalid roots before constructing a layer, using the host's
+own error with code `invalid_repository_root`.
+
+BunHost includes BunCrypto in every bundle, so ArtifactStore.put composes
+with BunHost alone. Crypto remains separate from the five capability slots.
+BunHost also re-exports ProcessReaper and HostLiveness from platform-node.

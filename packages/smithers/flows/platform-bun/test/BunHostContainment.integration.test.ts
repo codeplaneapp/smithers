@@ -277,7 +277,7 @@ describe.skipIf(process.platform === "win32")("BunHost.layerContained", () => {
         const status = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(Effect.provide(host), Effect.scoped)
 
         expect(status.trim()).toBe(realpathSync(directory))
-        expect(recorded).toEqual(["jj --version", "jj status"])
+        expect(recorded).toEqual(["jj --version", "jj status --config snapshot.max-new-file-size=0"])
         // The invocation finished, so the record was retired with it.
         expect(yield* ledger.live).toEqual([])
       } finally {

@@ -24,6 +24,7 @@
  * @since 1.0.0-rc.0
  */
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
+import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import type { Jj, JjError } from "@smthrs/jj"
 import * as BunJj from "@smthrs/jj/bun/BunJj"
@@ -31,7 +32,9 @@ import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import type { HostServiceIds } from "@smthrs/kernel/HostServices"
 import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
+import * as HostLiveness from "@smthrs/platform-node/HostLiveness"
 import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
+import type * as Crypto from "effect/Crypto"
 import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
@@ -55,7 +58,15 @@ import * as BunFileSystem from "./BunFileSystem.ts"
  * @since 1.0.0-rc.0
  * @slop
  */
-export { AtomicFileSystem, BunChildProcessSpawner, BunFileSystem, BunHttpClient }
+export {
+  AtomicFileSystem,
+  BunChildProcessSpawner,
+  BunCrypto,
+  BunFileSystem,
+  BunHttpClient,
+  HostLiveness,
+  ProcessReaper
+}
 
 /**
  * The complete closed Host service union provided by Bun.
@@ -197,7 +208,7 @@ const reaping = (options?: ContainedOptions): ProcessReaper.Options => ({
 })
 
 /** The two services `BunChildProcessSpawner` resolves paths and files with. */
-const platform = Layer.mergeAll(BunFileSystem.layer, Path.layer)
+const platform = Layer.mergeAll(BunFileSystem.layer, Path.layer, BunCrypto.layer)
 
 /** Effect's fetch client, told never to follow a redirect on its own. */
 const layerHttpClient: Layer.Layer<HttpClient> = Layer.provide(
@@ -213,7 +224,7 @@ const layerHttpClient: Layer.Layer<HttpClient> = Layer.provide(
  * @since 1.0.0-rc.0
  * @slop
  */
-export const layer: Layer.Layer<BunHost, JjError> = Layer.mergeAll(
+export const layer: Layer.Layer<BunHost | Crypto.Crypto, JjError> = Layer.mergeAll(
   platform,
   Layer.provide(BunChildProcessSpawner.layer, platform),
   BunJj.layer,
@@ -230,7 +241,7 @@ export const layer: Layer.Layer<BunHost, JjError> = Layer.mergeAll(
  * @category layers
  * @since 1.0.0-rc.0
  */
-export const layerAt = (root: string): Layer.Layer<BunHost, JjError> => {
+export const layerAt = (root: string): Layer.Layer<BunHost | Crypto.Crypto, JjError> => {
   const repositoryRoot = absoluteRoot("layerAt", root)
   return Layer.mergeAll(
     platform,
@@ -256,7 +267,7 @@ export const layerAt = (root: string): Layer.Layer<BunHost, JjError> => {
  */
 export const layerContained = (
   options?: ContainedOptions
-): Layer.Layer<BunHost, JjError, ProcessLedger.ProcessLedger> => {
+): Layer.Layer<BunHost | Crypto.Crypto, JjError, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
     ContainedSpawner.layer(containment(options)),
     Layer.provide(BunChildProcessSpawner.layer, platform)
@@ -283,7 +294,7 @@ export const layerContained = (
 export const layerContainedAt = (
   root: string,
   options?: ContainedOptions
-): Layer.Layer<BunHost, JjError, ProcessLedger.ProcessLedger> => {
+): Layer.Layer<BunHost | Crypto.Crypto, JjError, ProcessLedger.ProcessLedger> => {
   const repositoryRoot = absoluteRoot("layerContainedAt", root)
   const spawner = Layer.provide(
     ContainedSpawner.layer(containment(options)),
