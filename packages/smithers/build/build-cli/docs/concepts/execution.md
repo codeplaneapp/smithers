@@ -120,8 +120,19 @@ mechanism with an image containing the toolchain when host-file read isolation
 is required; only its declared host mounts are exposed. Explicit read mounts
 and symlinks into host stores still expose the files they admit.
 
-Cache keys carry the platform and the architecture, so a result produced on
-one platform is never served to another.
+Cache keys carry the platform and architecture, the resolved executable path
+and SHA-256 of its bytes, and the identities and bytes of declared tool
+references. Replacing a compiler without changing its version string therefore
+invalidates its cached build. Workspace-local executable paths remain relative;
+host tool installations retain their resolved absolute paths.
+
+The child environment is also keyed: inherited values from the exec allowlist
+(including `PATH`, `CI`, and SDK selection), declared `env` overrides, and a
+resolved Nix environment. The environment enters diagnostics as a digest;
+withheld cache credentials and unrelated parent variables are excluded. A
+changed `PATH` invalidates command-form builds too. Tools selected dynamically
+inside shell scripts must still be declared as tool dependencies; this does not
+infer an arbitrary program's subprocess or library dependencies.
 
 ## Services
 

@@ -64,6 +64,21 @@ pins does not.
 `API-REVIEW.md` records that executable targets should eventually derive both
 lists from the real flow graph and its resolved layers.
 
+### Executable and environment identity
+
+`PACKAGE.ts` execution keys the selected executable's resolved path and content
+SHA-256, as well as each declared tool reference's resolution and executable
+bytes. Changing the bytes behind a fixed version string causes a miss.
+Workspace-local executable paths stay relative; host installations retain their
+absolute paths.
+
+The same allowlisted child environment used for execution supplies inherited
+values such as `PATH`, `CI`, and SDK selection, with declared `env` and Nix
+overrides applied. Its values enter key diagnostics as a digest. Unrelated
+parent variables and withheld cache credentials do not enter it. Changes to
+host `PATH` can therefore prevent cache sharing between checkouts. Dynamically
+selected subprocesses and libraries still need declared tool/input dependencies.
+
 ### Implementation identity
 
 The ambient `implementation` field is a digest of the loaded, shipped source

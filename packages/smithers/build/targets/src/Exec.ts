@@ -600,8 +600,12 @@ export interface ToolEnvironment {
  * the one case where a variable is meant to reach the child. What reaches it is
  * a minted placeholder and the loopback proxy endpoint, never a credential, so
  * ordering it after the withholding pass grants no ambient authority.
+ * Planning uses the same environment to key inherited and declared values.
+ *
+ * @category environment
+ * @since 0.1.0
  */
-const toolEnvironment = (
+export const toolEnvironment = (
   declared: Readonly<Record<string, string>>,
   sensitiveEnv: ReadonlyArray<string>,
   secretEnv: Readonly<Record<string, string>> = {},

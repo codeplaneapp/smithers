@@ -471,3 +471,8 @@ opening or `{ network: "loopback" }`; service dependencies do not open the
 network implicitly. Linux bubblewrap refuses loopback-only access with
 `sandbox_unenforceable`, because sharing host loopback also shares host egress.
 macOS seatbelt supports the loopback policy.
+
+`Exec.toolEnvironment(declared, sensitiveEnv, secretEnv?, base?)` constructs the
+allowlisted child environment shared by execution and cache-key planning.
+Declared values override inherited defaults, cache credentials are withheld,
+and explicitly minted secret placeholders are applied last.

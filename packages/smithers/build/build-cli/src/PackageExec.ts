@@ -658,6 +658,7 @@ interface PlanContext {
    */
   readonly workspaceToolchain: WorkspaceToolchain.WorkspaceToolchain
   readonly tools: Map<string, ToolOutcome>
+  readonly toolBytes: Map<string, Promise<string>>
   readonly probes: Map<string, PackageTree.Probe>
   readonly nodes: Map<string, PackageNode>
   readonly privateLabels: WeakMap<Target.AnyTarget, string>
@@ -850,6 +851,22 @@ const probeOnce = async (context: PlanContext, path: string): Promise<PackageTre
   const probe = await PackageTree.probeVersion(path)
   context.probes.set(path, probe)
   return probe
+}
+
+const binaryIdentity = async (context: PlanContext, path: string): Promise<unknown> => {
+  const resolved = await Fs.realpath(path)
+  let digest = context.toolBytes.get(resolved)
+  if (digest === undefined) {
+    digest = PackageTree.digestFileBytes(resolved)
+    context.toolBytes.set(resolved, digest)
+  }
+  // Workspace installations stay relocatable; a host path selects a specific
+  // installation, whose bytes can change without its version string changing.
+  const relative = Path.containedRelative(context.root, resolved)
+  return {
+    path: relative === undefined ? resolved : `${workspaceRootToken}/${posix(relative)}`,
+    digest: await digest
+  }
 }
 
 const moduleVersion = async (root: string, packageName: string): Promise<string | null> => {
@@ -1240,6 +1257,15 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
     outcome = {
       _tag: "refused",
       tool: { refusal: `unknown tool reference: ${key}`, identity: { tag: "unknown", key } }
+    }
+  }
+  if (outcome._tag === "resolved") {
+    outcome = {
+      _tag: "resolved",
+      tool: {
+        ...outcome.tool,
+        identity: { resolution: outcome.tool.identity, binary: await binaryIdentity(context, outcome.tool.path) }
+      }
     }
   }
   context.tools.set(key, outcome)
@@ -2793,6 +2819,29 @@ const visit = async (
     (rule === "Go.Lint" && mode === "check") || (rule === "Go.Generate" && mode === "check") ||
     (rule === "Repo.Target" && repositoryState?.dirty === false))
 
+  const spawnEnvironment = Exec.toolEnvironment(
+    env,
+    context.remoteCache === undefined ? [] : Workspace.credentialEnvNames(context.remoteCache.credentials),
+    {},
+    context.nixEnvironment === undefined ? undefined : {
+      path: context.nixEnvironment.path.join(NodePath.delimiter),
+      variables: context.nixEnvironment.variables
+    }
+  )
+  // Key only the allowlisted/declared child environment, never the parent's
+  // credentials. Hash the values so key diagnostics do not print them.
+  const environmentDigest = sha256Hex(JSON.stringify(
+    Object.keys(spawnEnvironment).sort().map((name) => [name, spawnEnvironment[name]])
+  ))
+  let executable: unknown = null
+  const command = argv?.[0]
+  if (command !== undefined && !command.includes(workspaceRootToken)) {
+    const path = NodePath.isAbsolute(command)
+      ? command
+      : PackageTree.findOnPath(command, spawnEnvironment)
+    if (path !== undefined && NodeFs.existsSync(path)) executable = await binaryIdentity(context, path)
+  }
+
   const keyMaterial: Planner.KeyMaterial = {
     body: {
       flow: target._tag,
@@ -2815,6 +2864,7 @@ const visit = async (
       declared: declaredInputs,
       dependencies: dependencyRows,
       toolchain,
+      execution: argv === undefined ? null : { environmentDigest, executable },
       overlays: overlays.map(({ digest, path, source }) => ({ digest, path, source })),
       submodules: lane?.kind === "submodules"
         ? lane.plan.gitlinks.map((link) => ({ path: link.path, sha: link.sha }))
@@ -3174,6 +3224,7 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     managerBinary: managerBinaryOf(workspace),
     workspaceToolchain: WorkspaceToolchain.of(workspace),
     tools: new Map(),
+    toolBytes: new Map(),
     probes: new Map(),
     nodes: new Map(),
     privateLabels: new WeakMap(),

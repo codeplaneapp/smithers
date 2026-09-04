@@ -3,7 +3,7 @@ import * as Fs from "node:fs/promises"
 import * as NodeHttp from "node:http"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it, vi } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import { PACKAGE_EXECUTION_FORMAT, takesExclusiveTreePermit } from "../src/PackageExec.ts"
 
@@ -1192,6 +1192,77 @@ export const Package = S.Package({ targets: { check: S.Shell.Test({ command: "tr
 })
 
 describe("toolchain identity in keys", () => {
+  it("misses the build cache when a resolved binary changes without changing its version", async () => {
+    const root = await temporaryWorkspace()
+    const tools = await temporaryWorkspace()
+    const binary = NodePath.join(tools, "cache-compiler")
+    const install = async (value: string): Promise<void> => {
+      await Fs.writeFile(
+        binary,
+        `#!/bin/sh\nif [ "$1" = --version ]; then echo 1.0; exit 0; fi\nmkdir -p dist\nprintf '${value}' > dist/a.txt\n`,
+        { mode: 0o755 }
+      )
+    }
+    await install("one")
+    await write(root, "WORKSPACE.ts", workspaceModule(`  host: S.Host({ bins: ["cache-compiler"] }),`))
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const dist = S.Shell.Build({ bin: S.Host.bin("cache-compiler"), outDirs: ["dist"] })
+export const Package = S.Package({ targets: { dist } })
+`
+    )
+    commitAll(root)
+    vi.stubEnv("PATH", `${tools}${NodePath.delimiter}${process.env["PATH"] ?? ""}`)
+    try {
+      const first = await serve(root, ["//:dist"])
+      expect(first.exitCode, first.logs).toBe(0)
+      const warm = await serve(root, ["//:dist"])
+      expect(warm.logs).toContain("//:dist  hit")
+      await install("two")
+      await Fs.rm(NodePath.join(root, "dist"), { recursive: true, force: true })
+      const changed = await serve(root, ["//:dist"])
+      expect(changed.exitCode, changed.logs).toBe(0)
+      expect(changed.logs).toContain("//:dist  ran")
+      expect(await Fs.readFile(NodePath.join(root, "dist/a.txt"), "utf8")).toBe("two")
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("misses a command build when PATH or an inherited environment value changes", async () => {
+    const root = await temporaryWorkspace()
+    const tools = await temporaryWorkspace()
+    const originalPath = process.env["PATH"] ?? ""
+    for (const name of ["one", "two"]) {
+      await write(tools, `${name}/cache-compiler`, `#!/bin/sh\nmkdir -p dist\nprintf '${name}:%s' "$CI" > dist/a.txt\n`)
+      await Fs.chmod(NodePath.join(tools, name, "cache-compiler"), 0o755)
+    }
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const dist = S.Shell.Build({ command: "cache-compiler", outDirs: ["dist"] })
+export const Package = S.Package({ targets: { dist } })
+`
+    )
+    commitAll(root)
+    try {
+      for (const [tool, ci] of [["one", "first"], ["two", "first"], ["two", "second"]]) {
+        vi.stubEnv("PATH", `${NodePath.join(tools, tool!)}${NodePath.delimiter}${originalPath}`)
+        vi.stubEnv("CI", ci!)
+        const result = await serve(root, ["//:dist"])
+        expect(result.exitCode, result.logs).toBe(0)
+        expect(result.logs).toContain("//:dist  ran")
+        expect(await Fs.readFile(NodePath.join(root, "dist/a.txt"), "utf8")).toBe(`${tool}:${ci}`)
+      }
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("re-keys a target when the resolved node_modules package version changes", async () => {
     const root = await temporaryWorkspace()
     await write(root, "WORKSPACE.ts", workspaceModule())
