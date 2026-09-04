@@ -368,7 +368,8 @@ part of every call identity produced inside the cell, so editing one character
 re-keys every boundary within it. `Cell.extract(text)` recovers the cell
 program from one model reply: every fenced block tagged `cell`, `js`,
 `javascript`, `ts`, or `typescript`, joined in reply order with byte-identical
-repeats dropped, returning `{ source, blocks }` or a `no_cell` rejection.
+repeats dropped, returning `{ source, blocks }` or a `no_cell` rejection. An unterminated cell fence rejects the entire reply as
+`output_truncated`; a provider `length` stop uses the same code before execution.
 
 **Transitions.** `Cell.Transition` is the tagged union of:
 
@@ -383,7 +384,7 @@ repeats dropped, returning `{ source, blocks }` or a `no_cell` rejection.
 **Outcomes.** `Cell.Outcome` is the tagged union of `Settled` (ran and
 produced a well-formed transition), `Raised` (ran and threw; the thrown value
 is projected into stable `name` and `message` text), and `Rejected` (never
-ran, or produced no transition). `Cell.RejectionCode` is `no_cell`,
+ran, or produced no transition). `Cell.RejectionCode` is `no_cell`, `output_truncated`,
 `imports_forbidden`, `compile_failed`, `invalid_transition`,
 `unsupported_language`, `limit_exceeded`, or `stalled`. A result that cannot
 fit in the remaining QuickJS heap is rejected before materialization with

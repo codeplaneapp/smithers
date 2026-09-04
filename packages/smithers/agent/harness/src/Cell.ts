@@ -195,6 +195,7 @@ export const renderText = (value: Schema.Json): string =>
  */
 export const RejectionCode = Schema.Literals([
   "no_cell",
+  "output_truncated",
   "imports_forbidden",
   "compile_failed",
   "invalid_transition",
@@ -611,7 +612,7 @@ export const callFailure = (result: CallResult): Schema.Json => {
   }
 }
 
-const fenced = /```(?<info>[^\n`]*)\n(?<body>[\s\S]*?)\n?```/g
+const fenced = /```(?<info>[^\n`]*)\n(?<body>[\s\S]*?)(?:\n?(?<close>```)|$)/g
 
 const languageOf = (info: string): Language | undefined => {
   const tokens = new Set(info.trim().toLowerCase().split(/\s+/).filter((token) => token.length > 0))
@@ -695,6 +696,15 @@ export const extract = (text: string): Result.Result<Extracted, Rejected> => {
     /* v8 ignore next -- `info` is a mandatory group of `fenced`, outside any alternation or quantifier, so it participates in every match; the default only discharges the optional type TypeScript gives `RegExpMatchArray.groups` */
     const candidate = languageOf(match.groups?.info ?? "")
     if (candidate === undefined) continue
+    if (match.groups?.close === undefined) {
+      return Result.fail(
+        new Rejected({
+          code: "output_truncated",
+          message:
+            "The response contains an unterminated cell fence. No blocks ran. Emit the complete program with every fence closed."
+        })
+      )
+    }
     if (candidate === "typescript") typed = true
     /* v8 ignore next -- `body` is likewise mandatory in `fenced`; a match that reached here already produced `info`, so `groups` is present and carries both */
     const body = match.groups?.body ?? ""

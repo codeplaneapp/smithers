@@ -1873,7 +1873,15 @@ const frame = (
           durationMillis: settledAt - startedAt
         })
       )
-      const extracted = Cell.extract(assistantText(settled.message))
+      const extracted = settled.message.stopReason === "length"
+        ? Result.fail(
+          new Cell.Rejected({
+            code: "output_truncated",
+            message:
+              "The model reached its output limit (length) before finishing the response. No blocks ran. Emit a shorter, complete cell."
+          })
+        )
+        : Cell.extract(assistantText(settled.message))
       let rejection: Cell.Rejected | undefined
       if (extracted._tag === "Failure") rejection = extracted.failure
       else {

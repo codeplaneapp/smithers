@@ -131,10 +131,20 @@ describe("Cell.extract", () => {
     expect(extracted.source.digest).toBe(Cell.source("").digest)
   })
 
-  it("finds no cell in an unterminated fence", () => {
+  it("reports truncation in an unterminated fence", () => {
     const extracted = Cell.extract("```cell\nctx.done(\"x\")")
     expect(extracted._tag).toBe("Failure")
-    expect((extracted as Result.Failure<never, Cell.Rejected>).failure.code).toBe("no_cell")
+    expect((extracted as Result.Failure<never, Cell.Rejected>).failure.code).toBe("output_truncated")
+  })
+
+  it("rejects the entire reply when a second cell block is truncated", () => {
+    const text = fenced("cell", "await ctx.call(\"edit\", {})") + "\n```cell\nctx.done(\"cut off"
+    const extracted = Cell.extract(text)
+    expect(extracted._tag).toBe("Failure")
+    if (extracted._tag === "Failure") {
+      expect(extracted.failure.code).toBe("output_truncated")
+      expect(extracted.failure.message).toContain("unterminated")
+    }
   })
 
   it("finds no cell in an empty response", () => {

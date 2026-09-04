@@ -117,11 +117,11 @@ The failure split is the contract `EngineLike.call` declares:
 
 One evaluation settles with one of three `Cell.Outcome` members:
 
-| Tag        | Meaning                                                                                                                                                                                                              |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settled`  | The cell ran and produced a well-formed transition: `continue` when it called neither `ctx.done` nor `ctx.park`, `complete` for `ctx.done(output)`, `park` for `ctx.park(reason, message)`.                          |
-| `raised`   | The cell ran and threw. The thrown value is projected into stable `name` and `message` text.                                                                                                                         |
-| `rejected` | The cell never ran, or produced no transition. The `code` is a `Cell.RejectionCode`: `no_cell`, `imports_forbidden`, `compile_failed`, `invalid_transition`, `unsupported_language`, `limit_exceeded`, or `stalled`. |
+| Tag        | Meaning                                                                                                                                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settled`  | The cell ran and produced a well-formed transition: `continue` when it called neither `ctx.done` nor `ctx.park`, `complete` for `ctx.done(output)`, `park` for `ctx.park(reason, message)`.                                              |
+| `raised`   | The cell ran and threw. The thrown value is projected into stable `name` and `message` text.                                                                                                                                             |
+| `rejected` | The cell never ran, or produced no transition. The `code` is a `Cell.RejectionCode`: `no_cell`, `output_truncated`, `imports_forbidden`, `compile_failed`, `invalid_transition`, `unsupported_language`, `limit_exceeded`, or `stalled`. |
 
 `ctx.done` and `ctx.park` take effect where they are called: the run is over
 at that line, and a later `ctx.call` in the same cell resolves
@@ -203,3 +203,7 @@ module syntax, so `import` and `require` are not a back door.
   [Drive the cell loop](./drive-the-loop.md).
 - For the failure modes this surface raises, see
   [Troubleshooting](../troubleshooting.md).
+
+A provider `length` stop or an unterminated cell fence rejects the entire reply
+as `output_truncated`. No earlier block executes; the next request asks for a
+shorter, complete program.

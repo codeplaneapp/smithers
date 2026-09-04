@@ -1926,3 +1926,30 @@ describe("CellTurn recorded observations", () => {
     expect(of(events, "checkpoint-minted")).toHaveLength(0)
   })
 })
+
+describe("CellTurn truncated model output", () => {
+  it.each([
+    "Still thinking about the change",
+    "```cell\nawait ctx.call(\"fs/list\", {})",
+    "```cell\nawait ctx.call(\"fs/list\", {})\n```"
+  ])("rejects length settlement before executing %s", async (text) => {
+    const partial = prose(text)
+    const { events, engine, model, failure } = await run({
+      state: new CellTurn.State({ ...state(), revalidations: 0 }),
+      script: [
+        {
+          events: [
+            ...partial.events.slice(0, -1),
+            ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "length" })
+          ]
+        },
+        emits("ctx.done(\"recovered\")")
+      ]
+    })
+    expect(failure).toBeUndefined()
+    expect(engine.recorder.calls).toHaveLength(0)
+    expect(of(events, "cell-settled")[0]?.outcome).toMatchObject({ _tag: "rejected", code: "output_truncated" })
+    expect(JSON.stringify(model.recorder.requests[1]?.messages)).toContain("output limit")
+    expect(resolvedText(events)).toBe("recovered")
+  })
+})
