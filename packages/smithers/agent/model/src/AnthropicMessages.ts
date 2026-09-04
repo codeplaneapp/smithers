@@ -750,16 +750,16 @@ const providerReason = (
   // `quota_exceeded` is what parks a seat, and `invalid_request` terminates it.
   if (isQuotaExhausted(providerType, message)) return "quota_exceeded"
   if (status === 401 || status === 403 || normalized.includes("authentication")) return "authentication"
-  if (status === 429 || normalized.includes("rate_limit")) return "rate_limited"
+  if (status === 429 || status === 529 || normalized.includes("rate_limit") || normalized.includes("overloaded")) {
+    return "rate_limited"
+  }
   if (normalized.includes("content_policy") || normalized.includes("safety")) return "content_policy"
   // Anthropic reports an oversized prompt as an ordinary `invalid_request_error`,
   // so overflow has to be recognized before that branch swallows it.
   if (isContextOverflow(providerType, message)) return "context_overflow"
   if (status === 400 || normalized.includes("invalid_request")) return "invalid_request"
   if (
-    status === 529 ||
     (status !== undefined && status >= 500) ||
-    normalized.includes("overloaded") ||
     normalized.includes("api_error")
   ) return "provider_internal"
   return "unknown"

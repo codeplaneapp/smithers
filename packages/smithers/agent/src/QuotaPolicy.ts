@@ -236,12 +236,13 @@ export const parseDelay = (message: string): number | undefined => {
 }
 
 /**
- * The quota-shaped codes. `http 429` is included on its own, because an
+ * The quota-shaped codes. HTTP 429 and 529 are included on its own, because an
  * adapter that could not read a provider's code still read the status.
  */
 const quotaCodes: ReadonlySet<string> = new Set(["rate_limited", "quota_exceeded"])
 
-const isQuotaRefusal = (error: ModelError): boolean => quotaCodes.has(error.code) || error.httpStatus === 429
+const isQuotaRefusal = (error: ModelError): boolean =>
+  quotaCodes.has(error.code) || error.httpStatus === 429 || error.httpStatus === 529
 
 /**
  * The `ModelError` a failure is, or wraps.

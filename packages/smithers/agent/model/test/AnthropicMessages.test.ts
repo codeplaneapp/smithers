@@ -537,7 +537,7 @@ describe("AnthropicMessages streaming", () => {
         .pipe(Effect.flip)
     )
     expect(error).toBeInstanceOf(ModelError)
-    expect(error).toMatchObject({ code: "provider_internal", providerCode: "overloaded_error" })
+    expect(error).toMatchObject({ code: "rate_limited", providerCode: "overloaded_error" })
   })
 
   it("names a stream error even when the provider sends neither type nor message", () => {
@@ -818,7 +818,7 @@ describe("AnthropicMessages body lowering", () => {
       message: "Anthropic Messages request failed with HTTP 500"
     })
     expect(classify(529, "{\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}")).toMatchObject({
-      code: "provider_internal"
+      code: "rate_limited"
     })
     expect(classify(418, "{\"error\":{\"type\":\"api_error\",\"message\":\"teapot\"}}")).toMatchObject({
       code: "provider_internal"

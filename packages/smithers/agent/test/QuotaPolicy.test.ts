@@ -360,6 +360,19 @@ describe("the default classifier", () => {
     expect(Option.isNone(park)).toBe(true)
   })
 
+  it("parks an HTTP 529 even when a generic adapter calls it provider_internal", () => {
+    const park = classify(
+      new ModelError({
+        code: "provider_internal",
+        message: "Service unavailable",
+        httpStatus: 529,
+        retryAfterMillis: 3_000
+      }),
+      1_000
+    )
+    expect(Option.getOrUndefined(park)).toEqual({ wakeAt: 4_000, source: "retry-after" })
+  })
+
   it("classifies nothing that is not a quota refusal", () => {
     expect(
       Option.isNone(classify(new ModelError({ code: "provider_internal", message: "boom" }), 1_000))
@@ -472,7 +485,10 @@ describe("the default classifier", () => {
 })
 
 describe("a quota refusal at a model-backed step", () => {
-  it("parks the run under the quota reason, wakes on the deadline, and answers", async () => {
+  it.each([
+    rateLimited,
+    new ModelError({ code: "provider_internal", message: "Overloaded", httpStatus: 529, retryAfterMillis: 3_000 })
+  ])("parks HTTP $httpStatus under the quota reason, wakes on the deadline, and answers", async (refusal) => {
     const calls: Array<string> = []
     const captured: Array<Captured> = []
     const observed = await durable(
@@ -481,7 +497,7 @@ describe("a quota refusal at a model-backed step", () => {
         const quotaParksBefore = yield* Metric.value(ObservabilityMetric.quotaParks)
         const wiring = yield* incarnation(
           "parking",
-          capturing(refusingOnce(rateLimited, calls), captured),
+          capturing(refusingOnce(refusal, calls), captured),
           QuotaPolicy.layerDefault()
         )
         const startedAt = yield* Clock.currentTimeMillis

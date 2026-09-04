@@ -363,7 +363,7 @@ assistant message also fails preparation as `invalid_request`, with path
 `pause_turn` to `"stop"`; `max_tokens` to `"length"`; `tool_use` to
 `"tool-calls"`; `refusal` to `"content-filter"`. Classification recognizes
 Anthropic's HTTP 400 "credit balance is too low" wording as
-`quota_exceeded`, and `overloaded` and 529 as `provider_internal`.
+`quota_exceeded`, and `overloaded` and 529 as `rate_limited` so the agent can park durably.
 
 ## `OpenAIResponses`
 
