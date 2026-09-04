@@ -29,7 +29,7 @@ to a successor, `park(code, message)` suspends.
 The first script searches, then hands its hits to the author for a successor
 script. The second script edits and finishes.
 
-```ts
+````ts
 const l1 = [
   "```flow",
   `const hits = await ctx.call("grep", { pattern: "TODO" })`,
@@ -44,7 +44,7 @@ const l2 = [
   "return done({ patched: true })",
   "```"
 ].join("\n")
-```
+````
 
 `author` is an ordinary catalog call: the model seat sits behind the same one
 door as every other effect. For the script model, see

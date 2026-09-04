@@ -288,7 +288,7 @@ const repositoryShape = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*
  *
  * The endpoint is derived from the API base and the repository, so the only
  * thing a workspace commits is the repository name and, optionally, its
- * public read token. `smithers cache connect` writes exactly this line.
+ * public read token. `smthrs cache connect` writes exactly this line.
  *
  * @category constructors
  * @since 0.1.0

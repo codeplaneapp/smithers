@@ -158,7 +158,7 @@ the current run's. Calls recorded outside any run tally under
 `Budget.looseRunId`.
 
 For the runnable demonstration of all three policies across an engine restart,
-see [`examples/src/39-agent-policies.ts`](../../../examples/src/39-agent-policies.ts):
+see [`examples/src/39-agent-policies.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/39-agent-policies.ts):
 the provider refuses, the run parks, the engine is killed while it waits, and a
 second engine over the same file waits out the recorded deadline, spends a
 correction, and finishes with the provider called three times in all.

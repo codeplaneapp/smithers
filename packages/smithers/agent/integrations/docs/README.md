@@ -54,6 +54,13 @@ consumes it. Inside the workspace, add it with:
 pnpm add @smthrs/integrations
 ```
 
+Webhook ingress also imports the control plane's channel coordinator, and
+durable flows import the flow and engine layers:
+
+```bash
+pnpm add @smthrs/control @smthrs/flow @smthrs/engine
+```
+
 Import one provider at a time when that is all you need. The aggregate entry
 point and the per-provider subpaths export the same names:
 

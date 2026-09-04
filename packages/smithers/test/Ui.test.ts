@@ -89,7 +89,11 @@ describe("interactivity", () => {
   })
 
   it("builds the layer on the process streams", async () => {
-    const ui = await Effect.runPromise(Ui.Ui.asEffect().pipe(Effect.provide(Ui.layer({ CI: "true" }))))
+    const ui = await Effect.runPromise(
+      Effect.gen(function*() {
+        return yield* Ui.Ui
+      }).pipe(Effect.provide(Ui.layer({ CI: "true" })))
+    )
     expect(ui.interactive).toBe(false)
   })
 })
@@ -111,7 +115,7 @@ describe("bookends and log lines", () => {
       })
     )
     const plain = term.plain()
-    expect(plain).toContain(`┌  smithers ${packageVersion}`)
+    expect(plain).toContain(`┌  smthrs ${packageVersion}`)
     expect(plain).toContain("●  info")
     expect(plain).toContain("◆  success")
     expect(plain).toContain("◇  step")
@@ -139,14 +143,14 @@ describe("bookends and log lines", () => {
       })
     )
     expect(term.text()).toBe("smithers suggest\ninfo\nsuccess\nstep\nwarn\nerror\ntitle\nbody\nuntitled\ndone\n")
-    expect(Ui.brand).toBe(`smithers ${packageVersion}`)
+    expect(Ui.brand).toBe(`smthrs ${packageVersion}`)
   })
 })
 
 describe("checklist", () => {
   it("is byte-identical to Doctor.render when not interactive", () => {
     const report: Doctor.Report = { root: "/work", checks }
-    expect(Ui.renderChecklist(`smithers doctor: ${report.root}`, report.checks, { interactive: false }))
+    expect(Ui.renderChecklist(`smthrs doctor: ${report.root}`, report.checks, { interactive: false }))
       .toBe(Doctor.render(report))
   })
 
@@ -219,7 +223,7 @@ describe("streamSuggestions", () => {
   it("prints each item as it arrives under a running spinner", async () => {
     const term = terminal()
     const ui = make(term, true)
-    const streamed = await Effect.runPromise(ui.streamSuggestions(source(["a", "b"], 30), options))
+    const streamed = await Effect.runPromise(ui.streamSuggestions(source(["a", "b"], 150), options))
     expect(streamed).toEqual({ items: ["a", "b"], stopped: false })
     const plain = term.plain()
     expect(plain).toContain("◇  1. a")

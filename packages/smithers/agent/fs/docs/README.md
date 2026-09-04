@@ -1,46 +1,90 @@
-# `@smthrs/fs`
+---
+title: "@smthrs/fs"
+description: "Private metadata routing and schema-checked command projections for Smithers flows."
+---
 
-Private metadata routing and schema-checked command projections for Smithers
-flows.
+`@smthrs/fs` connects registry discovery to the surfaces that run Smithers
+flows. It scans a flows tree without importing any flow module, freezes the
+discovered metadata into path-named routes, and projects the executable
+subset onto agent, CLI, HTTP, and MCP surfaces where the flow's own Effect
+schema checks every input and output.
 
 This package is private at 1.0.0-rc.0 and has no supported external consumer.
-Do not install it. It remains in the workspace as an internal adapter while
-the registry and command surfaces settle.
+Do not install it from a registry. It remains in the workspace as an internal
+adapter while the registry and command surfaces settle.
 
-`FileRouter.scan` reads registry metadata without importing flow modules. It
-returns module, Markdown, and skill routes for inspection. `Command.make` and
-`Incur.createCli` expose only model-invocable module routes, because Markdown
-and skill execution is not implemented here. A selected module is loaded only
-when invoked, its real Effect input schema decodes the request, and its output
-schema encodes the result around the injected `FlowInvoker` boundary.
+## What it does
+
+Two halves share one immutable route model:
+
+- **Metadata routing.** `FileRouter.scan` reads [registry](/api/registry)
+  metadata without importing flow modules and returns module, Markdown, and
+  skill routes for inspection. `Route` validates and freezes that metadata,
+  `CommandTree` indexes routes for lookup, and `Directive` compiles placement
+  literals into [core](/api/core) placement values.
+- **Command projections.** `Command.make` exposes the model-invocable module
+  routes to an agent as list, parse, execute, and typed call operations.
+  `Incur.createCli` serves the same routes as a CLI and as HTTP, OpenAPI, and
+  MCP surfaces. Neither projection executes a flow: both dispatch through the
+  injected `FlowInvoker` seam, and every failure arrives as a sanitized
+  `FsError`.
+
+A selected module loads only when invoked. Its real Effect input schema
+decodes the request, and its output schema encodes the result.
+
+## Install
+
+The package never publishes, so there is nothing to install from npm. Inside
+the Smithers workspace, add it as a dependency:
+
+```bash
+pnpm add @smthrs/fs
+```
+
+## The smallest working example
+
+Scan a flows directory, build the agent command surface, and execute one
+command through a stub invoker:
 
 ```ts
 import { Command, FileRouter, FlowInvoker } from "@smthrs/fs"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodePath from "@effect/platform-node/NodePath"
 import { Effect, Layer } from "effect"
 import { resolve } from "node:path"
 
-const invoker = FlowInvoker.make({ invoke: () => Effect.succeed({ accepted: true }) })
+const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
+
+const invoker = FlowInvoker.make({
+  invoke: ({ input }) =>
+    Effect.succeed({ accepted: true, number: (input as { readonly number: number }).number })
+})
 
 const program = Effect.gen(function*() {
   const { routes } = yield* FileRouter.scan({ root: resolve("flows") })
   const commands = yield* Command.make(routes)
-  return yield* commands.execute("review --title notes")
-}).pipe(Effect.provide(Layer.succeed(FlowInvoker.FlowInvoker, invoker)))
+  return yield* commands.execute("review --number 42")
+}).pipe(
+  Effect.provide(Layer.succeed(FlowInvoker.FlowInvoker, invoker)),
+  Effect.provide(platform)
+)
+
+Effect.runPromise(program).then(console.log)
 ```
 
-## Package-owned contract
+`FileRouter.scan` requires the platform `FileSystem` and `Path` services, and
+`execute` requires a `FlowInvoker`. For the guided version of this program,
+see [Quickstart](./quickstart.md).
 
-- [`docs/README.md`](./docs/README.md) is the editable source for this generated
-  package README.
-- [`docs/api.md`](./docs/api.md) describes the eight namespaces and their
-  composition.
-- [`docs/contract.md`](./docs/contract.md) defines visibility, schema,
-  path, snapshot, resource, and error behavior.
-- [`docs/exports.md`](./docs/exports.md) is generated from exported JSDoc.
+## Where to go next
 
-Run `node packages/smithers/agent/fs/scripts/docs.mjs` from the workspace root to regenerate
-this README and the export index. `//packages/smithers/agent/fs:docsPages` drift-checks both.
-
-The root and named module subpaths are workspace surfaces only.
-`./internal/*` and nested `*/index` paths are blocked. There is no Vite entry
-or Vite peer contract.
+- [Quickstart](./quickstart.md): scan a flows tree and run one command end to end.
+- [Expose flows to an agent](./guides/expose-flows-to-an-agent.md): list, parse, execute, and call routes programmatically.
+- [Serve flows over CLI, HTTP, and MCP](./guides/serve-over-cli-http-and-mcp.md): project routes onto an Incur CLI.
+- [Test flow invocation](./guides/test-flow-invocation.md): stub the invocation boundary.
+- [Metadata routing](./concepts/metadata-routing.md): how filesystem paths become routes.
+- [Command projections](./concepts/command-projections.md): how routes become schema-checked surfaces.
+- [Filesystem routing contract](./contract.md): the normative visibility, schema, path, snapshot, resource, and error behavior.
+- [API reference](./api.md): every export, with signatures, requirements, and errors.
+- [Exported members](./exports.md): the public surface as one index.
+- [Troubleshooting](./troubleshooting.md): the `FsError` codes, their causes, and their fixes.

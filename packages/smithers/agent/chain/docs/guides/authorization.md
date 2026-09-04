@@ -40,8 +40,7 @@ import { CapabilityPattern } from "@smthrs/capability/Capability"
 import { Rule } from "@smthrs/capability/Permission"
 import { Authorize } from "@smthrs/chain"
 
-const pattern = (action: CapabilityPattern["action"], resource: string) =>
-  new CapabilityPattern({ action, resource })
+const pattern = (action: CapabilityPattern["action"], resource: string) => new CapabilityPattern({ action, resource })
 
 const authorize = Authorize.layerRules([
   new Rule({ effect: "allow", pattern: pattern("model:call", "**") }),

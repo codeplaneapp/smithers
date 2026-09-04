@@ -11,7 +11,7 @@ needs no API key. By the end you will have a step whose answer arrives as a
 typed value, decoded by the schema you declared.
 
 The runnable original of this walkthrough is
-[`examples/src/11-agent-step.ts`](../../examples/src/11-agent-step.ts) in the
+[`examples/src/11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts) in the
 repository.
 
 ## Prerequisites
@@ -195,8 +195,8 @@ Run the file with your TypeScript runner. The output is the decoded
 
 ```text
 {
-  summary: "Durable workflows record every step so a restart resumes instead of repeating.",
-  keyPoints: [ "steps are journaled", "replay is deterministic" ]
+  summary: 'Durable workflows record every step so a restart resumes instead of repeating.',
+  keyPoints: [ 'steps are journaled', 'replay is deterministic' ]
 }
 ```
 

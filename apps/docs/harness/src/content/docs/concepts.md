@@ -1,17 +1,45 @@
 ---
 title: "Concepts"
-description: "The Smithers built-in agent loop: a cell-first controller whose model turns produce JavaScript cells that run in a persistent realm and reach the world only through durable flow calls"
+description: "The mental models behind @smthrs/harness: cells, the persistent realm, durable flow calls as the only I/O, and the governing designs the source JSDoc cites."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/harness/docs/concepts.md"
 ---
 
-The source JSDoc in this package cites the design each module implements. Those
-designs used to live in a `docs/specs/` tree that is not part of this repository
-and is not shipped in the published tarball, so a reader following a citation
-found nothing. This file is the replacement: one section per design, stating
-what it decides and where the decision is enforced. Cite it from JSDoc by its
-path relative to the citing file — `../docs/concepts.md#<anchor>` from `src/`,
-`../../docs/concepts.md#<anchor>` from `src/internal/` — because `src/**` ships
-in the tarball and a monorepo-rooted path does not resolve once it is there.
+The source JSDoc in this package cites the design each module implements. This
+page states each design: what it decides and where the decision is enforced.
+Three mental models organize all of them: the cell, the persistent realm, and
+the durable flow call.
+
+## The cell loop
+
+A run of the built-in agent is a sequence of frames. One frame is:
+
+```text
+model -> generated cell -> realm evaluation -> individually durable flow calls -> next transition
+```
+
+The model's whole answer is text, and the harness recovers a program from it:
+every fenced `cell` block of the reply, joined in order into one JavaScript
+program. That program is the cell. It runs inside a realm the run keeps, and
+it states how the run should proceed by calling: `ctx.done(output)` completes
+the run, `ctx.park(reason, message)` waits durably, and a cell that calls
+neither continues to the next frame. `Sandbox.replTransition` builds the
+`Cell.Transition` the journal records from that call.
+
+The loop is cell-first rather than tool-call-first. The controller seals every
+model request with `tools: []` and `toolChoice: "none"`, so continuation never
+comes from provider plumbing: it comes from the transition the cell settled
+and the budgets the run declared. A model that wants to read a file, run a
+command, or ask a human writes JavaScript that awaits `ctx.call`, the same two
+lines for every capability, and the harness turns each call into its own
+durable boundary.
+
+Four actors share the frame, and the package draws a hard line between them.
+The model authors cells. The realm evaluates them. The controller (`CellTurn`)
+decides what the transition means and what the next frame shows. The engine
+(`EngineLike`) owns everything durable: sealed model steps, flow-call
+settlements, journaled records, workspace measurement, checkpoints, and
+suspension. The package is the translation between the four; scheduling,
+persistence, transport, and model execution stay behind the ports.
 
 ## Repl realm
 
@@ -86,7 +114,7 @@ zoned, so a provider's prefix cache covers the stable span. Segments carry their
 own digest and estimated token count, computed once at construction; the arrays
 are frozen so a mutation cannot invalidate a cached digest silently.
 
-The volatile block — the frame's state section — sits in one trailing user
+The volatile block, the frame's state section, sits in one trailing user
 message after the transcript rather than inside the system context, so the whole
 stable span is byte-identical for the life of a run.
 
@@ -140,3 +168,11 @@ the run pays every frame. It is pinned by a token ceiling in
 attached.
 
 Implemented by `internal/cellPrompt.ts`.
+
+## Citing this file from source
+
+The JSDoc of this package cites these sections by package-relative path,
+because `src/**` ships in the published tarball and a monorepo-rooted path does
+not resolve once it is there: `../docs/concepts.md#<anchor>` from `src/`, and
+`../../docs/concepts.md#<anchor>` from `src/internal/`. Section anchors are
+therefore stable names; renaming a heading is a source-visible change.

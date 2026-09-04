@@ -16,11 +16,12 @@ works.
 
 ## 1. Install
 
-In the Smithers workspace, install the package plus the two pieces the
-runnable examples use: the in-memory flow engine and the Node platform layer.
+In the Smithers workspace, install the package plus the pieces the runnable
+examples import: the flow declaration layer, the in-memory flow engine, and
+the Node platform layer.
 
 ```bash
-pnpm add @smthrs/integrations @smthrs/engine @effect/platform-node effect
+pnpm add @smthrs/integrations @smthrs/flow @smthrs/engine @effect/platform-node effect
 ```
 
 ## 2. Configure the credential

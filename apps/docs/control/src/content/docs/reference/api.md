@@ -251,7 +251,7 @@ anonymously. `resume` records the same pair on its `control.run.resume` entry.
 A cancel whose executor reports that the engine row has already settled writes
 no attribution, because nobody cancelled anything, and reconciles the control
 row onto the engine's own status. Leaving the two rows disagreeing was
-permanent: no verb converged it, `smithers ps` listed the run as live, and `gc`
+permanent: no verb converged it, `smthrs ps` listed the run as live, and `gc`
 skipped it forever.
 
 The `Cancel` RPC carries the reason and refuses a caller-named principal: the

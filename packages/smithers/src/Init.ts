@@ -122,10 +122,10 @@ export const ensureIgnored = (root: string): IgnoreStatus => {
  * The seat `init` writes for each provider credential, in the order
  * `smthrs doctor` reports them.
  *
- * `CEREBRAS_API_KEY` is missing on purpose. `Doctor` names it a provider key
- * and `NodeControl.seatResolver` has no route for the provider, so a scaffold
- * that chose it would write a flow whose launch answers `No route is
- * configured for the cerebras provider` (release rehearsal).
+ * `CEREBRAS_API_KEY` is missing on purpose. `Doctor` names it a provider key,
+ * and the resolver routes it since `smthrs suggest` landed, but the scaffold
+ * keeps to the three providers `doctor` has always ordered; `suggest` is the
+ * verb that reads the wider set (`Providers.detect`).
  */
 const providerSeats: ReadonlyArray<readonly [variable: string, seat: string]> = [
   ["ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-5"],

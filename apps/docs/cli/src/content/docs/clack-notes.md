@@ -157,6 +157,55 @@ The spinner/log interleave is `spinner.clear()`, `log.step(line)`,
 whose chunks are joined on one line, and it writes to `process.stdout` with
 no `output` option, so no test can observe it.
 
+## The layer: `src/Ui.ts`
+
+`Ui.make({ output, input?, interactive })` returns a `Ui.Service`; `Ui.layer(env)`
+builds it on the process streams; `Ui.current` reads the provided service or
+falls back to the process streams, so a handler needs no layer plumbing and a
+test can inject a fake terminal through `Effect.provideService(Ui.Ui, ...)`.
+`Ui.isInteractive(stdout, stdin, env)` is the decision. Every method has a
+plain-line rendering for non-interactive sessions.
+
+```ts
+import { Effect, Option } from "effect"
+import * as Ui from "@smthrs/cli/Ui"
+
+const suggest = (candidates: AsyncIterable<Suggestion>) =>
+  Effect.gen(function*() {
+    const ui = yield* Ui.current
+    yield* ui.intro()                                  // "┌  smthrs 1.0.0-rc.0"
+    const scan = yield* ui.streamSuggestions(candidates, {
+      label: (item, position) => `${position}. ${item.title}`,
+      scanning: "Scanning the tree",                   // spinner text while items arrive
+      settled: (count) => `${count} suggestions`,      // final ◇ line (or ■ when aborted)
+      signal                                           // optional AbortSignal: stop early, keep what arrived
+    })
+    const picked = yield* ui.pickSuggestion(scan.items, {
+      message: "Apply which suggestion?",
+      label: (item, position) => `${position}. ${item.title}`,
+      hint: (item) => item.file
+    })                                                 // Option<Suggestion>; None on cancel, empty, or non-TTY
+    if (Option.isNone(picked)) return yield* ui.outro("Nothing applied")
+    const apply = yield* ui.confirm({ message: `Apply to ${picked.value.file}?`, nonInteractive: false })
+    if (apply) yield* ui.success(`Applied ${picked.value.title}`)
+    yield* ui.outro("Done")
+  })
+```
+
+Other members: `ui.interactive`, `ui.note(message, title?)`, `ui.info/success/step/warn/error(message)`,
+`ui.checklist(title, checks)`, `ui.spinner()` (`start/message/stop/cancel/error`), and the pure
+`Ui.renderChecklist(title, checks, { interactive, columns? })` that `smthrs doctor` prints through
+`Output`/`Console` (non-interactive text is byte-identical to `Doctor.render`).
+
+Non-interactive renderings: `streamSuggestions` prints one label line per item then the settled
+line; `pickSuggestion` prints the message and a numbered list and answers `None`; `confirm` prints
+`"<message> yes|no (non-interactive)"` and answers the declared `nonInteractive` value. Under
+`--json` a verb should print its document through `Output` and not call the layer at all.
+
+Cancel semantics: a cancelled `pickSuggestion` is `None`, a cancelled `confirm` is `false`; neither
+sets exit 130, because Ctrl+C inside a raw-mode prompt is a keypress, not `SIGINT`. A verb that
+wants 130 fails with its own error after `None`.
+
 ## Gotchas met while prototyping
 
 - `spinner().clear()` unregisters the process listeners and unblocks stdin;

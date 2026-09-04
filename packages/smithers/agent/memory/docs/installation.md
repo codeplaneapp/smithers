@@ -16,7 +16,7 @@ sidebar:
 pnpm add @smthrs/memory
 ```
 
-The package ships as ESM and CommonJS with TypeScript declarations. Its own dependencies (`effect`, `@smthrs/core`, `@smthrs/database`, `@smthrs/patterns`) install with it.
+The package ships as ESM and CommonJS with TypeScript declarations. Its own dependencies (`effect`, `@smthrs/core`, `@smthrs/database`, `@smthrs/model`, `@smthrs/patterns`) install with it.
 
 ## Packages you add for production wiring
 

@@ -30,14 +30,14 @@ tests replay and resume a chain.
 
 Six tags make up the whole vocabulary, all in the `Event` namespace:
 
-| Event             | What it records                                                                          |
-| ----------------- | ---------------------------------------------------------------------------------------- |
-| `ChainStarted`    | The chain's first event: the goal it was started with and the caller's envelope.        |
+| Event             | What it records                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `ChainStarted`    | The chain's first event: the goal it was started with and the caller's envelope.                   |
 | `LinkAuthored`    | The script a link will execute, recorded before it runs so a resumed link replays the same source. |
-| `CallSettled`     | One call that reached an entry and produced a result: the unit the replay cache is keyed by. |
-| `GateRejected`    | One call a gate refused, recorded as the observation the next authoring reads.          |
-| `LinkEnded`       | The outcome a link ended with: the event that advances the link counter.                |
-| `SteeringDrained` | One non-empty steering drain, tied to the live author call it fed.                      |
+| `CallSettled`     | One call that reached an entry and produced a result: the unit the replay cache is keyed by.       |
+| `GateRejected`    | One call a gate refused, recorded as the observation the next authoring reads.                     |
+| `LinkEnded`       | The outcome a link ended with: the event that advances the link counter.                           |
+| `SteeringDrained` | One non-empty steering drain, tied to the live author call it fed.                                 |
 
 Every event carries an optional `chain` field. The root chain omits it, so
 existing journals stay byte-identical; a sub-chain sets it to the

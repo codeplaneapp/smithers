@@ -1,14 +1,14 @@
 ---
 title: "API reference"
-description: "Fixed-suite evaluation, baselines, regression reports, and score gates for flows"
+description: "Every @smthrs/evals export: the pipeline, comparison semantics, failure codes, the batch protocol, and limits."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/evals/docs/api.md"
 ---
 
 Fixed-suite evaluation, baselines, regression reports, and score gates for
 flows.
 
-The package is workspace-private at 1.0.0-rc.0 and is not published to npm. It is
-consumed from inside this repository, by `evals/agent`.
+The package is workspace-private at 1.0.0-rc.0 and is not published to npm. It
+is consumed from inside this repository, by `evals/agent`.
 
 ## The pipeline
 
@@ -27,6 +27,7 @@ import { Flow } from "@smthrs/core"
 import { Baseline, CaseExecutor, Gate, Regression, Runner, Suite } from "@smthrs/evals"
 import { Binding, Scorer } from "@smthrs/scorers"
 import { Effect, Layer } from "effect"
+import { readFile } from "node:fs/promises"
 
 const greet = Flow.make({ name: "greet" })
 
@@ -54,7 +55,9 @@ const program = Effect.gen(function*() {
     concurrency: 1
   })
   const run = yield* Runner.run(suite, { runId: "nightly-2026-01-01", at: "2026-01-01T00:00:00.000Z" })
-  const committed = yield* Baseline.load(committedBaselineJson)
+  const committed = yield* Baseline.load(
+    yield* Effect.promise(() => readFile("baseline.json", "utf8"))
+  )
   const comparison = yield* Regression.compare(committed, run)
   return Gate.ciGrade(yield* Gate.check(comparison, { mean: 0.9 }))
 }).pipe(Effect.provide(Layer.succeed(CaseExecutor.CaseExecutor)(executor)))
@@ -62,8 +65,8 @@ const program = Effect.gen(function*() {
 
 `Runner.run` needs only `CaseExecutor`. Scoring runs in process by default;
 provide `Runner.layerInline` to say so explicitly, `Runner.layerNoop` to state
-that a suite must not score, or your own adapter through `options.scorer` or the
-`Runner` service.
+that a suite must not score, or your own adapter through `options.scorer` or
+the `Runner` service.
 
 ## How comparison works
 
@@ -75,33 +78,32 @@ Four rules decide what a comparison reports, and none of them are obvious:
   `nondeterminism`: the same work graded differently twice. A gate reads both as
   red.
 - **`Observation.scorer` is a digest, not a name.** It is the scorer key, derived
-  from the scorer's own `{id, version, config}`, and it is what a baseline
+  from the scorer's own `{ id, version, config }`, and it is what a baseline
   matches on. `Observation.scorerName` carries the readable name beside it, and a
   Markdown report prints `name (first 8 of the key)`.
 - **A binding matches its target by reference identity.** `binding.appliesTo` has
   to be the same flow value the execution reports as its `target`; a structurally
   equal copy grades nothing.
-- **A baseline belongs to one suite.** New artifacts carry `Baseline.suite`, so
-  ownership is checked even when the baseline has no records. Older artifacts
-  without that field still load and rely on each record's suite. A suite-less
-  artifact with no records also loads, but comparison refuses it because nothing
-  establishes ownership. A mismatch fails with `invalid_baseline` rather than
-  reporting a clean pass.
+- **A baseline belongs to one suite.** Validation requires the artifact's
+  top-level `suite` field and a `suite` on every record, so ownership is recorded
+  even when the baseline has no records. Comparison refuses an artifact or any
+  record that names a suite other than the run's: a mismatch fails with
+  `invalid_baseline` rather than reporting a clean pass.
 
 ## Failure codes
 
 `EvalError.code` is the stable branch point.
 
-| Code                  | Raised when                                                                                                                                | Who fixes it              |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| Code                  | Raised when                                                                                                                              | Who fixes it              |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | `invalid_suite`       | The suite declaration is wrong: a name, a case, a concurrency, a fixture line, non-cloneable case data, or an undecidable sampling policy. | The suite author          |
-| `invalid_run_options` | `Runner.run`'s own options are wrong: an empty `runId`, or an `at` that is not a canonical UTC instant.                                    | The caller                |
-| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, belongs to another suite, or cannot establish suite ownership.    | Regenerate the baseline   |
-| `invalid_tolerance`   | A comparison tolerance is not a finite non-negative number.                                                                                | The caller                |
-| `executor`            | The target flow failed for a case, or no executor was available.                                                                           | The target or the wiring  |
-| `ambiguous_score_job` | Two jobs share a step key and scorer, so an order-only runner cannot attribute their results to cases.                                     | The suite or batch runner |
-| `scorer_protocol`     | A batch runner returned the wrong number of observations, or observations identifying jobs other than the ones it was given.               | The batch runner          |
-| `scorer_unavailable`  | No batch runner was available to score with.                                                                                               | The wiring                |
+| `invalid_run_options` | `Runner.run`'s own options are wrong: an empty `runId`, or an `at` that is not a canonical UTC instant.                                  | The caller                |
+| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, or belongs to another suite.                                    | Regenerate the baseline   |
+| `invalid_tolerance`   | A comparison tolerance is not a finite non-negative number.                                                                              | The caller                |
+| `executor`            | The target flow failed for a case, or no executor was available.                                                                         | The target or the wiring  |
+| `ambiguous_score_job` | Two jobs share a step key and scorer, so an order-only runner cannot attribute their results to cases.                                   | The suite or batch runner |
+| `scorer_protocol`     | A batch runner returned the wrong number of observations, or observations identifying jobs other than the ones it was given.             | The batch runner          |
+| `scorer_unavailable`  | No batch runner was available to score with.                                                                                             | The wiring                |
 
 Most failures carry a `path` locating the offending value: `cases[1].input`,
 `records[3].score`, `options.at`, `runBatch[0]`. A case whose target failed keeps
@@ -129,7 +131,7 @@ A run verifies all three and fails with `scorer_protocol` when one is broken.
 Before calling an order-only runner, it also refuses two jobs that share a step
 key and scorer with `ambiguous_score_job`. Give each case its own step key, or
 provide a runner that implements `runBatchCorrelated`. A returned score that is
-not finite and inside `[0, 1]` becomes an inconclusive observation naming the
+not finite and inside [0, 1] becomes an inconclusive observation naming the
 scorer and the offending value; the run's own timestamp, not the adapter's, is
 what reaches the observation.
 
@@ -151,11 +153,297 @@ what reaches the observation.
 - `Report.markdown` escapes, flattens, and caps every cell at 240 characters,
   including the heading.
 
-## Public API
+## Module reference
 
 The root entry point exports these namespaces; each is also importable from
 `@smthrs/evals/<Module>`. `@smthrs/evals/package.json` is exported too;
 `internal/*` and nested `*/index` subpaths are not public.
+
+### EvalError
+
+Typed evaluation failures and the stable codes a caller branches on.
+
+```ts
+class EvalError extends Schema.TaggedError<EvalError>()("flows/evals/EvalError", {
+  code: EvalErrorCode,
+  message: Schema.String,
+  path: Schema.optional(Schema.String),
+  cause: Schema.optional(Schema.Defect())
+}) {}
+```
+
+`code` is the stable branch point, `message` is the sentence a CI log shows,
+and `path` locates the offending value inside the input the caller supplied
+(`records[3].score`, `cases[1].input`, `options.at`). `cause` retains the
+original failure; it is never rendered on its own, so a message that matters
+to an operator says so itself. `EvalErrorCode` is the schema and type for the
+eight codes in the failure table.
+
+### Suite
+
+Fixed suite declarations and their JSON Lines fixture format.
+
+- `Case`: `{ name, input, expected? }`. `input` is handed to the executor and
+  `expected` is offered to a bound scorer as ground truth when the binding
+  declares none of its own. Both are snapshots taken by `make`.
+- `Binding`: a scorer binding accepted from [@smthrs/scorers](https://scorers.smithers.sh/reference/api/).
+  The binding's `appliesTo` flow is matched against an execution's `target` by
+  reference identity.
+- `MakeOptions`: `{ name, cases, bindings?, concurrency }`.
+- `Suite`: `{ name, cases, bindings, concurrency }`, with `cases` and
+  `bindings` frozen and every data field a copy the caller cannot reach.
+- `limits`: `{ concurrency: 1024, cases: 10000, fixtureLength: 8388608 }`, the
+  declared ceilings a suite is validated against.
+
+```ts
+const make = (options: MakeOptions): Effect.Effect<Suite, EvalError>
+```
+
+Builds and validates a fixed suite. When the effect runs, it reads every
+option, case field, and binding field exactly once, then validates and copies
+only what it read, so a getter cannot hand the suite a value validation never
+saw. Every case and binding is then copied with `structuredClone`, which is
+also the check that the data is inert. Fails with `invalid_suite` for an empty
+or control-character name, no cases, more than `limits.cases` cases, a
+duplicate case name, or a concurrency that is not a safe integer in
+[1, `limits.concurrency`].
+
+```ts
+const fromJsonLines = (text: string, options: JsonLinesOptions): Effect.Effect<Suite, EvalError>
+```
+
+Loads the `{ name, input, expected? }` JSON Lines fixture format.
+`JsonLinesOptions` is `{ name, bindings?, concurrency }`. Blank lines are
+skipped, a leading byte-order mark is stripped, and both LF and CRLF terminate
+a line. A malformed line fails with `invalid_suite` carrying the 1-based line
+number in both the message and the path; a fixture larger than
+`limits.fixtureLength` is rejected before any of it is parsed.
+
+### CaseExecutor
+
+The injectable boundary that executes one case against a target flow. A suite
+says what to run; this service says how.
+
+- `Execution`: `{ output, stepKey, latencyMs, target }`. `target` is the flow
+  value the case actually executed, matched against each binding's `appliesTo`
+  by reference identity, so it has to be the declared flow itself rather than
+  a copy of it.
+- `CaseInput`: the `Case` the executor receives.
+- `Run`: `(suiteCase: CaseInput) => Effect.Effect<Execution, EvalError>`.
+- `Service`: `{ run: Run }`.
+- `Implementation`: `{ run }` or `{ execute }`. The union accepts exactly one
+  of them, so an object supplying both is a type error instead of a service
+  whose two halves can disagree.
+- `CaseExecutor`: the `Context.Service` tag, `flows/evals/CaseExecutor`.
+
+```ts
+const make = (implementation: Implementation | Run): Service
+```
+
+Builds an executor from a callback, or from an object naming it `run` or
+`execute`. Throws a `TypeError` when neither is a function: an executor that
+silently degraded would turn one wiring mistake into a whole suite of cases
+failing with `executor`, which reads as a broken target rather than a missing
+one.
+
+`makeNoop()` builds an executor that fails every case with a typed `executor`
+error, and `layerNoop` provides it.
+
+### Runner
+
+Deterministic suite execution and bound scorer evaluation.
+
+- `Observation`: one score observation emitted by a suite run. Every
+  observation carries `case`, `scorer`, `stepKey`, and `at`, plus an optional
+  `scorerName`; a `score` observation adds `score` in [0, 1] with an optional
+  `reason`, and an `inconclusive` observation adds a required `reason`. Both
+  kinds may carry `meta`. `at` is the run's timestamp, not the scorer's: a
+  run's observations all carry one instant so a baseline stays reproducible.
+- `ScoreRequest`: a request sent to the scorers batch runner, joining the
+  case, the step key, the binding, and the scorer input (`input`, `output`,
+  optional `groundTruth` and `context`, `latencyMs`).
+- `ScoreJob`: a blocking scorer job, matching the `Runner` module in
+  [@smthrs/scorers](https://scorers.smithers.sh/reference/api/): an `identity`, an `observation` seed with
+  `targetStepKey` and `scorerKey`, the `score` effect, and `at` in
+  milliseconds.
+- `ScoreObservation`: a score result aligned with a `ScoreRequest`.
+- `BatchResult`: `{ identity, observation }`, a batch result tagged with the
+  identity of the job that produced it.
+- `CaseResult`: `{ case, execution?, error?, observations }`, the per-case
+  result retained by the runner.
+- `RunResult`: `{ runId, suite, cases, observations }`, the stable result of a
+  suite run.
+- `RunOptions`: `{ scorer?, runId, sampleId?, at }`.
+- `Runner`: the `Context.Service` tag, `flows/evals/Runner`, for an injectable
+  batch runner. `run` does not require it: a run scores with `options.scorer`
+  when one is passed, otherwise with this service when one is provided,
+  otherwise in process through `makeInline`.
+- `ScoreBatchRunner`: the structural adapter described in the batch protocol
+  section.
+
+```ts
+const run = (
+  suite: Suite,
+  options: RunOptions
+): Effect.Effect<RunResult, EvalError, CaseExecutor>
+```
+
+Runs a fixed suite with bounded execution and declaration-order results. Cases
+run through the provided `CaseExecutor` at the suite's concurrency. Every
+execution is graded by the bindings whose `appliesTo` is the flow the
+execution reports as its target, matched by reference identity. A case whose
+target failed keeps its typed error and produces no observations; a scorer
+that failed produces an inconclusive observation. The run itself fails only
+with `invalid_run_options` for a non-canonical run identity or timestamp,
+`invalid_suite` for an unusable sampling policy, `ambiguous_score_job` when an
+order-only runner cannot distinguish two jobs, or `scorer_protocol` for a
+batch runner that broke the `ScoreBatchRunner` contract.
+
+```ts
+const makeInline = (): ScoreBatchRunner
+```
+
+Builds the in-process batch runner a run scores with by default. Each job's
+scorer runs in the current process, its result is checked by the scorers
+package's own `Scorer.validate`, and a scorer that fails becomes an
+inconclusive observation naming its cause rather than failing the run.
+`layerInline` provides it as the `Runner` service.
+
+`layerNoop` provides a batch runner that is never available. Every bound score
+under it becomes an inconclusive observation, which a gate grades as an
+undecidable run rather than a red. Provide it to state that a suite must not
+score.
+
+### Baseline
+
+Committed baselines: what a suite used to score.
+
+- `version`: `1`, the current committed baseline artifact version.
+- `BaselineRecord`: `{ suite, case, scorer, scorerName?, stepKey, score }`,
+  one successful score retained by a baseline.
+- `Baseline`: `{ version, suite, records }`. `suite` records artifact
+  ownership even when `records` is empty.
+
+```ts
+const fromRun = (run: RunResult): Effect.Effect<Baseline, EvalError>
+```
+
+Builds and validates a baseline from a run's successful observations.
+Inconclusive observations are dropped: a baseline records what was measured,
+and an inconclusive observation measured nothing.
+
+```ts
+const make = (
+  baseline: Omit<Baseline, "version"> & { readonly version?: typeof version }
+): Effect.Effect<Baseline, EvalError>
+```
+
+Validates an in-memory baseline. Every known field is read once, records are
+rebuilt from the validated values, and the array is frozen. Fails with
+`invalid_baseline` carrying the record index and field name in `path` for a
+wrong version, a non-array `records`, a record that is not an object, a
+non-string identity field, or a score that is not finite in [0, 1].
+
+```ts
+const write = (baseline: Baseline): string
+const load = (text: string): Effect.Effect<Baseline, EvalError>
+```
+
+`write` serializes a baseline with recursively sorted keys and stable numbers,
+records ordered by an injective encoding of `(suite, case, scorer, stepKey)`,
+ending with a newline. `load` parses and validates canonical baseline JSON,
+failing with `invalid_baseline`.
+
+### Regression
+
+Step-key-aware comparison of a run against a baseline.
+
+- `Tolerances`: `{ absolute?, relative? }`. A move is reported only when it
+  exceeds both tolerances, so either one alone is enough to silence it. Both
+  default to 0, which reports every move.
+- `Regression`: `{ case, scorer, baseline, actual, drop }`, a score drop at a
+  changed step key.
+- `Nondeterminism`: `{ case, scorer, baseline, actual, delta }`, a changed
+  score at the same step key.
+- `MissingObservation`: `{ side, case, scorer, scorerName?, stepKey }`. `side`
+  names the side the observation is missing from: `"run"` for a baseline
+  record the run never reproduced, `"baseline"` for a score no baseline record
+  accounts for.
+- `Report`: `{ suite, baseline, run, regressions, nondeterminism, missing,
+  samples, inconclusive }`, the complete comparison.
+
+```ts
+const compare = (
+  baseline: Baseline,
+  run: RunResult,
+  tolerances?: Tolerances
+): Effect.Effect<Report, EvalError>
+```
+
+Compares a run to a baseline, preserving missing and inconclusive
+observations. Records and observations are grouped by `(case, scorer)` and
+then paired by step key, so a scorer that ran several times against one case
+is compared pairwise instead of by array position. Fails with
+`invalid_tolerance` when a tolerance is not finite and non-negative, and with
+`invalid_baseline` when the artifact or any of its records belongs to a suite
+other than the one the run reports.
+
+### Report
+
+Canonical JSON and Markdown renderings of a comparison.
+
+```ts
+const json = (report: Regression.Report): string
+const markdown = (report: Regression.Report): string
+```
+
+`json` serializes a regression report as stable, sorted-key JSON. The report
+embeds each case's raw `execution.output`, which comes from an arbitrary
+target flow, so the encoding is total rather than trusting: keys are sorted by
+code unit, embedded strings are capped, and anything JSON cannot express
+becomes a named marker instead of a `RangeError` or a silent `null`. Two
+identical runs therefore produce byte-identical JSON. Nothing redacts the
+embedded output.
+
+`markdown` renders the report an operator reads in a CI log. Every count in
+the summary that is not zero has a section naming its rows: the regressions
+and the nondeterminism a gate reads as red, and the case failures, missing
+observations, and inconclusive observations that leave a gate undecided. Cell
+text is escaped, stripped of control characters, and capped, so a suite, case,
+or scorer name cannot inject Markdown into a rendered report.
+
+### Gate
+
+Score thresholds and the CI exit grade a comparison earns.
+
+- `Options`: `{ mean?, min?, perCase? }`. `mean` gates the arithmetic mean of
+  every score observation, `min` gates the lowest one, and `perCase` gates
+  each named case's lowest score. With none of them set the gate still runs,
+  as `mean(0)`, so a run with no score at all is undecidable rather than a
+  pass.
+
+```ts
+const check = (report: Regression.Report, options?: Options): Effect.Effect<Verdict, ScoreGateError>
+```
+
+Checks thresholds through the shared ScoreGate arithmetic in
+[@smthrs/testing](https://testing.smithers.sh/reference/api/). The threshold gates always run: an
+unobserved case cannot excuse the cases that were observed. Regressions and
+nondeterminism are findings and force a `Failed` verdict; failed cases and
+missing observations are environment faults and travel beside the verdict. A
+threshold outside [0, 1] fails in the error channel with a `ScoreGateError`,
+code `invalid_threshold`.
+
+```ts
+const ciGrade = (verdict: Verdict): { readonly exitCode: 0 | 1 | 5; readonly summary: string }
+```
+
+Maps a gate verdict to the shared CI convention: a finding is exit code 1, an
+undecidable run is exit code 5, and a clean pass is exit code 0. A pass that
+carries unresolved observations exits 5 as well: the gates it met were met
+over fewer observations than the suite declared.
+
+## Export index
 
 | Export                          | Category      | Summary                                                                             |
 | ------------------------------- | ------------- | ----------------------------------------------------------------------------------- |
@@ -213,6 +501,6 @@ The root entry point exports these namespaces; each is also importable from
 
 ## A worked suite
 
-`evals/agent/` in this repository is a committed suite built on these modules. It
-evaluates the Smithers agent itself, offline against a scripted model, and gates
-the run on a committed baseline. Run it with `bun evals/agent/run.ts`.
+`evals/agent/` in this repository is a committed suite built on these modules.
+It evaluates the Smithers agent itself, offline against a scripted model, and
+gates the run on a committed baseline. Run it with `node evals/agent/run.ts`.

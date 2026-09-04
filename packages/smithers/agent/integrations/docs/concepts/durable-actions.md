@@ -95,7 +95,7 @@ journals `retryable: true`, a chat that does not exist journals
 action applies that mapping, so every journaled failure keeps the package's
 one promise: a machine-readable reason.
 
-## Writing your own action
+## Write your own action
 
 An application that needs an endpoint these three do not cover writes its own
 `Action.make` over the same client. That is the intended extension point, not

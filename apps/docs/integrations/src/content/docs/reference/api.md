@@ -1,372 +1,658 @@
 ---
 title: "API reference"
-description: "GitHub, Linear, and Telegram adapters over the Smithers control plane"
+description: "Every public export of @smthrs/integrations: signatures, behavior, and errors, for the Core, GitHub, Linear, and Telegram namespaces."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/integrations/docs/api.md"
 ---
 
-The package is private at `1.0.0-rc.0`: no consumer on the registry imports it.
-It is documented here because it is the worked example of what a Smithers
-integration is: a narrow host layer with a verified door into the control
-plane, and no opinion above that line.
+The package exports four namespaces from the aggregate entry point
+`@smthrs/integrations` and from the per-provider subpaths
+`@smthrs/integrations/core`, `/github`, `/linear`, and `/telegram`. The
+`Environment` module is reachable as `@smthrs/integrations/Environment`.
 
-GitHub and Linear are the two integrations the `1.0.0-rc.0` release smoke
-exercises against live APIs.
+Conventions worth knowing before the signatures:
 
-## The shape of an integration
+- Clients are Effect services. Each has a tag (for example `GitHubClient`), a
+  `make` constructor for direct use, and a `layer` for composition.
+- Failing Effect values fail with `Core.IntegrationError`, except the
+  Telegram client, which fails with `Telegram.TelegramClient.TelegramApiError`.
+- Plan-time helpers validate their arguments by throwing, the way an ordinary
+  constructor does. Those throws are `SmithersError` values with codes such
+  as `INVALID_INPUT`, or an `IntegrationError`, and they mean the caller has
+  a bug to fix rather than a failure to journal. See
+  [the errors API](https://errors.smithers.sh/reference/api/) for `SmithersError`.
+- Explicit configuration wins over the environment, and a passed `env` record
+  replaces the ambient environment rather than layering over it.
 
-Four things, per provider:
+## Core
 
-1. **A client.** Authentication, rate limits, pagination, and credential
-   hygiene. Everything a caller would otherwise get wrong against that API.
-2. **A channel.** A `@smthrs/control` `Channel` that verifies an inbound
-   webhook and turns it into one normalized event.
-3. **Schemas.** The payload fields worth typing, with everything else passing
-   through untouched.
-4. **Actions.** The durable steps a flow calls: `GitHub.Actions.CommentOnIssue`,
-   `Linear.Actions.CreateIssue`, `Telegram.Actions.SendMessage`. Each declares
-   its payload, its success, and `IntegrationFailure` as its error, so the
-   engine can journal the result and replay it instead of posting twice.
+The service-agnostic pieces every provider builds on, exported as `Core`.
 
-What an event _means_, which flow a pull request starts and which run an issue
-comment signals, stays a Flow the application writes. A provider adapter that
-decided that for you would be a framework.
+### Core.Signature
 
-## Webhook ingress
+Constant-time HMAC-SHA256 verification, the check every webhook source uses.
 
-Smithers 1.0 has no listener verb and no gateway-level webhook
-configuration. A webhook door is library code:
+| Export                  | Signature                                                            | Notes |
+| ----------------------- | ------------------------------------------------------------------- | ----- |
+| `verifySignature`       | `(options: VerifyOptions) => boolean`                               | Accepts GitHub's `sha256=<hex>`, a bare hex digest, and a base64 digest. Returns `false`, never throws, for a missing signature, an empty secret, a wrong prefix, or an undecodable digest. |
+| `constantTimeEqual`     | `(left: Uint8Array, right: Uint8Array) => boolean`                  | Always scans the longer input and folds the length difference into the result, so a mismatch leaks nothing through timing. |
+| `computeHmacSha256Hex`  | `(payload: string \| Uint8Array, secret: string) => string`         | The lowercase hex digest, for signing test deliveries. |
+| `GITHUB_SIGNATURE_PREFIX` | `"sha256="`                                                       | The prefix GitHub puts in front of its hex digest. |
 
-```ts
-import * as Channels from "@smthrs/control/Channels"
-import { Core, GitHub } from "@smthrs/integrations"
-import { Effect, Redacted } from "effect"
+`VerifyOptions` fields: `payload` (the exact bytes the provider signed, never
+a re-serialized copy), `secret`, `signature` (nullable), and an optional
+`prefix` that is required and stripped before decoding. Omit `prefix` to
+strip an optional `sha256=` and otherwise accept a bare digest.
 
-const channel = GitHub.Webhook.channel({
-  credential: Redacted.make({ id: "github-webhook", name: "github-webhook" }),
-  secret: Core.Channel.constantSecret(Redacted.make(secret)),
-  route: Core.Channel.startFlow("triage")
-})
+### Core.Channel
 
-const program = Effect.gen(function*() {
-  const channels = yield* Channels.Channels
-  yield* channels.register(channel)
-  return yield* channels.ingest({
-    channel: "github",
-    // The redelivery guarantee lives here. `ingest` drops a replayed
-    // `idempotencyKey`, and nothing derives one for you.
-    raw: { ...raw, idempotencyKey: GitHub.Webhook.idempotencyKey(raw) }
-  })
-})
-```
+The binding between a provider webhook and a `@smthrs/control` `Channel`.
+[How adapters sit on the control plane](/concepts/control-plane/) explains
+the contract.
 
-`Channels.ingest` runs one fixed order: verify the raw bytes, decode, map,
-then reach `Control`. Verification is the amplification guard, so a delivery
-that does not verify never reaches a decoder, a plan, or a database.
+| Export             | Signature                                                              | Notes |
+| ------------------ | --------------------------------------------------------------------- | ----- |
+| `make`             | `(config: Config) => Channel`                                          | Builds the control-plane channel for one provider webhook. A delivery whose signature does not verify fails `Unauthorized` before the decoder or `Control` is reached; the decoder's output is validated against `Core.ExternalEvent` before it leaves the channel. |
+| `constantSecret`   | `(secret: Redacted<string>) => SecretResolver`                         | Always answers with one secret, for a single-tenant deployment. |
+| `credentialSecret` | `(credentials: Credential) => SecretResolver`                          | Resolves through the control plane's credential store. |
+| `startFlow`        | `(flowId: FlowId) => (event: ExternalEvent) => Effect<InboundResult, InvalidInput>` | A route that starts `flowId` with the event as its input. |
+| `signalRun`        | `(runId: RunId) => (event: ExternalEvent) => Effect<InboundResult, InvalidInput>`   | A route that signals `runId` with the event's signal name and payload. |
 
-Ingest also drops a replayed `idempotencyKey`, which is what makes accepting a
-provider redelivery safe. That key is the caller's to supply on the
-`RawInbound` it hands `ingest`. Each provider exports the derivation:
-`GitHub.Webhook.idempotencyKey(raw)` reads `X-GitHub-Delivery`,
-`Linear.Webhook.idempotencyKey(raw, payload)` reads `Linear-Delivery` and falls
-back to the delivery's own identity, and `Telegram.Source.idempotencyKey(event)`
-is the source-scoped update key. An ingress that leaves the field unset has no
-redelivery protection at all.
+`Config` fields: `name` (the name `Channels.register` and `Channels.ingest`
+address the channel by), `credential` (the journal-safe `CredentialRef`),
+`secret` (a `SecretResolver`), optional `fingerprintHeaders` (non-secret
+headers whose values affect the decoded event), `verify`, `decode`, `route`,
+and an optional `project` that defaults to a no-op projection posting
+nothing.
 
-`secret` is how the channel obtains the signing secret behind a credential
-reference. `Core.Channel.constantSecret` is for a single-tenant deployment that
-reads one secret from its environment; `Core.Channel.credentialSecret` resolves
-through the control plane's credential store.
+`SecretResolver` is
+`(credential: Redacted<CredentialRef>) => Effect<Redacted<string>, Unauthorized>`.
 
-`route` decides what the event does. `Core.Channel.startFlow(flowId)` starts a
-flow with the event as input; `Core.Channel.signalRun(runId)` signals a run
-that is already waiting. There is no broadcast: rc.0 does not deliver one event
-to every run parked on a matching name.
+### Core.ExternalEvent
 
-A provider decoder's output is validated against `Core.ExternalEvent` before it
-leaves the channel, so a decoder bug fails on the delivery that triggered it
-rather than surfacing as a malformed signal three hops later. A verifier or a
-decoder that throws is a refusal, not a crash: the delivery fails
-`Unauthorized` or `InvalidInput`, and the internal message stays in the log
-rather than crossing to the control plane.
+The normalized event every source produces. Fields: `source`, `eventName`
+(refined to a name `SignalName.eventName` could build), `correlationId`
+(string or `null`), `payload` (JSON), `dedupeKey`, and `receivedAtMs`.
 
-## Verification
+| Export | Signature | Notes |
+| ------ | --------- | ----- |
+| `ExternalEvent` | `Schema.Struct<...>` | The schema and its inferred type. |
+| `decode` | `(value: unknown) => Effect<ExternalEvent>` | Decodes an unknown value; fails with a schema issue. Sources run their own output through this at the ingress boundary. |
 
-`Core.Signature.verifySignature` is the constant-time HMAC-SHA256 check every
-webhook source uses. It accepts GitHub's `sha256=<hex>`, Linear's bare hex, and
-a base64 digest. It returns `false` and never throws for a missing signature,
-an empty secret, a wrong prefix, or an undecodable digest.
+### Core.SignalName
 
-The comparison is `Core.Signature.constantTimeEqual`, which always scans the
-longer of its two inputs and folds the length difference into the accumulator.
-An early return on the first differing byte would make the endpoint an oracle
-that leaks the expected digest one byte at a time to anyone who can time it.
+The reserved `integration:` namespace and the mapping onto control-plane
+signals and notifications.
 
-Linear webhooks are checked twice: the signature, and then the
-`webhookTimestamp` freshness window. A valid signature never expires, so
-without the window a captured delivery would be replayable forever. The window
-is bounded at both ends and capped at an hour; a skew of `Infinity` would
-disable the check, so it is refused rather than honored.
+| Export                    | Signature                                              | Notes |
+| ------------------------- | ------------------------------------------------------ | ----- |
+| `eventName`               | `(service: string, event: string) => string`           | Builds `integration:<service>:<event>`. The event segment may contain dots (`pull_request.opened`); neither segment may contain `:`. Both are trimmed. Throws `SmithersError` `INVALID_INPUT` for an empty or colon-bearing segment. |
+| `parse`                   | `(name: string) => { service: string; event: string } \| null` | Splits a name back into its parts. A name `eventName` could not have produced parses as `null`. |
+| `receivedBy`              | `(service: string) => string`                          | The attribution stamped on a delivered signal: `integration:<service>`. Throws `INVALID_INPUT` for an empty or colon-bearing service. |
+| `toSignalPayload`         | `(event: ExternalEvent) => SignalPayload`              | The control-plane signal: name plus payload. |
+| `toNotification`          | `(event: ExternalEvent, options: NotificationOptions) => Notification` | A queued `system-event` that coalesces on `<eventName>:<correlationId>`. `options.id` defaults to the event's dedupe key; `targetLineageId` and `provenance` are required. |
+| `isSegment`               | `(value: unknown) => value is string`                  | The one refinement constructor and parser agree on. |
+| `isEventName`             | `(value: unknown) => value is string`                  | Whether `parse` accepts the value. |
+| `isIntegrationSignalName` | `(name: unknown) => name is string`                    | Whether the name carries the reserved prefix. |
+| `INTEGRATION_SIGNAL_PREFIX` | `"integration:"`                                     | A workflow's own signals must not use it. |
 
-## Events and signals
+### Core.CursorStore
 
-One delivery decodes to one `Core.ExternalEvent`:
+Durable cursor persistence for polling sources, deliberately limited to `get`
+and `set`. The contract is ordering: a proposed cursor is committed after the
+batch it acknowledges has been handled.
 
-| Field           | What it is                                                                   |
-| --------------- | ---------------------------------------------------------------------------- |
-| `source`        | `github`, `linear`, `telegram`                                               |
-| `eventName`     | `integration:<service>:<event>`, the most specific form the payload supports |
-| `correlationId` | What the event is about, or `null`                                           |
-| `payload`       | The provider payload, as delivered                                           |
-| `dedupeKey`     | The provider's delivery identity, so a redelivery is recognizable            |
-| `receivedAtMs`  | When it arrived                                                              |
+| Export        | Signature                                                            | Notes |
+| ------------- | ------------------------------------------------------------------- | ----- |
+| `CursorStore` | service tag and interface                                            | `get(sourceId): Effect<string \| null, IntegrationError>`; `set(sourceId, cursor): Effect<void, IntegrationError>`. |
+| `makeMemory`  | `Effect<CursorStore>`                                                | Cursors live as long as the process. |
+| `layerMemory` | `Layer<CursorStore>`                                                 | The in-memory store as a layer. |
+| `makeSql`     | `Effect<CursorStore, never, SqlClient>`                              | Over the control database's `smithers_integration_cursors` table. Requires the migration in `Core.Migrations` to have run. |
+| `layerSql`    | `Layer<CursorStore, never, SqlClient>`                               | The SQL store as a layer. |
 
-The `integration:` prefix is reserved. `Core.SignalName.eventName` builds a
-name, `parse` splits one, and `receivedBy` is the attribution stamped on a
-delivered signal. The two are symmetric: a name the constructor refuses to
-build, such as one whose event segment carries a second colon, parses as `null`
-rather than becoming an identity nothing can reproduce. `toSignalPayload`
-produces the control-plane signal; `toNotification` produces a queued
-`system-event` that coalesces on `<eventName>:<correlationId>`, so a burst of
-edits to one issue leaves one pending notification carrying the newest payload.
+### Core.Migrations
 
-Each provider also exposes the full ordered ladder its payload answers to, for
-a caller that routes on a broader form:
+The cursor table's schema migrations, in migration id block 6000, run through
+[the database API](https://database.smithers.sh/reference/api/)'s migration ladder.
 
-| Provider | Names                                          | Correlations                          |
-| -------- | ---------------------------------------------- | ------------------------------------- |
-| GitHub   | `…:pull_request.opened`, then `…:pull_request` | `owner/repo#12`, `owner/repo`, `null` |
-| Linear   | `…:issue.update`, then `…:issue`               | `ENG-123`, `ENG`, `null`              |
+| Export  | Signature             | Notes |
+| ------- | --------------------- | ----- |
+| `set`   | `MigrationSet`        | Namespace `integrations`, one migration: `0001_integration_cursors`. |
+| `run`   | `Effect<void, ...>`   | Applies the set. |
+| `layer` | `Layer<never, ...>`   | Runs `run` once as a layer. |
 
-Telegram dedupe keys carry the source id, because `update_id` is scoped per
-bot: two configured sources would otherwise produce the same key for unrelated
-updates, and the second bot's event would be dropped as a duplicate.
+### Core.IntegrationError
 
-## Cursors
+The normalized provider-error vocabulary. Details are provider-safe by
+construction: no constructor in this package puts a token, an API key, or a
+webhook secret into `details`.
 
-`Core.CursorStore` persists a polling source's cursor. `layerMemory` keeps it
-for the life of the process; `layerSql` keeps it in the control database, over
-the migration in `core/migrations`.
+`new IntegrationError(reason, message, details?, { cause? }?)` extends
+`SmithersError` with code `INTEGRATION_ERROR` and carries the
+machine-readable `reason`.
 
-The contract that matters is ordering: a proposed cursor is committed only
-after the batch it acknowledges has been handled. A process that dies mid-batch
-re-polls that batch instead of skipping it, and the redelivery is dropped
-downstream on the event's dedupe key. A stored cursor that does not parse as an
-offset fails the poll rather than being dropped, because dropping it sends
-`getUpdates` with no offset and replays Telegram's whole retained backlog.
-
-## Pagination
-
-`GitHub.GitHubClient.paginate` follows `Link: rel="next"` inside a declared
-budget: `perPage` defaults to 100 and `maxPages` to 10, so the default ceiling
-is a thousand items. Hitting the ceiling is reported as `truncated`, never as a
-short but complete answer. `ListenerRegistry` refuses to plan against a
-truncated hook list, because planning against one would emit a `create` for an
-owned hook it simply did not see.
-
-## Declared GitHub webhooks
-
-`GitHub.ListenerRegistry` reconciles a `.smithers/listeners.json` declaration
-against a repository. `plan` is pure and performs no requests; `reconcile`
-plans by default and applies only with `apply: true`.
-
-A declaration is refused when two listeners name one repository and one
-callback URL. That pair is a single GitHub hook, so declaring it twice asks for
-a second hook doubling every overlapping delivery, and reconciliation can only
-report it as a `conflict` against a hook this workspace created itself. The
-same URL in a different repository is the intended shape: one flow fed by
-several repositories through one endpoint.
-
-Ownership is the safety property. A hook is owned only when its numeric GitHub
-id appears in `.smithers/listeners.state.json`; a matching callback URL proves
-nothing, because anyone can point a hook anywhere. So:
-
-- an unowned hook on a declared URL is a `conflict`, and `apply` refuses rather
-  than adopting it. Every `create` runs that check, including the one for a
-  listener that moved repositories and the one for a hook that was deleted
-  remotely, because both land in a repository that may already have somebody
-  else's hook on the same URL;
-- an unowned hook elsewhere in the repository is `leave`, reported once;
-- a delete needs `allowDelete: true` on top of `apply`, and the create half of
-  a repository move is skipped when its delete was refused, because applying
-  the create alone would leave two live hooks for one listener;
-- a create is recorded as `pending` before the POST and confirmed as ownership
-  after it. A process that dies in between leaves a state file the next run
-  converges from: it recognizes the hook it was creating and adopts it, rather
-  than reporting a permanent conflict against its own work. That inference is
-  bounded, because an intent is evidence and not proof. The record is retired
-  the moment GitHub says it refused the create, it is dropped when the
-  declaration that produced it changes, it expires after a day, and adoption
-  requires exactly one hook on the URL. Anything else is still a `conflict`;
-- a `delete` is only planned for a hook that is still there, so a run that
-  deleted the old half of a repository move and died before writing ownership
-  finishes the move next time instead of retrying a delete GitHub answers 404.
-
-An owner or a repository name is validated before it becomes part of a request
-path. Encoding is not enough: `encodeURIComponent("..")` is `".."`, and the URL
-parser removes dot segments afterwards, so an unvalidated repository string
-walks a token-bearing request to a different GitHub endpoint on the same
-origin. `GitHub.Repository.repositoryPath` is the only way this package builds
-one, and `GitHub.Actions.CommentOnIssuePayload` demands the same shapes, so a
-payload built from a webhook body or a model's output fails to decode rather
-than reaching the API.
-
-A state file that exists but cannot be parsed is fatal. Reconciling without
-knowing what this workspace owns is how somebody else's hook gets deleted. Every
-one of those file boundaries fails with an `IntegrationError` in the declared
-channel, so a caller's `catchTag` sees a missing declaration rather than a
-dead fiber.
-
-## OAuth
-
-`Core.Pkce.createPkcePair` returns an RFC 7636 S256 verifier and challenge;
-`Core.AuthorizationUrl.buildAuthorizationUrl` builds the RFC 6749
-authorization-code request around it. Both are for the GitHub and Linear OAuth
-apps, where an intercepted authorization code would otherwise be redeemable by
-whoever caught it.
-
-`extraParams` is applied after the standard parameters, so a provider that
-needs a different `response_type` can say so. It cannot replace `client_id`,
-`redirect_uri`, `state`, `code_challenge`, or `code_challenge_method`: those
-are the CSRF and PKCE bindings the builder validates, and overwriting one from
-a provider-specific map would disable exactly what the validation is for.
-
-## Credential hygiene
-
-A token reaches the `Authorization` header and nothing else. It is not in a
-message, not in `details`, and not in a log line, and the Telegram client
-additionally strips its token from errors it did not construct, because the
-token is in the request path and a transport error quotes the URL.
-
-Every GitHub request URL is pinned to the configured API origin, including a
-`Link: rel="next"` target. A redirected page link that left the origin would
-hand the token to whoever received it. The origin pin is not a path pin, which
-is why repository coordinates are validated separately.
-
-Every client and the Telegram source take an `env` argument that replaces the
-ambient environment rather than layering over it, so a caller that supplies its
-own credentials cannot have an ambient `GITHUB_TOKEN` decide which account a
-call runs as. Omitting it reads the host environment through the named
-`Environment.ambientEnvironment` accessor, which is the one place this package
-spells that decision.
-
-## Actions
-
-Each provider ships one durable action over its client. The client is an
-ordinary Effect service; the action is what makes a call a step of a flow, so
-the engine journals the result and a restart replays it instead of posting a
-second comment.
-
-| Action                          | Tag                                    | Does                                                           |
-| ------------------------------- | -------------------------------------- | -------------------------------------------------------------- |
-| `GitHub.Actions.CommentOnIssue` | `integrations/github/comment-on-issue` | Comments on an issue or pull request.                          |
-| `Linear.Actions.CreateIssue`    | `integrations/linear/create-issue`     | Files an issue, resolving team, state, and label names to ids. |
-| `Telegram.Actions.SendMessage`  | `integrations/telegram/send-message`   | Sends a message, chunked, with the markdown fallback.          |
-
-All three are `tier: "irreversible"`. The remote side has acted by the time the
-call returns, so the engine never retries one on its own, and neither does the
-client underneath it. A rate limit is retried for every method, because a
-rejected request was not performed. A 5xx or a dropped connection on a write is
-not: the provider may have committed it and lost the answer, so the failure
-says `outcomeUnknown` instead of posting the comment twice. A caller that knows
-its endpoint is idempotent opts in with `retryUnsafeWrites`.
-
-`SendMessage` is the one action that is not atomic. Text over Telegram's
-4096-character limit becomes several `sendMessage` calls inside the step, and a
-failure partway through leaves the earlier chunks visible in the chat. The
-failure names them, so an operator deciding whether to resend can see what the
-reader already has.
-
-A flow calls the declaration and provides the implementation layer plus the
-client the layer needs:
-
-```ts
-import { Flow } from "@smthrs/flow"
-import { Core, GitHub } from "@smthrs/integrations"
-import { Layer } from "effect"
-
-const Triage = Flow.make("triage", {
-  payload: GitHub.Actions.CommentOnIssuePayload,
-  success: GitHub.Actions.Comment,
-  error: Core.ActionFailure.IntegrationFailure,
-  body: (input) => GitHub.Actions.CommentOnIssue.call({ ...input, body: "Triaged." })
-})
-
-const layer = Layer.provideMerge(
-  GitHub.Actions.layer,
-  GitHub.GitHubClient.layer({ token: process.env["GITHUB_TOKEN"] })
-)
-```
-
-`.call(payload)` records a plan node and runs nothing. The node demands the
-requirement that `GitHub.Actions.layer` provides, so a composition that forgot
-the layer fails to compile rather than at run time.
-
-An action fails with `Core.ActionFailure.IntegrationFailure`, the schema form
-of `IntegrationError`: a `reason`, a message already safe to persist,
-`retryable`, and two fields an operator reads after a restart.
-`outcomeUnknown` says the provider may have applied the write and lost the
-answer, which is a different answer from "this did not happen".
-`deliveredMessageIds` names what a partially completed send already put in the
-chat. A class cannot cross the journal; these can.
-
-An application that needs an endpoint these three do not cover writes its own
-`Action.make` over the same client. That is the intended extension point, not a
-gap.
-
-## Errors
-
-`Core.IntegrationError` is the normalized provider-error vocabulary. GitHub and
-Linear clients, every source and channel, and durable actions use it directly,
-so callers can branch on a machine-readable `reason` without reading message
-text:
-
-| Reason                | Raised when                                                                                                                                                      |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invalid-config`      | A declaration, option, or stored cursor is unusable.                                                                                                             |
-| `invalid-signature`   | A webhook signature did not verify.                                                                                                                              |
-| `decode-failed`       | A payload or response could not be read as expected.                                                                                                             |
-| `poll-failed`         | A polling source's request failed.                                                                                                                               |
+| Reason                | Raised when |
+| --------------------- | ----------- |
+| `invalid-config`      | A declaration, option, or stored cursor is unusable. |
+| `invalid-signature`   | A webhook signature did not verify. |
+| `decode-failed`       | A payload or response could not be read as expected. |
+| `poll-failed`         | A polling source's request failed. |
 | `delivery-failed`     | An API call failed. `details.retryable` says whether another attempt is worth making, and `details.outcomeUnknown` says the write may already have been applied. |
-| `credentials-missing` | A required credential was not configured.                                                                                                                        |
-| `permission-denied`   | The credential lacks the scope the operation needs.                                                                                                              |
-| `listener-conflict`   | An unowned hook holds a declared callback URL.                                                                                                                   |
+| `credentials-missing` | A required credential was not configured. |
+| `permission-denied`   | The credential lacks the scope the operation needs. |
+| `listener-conflict`   | An unowned hook holds a declared callback URL, or a reconcile apply lock is held. |
 
-The Telegram client is the Effect-channel exception. Its calls fail with
-`TelegramApiError`, which carries the Bot API's `error_code` while its retry
-schedule is still operating. `Telegram.TelegramClient.toIntegrationError`
-normalizes that error at the action boundary. The durable action applies the
-mapping, so an exhausted rate limit journals `retryable: true` and a chat that
-does not exist journals something a caller can tell apart from it.
+| Export              | Signature                                        | Notes |
+| ------------------- | ------------------------------------------------ | ----- |
+| `reasons`           | `readonly Reason[]`                              | Every classification, in one runtime list. |
+| `isReason`          | `(value: unknown) => value is Reason`            | Whether a value is a classification this build can encode. |
+| `isIntegrationError` | `(error: unknown) => error is IntegrationError` | Guarded against cross-instance forgeries and throwing getters. |
+| `isRetryable`       | `(error: unknown) => boolean`                    | True when the error is an `IntegrationError` with `details.retryable === true`. |
+| `toUnauthorized`    | `(error: IntegrationError) => Unauthorized`      | Maps onto the control plane's `Unauthorized`. Only the summary crosses. |
+| `toInvalidInput`    | `(error: IntegrationError) => InvalidInput`      | Maps onto the control plane's `InvalidInput`. |
 
-Plan-time validation also sits outside that vocabulary.
+### Core.ActionFailure
 
-The plan-time helpers validate their arguments by throwing, the way an ordinary
-constructor does, rather than by returning an Effect: `Telegram.Config.resolve`,
-`Telegram.Chunk.chunk`, `Telegram.Approval.callbackData` and its neighbours,
-`Telegram.InitData.*`, `Core.SignalName.eventName`, `Core.AuthorizationUrl`, and
-`GitHub.Repository.repositoryPath`. Each raises a `SmithersError` with a code
-such as `INVALID_INPUT`, because a caller that passed a bad argument has a bug
-to fix rather than a failure to journal. `GitHub.Repository` also exports
-`requireRepositoryPath`, the same check inside the Effect channel, for the
-paths that build a request from configuration.
+The failure a durable action journals: the schema form of `IntegrationError`.
+[Durable actions](/concepts/durable-actions/) explains why a schema and
+not the class.
 
-`toUnauthorized` and `toInvalidInput` map a failure onto the control plane's
-own errors at the channel boundary. Only the reason crosses: a verifier that
-reported which byte of a digest mismatched would be a verification oracle.
+| Export                | Signature                                       | Notes |
+| --------------------- | ----------------------------------------------- | ----- |
+| `IntegrationFailure`  | `Schema.TaggedError`, tag `/integrations/IntegrationFailure` | Fields: `reason`, `message`, `retryable`, optional `outcomeUnknown`, optional `deliveredMessageIds`. |
+| `fromIntegrationError` | `(error: unknown) => IntegrationFailure`       | Total: anything that is not a well-formed `IntegrationError` converts to a non-retryable `delivery-failed` instead of throwing inside `Effect.mapError`. The message is capped at `MAX_MESSAGE_LENGTH`. |
+| `toIntegrationError`  | `(failure: IntegrationFailure) => IntegrationError` | Converts back to the class, preserving `retryable`, `outcomeUnknown`, and `deliveredMessageIds` in `details`. |
+| `Reason`              | schema                                           | The classification as a schema, built from `IntegrationError.reasons`. |
+| `MessageId`           | schema                                           | A provider message id: a positive integer within the safe range. |
+| `isMessageId`         | `(value: unknown) => value is number`            | The refinement `MessageId` applies. |
+| `MAX_MESSAGE_LENGTH`  | `512`                                            | The longest provider text a failure persists. |
 
-The conversion into the journal is total. An error that only claims the
-`IntegrationError` name, or that carries a reason a different build invented,
-converts to a non-retryable `delivery-failed` rather than failing schema
-validation inside `Effect.mapError`, where the throw would become a defect.
-Persisted text is capped, and it is the error's `summary` rather than its
-`message`, so one provider's failures do not carry a documentation URL the
-others' do not.
+### Core.Pkce
 
-## Tests
+RFC 7636 PKCE parameters for the GitHub and Linear OAuth apps. All three
+constructors throw `TypeError` or `RangeError` for invalid arguments.
 
-The client and webhook suites drive a real `node:http` fixture server over a
-real socket. Nothing in this package mocks a transport.
+| Export                | Signature                                  | Notes |
+| --------------------- | ------------------------------------------ | ----- |
+| `createPkcePair`      | `(byteLength?: number) => PkcePair`        | A fresh verifier with its S256 challenge. |
+| `createCodeVerifier`  | `(byteLength?: number) => string`          | 32 to 96 bytes of entropy, producing the 43 to 128 characters RFC 7636 allows. Defaults to 32. |
+| `deriveCodeChallenge` | `(codeVerifier: string) => string`         | Base64url of the verifier's SHA-256, unpadded. |
 
-Three suites talk to the live APIs and skip, naming the credential, when it is
-absent: `GITHUB_TOKEN`, `LINEAR_API_KEY`, `TELEGRAM_BOT_TOKEN`. All three are
-read-only. They are listed in the pin register in `scripts/test-pins.md`.
+`PkcePair` fields: `codeVerifier`, `codeChallenge`, and
+`codeChallengeMethod: "S256"`.
+
+### Core.AuthorizationUrl
+
+The RFC 6749 authorization-code request URL, with PKCE.
+
+| Export                 | Signature                                | Notes |
+| ---------------------- | ---------------------------------------- | ----- |
+| `buildAuthorizationUrl` | `(request: AuthorizationRequest) => string` | Throws `TypeError` for a non-HTTP(S) endpoint, an empty required field, or an `extraParams` key in `RESERVED_PARAMS`. `response_type` stays overridable through `extraParams`. |
+| `RESERVED_PARAMS`      | `readonly string[]`                       | `client_id`, `redirect_uri`, `state`, `code_challenge`, `code_challenge_method`: the CSRF and PKCE bindings the builder validates. |
+
+`AuthorizationRequest` fields: `authorizationEndpoint` (absolute `http:` or
+`https:` URL; its own query parameters survive), `clientId`, `redirectUri`,
+`state`, `codeChallenge`, optional `scope` (a string, or scopes to
+space-join; omitted when empty), optional `codeChallengeMethod` (defaults to
+`S256`), and optional `extraParams` applied after the standard parameters.
+
+### Core.JsonPath
+
+Dot-path reads over decoded provider payloads, used by the decoders instead
+of type assertions.
+
+| Export         | Signature                                             | Notes |
+| -------------- | ----------------------------------------------------- | ----- |
+| `readJsonPath` | `(value: unknown, path?: string \| null) => unknown`  | Only own properties are read; arrays count as non-objects; an empty or absent path returns the value itself. |
+| `readString`   | `(value: unknown, path: string) => string \| undefined` | The value when it is a non-empty string. |
+| `readInteger`  | `(value: unknown, path: string) => number \| undefined` | The value when it is an integer. |
+| `readHeader`   | `(raw: HasHeaders, name: string) => string \| undefined` | Case-insensitive header lookup over a transport-neutral record. |
+
+`HasHeaders` is anything with `headers` in the `RawInbound` shape.
+
+## Environment
+
+`@smthrs/integrations/Environment`: explicit access to the host's process
+environment, the one place the package spells that decision.
+
+| Export                    | Signature                                              | Notes |
+| ------------------------- | ------------------------------------------------------ | ----- |
+| `ambientEnvironment`      | `() => Readonly<Record<string, string \| undefined>>`  | Reads the ambient process environment. Callers that require account isolation pass an environment record explicitly instead. |
+| `ambientWorkingDirectory` | `() => string`                                         | Reads the ambient working directory. `ListenerRegistry.reconcile` defaults its workspace root through this. |
+
+## GitHub
+
+The GitHub surface, exported as `GitHub` or from `@smthrs/integrations/github`.
+
+### GitHub.Config
+
+Credential and endpoint resolution. Explicit configuration wins; what it
+omits falls back to `env`, which defaults to the ambient environment.
+
+`GitHubConfig` fields: `token` (falls back to `SMITHERS_GITHUB_TOKEN`, then
+`GITHUB_TOKEN`), `apiBaseUrl` (falls back to `SMITHERS_GITHUB_API_BASE_URL`,
+default `https://api.github.com`), `webhookSecret` (falls back to
+`SMITHERS_GITHUB_WEBHOOK_SECRET`), and `maxRetries` (defaults to 3).
+
+| Export                | Signature                                                     | Notes |
+| --------------------- | ------------------------------------------------------------- | ----- |
+| `resolve`             | `(config?: GitHubConfig, env?) => ResolvedGitHubConfig`       | First non-empty value wins, trimmed. |
+| `DEFAULT_API_BASE_URL` | `"https://api.github.com"`                                   | The public REST endpoint. |
+
+### GitHub.GitHubClient
+
+The REST client. Rate-limit handling, bounded pagination, and token hygiene:
+the token reaches the `Authorization` header and nothing else, and every
+request URL, including a `rel="next"` target, is pinned to the configured API
+origin.
+
+Service interface:
+
+| Method    | Signature | Notes |
+| --------- | --------- | ----- |
+| `request` | `<A = unknown>(method: RequestMethod, path: string, body?: unknown, options?: RequestOptions<A>) => Effect<A, IntegrationError>` | One REST call. A rate limit (a 429, or the 403 forms GitHub uses for a secondary limit) is retried for every method, waiting the server's `Retry-After` or `x-ratelimit-reset` capped at one minute. A 5xx or transport failure is retried only for a read; on a write it reports `outcomeUnknown` unless `retryUnsafeWrites` is set. An
+optional `schema` decodes the response, failing `decode-failed`. An
+unserializable body or an unparseable path fails `invalid-config` before any
+request. Interrupting the fiber aborts the request in flight. |
+| `paginate` | `(path: string, options?: { perPage?: number; maxPages?: number }) => Effect<Page, IntegrationError>` | Follows `Link: rel="next"` within the page budget and concatenates the pages. `perPage` defaults to 100 and accepts 1 to 100; `maxPages` defaults to 10 and accepts 1 to 1000. A bound outside its range fails `invalid-config` before the first request. Running out of budget with a next link outstanding is reported as `truncated: true`, never as a short but complete answer. |
+
+| Export             | Signature                                              | Notes |
+| ------------------ | ------------------------------------------------------ | ----- |
+| `GitHubClient`     | service tag and interface                              |       |
+| `make`             | `(config?: GitHubConfig, env?) => GitHubClient`        | Throws `IntegrationError` `invalid-config` for an `apiBaseUrl` that is not a valid HTTP(S) URL or a `maxRetries` outside 0 to 10. |
+| `layer`            | `(config?: GitHubConfig, env?) => Layer<GitHubClient>` | The client as a layer. |
+| `isRateLimitResponse` | `(status: number, headers: Headers, body: unknown) => boolean` | Whether a response is GitHub telling the client to slow down. |
+| `retryAfterMs`     | `(headers: Headers, nowMs?: number) => number \| null` | The wait the server asked for, capped at one minute. |
+| `nextPageUrl`      | `(linkHeader: string \| null) => string \| null`       | The `rel="next"` URL in an RFC 5988 `Link` header. |
+| `UNSAFE_METHODS`   | `readonly RequestMethod[]`                             | `POST`, `PATCH`, `PUT`, `DELETE`: the verbs whose effect the server may already have applied when the answer is lost. |
+| `MAX_PER_PAGE`     | `100`                                                  | The largest `per_page` GitHub accepts. |
+| `DEFAULT_MAX_PAGES` | `10`                                                  | The default page budget. |
+| `MAX_PAGES_LIMIT`  | `1000`                                                 | The largest accepted page budget. |
+
+`RequestOptions<A>` fields: `schema` (decodes the response body; omit it to
+receive the parsed JSON), `query`, and `retryUnsafeWrites`. `Page` fields:
+`items` and `truncated`. `RequestMethod` is `"GET" | "POST" | "PATCH" | "PUT"
+| "DELETE"`.
+
+### GitHub.Repository
+
+Repository coordinates, validated before they become a request path. Encoding
+is not enough: `encodeURIComponent("..")` is `".."`, and the URL parser
+removes dot segments afterwards, so an unvalidated repository string walks a
+token-bearing request to a different GitHub endpoint on the same origin.
+Every path this package builds from an owner and a repository goes through
+`repositoryPath`.
+
+| Export                  | Signature                                                     | Notes |
+| ----------------------- | ------------------------------------------------------------- | ----- |
+| `repositoryPath`        | `(owner: string, repo: string) => string`                     | Validated, then encoded. Throws an `IntegrationError` `invalid-config` when either half is not a name GitHub could have issued. |
+| `fullNamePath`          | `(fullName: string) => string`                                | The same, for the `owner/repository` spelling a listener declaration uses. |
+| `requireRepositoryPath` | `(owner: string, repo: string) => Effect<string, IntegrationError>` | `repositoryPath` in the Effect channel. |
+| `requireFullNamePath`   | `(fullName: string) => Effect<string, IntegrationError>`      | `fullNamePath` in the Effect channel. |
+| `isOwner` / `isRepo`    | `(value: unknown) => value is string`                         | Refinements over `OWNER_PATTERN` and `REPO_PATTERN`. |
+| `Owner` / `Repo`        | schemas                                                        | The same rules as schemas an action payload can demand. |
+| `IssueNumber`           | schema                                                         | An integer of at least 1. |
+| `OWNER_PATTERN`         | regex                                                          | 1 to 39 characters, alphanumerics and hyphens, not starting with a hyphen, with one underscore allowed as an Enterprise Managed User separator. |
+| `REPO_PATTERN`          | regex                                                          | 1 to 100 characters of alphanumerics, dots, underscores, and hyphens, excluding `.` and `..`. |
+
+### GitHub.Webhook
+
+GitHub webhook ingress. `X-Hub-Signature-256` is verified over the exact
+delivered bytes before anything reads the body.
+
+| Export           | Signature                                                                  | Notes |
+| ---------------- | -------------------------------------------------------------------------- | ----- |
+| `verify`         | `(raw: RawInbound, secret: string) => boolean`                             | The signature check over `raw.body`, never a re-serialized copy. |
+| `decode`         | `(raw: RawInbound, payload: unknown, receivedAtMs?: number) => ExternalEvent` | Throws an `IntegrationError` `decode-failed` when `X-GitHub-Event` or `X-GitHub-Delivery` is missing. The dedupe key is `<deliveryId>:<eventName>:<correlationId or "*">`. |
+| `names`          | `(event: string, payload: unknown) => readonly string[]`                   | The signal names a delivery answers to, most specific first: the per-action variant ahead of the bare event name. |
+| `correlations`   | `(payload: unknown) => readonly (string \| null)[]`                        | `owner/repo#number`, then `owner/repo`, then `null`. |
+| `idempotencyKey` | `(raw: HasHeaders) => string \| undefined`                                 | `github:<X-GitHub-Delivery>`, or `undefined` when the header is absent. |
+| `channel`        | `(options: ChannelOptions) => Channel`                                     | A control-plane channel for GitHub webhooks. The channel name defaults to `github`; fingerprint headers are `x-github-delivery` and `x-github-event`. |
+| `SERVICE`        | `"github"`                                                                 | The service segment of every GitHub signal name. |
+
+`ChannelOptions` fields: optional `name`, `credential`, `secret`, `route`,
+and optional `project`.
+
+### GitHub.ListenerRegistry
+
+Declared GitHub webhooks, and the reconciliation that makes a repository
+match the declaration. The safety property is ownership: a hook is owned only
+when its numeric GitHub id appears in the workspace's state file. An unowned
+hook on a declared callback URL is reported as a `conflict` and never
+modified. [The GitHub guide](/guides/github/) walks the workflow.
+
+| Export              | Signature                                                        | Notes |
+| ------------------- | ---------------------------------------------------------------- | ----- |
+| `reconcile`         | `(options?: ReconcileOptions) => Effect<ReconcileResult, IntegrationError>` | Plans by default and applies only with `apply: true`; deletes additionally need `allowDelete: true`. An apply that would touch an unowned hook fails `listener-conflict`. An apply holds the workspace lock file. |
+| `plan`              | `(input: PlanInput) => readonly PlanAction[]`                    | Pure: performs no requests and writes nothing. |
+| `parseRegistry`     | `(input: unknown, source?: string) => Registry`                  | Validates a declaration, reporting every problem it finds. Throws `IntegrationError` `invalid-config`. |
+| `readRegistry`      | `(workspaceRoot: string) => Registry`                            | Reads `.smithers/listeners.json`. Throws `invalid-config` when the file is missing or invalid. |
+| `readOwnershipState` | `(workspaceRoot: string) => OwnershipState`                     | An empty state when the workspace has never reconciled. A state file that exists but cannot be parsed is fatal. |
+| `parseRemoteHooks`  | `(value: readonly unknown[], repository: string) => readonly RemoteHook[]` | Decodes the hook list GitHub returned. Throws `decode-failed` naming the member and field. |
+| `PENDING_CREATE_MAX_AGE_MS` | `86400000`                                             | How long a pending create stays adoptable: one day. |
+| `DEFAULT_REGISTRY_PATH` | `".smithers/listeners.json"`                                 |       |
+| `DEFAULT_STATE_PATH` | `".smithers/listeners.state.json"`                            |       |
+| `DEFAULT_LOCK_PATH` | `".smithers/listeners.lock"`                                    |       |
+| `LISTENER_EVENTS`   | `readonly string[]`                                              | `issues`, `issue_comment`, `pull_request`, `pull_request_review`, `pull_request_review_comment`. |
+
+`ReconcileOptions` fields: `workspaceRoot` (defaults to the ambient working
+directory), `registry` (an in-memory declaration instead of the file),
+`apply`, `allowDelete`, `token`, `apiBaseUrl`, `env` (replaces the ambient
+environment outright), and `client` (an already-built client, which skips the
+token check; each listener's `secretEnv` variable is still required).
+
+`reconcile` fails with `credentials-missing` when it has neither a token nor
+a client, or when a listener's `secretEnv` variable is unset;
+`permission-denied` when listing hooks answers 401, 403, or 404;
+`delivery-failed` when a repository's hook list is truncated;
+`invalid-config` for workspace file problems; `decode-failed` when GitHub
+returns an unreadable hook or no hook id after a create; and
+`listener-conflict` when an apply meets an unowned hook on a declared URL or
+the lock is held by a live process.
+
+`PlanAction.action` is one of `create`, `update`, `delete`, `noop`, `leave`,
+or `conflict`, with `listenerId`, `repository`, `hookId`, `reason`, and
+`destructive` alongside. `ReconcileResult` adds `applied` and `skipped` to
+the plan summary (`actions`, `changes`, `destructiveChanges`, and the two
+paths). Models: `Listener`, `Registry`, `Ownership`, `PendingCreate`,
+`OwnershipState`, `RemoteHook`, `PlanInput`.
+
+### GitHub.Payload
+
+Schemas for the webhook payloads this package types: `User`, `Repository`,
+`PullRequest`, `Issue`, `Comment`, `PullRequestEvent`, `IssuesEvent`,
+`IssueCommentEvent`, and `PushEvent`. Every schema validates the fields a
+caller is likely to read and passes everything else through untouched.
+
+### GitHub.Actions
+
+The durable GitHub action. [Durable actions](/concepts/durable-actions/)
+explains the pattern.
+
+| Export                 | Signature                                              | Notes |
+| ---------------------- | ------------------------------------------------------ | ----- |
+| `CommentOnIssue`       | `Action`, tag `integrations/github/comment-on-issue`   | Posts a comment on an issue or pull request. Tier `irreversible`. Error schema `IntegrationFailure`. |
+| `CommentOnIssuePayload` | schema                                                | `owner`, `repo`, `issueNumber`, `body`. The coordinates demand the `Owner` and `Repo` shapes, so a payload built from a webhook body or a model's output fails to decode rather than reaching the API. |
+| `Comment`              | schema                                                 | The comment GitHub created: `id` and `url`. |
+| `layerCommentOnIssue`  | `Layer<Requirement<...>, never, GitHubClient \| FlowRuntime>` | Implements the action over the client in context. |
+| `layer`                | same                                                   | Every GitHub action's implementation in one layer. |
+
+## Linear
+
+The Linear surface, exported as `Linear` or from `@smthrs/integrations/linear`.
+
+### Linear.Config
+
+`LinearConfig` fields: `apiKey` (a personal API key, sent raw in
+`Authorization`; an OAuth token arrives already prefixed; falls back to
+`SMITHERS_LINEAR_API_KEY`), `webhookSecret` (falls back to
+`SMITHERS_LINEAR_WEBHOOK_SECRET`), and `apiBaseUrl` (falls back to
+`SMITHERS_LINEAR_API_BASE_URL`, default `https://api.linear.app/graphql`).
+
+| Export                | Signature                                              | Notes |
+| --------------------- | ------------------------------------------------------ | ----- |
+| `resolve`             | `(config?: LinearConfig, env?) => ResolvedLinearConfig` | First non-empty value wins, trimmed. |
+| `DEFAULT_API_BASE_URL` | `"https://api.linear.app/graphql"`                    | The public GraphQL endpoint. |
+
+### Linear.LinearClient
+
+The GraphQL client: plain `fetch` over raw GraphQL, with lookup caching, name
+resolution, and rate-limit handling. A 429 is retried up to five attempts for
+every operation, waiting `Retry-After` or `X-RateLimit-Requests-Reset` capped
+at 30 seconds. A 5xx is retried only for a query: on `issueCreate`,
+`issueUpdate`, or `commentCreate` the server may have applied the mutation
+and lost the answer, so those report `outcomeUnknown` instead of filing a
+second issue. Interrupting the fiber aborts the request and the body read.
+
+Service interface:
+
+| Method           | Signature | Notes |
+| ---------------- | --------- | ----- |
+| `query`          | `(gql: string, variables?: Record<string, unknown>, options?: { retryServerErrors?: boolean }) => Effect<Record<string, any>, IntegrationError>` | A raw GraphQL request resolving with the `data` payload. Fails `credentials-missing` when no API key is configured, `delivery-failed` for transport, HTTP, and GraphQL errors, and `decode-failed` for a non-JSON response. |
+| `resolveTeam`    | `(ref: { teamId?: string; teamKey?: string }) => Effect<TeamRef, IntegrationError>` | Resolves a team by key, case-insensitively, or passes an explicit id through. Cached per client. Supplying both or neither fails `decode-failed`. |
+| `resolveStateId` | `(teamId: string, stateName: string) => Effect<string, IntegrationError>` | Resolves a workflow-state name such as `In Progress` to its id. Cached per team. An unknown name fails `decode-failed` naming the known states. |
+| `resolveLabelIds` | `(teamId: string, names: readonly string[]) => Effect<readonly string[], IntegrationError>` | Resolves label names to ids. Cached per team. Any missing name fails `decode-failed` naming the missing ones. |
+| `getIssue`       | `(idOrIdentifier: string) => Effect<IssueResult, IntegrationError>` | Fetches an issue by UUID or by `ENG-123` identifier. A miss fails `decode-failed`. |
+| `createIssue`    | `(input: CreateIssueInput) => Effect<IssueResult, IntegrationError>` | Files an issue. Exactly one of `teamKey` and `teamId` is required. |
+| `updateIssue`    | `(idOrIdentifier: string, fields: IssueFields) => Effect<IssueResult, IntegrationError>` | Updates an issue. Resolves the issue first when given an identifier or when a name field needs the issue's team. |
+| `commentOnIssue` | `(idOrIdentifier: string, body: string) => Effect<CommentResult, IntegrationError>` | Comments on an issue, resolving an identifier to the UUID first. |
+
+| Export              | Signature                                                       | Notes |
+| ------------------- | --------------------------------------------------------------- | ----- |
+| `LinearClient`      | service tag and interface                                        |       |
+| `make`              | `(config?: LinearConfig, env?) => LinearClient`                  |       |
+| `layer`             | `(config?: LinearConfig, env?) => Layer<LinearClient>`           |       |
+| `normalizePriority` | `(priority: Priority \| undefined) => number \| undefined`       | Normalizes a priority name or number onto Linear's 0 to 4 scale. Throws an `IntegrationError` `decode-failed` for anything else. |
+| `requirePriority`   | `(priority: Priority \| undefined) => Effect<number \| undefined, IntegrationError>` | The same, in the Effect channel. |
+| `retryDelayMs`      | `(headers: Headers, nowMs?: number) => number \| undefined`      | The wait the server asked for, capped at 30 seconds. |
+
+`IssueFields` accepts `title`, `description`, `priority`, `labels`,
+`labelIds`, `stateName`, `stateId`, `assigneeId`, `projectId`, `estimate`,
+and `dueDate`. Supply `labels` or `labelIds`, and `stateName` or `stateId`,
+not both; both fail `decode-failed`. An empty `labels` array clears the
+issue's labels; omitting the field leaves them alone. Name resolution needs
+the issue's team. `Priority` is a number 0 to 4 or one of `none`, `urgent`,
+`high`, `normal`, `medium`, `low`.
+
+### Linear.Webhook
+
+Linear webhook ingress. Verification checks two things: the
+`Linear-Signature` HMAC over the raw body, and the `webhookTimestamp`
+freshness window, because a valid signature never expires and a captured
+delivery would otherwise be replayable forever.
+
+| Export                    | Signature                                                              | Notes |
+| ------------------------- | --------------------------------------------------------------------- | ----- |
+| `verify`                  | `(raw: RawInbound, secret: string, options?: VerifyOptions) => boolean` | Fails closed: a skew that is not a finite integer from 0 to `MAX_TIMESTAMP_SKEW_MS` refuses rather than disabling the replay check. |
+| `decode`                  | `(raw: RawInbound, payload: unknown, source?: string, receivedAtMs?: number) => ExternalEvent` | The dedupe key is `<deliveryId>#<eventName>#<correlationId or "">`. |
+| `names`                   | `(payload: unknown) => readonly string[]`                              | `integration:linear:<type>.<action>`, then `integration:linear:<type>`, lowercased. |
+| `correlations`            | `(payload: unknown) => readonly (string \| null)[]`                    | The issue identifier (`ENG-123`), the team key (`ENG`), then `null`. A comment delivery carries the issue one level down, under `data.issue`. |
+| `idempotencyKey`          | `(raw: HasHeaders, payload: unknown) => string`                        | `linear:<deliveryId>`, where the delivery id is the `Linear-Delivery` header or, in its absence, the webhook id, entity, action, and timestamp. |
+| `channel`                 | `(options: ChannelOptions) => Channel`                                 | A control-plane channel for Linear webhooks. The channel name defaults to `linear`; the fingerprint header is `linear-delivery`. |
+| `timestampMs`             | `(value: unknown) => number \| null`                                   | Reads `webhookTimestamp` as milliseconds; older payloads send seconds. |
+| `DEFAULT_TIMESTAMP_SKEW_MS` | `60000`                                                              | The default freshness window. |
+| `MAX_TIMESTAMP_SKEW_MS`   | `3600000`                                                              | The largest accepted freshness window: one hour. |
+| `SERVICE`                 | `"linear"`                                                             |       |
+
+`VerifyOptions` fields: `maxTimestampSkewMs` and `nowMs`. `ChannelOptions`
+extends them with `name`, `credential`, `secret`, `route`, and `project`.
+
+### Linear.Payload
+
+Schemas for Linear webhook deliveries: `IssueData`, `CommentData`,
+`Delivery`, `IssueDelivery`, and `CommentDelivery`. `updatedFrom` carries the
+previous values of the fields an `update` changed. Core fields are typed and
+everything else passes through.
+
+### Linear.Actions
+
+| Export              | Signature                                            | Notes |
+| ------------------- | ---------------------------------------------------- | ----- |
+| `CreateIssue`       | `Action`, tag `integrations/linear/create-issue`     | Files an issue. Tier `irreversible`. Error schema `IntegrationFailure`. |
+| `CreateIssuePayload` | schema                                              | `title`, plus optional `teamKey`, `teamId`, `description`, `stateName`, and `labels`. The client resolves the names to ids and enforces exactly one of `teamKey` and `teamId`. |
+| `Issue`             | schema                                               | The issue Linear created: `id`, `identifier`, `title`, `url`. |
+| `layerCreateIssue`  | `Layer<Requirement<...>, never, LinearClient \| FlowRuntime>` | Implements the action over the client in context. |
+| `layer`             | same                                                 | Every Linear action's implementation in one layer. |
+
+## Telegram
+
+The Telegram surface, exported as `Telegram` or from
+`@smthrs/integrations/telegram`.
+
+### Telegram.Config
+
+`TelegramConfig` fields: `botToken` (required; falls back to
+`SMITHERS_TELEGRAM_BOT_TOKEN`), optional `apiBaseUrl` (default
+`https://api.telegram.org`), `maxRateLimitRetries` (defaults to 3), and
+`maxRetryAfterSeconds` (the cap on the server-supplied `retry_after` honored
+per retry, defaults to 30).
+
+| Export                | Signature                                  | Notes |
+| --------------------- | ------------------------------------------ | ----- |
+| `resolve`             | `(config?: Partial<TelegramConfig>, env?) => TelegramConfig` | Throws `SmithersError` `INVALID_INPUT` when no token can be found. The message names the ways to supply one and never contains token material. |
+| `DEFAULT_API_BASE_URL` | `"https://api.telegram.org"`              | The public Bot API host. |
+
+### Telegram.TelegramClient
+
+The Bot API client: plain `fetch`, no framework. The bot token is redacted
+from every error, including one a transport raised with the URL in it. A 429
+is retried, waiting the server's capped `retry_after`.
+
+Service interface:
+
+| Method                | Signature | Notes |
+| --------------------- | --------- | ----- |
+| `call`                | `(method: string, params?: Record<string, unknown>) => Effect<unknown, SmithersError>` | A raw Bot API call returning the `result` field. Retries a 429. |
+| `sendMessageSmart`    | `(chatId: number \| string, text: string, options?: SendOptions) => Effect<SendResult, SmithersError>` | Chunks at 4096 characters, converts markdown to MarkdownV2, and resends a chunk as plain text when Telegram rejects the entities, so a formatting failure costs formatting rather than the message. A failure after earlier chunks landed names their ids in `deliveredMessageIds`. Shows a typing action first unless `typing: false`; a failed typing action never fails the send. |
+| `editMessageSmart`    | `(chatId: number \| string, messageId: number, text: string, options?: Pick<SendOptions, "parseMode" \| "inlineKeyboard">) => Effect<unknown, SmithersError>` | Edits a message, falling back to plain text when Telegram rejects the entities, so fresh content replaces a stale message. |
+| `sendDocument`        | `(chatId: number \| string, document: DocumentInput, options?: { caption?: string; replyToMessageId?: number; messageThreadId?: number }) => Effect<unknown, SmithersError>` | Sends a document by URL or `file_id`, or uploads raw bytes as multipart form data. The caption is converted to MarkdownV2. |
+| `answerCallbackQuery` | `(callbackQueryId: string, options?: { text?: string; showAlert?: boolean }) => Effect<unknown, SmithersError>` | Answers an inline-keyboard press. |
+| `answerWebAppQuery`   | `(webAppQueryId: string, result: Record<string, unknown>) => Effect<unknown, SmithersError>` | Answers a Mini App inline query: posts `result` to the chat on the user's behalf and closes the Mini App. |
+
+`SendOptions` fields: `parseMode` (`markdown` converts standard markdown to
+MarkdownV2 and is the default; `MarkdownV2` and `HTML` send the text as-is;
+`none` sends raw text with no parse mode; all but `none` keep the plain-text
+fallback), `replyToMessageId` (first chunk only), `messageThreadId` (every
+chunk), `inlineKeyboard` (last chunk only), `typing` (defaults to true), and
+`disableNotification`. `SendResult` fields: `chatId`, `messageIds` (every
+chunk's id, in send order), `chunkCount`, and `usedPlainTextFallback`.
+`DocumentInput` is a string (URL or `file_id`) or `{ filename, content,
+contentType? }`.
+
+| Export              | Signature                                                        | Notes |
+| ------------------- | ---------------------------------------------------------------- | ----- |
+| `TelegramClient`    | service tag and interface                                        |       |
+| `make`              | `(config?: Partial<TelegramConfig>, env?) => TelegramClient`     | Throws `SmithersError` `INVALID_INPUT` when no token can be found. |
+| `layer`             | `(config?: Partial<TelegramConfig>, env?) => Layer<TelegramClient>` |    |
+| `TelegramApiError`  | class, code `TELEGRAM_API_ERROR`                                 | Carries the Bot API's `errorCode`, `retryAfterSeconds`, `deliveredMessageIds`, and an optional `reason` override for a failure the transport did not report. The token is never part of any field. |
+| `isTelegramApiError` | `(error: unknown) => error is TelegramApiError`                 | Guarded against forged names and throwing getters. |
+| `toIntegrationError` | `(error: unknown) => unknown`                                   | Maps a `TelegramApiError` onto `IntegrationError`: a 429 or 5xx becomes a retryable `delivery-failed` with `outcomeUnknown` for a 5xx or a lost connection; a 401 or 403 becomes `permission-denied`; a 400 or 404 becomes `decode-failed`. Anything else passes through unchanged. The action boundary applies this before `fromIntegrationError`. |
+| `redactBotToken`    | `(text: string, botToken: string) => string`                     | Removes the literal token and any `/bot<id>:<secret>` path segment from a string. |
+
+### Telegram.Chunk
+
+Message chunking at Telegram's hard `sendMessage` limit.
+
+| Export               | Signature                                                     | Notes |
+| -------------------- | ------------------------------------------------------------- | ----- |
+| `chunk`              | `(text: string, maxLength?: number) => readonly string[]`     | Splits at the last paragraph break, line break, sentence end, or word boundary that fits, and cuts mid-word only for a single unbroken run longer than the limit. A cut never lands inside a UTF-16 surrogate pair. Chunks are trimmed of the whitespace they were split on. Throws `SmithersError` `INVALID_INPUT` when `maxLength` is not an integer between 1 and 4096. |
+| `MAX_MESSAGE_LENGTH` | `4096`                                                        | Telegram's maximum `sendMessage` text length. |
+
+### Telegram.Markdown
+
+Standard markdown to Telegram MarkdownV2.
+
+| Export      | Signature                          | Notes |
+| ----------- | ---------------------------------- | ----- |
+| `toTelegram` | `(markdown: string) => string`    | Handles fenced and inline code, links, bold (`**` to `*`), strikethrough (`~~` to `~`), italic, and headings, which become bold because an unescaped `#` is one of the characters Telegram rejects. Everything outside a recognized token is escaped defensively. |
+| `escape`    | `(text: string) => string`         | Escapes plain text for MarkdownV2. |
+| `clean`     | `(text?: string \| null) => string` | Strips NUL characters, which collide with the conversion's sentinel scheme and which Telegram rejects anyway. |
+
+### Telegram.Source
+
+The `getUpdates` long-poll source. Confirming an offset is what tells
+Telegram to forget those updates, so the cursor is committed after the
+handler has processed the batch.
+[Events, signals, and cursors](/concepts/events-and-signals/) explains the
+contract.
+
+`Options` fields, all optional: `sourceId` (the cursor key and dedupe scope,
+defaults to `telegram`), `pollTimeoutSeconds` (how long the Bot API holds a
+poll open, defaults to 25), `allowedUpdates` (defaults to `message`,
+`edited_message`, and `callback_query`), `allowedChatIds` (updates from other
+chats are dropped, and so is an update whose chat the source cannot
+determine; the offset still advances past every dropped update once the rest
+of the batch is handled), `client` (an already-built client), and the
+`TelegramConfig` fields.
+
+Service interface:
+
+| Method | Signature | Notes |
+| ------ | --------- | ----- |
+| `poll` | `(cursor: string \| null) => Effect<Batch, IntegrationError>` | One poll turn against the stored offset. Commits nothing. A stored cursor that is not a decimal offset fails `invalid-config` rather than replaying the backlog. A failed `getUpdates` fails `poll-failed`. A result that is not an update array, an update with no numeric `update_id`, or an update whose `message`, `edited_message`, or `callback_query` is not an object fails `decode-failed`. |
+| `run`  | `(onBatch: (events) => Effect<void, E, R>, options?: { schedule?: Schedule }) => Effect<never, IntegrationError \| E, R \| CursorStore>` | Polls forever: read the cursor, poll, hand the batch to `onBatch`, and commit the offset only after `onBatch` succeeds. Repeats on the given schedule, defaulting to one turn every 250 milliseconds. Requires `CursorStore`. |
+
+`Batch` fields: `events`, and `cursor`, which is absent when the poll
+returned nothing.
+
+| Export                | Signature                                                              | Notes |
+| --------------------- | --------------------------------------------------------------------- | ----- |
+| `Source`              | interface                                                              | `sourceId`, `poll`, `run`. |
+| `make`                | `(options?: Options, env?) => Source`                                  | Throws an `IntegrationError` `invalid-config` for a source id that is empty or padded with whitespace, and `SmithersError` `INVALID_INPUT` when no bot token can be found. |
+| `updateToEvents`      | `(source: string, update: Record<string, any>, receivedAtMs: number) => readonly ExternalEvent[]` | Maps one update onto its events. A message carrying `message_thread_id` emits a chat-scoped and a thread-scoped event with distinct dedupe keys; one carrying `web_app_data` additionally emits a separately deduped Mini App data event. |
+| `idempotencyKey`      | `(event: ExternalEvent) => string`                                     | The event's dedupe key, already scoped to the source. |
+| `chatCorrelationId`   | `(chatId: number \| string) => string`                                 | `chat:<id>`. |
+| `threadCorrelationId` | `(chatId: number \| string, threadId: number \| string) => string`     | `chat:<id>:thread:<id>`. |
+| `MESSAGE_EVENT`       | `"integration:telegram:message"`                                       |       |
+| `EDITED_MESSAGE_EVENT` | `"integration:telegram:edited_message"`                               |       |
+| `CALLBACK_QUERY_EVENT` | `"integration:telegram:callback_query"`                               |       |
+| `WEB_APP_DATA_EVENT`  | `"integration:telegram:web_app_data"`                                  |       |
+| `SERVICE`             | `"telegram"`                                                           |       |
+
+### Telegram.Approval
+
+Inline-keyboard approvals. Telegram caps `callback_data` at 64 bytes, so a
+press carries a compact code and nothing else. It also carries no trust: any
+member of the chat can press a button, so a caller that cares re-authorizes
+on the presser's user id. The per-approval token is a 32-bit namespace, not a
+secret, and it is what keeps one prompt's buttons from resolving another's:
+a press whose token does not match fails safe, and a prompt built with no
+token matches nothing at all.
+
+| Export                  | Signature                                                              | Notes |
+| ----------------------- | --------------------------------------------------------------------- | ----- |
+| `token`                 | `(id: string) => string`                                               | A short, colon-free namespace derived from an id. Throws `SmithersError` `INVALID_INPUT` for an id that is not a non-empty string. |
+| `callbackData`          | `(choice: Choice, approvalToken: string) => string`                    | Encodes a choice as `sap:<token>:a`, `sap:<token>:d`, or `sap:<token>:s:<key>`. Throws `INVALID_INPUT` for a token that is not a string, a token containing `:`, an empty or colon-bearing option key, or data over the 64-byte limit. |
+| `parseCallbackData`     | `(data?: string \| null) => (Choice & { token: string }) \| null`      | Decodes `callback_data`, or `null` when the press is not one of ours. Reads only the exact grammar `callbackData` emits. |
+| `isOwnPress`            | `(callbackQuery: { data?: string }, spec: KeyboardSpec) => boolean`    | Whether a delivered callback query is a press on this approval's buttons. |
+| `keyboard`              | `(spec: KeyboardSpec) => InlineKeyboard`                               | Builds the keyboard for a prompt. Throws `INVALID_INPUT` for `select` mode with no options. |
+| `webAppButton`          | `(text: string, url: string) => InlineKeyboardButton`                  | A Mini App button. Throws `INVALID_INPUT` unless the URL is HTTPS, which is Telegram's own rule. |
+| `approverLabel`         | `(callbackQuery: { from?: { id?: number \| string; username?: string } }) => string \| null` | Who pressed the button, as `@username` or the numeric id. |
+| `decision`              | `(callbackQuery, spec: KeyboardSpec, nowMs?: number) => Decision \| Selection` | Maps a delivered callback query to a decision. A press that is not this approval's own fails safe: a rejection in `approve` mode, an empty selection in `select` mode, which accepts only a key this approval offered. `decidedAt` is the resolution wall clock; Telegram does not report when a button was pressed. |
+| `CALLBACK_DATA_MAX_BYTES` | `64`                                                                 | Telegram's hard limit on `callback_data`. |
+
+Models: `Choice` (`approve`, `reject`, or `select` with a `key`), `Option`
+(`key` and `label`), `KeyboardSpec` (`mode`, optional `token`, `options`,
+`approveText`, `rejectText`, `miniAppUrl`, `miniAppText`), `Decision`
+(`approved`, `note`, `decidedBy`, `decidedAt`), and `Selection` (`selected`,
+`notes`).
+
+### Telegram.InitData
+
+Telegram Mini App `initData` verification, on Web Crypto with no `node:`
+builtin. Two paths: HMAC when you hold the bot token, and Ed25519 for a third
+party holding only the numeric bot id. Only Node is verified by this
+package's test matrix; read any other runtime as untested.
+
+| Export                   | Signature                                                              | Notes |
+| ------------------------ | --------------------------------------------------------------------- | ----- |
+| `parse`                  | `(initData: string) => InitData`                                       | Parses the query string into its fields without verifying it. Verification is what makes the fields trustworthy. |
+| `verifyWithBotToken`     | `(initData: string, botToken: string, options?: VerifyOptions) => Promise<InitData>` | The HMAC path. Resolves with the parsed fields. Rejects with `TELEGRAM_INIT_DATA_INVALID` for a bad or stale payload, `INVALID_INPUT` for a missing token or bad options, and `UNSUPPORTED` when the runtime has no Web Crypto. The token never appears in error output. |
+| `verifySignature`        | `(initData: string, botId: number \| string, options?: VerifySignatureOptions) => Promise<InitData>` | The Ed25519 path, for a third party that must authenticate a Mini App user without holding the bot token. Same rejection codes, with `UNSUPPORTED` when the runtime lacks Ed25519. |
+| `ED25519_PUBLIC_KEY_PROD` | hex string                                                            | Telegram's production Ed25519 public key, the default for `verifySignature`. |
+| `ED25519_PUBLIC_KEY_TEST` | hex string                                                            | Telegram's test-datacenter key. |
+
+`VerifyOptions` fields: `maxAgeSeconds` (rejects `initData` older than this;
+defaults to 3600, `0` disables the age check, and anything outside 0 to
+86400 is a configuration error) and `nowMs`. Both ends of the freshness
+window are bounded: a correctly signed `auth_date` dated far ahead is
+refused. `VerifySignatureOptions` adds `publicKeyHex`, exactly 64 hexadecimal
+characters. `InitData` fields include `raw`, `hash`, `signature`, `authDate`,
+`queryId`, `user`, `receiver`, `chat`, `chatType`, `chatInstance`,
+`startParam`, and `params` (every decoded pair).
+
+### Telegram.Payload
+
+Schemas for the Bot API objects this package delivers as payloads: `Chat`,
+`User`, `Message` (delivered for `message` and `edited_message` events),
+`CallbackQuery`, `WebAppData`, and `WebAppDataMessage`. Core fields are typed
+and everything else passes through.
+
+### Telegram.Actions
+
+| Export              | Signature                                                      | Notes |
+| ------------------- | -------------------------------------------------------------- | ----- |
+| `SendMessage`       | `Action`, tag `integrations/telegram/send-message`             | Sends a message to a chat. Tier `irreversible`. Error schema `IntegrationFailure`. Not atomic: text over the limit is several `sendMessage` calls inside the step, and a partway failure journals the ids already delivered. |
+| `SendMessagePayload` | schema                                                        | `chatId` (a string, because Telegram uses both numeric ids and `@channel` usernames, and a numeric id exceeds the range JSON round-trips exactly), `text`, and optional `parseMode`, `messageThreadId`, `disableNotification`. |
+| `Sent`              | schema                                                         | `chatId`, `messageIds`, `chunkCount`, `usedPlainTextFallback`. |
+| `layerSendMessage`  | `Layer<Requirement<...>, never, TelegramClient \| FlowRuntime>` | Implements the action over the client in context, mapping `TelegramApiError` through `toIntegrationError` before `fromIntegrationError`. |
+| `layer`             | same                                                           | Every Telegram action's implementation in one layer. |

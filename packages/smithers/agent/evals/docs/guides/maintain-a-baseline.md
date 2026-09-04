@@ -47,17 +47,18 @@ a red gate erases the regression the gate caught.
 
 ## The artifact
 
-A baseline is versioned JSON owned by one suite:
+A baseline is versioned JSON owned by one suite. This is the shape
+`Baseline.write` emits, with every object key sorted:
 
 ```json
 {
   "records": [
     {
       "case": "adds numbers",
+      "score": 1,
       "scorer": "exact",
       "stepKey": "step-a",
-      "suite": "arithmetic",
-      "score": 1
+      "suite": "arithmetic"
     }
   ],
   "suite": "arithmetic",

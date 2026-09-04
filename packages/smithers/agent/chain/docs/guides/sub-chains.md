@@ -44,7 +44,7 @@ different journal than their parent.
 The `agent` entry takes `{ goal, context? }` and returns the child's terminal
 outcome as data the parent script inspects:
 
-```ts
+````ts
 const script = [
   "```flow",
   `const child = await ctx.call("agent", { goal: "count TODOs", context: ["look in src"] })`,
@@ -52,7 +52,7 @@ const script = [
   "return done({ child: child.value })",
   "```"
 ].join("\n")
-```
+````
 
 The child id derives from the spawning call slot: `parent-chain/link.ordinal`
 (`1.0` for the root chain's link 1, ordinal 0). The child's events are scoped

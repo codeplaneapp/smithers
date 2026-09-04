@@ -260,3 +260,39 @@ describe("NodeControl.seatResolver ChatGPT mode", () => {
     expect((await prepared(resolved, "claude-sonnet-4-5")).url).toBe("https://api.anthropic.com/v1/messages")
   })
 })
+
+describe("NodeControl.seatResolver OpenAI-compatible providers", () => {
+  it.each(
+    [
+      ["moonshot", "moonshot:kimi-k3", "MOONSHOT_API_KEY", "https://api.moonshot.ai/v1/chat/completions"],
+      [
+        "gemini",
+        "gemini:gemini-2.5-pro",
+        "GEMINI_API_KEY",
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+      ],
+      [
+        "gemini via GOOGLE_API_KEY",
+        "gemini:gemini-2.5-pro",
+        "GOOGLE_API_KEY",
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+      ],
+      ["cerebras", "cerebras:gpt-oss-120b", "CEREBRAS_API_KEY", "https://api.cerebras.ai/v1/chat/completions"]
+    ] as const
+  )("routes a keyed %s seat through Chat Completions at its own endpoint", async (_provider, seat, variable, url) => {
+    const resolved = await Effect.runPromise(resolve({ [variable]: "key" }, seat))
+
+    expect(resolved.id).toBe(seat)
+    const request = await prepared(resolved, Seat.modelIdOf(seat))
+    expect(request.url).toBe(url)
+    expect(JSON.stringify(request.publicHeaders)).not.toContain("key")
+  })
+
+  it("names every variable the provider reads when none is set", async () => {
+    const gemini = await Effect.runPromise(Effect.flip(resolve({ GEMINI_API_KEY: "" }, "gemini:gemini-2.5-pro")))
+    const moonshot = await Effect.runPromise(Effect.flip(resolve({}, "moonshot:kimi-k3")))
+
+    expect(gemini.message).toBe("Set GEMINI_API_KEY or GOOGLE_API_KEY to run the gemini:gemini-2.5-pro seat")
+    expect(moonshot.message).toBe("Set MOONSHOT_API_KEY to run the moonshot:kimi-k3 seat")
+  })
+})

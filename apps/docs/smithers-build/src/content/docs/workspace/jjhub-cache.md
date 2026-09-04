@@ -31,7 +31,7 @@ happens in a process the CLI says so on standard error and names the command
 that makes it permanent:
 
 ```text
-smthrs: using the jjhub build cache for acme/app (no declaration; anonymous reads, SMITHERS_CACHE_TOKEN publishes). Run `smithers cache connect` to commit a read token.
+smthrs: using the jjhub build cache for acme/app (no declaration; anonymous reads, SMITHERS_CACHE_TOKEN publishes). Run `smthrs cache connect` to commit a read token.
 ```
 
 `SMITHERS_CACHE_DISCOVERY=0` turns discovery off. `SMITHERS_JJHUB_HOSTS` adds
@@ -55,7 +55,7 @@ Commit it. The token has exactly one power: reading `acme/app`'s cache. It is
 refused with `403` on every `PUT` and `DELETE` before the body is read, it is
 not accepted on any other repository's cache, and the general token loader
 never accepts its shape, so it authenticates nothing else on jjhub. A leaked
-one costs a rotation (`smithers cache token revoke`, then `connect` again) and
+one costs a rotation (`smthrs cache token revoke`, then `connect` again) and
 nothing more. This is the posture of an Nx read-only access token.
 
 `Smithers.RemoteCache.make` accepts the same `publicReadToken` option for a

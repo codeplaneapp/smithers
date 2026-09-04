@@ -11,12 +11,12 @@ sidebar:
 
 A namespace is a structured value `{ kind, id }`. The `kind` names the record's lifetime, and four stable lifetimes exist:
 
-| Kind     | The lifetime it names                                  |
-| -------- | ------------------------------------------------------ |
-| `flow`   | one flow's private memory                              |
-| `agent`  | one agent's memory across the flows it runs            |
-| `user`   | one user's memory across agents                        |
-| `global` | memory shared by everything that opens the database    |
+| Kind     | The lifetime it names                               |
+| -------- | --------------------------------------------------- |
+| `flow`   | one flow's private memory                           |
+| `agent`  | one agent's memory across the flows it runs         |
+| `user`   | one user's memory across agents                     |
+| `global` | memory shared by everything that opens the database |
 
 A bank is the public string spelling of a namespace, the form a model writes and a recall request carries. A prefixed bank such as `flow-release-notes` or `global-history` names an explicit lifetime; an unprefixed bank such as `release-notes` is flow-local and resolves to `{ kind: "flow", id: "release-notes" }`. Because `release-notes` and `flow-release-notes` resolve to the same namespace, every read that accepts a list of banks de-duplicates on the resolved namespace rather than the spelling.
 

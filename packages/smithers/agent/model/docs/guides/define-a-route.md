@@ -137,11 +137,11 @@ When no constructor fits, compose the four pieces yourself. A `Protocol`
 owns the body codec, the event codec, the streaming state machine, and error
 classification; `Endpoint.make` validates the target; `Auth.apiKeyHeader` or
 `Auth.bearer` carries the credential; `Framing.sse` or `Framing.ndjson`
-matches the byte shape:
+matches the byte shape. `myProtocol` stands for any `Protocol.make` value:
 
 ```ts
-import { Endpoint, Framing, Auth, Protocol, Route } from "@smthrs/model"
-import { Effect, Redacted, Result, Schema } from "effect"
+import { Auth, Endpoint, Framing, Route } from "@smthrs/model"
+import { Redacted, Result } from "effect"
 
 const route = Result.gen(function*() {
   const endpoint = yield* Endpoint.make({ url: "https://provider.example", path: "/v1/generate" })

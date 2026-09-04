@@ -1,5 +1,5 @@
 ---
-title: "smithers plan"
+title: "smthrs plan"
 description: "Render a flow plan and its complete approval payload"
 area: cli
 order: 0
@@ -9,19 +9,19 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/doc
 ## Synopsis
 
 ```text
-smithers plan [FLOW_ID [KEY=VALUE ...]] [--data JSON]
+smthrs plan [FLOW_ID [KEY=VALUE ...]] [--data JSON]
 ```
 
 ## Description
 
-`smithers plan` asks the control plane to plan one flow with one input, then
+`smthrs plan` asks the control plane to plan one flow with one input, then
 prints the plan card it returns. The card carries the plan id, the content
 digest, a canonical summary of the input, the capability envelope, the keyed
-node graph, and the `approval` payload that `smithers approve` and
-`smithers run` accept unchanged.
+node graph, and the `approval` payload that `smthrs approve` and
+`smthrs run` accept unchanged.
 
 The command creates no run, grants no approval, and executes no node. A durable
-run row appears only when `smithers run` or `smithers up` submits the payload.
+run row appears only when `smthrs run` or `smthrs up` submits the payload.
 
 A flow id that starts with `system/` is refused. The control catalog reserves
 those ids for command-line verbs and 1.0.0-rc.0 ships a body for none of them,
@@ -34,7 +34,7 @@ element 0 as the flow id and every later element as an input entry:
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
-| `FLOW_ID` | `string` | No | The flow to plan, spelled as `smithers ls` lists it. An omitted flow id reaches the control plane as the empty string, which no flow matches. |
+| `FLOW_ID` | `string` | No | The flow to plan, spelled as `smthrs ls` lists it. An omitted flow id reaches the control plane as the empty string, which no flow matches. |
 | `KEY=VALUE` | `string` | No | One input entry, repeatable. The text before the first `=` is the key and the text after it is the value. An element with no `=` at position 1 or later becomes that key with the boolean value `true`. |
 
 ## Flags
@@ -45,13 +45,13 @@ element 0 as the flow id and every later element as an input entry:
 
 ## Global flags
 
-`smithers plan` accepts `--root`, `--remote`, `--credential`, `--json`,
+`smthrs plan` accepts `--root`, `--remote`, `--credential`, `--json`,
 `--quiet`, `--mcp-config`, and `--log-level`, listed in the
 [CLI reference index](https://smithers.sh/docs/reference/cli/).
 
 ## Output
 
-`smithers plan` prints one JSON document on stdout. Object members are ordered
+`smthrs plan` prints one JSON document on stdout. Object members are ordered
 by UTF-16 code unit, the human rendering indents two spaces per level, and
 `--json` prints the same document with no whitespace.
 
@@ -88,7 +88,7 @@ holds 0.x state but no `.flows/` directory prints the one-line 0.x notice from
 Plan the `deploy/status` flow with one input entry:
 
 ```bash
-smithers plan deploy/status branch=main
+smthrs plan deploy/status branch=main
 ```
 
 The human rendering, with the identifier placeholders that
@@ -126,12 +126,12 @@ The human rendering, with the identifier placeholders that
 
 ## See also
 
-- [`smithers approve`](https://smithers.sh/docs/reference/cli/approve/) grants the `approval`
+- [`smthrs approve`](https://smithers.sh/docs/reference/cli/approve/) grants the `approval`
   payload this command prints.
-- [`smithers run`](https://smithers.sh/docs/reference/cli/run/) submits that payload as a run.
-- [`smithers up`](https://smithers.sh/docs/reference/cli/up/) performs plan, approve, and run in
+- [`smthrs run`](https://smithers.sh/docs/reference/cli/run/) submits that payload as a run.
+- [`smthrs up`](https://smithers.sh/docs/reference/cli/up/) performs plan, approve, and run in
   one call.
-- [`smithers ls`](https://smithers.sh/docs/reference/cli/ls/) lists the flow ids this command
+- [`smthrs ls`](https://smithers.sh/docs/reference/cli/ls/) lists the flow ids this command
   accepts.
 - [Plan, approve, run](https://smithers.sh/docs/guides/plan-approve-run/) shows the procedure.
 

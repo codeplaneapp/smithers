@@ -63,7 +63,7 @@ describe("every removed verb", () => {
     for (const [group, sub] of [["agents", "add"], ["cron", "list"], ["human", "resolve"], ["packs", "update"]]) {
       const error = await failure([group!, sub!])
 
-      expect((error as CliError.UnsupportedError).message).toContain(`smithers ${group} ${sub} was removed`)
+      expect((error as CliError.UnsupportedError).message).toContain(`smthrs ${group} ${sub} was removed`)
     }
   })
 })

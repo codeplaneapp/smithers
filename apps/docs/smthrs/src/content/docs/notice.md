@@ -9,7 +9,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smthrs-depre
 ```
 smthrs 1.0 is a migration notice, not a runtime.
 Smithers 1.0 ships as @smthrs/* packages. Install @smthrs/flows (authoring and engine)
-and @smthrs/cli (the `smithers` command), then run `smithers migrate` in a 0.x project.
+and @smthrs/cli (the `smthrs` command), then run `smthrs migrate` in a 0.x project.
 Migration guide: https://smithers.sh/migration/1.0
 ```
 
@@ -30,7 +30,7 @@ Remove the old package, install the 1.0 packages, and run the migration:
 ```sh
 npm remove smthrs
 npm install @smthrs/flows@1.0.0-rc.0 @smthrs/cli@1.0.0-rc.0
-npx smithers migrate
+npx smthrs migrate
 ```
 
 `smthrs@0.35.0` keeps the `latest` dist-tag until 1.0.0 is final, so

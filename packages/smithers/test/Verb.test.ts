@@ -204,7 +204,7 @@ describe("the removed surface", () => {
   it("gives every removal a reason and a migration link", () => {
     for (const verb of Unsupported.removedVerbs) {
       const message = Unsupported.verbError(verb).message
-      expect(message).toContain(`smithers ${verb.name} was removed in 1.0.0-rc.0`)
+      expect(message).toContain(`smthrs ${verb.name} was removed in 1.0.0-rc.0`)
       expect(message).toContain(verb.reason)
       expect(message).toContain(`${Unsupported.migrationUrl}#${verb.name}`)
     }

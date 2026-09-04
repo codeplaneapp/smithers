@@ -83,6 +83,7 @@ import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
 import * as Output from "./Output.ts"
 import * as Project from "./Project.ts"
+import * as Providers from "./Providers.ts"
 import * as Serve from "./Serve.ts"
 
 /**
@@ -647,6 +648,31 @@ export const seatResolver = (
         const separator = seat.indexOf(":")
         const provider = separator < 0 ? "anthropic" : seat.slice(0, separator)
         const modelId = Seat.modelIdOf(seat)
+        // The OpenAI-compatible Chat Completions providers are routed by
+        // table (`Providers.compatible`): the origin, the exact path, and the
+        // key variables read in order. `Object.hasOwn`, so `constructor:x`
+        // finds no inherited function.
+        if (Object.hasOwn(Providers.compatible, provider)) {
+          const entry = Providers.compatible[provider]!
+          const found = Providers.compatibleKey(provider, environment)
+          if (found === undefined) {
+            return yield* new Seat.SeatUnresolved({
+              seat,
+              message: `Set ${entry.variables.join(" or ")} to run the ${seat} seat`
+            })
+          }
+          return yield* seatOf(
+            Route.openaiChatCompatible({
+              id: provider,
+              baseUrl: entry.baseUrl,
+              path: entry.path,
+              apiKey: Redacted.make(found.key)
+            }),
+            executor,
+            seat,
+            modelId
+          )
+        }
         const variable = apiKeyVariable[provider]
         if (variable === undefined) {
           return yield* new Seat.SeatUnresolved({

@@ -21,7 +21,7 @@ Provide it with `MemoryStore.layer` over a SQL client in production, or `@smthrs
 Call `putFact` with a namespace, a key, a JSON-serializable value, and the provenance you want recorded. Writes are last-write-wins upserts.
 
 ```ts
-yield* store.putFact({
+yield * store.putFact({
   namespace: { kind: "flow", id: "release-notes" },
   key: "release",
   value: { content: "cut 0.1.0" },
@@ -39,8 +39,8 @@ yield* store.putFact({
 Read facts back with `getFact` for an exact key, or `listFacts` with an optional key `prefix` and `limit`:
 
 ```ts
-const fact = yield* store.getFact({ namespace: { kind: "flow", id: "release-notes" }, key: "release" })
-const sessionFacts = yield* store.listFacts({ namespace: "flow-release-notes", prefix: "session:", limit: 50 })
+const fact = yield * store.getFact({ namespace: { kind: "flow", id: "release-notes" }, key: "release" })
+const sessionFacts = yield * store.listFacts({ namespace: "flow-release-notes", prefix: "session:", limit: 50 })
 ```
 
 `getFact` answers `undefined` for a missing or expired fact. `deleteFact` removes a fact together with its full text and vector projections and answers whether a row existed.
@@ -68,7 +68,7 @@ const output = yield* Flows.handlers.remember({
 Notes are append-only knowledge records. Call `putNote` with a globally unique id, text, tags, and provenance:
 
 ```ts
-const note = yield* store.putNote({
+const note = yield * store.putNote({
   namespace: { kind: "agent", id: "reviewer" },
   id: "finding-41",
   text: "The changelog job skips pre-release tags.",
@@ -85,8 +85,8 @@ const note = yield* store.putNote({
 Read notes with `listNotes`. An absent `status` filter selects `accepted`; pass `"any"` for everything, or an array of statuses. A note with an accepted superseder is hidden unless you pass `includeSuperseded: true`:
 
 ```ts
-const accepted = yield* store.listNotes({ namespace: "agent-reviewer", prefix: "finding-" })
-const everything = yield* store.listNotes({
+const accepted = yield * store.listNotes({ namespace: "agent-reviewer", prefix: "finding-" })
+const everything = yield * store.listNotes({
   namespace: "agent-reviewer",
   status: "any",
   includeSuperseded: true,
@@ -97,7 +97,7 @@ const everything = yield* store.listNotes({
 Add a supersession edge after the fact with `supersede`:
 
 ```ts
-yield* store.supersede({ supersederId: "finding-41", targetId: "finding-40" })
+yield * store.supersede({ supersederId: "finding-41", targetId: "finding-40" })
 ```
 
 Both notes must exist and share a namespace, and a note cannot supersede itself; violations fail with `supersede_conflict`.
@@ -107,9 +107,9 @@ Both notes must exist and share a namespace, and a note cannot supersede itself;
 Create a thread explicitly when it belongs in a specific namespace, then append messages:
 
 ```ts
-yield* store.createThread({ id: "conversation-7", namespace: "agent-reviewer", title: "PR 41 review" })
+yield * store.createThread({ id: "conversation-7", namespace: "agent-reviewer", title: "PR 41 review" })
 
-yield* store.appendMessage({
+yield * store.appendMessage({
   threadId: "conversation-7",
   id: "msg-1",
   role: "user",
@@ -125,11 +125,11 @@ yield* store.appendMessage({
 Read a thread with `listMessages`, paginating with the exclusive `cursor` when you need more than one page:
 
 ```ts
-const page = yield* store.listMessages({ threadId: "conversation-7", limit: 100 })
+const page = yield * store.listMessages({ threadId: "conversation-7", limit: 100 })
 const last = page.at(-1)
 const nextPage = last === undefined
   ? []
-  : yield* store.listMessages({ threadId: "conversation-7", limit: 100, cursor: { at: last.at, id: last.id } })
+  : yield * store.listMessages({ threadId: "conversation-7", limit: 100, cursor: { at: last.at, id: last.id } })
 ```
 
 `deleteThread` removes the thread and all its messages.

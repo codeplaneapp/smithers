@@ -147,7 +147,10 @@ export interface Service {
    * aborts. A source that throws settles the spinner as an error and fails
    * with the thrown value.
    */
-  readonly streamSuggestions: <A>(items: AsyncIterable<A>, options: StreamOptions<A>) => Effect.Effect<Streamed<A>, Error>
+  readonly streamSuggestions: <A>(
+    items: AsyncIterable<A>,
+    options: StreamOptions<A>
+  ) => Effect.Effect<Streamed<A>, Error>
   /**
    * A `select` over items already received. `None` when the list is empty,
    * when the operator cancels, or in a non-interactive session, where the

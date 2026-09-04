@@ -13,11 +13,11 @@ Recall is two things at once: an Effect service (`Recall.Recall`) with one metho
 
 Three bindings ship in the box:
 
-| Binding          | Extra services it needs        | Ranking                                                                   | Pick it when                                                |
-| ---------------- | ------------------------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `RecallKeyword`  | none beyond the store          | count of normalized query terms found in the row's key and text           | you want zero moving parts                                  |
-| `RecallFts`      | an FTS-enabled namespace kind  | SQLite FTS5 BM25 rank                                                     | you want ranked full text search at store scale             |
-| `RecallSemantic` | `Embedding` and a vector store | cosine similarity to the query embedding, decayed by row age              | you want meaning-level matching and accept projection costs |
+| Binding          | Extra services it needs        | Ranking                                                         | Pick it when                                                |
+| ---------------- | ------------------------------ | --------------------------------------------------------------- | ----------------------------------------------------------- |
+| `RecallKeyword`  | none beyond the store          | count of normalized query terms found in the row's key and text | you want zero moving parts                                  |
+| `RecallFts`      | an FTS-enabled namespace kind  | SQLite FTS5 BM25 rank                                           | you want ranked full text search at store scale             |
+| `RecallSemantic` | `Embedding` and a vector store | cosine similarity to the query embedding, decayed by row age    | you want meaning-level matching and accept projection costs |
 
 `RecallKeyword` normalizes both query and row text to NFKC before matching. SQLite full text search does not, so the two bindings can disagree on compatibility-equivalent characters. `RecallFts` quotes each query term independently, so user input can never become an FTS5 operator, and it propagates the store's `fts_not_enabled` error when the namespace kind has not opted in.
 

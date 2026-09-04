@@ -1,4 +1,7 @@
-# The chain contract
+---
+title: "The chain contract"
+description: "The governing design of @smthrs/chain: the slice, the four gates, the failure taxonomy, concurrency, resource limits, the JSON boundary, determinism, and isolation."
+---
 
 The governing design for `@smthrs/chain`. Source modules cite this file; it
 replaced a `docs/specs/Concepts/` directory that never came across with the
@@ -6,8 +9,8 @@ package.
 
 ## The slice
 
-The journal is the only state. Every other structure a host shows — the
-call cache used for replay, transcripts, timelines, a UI — is a pure fold
+The journal is the only state. Every other structure a host shows (the
+call cache used for replay, transcripts, timelines, a UI) is a pure fold
 over `Event.Event`. There is no agent-loop object.
 
 A **link** either runs its authored script to an outcome, or, when it has no
@@ -63,7 +66,7 @@ is out of fuel, so there is no next author to read it.
 Every failure the run's error channel carries is a tagged error with a stable
 `code`. Codes are part of the contract: a host branches on them, never on
 prose. `Catalog.CallError` is the one entry below that carries no `code` of
-its own — it is a host's failure, described by `name` and `message`, with an
+its own: it is a host's failure, described by `name` and `message`, with an
 optional `cause` for the subsystem's own stable code.
 
 | Error                        | Codes                                                         | Reaches the caller when                                                                                                                                                                                |
@@ -84,8 +87,8 @@ script's own `compile` failure is one of those observations, raised while the
 link runs.
 
 Building the layers is separate: `QuickJsRunner.layer()` carries a
-`ScriptFailure`, so a host that cannot load the QuickJS WebAssembly module —
-a browser CSP blocking it, say — fails with `runner_unavailable` while the
+`ScriptFailure`, so a host that cannot load the QuickJS WebAssembly module
+(a browser CSP blocking it, say) fails with `runner_unavailable` while the
 runtime is constructed, before any run starts.
 
 ## Concurrency
@@ -96,8 +99,8 @@ sub-chain legitimately appends to the same journal under its own id while
 the parent frame is suspended inside the spawning handler. What a run tracks
 instead is the number of events in ITS OWN chain scope: a second writer on
 that scope fails the run with `journal_conflict`, and a child writing its
-own scope does not. Effect execution remains at-least-once — a losing writer
-may dispatch one handler before it discovers the conflict — but each `(link,
+own scope does not. Effect execution remains at-least-once: a losing writer
+may dispatch one handler before it discovers the conflict, but each `(link,
 ordinal)` slot settles exactly once and each link ends exactly once.
 
 ## Resource limits
@@ -133,8 +136,8 @@ crosses is a structural COPY.
 The walk is total and single-read. It builds the copy as it validates,
 reading every property exactly once, so an accessor that answers differently
 on a second read cannot smuggle an unvalidated subtree across; and it turns
-every throw — a throwing accessor, a throwing proxy trap, a cycle, a depth
-or size overrun — into a refusal. A host handler returning something
+every throw (a throwing accessor, a throwing proxy trap, a cycle, a depth
+or size overrun) into a refusal. A host handler returning something
 unserializable is never a defect: at the runner boundary it rejects the
 script's own `ctx.call` promise, and inside `Chain.run` it is a `call_failed`
 observation that ends the attempt and hands the next author the reason.
@@ -149,7 +152,7 @@ Copy semantics a caller must expect:
   because JSON cannot represent a negative zero and the QuickJS binding,
   which encodes in-realm, already hands the host `0`. Every other accepted
   value crosses unchanged.
-- A `toJSON` method is never called, however it is reached — own or
+- A `toJSON` method is never called, however it is reached: own or
   inherited. An ENUMERABLE function-valued property refuses the object
   outright, because a function is not a JSON value; a non-enumerable or
   inherited one is simply not part of the copy.
@@ -169,7 +172,7 @@ change what the boundary accepts.
 Capture alone is not enough, because the realm's PROTOTYPES stay writable.
 `JSON.stringify` reads an inherited `toJSON`, so a copy that kept its
 prototype would be validated by the walk and then replaced by a hook the
-script installed on `Object.prototype` or `Array.prototype` — the host
+script installed on `Object.prototype` or `Array.prototype`: the host
 handler would receive a payload the boundary never saw, and `done([1, 2, 3])`
 would journal whatever the hook returned. Every container the in-realm copy
 is built from therefore carries no prototype at all, which is what makes "a

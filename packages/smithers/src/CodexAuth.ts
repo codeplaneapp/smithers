@@ -84,9 +84,12 @@ const LOCK_POLL_MS = 25
  * @category constructors
  * @since 0.1.0
  */
-export const locate = (environment: Readonly<Record<string, string | undefined>>): string => {
+export const locate = (
+  environment: Readonly<Record<string, string | undefined>>,
+  homeDirectory: string = homedir()
+): string => {
   const home = environment["CODEX_HOME"]
-  return join(home === undefined || home === "" ? join(homedir(), ".codex") : home, "auth.json")
+  return join(home === undefined || home === "" ? join(homeDirectory, ".codex") : home, "auth.json")
 }
 
 /**
@@ -143,6 +146,53 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const nonEmptyString = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined
+
+/**
+ * What one `auth.json` text holds: a ChatGPT token set, or the reason it is
+ * not one.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type Parsed =
+  | {
+    readonly usable: true
+    readonly raw: Readonly<Record<string, unknown>>
+    readonly rawTokens: Readonly<Record<string, unknown>>
+    readonly access: string
+    readonly refresh: string
+    readonly accountId: string | undefined
+  }
+  | { readonly usable: false; readonly reason: "invalid-json" | "no-tokens" }
+
+/**
+ * Reads a ChatGPT token set out of the text of one `auth.json`.
+ *
+ * Pure, and the one parser of the file's layout: the store's own `read` and
+ * `Providers.detect` both go through it, so "usable session" means the same
+ * thing to the seat that signs with it and to the verb that reports it. An
+ * API-key login (`OPENAI_API_KEY` in the file, no `tokens`) is `no-tokens`:
+ * it cannot serve the ChatGPT mode.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const parse = (text: string): Parsed => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { usable: false, reason: "invalid-json" }
+  }
+  const raw = isRecord(parsed) ? parsed : undefined
+  const rawTokens = raw === undefined ? undefined : isRecord(raw.tokens) ? raw.tokens : undefined
+  const access = rawTokens === undefined ? undefined : nonEmptyString(rawTokens.access_token)
+  const refresh = rawTokens === undefined ? undefined : nonEmptyString(rawTokens.refresh_token)
+  if (raw === undefined || rawTokens === undefined || access === undefined || refresh === undefined) {
+    return { usable: false, reason: "no-tokens" }
+  }
+  return { usable: true, raw, rawTokens, access, refresh, accountId: nonEmptyString(rawTokens.account_id) }
+}
 
 /**
  * The access token's JWT expiry in epoch milliseconds, or undefined for a
@@ -284,25 +334,18 @@ export const make = (options: MakeOptions): Store => {
         `No ChatGPT credentials at ${file}; sign in with \`codex login\` or use SMITHERS_OPENAI_AUTH=api-key`
       ))
     }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      return Effect.fail(authenticationError(`${file} is not valid JSON; sign in again with \`codex login\``))
-    }
-    const raw = isRecord(parsed) ? parsed : undefined
-    const rawTokens = raw === undefined ? undefined : isRecord(raw.tokens) ? raw.tokens : undefined
-    const access = rawTokens === undefined ? undefined : nonEmptyString(rawTokens.access_token)
-    const refresh = rawTokens === undefined ? undefined : nonEmptyString(rawTokens.refresh_token)
-    if (raw === undefined || rawTokens === undefined || access === undefined || refresh === undefined) {
+    const parsed = parse(text)
+    if (!parsed.usable) {
       return Effect.fail(authenticationError(
-        `${file} holds no ChatGPT token set; sign in with \`codex login\` (API-key logins cannot serve this mode)`
+        parsed.reason === "invalid-json"
+          ? `${file} is not valid JSON; sign in again with \`codex login\``
+          : `${file} holds no ChatGPT token set; sign in with \`codex login\` (API-key logins cannot serve this mode)`
       ))
     }
     return Effect.succeed({
-      raw,
-      rawTokens,
-      tokens: { access, refresh, accountId: nonEmptyString(rawTokens.account_id) }
+      raw: parsed.raw,
+      rawTokens: parsed.rawTokens,
+      tokens: { access: parsed.access, refresh: parsed.refresh, accountId: parsed.accountId }
     })
   })
 

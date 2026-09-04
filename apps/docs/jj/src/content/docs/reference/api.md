@@ -140,7 +140,7 @@ of a different binary being quietly substituted. An override that names nothing
 falls through to `PATH`, and the fall-through is reported in `describe()` rather
 than passing silently. A resolution that came from `PATH` is spawned as the bare
 name `jj`, so a host spawner that hands the child a different `PATH` still
-decides for itself. `smithers doctor` prints `describe()`.
+decides for itself. `smthrs doctor` prints `describe()`.
 
 A spawn that never produced a process is still a `JjError`. `node:child_process`
 throws rather than emitting an `error` event for most failures, so the adapter

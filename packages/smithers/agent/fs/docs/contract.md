@@ -1,4 +1,11 @@
-# Filesystem routing contract
+---
+title: "Filesystem routing contract"
+description: "The normative visibility, schema, path, snapshot, resource, and error behavior of @smthrs/fs."
+---
+
+This page states the behavior every surface of `@smthrs/fs` guarantees. For
+the mental models behind it, see [Metadata routing](./concepts/metadata-routing.md)
+and [Command projections](./concepts/command-projections.md).
 
 ## Boundary order
 
@@ -101,7 +108,7 @@ completion and metadata output, matching Incur. An empty value is ignored.
 
 Single quotes are literal: a backslash inside them is an ordinary character, so
 a Windows path or a regular expression survives unchanged. Unquoted and
-double-quoted text honour backslash escapes. Shell syntax is never evaluated.
+double-quoted text honor backslash escapes. Shell syntax is never evaluated.
 
 ## Snapshot semantics
 
@@ -156,3 +163,5 @@ to one route declaration.
 | `decode_failed`          | Input failed descriptor or Effect schema decoding.               |
 | `encode_failed`          | Output failed Effect schema encoding.                            |
 | `invocation_unavailable` | No execution seam is installed.                                  |
+
+For cause-by-cause remedies, see [Troubleshooting](./troubleshooting.md).

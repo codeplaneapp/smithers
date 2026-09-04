@@ -46,14 +46,14 @@ import * as Catalog from "@smthrs/chain/Catalog"
 `Chain.run` requires four services in its environment, and picks up two
 optional seams when they are mounted:
 
-| Service                 | Layer you mount                                        | Required |
-| ----------------------- | ------------------------------------------------------ | -------- |
-| `Journal.Journal`       | `Journal.layerMemory()` or an engine-backed journal    | Yes      |
-| `Catalog.Catalog`       | `Catalog.layer(entries)` or a composed catalog         | Yes      |
-| `Author.Author`         | `ModelAuthor.layer(config)` over `Model.Model`         | Yes      |
-| `ScriptRunner.ScriptRunner` | `QuickJsRunner.layer()` (production)               | Yes      |
-| `Authorize.Authorize`   | `Authorize.layerRules(rules)`                          | Optional |
-| `Steering.Steering`     | `Steering.layerMemory()` or a durable queue            | Optional |
+| Service                     | Layer you mount                                     | Required |
+| --------------------------- | --------------------------------------------------- | -------- |
+| `Journal.Journal`           | `Journal.layerMemory()` or an engine-backed journal | Yes      |
+| `Catalog.Catalog`           | `Catalog.layer(entries)` or a composed catalog      | Yes      |
+| `Author.Author`             | `ModelAuthor.layer(config)` over `Model.Model`      | Yes      |
+| `ScriptRunner.ScriptRunner` | `QuickJsRunner.layer()` (production)                | Yes      |
+| `Authorize.Authorize`       | `Authorize.layerRules(rules)`                       | Optional |
+| `Steering.Steering`         | `Steering.layerMemory()` or a durable queue         | Optional |
 
 Two layers in this table can fail while they are being built, before any run
 starts: `QuickJsRunner.layer()` fails with a `ScriptFailure` whose code is
