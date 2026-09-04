@@ -372,6 +372,19 @@ export const make = (options: BrowserJjOptions): Jj => {
           Effect.suspend(() => {
             let text: string
             try {
+              // Older shipped reactors auto-initialize on reads. Refuse missing
+              // repositories before entering them, and keep initialization an
+              // explicit ABI operation on the compensable snapshot path.
+              if (["status", "diff", "restore", "snapshot"].includes(method)) {
+                try {
+                  host.fs.statSync(`${String(request.root)}/.jj`)
+                } catch (cause) {
+                  if (method !== "snapshot" || (cause as { code?: string }).code !== "ENOENT") throw cause
+                  const initialized = exchange(abi, { op: "init", root: request.root })
+                  const response: unknown = JSON.parse(initialized)
+                  if (!isRecord(response) || !isRecord(response.ok)) return decodeResponse(method, command, initialized)
+                }
+              }
               text = exchange(abi, request)
             } catch (cause) {
               // A trap (proc_exit, a Rust panic, an out-of-range response) is a

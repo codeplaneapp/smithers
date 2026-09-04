@@ -79,24 +79,8 @@ fn snapshot_options() -> SnapshotOptions<'static> {
     }
 }
 
-/// Loads the workspace at `root`, initializing a `SimpleBackend` repo first
-/// when `root` has no `.jj` — every op auto-inits, mirroring how the flows
-/// host treats jj as always-available infrastructure.
-///
-/// KNOWN DIVERGENCE from `NodeJj`, mandated by design: the CLI-backed layer
-/// fails every op with `unknown` ("There is no jj repo in ...") when `root`
-/// has no repository, while this layer materializes one. A mistyped `root`
-/// on the browser side therefore yields a fresh empty repo (and a later
-/// `restore` of a known id reports `invalid_ref`), never a "no repo" error.
-fn load_or_init(
-    settings: &UserSettings,
-    root: &Path,
-) -> Result<(Workspace, Arc<ReadonlyRepo>), OpError> {
-    if !root.join(".jj").exists() {
-        std::fs::create_dir_all(root)?;
-        let (workspace, repo) = Workspace::init_simple(settings, root).block_on()?;
-        return Ok((workspace, repo));
-    }
+/// Loads an existing workspace without creating directories or repository state.
+fn load(settings: &UserSettings, root: &Path) -> Result<(Workspace, Arc<ReadonlyRepo>), OpError> {
     let workspace = Workspace::load(
         settings,
         root,
@@ -234,7 +218,12 @@ fn short_change_id(commit: &Commit) -> String {
 /// can call `init` unconditionally.
 pub fn init(root: &Path) -> Result<(), OpError> {
     let settings = user_settings()?;
-    let _ = load_or_init(&settings, root)?;
+    if root.join(".jj").exists() {
+        let _ = load(&settings, root)?;
+    } else {
+        std::fs::create_dir_all(root)?;
+        Workspace::init_simple(&settings, root).block_on()?;
+    }
     Ok(())
 }
 
@@ -244,7 +233,7 @@ pub fn init(root: &Path) -> Result<(), OpError> {
 /// change's id: the state callers later `restore` to.
 pub fn snapshot(root: &Path, message: Option<&str>) -> Result<String, OpError> {
     let settings = user_settings()?;
-    let (mut workspace, mut repo) = load_or_init(&settings, root)?;
+    let (mut workspace, mut repo) = load(&settings, root)?;
     let name = workspace.workspace_name().to_owned();
     let mut commit = snapshot_working_copy(&mut workspace, &mut repo)?;
 
@@ -291,7 +280,7 @@ pub fn snapshot(root: &Path, message: Option<&str>) -> Result<String, OpError> {
 /// only its tree (and the files on disk) change.
 pub fn restore(root: &Path, change_id: &str) -> Result<(), OpError> {
     let settings = user_settings()?;
-    let (mut workspace, mut repo) = load_or_init(&settings, root)?;
+    let (mut workspace, mut repo) = load(&settings, root)?;
     let name = workspace.workspace_name().to_owned();
     let commit = snapshot_working_copy(&mut workspace, &mut repo)?;
     let from_commit = resolve_revision(&repo, &commit, change_id)?;
@@ -321,7 +310,7 @@ pub fn restore(root: &Path, change_id: &str) -> Result<(), OpError> {
 /// `jj diff --from <from> --to <to> --git`.
 pub fn diff(root: &Path, from: &str, to: &str) -> Result<String, OpError> {
     let settings = user_settings()?;
-    let (mut workspace, mut repo) = load_or_init(&settings, root)?;
+    let (mut workspace, mut repo) = load(&settings, root)?;
     let commit = snapshot_working_copy(&mut workspace, &mut repo)?;
     let from_commit = resolve_revision(&repo, &commit, from)?;
     let to_commit = resolve_revision(&repo, &commit, to)?;
@@ -333,7 +322,7 @@ pub fn diff(root: &Path, from: &str, to: &str) -> Result<String, OpError> {
 /// format is ours and covered by tests.
 pub fn status(root: &Path) -> Result<String, OpError> {
     let settings = user_settings()?;
-    let (mut workspace, mut repo) = load_or_init(&settings, root)?;
+    let (mut workspace, mut repo) = load(&settings, root)?;
     let commit = snapshot_working_copy(&mut workspace, &mut repo)?;
     let parent_tree = commit.parent_tree(repo.as_ref()).block_on()?;
     status_render::status(&parent_tree, &commit.tree(), &short_change_id(&commit))
@@ -345,7 +334,7 @@ pub fn status(root: &Path) -> Result<String, OpError> {
 /// as the CLI.
 pub fn workspace_add(root: &Path, name: &str, path: &str) -> Result<(), OpError> {
     let settings = user_settings()?;
-    let (mut workspace, mut repo) = load_or_init(&settings, root)?;
+    let (mut workspace, mut repo) = load(&settings, root)?;
     snapshot_working_copy(&mut workspace, &mut repo)?;
 
     if name.is_empty() {
@@ -408,7 +397,7 @@ pub fn workspace_add(root: &Path, name: &str, path: &str) -> Result<(), OpError>
 /// the forgotten workspace's path are left in place, also like the CLI.
 pub fn workspace_forget(root: &Path, name: &str) -> Result<(), OpError> {
     let settings = user_settings()?;
-    let (workspace, repo) = load_or_init(&settings, root)?;
+    let (workspace, repo) = load(&settings, root)?;
     let name_buf: WorkspaceNameBuf = name.into();
     if repo.view().get_wc_commit_id(&name_buf).is_none() {
         return Ok(());
@@ -423,4 +412,30 @@ pub fn workspace_forget(root: &Path, name: &str) -> Result<(), OpError> {
     workspace_store.forget(&[&*name_buf])?;
     tx.commit(format!("forget workspace {name}")).block_on()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_repository_operations_do_not_create_a_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        for exists in [false, true] {
+            let root = temp.path().join(if exists { "empty" } else { "missing" });
+            if exists {
+                std::fs::create_dir(&root).unwrap();
+            }
+            for result in [
+                status(&root),
+                diff(&root, "@", "@"),
+                restore(&root, "@").map(|()| String::new()),
+            ] {
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err().code, crate::error::ErrorCode::Unknown);
+                assert_eq!(root.exists(), exists);
+                assert!(!root.join(".jj").exists());
+            }
+        }
+    }
 }

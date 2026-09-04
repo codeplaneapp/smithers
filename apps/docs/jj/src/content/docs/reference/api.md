@@ -333,7 +333,7 @@ because the frozen wasm ABI has no field for them:
 - `root(from)` answers the configured slice root, and fails when `from` is not
   inside it rather than answering for an unrelated tree.
 
-Every other divergence, including auto-initialization and symlink degradation,
+Every other divergence, including initialization and symlink degradation,
 is in [Run jj in a browser tab](/guides/run-jj-in-a-browser/#where-the-wasm-backend-answers-differently).
 
 ### @smthrs/jj/browser/WasiPreview1
@@ -435,3 +435,7 @@ with capability checks, and [`@smthrs/time-travel`](https://time-travel.smithers
 workspace snapshot and restore. See also
 [Capabilities and the host kernel](https://smithers.sh/docs/concepts/kernel/) and
 [Time travel](https://smithers.sh/docs/concepts/time-travel/).
+
+BrowserJj status, diff, and restore refuse missing repositories with typed
+`unknown` failures and never initialize them. Snapshot explicitly invokes the
+wasm `init` operation if the repository is absent.

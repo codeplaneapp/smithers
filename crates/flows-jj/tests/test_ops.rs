@@ -44,6 +44,7 @@ fn assert_change_id(id: &str) {
 fn init_creates_repo_and_is_idempotent() {
     let (_temp, root) = temp_root();
     ops::init(&root).unwrap();
+    ops::init(&root).unwrap();
     assert!(root.join(".jj").is_dir());
     // A second init over the same root must not fail or reset anything.
     write(&root, "a.txt", "alpha\n");
@@ -54,7 +55,8 @@ fn init_creates_repo_and_is_idempotent() {
 #[test]
 fn snapshot_returns_change_id_and_opens_fresh_change() {
     let (_temp, root) = temp_root();
-    // Auto-init: no explicit `init` call.
+    ops::init(&root).unwrap();
+    // Repository creation is explicit.
     write(&root, "a.txt", "alpha\n");
     let id1 = ops::snapshot(&root, Some("first")).unwrap();
     assert_change_id(&id1);
@@ -82,6 +84,7 @@ fn snapshot_returns_change_id_and_opens_fresh_change() {
 #[test]
 fn restore_roundtrip_across_add_modify_delete() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "a.txt", "alpha\n");
     write(&root, "b.txt", "bravo\n");
     let s1 = ops::snapshot(&root, Some("s1")).unwrap();
@@ -105,6 +108,7 @@ fn restore_roundtrip_across_add_modify_delete() {
 #[test]
 fn restore_to_current_state_is_a_no_op() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "a.txt", "alpha\n");
     let s1 = ops::snapshot(&root, None).unwrap();
     ops::restore(&root, &s1).unwrap();
@@ -114,6 +118,7 @@ fn restore_to_current_state_is_a_no_op() {
 #[test]
 fn restore_unknown_or_malformed_id_is_invalid_ref() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "a.txt", "alpha\n");
     ops::snapshot(&root, None).unwrap();
 
@@ -134,6 +139,7 @@ fn restore_unknown_or_malformed_id_is_invalid_ref() {
 #[test]
 fn diff_between_ids_and_identity() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "greeting.txt", "hello\nworld\n");
     write(&root, "gone.txt", "bye\n");
     let s1 = ops::snapshot(&root, Some("s1")).unwrap();
@@ -222,6 +228,7 @@ fn normalize_hashes(actual: &str, expected: &str) -> String {
 #[test]
 fn diff_multi_hunk_output_is_exact() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     let before: String = (1..=20).map(|i| format!("line {i}\n")).collect();
     write(&root, "long.txt", &before);
     let s1 = ops::snapshot(&root, None).unwrap();
@@ -260,6 +267,7 @@ index 0000000000..0000000000 100644
 #[test]
 fn diff_binary_files() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "blob.bin", b"\x00\x01\x02");
     let s1 = ops::snapshot(&root, None).unwrap();
     write(&root, "blob.bin", b"\x00\xff\xfe");
@@ -279,6 +287,7 @@ fn diff_binary_files() {
 #[test]
 fn diff_new_binary_file_uses_dev_null() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "keep.txt", "keep\n");
     let s1 = ops::snapshot(&root, None).unwrap();
     write(&root, "blob.bin", b"\x00\x01");
@@ -294,6 +303,7 @@ fn diff_new_binary_file_uses_dev_null() {
 #[test]
 fn diff_rename_shows_as_delete_plus_add() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "old.txt", "same content\n");
     let s1 = ops::snapshot(&root, None).unwrap();
     fs::rename(root.join("old.txt"), root.join("new.txt")).unwrap();
@@ -309,6 +319,7 @@ fn diff_rename_shows_as_delete_plus_add() {
 #[test]
 fn status_reflects_working_copy_changes() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "a.txt", "alpha\n");
     write(&root, "b.txt", "bravo\n");
     ops::snapshot(&root, Some("baseline")).unwrap();
@@ -337,6 +348,7 @@ fn status_reflects_working_copy_changes() {
 #[test]
 fn workspace_add_and_forget() {
     let (temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "a.txt", "alpha\n");
     ops::snapshot(&root, Some("base")).unwrap();
 
@@ -372,6 +384,7 @@ fn workspace_add_and_forget() {
 #[test]
 fn snapshot_sets_description_on_closed_change() {
     let (_temp, root) = temp_root();
+    ops::init(&root).unwrap();
     write(&root, "a.txt", "alpha\n");
     let s1 = ops::snapshot(&root, Some("the message")).unwrap();
     // No direct description accessor in the contract; prove it via restore:

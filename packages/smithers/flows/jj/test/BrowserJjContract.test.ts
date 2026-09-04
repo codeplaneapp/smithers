@@ -173,3 +173,23 @@ describe.skipIf(wasmBytes === undefined)("BrowserJj over flows_jj.wasm", () => {
     { timeout }
   )
 })
+
+it.effect("sealed operations refuse missing repositories without creating them", () =>
+  Effect.gen(function*() {
+    const host = fsModule.mkdtempSync(join(tmpdir(), "flows-jj-no-init-"))
+    try {
+      for (const exists of [false, true]) {
+        const root = exists ? "/empty" : "/missing"
+        if (exists) fsModule.mkdirSync(join(host, root))
+        const jj = BrowserJj.make({ wasm: wasmBytes!, fs: rootedSyncFs(host), root })
+        for (const operation of [jj.status(), jj.diff("@", "@"), jj.restore("@")]) {
+          const error = yield* Effect.flip(operation)
+          expect(error).toMatchObject({ code: "unknown" })
+          expect(fsModule.existsSync(join(host, root))).toBe(exists)
+          expect(fsModule.existsSync(join(host, root, ".jj"))).toBe(false)
+        }
+      }
+    } finally {
+      fsModule.rmSync(host, { recursive: true, force: true })
+    }
+  }), { timeout: 60_000 })

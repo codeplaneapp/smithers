@@ -104,20 +104,19 @@ describe.skipIf(wasmBytes === undefined)("BrowserJj edge cases over flows_jj.was
     })
 
   describe("empty repo (before any snapshot)", () => {
-    it.effect("status auto-initializes the repo and reports a clean working copy", () =>
+    it.effect("status refuses an uninitialized repository", () =>
       Effect.gen(function*() {
         const host = freshHost()
         const jj = yield* jjFor(host)
-        const status = yield* (jj.status())
-        expect(status).toContain("The working copy has no changes.")
-        expect(status).toMatch(/Working copy {2}\(@\) : [k-z]{12}/)
-        expect(fsModule.existsSync(join(host, "repo", ".jj"))).toBe(true)
+        expect(yield* flip(jj.status())).toMatchObject({ code: "unknown" })
+        expect(fsModule.existsSync(join(host, "repo", ".jj"))).toBe(false)
       }), { timeout })
 
     it.effect("diff of @ against @ is empty and restore from @ is a no-op", () =>
       Effect.gen(function*() {
         const host = freshHost()
         const jj = yield* jjFor(host)
+        yield* jj.snapshot()
         expect(yield* (jj.diff("@", "@"))).toBe("")
         yield* (jj.restore("@"))
       }), { timeout })
@@ -128,6 +127,7 @@ describe.skipIf(wasmBytes === undefined)("BrowserJj edge cases over flows_jj.was
         Effect.gen(function*() {
           const host = freshHost()
           const jj = yield* jjFor(host)
+          yield* jj.snapshot()
           // Well-formed reverse-hex id that matches nothing in a fresh repo.
           const restoreError = yield* flip(jj.restore("kkkkkkkkkkkk"))
           expect(restoreError.code).toBe("invalid_ref")
@@ -183,7 +183,7 @@ describe.skipIf(wasmBytes === undefined)("BrowserJj edge cases over flows_jj.was
       Effect.gen(function*() {
         const host = freshHost()
         const first = yield* jjFor(host)
-        yield* (first.status()) // auto-init with zero snapshots
+        yield* first.snapshot()
         const second = yield* jjFor(host)
         const status = yield* (second.status())
         expect(status).toContain("The working copy has no changes.")

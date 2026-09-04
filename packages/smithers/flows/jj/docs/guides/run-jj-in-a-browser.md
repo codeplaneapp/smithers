@@ -85,12 +85,14 @@ an absent capability is a capability with an answer, never a missing tag.
 These divergences are real, deliberate, and pinned by tests. Read them before
 you assume parity with the CLI.
 
-### Every operation auto-initializes the repository
+### Repository initialization is explicit in the wasm ABI
 
-If `root` has no `.jj`, the wasm layer creates one and continues. `NodeJj`
-fails with `unknown` and jj's own "There is no jj repo" text. A mistyped `root`
-in a page therefore yields a fresh empty repository, and a later `restore` of a
-known change id reports `invalid_ref`, rather than a "no repo" error.
+Only the `init` ABI operation creates a repository. `status`, `diff`, and
+`restore` on an uninitialized or missing root fail with `JjError.code: "unknown"`
+and leave the filesystem unchanged, like NodeJj. BrowserJj checks for the
+repository before calling those operations, including with older wasm bytes.
+`BrowserJj.snapshot` explicitly calls `init` before its first snapshot when the
+repository is absent; snapshot is a compensable write capability.
 
 ### Simple backend, no git
 

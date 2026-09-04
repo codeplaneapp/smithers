@@ -130,6 +130,10 @@ fn restore_to_unknown_id_reports_invalid_ref_with_command() {
     let root_str = root.to_str().unwrap();
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    assert_eq!(
+        call(&json!({"op": "init", "root": root_str})),
+        json!({"ok": {}})
+    );
     call(&json!({"op": "snapshot", "root": root_str}));
 
     let value = call(&json!({"op": "restore", "root": root_str, "changeId": "kkkkkkkkkkkk"}));
@@ -148,6 +152,10 @@ fn diff_with_unknown_revision_reports_invalid_ref() {
     let (_temp, root) = temp_root();
     let root_str = root.to_str().unwrap();
     fs::create_dir_all(&root).unwrap();
+    assert_eq!(
+        call(&json!({"op": "init", "root": root_str})),
+        json!({"ok": {}})
+    );
     call(&json!({"op": "snapshot", "root": root_str}));
 
     let value = call(&json!({"op": "diff", "root": root_str, "from": "kkkkkkkkkkkk", "to": "@"}));

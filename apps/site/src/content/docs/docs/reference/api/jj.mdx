@@ -127,16 +127,16 @@ Both optional operations are capability-checked like every other one:
 
 ### Failures
 
-| Export                | Signature                                                                                                              | Meaning                                                                                                                  |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unsupported_version", "unknown"]>` and the type                                | The closed reason vocabulary.                                                                                            |
-| `JjError`             | `class JjError` with `_tag` `"@smthrs/jj/JjError"`                                                                     | A jj failure, shaped after `effect/PlatformError`.                                                                       |
-| `jjError(options)`    | `(options: { code: JjErrorCode; module?: string; method: string; description?: string; command?: string }) => JjError` | Composes the human message from the code, the failing `module.method`, and the description. `module` defaults to `"Jj"`. |
-| `isJjError(error)`    | `(error: unknown) => error is JjError`                                                                                 | Tells "jj said no" from "the capability kernel said no" without matching `_tag` by hand.                                 |
-| `JjFailure`           | `type JjFailure = JjError \| Permission.PermissionError`                                                               | Everything a `Jj` operation can fail with.                                                                               |
-| `JjErrorCause`        | `Schema.Struct<{ name?: string; code?: string; message: string }>` and the type                                        | The plain-data projection of an underlying host failure.                                                                 |
-| `jjErrorCause(cause)` | `(cause: unknown) => JjErrorCause`                                                                                     | Projects an arbitrary host failure onto that shape, truncating each field to fit.                                        |
-| `causeMessageLimit`   | `1024`                                                                                                                 | How many characters each string in a `JjErrorCause` keeps.                                                               |
+| Export                | Signature                                                                                                                          | Meaning                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unsupported_version", "unknown"]>` and the type | The closed reason vocabulary.                                                                                            |
+| `JjError`             | `class JjError` with `_tag` `"@smthrs/jj/JjError"`                                                                                 | A jj failure, shaped after `effect/PlatformError`.                                                                       |
+| `jjError(options)`    | `(options: { code: JjErrorCode; module?: string; method: string; description?: string; command?: string }) => JjError`             | Composes the human message from the code, the failing `module.method`, and the description. `module` defaults to `"Jj"`. |
+| `isJjError(error)`    | `(error: unknown) => error is JjError`                                                                                             | Tells "jj said no" from "the capability kernel said no" without matching `_tag` by hand.                                 |
+| `JjFailure`           | `type JjFailure = JjError \| Permission.PermissionError`                                                                           | Everything a `Jj` operation can fail with.                                                                               |
+| `JjErrorCause`        | `Schema.Struct<{ name?: string; code?: string; message: string }>` and the type                                                    | The plain-data projection of an underlying host failure.                                                                 |
+| `jjErrorCause(cause)` | `(cause: unknown) => JjErrorCause`                                                                                                 | Projects an arbitrary host failure onto that shape, truncating each field to fit.                                        |
+| `causeMessageLimit`   | `1024`                                                                                                                             | How many characters each string in a `JjErrorCause` keeps.                                                               |
 
 `JjError` carries a stable `code`, the `module` and `method` that failed, a
 human `message`, the `command` that produced it, and an optional `cause`.
@@ -170,10 +170,10 @@ bundles for the browser; each implementation is imported from its own subpath.
 `NodeJj` shells out to the `jj` CLI with argv arrays and never a shell string.
 It ships four layers, and they differ along two axes.
 
-| Export                           | Signature                                                           | Process ownership | Repository      |
-| -------------------------------- | ------------------------------------------------------------------- | ----------------- | --------------- |
-| `layer`                          | `Layer<Jj, JjError>`                                                         | Its own child     | The process cwd |
-| `layerAt(repositoryRoot)`        | `(repositoryRoot: string) => Layer<Jj, JjError>`                             | Its own child     | Bound, absolute |
+| Export                           | Signature                                                             | Process ownership | Repository      |
+| -------------------------------- | --------------------------------------------------------------------- | ----------------- | --------------- |
+| `layer`                          | `Layer<Jj, JjError>`                                                  | Its own child     | The process cwd |
+| `layerAt(repositoryRoot)`        | `(repositoryRoot: string) => Layer<Jj, JjError>`                      | Its own child     | Bound, absolute |
 | `layerSpawner`                   | `Layer<Jj, JjError, ChildProcessSpawner>`                             | The host spawner  | The process cwd |
 | `layerSpawnerAt(repositoryRoot)` | `(repositoryRoot: string) => Layer<Jj, JjError, ChildProcessSpawner>` | The host spawner  | Bound, absolute |
 
@@ -338,7 +338,7 @@ because the frozen wasm ABI has no field for them:
 - `root(from)` answers the configured slice root, and fails when `from` is not
   inside it rather than answering for an unrelated tree.
 
-Every other divergence, including auto-initialization and symlink degradation,
+Every other divergence, including initialization and symlink degradation,
 is in [Run jj in a browser tab](https://jj.smithers.sh/guides/run-jj-in-a-browser/#where-the-wasm-backend-answers-differently).
 
 ### @smthrs/jj/browser/WasiPreview1
@@ -440,4 +440,8 @@ with capability checks, and [`@smthrs/time-travel`](/docs/reference/api/time-tra
 workspace snapshot and restore. See also
 [Capabilities and the host kernel](/docs/concepts/kernel/) and
 [Time travel](/docs/concepts/time-travel/).
+
+BrowserJj status, diff, and restore refuse missing repositories with typed
+`unknown` failures and never initialize them. Snapshot explicitly invokes the
+wasm `init` operation if the repository is absent.
 

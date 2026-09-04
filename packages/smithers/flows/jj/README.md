@@ -235,3 +235,7 @@ does not own the mount and never syncs for you.
 
 See the [kernel reference](https://kernel.smithers.sh/reference/api/), which
 owns the closed host service list this contract is one slot of.
+
+Only the wasm `init` operation creates repositories. BrowserJj refuses status,
+diff, and restore on missing repositories with code `unknown`, without creating
+a directory or `.jj`. Snapshot explicitly initializes an absent repository.

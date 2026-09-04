@@ -19,7 +19,7 @@ import { isJjError, Jj, type JjError, type JjFailure } from "../src/Jj.ts"
 import { emptyWasmModule, fakeFlowsJjWasm } from "./FakeFlowsJjWasm.ts"
 
 /** The fake module never touches the filesystem; any structural slice will do. */
-const slice = fs
+const slice = { ...fs, statSync: () => fs.statSync(import.meta.filename) }
 
 /**
  * `Jj`'s error channel is `JjFailure` because the capability kernel decorates
@@ -507,3 +507,28 @@ describe("BrowserJj over the fake ABI module", () => {
       expect(error.command).toBe("jj snapshot")
     }))
 })
+
+it.effect("reports initialization failures without attempting a snapshot", () =>
+  Effect.gen(function*() {
+    for (
+      const response of [
+        "{\"err\":{\"code\":\"unknown\",\"message\":\"init refused\",\"command\":\"jj init\"}}",
+        "null",
+        "{\"ok\":42}"
+      ]
+    ) {
+      const requests: Array<string> = []
+      const error = yield* flip({
+        wasm: fakeFlowsJjWasm({ response }),
+        fs: {
+          ...slice,
+          statSync: () => {
+            throw Object.assign(new Error("missing"), { code: "ENOENT" })
+          }
+        },
+        onStderr: (text) => requests.push(text)
+      }, (jj) => jj.snapshot())
+      expect(error.code).toBe("unknown")
+      expect(requests.slice(1).map((request) => JSON.parse(request).op)).toEqual(["init"])
+    }
+  }))
