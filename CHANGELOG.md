@@ -155,10 +155,19 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1230 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1297 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **targets:** land the unknown-property guidance its test already asks for ([ff58cf0054](https://github.com/smithersai/smithers/commit/ff58cf0054e3fc97574bac1b9e649328e08fcd1c))
+- **ci:** gate the 53 package documentation sites ([f0114f19c4](https://github.com/smithersai/smithers/commit/f0114f19c41da2862910a61708490b2cee8d33d9))
+- **cli:** smthrs suggest ([e1bdbb9ca8](https://github.com/smithersai/smithers/commit/e1bdbb9ca83b1e84123eb8acdf3105fb7c9477cd))
+- **docs:** publish package-specific documentation sites ([f067decdd7](https://github.com/smithersai/smithers/commit/f067decdd78170e1bd770d1dcca411bd385a012d))
+- **cli:** render doctor checks with terminal status symbols ([135106f40f](https://github.com/smithersai/smithers/commit/135106f40f04e2803441f77c19416c8a4687a654))
+- **ui:** render schema-driven flow forms in chat ([13585bde95](https://github.com/smithersai/smithers/commit/13585bde957a449acd147f2c7c4ff773c8fb7687))
+- **code-intel:** stream cloud LSP sessions into file cards ([0405c0273e](https://github.com/smithersai/smithers/commit/0405c0273e2cdea9b6bba61686a288f72a3bb572))
+- **cli:** add interactive local UI launcher ([c456209f27](https://github.com/smithersai/smithers/commit/c456209f274e63f5df3551acf913e3818c6421cd))
+- **build:** support portable markdown code targets ([440f41711c](https://github.com/smithersai/smithers/commit/440f41711c111975e9aa532be9ad781460db7ab2))
 - **release:** generate the changelog and cut a release from the target graph ([c75210a153](https://github.com/smithersai/smithers/commit/c75210a153bbe637791e5c48447b68012cd709ec))
 - **ui:** connect Linear and GitHub sync as first-class actions ([8d7e2c97a6](https://github.com/smithersai/smithers/commit/8d7e2c97a620af624e05121982dc2fffbfb2f3a7))
 - **ui:** forward the product API from the local host and remember open repos ([4d335b3aac](https://github.com/smithersai/smithers/commit/4d335b3aaca76f2e8c147d87a4cae29020fdf2c7))
@@ -272,6 +281,41 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **platform-bun:** raise the published bun floor to the one the workspace requires ([45b8dfbf27](https://github.com/smithersai/smithers/commit/45b8dfbf272f7e4837d4fad78b32ca6f81c82bed))
+- **targets:** park the escaped grandchild on a fifo instead of racing its timer ([cfb8d9343c](https://github.com/smithersai/smithers/commit/cfb8d9343cc20aa7b0a6f26ac3232628e5d00669))
+- **build-cli:** render pull_request_target and declare the gate's read ([216beca6b6](https://github.com/smithersai/smithers/commit/216beca6b68e33a8e90723b2d5ccebed8502fb17))
+- **repo:** finish the Bun floor in package.json and mirror the docs-sites gate into the release ([4141481af0](https://github.com/smithersai/smithers/commit/4141481af028f39607aaf0a80963d38ba971299b))
+- **build,observability:** repair a half-bumped version pair and count passes instead of timing them ([01c6e44055](https://github.com/smithersai/smithers/commit/01c6e440555db951a7edfac91cfdc95e570fec38))
+- **repo:** drop the JJ-CONFLICT-README a conflicted push left at the root ([4a13f3d8d8](https://github.com/smithersai/smithers/commit/4a13f3d8d89a99668dfc1320f9ce360d3c257c4f))
+- **build-cli:** treat a toolchain's build directory as host state ([181098b1ac](https://github.com/smithersai/smithers/commit/181098b1ac4761ee5ea21cbb2f47b8ca74354806))
+- **repo:** drop the jj conflict-artifact trees a push wrote into main ([9340dfaeca](https://github.com/smithersai/smithers/commit/9340dfaeca30cd8eed3db056c20d78db9cbf8592))
+- **ui:** hang up the tunnel before stopping the code-intel double ([15efbe0fb1](https://github.com/smithersai/smithers/commit/15efbe0fb162f3b6fd3292b49136a502cc1e0676))
+- **site:** redirect the vocs-era routes published packages point at ([0e28b54aa5](https://github.com/smithersai/smithers/commit/0e28b54aa57d51bc235b135b2abd17c6c9860dc1))
+- **build-cli:** link a scaffold against the real workspace layout ([5b8b4b1e06](https://github.com/smithersai/smithers/commit/5b8b4b1e0641743dd3601e32908727928d936a0f))
+- **ci:** declare the examples target as its own generated step ([e6437b32d9](https://github.com/smithersai/smithers/commit/e6437b32d99e77da7487098957806258f2dc352f))
+- **docs:** point the shipping-source links at the site that exists ([a540aec649](https://github.com/smithersai/smithers/commit/a540aec6497a57ad7b25133b9d94a314e094401f))
+- **update:** read the prerelease dist-tag the release publishes ([411312f9fb](https://github.com/smithersai/smithers/commit/411312f9fb9065ac3fd2bede4cd82d34e64e330e))
+- **migrate:** name the publishing repository in the manifest ([abde1f14b4](https://github.com/smithersai/smithers/commit/abde1f14b4112a37cd5665b9cf86ccfad1fd81c4))
+- **build-cli:** always render a reason when a target fails ([4a536d31a9](https://github.com/smithersai/smithers/commit/4a536d31a91373eefcd0b81d0ad828d220892da0))
+- **repo:** spell the CLI smthrs in the strings a user reads ([6e6f84a909](https://github.com/smithersai/smithers/commit/6e6f84a9094833c39675b02ec1729ca35220b6ca))
+- **cli:** stop the redactor eating the provider setup hint ([67b25e503b](https://github.com/smithersai/smithers/commit/67b25e503b29ee48c211c20b3fc9cc89ff271b52))
+- **errors:** point ERROR_REFERENCE_URL at the page that exists ([2b332c8d9f](https://github.com/smithersai/smithers/commit/2b332c8d9fc966a0181b5f128e410536f11c7ba8))
+- **ui:** prove the tokenizer yields structurally instead of by stopwatch ([c6db60cbda](https://github.com/smithersai/smithers/commit/c6db60cbda990daf8eb8462e41866c25ceea4cae))
+- **build:** match npx in command position, not as an API accessor ([14c5140aef](https://github.com/smithersai/smithers/commit/14c5140aef0b0924a591b5549ba189e258ebd194))
+- **flows:** pin the apps/docs workspace glob and the four docs scripts ([1ab5e7af7f](https://github.com/smithersai/smithers/commit/1ab5e7af7f833485a0f9d3c83c9ed1fb4eb0a5f5))
+- **repo:** record the CLI's three workspace dependencies in both lockfiles ([6bfab08f8d](https://github.com/smithersai/smithers/commit/6bfab08f8d0ba97ad0485ff378eb702a497fb6dc))
+- **ui:** assert the autosave transitions from a recorded history, not samples ([5e8532e860](https://github.com/smithersai/smithers/commit/5e8532e860ebbbac6118805e9a4e22b9392250d9))
+- **targets:** keep enough of a failing stream to name what failed ([4ee653b498](https://github.com/smithersai/smithers/commit/4ee653b498841ba811a4820131524795b9227393))
+- **deprecation:** name the smthrs executable consistently ([2a466bf53d](https://github.com/smithersai/smithers/commit/2a466bf53df7aeb1df72d6a8f0b46ef9b7510807))
+- **review:** let the deploy-gate test see the rpc package and pin the exact roster ([48c5f7e2c7](https://github.com/smithersai/smithers/commit/48c5f7e2c7cec02f169a71c5121e6e9b56920648))
+- **sandbox:** park the kill fixtures on a fifo so a working kill cannot read as success ([f1d6830cb8](https://github.com/smithersai/smithers/commit/f1d6830cb8ca49e22c67df6292561edc40665cf5))
+- **ui:** keep the file-tree fixture's child paths consistent with its listing ([4bdac007be](https://github.com/smithersai/smithers/commit/4bdac007be390c02168eb5938a85b4bdd5a45c16))
+- **ui:** follow the nested build-cli path and give launch probes a real budget ([c4633a6670](https://github.com/smithersai/smithers/commit/c4633a6670aea266d4a38fd10acac87bb05a5b88))
+- **build-cli:** skip the Docker lane without an engine and cover DockerExec with a stub ([2c8058ef20](https://github.com/smithersai/smithers/commit/2c8058ef200dbb390b312657777bab3875d91ce9))
+- **flows:** pin core-js in the allowBuilds roster the build-cli fix added ([1d32feaf98](https://github.com/smithersai/smithers/commit/1d32feaf9856dd0c8553bb5727c77ae708c30bdf))
+- **build-cli:** resolve the rsbuild fixture from the package's own dependency ([7dc8724fa5](https://github.com/smithersai/smithers/commit/7dc8724fa5e21681736614109d1d56d73c6481be))
+- **mcp:** sequence the late-reply test on signals, not sleeps ([b373b026f6](https://github.com/smithersai/smithers/commit/b373b026f6aff7f6bca7f989f6cb4a873ba7661a))
+- **release:** run CI's target graph with CI's toolchain in release.yml ([92d17090be](https://github.com/smithersai/smithers/commit/92d17090beae4503cfc793d61aa3290a1c73ce1b))
 - **ci:** select every package step recursively, not by a bare label ([47e83177d3](https://github.com/smithersai/smithers/commit/47e83177d3ae14c06a914f272c93efd7ee331b1e))
 - **repo:** track every .smithers/WORKSPACE.ts, ignore only run state ([4a80d1e59d](https://github.com/smithersai/smithers/commit/4a80d1e59dca863a6ac0a30f310c434f676bb1b4))
 - **build-cli:** keep nested checkouts and VCS state out of discovery and the scratch copy ([a4410fdfc2](https://github.com/smithersai/smithers/commit/a4410fdfc29e265a84709569d1897d39ad592fda))
@@ -796,6 +840,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### ⚡ Performance
 
+- **agent:** read UTF-8 boundaries off the bytes, not per character ([23de0f8c50](https://github.com/smithersai/smithers/commit/23de0f8c5089c269357dce155ce71cdc0c0a25cd))
 - **core:** prepare an effect envelope once for every node it encloses ([b3306a9e79](https://github.com/smithersai/smithers/commit/b3306a9e79402a344b827015c1b8b4546fa55e34))
 - **core:** index effect paths and answer reachability from a closure ([4eb407a984](https://github.com/smithersai/smithers/commit/4eb407a9847ca2877be292ed2c64c366275d1172))
 - **build-cli:** make the gitignored census cost what a body can change ([7271c57b6b](https://github.com/smithersai/smithers/commit/7271c57b6bc12300f9d34e6f03bf184b0107b875))
@@ -848,6 +893,14 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- **capability:** restore the README the docs restitch emptied ([b9e8ebd3f9](https://github.com/smithersai/smithers/commit/b9e8ebd3f94c26f2668a473923a07a4c196fc323))
+- **changelog:** record the docs-generation-links findings as resolved ([48e0cbaf2a](https://github.com/smithersai/smithers/commit/48e0cbaf2aaa444cd81758b5dc312243f3855755))
+- give every package the same shape and restitch its site ([35781c59fb](https://github.com/smithersai/smithers/commit/35781c59fbaaa7cdcec72c4760bdf313bcd5e1f8))
+- **create-app:** drop the blocker layerFor already fixed ([6108a82127](https://github.com/smithersai/smithers/commit/6108a82127633fca4bf274e633a2354091a680fe))
+- **site:** serve the changelogs from the docs site again ([bfce5637de](https://github.com/smithersai/smithers/commit/bfce5637de40a3b6b721786e1036fc8384eb0c36))
+- correct the contributor commands and label the private packages ([a54be8075a](https://github.com/smithersai/smithers/commit/a54be8075a3e2b6cc61ddba89287539cea250f92))
+- **site:** stop advertising desktop artifacts no pipeline builds ([69108f9f09](https://github.com/smithersai/smithers/commit/69108f9f09ccee7f3467db47774817562f59c949))
+- **site:** publish comprehensive Smithers reference ([9a6caa5c60](https://github.com/smithersai/smithers/commit/9a6caa5c6008cd7d29b93b257d5314bfe190cbad))
 - replace the vocs site with the apps/site Astro site ([6d120f3e91](https://github.com/smithersai/smithers/commit/6d120f3e911ccc4e1d424b5f01bbbecca24cb198))
 - report land lane verification ([c164780475](https://github.com/smithersai/smithers/commit/c164780475c829c77c5217cac97715939ffa2852))
 - report integration lane results ([9b494aa049](https://github.com/smithersai/smithers/commit/9b494aa049016064553aeaa5299c55883ce66316))
@@ -1050,6 +1103,10 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🧹 Chores
 
+- **ci:** move every Bun pin to 1.4.1 so the graph loads ([ec540eee08](https://github.com/smithersai/smithers/commit/ec540eee0855ceab96445170a687d20dcf2b3379))
+- **ci:** run on Bun 1.4.1 and commit the docs target modules the graph imports ([d9566dfe6d](https://github.com/smithersai/smithers/commit/d9566dfe6dbd57678bc8944367b29c8d4910bc76))
+- **repo:** re-sort the registry dependency and reformat two files ([8eca886272](https://github.com/smithersai/smithers/commit/8eca8862727aab921f1bc602a0911a5fdf780b67))
+- **create-app:** enable exactOptionalPropertyTypes in the templates ([2d0968cd8c](https://github.com/smithersai/smithers/commit/2d0968cd8cb12709f0f80ebd2713f0a0b28bb92a))
 - **repo:** untrack the run logs and scratch trees the last commit swept in ([16799156fe](https://github.com/smithersai/smithers/commit/16799156fe94f89c0d44e571d0d9379767e8648f))
 - **jj:** drop the dangling vendor/jj submodule gitlink ([7f384b134b](https://github.com/smithersai/smithers/commit/7f384b134b56973fe2ddc09739b8be775a9d97dd))
 - **plugins:** remove the claude and codex plugins and the skills tree ([cda26713f7](https://github.com/smithersai/smithers/commit/cda26713f710dd46ceb0b5d920380c129001fd94))
@@ -1147,6 +1204,16 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **test(smithers):** run suggest's real defaults and the SIGKILL escalation ([00b57bcca9](https://github.com/smithersai/smithers/commit/00b57bcca9db4675fd39e2e0978cb7d69daaa9a8))
+- **test(targets):** cover the fold's unlistable directory and pin every sandbox rendering ([e7200a02f0](https://github.com/smithersai/smithers/commit/e7200a02f02eaa054a613524db2af736fa85fe5c))
+- **test(targets):** cover the metadata guards, option refusals, and workflow indentation the floors demand ([3833d8f7e0](https://github.com/smithersai/smithers/commit/3833d8f7e0302474092da39ff4da35412f8298fd))
+- **test(repo-contract):** require a CLI reference page for each shipped verb ([306f0a3f9f](https://github.com/smithersai/smithers/commit/306f0a3f9f1510a86c82802ff43ab08234793c22))
+- **test(repo-contract):** resolve a link's redirect to a page that exists ([3a0f99b1bb](https://github.com/smithersai/smithers/commit/3a0f99b1bb89eacaffd162cc9d7aa5563317bf32))
+- **test(examples):** assert the denial the engine reports, and run examples in CI ([2033f48e83](https://github.com/smithersai/smithers/commit/2033f48e83f18a0c226be25de7eb363a49e2e0e3))
+- **style(build-cli):** format the sources and categorize every export ([0ceac8d4fc](https://github.com/smithersai/smithers/commit/0ceac8d4fc233cbb6200610bd9c8505e8402e169))
+- **test(cli):** shadow the executable the card actually renders ([b3bdc2dfef](https://github.com/smithersai/smithers/commit/b3bdc2dfef6065921ea34f96f4bd64adece370ec))
+- **wip(rc0):** package docs sites + suggest scaffolding (frozen release base) ([1b177b8710](https://github.com/smithersai/smithers/commit/1b177b87104e403a0d34dcfcf050257ff93d05b0))
+- **test(platform-node):** enforce a single exact Effect peer set ([c5e190425b](https://github.com/smithersai/smithers/commit/c5e190425b5b19ae2431b7fbbb79de79f26b91fc))
 - **test(build-cli):** run the Docker suite on every host again ([4c2d3d3b64](https://github.com/smithersai/smithers/commit/4c2d3d3b647719c999dda08c0bde1aa3b027e36e))
 - **test(build-cli):** run the Docker suite on every host again ([d3f983e223](https://github.com/smithersai/smithers/commit/d3f983e2239add8b81029674d6642649f4b8d86d))
 - **test(ui):** name the sync e2e's cards by literal test id ([8cdff1a2de](https://github.com/smithersai/smithers/commit/8cdff1a2de2c17f2c708a5912f0a06746db6f6ae))
