@@ -17,10 +17,29 @@ const open = <Fields extends Schema.Struct.Fields>(fields: Fields) => Schema.Str
 /**
  * A GitHub account.
  *
+ * `type` distinguishes a person from a GitHub App: `Webhook.senderRefusal`
+ * refuses a `Bot` sender, so the field is modelled rather than left to the
+ * open rest.
+ *
  * @category schemas
  * @since 1.0.0
  */
-export const User = open({ login: Schema.String, id: Schema.optional(Schema.Number) })
+export const User = open({
+  login: Schema.String,
+  id: Schema.optional(Schema.Number),
+  type: Schema.optional(Schema.String)
+})
+
+/**
+ * How the author of a comment, issue, or pull request relates to the
+ * repository. GitHub sends it on every author-attributed delivery, and
+ * `Webhook.senderRefusal` reads it as the only authorization signal a webhook
+ * payload carries.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const AuthorAssociation = Schema.String
 
 /**
  * A repository, as embedded in a webhook payload.
@@ -43,6 +62,7 @@ export const Repository = open({
  */
 export const PullRequest = open({
   number: Schema.Number,
+  author_association: Schema.optional(AuthorAssociation),
   title: Schema.optional(Schema.String),
   state: Schema.optional(Schema.String),
   html_url: Schema.optional(Schema.String),
@@ -62,6 +82,7 @@ export const PullRequest = open({
  */
 export const Issue = open({
   number: Schema.Number,
+  author_association: Schema.optional(AuthorAssociation),
   title: Schema.optional(Schema.String),
   state: Schema.optional(Schema.String),
   html_url: Schema.optional(Schema.String),
@@ -78,6 +99,7 @@ export const Issue = open({
  */
 export const Comment = open({
   id: Schema.optional(Schema.Number),
+  author_association: Schema.optional(AuthorAssociation),
   body: Schema.optional(Schema.String),
   html_url: Schema.optional(Schema.String),
   user: Schema.optional(User)

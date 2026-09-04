@@ -122,9 +122,12 @@ const githubDelivery = (body: string, signature: string, deliveryId = "delivery-
   return { ...raw, idempotencyKey: GitHubWebhook.idempotencyKey(raw) as string }
 }
 
+// `OWNER` because the GitHub channel gates the sender's `author_association`:
+// these cases are about signatures and idempotency, so the sender is one the
+// door admits.
 const ISSUE_BODY = JSON.stringify({
   action: "opened",
-  issue: { number: 12 },
+  issue: { number: 12, author_association: "OWNER" },
   repository: { full_name: "smithersai/smithers" }
 })
 
@@ -132,6 +135,32 @@ const ISSUE_BODY = JSON.stringify({
 // pinned against the deleted gateway. The gateway is gone; the requirement is
 // not, so it is re-pinned here against the channel that replaced it.
 describe("case 17: a WebhookChannel bound with the GitHub verifier rejects a bad signature", () => {
+  it.each([
+    ["OWNER", "User", true],
+    ["MEMBER", "User", true],
+    ["COLLABORATOR", "User", true],
+    ["NONE", "User", false],
+    ["CONTRIBUTOR", "User", false],
+    [undefined, "User", false],
+    ["OWNER", "Bot", false]
+  ])("gates a signed comment from %s / %s before planning", async (association, type, allowed) => {
+    const body = JSON.stringify({
+      action: "created",
+      issue: { number: 12, author_association: "OWNER" },
+      comment: { body: "/fix", author_association: association },
+      sender: { type },
+      repository: { full_name: "smithersai/smithers" }
+    })
+    const delivery = githubDelivery(body, `sha256=${computeHmacSha256Hex(body, SECRET)}`)
+    const calls: Array<string> = []
+    const exit = await ingest(githubChannel(), {
+      ...delivery,
+      headers: { ...delivery.headers, "x-github-event": "issue_comment" }
+    }, calls)
+    expect(exit._tag).toBe(allowed ? "Success" : "Failure")
+    expect(calls).toEqual(allowed ? ["plan", "run"] : [])
+  })
+
   it("refuses a sha256= signature computed with a different secret", async () => {
     const calls: Array<string> = []
     const signature = `sha256=${computeHmacSha256Hex(ISSUE_BODY, WRONG_SECRET)}`

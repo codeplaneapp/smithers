@@ -142,6 +142,36 @@ Three details are load-bearing:
 - A refused delivery fails `Unauthorized` before the decoder or the control
   plane runs. Only the refusal crosses; the digest detail stays in the log.
 
+### Who is allowed to start work
+
+A verified HMAC authenticates the delivery, but public-repository comments
+can come from untrusted accounts. The channel requires the event author's
+`author_association` to match `OWNER`, `MEMBER`, or `COLLABORATOR` by default,
+and always refuses `sender.type === "Bot"`.
+
+Configure the list per channel:
+
+```ts
+const channel = GitHub.Webhook.channel({
+  credential: Redacted.make({ id: "github-webhook", name: "github-webhook" }),
+  secret: Core.Channel.constantSecret(Redacted.make(webhookSecret)),
+  route: Core.Channel.startFlow("triage"),
+  allowedAssociations: ["OWNER", "MEMBER"]
+})
+```
+
+An empty list admits nobody. Associations are compared without regard to
+case. A comment or review uses its own association, never its parent issue
+or pull request's association. Missing associations fail closed; this also
+refuses event types such as `push` that do not supply an author association.
+
+`GitHub.Webhook.senderRefusal` returns a `SenderRefused` error with reason
+`permission-denied` and a typed `skipReason`: `bot-sender`,
+`missing-association`, or `association-not-allowed`. `decode` throws that
+error. The channel reports it as `InvalidInput` and never calls the route or
+control plane. An ingress that needs to acknowledge a skipped delivery can
+inspect `senderRefusal` after verifying its HMAC.
+
 [How adapters sit on the control plane](../concepts/control-plane.md)
 explains the full contract, including `signalRun` for signaling a waiting run
 instead of starting a flow.

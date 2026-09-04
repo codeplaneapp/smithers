@@ -90,16 +90,113 @@ export const correlations = (payload: unknown): ReadonlyArray<string | null> => 
 }
 
 /**
+ * Repository associations admitted by default.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const defaultAllowedAssociations: ReadonlyArray<string> = Object.freeze(["OWNER", "MEMBER", "COLLABORATOR"])
+
+/**
+ * Sender authorization for a verified delivery.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface SenderPolicy {
+  /** Allowed `author_association` values; an empty list admits nobody. */
+  readonly allowedAssociations?: ReadonlyArray<string> | undefined
+}
+
+/**
+ * Why a verified delivery must not reach a flow.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type SenderSkipReason = "bot-sender" | "missing-association" | "association-not-allowed"
+
+/**
+ * A sender refusal, classified independently of the human-readable message.
+ * The channel translates it to `InvalidInput` before routing.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class SenderRefused extends IntegrationError {
+  readonly skipReason: SenderSkipReason
+
+  constructor(skipReason: SenderSkipReason, event: string) {
+    const explanation = skipReason === "bot-sender"
+      ? "Bot senders cannot start work."
+      : skipReason === "missing-association"
+      ? "The delivery has no author_association for its author."
+      : "The author's author_association is not allowed."
+    super("permission-denied", `GitHub ${event} delivery refused: ${explanation}`, {
+      source: SERVICE,
+      event,
+      skipReason
+    })
+    this.skipReason = skipReason
+  }
+}
+
+// Select the event's author, never a parent issue or pull request's author:
+// otherwise a comment missing its own association inherits someone else's access.
+const associationPaths: Readonly<Record<string, string>> = {
+  commit_comment: "comment.author_association",
+  discussion: "discussion.author_association",
+  discussion_comment: "comment.author_association",
+  issue_comment: "comment.author_association",
+  issues: "issue.author_association",
+  pull_request: "pull_request.author_association",
+  pull_request_review: "review.author_association",
+  pull_request_review_comment: "comment.author_association"
+}
+
+/**
+ * Returns a typed skip reason as an error, or `undefined` for an allowed sender.
+ * Events without an author association fail closed, including event types
+ * for which GitHub does not supply one.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const senderRefusal = (
+  event: string,
+  payload: unknown,
+  policy?: SenderPolicy
+): SenderRefused | undefined => {
+  if (readString(payload, "sender.type") === "Bot") return new SenderRefused("bot-sender", event)
+  const association = readString(payload, associationPaths[event] ?? "author_association")
+  if (association === undefined) return new SenderRefused("missing-association", event)
+  const allowed = policy?.allowedAssociations ?? defaultAllowedAssociations
+  if (!allowed.some((value) => value.toUpperCase() === association.toUpperCase())) {
+    return new SenderRefused("association-not-allowed", event)
+  }
+  return undefined
+}
+
+/**
  * Decodes one verified delivery.
  *
  * Throws an `IntegrationError` when GitHub's own headers are missing: without
  * `X-GitHub-Event` there is no signal name, and without `X-GitHub-Delivery`
  * there is no redelivery identity.
  *
+ * Also throws when {@link senderRefusal} refuses the account behind the
+ * delivery. That check lives here, not in the caller, so every ingress built
+ * on this module is gated whether or not it remembered to ask.
+ *
  * @category constructors
  * @since 1.0.0
  */
-export const decode = (raw: RawInbound, payload: unknown, receivedAtMs: number = Date.now()): ExternalEvent => {
+export const decode = (
+  raw: RawInbound,
+  payload: unknown,
+  receivedAtMs: number = Date.now(),
+  policy?: SenderPolicy
+): ExternalEvent => {
   const event = readHeader(raw, "x-github-event")
   if (event === undefined || event.length === 0) {
     throw new IntegrationError("decode-failed", "GitHub webhook is missing the X-GitHub-Event header.", {
@@ -113,6 +210,8 @@ export const decode = (raw: RawInbound, payload: unknown, receivedAtMs: number =
       event
     })
   }
+  const refusal = senderRefusal(event, payload, policy)
+  if (refusal !== undefined) throw refusal
   const eventName = names(event, payload)[0] as string
   const correlationId = correlations(payload)[0] as string | null
   return {
@@ -158,6 +257,11 @@ export interface ChannelOptions {
   readonly secret: Core.SecretResolver
   readonly route: (event: ExternalEvent) => Effect.Effect<InboundResult, InvalidInput>
   readonly project?: Core.Config["project"]
+  /**
+   * The `author_association` values whose deliveries start work. Defaults to
+   * {@link defaultAllowedAssociations}.
+   */
+  readonly allowedAssociations?: ReadonlyArray<string> | undefined
 }
 
 /**
@@ -173,7 +277,7 @@ export const channel = (options: ChannelOptions): Channel =>
     secret: options.secret,
     fingerprintHeaders: ["x-github-delivery", "x-github-event"],
     verify,
-    decode: (raw, payload) => decode(raw, payload),
+    decode: (raw, payload) => decode(raw, payload, undefined, { allowedAssociations: options.allowedAssociations }),
     route: options.route,
     project: options.project
   })

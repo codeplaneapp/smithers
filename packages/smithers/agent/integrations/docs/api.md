@@ -296,17 +296,29 @@ Every path this package builds from an owner and a repository goes through
 ### GitHub.Webhook
 
 GitHub webhook ingress. `X-Hub-Signature-256` is verified over the exact
-delivered bytes before anything reads the body.
+delivered bytes before anything reads the body. `allowedAssociations` defaults
+to `OWNER`, `MEMBER`, and `COLLABORATOR`. Bots, disallowed associations, and
+missing associations are refused before routing. Comments and reviews use
+their own association, never a parent issue or pull request's association.
+Events without an association, including `push`, fail closed.
 
-| Export           | Signature                                                                     | Notes                                                                                                                                                                      |
-| ---------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `verify`         | `(raw: RawInbound, secret: string) => boolean`                                | The signature check over `raw.body`, never a re-serialized copy.                                                                                                           |
-| `decode`         | `(raw: RawInbound, payload: unknown, receivedAtMs?: number) => ExternalEvent` | Throws an `IntegrationError` `decode-failed` when `X-GitHub-Event` or `X-GitHub-Delivery` is missing. The dedupe key is `<deliveryId>:<eventName>:<correlationId or "*">`. |
-| `names`          | `(event: string, payload: unknown) => readonly string[]`                      | The signal names a delivery answers to, most specific first: the per-action variant ahead of the bare event name.                                                          |
-| `correlations`   | `(payload: unknown) => readonly (string \| null)[]`                           | `owner/repo#number`, then `owner/repo`, then `null`.                                                                                                                       |
-| `idempotencyKey` | `(raw: HasHeaders) => string \| undefined`                                    | `github:<X-GitHub-Delivery>`, or `undefined` when the header is absent.                                                                                                    |
-| `channel`        | `(options: ChannelOptions) => Channel`                                        | A control-plane channel for GitHub webhooks. The channel name defaults to `github`; fingerprint headers are `x-github-delivery` and `x-github-event`.                      |
-| `SERVICE`        | `"github"`                                                                    | The service segment of every GitHub signal name.                                                                                                                           |
+`SenderPolicy` and `ChannelOptions` accept `allowedAssociations`; an empty
+list admits nobody. `defaultAllowedAssociations` exposes the default.
+`senderRefusal(event, payload, policy?)` returns `SenderRefused | undefined`.
+`SenderRefused` has reason `permission-denied` and a typed `SenderSkipReason`
+in `skipReason`: `bot-sender`, `missing-association`, or
+`association-not-allowed`. `decode` throws the refusal; the channel converts
+it to `InvalidInput` before it can start or signal a run.
+
+| Export           | Signature                                                                                            | Notes                                                                                                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `verify`         | `(raw: RawInbound, secret: string) => boolean`                                                       | The signature check over `raw.body`, never a re-serialized copy.                                                                                                           |
+| `decode`         | `(raw: RawInbound, payload: unknown, receivedAtMs?: number, policy?: SenderPolicy) => ExternalEvent` | Throws an `IntegrationError` `decode-failed` when `X-GitHub-Event` or `X-GitHub-Delivery` is missing. The dedupe key is `<deliveryId>:<eventName>:<correlationId or "*">`. |
+| `names`          | `(event: string, payload: unknown) => readonly string[]`                                             | The signal names a delivery answers to, most specific first: the per-action variant ahead of the bare event name.                                                          |
+| `correlations`   | `(payload: unknown) => readonly (string \| null)[]`                                                  | `owner/repo#number`, then `owner/repo`, then `null`.                                                                                                                       |
+| `idempotencyKey` | `(raw: HasHeaders) => string \| undefined`                                                           | `github:<X-GitHub-Delivery>`, or `undefined` when the header is absent.                                                                                                    |
+| `channel`        | `(options: ChannelOptions) => Channel`                                                               | A control-plane channel for GitHub webhooks. The channel name defaults to `github`; fingerprint headers are `x-github-delivery` and `x-github-event`.                      |
+| `SERVICE`        | `"github"`                                                                                           | The service segment of every GitHub signal name.                                                                                                                           |
 
 `ChannelOptions` fields: optional `name`, `credential`, `secret`, `route`,
 and optional `project`.

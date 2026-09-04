@@ -1,8 +1,11 @@
 import type { RawInbound } from "@smthrs/control/Channels"
-import { Effect, Schema } from "effect"
+import { Effect, Redacted, Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Core from "../src/core/Channel.ts"
+import { isIntegrationError } from "../src/core/IntegrationError.ts"
 import { computeHmacSha256Hex } from "../src/core/Signature.ts"
 import * as Payload from "../src/github/Payload.ts"
+import * as GitHubWebhook from "../src/github/Webhook.ts"
 import { correlations, decode, names, verify } from "../src/github/Webhook.ts"
 
 const SECRET = "shared-secret-correct"
@@ -21,9 +24,11 @@ const raw = (body: unknown, headers: Record<string, string | undefined> = {}): R
   }
 }
 
+// Carries the association a real delivery carries. `decode` gates the sender,
+// so a fixture without one is a delivery the door refuses, not a neutral one.
 const pullRequest = {
   action: "opened",
-  pull_request: { number: 12 },
+  pull_request: { number: 12, author_association: "OWNER" },
   repository: { full_name: "smithersai/smithers" }
 }
 
@@ -100,9 +105,9 @@ describe("decode", () => {
   })
 
   it("marks an uncorrelated delivery in the dedupe key", () => {
-    const push = { ref: "refs/heads/main" }
-    expect(decode(raw(push, { "x-github-event": "push" }), push).dedupeKey)
-      .toBe("delivery-1:integration:github:push:*")
+    const payload = { action: "created", comment: { author_association: "OWNER" } }
+    expect(decode(raw(payload, { "x-github-event": "issue_comment" }), payload).dedupeKey)
+      .toBe("delivery-1:integration:github:issue_comment.created:*")
   })
 
   it("refuses a delivery with no X-GitHub-Event header", () => {
@@ -113,6 +118,131 @@ describe("decode", () => {
   it("refuses a delivery with no X-GitHub-Delivery header", () => {
     expect(() => decode(raw(pullRequest, { "x-github-delivery": undefined }), pullRequest))
       .toThrow(/X-GitHub-Delivery/)
+  })
+})
+
+describe("sender policy", () => {
+  const comment = (association: string | undefined, sender?: Record<string, unknown>) => ({
+    action: "created",
+    issue: { number: 12 },
+    comment: association === undefined ? { body: "/fix" } : { body: "/fix", author_association: association },
+    repository: { full_name: "smithersai/smithers" },
+    ...(sender === undefined ? {} : { sender })
+  })
+
+  const decodeComment = (payload: unknown, policy?: { readonly allowedAssociations?: ReadonlyArray<string> }) =>
+    decode(raw(payload, { "x-github-event": "issue_comment" }), payload, 1_700_000_000_000, policy)
+
+  it("admits a comment from an account with write access", () => {
+    expect(decodeComment(comment("OWNER")).correlationId).toBe("smithersai/smithers#12")
+    expect(decodeComment(comment("MEMBER")).correlationId).toBe("smithersai/smithers#12")
+    expect(decodeComment(comment("COLLABORATOR")).correlationId).toBe("smithersai/smithers#12")
+  })
+
+  it("refuses a comment from an account with no association to the repository", () => {
+    expect(() => decodeComment(comment("NONE"))).toThrow(/author_association/)
+  })
+
+  it("refuses a drive-by contributor, the public-repo case that motivated the gate", () => {
+    expect(() => decodeComment(comment("CONTRIBUTOR"))).toThrow(/author_association/)
+  })
+
+  it("classifies the refusal as permission-denied", () => {
+    try {
+      decodeComment(comment("NONE"))
+      expect.unreachable("a NONE association must not decode")
+    } catch (error) {
+      expect(isIntegrationError(error) ? error.reason : undefined).toBe("permission-denied")
+    }
+  })
+
+  it("fails closed when an author-attributed delivery carries no association at all", () => {
+    expect(() => decodeComment(comment(undefined))).toThrow(/author_association/)
+  })
+
+  it("refuses a bot even when its association is allowed", () => {
+    expect(() => decodeComment(comment("OWNER", { login: "dependabot[bot]", type: "Bot" })))
+      .toThrow(/Bot/)
+  })
+
+  it("admits a human sender named alongside an allowed association", () => {
+    expect(decodeComment(comment("OWNER", { login: "will", type: "User" })).eventName)
+      .toBe("integration:github:issue_comment.created")
+  })
+
+  it("honours a caller-widened association list", () => {
+    expect(decodeComment(comment("CONTRIBUTOR"), { allowedAssociations: ["CONTRIBUTOR"] }).correlationId)
+      .toBe("smithersai/smithers#12")
+  })
+
+  it("refuses every sender when the caller empties the list", () => {
+    expect(() => decodeComment(comment("OWNER"), { allowedAssociations: [] })).toThrow(/author_association/)
+  })
+
+  it("compares the association without regard to case", () => {
+    expect(decodeComment(comment("owner")).correlationId).toBe("smithersai/smithers#12")
+  })
+
+  it("fails closed for events without an association", () => {
+    const push = { ref: "refs/heads/main", repository: { full_name: "smithersai/smithers" } }
+    expect(() => decode(raw(push, { "x-github-event": "push" }), push)).toThrow(/author_association/)
+  })
+
+  it("does not borrow an issue author's association for a comment missing its own", () => {
+    const payload = { ...comment(undefined), issue: { number: 12, author_association: "OWNER" } }
+    expect(() => decodeComment(payload)).toThrow(/author_association/)
+  })
+
+  it("refuses bots even when the event has no author association", () => {
+    const payload = { sender: { type: "Bot" } }
+    expect(() => decode(raw(payload, { "x-github-event": "push" }), payload)).toThrow(/Bot/)
+  })
+
+  it("exposes typed skip reasons", () => {
+    expect(GitHubWebhook.senderRefusal("issue_comment", comment(undefined)))
+      .toMatchObject({ reason: "permission-denied", skipReason: "missing-association" })
+    expect(GitHubWebhook.senderRefusal("issue_comment", comment("NONE")))
+      .toMatchObject({ reason: "permission-denied", skipReason: "association-not-allowed" })
+    expect(GitHubWebhook.senderRefusal("issue_comment", comment("OWNER", { type: "Bot" })))
+      .toMatchObject({ reason: "permission-denied", skipReason: "bot-sender" })
+  })
+
+  it("still refuses a disallowed association on an event it does not otherwise gate", () => {
+    const starred = {
+      action: "created",
+      repository: { full_name: "smithersai/smithers" },
+      author_association: "NONE"
+    }
+    expect(() => decode(raw(starred, { "x-github-event": "star" }), starred)).toThrow(/author_association/)
+  })
+
+  it("gates the channel door with the configured list", async () => {
+    const payload = comment("CONTRIBUTOR")
+    const body = JSON.stringify(payload)
+    const delivery: RawInbound = {
+      body: new TextEncoder().encode(body),
+      headers: {
+        "x-github-event": "issue_comment",
+        "x-github-delivery": "delivery-9",
+        "x-hub-signature-256": `sha256=${computeHmacSha256Hex(body, SECRET)}`
+      },
+      idempotencyKey: "delivery-9"
+    }
+    const refused = GitHubWebhook.channel({
+      credential: Redacted.make({ id: "c", name: "github-webhook" }),
+      secret: Core.constantSecret(Redacted.make(SECRET)),
+      route: Core.startFlow("triage")
+    })
+    const admitted = GitHubWebhook.channel({
+      credential: Redacted.make({ id: "c", name: "github-webhook" }),
+      secret: Core.constantSecret(Redacted.make(SECRET)),
+      route: Core.startFlow("triage"),
+      allowedAssociations: ["CONTRIBUTOR"]
+    })
+    const refusal = await Effect.runPromise(Effect.exit(refused.decode(delivery) as Effect.Effect<unknown, unknown>))
+    expect(refusal._tag).toBe("Failure")
+    const accepted = await Effect.runPromise(Effect.exit(admitted.decode(delivery) as Effect.Effect<unknown, unknown>))
+    expect(accepted._tag).toBe("Success")
   })
 })
 
