@@ -239,3 +239,8 @@ owns the closed host service list this contract is one slot of.
 Only the wasm `init` operation creates repositories. BrowserJj refuses status,
 diff, and restore on missing repositories with code `unknown`, without creating
 a directory or `.jj`. Snapshot explicitly initializes an absent repository.
+The shipped Rust dependency inventory in `THIRD_PARTY_NOTICES.md` is generated
+from the locked Cargo graph for `wasm32-wasip1`. After a dependency change, run
+`node scripts/generate-third-party-notices.mjs` from the repository root;
+`--check` detects drift and runs in Rust CI. The template under `scripts/` keeps
+the attribution prose and license text; new license groups require review.

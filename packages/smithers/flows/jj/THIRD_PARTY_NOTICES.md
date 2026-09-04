@@ -246,6 +246,10 @@ give recipients a copy of the License; the full text is reproduced below.
    limitations under the License.
 ```
 
+Generated inventory: run `node scripts/generate-third-party-notices.mjs` after
+changing Cargo dependencies. CI checks it with `--check`. Attribution prose and
+license text are maintained in `scripts/third-party-notices.template.md`.
+
 ## All statically linked crates, by license
 
 ### Apache-2.0 (no alternate license offered)
@@ -256,10 +260,10 @@ dependency closure that are also Apache-2.0–only.
 
 | Crate                | Version | Copyright                                                                                                                                     | Repository                                 |
 | -------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `jj-lib`             | 0.44.0  | (see repository)                                                                                                                              | <https://github.com/jj-vcs/jj>             |
 | `jj-lib-proc-macros` | 0.44.0  | (see repository)                                                                                                                              | <https://github.com/jj-vcs/jj>             |
-| `prost`              | 0.14.4  | Dan Burkert <dan@danburkert.com>; Lucio Franco <luciofranco14@gmail.com>; Casper Meijn <casper@meijn.net>; Tokio Contributors <team@tokio.rs> | <https://github.com/tokio-rs/prost>        |
+| `jj-lib`             | 0.44.0  | (see repository)                                                                                                                              | <https://github.com/jj-vcs/jj>             |
 | `prost-derive`       | 0.14.4  | Dan Burkert <dan@danburkert.com>; Lucio Franco <luciofranco14@gmail.com>; Casper Meijn <casper@meijn.net>; Tokio Contributors <team@tokio.rs> | <https://github.com/tokio-rs/prost>        |
+| `prost`              | 0.14.4  | Dan Burkert <dan@danburkert.com>; Lucio Franco <luciofranco14@gmail.com>; Casper Meijn <casper@meijn.net>; Tokio Contributors <team@tokio.rs> | <https://github.com/tokio-rs/prost>        |
 | `unicode-bom`        | 2.0.3   | Phil Booth <pmbooth@gmail.com>                                                                                                                | <https://gitlab.com/philbooth/unicode-bom> |
 
 ### MIT OR Apache-2.0 (dual-licensed)
@@ -293,7 +297,6 @@ reproduced in the root `THIRD_PARTY_NOTICES.md`).
 | `etcetera`         | 0.11.0             | (see repository)                                                                                                                           | <https://github.com/lunacookies/etcetera>             |
 | `fastrand`         | 2.5.0              | Stjepan Glavina <stjepang@gmail.com>                                                                                                       | <https://github.com/smol-rs/fastrand>                 |
 | `fnv`              | 1.0.7              | Alex Crichton <alex@alexcrichton.com>                                                                                                      | <https://github.com/servo/rust-fnv>                   |
-| `futures`          | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
 | `futures-channel`  | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
 | `futures-core`     | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
 | `futures-executor` | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
@@ -302,6 +305,7 @@ reproduced in the root `THIRD_PARTY_NOTICES.md`).
 | `futures-sink`     | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
 | `futures-task`     | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
 | `futures-util`     | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
+| `futures`          | 0.3.33             | (see repository)                                                                                                                           | <https://github.com/rust-lang/futures-rs>             |
 | `getrandom`        | 0.4.3              | The Rand Project Developers                                                                                                                | <https://github.com/rust-random/getrandom>            |
 | `gix-features`     | 0.48.1             | Sebastian Thiel <sebastian.thiel@icloud.com>                                                                                               | <https://github.com/GitoxideLabs/gitoxide>            |
 | `gix-glob`         | 0.26.1             | Sebastian Thiel <sebastian.thiel@icloud.com>                                                                                               | <https://github.com/GitoxideLabs/gitoxide>            |
@@ -318,44 +322,44 @@ reproduced in the root `THIRD_PARTY_NOTICES.md`).
 | `lazy_static`      | 1.5.0              | Marvin Löbel <loebel.marvin@gmail.com>                                                                                                     | <https://github.com/rust-lang-nursery/lazy-static.rs> |
 | `libc`             | 0.2.189            | (see repository)                                                                                                                           | <https://github.com/rust-lang/libc>                   |
 | `log`              | 0.4.33             | The Rust Project Developers                                                                                                                | <https://github.com/rust-lang/log>                    |
-| `logos`            | 0.15.1             | Maciej Hirsz <hello@maciej.codes>; Jérome Eertmans (maintainer) <jeertmans@icloud.com>                                                     | <https://github.com/maciejhirsz/logos>                |
 | `logos-codegen`    | 0.15.1             | Maciej Hirsz <hello@maciej.codes>; Jérome Eertmans (maintainer) <jeertmans@icloud.com>                                                     | <https://github.com/maciejhirsz/logos>                |
 | `logos-derive`     | 0.15.1             | Maciej Hirsz <hello@maciej.codes>; Jérome Eertmans (maintainer) <jeertmans@icloud.com>                                                     | <https://github.com/maciejhirsz/logos>                |
+| `logos`            | 0.15.1             | Maciej Hirsz <hello@maciej.codes>; Jérome Eertmans (maintainer) <jeertmans@icloud.com>                                                     | <https://github.com/maciejhirsz/logos>                |
 | `maplit`           | 1.0.2              | bluss                                                                                                                                      | <https://github.com/bluss/maplit>                     |
 | `num-traits`       | 0.2.19             | The Rust Project Developers                                                                                                                | <https://github.com/rust-num/num-traits>              |
 | `once_cell`        | 1.21.4             | Aleksey Kladov <aleksey.kladov@gmail.com>                                                                                                  | <https://github.com/matklad/once_cell>                |
-| `pest`             | 2.8.8              | Dragoș Tiselice <dragostiselice@gmail.com>                                                                                                 | <https://github.com/pest-parser/pest>                 |
 | `pest_derive`      | 2.8.8              | Dragoș Tiselice <dragostiselice@gmail.com>                                                                                                 | <https://github.com/pest-parser/pest>                 |
 | `pest_generator`   | 2.8.8              | Dragoș Tiselice <dragostiselice@gmail.com>                                                                                                 | <https://github.com/pest-parser/pest>                 |
 | `pest_meta`        | 2.8.8              | Dragoș Tiselice <dragostiselice@gmail.com>                                                                                                 | <https://github.com/pest-parser/pest>                 |
+| `pest`             | 2.8.8              | Dragoș Tiselice <dragostiselice@gmail.com>                                                                                                 | <https://github.com/pest-parser/pest>                 |
 | `pin-project-lite` | 0.2.17             | (see repository)                                                                                                                           | <https://github.com/taiki-e/pin-project-lite>         |
 | `pollster`         | 1.0.1              | Joshua Barretto <joshua@jsbarretto.com>                                                                                                    | <https://github.com/zesterer/pollster>                |
 | `ppv-lite86`       | 0.2.21             | The CryptoCorrosion Contributors                                                                                                           | <https://github.com/cryptocorrosion/cryptocorrosion>  |
 | `proc-macro2`      | 1.0.107            | David Tolnay <dtolnay@gmail.com>; Alex Crichton <alex@alexcrichton.com>                                                                    | <https://github.com/dtolnay/proc-macro2>              |
 | `quote`            | 1.0.47             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/quote>                    |
-| `rand`             | 0.10.2             | The Rand Project Developers; The Rust Project Developers                                                                                   | <https://github.com/rust-random/rand>                 |
 | `rand_chacha`      | 0.10.0             | The Rand Project Developers; The Rust Project Developers; The CryptoCorrosion Contributors                                                 | <https://github.com/rust-random/rand>                 |
 | `rand_core`        | 0.10.1             | The Rand Project Developers                                                                                                                | <https://github.com/rust-random/rand_core>            |
-| `rayon`            | 1.12.0             | (see repository)                                                                                                                           | <https://github.com/rayon-rs/rayon>                   |
+| `rand`             | 0.10.2             | The Rand Project Developers; The Rust Project Developers                                                                                   | <https://github.com/rust-random/rand>                 |
 | `rayon-core`       | 1.13.0             | (see repository)                                                                                                                           | <https://github.com/rayon-rs/rayon>                   |
-| `ref-cast`         | 1.0.26             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/ref-cast>                 |
+| `rayon`            | 1.12.0             | (see repository)                                                                                                                           | <https://github.com/rayon-rs/rayon>                   |
 | `ref-cast-impl`    | 1.0.26             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/ref-cast>                 |
-| `regex`            | 1.13.1             | The Rust Project Developers; Andrew Gallant <jamslam@gmail.com>                                                                            | <https://github.com/rust-lang/regex>                  |
+| `ref-cast`         | 1.0.26             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/ref-cast>                 |
 | `regex-automata`   | 0.4.18             | The Rust Project Developers; Andrew Gallant <jamslam@gmail.com>                                                                            | <https://github.com/rust-lang/regex>                  |
 | `regex-syntax`     | 0.8.11             | The Rust Project Developers; Andrew Gallant <jamslam@gmail.com>                                                                            | <https://github.com/rust-lang/regex>                  |
+| `regex`            | 1.13.1             | The Rust Project Developers; Andrew Gallant <jamslam@gmail.com>                                                                            | <https://github.com/rust-lang/regex>                  |
 | `rustc_version`    | 0.4.1              | (see repository)                                                                                                                           | <https://github.com/djc/rustc-version-rs>             |
 | `semver`           | 1.0.28             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/semver>                   |
-| `serde`            | 1.0.229            | Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>                                                              | <https://github.com/serde-rs/serde>                   |
 | `serde_core`       | 1.0.229            | Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>                                                              | <https://github.com/serde-rs/serde>                   |
 | `serde_derive`     | 1.0.229            | Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>                                                              | <https://github.com/serde-rs/serde>                   |
 | `serde_json`       | 1.0.151            | Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>                                                              | <https://github.com/serde-rs/json>                    |
 | `serde_spanned`    | 1.1.1              | (see repository)                                                                                                                           | <https://github.com/toml-rs/toml>                     |
+| `serde`            | 1.0.229            | Erick Tryzelaar <erick.tryzelaar@gmail.com>; David Tolnay <dtolnay@gmail.com>                                                              | <https://github.com/serde-rs/serde>                   |
 | `smallvec`         | 1.15.2             | The Servo Project Developers                                                                                                               | <https://github.com/servo/rust-smallvec>              |
 | `syn`              | 2.0.119            | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/syn>                      |
 | `syn`              | 3.0.3              | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/syn>                      |
 | `tempfile`         | 3.27.0             | Steven Allen <steven@stebalien.com>; The Rust Project Developers; Ashley Mannix <ashleymannix@live.com.au>; Jason White <me@jasonwhite.io> | <https://github.com/Stebalien/tempfile>               |
-| `thiserror`        | 2.0.20             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/thiserror>                |
 | `thiserror-impl`   | 2.0.20             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/thiserror>                |
+| `thiserror`        | 2.0.20             | David Tolnay <dtolnay@gmail.com>                                                                                                           | <https://github.com/dtolnay/thiserror>                |
 | `toml_datetime`    | 1.1.1+spec-1.1.0   | (see repository)                                                                                                                           | <https://github.com/toml-rs/toml>                     |
 | `toml_edit`        | 0.25.13+spec-1.1.0 | (see repository)                                                                                                                           | <https://github.com/toml-rs/toml>                     |
 | `toml_parser`      | 1.1.3+spec-1.1.0   | (see repository)                                                                                                                           | <https://github.com/toml-rs/toml>                     |
@@ -379,12 +383,12 @@ reproduced in the root `THIRD_PARTY_NOTICES.md`).
 | `bytes`              | 1.12.1  | Carl Lerche <me@carllerche.com>; Sean McArthur <sean@seanmonstar.com>                                   | <https://github.com/tokio-rs/bytes>            |
 | `clru`               | 0.6.3   | marmeladema <xademax@gmail.com>                                                                         | <https://github.com/marmeladema/clru-rs>       |
 | `generic-array`      | 0.14.7  | Bartłomiej Kamiński <fizyk20@gmail.com>; Aaron Trent <novacrazy@gmail.com>                              | <https://github.com/fizyk20/generic-array.git> |
-| `interim`            | 0.2.1   | Conrad Ludgate <conradludgate@gmail.com>                                                                | <https://github.com/conradludgate/interim>     |
+| `interim`            | 0.2.1   | Conrad Ludgate <conradludgate@gmail.com                                                                 | <https://github.com/conradludgate/interim>     |
 | `slab`               | 0.4.12  | Carl Lerche <me@carllerche.com>                                                                         | <https://github.com/tokio-rs/slab>             |
 | `strsim`             | 0.11.1  | Danny Guo <danny@dannyguo.com>; maxbachmann <oss@maxbachmann.de>                                        | <https://github.com/rapidfuzz/strsim-rs>       |
-| `tracing`            | 0.1.44  | Eliza Weisman <eliza@buoyant.io>; Tokio Contributors <team@tokio.rs>                                    | <https://github.com/tokio-rs/tracing>          |
 | `tracing-attributes` | 0.1.31  | Tokio Contributors <team@tokio.rs>; Eliza Weisman <eliza@buoyant.io>; David Barsky <dbarsky@amazon.com> | <https://github.com/tokio-rs/tracing>          |
 | `tracing-core`       | 0.1.36  | Tokio Contributors <team@tokio.rs>                                                                      | <https://github.com/tokio-rs/tracing>          |
+| `tracing`            | 0.1.44  | Eliza Weisman <eliza@buoyant.io>; Tokio Contributors <team@tokio.rs>                                    | <https://github.com/tokio-rs/tracing>          |
 | `winnow`             | 1.0.4   | (see repository)                                                                                        | <https://github.com/winnow-rs/winnow>          |
 | `zmij`               | 1.0.23  | David Tolnay <dtolnay@gmail.com>                                                                        | <https://github.com/dtolnay/zmij>              |
 

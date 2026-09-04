@@ -375,6 +375,44 @@ const githubTriage = Smithers.NodeTest({
   deps: []
 })
 
+/**
+ * Keeps the attribution inventory in the published wasm package current.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const thirdPartyNotices = Smithers.NodeTest({
+  runner: Smithers.entrypoint(Smithers.file("//scripts/generate-third-party-notices.mjs"), ["--check"]),
+  srcs: [
+    Smithers.file("//scripts/generate-third-party-notices.mjs"),
+    Smithers.file("//scripts/third-party-notices.template.md"),
+    Smithers.file("//Cargo.toml"),
+    Smithers.file("//Cargo.lock"),
+    Smithers.file("//crates/flows-jj/Cargo.toml"),
+    Smithers.file("//rust-toolchain.toml"),
+    Smithers.file("//packages/smithers/flows/jj/THIRD_PARTY_NOTICES.md")
+  ],
+  deps: []
+})
+
+/**
+ * Exercises generation and drift detection against a real Cargo workspace.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const thirdPartyNoticesUnit = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/generate-third-party-notices.test.mjs")]),
+  srcs: [...sources, Smithers.file("//scripts/third-party-notices.template.md"), Smithers.file("//.github/workflows/ci.yml")],
+  deps: []
+})
+
+/**
+ * Repository script gates.
+ *
+ * @since 1.0.0
+ * @category configuration
+ */
 export const Package = Smithers.Package({
   targets: {
     browserContract,
@@ -394,6 +432,8 @@ export const Package = Smithers.Package({
     releaseSmoke,
     releaseVersion,
     testPinRegister,
-    toolchainPins
+    toolchainPins,
+    thirdPartyNotices,
+    thirdPartyNoticesUnit
   }
 })

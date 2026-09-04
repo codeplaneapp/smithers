@@ -444,4 +444,8 @@ workspace snapshot and restore. See also
 BrowserJj status, diff, and restore refuse missing repositories with typed
 `unknown` failures and never initialize them. Snapshot explicitly invokes the
 wasm `init` operation if the repository is absent.
+The published package includes a generated Rust dependency inventory in
+`THIRD_PARTY_NOTICES.md`. Maintainers regenerate it from the locked wasm Cargo
+graph with `node scripts/generate-third-party-notices.mjs`; Rust CI runs the
+script with `--check` to reject attribution drift.
 
