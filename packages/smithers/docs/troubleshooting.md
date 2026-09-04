@@ -211,15 +211,15 @@ partial history from a complete one.
 **Fix.** Use `--follow`, which applies the per-event cap without retaining
 history, or run `smthrs gc` so the history is bounded going forward.
 
-### `--json` printed nothing
+### `--json --quiet` still printed a document
 
-**Symptom.** stdout is empty and the command exited 0.
+**Symptom.** stdout contains JSON even though `--quiet` was passed.
 
-**Cause.** `--quiet` was also passed. Despite its description, `--quiet`
-suppresses the stdout document as well as the stderr notices.
+**Cause.** `--quiet` suppresses banners and progress on stderr, never the
+command's stdout document.
 
-**Fix.** Drop `--quiet` and redirect stderr instead: `smthrs --json ps
-2>/dev/null`.
+**Fix.** Redirect stdout when the document is unwanted. Scripts may safely
+parse `smthrs --json --quiet ps`.
 
 ### The interactive rendering did not appear
 

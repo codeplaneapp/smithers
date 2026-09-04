@@ -65,7 +65,7 @@ Every verb accepts the shared flag set, declared once on the root command:
 | `--remote` | URL | The control plane to act on. Falls back to `SMITHERS_REMOTE`. |
 | `--credential` | token | Bearer token for that control plane. Falls back to `SMITHERS_API_KEY`. |
 | `--json` | none | Print the machine document instead of the human rendering. |
-| `--quiet` | none | Suppress what the command writes. |
+| `--quiet` | none | Suppress banners and progress on stderr; stdout documents still print. |
 | `--mcp-config` | path | The JSON array of MCP servers the local executor projects into a run's flow catalog. |
 | `--backend` | name | Hidden. `sqlite` is a no-op; any other value exits 1. |
 
@@ -77,10 +77,9 @@ by `NodeControl.makeConfig` before the parser runs, because the durable layers
 are built from them. They are declared on the command tree as well so the
 parser accepts them.
 
-`--quiet` currently suppresses the stdout document as well as the stderr
-banners its own description names, because `Command.ts` skips the
-`Console.log` when it is set. Do not use it on a command whose document you
-intend to read.
+`--quiet` never suppresses the stdout document. It is safe to combine with
+`--json` when a script wants the machine document without banners or progress
+on stderr.
 
 ## The removed list
 

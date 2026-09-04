@@ -245,7 +245,7 @@ describe("presentation flags", () => {
     expect(rendered).toContain("\n  \"flowId\": \"demo/ship\"")
   })
 
-  it("prints nothing at all under --quiet while still performing the mutation", async () => {
+  it("keeps the command document under --quiet while still performing the mutation", async () => {
     const result = await run(
       Effect.gen(function*() {
         const quiet = yield* text(["--json", "--quiet", "plan", "demo/ship"])
@@ -255,7 +255,7 @@ describe("presentation flags", () => {
       testControl
     )
 
-    expect(result.quiet).toBe("")
+    expect(JSON.parse(result.quiet)).toMatchObject({ flowId: "demo/ship" })
     expect(JSON.parse(result.loud)).toMatchObject({ flowId: "demo/ship" })
   })
 

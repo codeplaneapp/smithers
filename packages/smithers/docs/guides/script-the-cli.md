@@ -26,9 +26,9 @@ when you want it:
 smthrs --json ps 2>/dev/null
 ```
 
-Do not add `--quiet` to a command whose document you intend to read. Despite
-its description, `--quiet` suppresses the stdout document as well as the
-stderr notices.
+Add `--quiet` when banners or progress on stderr are unwanted. It never
+suppresses the stdout document, so `smthrs --json --quiet ps` remains valid
+input to a JSON parser.
 
 ## Branch on the status
 

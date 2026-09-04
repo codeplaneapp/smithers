@@ -14,7 +14,7 @@ Every verb accepts these flags.
 | `--credential` | token | Bearer token for the remote control plane; falls back to `SMITHERS_API_KEY`. |
 | `--json` | none | Print the machine-readable document instead of the human rendering. |
 | `--remote` | URL | http(s) URL of the control plane to act on; falls back to `SMITHERS_REMOTE`. |
-| `--quiet` | none | Drop the banners and notices commands write to stderr. |
+| `--quiet` | none | Suppress banners and progress on stderr; stdout documents still print. |
 | `--mcp-config` | path | Path to the JSON array of MCP servers the local executor projects into a run's flow catalog. |
 | `--root` | path | Project root to act on, instead of walking up from the working directory. |
 | `--backend` | name | Hidden. `sqlite` is the only supported value, so it is a no-op; any other value exits 1 with `unsupported_database`. |

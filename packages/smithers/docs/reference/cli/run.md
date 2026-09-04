@@ -63,8 +63,8 @@ When the executor declines an accepted run, the command prints the run summary
 and then fails with a sentence that names the run, its status, and
 `smthrs cancel <run-id>` as the way to end it.
 
-`--quiet` suppresses the document itself, not only the stderr notices its own
-description names.
+`--quiet` suppresses banners and progress on stderr, but this document still
+prints.
 
 ## Exit codes
 

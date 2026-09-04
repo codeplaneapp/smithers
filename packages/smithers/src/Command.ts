@@ -65,7 +65,7 @@ const global = {
     Flag.withDescription("http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE")
   ),
   quiet: Flag.boolean("quiet").pipe(
-    Flag.withDescription("Drop the banners and notices commands write to stderr")
+    Flag.withDescription("Suppress banners and progress on stderr; stdout documents still print")
   ),
   // Declared here so the CLI's own flag validation accepts them; the values
   // are read from raw argv by `NodeControl.makeConfig`, which runs before the
@@ -244,16 +244,15 @@ const render = (value: unknown) =>
     const output = yield* Output
     const root = yield* rootCommand
     const rendered = yield* output.render(value, root.json ? "json" : "human")
-    if (!root.quiet) yield* Console.log(rendered.text)
+    yield* Console.log(rendered.text)
   })
 
 /** Forces JSON rendering, for the `events` alias and the `--json` contract. */
 const renderJson = (value: unknown) =>
   Effect.gen(function*() {
     const output = yield* Output
-    const root = yield* rootCommand
     const rendered = yield* output.render(value, "json")
-    if (!root.quiet) yield* Console.log(rendered.text)
+    yield* Console.log(rendered.text)
   })
 
 /**
@@ -1262,11 +1261,9 @@ const migrate = Command.make("migrate", {
       return yield* Effect.fail(new CliError.UnsupportedError({ message }))
     }
     const report = outcome.success
-    if (!root.quiet) {
-      yield* Console.log(
-        MigrateCommand.render(report, root.json ? "json" : "human", MigrateCommand.reportDirectory(options))
-      )
-    }
+    yield* Console.log(
+      MigrateCommand.render(report, root.json ? "json" : "human", MigrateCommand.reportDirectory(options))
+    )
     // The migration's own status, the way `smithers-migrate` reports it: 3 is
     // "parked, the operator has a decision", not a failure. `bin.ts` hands a
     // successful exit whatever `process.exitCode` holds, which is also how

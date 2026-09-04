@@ -74,8 +74,8 @@ past `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` (30000 milliseconds by default)
 but still alive prints a slow-boot line to stderr and is granted four times
 that window before the launch is reported as failed.
 
-`--quiet` suppresses the document itself, not only the stderr notices its own
-description names.
+`--quiet` suppresses banners and progress on stderr, but this document still
+prints.
 
 ## Exit codes
 

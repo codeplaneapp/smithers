@@ -653,11 +653,11 @@ describe("the --json stdout contract", processBudget, () => {
     expect(() => JSON.parse(result.stdout)).not.toThrow()
   })
 
-  it("prints nothing at all under --quiet", () => {
+  it("keeps the JSON document on stdout under --quiet", () => {
     const result = run(["--json", "--quiet", "ls"])
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toBe("")
+    expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
   })
 })
 

@@ -63,8 +63,8 @@ the decoded input. `envelope` holds `capabilities`, `flows`, `budget`, and
 `idempotencyKey`; `scope` is `run`, and `idempotencyKey` is `approve:` followed
 by the plan id, because the command line supplies none of its own.
 
-`--quiet` suppresses the document itself, not only the stderr notices its own
-description names.
+`--quiet` suppresses banners and progress on stderr, but this document still
+prints.
 
 Notices go to stderr before the document. Each `SMITHERS_POSTGRES_*` or
 `SMITHERS_TEST_PG_URL` name that carries a value prints
