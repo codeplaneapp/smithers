@@ -107,11 +107,16 @@ smthrs bug "up hangs after the second turn" --run <run-id>
 ```
 
 `bug` collects the context a maintainer always asks for: versions, platform,
-the runs in this project, and the named run's event digest. Everything it
+only the named run and its event digest. Without `--run`, no runs are included. Everything it
 collects passes through the journal's shared redaction rules before it leaves
 the machine, and the report is refused outright if it contains a callable, a
 proxy, a `toJSON` member, or a value past the walk limits, because those could
 run code while the report is rendered.
+
+The exact redacted JSON payload and endpoint are printed to stderr before any post.
+Use `--dry-run` to inspect them without sending, including when `--yes` is also set.
+Posting requires `--yes` or confirmation on an interactive TTY; declining or
+omitting consent in a non-interactive session sends nothing and exits 2.
 
 Reports go to `https://bug.smithers.sh/api/bugs` unless
 `SMITHERS_BUG_ENDPOINT` names another one.

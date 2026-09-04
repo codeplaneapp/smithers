@@ -82,7 +82,7 @@ export const shipped: ReadonlyArray<Verb> = [
   verb("claude", "Claude Code plugin mirror protocol"),
   verb("mcp", "Wire the Smithers MCP server into an agent"),
   verb("update", "Check npm for a newer @smthrs/cli"),
-  verb("bug", "Report a bug with a run digest attached"),
+  verb("bug", "Preview a redacted bug report; post with --yes or TTY confirmation, or inspect with --dry-run"),
   { ...verb("completions", "Print a shell completion script"), builtin: true }
 ]
 

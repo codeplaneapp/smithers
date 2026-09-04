@@ -5,7 +5,7 @@ USAGE
   smthrs <subcommand> [flags]
 
 FLAGS
-  --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY
+  --credential string    Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv
   --json                 Print the machine-readable document instead of the human rendering
   --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
   --quiet                Suppress banners and progress on stderr; stdout documents still print
@@ -44,4 +44,4 @@ SUBCOMMANDS
   claude             Claude Code plugin mirror protocol
   mcp                Wire the Smithers MCP server into an agent
   update             Check npm for a newer @smthrs/cli
-  bug                Report a bug with a run digest attached
+  bug                Preview a redacted bug report; post with --yes or TTY confirmation, or inspect with --dry-run

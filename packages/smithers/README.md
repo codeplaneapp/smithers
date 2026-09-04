@@ -160,3 +160,5 @@ against a real provider:
    `waiting-approval` and journals a `control.approval.requested` event whose
    `payload` field is the exact argument for `smthrs approve '<payload>'`;
    `smthrs run --resume <run-id>` then re-drives the parked execution.
+
+`smthrs bug "summary" --run <id> --dry-run` previews the redacted payload and endpoint. Only the named run is included; omitting `--run` includes no runs. Posting requires `--yes` or confirmation on a TTY, after the exact payload is printed.

@@ -1645,11 +1645,11 @@ const update = Command.make("update", {}, () =>
   })).pipe(Command.withDescription(Verb.find("update")!.help))
 
 const bug = Command.make("bug", {
-  summary: requiredArgument("summary"),
-  rest: Argument.string("summary-word").pipe(Argument.variadic()),
-  runId: Flag.string("run").pipe(
-    Flag.optional,
-    Flag.withDescription("Attach the diagnosis digest of this run to the bug report")
+  summary: Argument.string("summary").pipe(Argument.variadic()),
+  runId: Flag.string("run").pipe(Flag.optional, Flag.withDescription("Include only this run and its event digest")),
+  yes: Flag.boolean("yes").pipe(Flag.withDescription("Post the previewed payload without an interactive confirmation")),
+  dryRun: Flag.boolean("dry-run").pipe(
+    Flag.withDescription("Print the exact redacted payload and endpoint without posting")
   )
 }, (config) =>
   Effect.gen(function*() {
@@ -1659,7 +1659,9 @@ const bug = Command.make("bug", {
       return yield* Effect.fail(new CliError.UsageError({ message: "smthrs bug needs a one-line summary" }))
     }
     const control = yield* ControlService.Control
-    const listed = yield* control.list({ _tag: "runs" })
+    const listed = Option.isNone(config.runId)
+      ? undefined
+      : yield* control.list({ _tag: "runs", filters: { runId: config.runId.value } })
     const digest = Option.isNone(config.runId)
       ? undefined
       : Forensics.digest(yield* eventsOf(control, config.runId.value))
@@ -1668,16 +1670,38 @@ const bug = Command.make("bug", {
       version: packageVersion,
       platform: `${process.platform}-${process.arch}`,
       node: process.versions.node,
-      runs: listed._tag === "runs" ? listed.items : [],
+      runs: listed?._tag === "runs"
+        ? listed.items.filter((run) => run.runId === Option.getOrUndefined(config.runId))
+        : [],
       ...(digest === undefined ? {} : { digest })
     })
     const endpoint = Environment.read(process.env, "SMITHERS_BUG_ENDPOINT") ?? Bug.defaultEndpoint
+    const payload = JSON.stringify(body)
+    yield* Console.error(endpoint)
+    yield* Console.error(payload)
+    if (config.dryRun) {
+      yield* render({ reported: false, endpoint, payload: body })
+      return
+    }
+    const ui = yield* Ui.current
+    const confirmed = config.yes || (ui.interactive && (yield* ui.confirm({
+      message: `Post this report to ${endpoint}?`,
+      initialValue: false,
+      nonInteractive: false
+    })))
+    if (!confirmed) {
+      return yield* Effect.fail(
+        new CliError.UsageError({
+          message: "Report not sent. Use --yes to post the previewed payload, or --dry-run to inspect it."
+        })
+      )
+    }
     const posted = yield* Effect.tryPromise({
       try: async () => {
         const response = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
+          body: payload,
           signal: AbortSignal.timeout(Bug.timeoutMs)
         })
         return { status: response.status, ok: response.ok }

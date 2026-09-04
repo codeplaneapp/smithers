@@ -3,7 +3,7 @@
  * into a browser.
  *
  * The value of the command is that it collects the context a maintainer always
- * asks for: versions, platform, the runs in this project, and one run's event
+ * asks for: versions, platform, and optionally the named run and its event
  * digest. The collected value takes the journal's shared redaction rules before
  * it leaves the machine.
  *

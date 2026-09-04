@@ -26,6 +26,7 @@ import { createServer, type Server } from "node:http"
 import { type AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { PassThrough, Writable } from "node:stream"
 import { afterEach, describe, expect, it } from "vitest"
 import * as ClaudeMirror from "../src/ClaudeMirror.ts"
 import * as CliError from "../src/CliError.ts"
@@ -33,6 +34,7 @@ import { cli } from "../src/Command.ts"
 import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
 import * as Project from "../src/Project.ts"
+import * as Ui from "../src/Ui.ts"
 import { packageVersion } from "../src/Version.ts"
 
 const runCommand = Command.runWith(cli, { version: packageVersion })
@@ -88,7 +90,7 @@ const historyControl = (events: ReadonlyArray<ControlSchema.ControlEvent>) =>
                 status: "running" as const,
                 createdAt: 0,
                 updatedAt: 0
-              }]
+              }, { runId: "unrelated", flowId: "demo/ship", status: "running" as const, createdAt: 0, updatedAt: 0 }]
             })
             : control.list(request),
         watch: () => Stream.fromIterable(events)
@@ -263,7 +265,7 @@ describe("smthrs bug", () => {
 
     const reported = await withEndpoint(
       target.url,
-      () => run(json(["--json", "bug", "the", "gc", "verb", "hangs"]), testControl)
+      () => run(json(["--json", "bug", "--yes", "the", "gc", "verb", "hangs"]), testControl)
     )
 
     expect(reported).toEqual({ reported: true, endpoint: target.url })
@@ -282,11 +284,76 @@ describe("smthrs bug", () => {
 
     const exit = await withEndpoint(
       target.url,
-      () => run(Effect.exit(text(["bug", "everything", "is", "broken"])), testControl)
+      () => run(Effect.exit(text(["bug", "--yes", "everything", "is", "broken"])), testControl)
     )
 
     expect(exit._tag).toBe("Failure")
     expect(String(exit._tag === "Failure" ? exit.cause : "")).toContain("503")
+  })
+
+  it("requires consent before sending any request", async () => {
+    const target = await endpoint(202)
+    const exit = await withEndpoint(
+      target.url,
+      () => run(Effect.exit(text(["bug", "a failure"])), historyControl(calls))
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(String(exit._tag === "Failure" ? exit.cause : "")).toContain("--yes")
+    expect(target.received).toEqual([])
+  })
+
+  it("dry-run previews a redacted payload and endpoint without posting, even with --yes", async () => {
+    const target = await endpoint(202)
+    const preview = await withEndpoint(target.url, () =>
+      run(
+        json(["--json", "bug", "Authorization: Bearer secret-token", "--dry-run", "--yes"]),
+        historyControl(calls)
+      ))
+    expect(preview).toMatchObject({ endpoint: target.url, payload: { runs: [] }, reported: false })
+    expect(JSON.stringify(preview)).not.toContain("secret-token")
+    expect(target.received).toEqual([])
+  })
+
+  it("includes only the named run and prints the exact payload it sends", async () => {
+    const target = await endpoint(202)
+    const result = await withEndpoint(target.url, () =>
+      run(
+        Effect.gen(function*() {
+          yield* text(["bug", "a failure", "--run", "run-1", "--yes"])
+          return { runId: "run-1", errors: yield* TestConsole.errorLines }
+        }),
+        historyControl(calls)
+      ))
+    expect(target.received).toHaveLength(1)
+    expect(target.received[0]).toMatchObject({ runs: [{ runId: result.runId }] })
+    expect((target.received[0] as { runs: unknown[] }).runs).toHaveLength(1)
+    expect(result.errors.map(String)).toContain(target.url)
+    expect(result.errors.map(String)).toContain(JSON.stringify(target.received[0]))
+  })
+
+  it.each([true, false])("posts only when the TTY confirmation is accepted (%s)", async (accepted) => {
+    const target = await endpoint(202)
+    const input = new PassThrough()
+    const output = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback()
+      }
+    })
+    const ui = Ui.make({ input, output, interactive: true })
+    const keys = setTimeout(() => input.write(accepted ? "y\r" : "n\r"), 100)
+    try {
+      const exit = await withEndpoint(target.url, () =>
+        run(
+          Effect.exit(text(["bug", "a failure"]).pipe(Effect.provideService(Ui.Ui, ui))),
+          testControl
+        ))
+      expect(exit._tag).toBe(accepted ? "Success" : "Failure")
+      expect(target.received).toHaveLength(accepted ? 1 : 0)
+    } finally {
+      clearTimeout(keys)
+      input.destroy()
+      output.destroy()
+    }
   })
 
   it("refuses an empty summary before reaching the network", async () => {
