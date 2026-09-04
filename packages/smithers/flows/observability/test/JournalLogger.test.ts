@@ -21,6 +21,38 @@ const runId = (value: string): JournalEvent.RunId => Schema.decodeUnknownSync(Jo
 /** The malformation `Resource` refuses, used here as an independent oracle. */
 const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
 
+/**
+ * The exact work a synchronous block does over string buffers: code units the
+ * bounding scanner reads one at a time, and code units handed to a full UTF-8
+ * encode. Those are the two mechanisms a multi-pass bound repeats, and both are
+ * integers no machine load can move.
+ */
+const bufferPasses = <A>(body: () => A): {
+  readonly result: A
+  readonly unitsRead: number
+  readonly unitsEncoded: number
+} => {
+  const charCodeAt = String.prototype.charCodeAt
+  const encode = TextEncoder.prototype.encode
+  let unitsRead = 0
+  let unitsEncoded = 0
+  String.prototype.charCodeAt = function(this: string, index: number): number {
+    unitsRead += 1
+    return charCodeAt.call(this, index)
+  }
+  TextEncoder.prototype.encode = function(this: TextEncoder, input?: string): ReturnType<TextEncoder["encode"]> {
+    unitsEncoded += input === undefined ? 0 : input.length
+    return encode.call(this, input)
+  }
+  try {
+    const result = body()
+    return { result, unitsRead, unitsEncoded }
+  } finally {
+    String.prototype.charCodeAt = charCodeAt
+    TextEncoder.prototype.encode = encode
+  }
+}
+
 /** Waits for an out-of-band worker effect without pinning a wall-clock delay. */
 const settled = (predicate: () => boolean) =>
   Effect.gen(function*() {
@@ -609,7 +641,8 @@ describe("JournalLogger", () => {
     const astral = "\u{1F600}".repeat(600_000)
     const escaped = `"\\\n\u0001aéあ𐀀\u{1F600}`.repeat(200_000)
     const malformed = `${"\ud800"}lone${"\udfff"}`.repeat(200_000)
-    const { elapsed, payloads } = await run(
+    const inputs = [astral, escaped, malformed]
+    const { passes, payloads } = await run(
       Effect.gen(function*() {
         const journal = yield* Journal.Journal
         const measured = yield* Effect.withFiber((fiber) =>
@@ -623,34 +656,12 @@ describe("JournalLogger", () => {
                 fiber: fiber as never,
                 date: new Date(0)
               })
-            // One full encode of the same value is the unit of work. It is
-            // native, so it absorbs machine load and coverage instrumentation
-            // the same way the snapshot does and keeps this bound stable.
-            const encodeOnce = () => {
-              const at = performance.now()
-              new TextEncoder().encode(JSON.stringify(astral))
-              return performance.now() - at
-            }
-            encodeOnce()
-            const unit = Math.min(encodeOnce(), encodeOnce(), encodeOnce())
-            // The measured side takes the same minimum of three samples as the
-            // reference unit does. A single sample against a min-of-three
-            // denominator inflates the ratio whenever a loaded CI box preempts
-            // that one sample, which is a flake, not a regression.
-            const snapshotOnce = () => {
-              const at = performance.now()
-              emit(astral)
-              return performance.now() - at
-            }
-            const cost = Math.min(snapshotOnce(), snapshotOnce(), snapshotOnce())
-            emit(escaped)
-            emit(malformed)
-            return cost / unit
+            return inputs.map((input) => bufferPasses(() => emit(input)))
           })
         )
-        const entries = yield* entriesEventually(journal, id, 5)
+        const entries = yield* entriesEventually(journal, id, inputs.length)
         return {
-          elapsed: measured,
+          passes: measured,
           payloads: entries.map((entry) => Schema.decodeUnknownSync(TelemetryLog)(entry.payload))
         }
       }).pipe(
@@ -658,12 +669,29 @@ describe("JournalLogger", () => {
       )
     )
 
-    // The binary search this replaced re-encoded the value about twenty times:
-    // 122 ms against a 2.0 ms single pass for this input, or nine reference
-    // encodes for the search alone before the rest of the snapshot ran. The
-    // bound sits far below that and far above the one-pass cost, so it names a
-    // regression rather than a slow machine.
-    expect(elapsed, `snapshot cost in reference encodes: ${elapsed.toFixed(1)}`).toBeLessThan(12)
+    inputs.forEach((input, index) => {
+      const pass = passes[index]!
+      // One forward pass costs at most one read per byte it spends: a lone code
+      // unit is one read for at least one byte, and a surrogate lookahead is
+      // two reads for four bytes. The scan stops at the budget, so a bounded
+      // single pass cannot read past `maximumSnapshotBytes` units however the
+      // input is shaped, and the two reads that overflow the budget end it.
+      expect(pass.unitsRead, `code units read for input ${index}`)
+        .toBeLessThanOrEqual(maximumSnapshotBytes + 2)
+      // The same statement from the other side: the scan is bounded by the
+      // budget, not by the input, so it never walks the multi-megabyte tail it
+      // is dropping.
+      expect(pass.unitsRead, `code units read for input ${index}`).toBeLessThan(input.length)
+      // The only full encode on this path is the single size check on the
+      // bounded projection. Its JSON is one snapshot's worth of bytes plus the
+      // record envelope, and a UTF-16 unit never outweighs its UTF-8 byte, so
+      // one pass stays inside this bound. The binary search this replaced
+      // re-encoded the input about twenty times; even one extra encode of the
+      // smallest input here adds 1,200,000 units and trips it.
+      expect(pass.unitsEncoded, `code units encoded for input ${index}`)
+        .toBeLessThanOrEqual(maximumSnapshotBytes + 64 * 1024)
+    })
+
     for (const payload of payloads) {
       const message = payload.message as string
       expect(message.endsWith(truncatedMarker)).toBe(true)
@@ -673,7 +701,7 @@ describe("JournalLogger", () => {
     // `Resource` validator refuses. The last input was malformed on arrival,
     // so only the astral and escaped records carry that guarantee.
     expect(loneSurrogate.test(payloads[0]!.message as string)).toBe(false)
-    expect(loneSurrogate.test(payloads[3]!.message as string)).toBe(false)
+    expect(loneSurrogate.test(payloads[1]!.message as string)).toBe(false)
   })
 
   it("reports and counts a journal delivery failure, then keeps forwarding", async () => {
