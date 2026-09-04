@@ -2429,6 +2429,19 @@ export const layer = (
           )(projection, streamOptions)
         )
 
+      yield* JournalGeneration.onTruncate((runIds) => {
+        for (const runId of runIds) {
+          state.sequences.delete(runId as RunId)
+          const prefix = `${runId.length}:${runId}`
+          for (const key of state.sourceSequences.keys()) {
+            if (key.startsWith(prefix)) state.sourceSequences.delete(key)
+          }
+          for (const key of state.sourceEvents.keys()) {
+            if (key.startsWith(prefix)) state.sourceEvents.delete(key)
+          }
+        }
+      })
+
       return makeJournal({
         generation: (runId) =>
           sql<{ readonly generation: number; readonly afterSeq: number }>`

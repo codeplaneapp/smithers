@@ -539,3 +539,9 @@ effect that recorded no key, a custom `assess` result is decoded against
 `Assessment` and assesses `blocking` when it does not decode, and a rollback
 refuses a receipt whose tier or descriptor the handler does not match.
 
+
+
+After a successful archive transaction, `SqlTimeTravelStore.archiveAndTruncate`
+invalidates cached journal identities and allocation floors for the parent and
+attached descendants. All live `SqlJournal` instances sharing its SQL client
+observe the reset, so archived lossy source identities can be emitted again.

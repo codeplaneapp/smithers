@@ -497,3 +497,12 @@ Append-only adapters may omit it (generation zero). A truncating adapter must
 advance it atomically with truncation so followers detect reused sequences.
 `SqlJournal.layer` persists it in `flows_journal_generations`, installed through
 `JournalGeneration.initialize`; a fresh run reports `{ generation: 0, afterSeq: -1 }`.
+
+`JournalGeneration.forget(runIds)` invalidates live journal source identities and
+allocation floors after a committed truncation, for every journal sharing the
+SQL client. It requires `SqlClient`; it changes no durable rows. Producers must
+be quiescent and pending lossy admissions flushed before truncation.
+`JournalGeneration.onTruncate(callback)` registers an invalidator for the current
+scope. `SqlJournal` registers automatically, and `SqlTimeTravelStore.archiveAndTruncate`
+notifies after commit for the parent and attached descendants. Re-emitting an
+archived lossy source identity is then admitted against the retained history.

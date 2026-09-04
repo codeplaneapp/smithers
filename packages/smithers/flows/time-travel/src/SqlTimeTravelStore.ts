@@ -921,9 +921,15 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
               )
             `
                 }
-                return { archived, orphaned: descendants.detached }
+                return { archived, orphaned: descendants.detached, forgotten: [runId, ...descendants.attachedRunIds] }
               }).pipe(Effect.mapError(mapError))
-            ).pipe(Effect.mapError(mapError))
+            ).pipe(
+              Effect.tap(({ forgotten }) =>
+                JournalGeneration.forget(forgotten).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+              ),
+              Effect.map(({ archived, orphaned }) => ({ archived, orphaned })),
+              Effect.mapError(mapError)
+            )
           ))
       ),
       archivedAt: Effect.fn("TimeTravelStore.archivedAt")((runId, seq) =>

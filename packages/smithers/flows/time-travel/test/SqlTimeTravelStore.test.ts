@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Migrations from "@smthrs/engine-store/Migrations"
+import { Journal, JournalEvent, SqlJournal } from "@smthrs/journal"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
 
@@ -209,3 +211,41 @@ describe("SqlTimeTravelStore", () => {
       ])
     }))
 })
+
+it.effect("archiveAndTruncate forgets lossy source identities in the live journal", () =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      const journal = yield* Journal.Journal
+      const store = yield* SqlTimeTravelStore.make
+      yield* sql`INSERT INTO flows_runs
+      (run_id, status, created_at_ms, state_json, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms)
+      VALUES ('rewind-lossy', 'running', 0, '{}', ${owner.hostId}, ${owner.pid}, ${owner.nonce}, 0)`
+      const input = new JournalEvent.Input({
+        runId: "rewind-lossy" as JournalEvent.RunId,
+        sourceId: "producer" as JournalEvent.SourceId,
+        sourceSeq: 0 as JournalEvent.SourceSeq,
+        eventType: "event",
+        payload: "artifact"
+      })
+      yield* journal.emitDurable(
+        new JournalEvent.Input({
+          runId: input.runId,
+          sourceId: "lifecycle" as JournalEvent.SourceId,
+          eventType: "started",
+          payload: null
+        }),
+        owner
+      )
+      yield* journal.emitLossy(input)
+      yield* journal.flush
+      yield* store.archiveAndTruncate("rewind-lossy", { lineageId: "main", seq: 0 }, [], owner)
+      expect(yield* journal.emitLossy(input)).toMatchObject({ _tag: "Accepted", seq: 1 })
+      yield* journal.flush
+      expect((yield* journal.entries({ runId: input.runId, limit: 10 })).entries).toHaveLength(2)
+    }).pipe(Effect.provide(
+      SqlJournal.layer({ capacity: 16, overflow: "reject" }).pipe(
+        Layer.provideMerge(Layer.provideMerge(Migrations.layer, TestDatabase.layer))
+      )
+    ))
+  ))
