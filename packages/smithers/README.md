@@ -9,7 +9,7 @@ all Smithers packages share one Effect runtime.
 Node command-line projection of the Smithers control plane. It turns `@smthrs/control` operations into the `smthrs` executable (with `smithers` as an alias) and supplies the Node HTTP, WebSocket, and output layers used by the CLI host.
 
 ```sh
-npm install @smthrs/cli
+npm install @smthrs/cli@next
 ```
 
 ## Public API

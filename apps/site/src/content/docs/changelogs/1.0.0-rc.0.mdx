@@ -71,7 +71,7 @@ What Bun supports is exactly the `ci/BUILD.ts` matrix: the `artifacts`,
 `platform-browser`, `platform-bun`, and `sandbox` suites, plus the
 applications under `apps/`. Opening a durable database under Bun fails with
 `unsupported_runtime`. The `smithers` shim carries a `#!/usr/bin/env node`
-shebang, so `npx`, `npm install -g`, and `bun x --package @smthrs/cli
+shebang, so `npx`, `npm install -g`, and `bun x --package @smthrs/cli@next
 smithers` all execute the CLI under Node; running it with `bun <file>` or
 `bun x --bun` is unsupported.
 

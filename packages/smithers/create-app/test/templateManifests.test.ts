@@ -99,13 +99,17 @@ describe.each(templates)("template/%s", (template) => {
     expect(specifiers.length).toBeGreaterThan(0)
   })
 
-  it.each(specifiers)("pins %s at the version the workspace publishes", (name, specifier) => {
+  it.each(specifiers)("pins %s at the installable release line", (name, specifier) => {
     const workspace = workspaceManifests.get(name)
     expect(workspace, `${name} is not a package in this workspace`).toBeDefined()
+    // The first CLI release has no `latest` tag. A generated application must
+    // follow `next` until 1.0 is final instead of baking one release candidate
+    // into every future scaffold.
+    const expected = name === "@smthrs/cli" ? "next" : workspace?.version
     expect(
       specifier,
-      `template/${template} pins ${name} at ${specifier}; the workspace is at ${String(workspace?.version)}`
-    ).toBe(workspace?.version)
+      `template/${template} pins ${name} at ${specifier}; the installable release is ${String(expected)}`
+    ).toBe(expected)
   })
 
   /**

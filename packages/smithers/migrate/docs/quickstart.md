@@ -137,7 +137,7 @@ registry discovery over the final tree. Run them again yourself, then check
 that the flows are discoverable:
 
 ```bash
-pnpm add -D @smthrs/cli
+pnpm add -D @smthrs/cli@next
 smthrs ls
 smthrs doctor
 ```

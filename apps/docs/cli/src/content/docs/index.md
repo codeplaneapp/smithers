@@ -25,7 +25,7 @@ the command tree inside a program of their own.
 ## Install
 
 ```bash
-npm install --global @smthrs/cli
+npm install --global @smthrs/cli@next
 ```
 
 Node 22.19.0 or later is required. For the runner matrix, the source-checkout

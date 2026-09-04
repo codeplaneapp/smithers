@@ -36,7 +36,7 @@ Once the project is on 1.0, the same entry point is reachable as a verb of the
 Smithers CLI:
 
 ```bash
-pnpm add -D @smthrs/cli
+pnpm add -D @smthrs/cli@next
 smthrs migrate --scan
 ```
 

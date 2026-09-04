@@ -413,7 +413,7 @@ Retention.
 | `Legacy` | `read(path)` opens a 0.x `smithers.db` read-only; `refusal(databases)` is the sentence that names its non-terminal runs; `terminalStatuses` is the vocabulary it counts against. |
 | `ClaudeMirror` | The Claude Code plugin mirror protocol: `contract`, `subscriptionsPath`, `subscriptionTtlMs`, `Subscription`, `readSubscriptions`, `subscribe`, `unsubscribe`, `MirrorNode`, `Frame`, `frame`, `defaultMaxOutputChars`, `terminalStatuses`, `isTerminal`, `Transition`, `notableKinds`, `transition`. |
 | `CodexAuth` | Locates and refreshes the Codex credential store: `refreshUrl`, `clientId`, `locate`, `parse`, `Store`, `MakeOptions`, `make`. |
-| `Update` | `packageName`, `registryUrl`, `Status`, `isNewer`, `compare(current, tags)`, `render(status)`. Compares the installed version against the `rc` and `latest` dist-tags and prints the install line. It changes nothing. |
+| `Update` | `packageName`, `registryUrl`, `Status`, `isNewer`, `compare(current, tags)`, `render(status)`. Compares the installed version against the `next` and `latest` dist-tags and prints the install line. It changes nothing. |
 | `Bug` | `defaultEndpoint`, `timeoutMs`, `scrubText`, `scrub`, `Report`, `report`. Everything collected takes the journal's redaction rules before it leaves the machine, and a value carrying a callable, a proxy, or a `toJSON` member is refused rather than rendered. |
 | `Version` | `packageVersion`, read from the shipped manifest. The module throws at import when the manifest declares no version, because printing `undefined` to an operator is worse than refusing to start. |
 

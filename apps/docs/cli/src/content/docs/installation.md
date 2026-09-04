@@ -9,18 +9,17 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/doc
 ## Install the executable
 
 ```bash
-npm install --global @smthrs/cli
+npm install --global @smthrs/cli@next
 ```
 
 The package installs one executable under two names, `smthrs` and its
 `smithers` alias. Both are the same file, `bin/smithers.mjs`.
 
-This documentation describes 1.0.0-rc.0. A release candidate is published
-under a prerelease dist-tag rather than `latest`, so name the version or the
-tag to install it:
+This documentation describes 1.0.0-rc.0. Release candidates publish under
+the `next` dist-tag rather than `latest`, so name that tag when installing:
 
 ```bash
-npm install --global @smthrs/cli@1.0.0-rc.0
+npm install --global @smthrs/cli@next
 ```
 
 Confirm what you got, and what the registry offers, with the CLI itself:
@@ -30,7 +29,7 @@ smthrs --version
 smthrs update
 ```
 
-`smthrs update` compares `Version.packageVersion` against the `rc` and
+`smthrs update` compares `Version.packageVersion` against the `next` and
 `latest` dist-tags and prints the `npm install` line for the newer one. It
 changes nothing.
 
@@ -55,8 +54,8 @@ not supported on Bun. That makes every installation path run on Node:
 | Path | Command |
 | --- | --- |
 | Global install | `smthrs <verb>` |
-| One-off through npm | `npx --package @smthrs/cli smthrs <verb>` |
-| One-off through Bun | `bun x --package @smthrs/cli smthrs <verb>` |
+| One-off through npm | `npx --package @smthrs/cli@next smthrs <verb>` |
+| One-off through Bun | `bun x --package @smthrs/cli@next smthrs <verb>` |
 
 Bun honours the shebang, so `bun x` starts Node. Running the CLI with
 `bun --bun` overrides the shebang and is not supported.

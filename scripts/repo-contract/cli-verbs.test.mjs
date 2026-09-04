@@ -38,6 +38,11 @@ const cliPages = (directory) =>
     .filter((name) => name.endsWith(".mdx") && name !== "index.mdx")
     .map((name) => name.slice(0, -4))
 
+const markdownFiles = (directory) =>
+  readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.mdx?$/.test(entry.name))
+    .map((entry) => join(entry.parentPath, entry.name))
+
 describe("the CLI reference", () => {
   const verbSource = readFileSync(join(root, "packages/smithers/src/Verb.ts"), "utf8")
   const pagesDirectory = join(root, "apps/site/src/content/docs/docs/reference/cli")
@@ -69,5 +74,21 @@ describe("the CLI reference", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
+  })
+
+  it("names the dist-tag the update command actually reads", () => {
+    const files = [
+      ...markdownFiles(join(root, "packages/smithers/docs")),
+      ...markdownFiles(join(root, "apps/docs/cli/src/content/docs")),
+      ...markdownFiles(join(root, "apps/site/src/content/docs/docs"))
+    ]
+    const stale = files.flatMap((file) => {
+      const contents = readFileSync(file, "utf8")
+      return /(?:the |against the? )?`rc` and `latest`|under the `rc` tag|compares `rc` first|available \(rc\)/.test(contents)
+        ? [file.slice(root.length + 1)]
+        : []
+    })
+
+    assert.deepEqual(stale, [], `update documentation must name the next dist-tag:\n${stale.join("\n")}`)
   })
 })
