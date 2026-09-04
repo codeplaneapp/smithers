@@ -224,7 +224,7 @@ describe("vitest coverage isolation conformance", () => {
     // the word inside the comment that explains why the fault tier runs
     // "without coverage:", and the block read from there is whatever brace
     // happens to come next.
-    const at = source.search(new RegExp(`\\b${key}\\s*\\{`))
+    const at = source.search(new RegExp(`\\b${key}\\s*:\\s*\\{`))
     if (at === -1) return null
     const open = source.indexOf("{", at)
     if (open === -1) return null
@@ -247,19 +247,35 @@ describe("vitest coverage isolation conformance", () => {
    * shape that does the opposite: a pattern naming ANOTHER package's tree
    * removes code this package's gate was never responsible for. Two spellings
    * reach one — `<child>/**` for a package nested inside this one, and
-   * `**\/<path>/**` for a package elsewhere under `packages/` — and both are
+   * `../<sibling>/**` for a sibling package — and both are
    * resolved here against a real `package.json`, so the exemption expires the
    * day that package moves or stops existing and can never be spelled to hide
    * this package's own source.
    */
   const excludedPackage = (name: string, pattern: string): string | null => {
-    const body = pattern.replace(/^\*\*\//, "").replace(/\/\*\*$/, "")
+    const body = pattern.replace(/\/\*\*$/, "")
     if (body === "" || body.includes("*")) return null
-    for (const candidate of [`${name}/${body}`, body]) {
-      if (candidate !== name && isFile(join(packagesDir, candidate, "package.json"))) return candidate
-    }
-    return null
+    const candidate = relative(packagesDir, resolve(packagesDir, name, body))
+    return candidate !== name && isFile(join(packagesDir, candidate, "package.json")) ? candidate : null
   }
+
+  it.each([...configs, {
+    name: "smithers/build/infra",
+    source: readFileSync(join(packagesDir, "smithers/build/infra/vitest.config.ts"), "utf8")
+  }])("$name anchors every coverage glob to its config directory", ({ source }) => {
+    const coverage = block(source, "coverage") ?? ""
+    const globs = [
+      ...coverage.matchAll(
+        /\b(?:include|exclude):\s*\[[^\]]*\](\.map\(\s*\(pattern\) =>\s*join\(import\.meta\.dirname, pattern\)\s*\))?/g
+      )
+    ]
+    expect(globs.length).toBeGreaterThan(0)
+    for (const glob of globs) {
+      // Vitest's contains matcher sees absolute filenames. A relative glob
+      // can match a checkout ancestor and silently empty the denominator.
+      expect(glob[1], glob[0]).toBeDefined()
+    }
+  })
 
   const assertCoverageDenominator = (name: string, source: string) => {
     expect(source).toMatch(/coverage:\s*\{[^]*?enabled:\s*true/)

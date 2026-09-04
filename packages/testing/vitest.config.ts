@@ -16,7 +16,7 @@ export default defineConfig({
       // Per-process report directory so concurrent vitest runs do not destroy
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-testing-coverage-${process.pid}`),
-      include: ["src/**"],
+      include: ["src/**"].map((pattern) => join(import.meta.dirname, pattern)),
       // This package meets the workspace coverage norm on every default run.
       thresholds: {
         branches: 100,

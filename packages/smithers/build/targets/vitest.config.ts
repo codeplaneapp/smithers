@@ -15,7 +15,7 @@ export default defineConfig({
       enabled: true,
       provider: "v8",
       reportsDirectory: join(tmpdir(), `flows-targets-coverage-${process.pid}`),
-      include: ["src/**"],
+      include: ["src/**"].map((pattern) => join(import.meta.dirname, pattern)),
       thresholds: {
         branches: 97,
         functions: 99,

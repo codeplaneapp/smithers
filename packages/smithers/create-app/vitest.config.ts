@@ -38,7 +38,7 @@ export default defineConfig({
       // regression case in `test/routesBin.test.ts` instead. That is the
       // stronger check anyway: only a real process proves that Node refuses to
       // strip types under `node_modules`.
-      include: ["src/**"],
+      include: ["src/**"].map((pattern) => join(import.meta.dirname, pattern)),
       thresholds: {
         branches: 100,
         functions: 100,

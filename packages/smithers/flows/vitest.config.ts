@@ -34,17 +34,9 @@ export default defineConfig({
       // directory error and the other enforces 100% against a partial
       // profile with every test passing (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-flows-coverage-${process.pid}`),
-      include: ["src/**"],
-      // These directories are packages of their own, nested here because this
-      // package is what they are made of. The v8 provider reports every file
-      // EXECUTED under this vitest root whatever `include` says, and this
-      // package imports them, so their modules would land in this denominator.
-      // Each one is already the denominator of its own 100% gate under its own
-      // label. Counting them here would measure the same code twice and put
-      // this gate permanently out of reach, because the cases that cover them
-      // run in those suites. The exclusion removes another package's tree and
-      // never this package's own source, which is the distinction
-      // `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` enforces.
+      include: ["src/**"].map((pattern) => join(import.meta.dirname, pattern)),
+      // Nested packages have their own coverage gates. Absolute patterns keep
+      // checkout ancestors such as `review-harness` out of exclusion matching.
       exclude: [
         "artifacts/**",
         "canonical/**",
@@ -70,7 +62,7 @@ export default defineConfig({
         "step-cache/**",
         "sync/**",
         "time-travel/**"
-      ],
+      ].map((pattern) => join(import.meta.dirname, pattern)),
       // Accurate, enforceable floors measured against the committed suite.
       // Ratchet upward as tests land; never lower without a written
       // justification.

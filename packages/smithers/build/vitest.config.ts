@@ -21,18 +21,10 @@ export default defineConfig({
       enabled: true,
       provider: "v8",
       reportsDirectory: join(tmpdir(), `flows-build-coverage-${process.pid}`),
-      include: ["src/**"],
-      // These directories are packages of their own, nested here because this
-      // package is what they are made of. The v8 provider reports every file
-      // EXECUTED under this vitest root whatever `include` says, and this
-      // package imports them, so their modules would land in this denominator.
-      // Each one is already the denominator of its own gate under its own
-      // label. Counting them here would measure the same code twice and hold
-      // this package's floors against code its own suite never runs. The
-      // exclusion removes another package's tree and never this package's own
-      // source, which is the distinction
-      // `packages/smithers/flows/test/vitestCoverageIsolation.test.ts` enforces.
-      exclude: ["build-cli/**", "infra/**", "targets/**"],
+      include: ["src/**"].map((pattern) => join(import.meta.dirname, pattern)),
+      // Nested packages have their own coverage gates. Absolute patterns keep
+      // checkout ancestors such as `review-harness` out of exclusion matching.
+      exclude: ["build-cli/**", "infra/**", "targets/**"].map((pattern) => join(import.meta.dirname, pattern)),
       thresholds: {
         branches: 91,
         functions: 89,

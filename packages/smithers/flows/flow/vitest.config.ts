@@ -29,20 +29,10 @@ export default defineConfig({
       // profile with every test passing (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-flow-coverage-${process.pid}`),
       // Every production module, including the public barrel, is measured.
-      include: ["src/**"],
-      // `@smthrs/canonical` is not this package's code: it lives at
-      // `packages/smithers/flows/canonical`, nested inside the product package it
-      // belongs to, and this package reaches it through `@smthrs/keys`. The v8
-      // provider decides whether an executed file is "inside the root" by
-      // string prefix, and `packages/smithers/flows/flow` is a prefix of `packages/smithers/flows`, so
-      // canonical's modules look local here and land in this denominator
-      // against a 100% gate no case in this package covers. Every other
-      // consumer of canonical drops them correctly, because no other package
-      // directory is a prefix of that path. The exclusion names another
-      // package's tree and never this package's own source, which is the
-      // distinction `packages/smithers/flows/test/vitestCoverageIsolation.test.ts`
-      // enforces.
-      exclude: ["**/flows/canonical/**"],
+      include: ["src/**"].map((pattern) => join(import.meta.dirname, pattern)),
+      // The sibling package has its own gate; resolve it from this config so
+      // a checkout ancestor cannot match the exclusion.
+      exclude: ["../canonical/**"].map((pattern) => join(import.meta.dirname, pattern)),
       // The suite must earn complete coverage in every category.
       thresholds: {
         branches: 100,
