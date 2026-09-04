@@ -168,6 +168,14 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       expect(error.message).toContain("Refused to snapshot")
     }))
 
+  it.live("builds the unbound spawner layer and probes through the host", () =>
+    Effect.gen(function*() {
+      const output = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(
+        Effect.provide(Layer.provide(NodeJj.layerSpawner, realSpawner))
+      )
+      expect(output).toBe("the working copy is clean\n")
+    }))
+
   it.live("runs jj through the host spawner and returns its stdout", () =>
     Effect.gen(function*() {
       const output = yield* run(Effect.flatMap(Jj, (jj) => jj.status()), realSpawner)

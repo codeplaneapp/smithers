@@ -1,13 +1,33 @@
-import { describe, expect, it } from "@effect/vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Schedule from "effect/Schedule"
 import { existsSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { vi } from "vitest"
 import { Jj } from "../src/Jj.ts"
 import * as NodeJj from "../src/node/NodeJj.ts"
+
+// Fault injection stays at the filesystem boundary; all unaffected calls use
+// real temporary directories and the public layer still spawns its CLI shim.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>()
+  return {
+    ...actual,
+    rename: vi.fn(actual.rename),
+    readdir: vi.fn(actual.readdir),
+    rmdir: vi.fn(actual.rmdir),
+    unlink: vi.fn(actual.unlink)
+  }
+})
+const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")
+afterEach(() => {
+  vi.resetAllMocks()
+  vi.restoreAllMocks()
+})
+const errno = (code: string) => Object.assign(new Error(code), { code })
 
 const fixture = <A, E, R>(use: (root: string) => Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
@@ -47,6 +67,133 @@ const until = (predicate: () => Promise<boolean>) =>
   })
 
 describe("NodeJj repository locks", () => {
+  it.live("leaves the CLI to report operations outside a workspace", () =>
+    fixture((root) =>
+      Effect.gen(function*() {
+        yield* Effect.promise(() => rm(join(root, ".jj"), { recursive: true }))
+        const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+        expect((yield* jj.snapshot()).changeId).toBe("snapshotid")
+      })
+    ))
+
+  it.live("finds a repository from a nested directory", () =>
+    fixture((root) =>
+      Effect.gen(function*() {
+        const jj = yield* Effect.provide(Jj, NodeJj.layerAt(join(root, "nested")))
+        expect((yield* jj.snapshot()).changeId).toBe("snapshotid")
+        expect(existsSync(join(root, ".jj", "smithers.lock"))).toBe(false)
+      })
+    ))
+
+  for (const cause of [errno("EACCES"), null, "filesystem failure", {}]) {
+    it.live(`reports an acquisition failure as a typed lock error: ${String(cause)}`, () =>
+      fixture((root) =>
+        Effect.gen(function*() {
+          const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+          vi.mocked(rename).mockRejectedValueOnce(cause)
+          const error = yield* Effect.flip(jj.snapshot())
+          expect(error).toMatchObject({ code: "unknown", module: "NodeJj", method: "snapshot" })
+          expect(error.message).toContain("repository lock failed")
+          expect(yield* Effect.promise(() => readdir(join(root, ".jj")))).toEqual([])
+        })
+      ))
+  }
+
+  for (const code of ["ENOTEMPTY", "EEXIST"]) {
+    it.live(`retries a lock that disappeared after contention (${code})`, () =>
+      fixture((root) =>
+        Effect.gen(function*() {
+          const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+          vi.mocked(rename).mockRejectedValueOnce(errno(code))
+          vi.mocked(readdir).mockRejectedValueOnce(errno("ENOENT"))
+          expect((yield* jj.snapshot()).changeId).toBe("snapshotid")
+        })
+      ))
+  }
+
+  it.live("reports unreadable lock ownership without running a mutation", () =>
+    fixture((root) =>
+      Effect.gen(function*() {
+        const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+        vi.mocked(rename).mockRejectedValueOnce(errno("ENOTEMPTY"))
+        vi.mocked(readdir).mockRejectedValueOnce(errno("EACCES"))
+        expect((yield* Effect.flip(jj.snapshot())).message).toContain("EACCES")
+        expect(existsSync(join(root, "started"))).toBe(false)
+      })
+    ))
+
+  it.live("tolerates another reclaimer removing the dead owner's entry and directory", () =>
+    fixture((root) =>
+      Effect.gen(function*() {
+        const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+        const lock = join(root, ".jj", "smithers.lock")
+        yield* Effect.promise(async () => {
+          await mkdir(lock)
+          await writeFile(join(lock, "2147483647-dead-owner"), "")
+        })
+        vi.mocked(unlink).mockImplementationOnce(async (path) => {
+          await actualFs.unlink(path)
+          throw errno("ENOENT")
+        })
+        vi.mocked(rmdir).mockImplementationOnce(async (path) => {
+          await actualFs.rmdir(path)
+          throw errno("ENOENT")
+        })
+        expect((yield* jj.snapshot()).changeId).toBe("snapshotid")
+      })
+    ))
+
+  for (const code of ["ENOTEMPTY", "EEXIST"]) {
+    it.live(`does not delete a replacement lock during stale recovery (${code})`, () =>
+      fixture((root) =>
+        Effect.gen(function*() {
+          const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+          const lock = join(root, ".jj", "smithers.lock")
+          const replacement = join(lock, `${process.pid}-replacement`)
+          yield* Effect.promise(async () => {
+            await mkdir(lock)
+            await writeFile(join(lock, "2147483647-dead-owner"), "")
+          })
+          vi.mocked(rmdir).mockImplementationOnce(async () => {
+            await writeFile(replacement, "")
+            throw errno(code)
+          })
+          const pending = yield* Effect.forkChild(jj.snapshot())
+          yield* until(async () => existsSync(replacement))
+          yield* Fiber.interrupt(pending)
+          expect(existsSync(replacement)).toBe(true)
+          expect(existsSync(join(root, "started"))).toBe(false)
+        })
+      ))
+  }
+
+  for (const operation of [unlink, rmdir]) {
+    it.live(`keeps the result if lock release fails at ${operation.name}`, () =>
+      fixture((root) =>
+        Effect.gen(function*() {
+          const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+          vi.mocked(operation).mockRejectedValueOnce(errno("EACCES"))
+          expect((yield* jj.snapshot()).changeId).toBe("snapshotid")
+        })
+      ))
+  }
+
+  it.live("times out on unknown ownership without removing the lock", () =>
+    fixture((root) =>
+      Effect.gen(function*() {
+        const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+        const lock = join(root, ".jj", "smithers.lock")
+        yield* Effect.promise(async () => {
+          await mkdir(lock)
+          await writeFile(join(lock, "unknown-owner"), "")
+        })
+        let now = 0
+        vi.spyOn(Date, "now").mockImplementation(() => now += 120_001)
+        expect((yield* Effect.flip(jj.snapshot())).message).toContain("timed out waiting")
+        expect(existsSync(join(lock, "unknown-owner"))).toBe(true)
+      })
+    ))
+
   it.live("releases the lock after cancelling an active snapshot", () =>
     fixture((root) =>
       Effect.gen(function*() {
