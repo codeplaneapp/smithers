@@ -7,6 +7,12 @@ import { ContextWindow, prefixDigest } from "../src/ContextWindow.ts"
 
 const message = (text: string) => ModelRequest.Message.assistant(text, { stopReason: "stop" })
 
+// What a summarizer's assistant reply becomes once it is seated in the window.
+// The Messages API requires a leading user message, so a summary that replaced
+// the prefix — the only turn ahead of it — is re-roled rather than left as the
+// assistant turn the summarizer produced.
+const summarized = (text: string) => ModelRequest.Message.user(text)
+
 const segment = (text: string, tokens: number) => ({
   kind: "transcript" as const,
   zone: "tail" as const,
@@ -507,7 +513,7 @@ describe("Compaction", () => {
         current = Effect.runSync(Compaction.apply(current, step, message(text)))
         expect(current.segments.filter((item) => item.kind === "summary")).toHaveLength(1)
       }
-      expect(current.segments.at(0)?.content).toEqual([message("summary three")])
+      expect(current.segments.at(0)?.content).toEqual([summarized("summary three")])
       expect(current.segments.at(-1)?.digest).toBe(input.segments.at(-1)?.digest)
     })
 
