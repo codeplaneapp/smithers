@@ -30,7 +30,7 @@ When the package publishes, follow the shape `packages/smithers/flows/crypto` la
    `run` verb writes, the `lint` verb drift-checks, and the workspace `ci` step
    already runs the lint form.
 4. Add the sidebar entry in `docs/sidebar.ts`. Nothing registers the generator
-   with `scripts/check-docs.mjs`: that gate discovers every
+   with `pnpm -C apps/site check:docs`: that gate discovers every
    `packages/*/scripts/docs.mjs` on disk and runs it with `--check`.
 
 ## Files

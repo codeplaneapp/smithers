@@ -16,5 +16,5 @@ output. After editing, run:
 
 ```sh
 node packages/smithers/flows/platform-node/scripts/docs.mjs
-pnpm docs:llms
+pnpm -C apps/site sync:docs
 ```

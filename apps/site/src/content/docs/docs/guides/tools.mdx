@@ -24,18 +24,24 @@ pnpm add @smthrs/std@next @smthrs/flow@next effect@4.0.0-rc.108 @effect/platform
 ```ts
 import { Action } from "@smthrs/flow"
 import { Read } from "@smthrs/std"
+import * as StdError from "@smthrs/std/StdError"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 export const FirstLine = Action.make("docs/FirstLine", {
   payload: { path: Schema.String },
-  success: Schema.String
+  success: Schema.String,
+  error: StdError.StdError
 })
 
 export const firstLine = FirstLine.toLayer(({ path }) =>
   Read.run({ path }).pipe(Effect.map((page) => page.content))
 )
 ```
+
+`Read.run` can fail with `StdError.StdError`, so the action declares that error
+channel. An action implementation may only call a failing effect when its
+declaration states the failures callers must handle.
 
 `Read.run` needs a `FileSystem` service, which the host's layer supplies: the CLI's executor provides the kernel filesystem, and a standalone Node program provides `NodeFileSystem.layer`. Across the library six services are injected, and a tool whose service the host has not bound refuses with `provider_unavailable` rather than a silent success:
 

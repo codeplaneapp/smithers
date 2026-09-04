@@ -18,7 +18,7 @@ node packages/testing/scripts/docs.mjs           # write
 node packages/testing/scripts/docs.mjs --check   # drift-check, exits 1 when stale
 ```
 
-`scripts/check-docs.mjs` discovers every `packages/*/scripts/docs.mjs` and runs
+`pnpm -C apps/site check:docs` discovers every `packages/*/scripts/docs.mjs` and runs
 the `--check` form, so a stale generated region fails the repository docs gate.
 
 It writes the site's API page, `docs/pages/api/testing.md`: the prose in
@@ -29,7 +29,7 @@ Testing guide.
 
 `@smthrs/testing` was the last name in the release's published set with no page
 on the documentation site, because the page cannot land before
-`docs/sidebar.ts` lists it: `scripts/check-docs.mjs` fails any published page
+`docs/sidebar.ts` lists it: `pnpm -C apps/site check:docs` fails any published page
 the sidebar does not reach, and fails any sidebar link no page answers. That
 file is hand-written editorial order no generator writes, so the entry and the
 page land in the same commit.

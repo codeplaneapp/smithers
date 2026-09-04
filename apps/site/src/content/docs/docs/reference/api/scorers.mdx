@@ -9,6 +9,11 @@ description: "Flow-native scoring, durable observations, and asynchronous score 
 
 > **Related APIs:** [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/database`](/docs/reference/api/database/)
 
+## Availability
+
+`@smthrs/scorers` is a private workspace package for the 1.0.0-rc.0 release.
+Only code in this workspace may consume it. Do not install this package from npm.
+
 `@smthrs/scorers` declares scorers, attaches them to target flows, decides
 replay-stable sampling, and persists the resulting observations. It does not
 decide what to score or when: `@smthrs/evals` does that and is the only
@@ -222,4 +227,3 @@ this table and `src/` disagree.
 | `RunnerLive.layer`                   | layers       | Provides the scoped queue and the blocking batch runner.                        |
 | `Migrations.run`                     | migrations   | Applies all score-store migrations.                                             |
 | `Migrations.layer`                   | layers       | Applies score-store migrations when the layer is constructed.                   |
-

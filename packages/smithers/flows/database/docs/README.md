@@ -12,7 +12,7 @@ Two rules the generator enforces, because both are repository gates:
 
 - Every entry point in `docs/Manifest.ts` must resolve to a file that exists, so a new
   subpath is documented by declaring it here rather than by editing a page.
-- Generated content may not contain an em-dash. `scripts/check-docs.mjs`
+- Generated content may not contain an em-dash. `pnpm -C apps/site check:docs`
   forbids one anywhere in the site prose, and a first sentence lifted out of
   JSDoc would otherwise smuggle one in.
 
@@ -21,5 +21,5 @@ After editing, run:
 
 ```sh
 node packages/smithers/flows/database/scripts/docs.mjs
-pnpm docs:llms
+pnpm -C apps/site sync:docs
 ```

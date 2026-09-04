@@ -1,11 +1,11 @@
 ---
 title: "Library API"
-description: "One page per published @smthrs package: what it exports, with the types and defaults stitched from the api.md colocated with its source."
+description: "One page per @smthrs package: what it exports, with the types and defaults stitched from the api.md colocated with its source."
 sidebar:
   order: 0
 ---
 
-The Smithers library is a roster of `@smthrs/*` packages, each with one reference page here.
+The Smithers library is a roster of `@smthrs/*` packages, each with one reference page here. Packages marked **workspace-private** are documented for contributors but are not installable from npm.
 
 ## Install
 
@@ -53,9 +53,9 @@ Each page is stitched from the package's colocated `docs/api.md`: the source of 
 | [`@smthrs/plugin`](/docs/reference/api/plugin/) | Vite-style typed plugin kernel for flows: hooks, resolution, and config execution |
 | [`@smthrs/registry`](/docs/reference/api/registry/) | Portable flow descriptor discovery and progressive-disclosure registry services |
 | [`@smthrs/std`](/docs/reference/api/std/) | The flows standard tool library: filesystem, search, and shell flows |
-| [`@smthrs/chain`](/docs/reference/api/chain/) | The Agent Chain spine: an append-only journal, keyed replayable calls, and the trampoline that runs model-authored flow scripts |
-| [`@smthrs/evals`](/docs/reference/api/evals/) | Fixed-suite evaluation, baselines, regression reports, and score gates for flows |
-| [`@smthrs/scorers`](/docs/reference/api/scorers/) | Flow-native scoring, durable observations, and asynchronous score runners for flows |
+| [`@smthrs/chain`](/docs/reference/api/chain/) **workspace-private** | The Agent Chain spine: an append-only journal, keyed replayable calls, and the trampoline that runs model-authored flow scripts |
+| [`@smthrs/evals`](/docs/reference/api/evals/) **workspace-private** | Fixed-suite evaluation, baselines, regression reports, and score gates for flows |
+| [`@smthrs/scorers`](/docs/reference/api/scorers/) **workspace-private** | Flow-native scoring, durable observations, and asynchronous score runners for flows |
 
 ### Hosts and platforms
 

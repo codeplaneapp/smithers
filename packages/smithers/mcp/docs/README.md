@@ -17,7 +17,7 @@ node packages/smithers/mcp/scripts/docs.mjs           # write
 node packages/smithers/mcp/scripts/docs.mjs --check   # drift-check, exits 1 when stale
 ```
 
-`scripts/check-docs.mjs` discovers every `packages/*/scripts/docs.mjs` and runs
+`pnpm -C apps/site check:docs` discovers every `packages/*/scripts/docs.mjs` and runs
 the `--check` form, so stale generated prose fails the repository docs gate.
 
 It writes one file, `docs/reference.md`: the prose in `docs/api.md`, an index of
@@ -29,7 +29,7 @@ owns its formatting and dprint's table alignment would fight it forever.
 
 `@smthrs/mcp` is published at rc.0 and has no page under `docs/pages/api/`.
 `docs/Manifest.ts` records the target and what blocks it: `docs/sidebar.ts` is
-hand-written, `scripts/check-docs.mjs` fails any published page the sidebar does
+hand-written, `pnpm -C apps/site check:docs` fails any published page the sidebar does
 not list, and the release support matrix's `@smthrs/mcp` row has to link the
 page in the same edit. `@smthrs/testing` records the same arrangement for the
 same reason. When those two edits land, point `Package.api.target` at

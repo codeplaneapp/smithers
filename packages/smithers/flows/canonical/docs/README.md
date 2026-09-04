@@ -6,4 +6,4 @@ This directory and the package JSDoc are the source of every published sentence 
 
 The `//packages/smithers/flows/canonical:docsPages` target in `PACKAGE.ts` runs the same script: `smithers-build run` writes, `smithers-build lint` reports drift, and CI runs the lint form through the workspace `ci` step.
 
-After editing, run `node packages/smithers/flows/canonical/scripts/docs.mjs` from the repository root, then `pnpm docs:llms`, because both generated pages are in the llms bundles.
+After editing, run `node packages/smithers/flows/canonical/scripts/docs.mjs` from the repository root, then `pnpm -C apps/site sync:docs`, because both generated pages are in the llms bundles.

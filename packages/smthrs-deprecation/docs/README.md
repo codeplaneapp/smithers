@@ -15,7 +15,7 @@ node packages/smthrs-deprecation/scripts/docs.mjs --check
 ```
 
 The first command writes drifted output, and `--check` reports drift without
-writing. `scripts/check-docs.mjs` discovers this generator and runs the
+writing. `pnpm -C apps/site check:docs` discovers this generator and runs the
 `--check` form automatically.
 
 The golden notice also lives in `src/index.ts` and `README.md`.

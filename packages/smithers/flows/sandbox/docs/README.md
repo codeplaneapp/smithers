@@ -21,5 +21,5 @@ editing, run from the repository root:
 
 ```sh
 node packages/smithers/flows/sandbox/scripts/docs.mjs
-pnpm docs:llms
+pnpm -C apps/site sync:docs
 ```

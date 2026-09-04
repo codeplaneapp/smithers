@@ -12,5 +12,5 @@ After editing, run:
 
 ```sh
 node packages/smithers/flows/crypto/scripts/docs.mjs
-pnpm docs:llms
+pnpm -C apps/site sync:docs
 ```

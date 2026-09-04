@@ -13,5 +13,5 @@ After editing, run:
 
 ```sh
 node packages/smithers/agent/registry/scripts/docs.mjs
-pnpm docs:llms
+pnpm -C apps/site sync:docs
 ```

@@ -27,7 +27,7 @@ regenerated.
 
 Two rules the generator enforces:
 
-- Generated content carries no em-dash. `scripts/check-docs.mjs` forbids one
+- Generated content carries no em-dash. `pnpm -C apps/site check:docs` forbids one
   anywhere in the site, so a summary that reaches for one fails the build at
   the source instead of in review.
 - Only exports carrying `@category` reach a table. An export without one is

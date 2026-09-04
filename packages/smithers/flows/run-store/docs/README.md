@@ -11,4 +11,4 @@ reference table by carrying an `@category` tag.
 The `//packages/smithers/flows/run-store:docsPages` target writes or drift-checks the page.
 After editing, run `node packages/smithers/flows/run-store/scripts/docs.mjs`, then
 `node packages/smithers/flows/run-store/scripts/docs.mjs --check` and
-`node scripts/check-docs.mjs` from the repository root.
+`pnpm -C apps/site check:docs` from the repository root.

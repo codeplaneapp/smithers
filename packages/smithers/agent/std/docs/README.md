@@ -13,7 +13,7 @@ contract for `@smthrs/std`. Nothing here is hand-maintained twice.
   exists because the hand-written table named 21 of 30 modules and omitted three
   registry flows a model can call.
 
-`scripts/check-docs.mjs` discovers `packages/*/scripts/docs.mjs` and runs each in
+`pnpm -C apps/site check:docs` discovers `packages/*/scripts/docs.mjs` and runs each in
 `--check` mode, so the generator is a repository gate with no wiring of its own.
 
 ## The surface this package does not own yet
@@ -29,5 +29,5 @@ After editing anything under `src/` or `docs/`, run from the repository root:
 
 ```sh
 node packages/smithers/agent/std/scripts/docs.mjs
-pnpm docs:llms
+pnpm -C apps/site sync:docs
 ```

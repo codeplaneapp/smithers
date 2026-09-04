@@ -24,7 +24,7 @@ node packages/smithers/flows/time-travel/scripts/docs.mjs --check
 `packages/smithers/flows/time-travel/PACKAGE.ts` declares the same script as a `Generate`
 target, so `smithers-build run //packages/smithers/flows/time-travel:docsPages` writes the
 pages and `smithers-build lint //packages/smithers/flows/time-travel:docsPages` fails on
-drift. `scripts/check-docs.mjs` discovers this generator automatically.
+drift. `pnpm -C apps/site check:docs` discovers this generator automatically.
 
 The generator is not a formatter. It refuses to write when the documentation
 disagrees with the code, so these are hard failures rather than silent
@@ -37,4 +37,4 @@ rewrites:
   `src/TimeTravelError.ts`;
 - a page named in `Package.references` must still point at `/api/time-travel`;
 - generated content may not contain an em-dash, which is the repository house
-  style that `scripts/check-docs.mjs` enforces across the whole site.
+  style that `pnpm -C apps/site check:docs` enforces across the whole site.

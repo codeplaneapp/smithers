@@ -19,6 +19,6 @@ node packages/smithers/flows/jj/scripts/docs.mjs
 ```
 
 and drift-check it with `node packages/smithers/flows/jj/scripts/docs.mjs --check`, which is
-what `node scripts/check-docs.mjs` runs. The generator refuses to write content
+what `pnpm -C apps/site check:docs` runs. The generator refuses to write content
 containing an em-dash, so keep the prose here and the first sentence of every
 `@category` JSDoc block free of them.

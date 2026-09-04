@@ -22,7 +22,7 @@ registry consumer, so publishing an API page for it on the documentation site
 would describe a package nobody can install. If the package becomes public,
 add the generator following the
 `packages/smithers/flows/crypto` recipe (`Package.ts` + `scripts/docs.mjs` + a
-`Smithers.Generate` target; `scripts/check-docs.mjs` discovers the generator on
+`Smithers.Generate` target; `pnpm -C apps/site check:docs` discovers the generator on
 disk and needs no line of its own) and this note goes away.
 
 `src/README.md` used to hold a second copy of the layering notes and drifted

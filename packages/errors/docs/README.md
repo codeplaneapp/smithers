@@ -10,5 +10,5 @@ drift-checks those outputs. After editing, run:
 
 ```sh
 node packages/errors/scripts/docs.mjs
-pnpm docs:llms
+pnpm -C apps/site sync:docs
 ```

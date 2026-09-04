@@ -9,6 +9,11 @@ description: "The Agent Chain spine: an append-only journal, keyed replayable ca
 
 > **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/memory`](/docs/reference/api/memory/) · [`@smthrs/model`](/docs/reference/api/model/) · [`@smthrs/registry`](/docs/reference/api/registry/)
 
+## Availability
+
+`@smthrs/chain` is a private workspace package for the 1.0.0-rc.0 release.
+Only code in this workspace may consume it. Do not install this package from npm.
+
 `src/index.ts` re-exports one namespace per module. The wildcard `./*`
 export over `src/` is the same surface reached by subpath, so
 `@smthrs/chain/Catalog` and `Catalog` from the barrel are the same module.
@@ -90,4 +95,3 @@ the one in this package) must be built over the SAME journal, author, and
 runner instances the chain runs on. `SubChains` captures those services at
 construction, so a catalog built over a second set of layers would run its
 children against a different journal than their parent.
-

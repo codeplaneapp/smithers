@@ -15,9 +15,9 @@ to watch for when adding a public name.
 
 The `//packages/smithers/flows/step-cache:docsPages` target in `PACKAGE.ts` runs the same
 script: `smithers-build run` writes, `smithers-build lint` reports drift, and
-CI runs the lint form through the workspace `ci` step. `scripts/check-docs.mjs`
+CI runs the lint form through the workspace `ci` step. `pnpm -C apps/site check:docs`
 discovers this generator by path and runs its `--check` form as well.
 
 After editing, run `node packages/smithers/flows/step-cache/scripts/docs.mjs` from the
-repository root, then `pnpm docs:llms`, because the generated page feeds the
+repository root, then `pnpm -C apps/site sync:docs`, because the generated page feeds the
 llms bundles.
