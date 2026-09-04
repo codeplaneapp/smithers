@@ -2828,10 +2828,13 @@ const visit = async (
       variables: context.nixEnvironment.variables
     }
   )
-  // Key only the allowlisted/declared child environment, never the parent's
-  // credentials. Hash the values so key diagnostics do not print them.
+  // Host directories vary across machines. Only declarations carry value
+  // identity; PATH-selected executables are fingerprinted separately below.
+  const declaredEnvironment = { ...context.nixEnvironment?.variables, ...env }
   const environmentDigest = sha256Hex(JSON.stringify(
-    Object.keys(spawnEnvironment).sort().map((name) => [name, spawnEnvironment[name]])
+    Object.keys(spawnEnvironment).sort()
+      .filter((name) => name in declaredEnvironment || !["HOME", "TMPDIR", "TEMP", "TMP"].includes(name))
+      .map((name) => [name, name in declaredEnvironment ? spawnEnvironment[name] : true])
   ))
   let executable: unknown = null
   const command = argv?.[0]

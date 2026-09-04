@@ -120,6 +120,12 @@ The usual causes, in the order they turn up:
 | An input glob that matches a file you did not expect | `inputs.declared`               |
 | A dependency that itself re-keyed                    | `inputs.dependencies`           |
 
+Execution keys hash declared environment values and resolved executable identities.
+Inherited `HOME`, `TMPDIR`, `TEMP`, and `TMP` do not affect the key; other inherited
+allowlisted names contribute presence only. Declare an environment value in `env`
+when outputs depend on it, and name tools with `bin`/`using` so their resolved
+binary bytes participate in the key.
+
 The implementation fingerprint is deliberate: editing the executor re-keys
 every target, so a rule fix is never served a result the old rule produced.
 

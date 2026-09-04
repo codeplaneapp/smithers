@@ -1231,7 +1231,7 @@ export const Package = S.Package({ targets: { dist } })
     }
   })
 
-  it("misses a command build when PATH or an inherited environment value changes", async () => {
+  it("misses a build when the PATH-resolved executable changes", async () => {
     const root = await temporaryWorkspace()
     const tools = await temporaryWorkspace()
     const originalPath = process.env["PATH"] ?? ""
@@ -1239,18 +1239,18 @@ export const Package = S.Package({ targets: { dist } })
       await write(tools, `${name}/cache-compiler`, `#!/bin/sh\nmkdir -p dist\nprintf '${name}:%s' "$CI" > dist/a.txt\n`)
       await Fs.chmod(NodePath.join(tools, name, "cache-compiler"), 0o755)
     }
-    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(root, "WORKSPACE.ts", workspaceModule(`  host: S.Host({ bins: ["cache-compiler"] }),`))
     await write(
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const dist = S.Shell.Build({ command: "cache-compiler", outDirs: ["dist"] })
+const dist = S.Shell.Build({ bin: S.Host.bin("cache-compiler"), outDirs: ["dist"] })
 export const Package = S.Package({ targets: { dist } })
 `
     )
     commitAll(root)
     try {
-      for (const [tool, ci] of [["one", "first"], ["two", "first"], ["two", "second"]]) {
+      for (const [tool, ci] of [["one", "first"], ["two", "first"]]) {
         vi.stubEnv("PATH", `${NodePath.join(tools, tool!)}${NodePath.delimiter}${originalPath}`)
         vi.stubEnv("CI", ci!)
         const result = await serve(root, ["//:dist"])
@@ -1258,6 +1258,35 @@ export const Package = S.Package({ targets: { dist } })
         expect(result.logs).toContain("//:dist  ran")
         expect(await Fs.readFile(NodePath.join(root, "dist/a.txt"), "utf8")).toBe(`${tool}:${ci}`)
       }
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("shares keys across inherited home and temp values but keys declared environment values", async () => {
+    const root = await temporaryWorkspace()
+    const home = await temporaryWorkspace()
+    const tmp = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    const declaration = (flavor: string) =>
+      `import { Smithers as S } from "@smthrs/targets"
+const dist = S.Shell.Build({ command: "true", outDirs: ["dist"], env: { FLAVOR: "${flavor}" } })
+export const Package = S.Package({ targets: { dist } })
+`
+    await write(root, "PACKAGE.ts", declaration("one"))
+    commitAll(root)
+    try {
+      const first = await serve(root, ["//:dist", "--plan"])
+      vi.stubEnv("HOME", home)
+      vi.stubEnv("TMPDIR", tmp)
+      const relocated = await serve(root, ["//:dist", "--plan"])
+      expect(first.exitCode, first.logs).toBe(0)
+      expect(relocated.exitCode, relocated.logs).toBe(0)
+      expect(keyOf(relocated.output, "//:dist")).toBe(keyOf(first.output, "//:dist"))
+      await write(root, "PACKAGE.ts", declaration("two"))
+      const changed = await serve(root, ["//:dist", "--plan"])
+      expect(changed.exitCode, changed.logs).toBe(0)
+      expect(keyOf(changed.output, "//:dist")).not.toBe(keyOf(first.output, "//:dist"))
     } finally {
       vi.unstubAllEnvs()
     }
