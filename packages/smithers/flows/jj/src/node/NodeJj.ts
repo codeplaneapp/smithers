@@ -32,6 +32,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as ChildProcess from "node:child_process"
 import { realpathSync, statSync } from "node:fs"
 import { mkdtemp, readdir, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises"
+import { hostname } from "node:os"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { stripVTControlCharacters } from "node:util"
 import { isJjError, Jj, JjError, jjErrorCause } from "../Jj.ts"
@@ -313,8 +314,10 @@ const reclaimDeadLock = async (lockPath: string): Promise<void> => {
   try {
     const owners = await readdir(lockPath)
     for (const owner of owners) {
-      const match = /^(\d+)-/.exec(owner)
-      if (match !== null && !processIsAlive(Number(match[1]))) await removeLockOwner(lockPath, owner)
+      const match = /^(.*)-(\d+)-[^-]+$/.exec(owner)
+      if (match !== null && match[1] === hostname() && !processIsAlive(Number(match[2]))) {
+        await removeLockOwner(lockPath, owner)
+      }
     }
   } catch (cause) {
     if (!errnoIs(cause, "ENOENT")) throw cause
@@ -338,7 +341,7 @@ const withLockFile = <A, E, R>(
     io(() => mkdtemp(join(dirname(lockPath), ".smithers-lock-"))),
     (candidate) =>
       Effect.gen(function*() {
-        const owner = `${process.pid}-${candidate.slice(candidate.lastIndexOf("-") + 1)}`
+        const owner = `${hostname()}-${process.pid}-${candidate.slice(candidate.lastIndexOf("-") + 1)}`
         yield* io(() => writeFile(join(candidate, owner), "", { flag: "wx", mode: 0o600 }))
         const acquire = Effect.gen(function*() {
           const startedAt = Date.now()
@@ -541,7 +544,11 @@ const operations = (run: Run, repositoryRoot?: string) => {
     // the positional delimiter used to protect opaque workspace names.
     const delimiter = args.indexOf("--")
     const at = delimiter === -1 ? args.length : delimiter
-    return run(method, [...args.slice(0, at), "--config", "snapshot.max-new-file-size=0", ...args.slice(at)], repositoryRoot)
+    return run(
+      method,
+      [...args.slice(0, at), "--config", "snapshot.max-new-file-size=0", ...args.slice(at)],
+      repositoryRoot
+    )
   }
   /**
    * Fences one working-copy operation on the workspace it runs in.

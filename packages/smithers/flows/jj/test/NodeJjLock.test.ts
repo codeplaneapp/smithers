@@ -4,7 +4,7 @@ import * as Fiber from "effect/Fiber"
 import * as Schedule from "effect/Schedule"
 import { existsSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import { vi } from "vitest"
 import { Jj } from "../src/Jj.ts"
@@ -129,7 +129,7 @@ describe("NodeJj repository locks", () => {
         const lock = join(root, ".jj", "smithers.lock")
         yield* Effect.promise(async () => {
           await mkdir(lock)
-          await writeFile(join(lock, "2147483647-dead-owner"), "")
+          await writeFile(join(lock, `${hostname()}-2147483647-dead`), "")
         })
         vi.mocked(unlink).mockImplementationOnce(async (path) => {
           await actualFs.unlink(path)
@@ -149,10 +149,10 @@ describe("NodeJj repository locks", () => {
         Effect.gen(function*() {
           const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
           const lock = join(root, ".jj", "smithers.lock")
-          const replacement = join(lock, `${process.pid}-replacement`)
+          const replacement = join(lock, `${hostname()}-${process.pid}-replacement`)
           yield* Effect.promise(async () => {
             await mkdir(lock)
-            await writeFile(join(lock, "2147483647-dead-owner"), "")
+            await writeFile(join(lock, `${hostname()}-2147483647-dead`), "")
           })
           vi.mocked(rmdir).mockImplementationOnce(async () => {
             await writeFile(replacement, "")
@@ -174,6 +174,35 @@ describe("NodeJj repository locks", () => {
           const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
           vi.mocked(operation).mockRejectedValueOnce(errno("EACCES"))
           expect((yield* jj.snapshot()).changeId).toBe("snapshotid")
+        })
+      ))
+  }
+
+  for (
+    const [owner, code] of [
+      [`${hostname()}-2147483647-denied`, "EPERM"],
+      [`remote-${hostname()}-2147483647-foreign`, "ESRCH"],
+      ["2147483647-legacy", "ESRCH"]
+    ]
+  ) {
+    it.live(`preserves an owner whose death cannot be established locally: ${owner}`, () =>
+      fixture((root) =>
+        Effect.gen(function*() {
+          const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+          const lock = join(root, ".jj", "smithers.lock")
+          yield* Effect.promise(async () => {
+            await mkdir(lock)
+            await writeFile(join(lock, owner!), "")
+          })
+          const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+            throw errno(code!)
+          })
+          let now = 0
+          vi.spyOn(Date, "now").mockImplementation(() => now += 120_001)
+          expect((yield* Effect.flip(jj.snapshot())).message).toContain("timed out waiting")
+          expect(existsSync(join(lock, owner!))).toBe(true)
+          if (code === "EPERM") expect(kill).toHaveBeenCalledWith(2147483647, 0)
+          else expect(kill).not.toHaveBeenCalled()
         })
       ))
   }
@@ -214,14 +243,14 @@ describe("NodeJj repository locks", () => {
         const lock = join(root, ".jj", "smithers.lock")
         yield* Effect.promise(async () => {
           await mkdir(lock)
-          await writeFile(join(lock, `${process.pid}-other-owner`), "")
+          await writeFile(join(lock, `${hostname()}-${process.pid}-other`), "")
         })
         const pending = yield* Effect.forkChild(
           Effect.flatMap(Jj, (jj) => jj.restore("saved")).pipe(Effect.provide(NodeJj.layerAt(root)))
         )
         yield* until(async () => (await readdir(join(root, ".jj"))).some((name) => name.startsWith(".smithers-lock-")))
         yield* Fiber.interrupt(pending)
-        expect((yield* Effect.promise(() => readdir(lock))).sort()).toEqual([`${process.pid}-other-owner`])
+        expect((yield* Effect.promise(() => readdir(lock))).sort()).toEqual([`${hostname()}-${process.pid}-other`])
         expect(yield* Effect.promise(() => readdir(join(root, ".jj")))).toEqual(["smithers.lock"])
         expect(existsSync(join(root, "started"))).toBe(false)
       })

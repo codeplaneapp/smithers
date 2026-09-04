@@ -248,7 +248,11 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
 
       expect(error.code).toBe("unknown")
       expect(error.message).toBe("jj status: output exceeded the 67108864-byte ceiling")
-      expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status --config snapshot.max-new-file-size=0" })
+      expect(error).toMatchObject({
+        module: "NodeJj",
+        method: "status",
+        command: "jj status --config snapshot.max-new-file-size=0"
+      })
     }))
 
   it.effect("reports any other spawn failure as `unknown`", () =>

@@ -320,7 +320,11 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
 
       expect(error.code).toBe("unknown")
       expect(error.message).toBe("jj status: output exceeded the 67108864-byte ceiling")
-      expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status --config snapshot.max-new-file-size=0" })
+      expect(error).toMatchObject({
+        module: "NodeJj",
+        method: "status",
+        command: "jj status --config snapshot.max-new-file-size=0"
+      })
       // Refusing the output is only half the answer: the child has to be gone,
       // not left filling a pipe nobody reads.
       yield* waitForExit(Number(readFileSync(`${marker}.pid`, "utf8").trim()))

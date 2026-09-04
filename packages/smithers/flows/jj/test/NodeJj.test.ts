@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { execFile, execFileSync } from "node:child_process"
 import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { isJjError, Jj } from "../src/Jj.ts"
@@ -262,7 +262,7 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
 
           yield* Effect.promise(async () => {
             await mkdir(join(target, ".jj", "smithers.lock"))
-            await writeFile(join(target, ".jj", "smithers.lock", "2147483647-dead-owner"), "")
+            await writeFile(join(target, ".jj", "smithers.lock", `${hostname()}-2147483647-dead`), "")
           })
           const outputs = yield* Effect.all(Array.from({ length: 4 }, (_, i) => invoke(`process ${i}`)), {
             concurrency: "unbounded"
@@ -288,7 +288,7 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
         const target = await mkdtemp(join(tmpdir(), "flows-node-jj-stale-lock-"))
         execFileSync("jj", ["git", "init", target], { stdio: "ignore" })
         await mkdir(join(target, ".jj", "smithers.lock"))
-        await writeFile(join(target, ".jj", "smithers.lock", "2147483647-dead-owner"), "")
+        await writeFile(join(target, ".jj", "smithers.lock", `${hostname()}-2147483647-dead`), "")
         return target
       }),
       (target) =>

@@ -199,8 +199,9 @@ Repository state operations are fenced as a unit. `snapshot`, `restore`, and
 `diff` share one single-permit semaphore per repository inside a process and an
 exclusive `.jj/smithers.lock` owner directory across processes. The snapshot's
 CLI calls therefore cannot interleave with another state operation. A caller
-reclaims a lock whose owner process has exited, so an abruptly killed host does
-not strand the repository.
+records lock owners as `hostname-pid-random` and reclaims only an owner on the
+same host whose process is dead. Permission-denied probes count as alive;
+foreign-host and legacy owner markers require operator cleanup.
 
 Snapshot messages are opaque strings on both browser and CLI layers, including
 empty strings, leading `-`, quotes, and newlines. Node and Bun pass messages as
