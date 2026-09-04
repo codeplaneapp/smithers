@@ -22,6 +22,7 @@
 
 /** One scratch file the lane writes and hands to the compiler.
  *
+ * @category models
  * @since 0.1.0
  */
 export interface ExtractedFile {
@@ -31,6 +32,7 @@ export interface ExtractedFile {
 
 /** The files a page yields plus the counts the lane reports.
  *
+ * @category models
  * @since 0.1.0
  */
 export interface Extracted {
@@ -47,6 +49,7 @@ export interface Extracted {
 
 /** The fence metas the lane reads off the info string.
  *
+ * @category models
  * @since 0.1.0
  */
 export interface FenceMeta {
@@ -66,6 +69,7 @@ const languageAlternation = (languages: ReadonlyArray<string>): string =>
 
 /** Parses the info-string remainder after the language: `title="x" fragment`.
  *
+ * @category utils
  * @since 0.1.0
  */
 export const parseMeta = (meta: string): FenceMeta => {
@@ -93,7 +97,9 @@ const checkTitle = (title: string): void => {
     title.includes("\\") ||
     segments.some((segment) => segment === "" || segment === "." || segment === "..")
   ) {
-    throw new Error(`fenced code block title ${JSON.stringify(title)} must be a relative path with no "." or ".." segment`)
+    throw new Error(
+      `fenced code block title ${JSON.stringify(title)} must be a relative path with no "." or ".." segment`
+    )
   }
 }
 
@@ -104,11 +110,13 @@ const checkTitle = (title: string): void => {
  * fence body. Throws on a title that escapes the scratch directory or that
  * takes a standalone block's `block-N.ts` name.
  *
+ * @category utils
  * @since 0.1.0
  */
 export const extract = (markdown: string, languages: ReadonlyArray<string>): Extracted => {
   const pattern = new RegExp(
-    "^[ \\t]*```(?:" + languageAlternation(languages) + ")(?:[ \\t]+([^\\n]*?))?[ \\t]*\\n([\\s\\S]*?)^[ \\t]*```[ \\t]*$",
+    "^[ \\t]*```(?:" + languageAlternation(languages) +
+      ")(?:[ \\t]+([^\\n]*?))?[ \\t]*\\n([\\s\\S]*?)^[ \\t]*```[ \\t]*$",
     "gm"
   )
   const files = new Map<string, Array<string>>()

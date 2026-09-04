@@ -58,7 +58,9 @@ describe("MarkdownCodeBlocks.extract", () => {
     expect(() => MarkdownCodeBlocks.extract("```ts title=\"../a.ts\"\nexport {}\n```\n", ["ts"])).toThrow(
       /title "\.\.\/a\.ts"/
     )
-    expect(() => MarkdownCodeBlocks.extract("```ts title=\"/a.ts\"\nexport {}\n```\n", ["ts"])).toThrow(/title "\/a\.ts"/)
+    expect(() => MarkdownCodeBlocks.extract("```ts title=\"/a.ts\"\nexport {}\n```\n", ["ts"])).toThrow(
+      /title "\/a\.ts"/
+    )
   })
 
   it("refuses a titled file that collides with a standalone block name", () => {

@@ -4798,7 +4798,10 @@ export const execute = async (
           if (cached !== undefined) return green("hit")
           const lane = node.lane
           const readPage = async (page: string) =>
-            MarkdownCodeBlocks.extract(await Fs.readFile(NodePath.join(root, ...page.split("/")), "utf8"), lane.languages)
+            MarkdownCodeBlocks.extract(
+              await Fs.readFile(NodePath.join(root, ...page.split("/")), "utf8"),
+              lane.languages
+            )
           let extracted: MarkdownCodeBlocks.Extracted
           let contextFiles: Array<MarkdownCodeBlocks.ExtractedFile>
           try {
