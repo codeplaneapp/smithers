@@ -5,8 +5,8 @@
  * changed the world". Each step registers the call that undoes it, and a
  * failure walks those calls backwards, most recent first.
  *
- * @see https://smithers.sh/concepts/failure-and-retry
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/concepts/retries
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -83,7 +83,7 @@ export interface RuntimeStep<I, A, E, R, E2, R2> {
  * `run` snapshots `steps`, each step's `id`, `action`, and `compensation`,
  * and `onFailure` at the call, so a later edit to the array, a step record,
  * or the option object does not alter that run. See
- * https://smithers.sh/api/patterns#identity-and-ownership.
+ * https://smithers.sh/docs/reference/api/patterns#identity-and-ownership.
  *
  * @category models
  * @since 0.1.0

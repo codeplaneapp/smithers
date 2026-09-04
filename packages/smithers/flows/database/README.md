@@ -26,7 +26,7 @@ driver is platform-specific, so they live under explicit subpaths.
 
 Any Effect `SqlClient` works underneath `DurableWriter.layer()`, so a browser or
 Postgres client gets the same normalized errors and write retry. See
-[browser support](https://smithers.sh/architecture/browser-support).
+[browser support](https://smithers.sh/docs/reference/api/platform-browser).
 
 ```ts
 import { DurableWriter } from "@smthrs/database"
@@ -128,7 +128,7 @@ it, pointing the runtime at a 0.x `smithers.db` would add `flows_*` tables
 beside the `_smithers_*` ones and silently mix two schemas. See
 [the rc.0 contract](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md)
 sections 2 and 6 and
-[known limitations](https://smithers.sh/release/known-limitations).
+[known limitations](https://smithers.sh/docs/migration/compatibility).
 
 ## Why `DurableWriter.write` instead of bare `sql.withTransaction`
 
@@ -160,5 +160,5 @@ transaction policy that must live at one boundary:
   PGlite, and Postgres one stable `busy`/`constraint`/`io` vocabulary, so
   store logic never branches on driver-specific codes.
 
-See the [database reference](https://smithers.sh/api/database) and
-[journal concepts](https://smithers.sh/concepts/journal).
+See the [database reference](https://smithers.sh/docs/reference/api/database) and
+[journal concepts](https://smithers.sh/docs/concepts/durable-execution).

@@ -14,7 +14,7 @@
  * `ReviewLoop` owns: it reviews with the produced plan and revises with
  * `{ output, review, round }`, while `run` names the goal and the round in both.
  *
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

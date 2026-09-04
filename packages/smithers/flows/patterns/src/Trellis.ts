@@ -14,7 +14,7 @@
  * `@smthrs/flow` defines, so each round is its own journal segment and a crash
  * resumes at the round boundary.
  *
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

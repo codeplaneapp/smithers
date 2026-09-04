@@ -22,7 +22,7 @@
  * resolved references, and the hashed `version`.
  *
  * Governing contract: the step-key rules at
- * https://smithers.sh/concepts/step-keys.
+ * https://smithers.sh/docs/concepts/content-addressing.
  *
  * @since 0.1.0
  */

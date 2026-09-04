@@ -2,7 +2,7 @@
  * The single typed failure of the plugin kernel.
  *
  * The public package contract is documented at
- * {@link https://smithers.sh/api/plugin}; D14 in
+ * {@link https://smithers.sh/docs/reference/api/plugin}; D14 in
  * `docs/pages/design-decisions.md` bounds it to host-owned cell hooks.
  *
  * @since 1.0.0-rc.0

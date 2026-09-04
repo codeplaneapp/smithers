@@ -6,9 +6,9 @@
  * and a per-rung `escalateIf` that overrides it. A `fallback` runs only after
  * every rung escalated, which is where a human approval flow belongs.
  *
- * @see https://smithers.sh/api/patterns
- * @see https://smithers.sh/concepts/failure-and-retry
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/concepts/retries
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

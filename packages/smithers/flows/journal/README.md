@@ -8,16 +8,16 @@ else. It owns `flows_journal_events` and `flows_journal_checkpoints` above
 channel accepts, and the records consumed by engine-store and sync.
 
 Run and attempt state live in
-[`@smthrs/run-store`](https://smithers.sh/api/run-store), sealed step results in
-[`@smthrs/step-cache`](https://smithers.sh/api/step-cache), and the durable
+[`@smthrs/run-store`](https://smithers.sh/docs/reference/api/run-store), sealed step results in
+[`@smthrs/step-cache`](https://smithers.sh/docs/reference/api/step-cache), and the durable
 deferred/clock tables in
-[`@smthrs/engine-store`](https://smithers.sh/api/engine-store).
+[`@smthrs/engine-store`](https://smithers.sh/docs/reference/api/engine-store).
 
 The journal is Smithers' own **logical (domain) write-ahead log**, intended to
 become the authoritative state history. The SQLite WAL beneath it is only the
 storage durability substrate and is never consumed as the application event API.
 PostgreSQL and PGlite are unsupported at 1.0.0-rc.0; see
-[the support matrix](https://smithers.sh/release/support-matrix). Lifecycle
+[the support matrix](https://smithers.sh/docs/migration/compatibility). Lifecycle
 evidence takes `emitDurable`, which commits before it returns, and a durable
 boundary must not advance a run or expose its result before that commit.
 `emitLossy` is the telemetry channel: bounded, optimistic, lossy by
@@ -35,7 +35,7 @@ pnpm add @smthrs/journal
 
 The root exports these namespaces, also available from matching
 `@smthrs/journal/*` subpaths. The generated
-[API reference](https://smithers.sh/api/journal) lists every export with its
+[API reference](https://smithers.sh/docs/reference/api/journal) lists every export with its
 one-line summary.
 
 | Namespace        | Public exports                                                                                                                                                                                                                                                                                                       |
@@ -162,7 +162,7 @@ consistent across the package boundary: it runs a state projection and the
 write through the same `DurableWriter` and their writes join it as savepoints,
 and it defers publication until that transaction commits. Either a transition
 and its lifecycle entry are both durable, or neither is. See
-[implementation status](https://smithers.sh/release/support-matrix).
+[implementation status](https://smithers.sh/docs/migration/compatibility).
 
 One coupling outlives the split at the SQL level: a fenced `emitDurable` gates
 its insert on a `flows_runs` row still naming the given owner, so the journal
@@ -170,6 +170,6 @@ reads a table `@smthrs/run-store` owns. `test/JournalFence.test.ts` pins that
 contract here against a fixture of the columns the fence reads;
 `@smthrs/engine-store` pins it against the real migrated schema.
 
-See the [journal reference](https://smithers.sh/api/journal),
-[journal concepts](https://smithers.sh/concepts/journal), and
+See the [journal reference](https://smithers.sh/docs/reference/api/journal),
+[journal concepts](https://smithers.sh/docs/concepts/durable-execution), and
 [checkpoints and compaction](https://smithers.sh/compaction).

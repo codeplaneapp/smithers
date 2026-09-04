@@ -3,7 +3,7 @@
  * and the config pipeline.
  *
  * The public package contract is documented at
- * {@link https://smithers.sh/api/plugin}, with the shipped host catalog in
+ * {@link https://smithers.sh/docs/reference/api/plugin}, with the shipped host catalog in
  * `packages/smithers/agent/src/CellPlugin.ts`. Durable
  * engine extension remains dependency injection; this package does not expose
  * an engine-wide lifecycle registry.

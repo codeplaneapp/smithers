@@ -3,7 +3,7 @@
  * kernel's base hook catalog.
  *
  * The public package contract is documented at
- * {@link https://smithers.sh/api/plugin}. The shared catalog is limited to
+ * {@link https://smithers.sh/docs/reference/api/plugin}. The shared catalog is limited to
  * `config` and `configResolved`;
  * `@smthrs/agent` adds only `cellRegistry`, `cellFlows`, and
  * `cellModelRequest`. Durable-core lifecycle policy is not a hook catalog.

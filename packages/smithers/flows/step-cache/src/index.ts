@@ -4,8 +4,8 @@
  * `CacheStore` is a keyed memoization of sealed action results whose entries
  * may be evicted. It shares nothing with the journal or the run store beyond
  * the database beneath it. See the
- * {@link https://smithers.sh/concepts/step-keys | step-key contract} and
- * {@link https://smithers.sh/concepts/journal | journal architecture}.
+ * {@link https://smithers.sh/docs/concepts/content-addressing | step-key contract} and
+ * {@link https://smithers.sh/docs/concepts/durable-execution | journal architecture}.
  *
  * This entry point is browser-bundleable: the service is written against the
  * driver-neutral `@smthrs/database` contract. The test double, which binds a

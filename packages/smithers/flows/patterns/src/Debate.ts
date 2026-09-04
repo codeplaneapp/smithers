@@ -1,7 +1,7 @@
 /**
  * A bounded, alternating deliberation pattern.
  *
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

@@ -60,7 +60,7 @@ const main = Cli.run(Command.cli, { version: Version.packageVersion }).pipe(
 
 `@smthrs/cli/package.json` is exported for package metadata. `internal/*` and nested `*/index` subpaths are not public.
 
-Control servers bind `127.0.0.1` by default. See the [control-plane trust posture](https://smithers.sh/guides/control-plane-trust) before opting into a non-loopback bind.
+Control servers bind `127.0.0.1` by default. See the [control-plane trust posture](https://smithers.sh/docs/guides/control-plane) before opting into a non-loopback bind.
 
 ## Exit codes
 
@@ -75,7 +75,7 @@ Control servers bind `127.0.0.1` by default. See the [control-plane trust postur
 | `130` | The run was cancelled or interrupted.                                                 |
 | `143` | The run was terminated.                                                               |
 
-Codes 3, 130, and 143 report a run outcome rather than a failure of the command, and are decided from the control receipt alone. See [the CLI pages](https://smithers.sh/cli) for the per-verb detail.
+Codes 3, 130, and 143 report a run outcome rather than a failure of the command, and are decided from the control receipt alone. See [the CLI pages](https://smithers.sh/docs/reference/cli) for the per-verb detail.
 
 ## Environment
 

@@ -6,7 +6,7 @@
  * topology; it never executes a flow node, an Effect, or a value mapper.
  *
  * Governing contract: `packages/smithers/flows/core/docs/api.md`, published as
- * https://smithers.sh/api/core.
+ * https://smithers.sh/docs/reference/api/core.
  *
  * @since 0.0.0
  */

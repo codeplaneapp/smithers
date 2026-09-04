@@ -8,7 +8,7 @@
  * so the key package stays a leaf.
  *
  * Governing contract: the step-key rules at
- * https://smithers.sh/concepts/step-keys. Material is computed with no I/O,
+ * https://smithers.sh/docs/concepts/content-addressing. Material is computed with no I/O,
  * and two hardening rules shape it: the nominal, never shape-sniffed
  * `InputRef` and the hashed `version`.
  *

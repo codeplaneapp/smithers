@@ -41,7 +41,7 @@ pnpm add @smthrs/sync
 
 The root exports these namespaces, also available from matching
 `@smthrs/sync/*` subpaths. The per-export reference is generated from the
-source: see [smithers.sh/api/sync](https://smithers.sh/api/sync).
+source: see [smithers.sh/api/sync](https://smithers.sh/docs/reference/api/sync).
 
 | Namespace          | What it owns                                                                                      |
 | ------------------ | ------------------------------------------------------------------------------------------------- |
@@ -89,7 +89,7 @@ means the server skipped beyond the interval covered by the client's cursor.
 Every fan-out surface is bounded, so one follower's cost is a function of the
 configured bound rather than of the workspace's size or of how far behind that
 follower has fallen. The table lives with the rest of the contract at
-[smithers.sh/api/sync](https://smithers.sh/api/sync#bounds), and every numeric
+[smithers.sh/api/sync](https://smithers.sh/docs/reference/api/sync#bounds), and every numeric
 option is validated where it enters: a value that is not a positive safe
 integer fails the constructor with `invalid_request` rather than quietly
 disabling the comparison it configures.
@@ -99,5 +99,5 @@ Both change feeds slide rather than block, and neither is a source of truth.
 every reader re-lists on a cadence of its own, so a dropped notification costs
 latency and never state.
 
-See [sync concepts](https://smithers.sh/concepts/sync) for the protocol, and
+See [sync concepts](https://smithers.sh/docs/concepts/sync) for the protocol, and
 `docs/README.md` in this package for where each published sentence lives.

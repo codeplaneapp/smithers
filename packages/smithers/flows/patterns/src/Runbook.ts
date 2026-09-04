@@ -3,8 +3,8 @@
  * whether it is gated by an approval, and a denial either stops the runbook or
  * skips the step.
  *
- * @see https://smithers.sh/api/patterns-teams
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

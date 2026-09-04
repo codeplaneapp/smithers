@@ -30,7 +30,7 @@
  * closes that replay gap; omitting it deliberately keeps the process-local
  * fallback.
  *
- * @see https://smithers.sh/api/memory
+ * @see https://smithers.sh/docs/reference/api/memory
  *
  * @since 0.1.0
  */

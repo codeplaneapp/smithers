@@ -13,7 +13,7 @@
  * export happens over Effect's `HttpClient`, and {@link layerFetch} binds the
  * `fetch` implementation the host already has, so no entry point here ever
  * resolves a `node:` built-in. See the
- * {@link https://smithers.sh/api/observability | observability API contract}.
+ * {@link https://smithers.sh/docs/reference/api/observability | observability API contract}.
  *
  * @since 0.1.0
  */

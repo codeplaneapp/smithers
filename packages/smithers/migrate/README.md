@@ -30,7 +30,7 @@ Two gates gate `apply` and both exit 3. Persisted or live 0.x run state blocks u
 
 The root entry point exports these namespaces; each is also importable from `@smthrs/migrate/<Module>`.
 
-The exports themselves are not listed here. The reference page's [Exports](https://smithers.sh/migration/migrate-tool#exports) table is generated from the JSDoc of every public module, so it names every export, its category, and where to import it from, and a list kept here as well would be a second one to keep right.
+The exports themselves are not listed here. The reference page's [Exports](https://smithers.sh/docs/reference/api/migrate#exports) table is generated from the JSDoc of every public module, so it names every export, its category, and where to import it from, and a list kept here as well would be a second one to keep right.
 
 | Module           | Description                                                                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |

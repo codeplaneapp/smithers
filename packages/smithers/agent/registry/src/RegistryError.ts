@@ -5,7 +5,7 @@
  * to remediation. Never repurpose a code; add one.
  *
  * Governing contract: `packages/smithers/agent/registry/docs/api.md`, published as
- * https://smithers.sh/api/registry.
+ * https://smithers.sh/docs/reference/api/registry.
  *
  * @since 0.1.0
  */

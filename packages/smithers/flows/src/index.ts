@@ -42,7 +42,7 @@
  * surface is what you reach for, namespaces everywhere else. The rest of that
  * package (`Frame`, `TimeTravelStore`, the two store layers,
  * `EffectBoundary`) is reached through `@smthrs/time-travel` directly; see
- * https://smithers.sh/api/time-travel.
+ * https://smithers.sh/docs/reference/api/time-travel.
  *
  * There is no plugin namespace and no hook catalog: extension in `flows` is
  * Effect dependency injection. You extend the engine by providing a `Layer`,

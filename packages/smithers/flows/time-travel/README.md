@@ -64,7 +64,7 @@ const rewound = Effect.gen(function*() {
 ## Failure behaviour
 
 Every operation fails as a `TimeTravelError` discriminated by a closed `code`.
-The [API reference](https://smithers.sh/api/time-travel) carries the full table,
+The [API reference](https://smithers.sh/docs/reference/api/time-travel) carries the full table,
 generated from `TimeTravelErrorCode` itself; in short:
 
 `busy` (another owner holds the run), `live_parent` / `live_child` (the run or a
@@ -100,5 +100,5 @@ read more journal entries than `maxHistoryEntries` allows), and `unknown`.
 ## Documentation
 
 Prose about this package lives in [`docs/`](./docs) and is generated into the
-site; see [the API reference](https://smithers.sh/api/time-travel) and
-[time travel concepts](https://smithers.sh/concepts/time-travel).
+site; see [the API reference](https://smithers.sh/docs/reference/api/time-travel) and
+[time travel concepts](https://smithers.sh/docs/concepts/time-travel).

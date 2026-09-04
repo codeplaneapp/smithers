@@ -3,8 +3,8 @@
  *
  * Recall is both a flow-valued injection slot and an Effect runtime service.
  *
- * @see https://smithers.sh/api/memory
- * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/docs/reference/api/memory
+ * @see https://smithers.sh/docs/reference/api/patterns
  *
  * @since 0.1.0
  */

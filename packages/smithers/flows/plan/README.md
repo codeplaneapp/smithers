@@ -207,4 +207,4 @@ unchanged key.
 Browser-safe. The package resolves no `node:` built-in; `pnpm run browser` at the
 repository root executes that claim.
 
-Full API reference: [smithers.sh/api/plan](https://smithers.sh/api/plan).
+Full API reference: [smithers.sh/api/plan](https://smithers.sh/docs/reference/api/plan).

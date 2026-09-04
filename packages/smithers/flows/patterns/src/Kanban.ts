@@ -2,8 +2,8 @@
  * Kanban pattern: move every item through an ordered list of columns, with a
  * concurrency bound applied inside each column.
  *
- * @see https://smithers.sh/api/patterns-teams
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
@@ -109,7 +109,7 @@ export interface Board<Out, E> {
  * each item's `id` once there, so a later edit to the arrays or the option
  * object does not alter that run. The item record itself is handed to the
  * column as the caller's own object. See
- * https://smithers.sh/api/patterns#identity-and-ownership.
+ * https://smithers.sh/docs/reference/api/patterns#identity-and-ownership.
  *
  * @category models
  * @since 0.1.0

@@ -11,8 +11,8 @@
  * worst case. {@link run} performs the real fan-out over the issues the
  * scanner actually returned.
  *
- * @see https://smithers.sh/api/patterns-loops
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

@@ -2,7 +2,7 @@
  * The plugin object: a plain record produced by a factory function.
  *
  * The public package contract is documented at
- * {@link https://smithers.sh/api/plugin}. The shipped consumer is the
+ * {@link https://smithers.sh/docs/reference/api/plugin}. The shipped consumer is the
  * assembled cell host in `@smthrs/agent`;
  * durable-core policy continues to use Effect services and constructor
  * options rather than plugin lifecycle hooks.

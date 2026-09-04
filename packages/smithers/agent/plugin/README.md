@@ -6,7 +6,7 @@
 
 The bounded cell-host plugin kernel: typed hooks, resolution and ordering, and the config pipeline.
 
-The public package contract is documented at <https://smithers.sh/api/plugin>, with the shipped host catalog in `packages/smithers/agent/src/CellPlugin.ts`. Durable engine extension remains dependency injection; this package does not expose an engine-wide lifecycle registry.
+The public package contract is documented at <https://smithers.sh/docs/reference/api/plugin>, with the shipped host catalog in `packages/smithers/agent/src/CellPlugin.ts`. Durable engine extension remains dependency injection; this package does not expose an engine-wide lifecycle registry.
 
 Install the plugin kernel with the exact Effect release used by Smithers rc.0:
 
@@ -49,6 +49,6 @@ Configuration holds strict JSON only: an `undefined` member is refused, not
 dropped. Caller mutation after startup cannot change dispatch or sealed cache
 keys.
 
-See the [API reference](https://smithers.sh/api/plugin) for error codes,
+See the [API reference](https://smithers.sh/docs/reference/api/plugin) for error codes,
 dispatch semantics, and limits. The production cell hooks are documented by
-[`@smthrs/agent`](https://smithers.sh/api/agent).
+[`@smthrs/agent`](https://smithers.sh/docs/reference/api/agent).

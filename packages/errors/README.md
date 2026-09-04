@@ -36,7 +36,7 @@ import { isSmithersError, SmithersError } from "@smthrs/errors"
 
 const error = new SmithersError("INVALID_INPUT", "no bot token configured")
 error.code // "INVALID_INPUT"
-error.message // "no bot token configured See https://smithers.sh/reference/errors"
+error.message // "no bot token configured See https://smithers.sh/docs/reference/errors"
 isSmithersError(error) // true
 ```
 

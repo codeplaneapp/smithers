@@ -2,7 +2,7 @@
  * Agent Skills frontmatter support.
  *
  * Governing contracts:
- * `packages/smithers/flows/core/docs/api.md`, published as https://smithers.sh/api/core,
+ * `packages/smithers/flows/core/docs/api.md`, published as https://smithers.sh/docs/reference/api/core,
  * and https://agentskills.io/specification.
  *
  * @since 0.0.0

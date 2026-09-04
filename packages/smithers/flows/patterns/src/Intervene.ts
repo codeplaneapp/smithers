@@ -2,8 +2,8 @@
  * Intervene pattern: read a target, propose a change, apply it behind an
  * optional approval, and report what happened.
  *
- * @see https://smithers.sh/api/patterns-teams
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

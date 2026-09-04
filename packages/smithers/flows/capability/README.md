@@ -15,7 +15,7 @@ the three typed failures a guarded Host call can add:
 | `Capability` | `Capability`, `CapabilityPattern`, `Action`, `PatternAction`, `EffectTier`, `TierOptions`, `maxResourceLength`, `maxMatchWork`, `make`, `format`, `parse`, `parsePattern`, `patternFromCapability`, `withinMatchBudget`, `matches`, `subsumes`, `tierOf`, `requiresIdempotencyKey`.                              |
 | `Permission` | `PermissionRequired`, `PermissionDenied`, `GrantStoreError`, `GrantStoreErrorCode`, the `PermissionError` union and its schema, `Rule`, `RuleEffect`, `evaluate`, `permissionRequired`, `permissionDenied`, `isPermissionError`, `formatError`, `maxDisplayFieldLength`, `toPlatformError`, `fromPlatformError`. |
 
-Full reference: <https://smithers.sh/api/capability>.
+Full reference: <https://smithers.sh/docs/reference/api/capability>.
 
 ## Why it is its own package
 

@@ -8,7 +8,7 @@ The assembled workspace gateway: one HTTP surface carrying the control plane, th
 npm install @smthrs/gateway
 ```
 
-The mounts, the bind and credential policy, the projections and their rows, the subscription and cursor semantics, every failure code with the status it answers, and the resource limits are documented once, on [the API page](https://smithers.sh/api/gateway). This file lists what the package exports and shows how a host composes it.
+The mounts, the bind and credential policy, the projections and their rows, the subscription and cursor semantics, every failure code with the status it answers, and the resource limits are documented once, on [the API page](https://smithers.sh/docs/reference/api/gateway). This file lists what the package exports and shows how a host composes it.
 
 ## Public API
 

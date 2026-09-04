@@ -12,7 +12,7 @@ pnpm add @smthrs/jj
 
 The complete API reference, including every entry point and every export, is
 generated from this package's own sources and published at
-<https://smithers.sh/api/jj>. This file is the overview.
+<https://smithers.sh/docs/reference/api/jj>. This file is the overview.
 
 ## Entry points
 
@@ -200,5 +200,5 @@ does not own the mount and never syncs for you.
   `conflict`, `invalid_ref`, and `unknown`; `not_installed` comes from the TS
   side — `layerUnsupported`, kept exported for hosts that ship no module.
 
-See the [kernel reference](https://smithers.sh/api/kernel), which owns the
+See the [kernel reference](https://smithers.sh/docs/reference/api/kernel), which owns the
 closed host service list this contract is one slot of.

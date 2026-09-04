@@ -23,7 +23,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `SteerPayload`      | Defines the steering vocabulary a control plane and a harness exchange through a payload. |
 
 Every export of every module, with a one-line summary each, is listed on
-[the API page](https://smithers.sh/api/notifications). That table is generated
+[the API page](https://smithers.sh/docs/reference/api/notifications). That table is generated
 from the JSDoc in `src`, so it cannot drift from the barrel; this file
 deliberately does not repeat it.
 

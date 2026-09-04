@@ -26,7 +26,7 @@ supplying an alternate browser SQL client is not a supported runtime.
 
 `scripts/browser-check.mjs` at the repository root pins that boundary: it
 bundles this entry point for the browser and fails the build if it regresses.
-See [browser support](https://smithers.sh/architecture/browser-support).
+See [browser support](https://smithers.sh/docs/reference/api/platform-browser).
 
 ## Public API
 
@@ -224,6 +224,6 @@ needs human review; and scheduled recertification cadence, because scheduling
 nightly or per-merge full passes is a product/system-flow concern. The
 recertification primitive itself ships here.
 
-See the [engine-store reference](https://smithers.sh/api/engine-store),
-[durable execution model](https://smithers.sh/concepts/durable-execution-model), and
-[step keys](https://smithers.sh/concepts/step-keys).
+See the [engine-store reference](https://smithers.sh/docs/reference/api/engine-store),
+[durable execution model](https://smithers.sh/docs/concepts/durable-execution), and
+[step keys](https://smithers.sh/docs/concepts/content-addressing).

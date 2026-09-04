@@ -2,8 +2,8 @@
  * Supervisor pattern: one boss plans, workers execute in parallel, the boss
  * reviews, and only the tasks the review calls retriable are re-delegated.
  *
- * @see https://smithers.sh/api/patterns-teams
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

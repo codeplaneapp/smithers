@@ -2,8 +2,8 @@
  * Check-suite pattern: run independent checks with bounded concurrency and
  * reduce their rows to one verdict.
  *
- * @see https://smithers.sh/api/patterns-teams
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

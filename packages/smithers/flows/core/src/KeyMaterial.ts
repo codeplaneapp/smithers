@@ -2,7 +2,7 @@
  * Digest-free input to `/keys`.
  *
  * Governing contract: `packages/smithers/flows/core/docs/api.md`, published as
- * https://smithers.sh/api/core.
+ * https://smithers.sh/docs/reference/api/core.
  *
  * Graph-local ids may occur only inside dependency references. The key
  * compiler replaces those references with dependency digests; names and tree

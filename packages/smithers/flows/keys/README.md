@@ -21,9 +21,9 @@ const parsed = Schema.decodeUnknownSync(StoredKey)(derived)
 ```
 
 `deriveKey` serializes input through
-[`@smthrs/canonical`](https://smithers.sh/api/canonical), hashes the exact
+[`@smthrs/canonical`](https://smithers.sh/docs/reference/api/canonical), hashes the exact
 canonical UTF-8 document through injected SHA-256 from
-[`@smthrs/crypto`](https://smithers.sh/api/crypto), and produces
+[`@smthrs/crypto`](https://smithers.sh/docs/reference/api/crypto), and produces
 `key1_<64 lowercase hex>`.
 
 `KeyV1` validates that exact stored representation. `StoredKey` validates every
@@ -41,4 +41,4 @@ is one-shot, and imposes no size or depth limit of its own, so external callers
 must bound untrusted input before canonicalization.
 
 Full documentation is at
-[smithers.sh/api/keys](https://smithers.sh/api/keys).
+[smithers.sh/api/keys](https://smithers.sh/docs/reference/api/keys).

@@ -16,12 +16,12 @@
  * `src/main/java/com/google/devtools/build/lib/remote/UploadManifest.java`:
  * "action results may fail to validate server-side if they are accessed before
  * all blobs they refer to are present". See the
- * {@link https://smithers.sh/api/step-cache | step-cache reference}.
+ * {@link https://smithers.sh/docs/reference/api/step-cache | step-cache reference}.
  *
  * The endpoint and its credentials arrive as layer construction options. They
  * are a capability, never an input: they are not hashed into a step key and
  * never journaled; see the
- * {@link https://smithers.sh/concepts/step-keys | step-key contract}.
+ * {@link https://smithers.sh/docs/concepts/content-addressing | step-key contract}.
  *
  * ## Server contract
  *

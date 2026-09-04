@@ -1,8 +1,8 @@
 /**
  * Trellis-style bounded recursive expansion declarations.
  *
- * @see https://smithers.sh/api/patterns
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

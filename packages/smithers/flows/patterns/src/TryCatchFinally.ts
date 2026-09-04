@@ -7,8 +7,8 @@
  * handler claimed. The declaration shows the finalizer on both arms, so a
  * reader sees that nothing leaves the boundary without it.
  *
- * @see https://smithers.sh/concepts/failure-and-retry
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/concepts/retries
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

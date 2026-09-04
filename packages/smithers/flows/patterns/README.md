@@ -79,7 +79,7 @@ Unicode normalization. Every `make`, `run`, and decorator factory snapshots
 its options at the call, so a later edit to the caller's objects does not
 change a declaration or a run. Flows, callbacks, inputs, and the values
 callbacks return stay the caller's references. The full contract is in
-[Identity and ownership](https://smithers.sh/api/patterns#identity-and-ownership).
+[Identity and ownership](https://smithers.sh/docs/reference/api/patterns#identity-and-ownership).
 
 ## What `WithCache` declares today
 
@@ -91,4 +91,4 @@ so on a core flow the policy is a declaration: it renames the wrapper, enters it
 captured key material, and travels with the flow until the bridge lowers it onto
 the dispatched action. For a policy the engine acts on now, declare it on the
 action with `CacheEnvironment.withCache(action, policy)` from `@smthrs/flow`. See
-[Step cache](https://smithers.sh/api/step-cache).
+[Step cache](https://smithers.sh/docs/reference/api/step-cache).

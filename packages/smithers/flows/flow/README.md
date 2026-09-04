@@ -128,7 +128,7 @@ The root exports these namespaces, also available from matching
 `@smthrs/flow/*` subpaths.
 
 The full, generated export tables are on the
-[API reference](https://smithers.sh/api/flow); the table below is the shape of
+[API reference](https://smithers.sh/docs/reference/api/flow); the table below is the shape of
 the surface.
 
 | Namespace         | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -493,7 +493,7 @@ RetryPolicy.isNonRetryable(policy, new Error("x"))
 ```
 
 Full API documentation is at
-[smithers.sh/api/flow](https://smithers.sh/api/flow). See also the
-[engine reference](https://smithers.sh/api/engine),
-[failure and retry](https://smithers.sh/concepts/failure-and-retry), and
-[step keys](https://smithers.sh/concepts/step-keys).
+[smithers.sh/api/flow](https://smithers.sh/docs/reference/api/flow). See also the
+[engine reference](https://smithers.sh/docs/reference/api/engine),
+[failure and retry](https://smithers.sh/docs/concepts/retries), and
+[step keys](https://smithers.sh/docs/concepts/content-addressing).

@@ -3,7 +3,7 @@
  * hook interface.
  *
  * The public package contract is documented at
- * {@link https://smithers.sh/api/plugin}. Each host holds an instance over its
+ * {@link https://smithers.sh/docs/reference/api/plugin}. Each host holds an instance over its
  * augmented `FlowsHooks` and may dispatch only the runtime catalog it supplied.
  * The shipped cell host owns the three
  * waterfalls declared in `packages/smithers/agent/src/CellPlugin.ts`; there is

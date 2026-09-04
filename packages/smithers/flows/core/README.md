@@ -8,7 +8,7 @@ Pure plan-time data model for flows. It defines inert Flow and Node declarations
 npm install @smthrs/core
 ```
 
-The published contract lives at [smithers.sh/api/core](https://smithers.sh/api/core), generated from this package's sources.
+The published contract lives at [smithers.sh/api/core](https://smithers.sh/docs/reference/api/core), generated from this package's sources.
 
 ## Public API
 

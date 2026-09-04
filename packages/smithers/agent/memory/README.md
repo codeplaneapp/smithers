@@ -61,6 +61,6 @@ const program = Effect.gen(function*() {
 
 `Flows.runRecallFor` and `Flows.runRememberFor` read the policy back. It supplies defaults and never overrides: a caller that names its own banks or its own budget keeps them. `recall: "none"` and `retain: "never"` are refusals, not defaults, so no request reaches the service at all.
 
-`MemoryTrellis.make` is the delegation case: a model-authored plan generates work nobody named, so the leaf that runs each generated goal carries the policy instead of receiving it as an argument. See the [memory reference](https://smithers.sh/api/memory).
+`MemoryTrellis.make` is the delegation case: a model-authored plan generates work nobody named, so the leaf that runs each generated goal carries the policy instead of receiving it as an argument. See the [memory reference](https://smithers.sh/docs/reference/api/memory).
 
 Use `MemoryStore.layer` with the database service for persistence. `@smthrs/memory/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.

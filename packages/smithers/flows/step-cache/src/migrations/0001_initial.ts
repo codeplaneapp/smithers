@@ -1,7 +1,7 @@
 /**
  * Initial durable step result cache schema.
  *
- * See the {@link https://smithers.sh/api/step-cache | step-cache reference}.
+ * See the {@link https://smithers.sh/docs/reference/api/step-cache | step-cache reference}.
  *
  * @since 0.1.0
  */

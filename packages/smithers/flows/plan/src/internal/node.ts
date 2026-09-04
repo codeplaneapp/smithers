@@ -10,7 +10,7 @@
  * The functions an author does write — a mapper, a continuation, a branch
  * predicate — live in `WeakMap`s keyed by the AST node they belong to, and the
  * AST keeps only a {@link FunctionIdentity} digest of their source. The digest
- * is what enters content identity (https://smithers.sh/concepts/step-keys); the
+ * is what enters content identity (https://smithers.sh/docs/concepts/content-addressing); the
  * `WeakMap` is what the run reaches for when it has the real value in hand, and
  * it drops with the AST it is keyed by.
  *

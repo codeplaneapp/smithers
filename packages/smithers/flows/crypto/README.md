@@ -77,6 +77,6 @@ configuration defect, not a `Sha256Error`. Encoding `Sha256` in reverse fails wi
 `A digest cannot be converted back into its source bytes`.
 
 Canonical value serialization belongs to
-[`@smthrs/canonical`](https://smithers.sh/api/canonical). Domain-specific key
-formats belong to [`@smthrs/keys`](https://smithers.sh/api/keys). Full API
-documentation is at [smithers.sh/api/crypto](https://smithers.sh/api/crypto).
+[`@smthrs/canonical`](https://smithers.sh/docs/reference/api/canonical). Domain-specific key
+formats belong to [`@smthrs/keys`](https://smithers.sh/docs/reference/api/keys). Full API
+documentation is at [smithers.sh/api/crypto](https://smithers.sh/docs/reference/api/crypto).

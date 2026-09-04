@@ -136,5 +136,5 @@ command has it write a file and reads that back with `readFile`.
 
 {/* generated:sandbox-limits end */}
 
-See the [sandbox reference](https://smithers.sh/api/sandbox) and the
-[kernel reference](https://smithers.sh/api/kernel).
+See the [sandbox reference](https://smithers.sh/docs/reference/api/sandbox) and the
+[kernel reference](https://smithers.sh/docs/reference/api/kernel).

@@ -51,7 +51,7 @@ is chosen by the program that runs, not by the library it depends on.
 
 `@smthrs/flows` bundles for a browser, and `pnpm run browser` gates it along
 with every package root it re-exports.
-[Browser support](https://smithers.sh/architecture/browser-support) lists the
+[Browser support](https://smithers.sh/docs/reference/api/platform-browser) lists the
 gated entry points; that page tracks the gate's own contract, so it is the one
 place the list is written down.
 
@@ -64,7 +64,7 @@ Platform implementations are never re-exported through the namespaces here
 either. Import `@smthrs/platform-node`, `@smthrs/platform-bun`,
 `@smthrs/kernel/test/TestHost`, `@smthrs/database/node/NodeDatabase`, or
 `@smthrs/journal/test/TestJournal` directly. See
-[browser support](https://smithers.sh/architecture/browser-support).
+[browser support](https://smithers.sh/docs/reference/api/platform-browser).
 
 ## The Node runtime
 
@@ -98,4 +98,4 @@ from 0 through 2,147,483,647. A second signal, or a shutdown exceeding that
 deadline, exits with the signal's default status.
 
 See the [documentation](https://smithers.sh/) and
-[flows reference](https://smithers.sh/api/flows).
+[flows reference](https://smithers.sh/docs/reference/api/flows).

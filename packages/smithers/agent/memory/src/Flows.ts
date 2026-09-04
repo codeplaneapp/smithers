@@ -4,8 +4,8 @@
  * The declarations describe the runtime operation but intentionally perform
  * no memory I/O while a graph is being built.
  *
- * @see https://smithers.sh/api/memory
- * @see https://smithers.sh/api/patterns
+ * @see https://smithers.sh/docs/reference/api/memory
+ * @see https://smithers.sh/docs/reference/api/patterns
  * @since 0.1.0
  */
 import * as Effects from "@smthrs/core/Effects"

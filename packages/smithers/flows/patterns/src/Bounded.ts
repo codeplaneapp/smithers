@@ -8,8 +8,8 @@
  * `Node.all` per batch, batches sequenced. {@link run} is the Effect form of
  * the same contract.
  *
- * @see https://smithers.sh/concepts/concurrency
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/concepts/ownership
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

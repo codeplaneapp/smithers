@@ -2,7 +2,7 @@
  * Internal AST and runtime representation for pipeable flow nodes.
  *
  * Governing contract: `packages/smithers/flows/core/docs/api.md`, published as
- * https://smithers.sh/api/core.
+ * https://smithers.sh/docs/reference/api/core.
  *
  * @since 0.0.0
  */

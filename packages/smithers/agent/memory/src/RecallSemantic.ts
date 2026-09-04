@@ -6,7 +6,7 @@
  * authoritative MemoryStore writes complete first, projection failures retry
  * once and are logged without changing the write result.
  *
- * @see https://smithers.sh/api/memory
+ * @see https://smithers.sh/docs/reference/api/memory
  * @since 0.1.0
  */
 import * as Clock from "effect/Clock"

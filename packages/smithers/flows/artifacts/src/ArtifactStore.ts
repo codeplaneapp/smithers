@@ -6,7 +6,7 @@
  * recorded result, while large result bytes live here under their digest. The
  * two tiers remain separate because artifacts must be published before a cache
  * record may reference them. See the package README and
- * {@link https://smithers.sh/concepts/step-keys | step-key documentation}.
+ * {@link https://smithers.sh/docs/concepts/content-addressing | step-key documentation}.
  *
  * @since 1.0.0-rc.0
  */

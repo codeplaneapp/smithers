@@ -2,7 +2,7 @@
  * Serializable flow-registry descriptors.
  *
  * Governing contract: `packages/smithers/agent/registry/docs/api.md`, published as
- * https://smithers.sh/api/registry.
+ * https://smithers.sh/docs/reference/api/registry.
  * `EffectDeclaration` is the fully explicit discovery projection of
  * `packages/smithers/flows/core/src/Effects.ts`; placement literals are lowered by
  * `packages/smithers/flows/core/src/Markdown.ts` into `packages/smithers/flows/core/src/Placement.ts`

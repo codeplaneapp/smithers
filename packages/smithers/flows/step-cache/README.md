@@ -104,6 +104,6 @@ artifact tier before publishing the cache entry. Use deferred publication when
 the local write occurs inside a database transaction; perform remote I/O only
 after that transaction commits.
 
-See the [step-cache API](https://smithers.sh/api/step-cache),
-[step-key contract](https://smithers.sh/concepts/step-keys), and
-[journal architecture](https://smithers.sh/concepts/journal).
+See the [step-cache API](https://smithers.sh/docs/reference/api/step-cache),
+[step-key contract](https://smithers.sh/docs/concepts/content-addressing), and
+[journal architecture](https://smithers.sh/docs/concepts/durable-execution).

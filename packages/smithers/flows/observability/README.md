@@ -34,5 +34,5 @@ bounded journal-forwarding logger. Import
 `@smthrs/observability/NodeOtel` only in Node and
 `@smthrs/observability/BrowserOtel` only in browser bundles.
 
-See the [API reference](https://smithers.sh/api/observability) for validation,
+See the [API reference](https://smithers.sh/docs/reference/api/observability) for validation,
 backpressure, shutdown, retry, and platform contracts.

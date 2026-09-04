@@ -5,7 +5,7 @@
  * body; graph construction evaluates pure bodies at plan time.
  *
  * Governing contract: `packages/smithers/flows/core/docs/api.md`, published as
- * https://smithers.sh/api/core.
+ * https://smithers.sh/docs/reference/api/core.
  *
  * @since 0.0.0
  */

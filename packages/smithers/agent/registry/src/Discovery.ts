@@ -2,7 +2,7 @@
  * Portable discovery of markdown and module-backed flows.
  *
  * Governing contract: `packages/smithers/agent/registry/docs/api.md`, published as
- * https://smithers.sh/api/registry.
+ * https://smithers.sh/docs/reference/api/registry.
  *
  * Discovery follows symbolic links when the host `FileSystem.stat` does. A
  * visited-directory identity set stops cycles and aliases, while a 32-segment

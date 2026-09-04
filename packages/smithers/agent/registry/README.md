@@ -24,7 +24,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `RegistryError` | Typed discovery and registry failures and their constructors.                              |
 
 Every export of every namespace, with a one-line summary, is generated from this
-package's own JSDoc onto https://smithers.sh/api/registry. That page is the
+package's own JSDoc onto https://smithers.sh/docs/reference/api/registry. That page is the
 reference; this file is the orientation.
 
 ```ts
@@ -138,7 +138,7 @@ the layer as `RegistryError { code: "invalid_pack" }` naming the pack.
 A pack is a directory with a `pack.json` manifest, the shareable unit a project
 installs rather than copies. The manifest format, the path confinement rules, the
 content address, the compatibility grammar, and the merge precedence are
-documented once on https://smithers.sh/api/registry.
+documented once on https://smithers.sh/docs/reference/api/registry.
 
 `Registry.layerFromPacks(packs, { runtimeVersion })` scans a set of packs into one registry:
 

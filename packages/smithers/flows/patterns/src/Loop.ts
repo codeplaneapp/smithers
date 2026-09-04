@@ -11,10 +11,10 @@
  *
  * For a loop whose rounds must survive a crash, hand each iteration to the
  * durable trampoline instead: `Flow.to` with `maxRounds`, described in the
- * loops reference at https://smithers.sh/api/patterns-loops.
+ * loops reference at https://smithers.sh/docs/reference/api/patterns.
  *
- * @see https://smithers.sh/api/patterns
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */

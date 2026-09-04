@@ -3,7 +3,7 @@
  * dispatcher, a frozen config, and the merged layer.
  *
  * The public package contract is documented at
- * {@link https://smithers.sh/api/plugin}, with the shipped host catalog in
+ * {@link https://smithers.sh/docs/reference/api/plugin}, with the shipped host catalog in
  * `packages/smithers/agent/src/CellPlugin.ts`. D14 in
  * `docs/pages/design-decisions.md` keeps durable policy outside these hooks.
  *

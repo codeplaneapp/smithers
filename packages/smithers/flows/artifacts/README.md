@@ -5,7 +5,7 @@
 The content-addressed artifact store: bytes addressed by their own SHA-256
 digest.
 
-This is the byte half of the cache. [`@smthrs/step-cache`](https://smithers.sh/api/step-cache)
+This is the byte half of the cache. [`@smthrs/step-cache`](https://smithers.sh/docs/reference/api/step-cache)
 maps a step key to a recorded result; large outputs are referenced **by digest**
 and live here. The package depends on `effect` and `@smthrs/crypto`, owns no
 SQL, and bundles for the browser.
@@ -135,5 +135,5 @@ what is live belongs to `@smthrs/engine-store`'s
 Chunked and resumable transfer is `RemoteArtifacts.Options.chunkBytes`, and the
 `RemoteOutputChecker` analogue is `RemoteArtifacts.Options.downloadPolicy`
 (`all` | `toplevel` | `minimal`), honored by `CombinedArtifacts.get` and by
-[`@smthrs/engine-store`](https://smithers.sh/api/engine-store)'s
+[`@smthrs/engine-store`](https://smithers.sh/docs/reference/api/engine-store)'s
 `ArtifactSync.hydrate`.

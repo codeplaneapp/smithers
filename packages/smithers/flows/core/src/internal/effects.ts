@@ -14,7 +14,7 @@
  * lookup and one binary search however wide the envelope is.
  *
  * Governing contract: `packages/smithers/flows/core/docs/api.md`, published as
- * https://smithers.sh/api/core.
+ * https://smithers.sh/docs/reference/api/core.
  *
  * @since 1.0.0-rc.0
  */

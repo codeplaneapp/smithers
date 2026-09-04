@@ -4,8 +4,8 @@
  * These combinators are a forward-compatible bridge for the future
  * `Schema.Flow` and `Flow.decorate` core surfaces.
  *
- * @see https://smithers.sh/api/patterns
- * @see https://smithers.sh/api/patterns#identity-and-ownership
+ * @see https://smithers.sh/docs/reference/api/patterns
+ * @see https://smithers.sh/docs/reference/api/patterns#identity-and-ownership
  *
  * @since 0.1.0
  */
