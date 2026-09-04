@@ -54,6 +54,40 @@ const codeOf = (jj: Jj, operation: (jj: Jj) => Effect.Effect<unknown, unknown>) 
 describe.skipIf(!jjInstalled || wasmBytes === undefined)("Jj layer parity", () => {
   const timeout = 60_000
 
+  it.effect("accepts the same opaque snapshot messages on the CLI and wasm layers", () =>
+    Effect.gen(function*() {
+      const repository = fsModule.mkdtempSync(join(tmpdir(), "flows-jj-messages-node-"))
+      const browserHost = fsModule.mkdtempSync(join(tmpdir(), "flows-jj-messages-wasm-"))
+      fsModule.mkdirSync(join(browserHost, "repo"))
+      try {
+        execFileSync("jj", ["git", "init", repository], { stdio: "ignore" })
+        const node = yield* Effect.provide(Jj, NodeJj.layerAt(repository))
+        const browser = yield* Effect.provide(
+          Jj,
+          BrowserJj.layer({
+            wasm: wasmBytes!,
+            fs: rootedSyncFs(browserHost),
+            root: "/repo"
+          })
+        )
+        for (const message of ["-leading", "--help", "", "a \"quoted\" $message\nwith café"]) {
+          const saved = yield* node.snapshot(message)
+          const browserSaved = yield* browser.snapshot(message)
+          expect(saved.changeId).not.toBe("")
+          expect(browserSaved.changeId).not.toBe("")
+          expect(execFileSync("jj", ["log", "-r", saved.changeId, "--no-graph", "-T", "description"], {
+            cwd: repository,
+            encoding: "utf8"
+          })).toBe(message === "" ? "" : `${message}\n`)
+          yield* node.restore(saved.changeId)
+          yield* browser.restore(browserSaved.changeId)
+        }
+      } finally {
+        fsModule.rmSync(repository, { recursive: true, force: true })
+        fsModule.rmSync(browserHost, { recursive: true, force: true })
+      }
+    }), { timeout })
+
   it.effect("classifies the same failures identically on the CLI and wasm layers", () =>
     Effect.gen(function*() {
       const repository = fsModule.mkdtempSync(join(tmpdir(), "flows-jj-parity-node-"))

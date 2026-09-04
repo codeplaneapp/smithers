@@ -127,7 +127,7 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       const error = yield* status("refused")
       expect(error.code).toBe("snapshot_refused")
       expect(error.message).toContain("artifact.bin")
-      expect(error.command).toBe("jj status")
+      expect(asJjError(error).command).toBe("jj status")
     }))
 
   it.live("classifies conflict vocabulary as `conflict`", () =>
@@ -276,7 +276,7 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
 
       expect(error.command!.length).toBeLessThan(600)
       expect(error.command!.endsWith("…")).toBe(true)
-      expect(error.command!.startsWith("jj describe -r snapshotid -m mmm")).toBe(true)
+      expect(error.command!.startsWith("jj describe -r snapshotid -m=mmm")).toBe(true)
     }))
 
   it.live("names a starting path that is not there when asked for its root", () =>

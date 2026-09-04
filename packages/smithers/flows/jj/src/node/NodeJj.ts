@@ -567,7 +567,7 @@ const operations = (run: Run, repositoryRoot?: string) => {
         // Describing @ would overwrite the operator's active work. Only add an
         // engine label to an unnamed, closed change; never erase existing notes.
         if (message !== undefined && description.join("\n") === "") {
-          yield* inRepository("snapshot", ["describe", "-r", changeId!, "-m", message, "--quiet"])
+          yield* inRepository("snapshot", ["describe", "-r", changeId!, `-m=${message}`, "--quiet"])
         }
         return { changeId: changeId!.trim() }
       })

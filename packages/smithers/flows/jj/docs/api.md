@@ -202,6 +202,11 @@ CLI calls therefore cannot interleave with another state operation. A caller
 reclaims a lock whose owner process has exited, so an abruptly killed host does
 not strand the repository.
 
+Snapshot messages are opaque strings on both browser and CLI layers, including
+empty strings, leading `-`, quotes, and newlines. Node and Bun pass messages as
+`-m=<message>`; workspace names and paths use `--name=` and `--` so option-like
+values are not interpreted as CLI flags.
+
 Node and Bun require **jj 0.39.0 or newer**, pinned by the exported
 `NodeJj.minimumVersion` constant. Each layer build probes `jj --version` once
 through its own process runner before exposing `Jj`. An older or unrecognized
