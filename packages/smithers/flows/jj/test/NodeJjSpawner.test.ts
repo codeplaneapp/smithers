@@ -1,5 +1,5 @@
 /**
- * `NodeJj.layerSpawner`, driven against the same stand-in `jj` on `PATH`.
+ * `NodeJj.layerSpawner`, driven against a stand-in `jj` at an explicit path.
  *
  * The layer exists so a host that contains what it spawns contains jj too: a
  * `jj` child started around the host's spawner leads no process group the host
@@ -9,7 +9,7 @@
  * as the self-spawning layer. These cases run a real `jj` shim through a real
  * spawner adapter and check exactly that.
  */
-import { describe, expect, it } from "@effect/vitest"
+import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
@@ -32,7 +32,7 @@ import * as NodeJj from "../src/node/NodeJj.ts"
 
 const script = `#!/bin/sh
 case "$1" in
-  --version) echo "jj \${FLOWS_JJ_TEST_VERSION:-0.39.0}"; exit 0 ;;
+  --version) echo "jj 0.39.0"; exit 0 ;;
   restore) echo "Warning: Refused to snapshot some files:" 1>&2; exit 0 ;;
   status) echo "the working copy is clean"; exit 0 ;;
   root) echo "/scripted/root"; exit 0 ;;
@@ -54,11 +54,20 @@ chmodSync(join(directory, "jj"), 0o755)
 const overrideBinary = join(directory, "override-jj")
 writeFileSync(overrideBinary, overrideScript)
 chmodSync(overrideBinary, 0o755)
+const oldBinary = join(directory, "old-jj")
+writeFileSync(oldBinary, "#!/bin/sh\necho \"jj 0.38.0\"\n")
+chmodSync(oldBinary, 0o755)
 
 // The adapter honours SMITHERS_JJ_PATH, so a developer who has one set would
 // otherwise change which binary these cases spawn.
-delete process.env.SMITHERS_JJ_PATH
-delete process.env.FLOWS_JJ_PATH
+const previousJj = process.env.SMITHERS_JJ_PATH
+beforeEach(() => {
+  process.env.SMITHERS_JJ_PATH = join(directory, "jj")
+})
+afterEach(() => {
+  if (previousJj === undefined) delete process.env.SMITHERS_JJ_PATH
+  else process.env.SMITHERS_JJ_PATH = previousJj
+})
 
 const encode = (text: string) => Stream.make(new TextEncoder().encode(text))
 
@@ -149,16 +158,12 @@ const run = <A, E>(effect: Effect.Effect<A, E, Jj>, spawner: Layer.Layer<ChildPr
 process.on("exit", () => rmSync(directory, { recursive: true, force: true }))
 
 describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
-  it.live("rejects an old version through the host spawner before exposing Jj", () =>
+  it.live("rejects an old local version before exposing the spawner-backed Jj", () =>
     Effect.gen(function*() {
-      process.env.FLOWS_JJ_TEST_VERSION = "0.38.0"
-      try {
-        const error = yield* Effect.flip(run(Jj, realSpawner))
-        expect(error).toMatchObject({ code: "unsupported_version", method: "version", command: "jj --version" })
-        expect(error.message).toContain("0.39.0")
-      } finally {
-        delete process.env.FLOWS_JJ_TEST_VERSION
-      }
+      process.env.SMITHERS_JJ_PATH = oldBinary
+      const error = yield* Effect.flip(run(Jj, realSpawner))
+      expect(error).toMatchObject({ code: "unsupported_version", method: "version", command: "jj --version" })
+      expect(error.message).toContain("0.39.0")
     }))
 
   it.live("fails typed on refused-file warnings through the host spawner", () =>
@@ -168,7 +173,7 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       expect(error.message).toContain("Refused to snapshot")
     }))
 
-  it.live("builds the unbound spawner layer and probes through the host", () =>
+  it.live("builds the unbound spawner layer and runs operations through the host", () =>
     Effect.gen(function*() {
       const output = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(
         Effect.provide(Layer.provide(NodeJj.layerSpawner, realSpawner))
@@ -207,7 +212,7 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
 
   it.effect("reports a jj the host cannot find as `not_installed`", () =>
     Effect.gen(function*() {
-      const error = yield* Effect.flip(run(Jj, missingBinary))
+      const error = yield* Effect.flip(run(Effect.flatMap(Jj, (jj) => jj.status()), missingBinary))
       expect(error.code).toBe("not_installed")
       expect(error.message).toBe("jj: command not found on PATH")
     }))
@@ -269,9 +274,9 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
           )
         )
       )
-      const error = yield* Effect.flip(run(Jj, refused))
+      const error = yield* Effect.flip(run(Effect.flatMap(Jj, (jj) => jj.status()), refused))
       expect(error.code).toBe("unknown")
-      expect(error.message).toContain("jj version:")
+      expect(error.message).toContain("jj status:")
     }))
 })
 

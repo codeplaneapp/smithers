@@ -16,6 +16,9 @@
  *   `jj snapshot` that hangs is otherwise a process no host can account for.
  *   `@smthrs/platform-node`'s contained host bundle uses this one.
  *
+ * Both await a local version probe outside the host spawner before exposing
+ * `Jj`, sharing its result per executable path for the life of the process.
+ *
  * Errors are classified from `jj`'s own stderr vocabulary onto the stable
  * `JjError` codes, the same way `NodeFileSystem` classifies errno, and both
  * layers share that classification.
@@ -409,9 +412,14 @@ const settle = (method: string, args: ReadonlyArray<string>, output: Output): Ef
     : Effect.fail(classify(method, args, output))
 
 /** Runs `jj` with argv (never a shell string) in `cwd`. */
-const jj: Run = (method, args, cwd) =>
+const jj = (
+  method: string,
+  args: ReadonlyArray<string>,
+  cwd?: string,
+  binary?: { readonly command: string; readonly hint?: string | undefined }
+): Effect.Effect<string, JjError> =>
   Effect.callback<Output, JjError>((resume) => {
-    const { command, hint } = resolveCommand()
+    const { command, hint } = binary ?? resolveCommand()
     let child: ChildProcess.ChildProcess
     try {
       // `node:child_process` delivers only EACCES, EAGAIN, EMFILE, ENFILE, and
@@ -675,9 +683,33 @@ const operations = (run: Run, repositoryRoot?: string) => {
   return { snapshot, restore, diff, workspaceAdd, workspaceForget, status, root, revert }
 }
 
-/** Probe once when a layer is built, before exposing repository operations. */
+// Host introspection finishes before the layer exists, so it must not enter
+// the host ledger. Cache by executable path, including in-flight probes, so
+// separate repository layers and host incarnations share the same answer.
+const versionProbes = new Map<string, Effect.Effect<string, JjError>>()
+
+/** Check the local executable before exposing repository operations. */
 const checkedOperations = (run: Run, repositoryRoot?: string): Effect.Effect<Jj, JjError> =>
-  Effect.flatMap(run("version", ["--version"], repositoryRoot), (output) => {
+  Effect.gen(function*() {
+    if (repositoryRoot !== undefined && !isDirectory(repositoryRoot)) {
+      return yield* Effect.fail(
+        spawnFailure("version", ["--version"], repositoryRoot, undefined, new Error("not a directory"), false)
+      )
+    }
+    const binary = resolveJjBinary()
+    const path = binary.executable || binary.source === "env" ? resolve(binary.path) : binary.path
+    let probe = versionProbes.get(path)
+    if (probe === undefined) {
+      probe = yield* Effect.cached(
+        jj("version", ["--version"], undefined, { command: path, hint: binary.hint }).pipe(
+          // Cancellation produced no version result; a later layer must retry.
+          Effect.onInterrupt(() => Effect.sync(() => versionProbes.delete(path)))
+        )
+      )
+      // An unresolved command has no binary path to cache; PATH may change.
+      if (binary.executable || binary.source === "env") versionProbes.set(path, probe)
+    }
+    const output = yield* probe
     const actual = /^jj (\d+)\.(\d+)\.(\d+)(?:[-+\s]|$)/.exec(output.trim())
     const required = minimumVersion.split(".").map(Number)
     let comparison = 0
@@ -686,7 +718,7 @@ const checkedOperations = (run: Run, repositoryRoot?: string): Effect.Effect<Jj,
         comparison = Number(actual[index + 1]) - required[index]!
       }
     }
-    return actual !== null && comparison >= 0
+    return yield* actual !== null && comparison >= 0
       ? Effect.succeed(operations(run, repositoryRoot))
       : Effect.fail(
         new JjError({

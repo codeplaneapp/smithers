@@ -14,14 +14,14 @@
  * database. A double at any of those points would prove nothing, because the
  * subject is precisely what is left when no code of ours got to run.
  */
-import { afterAll, describe, expect, it } from "@effect/vitest"
+import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import { ProcessLedger } from "@smthrs/kernel"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { spawn } from "node:child_process"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -30,8 +30,20 @@ import * as NodeRuntime from "../src/NodeRuntime.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "flows-reap-host-"))
 const fixture = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "reap-host.ts")
+const previousJj = process.env.SMITHERS_JJ_PATH
 
-afterAll(() => rmSync(directory, { recursive: true, force: true }))
+beforeAll(() => {
+  // These hosts exercise containment, without needing an installed jj or a repository.
+  const binary = join(directory, "jj")
+  writeFileSync(binary, "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo \"jj 0.39.0\"; fi\n", { mode: 0o755 })
+  process.env.SMITHERS_JJ_PATH = binary
+})
+
+afterAll(() => {
+  if (previousJj === undefined) delete process.env.SMITHERS_JJ_PATH
+  else process.env.SMITHERS_JJ_PATH = previousJj
+  rmSync(directory, { recursive: true, force: true })
+})
 
 const groupIsAlive = (pgid: number): boolean => {
   try {
@@ -105,6 +117,23 @@ const readBack = <A>(filename: string, query: (database: DatabaseSync) => A): A 
 }
 
 describe("a host that was killed", () => {
+  it("journals only its real child after building the jj layers", async () => {
+    const filename = join(directory, "probe", "runtime.sqlite")
+    const pgid = await killHost(filename, "probe-host")
+    try {
+      expect(
+        readBack(
+          filename,
+          (database) =>
+            database.prepare("SELECT event_type FROM flows_journal_events WHERE run_id = ? ORDER BY seq")
+              .all("flows.host:probe-host")
+        )
+      ).toEqual([{ event_type: "flows.host.process-spawned.v1" }])
+    } finally {
+      process.kill(-pgid, "SIGKILL")
+    }
+  }, 120_000)
+
   it("leaves its children for the next incarnation of the same host to reap", async () => {
     const filename = join(directory, "reap", "runtime.sqlite")
 

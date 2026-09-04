@@ -209,10 +209,14 @@ empty strings, leading `-`, quotes, and newlines. Node and Bun pass messages as
 values are not interpreted as CLI flags.
 
 Node and Bun require **jj 0.39.0 or newer**, pinned by the exported
-`NodeJj.minimumVersion` constant. Each layer build probes `jj --version` once
-through its own process runner before exposing `Jj`. An older or unrecognized
-version fails construction with `JjError.code = "unsupported_version"` and the
-required minimum; a missing binary fails construction with `not_installed`.
+`NodeJj.minimumVersion` constant. Before exposing `Jj`, all CLI layers await a
+local `jj --version` probe through `node:child_process`, outside the host's
+process spawner and crash-reaping journal. Concurrent and subsequent layer
+builds share the probe result per resolved executable path for the lifetime of
+the process. Restart the process after replacing a binary at the same path.
+Repository commands still use the layer's chosen process runner. An older or
+unrecognized version fails construction with `JjError.code = "unsupported_version"`
+and the required minimum; a missing binary fails construction with `not_installed`.
 All four CLI layers therefore have `JjError` in their layer error channel.
 
 Node and Bun repository commands (except `root`) disable jj's default new-file size limit with
