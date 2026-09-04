@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import test from "node:test"
@@ -51,16 +51,22 @@ const seed = () => {
   const root = mkdtempSync(join(tmpdir(), "smthrs-cut-release-"))
   mkdirSync(join(root, "scripts"), { recursive: true })
   for (const script of copiedScripts) copyFileSync(join(scriptsDirectory, script), join(root, "scripts", script))
-  write(root, "pnpm-workspace.yaml", "packages:\n  - \"packages/*\"\n")
+  write(root, "pnpm-workspace.yaml", "packages:\n  - \"packages/*\"\nlinkWorkspacePackages: true\n")
   write(
     root,
     "package.json",
-    json({ name: "fixture", private: true, repository: { type: "git", url: "git+https://github.com/smithersai/smithers.git" } })
+    json({
+      name: "fixture",
+      private: true,
+      packageManager: "pnpm@11.21.0",
+      workspaces: ["packages/*"],
+      repository: { type: "git", url: "git+https://github.com/smithersai/smithers.git" }
+    })
   )
   write(
     root,
     "packages/smithers/package.json",
-    json({ name: "@smthrs/cli", version: "0.1.0", dependencies: { "@smthrs/kernel": "0.1.0", effect: "4.0.0-rc.108" } })
+    json({ name: "@smthrs/cli", version: "0.1.0", dependencies: { "@smthrs/kernel": "0.1.0" } })
   )
   write(root, "packages/kernel/package.json", json({ name: "@smthrs/kernel", version: "0.1.0" }))
   write(root, "packages/private/package.json", json({ name: "@smthrs/tooling", private: true, version: "0.0.0" }))
@@ -72,6 +78,8 @@ const seed = () => {
     "export const tool = { name: \"@smthrs/migrate\", version: \"0.1.0\" } as const\n"
   )
   write(root, "CHANGELOG.md", "# smthrs\n\nPreamble.\n\n## 0.1.0 (2020-01-01)\n\nThe first release.\n")
+  execFileSync("pnpm", ["install", "--lockfile-only", "--ignore-scripts"], { cwd: root, stdio: "ignore" })
+  execFileSync("bun", ["install", "--lockfile-only", "--ignore-scripts"], { cwd: root, stdio: "ignore" })
   git(root, ["init", "-q", "-b", "main"])
   git(root, ["config", "user.email", "release@smithers.sh"])
   git(root, ["config", "user.name", "Release"])
@@ -103,21 +111,30 @@ const cut = (root, args) =>
 const manifest = (root, path) => JSON.parse(readFileSync(join(root, path), "utf8"))
 
 test("parseArguments takes one version and refuses a tag", () => {
-  assert.deepEqual(parseArguments(["1.0.0"]), { version: "1.0.0", commit: false })
-  assert.deepEqual(parseArguments(["1.0.0", "--commit"]), { version: "1.0.0", commit: true })
+  assert.deepEqual(parseArguments(["1.0.0"]), { version: "1.0.0", commit: false, allowBranch: false })
+  assert.deepEqual(parseArguments(["1.0.0", "--commit"]), { version: "1.0.0", commit: true, allowBranch: false })
+  assert.deepEqual(parseArguments(["1.0.0", "--commit", "--allow-branch"]), {
+    version: "1.0.0",
+    commit: true,
+    allowBranch: true
+  })
   assert.throws(() => parseArguments([]), /usage: node scripts\/cut-release\.mjs/)
   assert.throws(() => parseArguments(["v1.0.0"]), /pass the version, not the tag: 1\.0\.0/)
   assert.throws(() => parseArguments(["1.0.0", "2.0.0"]), /cut one version at a time/)
   assert.throws(() => parseArguments(["1.0.0", "--push"]), /unknown option --push/)
+  assert.throws(() => parseArguments(["1.0.0", "--allow-branch"]), /--allow-branch requires --commit/)
 })
 
-test("a cut writes both halves and then verifies both, in that order", () => {
-  assert.deepEqual(steps("1.0.0").map((step) => step.args), [
-    ["scripts/set-release-version.mjs", "1.0.0"],
-    ["scripts/generate-changelog.mjs", "--version", "1.0.0"],
-    ["scripts/set-release-version.mjs", "--check", "1.0.0"],
-    ["scripts/generate-changelog.mjs", "--check", "--version", "1.0.0"]
+test("a cut writes both halves, refreshes both tracked lockfiles, and then verifies both", () => {
+  assert.deepEqual(steps("1.0.0", { bunLock: true }).map((step) => [step.command, ...step.args]), [
+    [process.execPath, "scripts/set-release-version.mjs", "1.0.0"],
+    [process.execPath, "scripts/generate-changelog.mjs", "--version", "1.0.0"],
+    ["pnpm", "install", "--lockfile-only", "--ignore-scripts"],
+    ["bun", "install", "--lockfile-only", "--ignore-scripts"],
+    [process.execPath, "scripts/set-release-version.mjs", "--check", "1.0.0"],
+    [process.execPath, "scripts/generate-changelog.mjs", "--check", "--version", "1.0.0"]
   ])
+  assert.equal(steps("1.0.0", { bunLock: false }).some((step) => step.command === "bun"), false)
 })
 
 test("the printed follow-up commits with the repository's message and pushes the tag", () => {
@@ -125,7 +142,8 @@ test("the printed follow-up commits with the repository's message and pushes the
   assert.equal(releaseTag("1.0.0"), "v1.0.0")
   assert.deepEqual(nextCommands("1.0.0"), [
     "jj commit -m \"🔖 release: 1.0.0\"",
-    "git tag v1.0.0 && git push origin main v1.0.0"
+    "node scripts/generate-changelog.mjs --check --version 1.0.0",
+    "git tag -a v1.0.0 -m \"🔖 release: 1.0.0\" && git push origin main v1.0.0"
   ])
 })
 
@@ -135,7 +153,6 @@ test("a cut bumps every manifest, retargets internal ranges, and writes the sect
 
     assert.equal(manifest(root, "packages/smithers/package.json").version, "0.2.0")
     assert.equal(manifest(root, "packages/smithers/package.json").dependencies["@smthrs/kernel"], "0.2.0")
-    assert.equal(manifest(root, "packages/smithers/package.json").dependencies.effect, "4.0.0-rc.108")
     assert.equal(manifest(root, "packages/kernel/package.json").version, "0.2.0")
     assert.equal(manifest(root, "packages/private/package.json").version, "0.0.0", "a private manifest is not bumped")
     assert.match(readFileSync(join(root, versionedSources[0].path), "utf8"), /"0\.2\.0"/)
@@ -147,7 +164,10 @@ test("a cut bumps every manifest, retargets internal ranges, and writes the sect
     assert.match(changelog, /## 0\.1\.0 \(2020-01-01\)\n\nThe first release\./, "the older section is untouched")
 
     assert.match(output, /jj commit -m "🔖 release: 0\.2\.0"/)
-    assert.match(output, /git tag v0\.2\.0 && git push origin main v0\.2\.0/)
+    assert.match(output, /generate-changelog\.mjs --check --version 0\.2\.0/)
+    assert.match(output, /git tag -a v0\.2\.0 -m "🔖 release: 0\.2\.0" && git push origin main v0\.2\.0/)
+    assert.match(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"), /0\.2\.0/)
+    assert.match(readFileSync(join(root, "bun.lock"), "utf8"), /0\.2\.0/)
     assert.deepEqual(git(root, ["tag"]), "v0.1.0", "a cut without --commit tags nothing")
   })
 })
@@ -171,7 +191,11 @@ test("--commit records the cut, tags it, and pushes nothing", () => {
 
     assert.equal(git(root, ["log", "-1", "--format=%s"]), "🔖 release: 0.2.0")
     assert.deepEqual(git(root, ["tag"]).split("\n").sort(), ["v0.1.0", "v0.2.0"])
-    assert.equal(git(root, ["rev-parse", "v0.2.0"]), git(root, ["rev-parse", "HEAD"]))
+    assert.equal(git(root, ["cat-file", "-t", "v0.2.0"]), "tag")
+    assert.equal(git(root, ["rev-parse", "v0.2.0^{}"]), git(root, ["rev-parse", "HEAD"]))
+    const committed = git(root, ["show", "--pretty=format:", "--name-only", "HEAD"]).split("\n")
+    assert.ok(committed.includes("pnpm-lock.yaml"))
+    assert.ok(committed.includes("bun.lock"))
     assert.deepEqual(dirtyPaths(root), [], "the cut is entirely in the commit")
     assert.match(output, /Nothing was pushed\./)
     assert.equal(output.includes("git push origin main v0.2.0\n"), true)
@@ -201,5 +225,53 @@ test("--commit refuses a dirty working copy rather than sweeping it into the rel
 
     assert.throws(() => cut(root, ["0.2.0", "--commit"]), /--commit stages every tracked modification/)
     assert.equal(manifest(root, "packages/kernel/package.json").version, "0.1.0", "the refusal is before the first write")
+  })
+})
+
+test("a cut refuses an existing release tag before its first write", () => {
+  withFixture((root) => {
+    assert.throws(() => cut(root, ["0.1.0"]), /tag v0\.1\.0 already exists/)
+    assert.equal(manifest(root, "packages/kernel/package.json").version, "0.1.0")
+  })
+})
+
+test("--commit refuses a detached HEAD and a non-main branch without the explicit override", () => {
+  withFixture((root) => {
+    git(root, ["checkout", "--detach", "-q"])
+    assert.throws(() => cut(root, ["0.2.0", "--commit"]), /detached HEAD/)
+    assert.equal(manifest(root, "packages/kernel/package.json").version, "0.1.0")
+  })
+  withFixture((root) => {
+    git(root, ["switch", "-q", "-c", "release-preparation"])
+    assert.throws(() => cut(root, ["0.2.0", "--commit"]), /requires main.*--allow-branch/)
+    assert.equal(manifest(root, "packages/kernel/package.json").version, "0.1.0")
+  })
+})
+
+test("--allow-branch permits an intentional release commit on a named branch", () => {
+  withFixture((root) => {
+    git(root, ["switch", "-q", "-c", "release-preparation"])
+    cut(root, ["0.2.0", "--commit", "--allow-branch"])
+
+    assert.equal(git(root, ["branch", "--show-current"]), "release-preparation")
+    assert.equal(git(root, ["cat-file", "-t", "v0.2.0"]), "tag")
+  })
+})
+
+test("--commit checks the generated block on the exact release commit before tagging", () => {
+  withFixture((root) => {
+    const hook = join(root, ".git", "hooks", "post-commit")
+    writeFileSync(
+      hook,
+      [
+        "#!/bin/sh",
+        `${JSON.stringify(process.execPath)} -e 'const fs=require(\"node:fs\"); const path=\"CHANGELOG.md\"; const text=fs.readFileSync(path,\"utf8\"); fs.writeFileSync(path,text.replace(\"2 commits since\",\"999 commits since\"))'`,
+        ""
+      ].join("\n")
+    )
+    chmodSync(hook, 0o755)
+
+    assert.throws(() => cut(root, ["0.2.0", "--commit"]), /disagrees/)
+    assert.equal(git(root, ["tag", "--list", "v0.2.0"]), "", "a stale exact-commit block is never tagged")
   })
 })
