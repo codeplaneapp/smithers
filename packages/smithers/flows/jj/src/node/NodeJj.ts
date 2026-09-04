@@ -536,10 +536,13 @@ const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, ar
  * does not, or the containment story would be bought with a behavior change.
  */
 const operations = (run: Run, repositoryRoot?: string) => {
-  const inRepository = (method: string, args: ReadonlyArray<string>) =>
-    // In jj 0.39, zero disables the new-file size limit. Apply it to every
-    // snapshot invocation, since each can discover new files in the working copy.
-    run(method, method === "snapshot" ? [...args, "--config", "snapshot.max-new-file-size=0"] : args, repositoryRoot)
+  const inRepository = (method: string, args: ReadonlyArray<string>) => {
+    // jj can snapshot on any repository command. Keep global options before
+    // the positional delimiter used to protect opaque workspace names.
+    const delimiter = args.indexOf("--")
+    const at = delimiter === -1 ? args.length : delimiter
+    return run(method, [...args.slice(0, at), "--config", "snapshot.max-new-file-size=0", ...args.slice(at)], repositoryRoot)
+  }
   /**
    * Fences one working-copy operation on the workspace it runs in.
    *

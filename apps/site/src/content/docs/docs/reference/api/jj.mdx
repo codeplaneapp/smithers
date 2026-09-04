@@ -220,7 +220,7 @@ version fails construction with `JjError.code = "unsupported_version"` and the
 required minimum; a missing binary fails construction with `not_installed`.
 All four CLI layers therefore have `JjError` in their layer error channel.
 
-Node and Bun snapshots disable jj's default new-file size limit with
+Node and Bun repository commands (except `root`) disable jj's default new-file size limit with
 `--config snapshot.max-new-file-size=0`, so new artifacts larger than 1 MiB are
 included. Any command that still warns `Refused to snapshot some files` fails
 with `JjError.code = "snapshot_refused"`, even when jj exits successfully.

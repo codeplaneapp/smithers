@@ -135,6 +135,40 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       expect(readFileSync(file).equals(contents)).toBe(true)
     }))
 
+  for (const operation of ["restore", "diff", "status", "workspaceAdd"] as const) {
+    it.effect(`${operation} snapshots a new 2 MiB artifact`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(async () => {
+          const target = await mkdtemp(join(tmpdir(), "flows-jj-large-"))
+          execFileSync("jj", ["git", "init", target], { stdio: "ignore" })
+          await writeFile(join(target, "artifact.bin"), Buffer.alloc(2 * 1024 * 1024, 0x61))
+          return target
+        }),
+        (target) =>
+          Effect.gen(function*() {
+            const jj = yield* Effect.provide(Jj, NodeJj.layerAt(target))
+            switch (operation) {
+              case "restore":
+                yield* jj.restore("@-")
+                expect(existsSync(join(target, "artifact.bin"))).toBe(false)
+                break
+              case "diff":
+                expect(yield* jj.diff("@-", "@")).toContain("artifact.bin")
+                break
+              case "status":
+                expect(yield* jj.status()).toContain("artifact.bin")
+                break
+              case "workspaceAdd":
+                yield* jj.workspaceAdd("large", join(target, "lane"))
+                expect(existsSync(join(target, "lane", ".jj"))).toBe(true)
+                yield* jj.workspaceForget("large")
+                break
+            }
+          }),
+        (target) => Effect.promise(() => rm(target, { recursive: true, force: true }))
+      ))
+  }
+
   it.effect("snapshots without a message when none is supplied", () =>
     Effect.gen(function*() {
       yield* Effect.promise(() => writeFile(join(repository, "unnamed.txt"), "x\n"))
