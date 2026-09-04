@@ -175,7 +175,7 @@ node publish.ts
 
 Each dispatch reads `Action.CurrentAttempt` and records it, so `attempts` is the attempt ladder the run actually climbed: 1 and 2 failed, 3 succeeded.
 
-Two boundaries are worth keeping straight. When a policy does give up, the terminal failure is `RetryAttemptsExhausted` (the `maxAttempts` bound was reached) or `RetryPolicyExpired` (the `expirationMs` budget was spent), each with a stable code. And a retry policy governs ordinary typed failures only: infrastructure interrupts carry their own `InfraInterrupt` error and a separate `interruptRetryPolicy` on the action, and [Retries](/docs/concepts/retries/) draws the full line, including where cancellation fits.
+Two boundaries are worth keeping straight. When a policy does give up, the terminal failure is `RetryAttemptsExhausted` (the `maxAttempts` bound was reached) or `RetryPolicyExpired` (the `expirationMs` budget was spent), each with a stable code. And a retry policy governs ordinary typed failures only: an action implementation or adapter may explicitly fail with `InfraInterrupt` and opt into a separate `interruptRetryPolicy`; engines do not synthesize that marker from fiber interruption. [Retries](/docs/concepts/retries/) draws the full line, including where cancellation fits.
 
 ```text
 You should see: the program prints an object with result "v1:uploaded",

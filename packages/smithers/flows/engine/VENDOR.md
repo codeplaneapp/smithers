@@ -69,10 +69,10 @@ to keep two runs apart, and the `executionId` option is that way. Which runs
 are "the same" beyond that is a host question, not a flow-definition question —
 a coding agent running one request per user is the case where equal payloads
 must NOT permanently join — so `Flow.layerExecutionIds` is where a host answers
-it once for every flow it drives. The default source derives from the flow tag
-and the payload's canonical form, which keeps an unnamed execution
-crash-resumable; a host that needs equal payloads kept apart scopes the minted
-ID to whatever separates them there.
+it once for every flow it drives. The default source dies with
+`ExecutionIdRequired`; a host opts into equal-payload joins with
+`Flow.layerExecutionIds(Flow.derived)`, or installs a source that scopes the
+minted ID to the request, session, or workspace that relates invocations.
 
 Upstream references:
 
@@ -90,10 +90,12 @@ Upstream references:
 Upstream sandwiches every activity effect in a default schedule that retries
 any interrupt cause up to ten times and turns exhaustion into a defect.
 
-Smithers removes that default. Ordinary fiber interruption and flow
-suspension propagate immediately. `InfraInterrupt` is the explicit marker for
-rebalancing or host-loss interruption, and only that marker consumes an
-action's opt-in `interruptRetryPolicy`. Exhaustion still becomes a defect.
+Smithers removes that default. Ordinary fiber interruption and flow suspension
+propagate immediately. `InfraInterrupt` is an explicit marker an action adapter
+may fail with for a host-loss or rebalancing event, and only that marker
+consumes an action's opt-in `interruptRetryPolicy`. The shipped memory and
+durable engines do not synthesize it from fiber interruption. Exhaustion still
+becomes a defect.
 
 This keeps user cancellation prompt while allowing a clustered engine to opt
 into the recovery behavior it actually needs.

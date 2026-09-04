@@ -17,17 +17,25 @@ whole execution, and the key of one dispatch inside it.
 1. The `executionId` the caller named on `execute`.
 2. The flow's declared `idempotencyKey`, JSON-tuple framed with the flow tag and
    hashed.
-3. The ambient `Flow.CurrentExecutionIds` source. Its default, `Flow.derived`,
-   encodes the payload with the flow's own codec, canonicalizes it under
-   RFC 8785, hashes it, and hashes that together with the flow tag.
+3. The ambient `Flow.CurrentExecutionIds` source. Its default dies with
+   `Flow.ExecutionIdRequired`, so a host must choose an identity policy.
 
 A declared key beats the ambient source because it is the narrower statement:
 this author said what makes two invocations of _this_ flow the same, where the
 source is the host's blanket answer for every flow it drives. Both preimage
 encodings freeze at rc.0, and neither applies Unicode normalization.
 
-Replace the third source when two equal payloads of one flow are not one piece of
-work in this host, for example one request per user:
+Install `Flow.derived` explicitly when equal encoded payloads of one flow are
+one piece of work. It encodes the payload with the flow's own codec,
+canonicalizes it under RFC 8785, hashes it, and hashes that together with the
+flow tag:
+
+```ts
+const derivedIdentity = Flow.layerExecutionIds(Flow.derived)
+```
+
+Install a custom source when a request, session, or workspace defines which
+invocations are the same:
 
 ```ts
 import { Flow } from "@smthrs/flow"
@@ -43,10 +51,11 @@ unaffected, because both are decided before the source is consulted.
 
 ### When identity cannot be derived
 
-`Flow.ExecutionIdRequired` is a defect, not a typed failure. The derived source
-raises it when the payload has no canonical form: a non-finite number, a lone
-surrogate, a cycle. `derived.mint` dies with it rather than starting a run under
-a guessed identity, because a run under the wrong id is worse than a run that
+`Flow.ExecutionIdRequired` is a defect, not a typed failure. The default source
+raises it whenever neither the caller nor the flow declaration selected an id.
+The opt-in derived source also raises it when the payload has no canonical
+form: a non-finite number, a lone surrogate, or a cycle. Both die before the
+engine is invoked, because a run under the wrong id is worse than a run that
 does not start.
 
 `Flow.executionId(payload)` precomputes the same id. It dies when the payload

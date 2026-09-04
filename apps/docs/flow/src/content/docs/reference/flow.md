@@ -147,7 +147,7 @@ The persisted key of the dispatch an implementation is running under, when the r
 - **Type:** `Schema.TaggedError` with fields `code: "infra_interrupt"` and `reason?: unknown`
 - **Since:** `0.1.0`
 
-The marker an engine raises when an action is interrupted by host loss or rebalancing rather than by user cancellation. It is retried only under an action's `interruptRetryPolicy`.
+The marker an action implementation or adapter explicitly fails with for an infrastructure event it wants retried under the action's `interruptRetryPolicy`. The shipped engines do not synthesize it from ordinary fiber interruption.
 
 ### `Action.InfraInterruptRetriesExhausted`
 
@@ -541,19 +541,19 @@ Whether a flow suspends when it encounters any error. A suspended execution is r
 - **Type:** `Schema.TaggedError` with fields `code: "execution_id_required"` and `flowName: string`
 - **Since:** `0.1.0`
 
-A flow execution has no derivable identity, because its payload has no canonical form. It is a defect rather than a typed failure: `derived.mint` dies with it rather than starting a run under a guessed identity.
+A flow execution has no selected identity. The default ambient source dies with this defect when neither the caller nor the flow declaration selected an id; the opt-in `derived` source also dies with it when the payload has no canonical form.
 
 ### `Flow.derived`
 
 - **Type:** `ExecutionIdSource`
 - **Since:** `0.1.0`
 
-The default execution-id source. It encodes the payload with the flow's own codec, canonicalizes it under RFC 8785, hashes it with SHA-256, and hashes that key together with the flow tag inside a JSON tuple. The same tag and encoded payload derive the same id. The preimage encoding freezes at rc.0.
+The opt-in payload-derived execution-id source. It encodes the payload with the flow's own codec, canonicalizes it under RFC 8785, hashes it with SHA-256, and hashes that key together with the flow tag inside a JSON tuple. The same tag and encoded payload derive the same id. Install it with `layerExecutionIds(derived)`. The preimage encoding freezes at rc.0.
 
 ### `Flow.CurrentExecutionIds`
 
 - **Type:** `Context.Reference<ExecutionIdSource>`
-- **Default:** `derived`
+- **Default:** dies with `ExecutionIdRequired`
 - **Since:** `0.1.0`
 
 The host's execution-id source. Its identifier is `"@smthrs/flow/Flow/CurrentExecutionIds"`.
@@ -1409,13 +1409,13 @@ Every failure the package defines is a `Schema.TaggedError` carrying a stable `c
 
 | Tag                                                    | Raised when                                                                                                          | Fields                                                                  |
 | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `@smthrs/flow/InfraInterrupt`                          | An engine interrupts an action because of host loss or rebalancing rather than user cancellation.                    | `code`, `reason`                                                        |
+| `@smthrs/flow/InfraInterrupt`                          | An action adapter explicitly marks an infrastructure event for `interruptRetryPolicy`; engines do not synthesize it. | `code`, `reason`                                                        |
 | `@smthrs/flow/InfraInterruptRetriesExhausted`          | An action spends its `interruptRetryPolicy` without reaching an ordinary success or failure.                         | `code`, `actionName`, `attempts`, `interrupt`, `message`                |
 | `@smthrs/flow/IrreversibleRetryRequiresIdempotencyKey` | An irreversible action attempts a retry without a declared idempotency key.                                          | `code`, `actionName`, `attempt`                                         |
 | `@smthrs/flow/ConcurrentKeylessDispatch`               | Two ordinal-keyed invocations of one allocation scope are in flight at once.                                         | `code`, `actionName`                                                    |
 | `@smthrs/flow/UncanonicalIdempotencyKey`               | A caller-declared object-form `idempotencyKey` carries material canonical serialization rejects.                     | `code`, `actionName`, `reason`, `path`, `message`                       |
 | `@smthrs/flow/DurableDeferred/TokenInvalid`            | A completion token does not parse, or names a different deferred than the surface it was submitted through.          | `code`, `message`                                                       |
-| `@smthrs/flow/ExecutionIdRequired`                     | The derived execution-id source is asked for an id and the payload has no canonical form.                            | `code`, `flowName`                                                      |
+| `@smthrs/flow/ExecutionIdRequired`                     | No caller, declaration, or ambient source selected an id, or opt-in derivation could not canonicalize the payload.   | `code`, `flowName`                                                      |
 | `@smthrs/flow/MaxRoundsExceeded`                       | A trampoline lineage opens a round past its flow's `maxRounds` budget.                                               | `code`, `flowName`, `lineageId`, `maxRounds`, `roundOrdinal`, `message` |
 | `@smthrs/flow/CancelRequestFailed`                     | `interrupt` cannot durably record its cancellation request, or a durable engine is asked for `interruptUnsafe`.      | `code`, `executionId`, `reason`                                         |
 | `@smthrs/flow/FlowCycleDetected`                       | Executing a flow would close a cycle in the persisted parent-execution chain.                                        | `code`, `path`                                                          |

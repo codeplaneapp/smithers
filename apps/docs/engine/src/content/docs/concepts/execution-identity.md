@@ -19,11 +19,11 @@ replays a request, and a sweep that resubmits all converge on one execution.
 Joining works whether the run is finished or still going. A duplicate submit of
 an in-flight id waits on the body that is already running.
 
-When a caller supplies no id at all, the flow derives one: from the declared
-`idempotencyKey` when the flow has one, and otherwise from the ambient
-execution-id source. A flow with an `idempotencyKey` is therefore
-content-addressed by construction, and two callers with the same payload
-converge without agreeing on an id first.
+When a caller supplies no id at all, the flow uses its declared
+`idempotencyKey` when it has one and otherwise asks the ambient execution-id
+source. That source refuses by default. A host may explicitly install the
+payload-derived source when equal payloads should converge; a flow with an
+`idempotencyKey` is content-addressed by construction.
 
 ## Two reuses are refused
 
@@ -34,6 +34,9 @@ two reuses raise `ExecutionIdentityConflict` as a defect:
 | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `"flow"`    | The id already belongs to a different flow declaration. Answering would hand one flow's value to another flow's schemas. |
 | `"payload"` | The id already belongs to a different payload. The recorded result answers the first payload's question, not this one's. |
+| `"lineage"` | A durable row with the id belongs to another trampoline lineage.                                                         |
+| `"round"`   | A durable row with the id belongs to another round ordinal.                                                              |
+| `"parent"`  | A durable row with the id belongs to another predecessor round.                                                          |
 
 Payload identity is structural, not referential. The engine compares the
 rebuilt payload snapshots: it recurses through the plain objects and arrays the

@@ -41,13 +41,13 @@ run under it.
 
 ## Execution id already belongs to another run
 
-**Symptom.** `execution <id> already belongs to flow <other>` with
-`field: "flow"`, or `execution <id> already belongs to the payload it was
-admitted with` with `field: "payload"`.
+**Symptom.** `execution <id> already belongs to ...` with `field: "flow"` or
+`field: "payload"`. A durable trampoline collision may instead name
+`field: "lineage"`, `"round"`, or `"parent"`.
 
-**Cause.** A caller reused an execution id for a different flow declaration or
-a different payload. The engine refuses rather than answering with a result
-that belongs to a different question.
+**Cause.** A caller reused an execution id for a different flow declaration,
+payload, or durable round identity. The engine refuses rather than answering
+with a result that belongs to a different question.
 
 **Fix.** Make the id unique per (flow, payload). If the collision is across
 tenants sharing one server, namespace the ids in one place:

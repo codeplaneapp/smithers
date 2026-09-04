@@ -9,11 +9,11 @@ Two identity questions decide whether a durable run is safe: which run is this, 
 
 ## The caller chooses the execution id
 
-Identity has three sources, consulted in a fixed order. First, the `executionId` the caller named on `execute`. Failing that, the `idempotencyKey` the flow declared, hashed together with the flow tag. Failing both, the ambient `CurrentExecutionIds` source, whose default `derived` hashes the flow tag with the payload's canonical form.
+Identity has three sources, consulted in a fixed order. First, the `executionId` the caller named on `execute`. Failing that, the `idempotencyKey` the flow declared, hashed together with the flow tag. Failing both, the ambient `CurrentExecutionIds` source. Its default dies with `ExecutionIdRequired`, so the host has to choose whether unnamed invocations should join.
 
-`layerExecutionIds(source)` replaces the third. Replace it when two equal payloads of one flow are not one piece of work in this host, for example one request per user in a coding agent. Callers that name an `executionId` and flows that declare an `idempotencyKey` are unaffected, because both are decided before the source is consulted.
+`layerExecutionIds(source)` replaces the third. Install `layerExecutionIds(derived)` when equal encoded payloads of one flow are one piece of work; install a custom source when a request, session, or workspace defines identity. Callers that name an `executionId` and flows that declare an `idempotencyKey` are unaffected, because both are decided before the source is consulted.
 
-`ExecutionIdRequired` is a defect, not a typed failure. The derived source raises it when the payload has no canonical form, a non-finite number, a lone surrogate, or a cycle, and `derived.mint` dies with it rather than starting a run under a guessed identity. `Flow.executionId(payload)` likewise dies when the payload fails the flow's own payload schema, where `Flow.execute` fails with a typed `SchemaError` instead. Precompute an id with `executionId` only for a payload you have already validated.
+`ExecutionIdRequired` is a defect, not a typed failure. The default source raises it whenever neither the caller nor the declaration selected an id. The opt-in derived source also raises it when the payload has no canonical form: a non-finite number, a lone surrogate, or a cycle. `Flow.executionId(payload)` likewise dies when the payload fails the flow's own payload schema, where `Flow.execute` fails with a typed `SchemaError` instead. Precompute an id with `executionId` only for a payload you have already validated.
 
 ## Why the hash-everything join was refused
 

@@ -114,10 +114,12 @@ descriptor found while walking a bounded prototype chain.
 
 ## Infrastructure interrupts
 
-An engine raises `Action.InfraInterrupt` when an action is interrupted by host
-loss or rebalancing rather than by user cancellation. It is not an ordinary
-failure and the retry policy does not see it. Only an inline action's
-`interruptRetryPolicy`, an Effect `Schedule`, retries one:
+An action implementation or transport adapter may fail with
+`Action.InfraInterrupt` when it can identify a retryable infrastructure event.
+It is not an ordinary domain failure and `retryPolicy` does not see it. Only an
+inline action's `interruptRetryPolicy`, an Effect `Schedule`, retries the
+explicit marker. The shipped engines do not convert owner loss, host shutdown,
+or ordinary fiber interruption into it:
 
 ```ts
 import * as Schedule from "effect/Schedule"
@@ -127,7 +129,12 @@ const resilient = Action.make({
   success: Schema.String,
   error: Schema.String,
   interruptRetryPolicy: Schedule.recurs(3),
-  execute: Effect.suspend(() => callProvider())
+  execute: callProvider().pipe(
+    Effect.catchTag(
+      "TransportUnavailable",
+      (error) => Effect.fail(new Action.InfraInterrupt({ reason: error.message }))
+    )
+  )
 })
 ```
 

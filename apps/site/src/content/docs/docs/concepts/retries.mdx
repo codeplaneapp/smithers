@@ -28,9 +28,9 @@ Because the decision reads durable state, retry deadlines survive restarts. A po
 
 Effect's own workflow package retries any interruption ten times by default. Smithers diverges on purpose: cancellation propagates at once. A cancel is a statement about the run, not an accident of the network, and retrying it would redo work the caller already refused. Durable cancellation is observed, not only recorded: while a run executes, the driver polls the run's cancel-requested flag on the heartbeat cadence and interrupts the flow fiber, and terminal transitions are guarded inside the ownership compare-and-swap, so a request that races past the last poll turns finalize into a cancellation. A cancel requested against a parked run is re-driven by the periodic sweep, so parking does not hide a run from its caller's refusal.
 
-## Only infrastructure interrupts consume a policy
+## Explicit infrastructure markers consume a policy
 
-An interrupt marked `InfraInterrupt` means the host was lost or the work was rebalanced, not that the work failed. Only that marker is retried, and only under the action's `interruptRetryPolicy`. An exhausted `interruptRetryPolicy` dies with the typed `InfraInterruptRetriesExhausted`, carrying the action, the attempts, and the final interrupt.
+An action implementation or transport adapter can fail with `InfraInterrupt` when it knows an infrastructure event is retryable. Only that explicit tagged failure is retried, and only under the action's `interruptRetryPolicy`. The shipped memory and durable engines do not convert owner loss, host shutdown, or ordinary fiber interruption into this marker: those interruptions propagate immediately, and the durable driver releases interrupted work for another owner to reclaim. An exhausted `interruptRetryPolicy` dies with the typed `InfraInterruptRetriesExhausted`, carrying the action, the attempts, and the final marker.
 
 A policy that runs out of road ends one of two ways, each a terminal failure with a stable code: `RetryPolicyExpired` when the deadline passed, and `RetryAttemptsExhausted` when the attempt budget did.
 

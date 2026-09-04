@@ -13,8 +13,9 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 /**
- * Marker raised by an engine when an action is interrupted by host loss or
- * rebalancing rather than user cancellation.
+ * Marker an action implementation or adapter raises for an infrastructure
+ * event it wants the action's `interruptRetryPolicy` to retry. Shipped engines
+ * do not synthesize it from ordinary fiber interruption.
  *
  * @category errors
  * @since 0.1.0

@@ -107,13 +107,14 @@ value captured from a different build.
 
 **Symptom.** A run dies before it starts, naming the flow.
 
-**Cause.** No `executionId` was given, the flow declares no `idempotencyKey`, and
-the payload has no canonical form: a non-finite number, a lone surrogate, or a
-cycle. The derived source refuses to guess.
+**Cause.** No `executionId` was given, the flow declares no `idempotencyKey`,
+and the default ambient source refuses to guess. When the opt-in derived source
+is installed, this also means the payload has no canonical form: a non-finite
+number, a lone surrogate, or a cycle.
 
 **Fix.** Pass an explicit `executionId`, declare an `idempotencyKey` on the flow,
-or make the payload canonical. Replace the ambient source with
-`Flow.layerExecutionIds` when the host has its own rule.
+`Flow.layerExecutionIds(Flow.derived)` when payload identity is intentional, or
+with a custom source when the host has its own rule.
 
 ### `Action.ConcurrentKeylessDispatch`
 

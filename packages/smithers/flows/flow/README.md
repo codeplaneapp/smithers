@@ -228,7 +228,9 @@ const ReviewHandler = Layer.mergeAll(
 ).pipe(Layer.provideMerge(Action.layerImplementations))
 
 // Run and observe. Identity precedence is an explicit executionId, the
-// flow's idempotencyKey (Review has one), then CurrentExecutionIds.derived.
+// flow's idempotencyKey (Review has one), then CurrentExecutionIds. Its
+// default requires an id; install layerExecutionIds(derived) to opt into
+// payload-derived identity.
 // discard: true returns that execution ID without waiting.
 const run = Effect.gen(function*() {
   const executionId = yield* Review.executionId({ pr: "42" })
@@ -256,15 +258,14 @@ successful effect if the enclosing flow later fails, and `Flow.intoResult` /
 handler effects to `Flow.Result` values (serialized via `Flow.Result`,
 `Flow.ResultEncoded`, `Flow.Complete.Schema`, and `Flow.Suspended`).
 
-Executing without an execution ID and without a declared `idempotencyKey`
-normally succeeds: identity falls through to the ambient
-`Flow.CurrentExecutionIds` source, whose default hashes the flow tag with the
-payload's canonical form. `Flow.ExecutionIdRequired` is what that source DIES
-with when the payload has no canonical form, for example a non-finite number, a
-lone surrogate, or a cycle. It is a defect rather than a typed failure, because
-a run started under a guessed identity is worse than a run that does not start.
-`Flow.layerExecutionIds(source)` replaces the source when equal payloads of one
-flow are not one piece of work in this host.
+Executing without an execution ID and without a declared `idempotencyKey` dies
+with `Flow.ExecutionIdRequired` before the engine is invoked. The default
+`Flow.CurrentExecutionIds` source refuses to guess. A host opts into
+payload-derived identity with
+`Flow.layerExecutionIds(Flow.derived)`; that source hashes the flow tag with the
+payload's canonical form and also raises `ExecutionIdRequired` when the payload
+has no canonical form. A host can install a custom source when a request,
+session, or workspace defines which invocations are the same.
 
 Registering a behavior under a flow tag is the runtime's own seam and stays
 internal to this package: a flow has one behavior and it is the body, so there
@@ -299,8 +300,9 @@ const charge = Action.make({
 
 // Action.retry wraps an action with Effect.retry semantics while
 // threading CurrentAttempt/CurrentOrdinal; Action.raceAll races several
-// actions durably. Infrastructure interrupts surface as
-// Action.InfraInterrupt and honor `interruptRetryPolicy`.
+// actions durably. An action adapter may mark a host failure with
+// Action.InfraInterrupt to opt into `interruptRetryPolicy`; ordinary fiber
+// interruption is never converted to that marker.
 const resilient = Action.retry(charge, { times: 3 })
 const fastest = Action.raceAll("fastest-charge", [charge, resilient])
 ```
