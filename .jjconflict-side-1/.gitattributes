@@ -1,0 +1,29 @@
+# Normalize line endings across platforms.
+#
+# CI runs required Linux jobs and an advisory Windows package lane. Several
+# gates and tests are line-ending sensitive: generated root files are
+# regenerated and diffed against the committed copy, the single-effect-version
+# gate matches line-anchored regexes against both lockfiles, and a number of
+# tests compare exact captured output. Without this file Windows' autocrlf
+# would check those files out as CRLF and fail them spuriously.
+#
+# Force LF for every text file (git auto-detects text vs binary); the explicit
+# binary entries below keep git from ever touching truly binary assets.
+* text=auto eol=lf
+
+# Binary assets. Never normalize or diff these as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.wasm binary
+*.gz binary
+*.zip binary
+*.exe binary
+*.node binary

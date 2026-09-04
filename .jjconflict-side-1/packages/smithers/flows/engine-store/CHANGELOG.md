@@ -1,0 +1,133 @@
+# Changelog
+
+## [Unreleased]
+
+### Fixed
+
+- Fixed the CommonJS build of the migration set. esbuild compiles a default
+  import of a sibling module under `"type": "module"` to Node-style interop,
+  where `import_x.default` is the sibling's whole exports object rather than
+  the Effect it exported, so `set.migrations["0001_initial"]` and
+  `set.migrations["0002_selection_store"]` had no `pipe` in `dist/cjs` and
+  every `require` consumer failed at schema time. `migrations/0001_initial`
+  now exports the named `initial` binding, `migrations/0002_selection_store`
+  exports the named `selectionStore` binding, neither has a default export,
+  and `Migrations` imports both by name.
+
+## [1.0.0-rc.0] - 2026-09-01
+
+### Release notes
+
+> **Issue links.** This package was imported from the `smithersai/flows`
+> repository, so the issue numbers cited below resolve there. Issues opened
+> since the import resolve in `smithersai/smithers`, which `package.json`
+> names as this package's repository.
+
+> **Databases.** Smithers 1.0.0-rc.0 stores run state in local SQLite only (`@effect/sql-sqlite-node` over Node.js `node:sqlite`). PostgreSQL and PGlite are not supported: no client layer or migration ladder ships, `SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with `unsupported_database`, and the 0.x `smithers migrate --to` database move is removed. Projects that ran 0.x on PGlite or PostgreSQL must finish or discard their runs on 0.x; there is no import path.
+
+### Added
+
+- Added persisted plan scheduling and reconciliation, workspace and step
+  sandboxes, selection and training, local/remote artifact and cache sync,
+  metrics, in-process wakes, bounded retention, run-catalog reads, artifact
+  garbage collection, and hot backup/verify/restore/fence operations.
+- Added cross-process artifact backup leases and frozen-root verification so a
+  backup cannot race artifact sweep or publish an incomplete manifest.
+
+### Changed
+
+- Required an owner-liveness probe when constructing the durable engine.
+- `DurableEngineState` now requires Effect's `SqlClient` service plus
+  `DurableWriter` (the renamed `Database` service).
+- Made durable state, journal records, plan mutations, and multi-row selection
+  updates transactional, with strict numeric bounds and host-independent
+  UTF-16 ordering.
+- Snapshot caller-owned descriptors and bytes before asynchronous work, and
+  bind checkpoint operations to the configured repository workspace.
+- Derived workspace-revision and bundle-identity strings from domain-tagged
+  canonical JSON. Their persisted values now change.
+- Removed the internal `@slop` review markers from every published JSDoc block.
+  They shipped in `src/**/*.ts` and the generated declarations, so a consumer's
+  editor hover showed a repository to-do instead of the contract.
+- Repointed every JSDoc design reference, every reference in the package's own
+  `docs/` prose, and the remaining references in test headers at their published
+  `docs/pages` successors. The imported `docs/specs` tree and the
+  `.smithers/tickets` notes do not exist in this repository, so each pointer
+  named a file no reader could open.
+- Renamed the durable `flows.engine.cache-conflict` payload field `key` to
+  `cacheKey`. `@smthrs/journal` reads a field named `key` as a credential and
+  replaces its value with `[REDACTED]`, which erased the very content address
+  the conflict record exists to preserve.
+- Renamed the dispatch observability field `key` to `stepKey` on every log
+  annotation and span attribute this package writes. The same journal rule that
+  redacts a durable `key` also redacts a log annotation named `key`, and
+  `RedactedLogger` is installed by `@smthrs/flows`' `NodeRuntime` and by the
+  `smithers` binary, so every dispatch line an operator read said
+  `key=[REDACTED]` and no longer named which step it described. Span attributes
+  take the new name too, so a trace and a log line agree.
+- Validated `DisasterRecovery` `maxFileSizeBytes` at option admission. A
+  fractional, NaN, infinite, negative, or unsafe value now fails with the new
+  `invalid_options` code instead of dying inside `BigInt`.
+
+### Fixed
+
+- Prevented torn scheduler/journal settlements, retention partial deletes,
+  mutable boundary evidence, forged materialization conflicts, ambiguous
+  deviation identities, and failure-Exit corruption after in-memory restart.
+- Made artifact GC and disaster recovery fail closed on corrupt durable roots,
+  and made the local CAS coordinate writers and sweepers across processes.
+- Required explicit whole-tree write verification before admitting a sealed
+  result to the cross-run cache.
+- Quarantined corrupt boundary evidence off succeeded attempt rows after
+  journalling the inconsistency, so a later resume returns the durable outcome
+  without re-executing the action
+  ([#171](https://github.com/smithersai/flows/issues/171)).
+- Included recorded-row provenance in corruption journal identities so an
+  identically re-corrupted row records a new incident after healing
+  ([#172](https://github.com/smithersai/flows/issues/172)).
+- Reduced a live failure value to inert JSON before it reaches the attempt row,
+  so a boundary refusal, a sandbox refusal, or any `Data.TaggedError` settles
+  the attempt instead of being refused by the store as a non-plain object. A
+  value JSON cannot express at all now records as `null` rather than as a
+  dropped key the replay decoder could not read. The reduction reads own data
+  properties only, so persisting a failure no longer runs the failing value's
+  getters, `toJSON`, or proxy traps, and it is bounded by the depth, node, and
+  character allowances the attempt store admits, so an outsized failure records
+  as `null` instead of being refused and leaving the row `running`.
+- Enumerated a declared tree artifact in full. `.git`, `.jj`, and `node_modules`
+  are pruned from glob expansion only; pruning them from `filesUnder` and
+  `entriesUnder` left files out of a tree's captured identity and left stale
+  copies of them behind on replay.
+- Derived glob-pruning exemptions from every full include that shares a walk
+  prefix. An ignored-directory segment after a wildcard now remains in a
+  declared read set instead of disappearing from boundary measurement, while a
+  root glob still skips undeclared repository metadata and dependency trees.
+- Charged the persisted cause envelope and interrupt reasons against one node
+  budget, with a replayable one-reason fallback when it is exhausted. A large
+  interrupted fan-out can no longer make `AttemptStore.finish` reject the
+  terminal update and leave the attempt `running`.
+- Reduced array-buffer views to a bounded marker before own-key enumeration and
+  charged every other enumerated key against a shared walk allowance. A large
+  typed-array defect can no longer materialize one property name per byte on
+  the terminal failure path.
+- Measured the encoded backup manifest against `maxFileSizeBytes` before its
+  final write. Backup can no longer report success for a manifest that verify
+  and restore reject under the same file-size option.
+- Dropped quarantined boundary evidence by omitting the key rather than writing
+  `undefined` over it, which the attempt store refuses.
+
+## [0.1.0] - 2026-08-05
+
+### Fixed
+
+- Removed composition-time throws and structural boundary sniffing by using
+  Deferred service wiring and Schema-backed boundary descriptors.
+- Supervised ownership heartbeats through structured interruption races.
+
+### Added
+
+- Added the journal-backed engine composition, claim-gated run
+  driver, durable deferred and absolute-clock state, action persistence
+  wiring, and deterministic test layers.
+- Added SQL-backed deferred completions and clock deadlines with owner-fenced
+  scheduling, first-writer completion, and restart recovery.

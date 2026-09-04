@@ -1,0 +1,106 @@
+[
+  {
+    "file": "src/agentic/Reasoning.tsx",
+    "exports": ["Reasoning", "ReasoningTrigger", "ReasoningContent", "ReasoningSummary"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/reasoning",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "useReasoning context hook export",
+      "ReasoningTrigger getThinkingMessage render callback"
+    ],
+    "divergences": [
+      "immediate auto-collapse (upstream delays 1s)",
+      "composed opt-in keeps the legacy flat render as the default",
+      "ReasoningContent renders children directly (upstream renders markdown via Streamdown)",
+      "ReasoningSummary presents provider-disclosed summaries only; no raw chain-of-thought channel",
+      "adds a labelled polite live region announcing streaming state transitions; visually hidden (sui-sr-only) so it is reduced-motion safe — upstream announces nothing"
+    ]
+  },
+  {
+    "file": "src/agentic/ChainOfThought.tsx",
+    "exports": ["ChainOfThought", "ChainOfThoughtStep", "chainOfThoughtStepStatus"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/chain-of-thought",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "ChainOfThoughtHeader/ChainOfThoughtContent compositional anatomy (trigger and body are built in)",
+      "ChainOfThoughtSearchResults/ChainOfThoughtSearchResult search-result chips",
+      "ChainOfThoughtImage per-step images"
+    ],
+    "divergences": [
+      "legacy steps-array mode kept alongside the composed ChainOfThoughtStep anatomy",
+      "uncontrolled open follows the streaming flag (upstream defaults closed)",
+      "adds a labelled polite live region announcing streaming state transitions; visually hidden (sui-sr-only) so it is reduced-motion safe — upstream announces nothing"
+    ]
+  },
+  {
+    "file": "src/agentic/ToolCall.tsx",
+    "exports": [
+      "ToolCall",
+      "ToolCallHeader",
+      "ToolCallContent",
+      "ToolCallInput",
+      "ToolCallOutput",
+      "ToolCallError",
+      "ToolCallApproval",
+      "toolCallStatus",
+      "TOOL_CALL_STATE_LABELS"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/tool",
+    "ported": "full-anatomy",
+    "omissions": [],
+    "divergences": [
+      "ToolCallContent corresponds to upstream ToolContent (naming divergence)",
+      "approvalSlot is a seam rather than built-in approval buttons",
+      "ToolCallApproval is a container; approval presentation is composed by the host",
+      "legacy model render kept alongside the compound anatomy"
+    ]
+  },
+  {
+    "file": "src/agentic/MessageResponse.tsx",
+    "exports": ["MessageResponse"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/message",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "Message/MessageContent wrappers",
+      "MessageActions/MessageAction/MessageToolbar action anatomy",
+      "MessageBranch* branching anatomy"
+    ],
+    "divergences": [
+      "renders through the smithers Markdown primitive (upstream renders via Streamdown with remark/rehype plugin seams)"
+    ]
+  },
+  {
+    "file": "src/agentic/AgentOutput.tsx",
+    "exports": ["AgentOutput"],
+    "collection": "agentic/ai-elements",
+    "registryItem": null,
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "smithers-original",
+      "AgentOutputModel.reasoningSummary is populated ONLY from explicit reasoningSummary/reasoning_summary fields, summary-typed parts, and nested summary payloads on parts carrying a recognized reasoning type/kind (reasoning/thinking/thought/summary family) — a `summary` field on untyped or unrelated part kinds is metadata, never reasoning text; raw reasoning/thinking/thought transcripts and redacted/signed parts are dropped and never rendered; reasoning remains as a deprecated alias"
+    ]
+  },
+  {
+    "file": "src/agentic/CodeBlock.ts",
+    "exports": ["CodeBlock", "CodeBlockHeader", "CodeBlockFilename", "CodeBlockGroup", "CodeBlockTabs"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/code-block",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "upstream CodeBlockTitle/CodeBlockActions header anatomy (CodeBlockHeader/CodeBlockFilename replace them; copy is a seam)",
+      "CodeBlockLanguageSelector family (language selector)",
+      "CodeBlockContainer/CodeBlockContent low-level composition wrappers"
+    ],
+    "divergences": [
+      "copy is a seam not a clipboard dependency",
+      "highlighter is a seam not bundled shiki",
+      "implementation lives in src/primitives/CodeBlock.tsx; this module is the public re-export",
+      "CodeBlockGroup derives tab/tabpanel DOM ids from the item index under a useId prefix — caller item ids are never embedded verbatim in id/aria-controls/aria-labelledby"
+    ]
+  }
+]

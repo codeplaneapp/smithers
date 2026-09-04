@@ -1,0 +1,126 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+import { mismatches, readManifests, retarget, retargetSource, sourceMismatches, versionedSources } from "./set-release-version.mjs"
+
+const workspaceNames = new Set(["@smthrs/kernel", "@smthrs/flows"])
+
+const example = {
+  name: "@smthrs/flows",
+  version: "0.1.0",
+  dependencies: {
+    "@smthrs/kernel": "0.1.0",
+    effect: "4.0.0-rc.108"
+  },
+  devDependencies: {
+    "@smthrs/kernel": "workspace:*",
+    vitest: "4.1.9"
+  }
+}
+
+test("retarget moves the version and the exact workspace ranges together", () => {
+  assert.deepEqual(retarget(example, "0.1.0-next.0", workspaceNames), {
+    name: "@smthrs/flows",
+    version: "0.1.0-next.0",
+    dependencies: {
+      "@smthrs/kernel": "0.1.0-next.0",
+      effect: "4.0.0-rc.108"
+    },
+    devDependencies: {
+      // A protocol range carries no version, so it cannot drift.
+      "@smthrs/kernel": "workspace:*",
+      vitest: "4.1.9"
+    }
+  })
+  assert.equal(example.version, "0.1.0")
+})
+
+test("retarget leaves third-party ranges alone", () => {
+  const retargeted = retarget(example, "9.9.9", new Set())
+  assert.equal(retargeted.dependencies["@smthrs/kernel"], "0.1.0")
+  assert.equal(retargeted.version, "9.9.9")
+})
+
+test("retarget preserves private versions while updating exact workspace ranges", () => {
+  const privateManifest = { ...example, private: true, version: "0.0.0" }
+  const retargeted = retarget(privateManifest, "0.1.0-next.0", workspaceNames)
+  assert.equal(retargeted.version, "0.0.0")
+  assert.equal(retargeted.dependencies["@smthrs/kernel"], "0.1.0-next.0")
+})
+
+test("mismatches names the version and every stale internal range", () => {
+  const entries = [
+    { directory: "packages/smithers/flows", manifest: example },
+    {
+      directory: "packages/smithers/flows/kernel",
+      manifest: { name: "@smthrs/kernel", version: "0.1.0-next.0" }
+    }
+  ]
+
+  assert.deepEqual(mismatches(entries, "0.1.0-next.0"), [
+    "packages/smithers/flows: version is 0.1.0, expected 0.1.0-next.0",
+    "packages/smithers/flows: dependencies.@smthrs/kernel is 0.1.0, expected 0.1.0-next.0"
+  ])
+  assert.deepEqual(mismatches(entries.slice(1), "0.1.0-next.0"), [])
+})
+
+test("this workspace is internally coherent at its current version", () => {
+  const entries = readManifests()
+  const version = entries.find(({ directory }) => directory === "packages/smithers/flows").manifest.version
+
+  assert.deepEqual(mismatches(entries, version), [])
+})
+
+test("workspace discovery follows every pnpm-workspace package glob", () => {
+  const directories = new Set(readManifests().map(({ directory }) => directory))
+  assert.equal(directories.has("packages/smithers/build/infra"), true)
+  assert.equal(directories.has("examples"), true)
+  assert.equal(directories.has("apps/server"), true)
+  assert.equal(directories.has("packages/rpc"), true)
+  assert.equal(directories.has("apps/ui"), true)
+})
+
+test("retargetSource rewrites the version literal and nothing else", () => {
+  const source = versionedSources.find(({ path }) => path.endsWith("Otlp.ts"))
+  const text = [
+    "/** @since 0.1.0 */",
+    'export const defaultServiceVersion = "1.0.0-rc.0"',
+    'export const other = "1.0.0-rc.0"'
+  ].join("\n")
+
+  assert.equal(
+    retargetSource(text, "1.0.0-rc.1", source),
+    [
+      // A `@since` tag records when the export appeared, not what ships today.
+      "/** @since 0.1.0 */",
+      'export const defaultServiceVersion = "1.0.0-rc.1"',
+      'export const other = "1.0.0-rc.0"'
+    ].join("\n")
+  )
+})
+
+test("retargetSource refuses a file that no longer carries the declaration", () => {
+  const source = versionedSources.find(({ path }) => path.endsWith("Otlp.ts"))
+
+  assert.throws(
+    () => retargetSource("export const somethingElse = \"1.0.0-rc.0\"", "1.0.0-rc.1", source),
+    /no longer declares defaultServiceVersion/
+  )
+})
+
+test("sourceMismatches names a literal the manifests left behind", () => {
+  assert.deepEqual(sourceMismatches("9.9.9"), [
+    "packages/smithers/flows/observability/src/Otlp.ts: defaultServiceVersion is 1.0.0-rc.0, expected 9.9.9",
+    "packages/smithers/migrate/src/flow/Cli.ts: version is 1.0.0-rc.0, expected 9.9.9",
+    "packages/smithers/migrate/src/Report.ts: tool.version is 1.0.0-rc.0, expected 9.9.9"
+  ])
+})
+
+test("every versioned source agrees with the version its own package declares", () => {
+  const entries = readManifests()
+  for (const { path } of versionedSources) {
+    const directory = path.split("/src/")[0]
+    const owner = entries.find((entry) => entry.directory === directory)
+    assert.ok(owner, `${path} is not inside a workspace package`)
+    assert.deepEqual(sourceMismatches(owner.manifest.version), [])
+  }
+})

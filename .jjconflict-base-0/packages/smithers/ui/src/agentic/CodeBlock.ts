@@ -1,0 +1,16 @@
+export {
+  CodeBlock,
+  CodeBlockFilename,
+  type CodeBlockFilenameProps,
+  CodeBlockGroup,
+  type CodeBlockGroupItem,
+  type CodeBlockGroupProps,
+  CodeBlockHeader,
+  type CodeBlockHeaderProps,
+  type CodeBlockHighlighter,
+  type CodeBlockProps,
+  CodeBlockTabs,
+  type CodeBlockTabsProps,
+  type HighlightedToken,
+  type HighlightLine,
+} from "../primitives/CodeBlock";

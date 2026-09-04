@@ -1,0 +1,405 @@
+/**
+ * Narrow engine port consumed by the built-in harness.
+ *
+ * Governing contracts: `../docs/concepts.md#durable-cell-loop`,
+ * `../docs/concepts.md#child-plans-and-the-splice-boundary`, and
+ * `../docs/concepts.md#step-keys-and-the-model-layer`.
+ *
+ * @since 0.1.0
+ */
+import type * as KeyMaterial from "@smthrs/core/KeyMaterial"
+import type * as Model from "@smthrs/model/Model"
+import type * as ModelEvent from "@smthrs/model/ModelEvent"
+import type * as ModelRequest from "@smthrs/model/ModelRequest"
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
+import type * as Cell from "./Cell.ts"
+import { HarnessError } from "./HarnessError.ts"
+import type * as Plan from "./Plan.ts"
+
+/**
+ * Stable reasons for parking a harness turn at a safe boundary.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export const SuspendReasonCode = Schema.Literals([
+  "permission-required",
+  "waiting-quota",
+  "waiting-input",
+  "waiting-event",
+  "engine"
+])
+
+/**
+ * Stable reasons for parking a harness turn at a safe boundary.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export type SuspendReasonCode = typeof SuspendReasonCode.Type
+
+/**
+ * A serializable request to park the current engine frame.
+ *
+ * `details` is a closed JSON value rather than `Schema.Unknown`, for the reason
+ * `HarnessError`'s `cause` is a `Schema.Defect`: this value is journaled inside
+ * `AgentEvent.Suspended` and served back to whatever resumes the run, so it has
+ * to be something the durable exit schema can encode. `Schema.Unknown` accepts
+ * a live `Error`, a function, a `BigInt`, a cycle and an accessor, and the
+ * controller was in fact attaching a `Permission.PermissionRequired` — a class
+ * that extends `Error` — to every permission park. What a park carries is now
+ * encoded before it is attached, so the journal holds the same value a resumed
+ * run decodes.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export class SuspendReason extends Schema.Class<SuspendReason>("flows/harness/EngineLike/SuspendReason")({
+  code: SuspendReasonCode,
+  message: Schema.String,
+  details: Schema.optional(Schema.Json)
+}) {}
+
+/**
+ * A sealed model request and the complete digest-free material declared by the
+ * harness.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface SealedModelStep {
+  readonly request: ModelRequest.ModelRequest
+  readonly keyMaterial: KeyMaterial.KeyMaterial
+  /**
+   * Wall-clock milliseconds one attempt at this step may spend; zero disarms.
+   *
+   * The budget travels on the step rather than on the engine's construction so
+   * the number the controller journals as armed is the number the engine
+   * enforces — one value, read from the controller's own state, and no way for
+   * a run's record of its discipline to disagree with the discipline it ran
+   * under.
+   *
+   * It is not key material and must never become key material: it says how
+   * long the caller will wait, not what the model was asked, and a step keyed
+   * on it would miss its cache the moment a host retuned the budget.
+   */
+  readonly modelCallMs?: number | undefined
+}
+
+/**
+ * The durable identity of one journaled controller boundary.
+ *
+ * `boundary` is a deterministic label for the boundary within its frame — a
+ * cell digest or a context digest — so re-executing the frame derives the same
+ * identity and replays the recorded value instead of performing the read
+ * again.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface BoundaryIdentity {
+  /** The durable session or lineage the boundary belongs to, when the loop has one. */
+  readonly session?: string | undefined
+  readonly frame: number
+  readonly boundary: string
+}
+
+/**
+ * A schema that decodes without services — the only kind a durable store can
+ * reconstruct a journaled value with.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export type DurableSchema<A> = Schema.Schema<A> & { readonly "DecodingServices": never }
+
+/**
+ * One nondeterministic read the controller must perform exactly once per run.
+ *
+ * The canonical example is the turn-boundary steering drain: the host queue is
+ * the world, and draining it is an effect. Left unjournaled, a resumed run
+ * drains an already-drained queue, rebuilds a different context than the
+ * original attempt, re-keys every later sealed step, and re-executes
+ * irreversible effects. Recorded through {@link EngineLike.record}, the drain
+ * replays its recorded value and the resumed run converges on the original
+ * attempt.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface RecordBoundary<A> {
+  readonly name: string
+  readonly identity: BoundaryIdentity
+  readonly success: DurableSchema<A>
+  readonly execute: Effect.Effect<A, HarnessError>
+}
+
+/**
+ * One measurement of the workspace the run is changing.
+ *
+ * The controller never interprets `digest`; it only asks whether two
+ * measurements are equal. That is deliberate — the host owns what "the
+ * workspace" means (which paths it covers, and what it reads off each one),
+ * and the only thing the loop is entitled to conclude is "this is the tree I
+ * left" or "this is not". `paths` is carried for the journal, so a reader can
+ * tell an observation over 7,000 files from one over an empty root.
+ *
+ * `complete` is the answer to the one question that makes "this is the tree I
+ * left" meaningful. A measurement that stopped at a bound covers a prefix of
+ * the workspace, and a prefix cannot say that the rest of it held still — a
+ * checkout larger than the host's bound would otherwise report every frame as
+ * idle, and the read-only cap would fail a run that had been editing the whole
+ * time. A host that does not narrow its own measurement leaves it `true`.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export class Observation extends Schema.Class<Observation>("flows/harness/EngineLike/Observation")({
+  /** A content address of everything the measurement covered, taken together. */
+  digest: Schema.String,
+  /** How many paths the measurement covered. */
+  paths: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Whether the measurement covered the whole tree it was asked to measure. */
+  complete: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(Effect.succeed(true)),
+    Schema.withDecodingDefaultKey(Effect.succeed(true))
+  )
+}) {}
+
+/**
+ * One pinned tree the run can come back to.
+ *
+ * A checkpoint is a **value**, not a place the run goes: minting one changes
+ * nothing about the workspace, and running a call against one leaves the live
+ * tree exactly as it stands. That is the whole point. Before this existed, the
+ * only way to answer "did this command fail before my change" was to undo the
+ * change, and `sympy__sympy-13878` shows what that costs — one byte-identical
+ * 4,789-character patch applied five times, four of those applications preceded
+ * by `git checkout -- sympy/stats/crv_types.py`, because a clean proof required
+ * reverting the very work it was meant to prove.
+ *
+ * `ref` is the host's own name for what it pinned — a commit id, a snapshot
+ * key, whatever the store speaks. The controller never interprets it, exactly
+ * as it never interprets {@link Observation.digest}; it is carried so the
+ * journal says which tree a checkpointed call ran against and a grader can
+ * reconcile the reading against the store by hand.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export class Snapshot extends Schema.Class<Snapshot>("flows/harness/EngineLike/Snapshot")({
+  /** The id the cell holds, and the id a later call names in `at`. */
+  id: Schema.String,
+  /** What the host recorded, in the host's own vocabulary. */
+  ref: Schema.String
+}) {}
+
+/**
+ * A request to pin the workspace as it stands right now.
+ *
+ * `identity` travels with it so a store *can* namespace what it writes by the
+ * run that wrote it: two runs over one workspace mint `id` values from the same
+ * frame-and-ordinal counter, so a store that keys on the id alone hands the
+ * second run the first run's tree. `@smthrs/std/Checkpoints`'s git store keys
+ * on the id alone and is right to: it also materializes at one path per id, as
+ * `TestRun`'s baseline worktree does, so two concurrent runs over one workspace
+ * collide on the checkout before they collide on the name. One workspace holds
+ * one run — that is the assumption the whole workspace layer already makes, and
+ * this field is what a store that stops making it would namespace by.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface CaptureRequest {
+  readonly id: string
+  readonly identity: BoundaryIdentity
+}
+
+/**
+ * The engine operations required by harness translation.
+ *
+ * @category services
+ * @since 0.1.0
+ * @slop
+ */
+export interface EngineLike {
+  /**
+   * Runs one sealed model step.
+   *
+   * The harness contributes the assembled-context input, resolved layer set,
+   * capability envelope, effect tier, placement, and provider-neutral
+   * `ModelRequest` as core key material. The step-key contract
+   * (`../docs/concepts.md#step-keys-and-the-model-layer`) requires the exact
+   * wire request in the key, so route resolution happens before the key is
+   * sealed. An implementation MUST therefore resolve the route, run
+   * `Route.prepare` (`/model/Route`), and digest the credential-free
+   * `PreparedRequest` — canonical body bytes included — together with
+   * declared material into the sealed-step key before executing. A provider
+   * wire change must produce a new key; credentials are signed on after the
+   * digest and never enter it.
+   */
+  readonly sealStep: (
+    step: SealedModelStep
+  ) => Stream.Stream<ModelEvent.ModelEvent, Model.ModelFailure | HarnessError>
+  readonly splice: (
+    batch: Plan.Batch
+  ) => Stream.Stream<Plan.SpliceEvent, HarnessError>
+  /**
+   * Runs one flow call issued from inside a running cell.
+   *
+   * This is the cell path's whole effectful surface, and it is deliberately
+   * one call at a time: a cell derives the second call's input from the first
+   * call's result, so there is no batch to hand over. The implementation owns
+   * durability — the call is a keyed, journaled activity at the tier the flow
+   * declares, keyed by `call.identity` so a settled boundary replays instead of
+   * re-running when the cell is re-executed after a crash or a permission park.
+   *
+   * A flow that fails settles as a `failure` {@link Cell.CallResult}, which the
+   * cell observes as a catchable exception. A permission requirement, an
+   * abort, or an engine failure travels in the error channel instead, so the
+   * cell never sees — and can never swallow — a park.
+   */
+  readonly call: (call: Cell.Call) => Effect.Effect<Cell.CallResult, HarnessError>
+  /**
+   * Journals one nondeterministic controller read as a durable boundary.
+   *
+   * The controller's state is rebuilt by re-execution, so every read of the
+   * world it makes between sealed steps must be recorded: the implementation
+   * runs `execute` once, journals the outcome under a run-scoped key derived
+   * from `name` and `identity` TOGETHER, and serves the recorded value to any
+   * later re-execution of the same frame. A read that bypasses this boundary is
+   * a replay divergence — and, downstream of one, duplicate irreversible
+   * effects.
+   *
+   * `(name, identity)` is the key, and both halves are load-bearing: one frame
+   * issues several records that share a session, a frame number and a boundary
+   * and differ only in what they are for. An implementation that keys on
+   * `identity` alone serves one frame's opening workspace measurement as its
+   * closing one. The controller also folds each boundary's purpose into
+   * `identity.boundary`, so it stays correct under an implementation that reads
+   * the contract the other way, but an implementation must key on both.
+   */
+  readonly record: <A>(boundary: RecordBoundary<A>) => Effect.Effect<A, HarnessError>
+  /**
+   * Measures the workspace as it stands right now.
+   *
+   * This is what makes the loop's mutation accounting honest. Every other
+   * signal the controller has about "did this frame change anything" is a
+   * *declaration*: a flow's registry envelope, or the write set an invocation
+   * claimed. A shell command declares neither — spawning a process is the one
+   * call whose effects do not travel through any boundary the harness can
+   * read — so a run whose only edits went through `bash` looked, to every
+   * control, exactly like a run that did nothing. Comparing two measurements
+   * around a frame answers the question from the world instead of from the
+   * paperwork.
+   *
+   * `Option.none()` is the honest answer for a host with no workspace to
+   * measure, or none it can measure cheaply. It is not an error and it is not
+   * "nothing changed": the controller reads it as "unobserved" and falls back
+   * to declared writes, and says in the journal which basis it used.
+   *
+   * The result is nondeterministic, so the controller journals it through
+   * {@link EngineLike.record} rather than calling this on a replayed frame.
+   */
+  readonly observe: Effect.Effect<Option.Option<Observation>, HarnessError>
+  /**
+   * Pins the workspace as it stands right now, under the id the caller gives.
+   *
+   * This is the sibling of {@link EngineLike.observe} and it is deliberately a
+   * different operation: `observe` answers "is this the tree I left", which
+   * needs only a digest, while this has to be able to hand the tree back later.
+   * The pin happens where the call happens — a cell that mints between two
+   * edits gets the tree between those two edits — which is what makes
+   * `ctx.checkpoint()` mean anything at the line it is written on.
+   *
+   * `Option.none()` is the honest answer for a host with no store to pin into,
+   * exactly as it is for `observe`. It is not an error: the controller answers
+   * the cell with a catchable `checkpoint_unavailable` and the run carries on
+   * taking its readings from the live tree.
+   *
+   * The result is nondeterministic, so the controller journals it through
+   * {@link EngineLike.record} rather than calling this on a replayed frame.
+   */
+  readonly capture: (request: CaptureRequest) => Effect.Effect<Option.Option<Snapshot>, HarnessError>
+  readonly suspend: (reason: SuspendReason) => Effect.Effect<never, HarnessError>
+}
+
+/**
+ * Context service for the harness engine boundary.
+ *
+ * @category services
+ * @since 0.1.0
+ * @slop
+ */
+export const EngineLike: Context.Service<EngineLike, EngineLike> = Context.Service(
+  "/harness/EngineLike"
+)
+
+/**
+ * Constructs an engine port from an implementation.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const make = (implementation: EngineLike): EngineLike => EngineLike.of(implementation)
+
+/**
+ * Provides an engine port implementation.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const layer = (implementation: EngineLike): Layer.Layer<EngineLike> =>
+  Layer.succeed(EngineLike)(make(implementation))
+
+const unavailable = (operation: string, code: "engine_failed" | "suspended" = "engine_failed"): HarnessError =>
+  new HarnessError({
+    code,
+    message: `${operation} is unavailable`
+  })
+
+/**
+ * Constructs an unavailable engine stub, optionally overriding operations.
+ *
+ * @category constructors
+ * @since 0.1.0
+ * @slop
+ */
+export const makeNoop = (overrides: Partial<EngineLike> = {}): EngineLike =>
+  EngineLike.of({
+    sealStep: () =>
+      Stream.unwrap(Effect.fn("EngineLike.sealStep")(() => Effect.succeed(Stream.fail(unavailable("sealStep"))))()),
+    splice: () => Stream.fail(unavailable("splice")),
+    call: Effect.fn("EngineLike.call")(() => Effect.fail(unavailable("call"))),
+    record: Effect.fn("EngineLike.record")(() => Effect.fail(unavailable("record"))),
+    // Unobservable rather than unavailable. A stub engine has no workspace, and
+    // the honest report of that is "I measured nothing" — which the controller
+    // already knows how to read. Failing here instead would turn a host that
+    // simply has no tree into a failed run.
+    observe: Effect.succeed(Option.none()),
+    // Unpinnable for the same reason, and reported the same way: a stub engine
+    // has no store to pin a tree into, and the controller reads the absence as
+    // a catchable refusal the cell can route around.
+    capture: () => Effect.succeed(Option.none()),
+    suspend: Effect.fn("EngineLike.suspend")(() => Effect.fail(unavailable("suspend", "suspended"))),
+    ...overrides
+  })
+
+/**
+ * Provides an unavailable engine stub.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const layerNoop = (overrides: Partial<EngineLike> = {}): Layer.Layer<EngineLike> =>
+  Layer.succeed(EngineLike)(makeNoop(overrides))

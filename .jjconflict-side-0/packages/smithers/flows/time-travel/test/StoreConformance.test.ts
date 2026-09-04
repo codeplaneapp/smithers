@@ -1,0 +1,534 @@
+import { describe, expect, it } from "@effect/vitest"
+import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as EngineMigrations from "@smthrs/engine-store/Migrations"
+import type { OwnerId } from "@smthrs/run-store/Ownership"
+import * as Effect from "effect/Effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { forkCreatedEventType, type LineageEdge } from "../src/Frame.ts"
+import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
+import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
+import type * as TimeTravelStore from "../src/TimeTravelStore.ts"
+
+const owner = { hostId: "owner-host", pid: 10, nonce: "owner-nonce" } as const
+const stranger = { hostId: "stranger-host", pid: 11, nonce: "stranger-nonce" } as const
+const frame = { lineageId: "run/root", seq: 1 } as const
+
+const memorySeed = () =>
+  MemoryTimeTravelStore.make({
+    records: [
+      {
+        runId: "run",
+        seq: 0,
+        eventId: "run-0",
+        payload: { state: { version: 1, flowName: "Demo", payload: { at: 0 } } },
+        eventType: "flows.engine.run-decision"
+      },
+      {
+        runId: "run",
+        seq: 1,
+        eventId: "run-1",
+        lineageId: "run/root",
+        payload: { stepKeyDigest: "step", attempt: 1 },
+        eventType: "flows.engine.attempt-started"
+      },
+      {
+        runId: "run",
+        seq: 2,
+        eventId: "run-2",
+        lineageId: "run/root",
+        payload: {
+          decision: "handed-off",
+          nextExecutionId: "detached",
+          state: { version: 1, flowName: "Demo", payload: { at: 2 } }
+        },
+        eventType: "flows.engine.run-decision"
+      },
+      { runId: "attached", seq: 0, eventId: "attached-0", payload: {} }
+    ],
+    edges: [
+      { parentRunId: "run", parentSeq: 2, childRunId: "attached", kind: "child", attached: true },
+      { parentRunId: "run", parentSeq: 2, childRunId: "detached", kind: "fork", attached: false },
+      { parentRunId: "run", parentSeq: 2, childRunId: "detached", kind: "continuation", attached: false }
+    ],
+    snapshots: [{ runId: "run", frame: { lineageId: "run/root", seq: 0 }, changeId: "change-0" }],
+    runOwners: new Map([["run", owner]])
+  })
+
+const seedSql = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function*() {
+    yield* sql`
+      INSERT INTO flows_runs
+        (run_id, status, created_at_ms, state_json, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms)
+      VALUES (
+        'run', 'running', 0,
+        ${JSON.stringify({ version: 1, flowName: "Demo", payload: { at: 2 } })},
+        ${owner.hostId}, ${owner.pid}, ${owner.nonce}, 0
+      )
+    `
+    yield* sql`
+      INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+      VALUES
+        ('attached', 'completed', 0, ${JSON.stringify({ version: 1, flowName: "Demo", payload: {} })}),
+        ('detached', 'suspended', 0, ${JSON.stringify({ version: 1, flowName: "Demo", payload: {} })})
+    `
+    const events = [
+      {
+        seq: 0,
+        type: "flows.engine.run-decision",
+        payload: { state: { version: 1, flowName: "Demo", payload: { at: 0 } } },
+        meta: {}
+      },
+      {
+        seq: 1,
+        type: "flows.engine.attempt-started",
+        payload: { stepKeyDigest: "step", attempt: 1 },
+        meta: { lineageId: "run/root" }
+      },
+      {
+        seq: 2,
+        type: "flows.engine.run-decision",
+        payload: {
+          decision: "handed-off",
+          nextExecutionId: "detached",
+          state: { version: 1, flowName: "Demo", payload: { at: 2 } }
+        },
+        meta: { lineageId: "run/root" }
+      }
+    ] as const
+    for (const event of events) {
+      yield* sql`
+        INSERT INTO flows_journal_events
+          (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+           event_type, payload_json, meta_json)
+        VALUES (
+          'run', ${event.seq}, ${`run-${event.seq}`}, 'source', ${event.seq}, 0,
+          ${event.type}, ${JSON.stringify(event.payload)}, ${JSON.stringify(event.meta)}
+        )
+      `
+    }
+    yield* sql`
+      INSERT INTO flows_journal_events
+        (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+         event_type, payload_json, meta_json)
+      VALUES ('attached', 0, 'attached-0', 'source', 0, 0, 'test', '{}', '{}')
+    `
+    yield* sql`
+      INSERT INTO flows_time_travel_edges
+        (parent_run_id, parent_seq, child_run_id, kind, attached)
+      VALUES
+        ('run', 2, 'attached', 'child', 1),
+        ('run', 2, 'detached', 'fork', 0)
+    `
+    yield* sql`
+      INSERT INTO flows_time_travel_snapshots
+        (run_id, lineage_id, seq, change_id, plan_digest)
+      VALUES ('run', 'run/root', 0, 'change-0', NULL)
+    `
+  })
+
+const normalizeEdges = (edges: ReadonlyArray<LineageEdge>) =>
+  edges.map((edge) => ({ ...edge })).sort((left, right) => left.childRunId.localeCompare(right.childRunId))
+
+const observe = (store: TimeTravelStore.Service) =>
+  Effect.gen(function*() {
+    const snapshot = yield* store.snapshotAt("run", frame)
+    const state = yield* store.stateAt("run", frame)
+    const attempts = yield* store.attemptsAt("run", frame)
+    const descendants = yield* store.descendants("run", frame)
+    const archivedBefore = yield* store.archivedAt("run", 2)
+    const refusal = yield* Effect.flip(store.archiveAndTruncate("run", frame, [], stranger))
+    const archivedAfterRefusal = yield* store.archivedAt("run", 2)
+    yield* store.archiveAndTruncate("run", frame, [], owner)
+    const archivedAfter = yield* store.archivedAt("run", 2)
+    return {
+      snapshot,
+      state,
+      attempts,
+      descendants: {
+        attached: normalizeEdges(descendants.attached),
+        detached: normalizeEdges(descendants.detached)
+      },
+      archivedBefore,
+      refusal: { code: refusal.code, message: refusal.message },
+      archivedAfterRefusal,
+      archivedAfter
+    }
+  })
+
+const withSql = <A>(
+  body: (store: TimeTravelStore.Service, sql: SqlClient.SqlClient) => Effect.Effect<A, unknown>
+) =>
+  Effect.gen(function*() {
+    yield* EngineMigrations.run
+    const sql = yield* Effect.service(SqlClient.SqlClient)
+    const store = yield* SqlTimeTravelStore.make
+    return yield* body(store, sql)
+  }).pipe(Effect.provide(TestDatabase.layer)) as Effect.Effect<A, unknown>
+
+describe("TimeTravelStore conformance", () => {
+  it.effect("answers frame reads, descendants, archive evidence, and owner fences identically", () =>
+    Effect.gen(function*() {
+      const memory = yield* observe(memorySeed())
+      const sqlite = yield* withSql((store, sql) => seedSql(sql).pipe(Effect.andThen(observe(store))))
+
+      expect(memory).toEqual(sqlite)
+      expect(memory).toMatchObject({
+        snapshot: { changeId: "change-0" },
+        state: JSON.stringify({ version: 1, flowName: "Demo", payload: { at: 0 } }),
+        attempts: [{ stepKeyDigest: "step", attempt: 1 }],
+        descendants: {
+          attached: [{ childRunId: "attached" }],
+          detached: [{ childRunId: "detached" }]
+        },
+        archivedBefore: false,
+        refusal: {
+          code: "fence_lost",
+          message: "run run is no longer owned by stranger-host:11:stranger-nonce"
+        },
+        archivedAfterRefusal: false,
+        archivedAfter: true
+      })
+    }))
+
+  it.effect("refuses a foreign-owned attached child without changing either journal", () =>
+    Effect.gen(function*() {
+      const childOwner = { ...owner, nonce: "rewind-child" }
+      const childFrame = { lineageId: "parent/root", seq: 0 } as const
+      const childEdge: LineageEdge = {
+        parentRunId: "parent",
+        parentSeq: 1,
+        childRunId: "child",
+        kind: "child",
+        attached: true
+      }
+      const memoryStore = MemoryTimeTravelStore.make({
+        records: [
+          { runId: "parent", seq: 0, eventId: "parent-0", payload: {} },
+          { runId: "parent", seq: 1, eventId: "parent-1", payload: {} },
+          { runId: "child", seq: 0, eventId: "child-0", payload: {} }
+        ],
+        edges: [childEdge],
+        runOwners: new Map<string, OwnerId>([["parent", owner], ["child", stranger]]),
+        runStatuses: new Map([["child", "running"]])
+      })
+      const memoryFailure = yield* Effect.flip(
+        memoryStore.archiveAndTruncate(
+          "parent",
+          childFrame,
+          [],
+          owner,
+          new Map([["child", childOwner]])
+        )
+      )
+
+      const sqlResult = yield* withSql((store, sql) =>
+        Effect.gen(function*() {
+          for (const [runId, runOwner] of [["parent", owner], ["child", stranger]] as const) {
+            yield* sql`
+              INSERT INTO flows_runs
+                (run_id, status, created_at_ms, state_json,
+                 owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms)
+              VALUES (${runId}, 'running', 0, '{}',
+                      ${runOwner.hostId}, ${runOwner.pid}, ${runOwner.nonce}, 0)
+            `
+          }
+          for (const [runId, seq] of [["parent", 0], ["parent", 1], ["child", 0]] as const) {
+            yield* sql`
+              INSERT INTO flows_journal_events
+                (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                 event_type, payload_json, meta_json)
+              VALUES (${runId}, ${seq}, ${`${runId}-${seq}`}, 'source', ${seq}, 0, 'test', '{}', '{}')
+            `
+          }
+          yield* sql`
+            INSERT INTO flows_time_travel_edges
+              (parent_run_id, parent_seq, child_run_id, kind, attached)
+            VALUES ('parent', 1, 'child', 'child', 1)
+          `
+          const failure = yield* Effect.flip(
+            store.archiveAndTruncate(
+              "parent",
+              childFrame,
+              [],
+              owner,
+              new Map([["child", childOwner]])
+            )
+          )
+          const live = yield* sql<{ readonly run_id: string; readonly seq: number }>`
+            SELECT run_id, seq FROM flows_journal_events ORDER BY run_id, seq
+          `
+          const archived = yield* sql<{ readonly run_id: string }>`
+            SELECT run_id FROM flows_time_travel_archive
+          `
+          return { failure, live, archived }
+        })
+      )
+
+      expect(memoryFailure).toMatchObject({
+        code: "fence_lost",
+        message: "attached child child is not owned by this rewind"
+      })
+      expect(memoryStore.state().records.map(({ runId, seq }) => ({ runId, seq }))).toEqual([
+        { runId: "parent", seq: 0 },
+        { runId: "parent", seq: 1 },
+        { runId: "child", seq: 0 }
+      ])
+      expect(memoryStore.state().archived).toEqual([])
+      for (
+        const mismatchedOwner of [
+          { ...childOwner, pid: childOwner.pid + 1 },
+          { ...childOwner, nonce: "different-child-nonce" }
+        ]
+      ) {
+        const mismatchStore = MemoryTimeTravelStore.make({
+          records: [
+            { runId: "parent", seq: 0, eventId: "parent-0", payload: {} },
+            { runId: "parent", seq: 1, eventId: "parent-1", payload: {} },
+            { runId: "child", seq: 0, eventId: "child-0", payload: {} }
+          ],
+          edges: [childEdge],
+          runOwners: new Map<string, OwnerId>([["parent", owner], ["child", mismatchedOwner]]),
+          runStatuses: new Map([["child", "running"]])
+        })
+        const mismatch = yield* Effect.flip(
+          mismatchStore.archiveAndTruncate(
+            "parent",
+            childFrame,
+            [],
+            owner,
+            new Map([["child", childOwner]])
+          )
+        )
+        expect(mismatch).toMatchObject({ code: "fence_lost" })
+      }
+      expect(sqlResult.failure).toMatchObject({
+        code: "fence_lost",
+        message: "attached child child is not owned by this rewind"
+      })
+      expect(sqlResult.live).toEqual([
+        { run_id: "child", seq: 0 },
+        { run_id: "parent", seq: 0 },
+        { run_id: "parent", seq: 1 }
+      ])
+      expect(sqlResult.archived).toEqual([])
+    }))
+
+  it.effect("applies allowed audit patches and rejects identity keys identically", () =>
+    Effect.gen(function*() {
+      const exercise = (store: TimeTravelStore.Service) =>
+        Effect.gen(function*() {
+          const detail = { nested: { value: "before" } }
+          yield* store.writeAudit({
+            id: "audit",
+            runId: "run",
+            frame,
+            status: "in_progress",
+            detail
+          })
+          detail.nested.value = "mutated-after-write"
+          const first = yield* store.pendingAudits()
+          // Snapshot before mutating: the point of the next line is that
+          // mutating what a read handed back changes nothing durable, so the
+          // value being compared has to be the one the read produced.
+          const firstDetail = structuredClone(first[0]!.detail)
+          ;(first[0]!.detail as { nested: { value: string } }).nested.value = "mutated-after-read"
+          const second = yield* store.pendingAudits()
+          yield* store.updateAudit("audit", { detail: { allowed: true }, rateLimit: { remaining: 2 } })
+          const invalid = yield* Effect.flip(
+            store.updateAudit("audit", { id: "moved" } as never)
+          )
+          const invalidStatus = yield* Effect.flip(
+            store.updateAudit("audit", { status: "bogus" } as never)
+          )
+          const updated = yield* store.pendingAudits()
+          return {
+            first: firstDetail,
+            second: second[0]!.detail,
+            invalid: { code: invalid.code, message: invalid.message },
+            invalidStatus: { code: invalidStatus.code, message: invalidStatus.message },
+            updated: {
+              id: updated[0]!.id,
+              runId: updated[0]!.runId,
+              frame: updated[0]!.frame,
+              status: updated[0]!.status,
+              rateLimit: updated[0]!.rateLimit,
+              detail: updated[0]!.detail
+            }
+          }
+        })
+
+      const memory = yield* exercise(memorySeed())
+      const sqlite = yield* withSql((store) => exercise(store))
+
+      expect(memory).toEqual(sqlite)
+      expect(memory.first).toEqual({ nested: { value: "before" } })
+      expect(memory.second).toEqual({ nested: { value: "before" } })
+      expect(memory.invalid).toEqual({ code: "invalid", message: "audit patch contains unknown key id" })
+      expect(memory.invalidStatus).toMatchObject({
+        code: "invalid",
+        message: "invalid audit patch {\"status\":\"bogus\"}"
+      })
+      expect(memory.updated).toMatchObject({
+        id: "audit",
+        runId: "run",
+        frame,
+        status: "in_progress",
+        rateLimit: { remaining: 2 },
+        detail: { allowed: true }
+      })
+    }))
+
+  it.effect("deep-copies memory receipts and reports non-cloneable writes as typed failures", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make()
+      const payload = { nested: { value: "before" } }
+      yield* store.recordReceipt({ id: "receipt", auditId: "audit", effectId: "effect", receipt: payload })
+      payload.nested.value = "mutated-after-write"
+      const first = store.state()
+      ;(first.receipts[0]!.receipt as { nested: { value: string } }).nested.value = "mutated-after-read"
+
+      expect(store.state().receipts[0]!.receipt).toEqual({ nested: { value: "before" } })
+      const failure = yield* Effect.flip(store.writeAudit({
+        id: "not-cloneable",
+        runId: "run",
+        frame,
+        status: "in_progress",
+        detail: () => "not cloneable"
+      }))
+      expect(failure).toMatchObject({ code: "invalid", message: "could not clone audit" })
+    }))
+
+  for (
+    const scenario of [
+      { name: "beyond the tail", frame: { lineageId: "run/root", seq: 2 } },
+      { name: "on the wrong lineage", frame: { lineageId: "run/other", seq: 1 } }
+    ] as const
+  ) {
+    it.effect(`refuses a fork ${scenario.name} without writing any child evidence`, () =>
+      Effect.gen(function*() {
+        const memory = MemoryTimeTravelStore.make({
+          records: [{ runId: "run", seq: 1, eventId: "run-1", lineageId: "run/root", payload: {} }]
+        })
+        const memoryBefore = memory.state()
+        const memoryFailure = yield* Effect.flip(
+          memory.createFork("run", scenario.frame, "refused-child")
+        )
+        expect(memoryFailure).toMatchObject({ code: "not_found" })
+        expect(memory.state()).toEqual(memoryBefore)
+        expect(memory.state().records.some((record) => record.eventType === forkCreatedEventType)).toBe(false)
+
+        const sqlite = yield* withSql((store, sql) =>
+          Effect.gen(function*() {
+            yield* sql`
+              INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+              VALUES ('run', 'suspended', 0,
+                      ${JSON.stringify({ version: 1, flowName: "Demo", payload: {} })})
+            `
+            yield* sql`
+              INSERT INTO flows_journal_events
+                (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                 event_type, payload_json, meta_json)
+              VALUES ('run', 1, 'run-1', 'source', 1, 0, 'test', '{}',
+                      ${JSON.stringify({ lineageId: "run/root" })})
+            `
+            const failure = yield* Effect.flip(
+              store.createFork("run", scenario.frame, "refused-child")
+            )
+            const childRuns = yield* sql<{ readonly count: number }>`
+              SELECT COUNT(*) AS count FROM flows_runs WHERE run_id = 'refused-child'
+            `
+            const copied = yield* sql<{ readonly count: number }>`
+              SELECT COUNT(*) AS count FROM flows_journal_events WHERE run_id = 'refused-child'
+            `
+            const edges = yield* sql<{ readonly count: number }>`
+              SELECT COUNT(*) AS count FROM flows_time_travel_edges WHERE child_run_id = 'refused-child'
+            `
+            const markers = yield* sql<{ readonly count: number }>`
+              SELECT COUNT(*) AS count FROM flows_journal_events
+              WHERE run_id = 'refused-child' AND event_type = ${forkCreatedEventType}
+            `
+            return {
+              failure: { code: failure.code, message: failure.message },
+              childRuns: Number(childRuns[0]!.count),
+              copied: Number(copied[0]!.count),
+              edges: Number(edges[0]!.count),
+              markers: Number(markers[0]!.count)
+            }
+          })
+        )
+
+        expect(sqlite).toEqual({
+          failure: { code: memoryFailure.code, message: memoryFailure.message },
+          childRuns: 0,
+          copied: 0,
+          edges: 0,
+          markers: 0
+        })
+      }))
+  }
+})
+
+/**
+ * A fork id is a durable reservation on both stores: consumed by the fork
+ * that commits it, handed back once when abandoned, never reused.
+ */
+describe("TimeTravelStore fork intents", () => {
+  it.effect("reserves, consumes, and reclaims fork intents identically", () =>
+    Effect.gen(function*() {
+      const at = { lineageId: "run/root", seq: 0 } as const
+      const exercise = (store: TimeTravelStore.Service) =>
+        Effect.gen(function*() {
+          const abandoned = yield* store.nextForkId("run", at)
+          const fresh = yield* store.abandonForkIntents(0)
+          const stale = yield* store.abandonForkIntents(1)
+          const again = yield* store.abandonForkIntents(1)
+          const minted = yield* store.nextForkId("run", at)
+          const fork = yield* store.createFork("run", at, minted)
+          const consumed = yield* store.abandonForkIntents(Number.MAX_SAFE_INTEGER)
+          return {
+            distinct: abandoned !== minted,
+            fresh,
+            stale: stale.map((intent) => ({
+              reclaimsAbandoned: intent.childRunId === abandoned,
+              parentRunId: intent.parentRunId,
+              parentSeq: intent.parentSeq,
+              reservedAtMs: intent.reservedAtMs
+            })),
+            again,
+            committed: fork.runId === minted,
+            consumed
+          }
+        })
+
+      const memory = yield* exercise(
+        MemoryTimeTravelStore.make({
+          records: [{ runId: "run", seq: 0, eventId: "run-0", lineageId: "run/root", payload: {} }]
+        })
+      )
+      const sqlite = yield* withSql((store, sql) =>
+        Effect.gen(function*() {
+          yield* sql`
+            INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+            VALUES ('run', 'suspended', 0, ${JSON.stringify({ version: 1, flowName: "Demo", payload: {} })})
+          `
+          yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json)
+            VALUES ('run', 0, 'run-0', 'source', 0, 0, 'test', '{}', ${JSON.stringify({ lineageId: "run/root" })})
+          `
+          return yield* exercise(store)
+        })
+      )
+
+      expect(memory).toEqual(sqlite)
+      expect(memory).toEqual({
+        distinct: true,
+        fresh: [],
+        stale: [{ reclaimsAbandoned: true, parentRunId: "run", parentSeq: 0, reservedAtMs: 0 }],
+        again: [],
+        committed: true,
+        consumed: []
+      })
+    }))
+})

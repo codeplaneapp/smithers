@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "reviewer": "deterministic",
+  "records": [
+    {
+      "fixture": "clean-error-message",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "clean-jsdoc",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "clean-refactor",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "clean-rename",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "cross-file-signature-mismatch",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 1
+    },
+    {
+      "fixture": "deleted-null-check",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 1
+    },
+    {
+      "fixture": "deleted-null-check-config",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 1
+    },
+    {
+      "fixture": "missing-await",
+      "status": "success",
+      "matches": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "missing-await-flush",
+      "status": "success",
+      "matches": 1,
+      "falsePositives": 1,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "off-by-one-boundary",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 1
+    },
+    {
+      "fixture": "off-by-one-slice",
+      "status": "success",
+      "matches": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "resource-leak",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 1
+    },
+    {
+      "fixture": "resource-leak-timer",
+      "status": "success",
+      "matches": 0,
+      "falsePositives": 0,
+      "falseNegatives": 1
+    },
+    {
+      "fixture": "sql-injection",
+      "status": "success",
+      "matches": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "sql-injection-like",
+      "status": "success",
+      "matches": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    },
+    {
+      "fixture": "tautological-test",
+      "status": "success",
+      "matches": 1,
+      "falsePositives": 0,
+      "falseNegatives": 0
+    }
+  ]
+}

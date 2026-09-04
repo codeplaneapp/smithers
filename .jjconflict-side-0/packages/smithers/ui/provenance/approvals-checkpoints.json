@@ -1,0 +1,47 @@
+[
+  {
+    "file": "src/approvals/Confirmation.tsx",
+    "exports": [
+      "Confirmation",
+      "ConfirmationTitle",
+      "ConfirmationRequest",
+      "ConfirmationAccepted",
+      "ConfirmationRejected",
+      "ConfirmationActions",
+      "ConfirmationAction",
+      "approvalStateToStatus",
+      "approvalStateLabel"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/confirmation",
+    "ported": "partial-anatomy",
+    "omissions": ["AI SDK tool-approval context wiring (state is a required prop)"],
+    "divergences": [
+      "Adds synchronizing/expired/unavailable/failed-submission states for durable gateway approvals",
+      "expired/unavailable render a muted note slot instead of hiding"
+    ]
+  },
+  {
+    "file": "src/approvals/ApprovalCard.tsx",
+    "exports": ["ApprovalCard", "ApprovalRisk", "ApprovalResources", "ApprovalNote"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/confirmation",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": [
+      "smithers-original composition: risk levels, proposed actions, affected resources, reviewer note threading"
+    ]
+  },
+  {
+    "file": "src/approvals/Checkpoint.tsx",
+    "exports": ["Checkpoint", "CheckpointIcon", "CheckpointMetadata", "CheckpointTrigger", "CheckpointActions"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/checkpoint",
+    "ported": "partial-anatomy",
+    "omissions": ["tooltip-only trigger variant without action group"],
+    "divergences": [
+      "CheckpointActionKind covers host-wired @smthrs/time-travel library operations: fork, replay, rewind",
+      "CheckpointModel carries presentational metadata for an rc.0 pinned-tree checkpoint row"
+    ]
+  }
+]

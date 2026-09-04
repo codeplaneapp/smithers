@@ -1,0 +1,56 @@
+---
+title: "A run is stuck"
+description: "Diagnose a run that stops moving: a dead owner, or a park nobody understands."
+---
+
+Two states look like stuck: a run whose driving process died, and a run parked on a wait. `smthrs status` tells them apart.
+
+## The run has no live owner
+
+```text
+$ smthrs status deploy-api-7
+Verdict   running
+Run       deploy-api-7 · examples/deploy · 42m 17s
+```
+
+The card says `running`, but the run has not moved in 42 minutes and `smthrs logs deploy-api-7` prints nothing new.
+
+**Cause.** The process driving the run died: a closed terminal, a killed host, a rebooted machine. The row keeps its last status because ownership is fenced: every ownership mutation compares the complete `OwnerId` (host, process id, and nonce) in the same SQL statement as its mutation, and a zombie owner interrupts itself rather than writing past its fence. Nothing is driving the run, and no other process may drive it without taking the claim.
+
+**Fix.** Re-drive the run from a live process:
+
+```bash
+smthrs run deploy-api-7 --resume
+```
+
+`smthrs resume <run-id>` is an unlisted alias of the same command; both spellings share one implementation and one idempotency key.
+
+**Verify.** `smthrs status <run-id>` shows a live verdict again, and `smthrs logs <run-id> --follow` prints new lines as events land.
+
+## The run is parked and nobody knows why
+
+```text
+$ smthrs status deploy-api-7
+Verdict   waiting-approval: asks: Apply the edit to src/routes.ts?
+Run       deploy-api-7 · examples/deploy · deploy · 2m 41s
+…
+Unblock   smthrs approve <approval> --scope run && smthrs run --resume deploy-api-7
+Next      smthrs logs deploy-api-7    # turn-by-turn transcript
+```
+
+**Fix.** Read the diagnosis card, then watch the transcript:
+
+```bash
+smthrs status deploy-api-7
+smthrs logs deploy-api-7 --follow
+```
+
+The card is a read-only projection of the run's own journaled events. The `Verdict` line pairs the status with the reason that best explains it: the journaled failure cause, or the question a parked run is asking. A parked run's `Unblock` line is the exact `smthrs approve` and `smthrs run --resume` pair that releases it. With `--follow`, `smthrs logs` stays attached and prints one line per event as it lands.
+
+A verdict of `pending: accepted, and no executor took the run; nothing is driving it` is a different wedge: the launch itself was declined, and the card's `Unblock` line offers `smthrs cancel` or driving the flow from the host program that registers it.
+
+**Verify.** The card's `Unblock` line names what releases the park; after you run it, the verdict moves past `waiting-approval`.
+
+## Still stuck?
+
+Run `smthrs bug` with the symptom as the summary. [smthrs bug](/docs/reference/cli/bug/) posts the report with your CLI version, platform, and Node version attached, and everything passes through the journal's shared redaction rules before it leaves the machine. With `--run <run-id>`, it also attaches that run's event digest.

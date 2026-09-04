@@ -1,0 +1,79 @@
+{
+  "instance": "pytest-dev__pytest-6197",
+  "selected": "r1",
+  "selectedRunId": "pytest-dev__pytest-6197-r1",
+  "selectedPatch": "selected/pytest-dev__pytest-6197.patch",
+  "read": {
+    "journals": "journals",
+    "patches": "patches"
+  },
+  "neverRead": "the official evaluator's reports, the dataset's tests, and every other record of the answer",
+  "predicateOrder": [
+    "preEditFailure",
+    "mutationAfter",
+    "greenOverFinalTree",
+    "cleanCompletion"
+  ],
+  "tieBreaks": [
+    "broader final check",
+    "non-empty patch",
+    "lower cost",
+    "lower run index"
+  ],
+  "candidates": [
+    {
+      "rank": 1,
+      "index": "r1",
+      "runId": "pytest-dev__pytest-6197-r1",
+      "score": 4,
+      "patchBytes": 735,
+      "finalCheckTerms": 35,
+      "usd": 0.4422,
+      "tokens": {
+        "inputTokens": 45052,
+        "cachedInputTokens": 29940,
+        "outputTokens": 11721,
+        "reasoningTokens": 7257
+      },
+      "seat": "openai:gpt-5.6-sol",
+      "frames": 6,
+      "modelCalls": 6,
+      "demands": {
+        "unmoved": 0,
+        "unresolved": 0,
+        "narrowed": 0,
+        "narrowOnly": 0,
+        "readOnly": 0,
+        "repeat": 0
+      },
+      "sufficiencyObservations": 0,
+      "predicates": {
+        "preEditFailure": {
+          "held": true,
+          "seq": 58,
+          "epoch": 0,
+          "check": "bash {\"command\":\"docker exec flowsbench-pytest-dev--pytest-6197 bash -lc 'set -eu; rm -rf /tmp/pytest-init-regression; mkdir -p /tmp/pytest-init-regression/foobar; …"
+        },
+        "mutationAfter": {
+          "held": true,
+          "seq": 266,
+          "digest": "ed5896cea4d6d40675d7d4391b7e392d9763752da571fcf1dede40edec0d4135"
+        },
+        "greenOverFinalTree": {
+          "held": true,
+          "seq": 293,
+          "failedEpoch": 0,
+          "digest": "ed5896cea4d6d40675d7d4391b7e392d9763752da571fcf1dede40edec0d4135",
+          "failed": "bash {\"command\":\"docker exec flowsbench-pytest-dev--pytest-6197 bash -lc 'set -eu; rm -rf /tmp/pytest-init-regression; mkdir -p /tmp/pytest-init-regression/foobar; …",
+          "passed": "bash {\"command\":\"docker exec flowsbench-pytest-dev--pytest-6197 bash -lc 'set -eu; rm -rf /tmp/pytest-init-regression; mkdir -p /tmp/pytest-init-regression/foobar; …",
+          "terms": 35
+        },
+        "cleanCompletion": {
+          "held": true,
+          "seq": 305,
+          "digest": "ed5896cea4d6d40675d7d4391b7e392d9763752da571fcf1dede40edec0d4135"
+        }
+      }
+    }
+  ]
+}

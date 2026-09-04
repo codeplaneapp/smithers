@@ -1,0 +1,184 @@
+---
+title: "0.14.0"
+description: "0.14.0 brings durable timers, sandboxed execution, and the diagnostic tools to"
+---
+
+0.14.0 brings durable timers, sandboxed execution, and the diagnostic tools to
+understand exactly what's happening inside a running workflow.
+
+---
+
+## New Components
+
+### `<Timer>`: Pause a workflow for minutes, hours, or until a specific time
+
+Durable timers that survive process restarts. The workflow engine persists the
+timer target to SQLite and automatically resumes execution when it fires, with no
+long-lived process required.
+
+```tsx
+<Timer id="cooldown" duration="1h" />
+<Timer id="market-open" until="2026-04-03T09:30:00Z" />
+```
+
+### `<Sandbox>`: Run untrusted code in isolation
+
+Execute agent-generated code or compute-heavy tasks in isolated environments.
+Three backends:
+
+| Runtime | What it does |
+|---|---|
+| **Bubblewrap** (default) | Local Linux namespace isolation, near-zero overhead |
+| **Docker** | Container execution with CPU/memory limits and volume mounts |
+| **Codeplane** | Remote VM workspace execution via SSH |
+
+Sandboxes capture filesystem diffs and present them for approval before applying
+changes to the host. Set `autoAcceptDiffs` to skip the gate for fully autonomous
+workflows.
+
+```tsx
+<Sandbox id="build" runtime="docker" image="node:22-slim" memoryLimit="2g">
+  <Task id="compile" output={outputs.compiled}>Run the build</Task>
+</Sandbox>
+```
+
+### `<ContinueAsNew>`: Prevent unbounded state growth in long-running loops
+
+Replaces the current run with a fresh one, carrying over only the state you
+specify. Old run history remains queryable and the continuation lineage is
+preserved. Essential for daemon-style loops that would otherwise accumulate
+gigabytes of event history.
+
+```tsx
+<Loop id="daemon" until={false} continueAsNewEvery={1000}>
+  {/* After 1000 iterations, state resets while preserving lineage */}
+</Loop>
+```
+
+### `<Signal>`: Inject external data into a running workflow
+
+Pauses execution until structured data arrives via the CLI or HTTP API. The
+payload is validated against a Zod schema and passed type-safely to downstream
+tasks.
+
+```tsx
+<Signal id="user-feedback" schema={z.object({ rating: z.number() })}>
+  {(data) => <Task id="process" input={data} />}
+</Signal>
+```
+
+```bash
+bunx smthrs signal abc123 user-feedback --data '{"rating": 5}'
+```
+
+---
+
+## CLI
+
+### `bunx smthrs why`: Understand why a run is stuck
+
+A diagnostic engine that calculates exactly what's blocking a run and tells you
+how to fix it.
+
+```
+$ bunx smthrs why abc123
+Run abc123 is waiting-approval
+  Blocked node:  review-gate
+  Reason:        Approval requested, no decision yet
+  Unblock:       bunx smthrs approve abc123
+```
+
+Detects waiting signals, pending approvals, stale heartbeats, retry backoffs,
+upstream dependency failures, and more.
+
+### `bunx smthrs events`: Browse workflow event history
+
+Filter by node, category, or time. Events stream incrementally so you never run
+out of memory on large runs.
+
+```bash
+bunx smthrs events abc123 --type approval --since 5m
+```
+
+### `bunx smthrs node`: Deep-dive into a single node
+
+Aggregates task attempts, tool calls, schema validation errors, Zod-validated
+outputs, and token usage with pricing.
+
+```bash
+bunx smthrs node review-step -r abc123 --tools --attempts
+```
+
+### `--watch` flag
+
+Live-updating views for `ps`, `inspect`, and `events`.
+
+```bash
+bunx smthrs ps --watch --interval 2
+```
+
+---
+
+## Durability
+
+- **Transactional state writes.** Critical SQLite updates are now grouped into
+  atomic `BEGIN IMMEDIATE` transactions, preventing partial state if a process
+  crashes mid-write.
+
+- **Task heartbeats with checkpoints.** Long-running tasks can report progress.
+  If the task crashes, the retry execution receives the last checkpoint via
+  `lastHeartbeat` to resume where it left off.
+  ```ts
+  runtime.heartbeat({ progress: 75, cursor: "page-42" });
+  ```
+
+- **Auto-resume supervisor.** Watches for orphaned runs with stale heartbeats
+  and resumes them automatically. Atomic DB claim lock prevents concurrent
+  supervisor races.
+  ```bash
+  bunx smthrs supervise
+  ```
+
+---
+
+## Engine & Storage
+
+- **Frame delta encoding.** 95-99% reduction in `_smithers_frames` storage.
+  Frames are now stored as compact XML structural diffs instead of full
+  snapshots, shrinking multi-gigabyte databases to megabytes.
+
+---
+
+## `bunx smthrs init` Improvements
+
+- Tier-based agent groupings (`cheapFast`, `smart`, `smartTool`) with automatic
+  provider detection and fallback
+- Typed `inputSchema` objects on all seeded workflows
+- `ValidationLoop` with feedback injection and convergence detection
+- New `ticket-kanban` workflow for parallel ticket implementation in worktrees
+- `bunx smthrs workflow create` scaffold uses the tier-based system
+- All seeded files use `zod/v4`
+
+---
+
+## New Run Statuses
+
+- `waiting-timer`: paused on a durable timer
+- `continued`: completed via continue-as-new; a successor run was started
+
+## New Metrics
+
+`timerDelayDuration`, `timersCancelled`, `timersCreated`, `timersFired`,
+`timersPending`, `dbTransactionDuration`, `dbTransactionRetries`,
+`dbTransactionRollbacks`, `sandboxActive`, `sandboxBundleSizeBytes`,
+`sandboxCompletedTotal`, `sandboxCreatedTotal`, `sandboxDurationMs`,
+`sandboxPatchCount`, `sandboxTransportDurationMs`
+
+## Error Codes
+
+- **Added**: `RUN_NOT_FOUND`, `NODE_NOT_FOUND`, `INVALID_EVENTS_OPTIONS`,
+  `SANDBOX_BUNDLE_INVALID`, `SANDBOX_BUNDLE_TOO_LARGE`,
+  `TASK_HEARTBEAT_TIMEOUT`, `HEARTBEAT_PAYLOAD_TOO_LARGE`,
+  `HEARTBEAT_PAYLOAD_NOT_JSON_SERIALIZABLE`
+- **Removed**: `PROMPT_EXISTS`, `PROMPT_MDX_INVALID`, `TICKET_EXISTS`,
+  `TICKET_NOT_FOUND`

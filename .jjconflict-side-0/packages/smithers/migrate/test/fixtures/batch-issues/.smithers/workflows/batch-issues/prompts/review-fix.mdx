@@ -1,0 +1,21 @@
+REVIEW FIX — Issue: {props.issueIdentifier} — {props.issueTitle}
+
+Address ALL issues from code review. Fix every issue unless clear false positive.
+
+REVIEW ISSUES:
+{JSON.stringify(props.issues, null, 2)}
+
+REVIEW FEEDBACK:
+{props.feedback}
+
+RULES:
+1. Fix every legitimate issue
+2. If FALSE POSITIVE: record it in falsePositiveComments array in your output JSON with file, line, issue, and rationale. Do NOT add comments to source code.
+3. Use **jj** for version control, never git
+4. Atomic commits with clear messages
+5. Run `make test-go` after fixes. Everything must pass.
+6. Significant refactoring required? Do it properly. No half-fixes.
+
+**REQUIRED OUTPUT** — JSON matching this schema:
+{props.schema}
+DO NOT skip JSON output. Workflow fails without it.

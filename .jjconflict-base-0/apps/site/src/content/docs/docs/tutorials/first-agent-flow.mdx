@@ -1,0 +1,299 @@
+---
+title: "Build your first agent flow"
+description: "Author a markdown agent flow, run it with smthrs up, then give a model-backed step real tools and a sandbox."
+sidebar:
+  order: 6
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components"
+import versions from "../../../../data/versions.json"
+
+In this tutorial you'll build an agent flow two ways. First, a markdown flow that reviews the uncommitted change in your repository and runs on your provider key. Then, a module flow whose model-backed step gets real file tools and runs the code it writes inside a sandbox. It takes about 20 minutes.
+
+## Before you begin
+
+- The Smithers CLI: `npm install --global @smthrs/cli@next`. The `@next` suffix is required while 1.0 is a release candidate.
+- A provider credential in the environment: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. [Configure model seats](/docs/guides/model-seats/) explains how a seat resolves from environment keys.
+- A git repository to work in. Part 2 reviews its uncommitted change.
+- Node.js {versions.node} or later for part 3.
+
+## 1. Author a markdown flow
+
+Scaffold the flow from the repository root:
+
+```bash
+smthrs init reviewer
+```
+
+The scaffold is one flow file, `flows/reviewer/flow.mdx`, plus the run state directory `.flows/`. Rewrite the flow file to this review:
+
+```md
+---
+name: "reviewer"
+description: Reviews the uncommitted change in this repository and returns a verdict with the reasons behind it.
+capabilities: ["fs:read:**", "proc:spawn:*"]
+model: anthropic:claude-sonnet-4-5
+---
+
+# Review the working-copy change
+
+Review the uncommitted change in this repository.
+
+## Read the change
+
+Run `git diff --stat` and then `git diff` for the paths in scope through the
+`bash` tool; that is the only way to run a command here. Read enough of
+each changed file to understand the change in context. Do not call other flows.
+
+## Judge it
+
+Look for behavior changes without a test, an error swallowed instead of
+surfaced, a public export without a JSDoc block, and a name that says less
+than the code does.
+
+## Verdict
+
+Finish with one line, `approve` or `request-changes`, followed by at most five
+findings. Each finding names the file, the line, and the fix in one sentence.
+```
+
+Keep the `model:` line `smthrs init` wrote for you: it chose the seat from the first provider credential in your environment, so with `OPENAI_API_KEY` the line reads `openai:gpt-5.6-sol`. Every heading below the frontmatter is a step the agent performs in order, and the text under it is the instruction for that step. [Markdown flows](/docs/guides/markdown-flows/) covers every field the frontmatter accepts.
+
+```text
+You should see: init reports the flow file it created, the project's state
+directory, and the seat it wrote. After your edit, the flow declares the
+review's name, description, capabilities, and model, and each heading is one
+step of the review.
+```
+
+## 2. Run the flow with smthrs up
+
+The flow reviews the uncommitted change in the repository, so make one first: edit any tracked file and leave the change uncommitted. Then launch:
+
+```bash
+smthrs up reviewer
+```
+
+`up` plans the flow, approves the plan, and launches the run in one command, staying attached until the run settles. The launch receipt's `runId` names the run. Read the verdict back, substituting that id:
+
+```bash
+smthrs output <run-id> result
+```
+
+The reserved node id `result` names the run's final assistant output.
+
+```text
+You should see: a launch receipt carrying the run id, and up stays attached
+until the run reaches a terminal status. output prints the outcome line for
+result and then the verdict: one line, approve or request-changes, followed
+by at most five findings.
+```
+
+## 3. Give a step real tools and a sandbox
+
+A markdown flow hands the whole task to one agent. A module flow declares each step in TypeScript: what the author declares is the seat, the system teaching, the prompt built from the step payload, and the output schema. The model answers with a fenced `cell` block, the block is evaluated inside a QuickJS sandbox with an explicit budget and no ambient host access, and the only way out is a call to a declared flow through `ctx.call`. [Agent runtime](/docs/concepts/agent-runtime/) explains the cell loop this runs in.
+
+Install the libraries:
+
+```bash
+pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/capability@next @smthrs/model@next @smthrs/registry@next @smthrs/platform-node@next
+```
+
+Write `sandbox.ts`. The step counts the lines in a source file and writes the count to a target file, using the standard file tools:
+
+```ts title="sandbox.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as Agent from "@smthrs/agent/Agent"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
+import * as Seat from "@smthrs/agent/Seat"
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import * as StandardFlows from "@smthrs/agent/StandardFlows"
+import * as Capability from "@smthrs/capability/Capability"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import type * as Route from "@smthrs/model/Route"
+import * as Registry from "@smthrs/registry/Registry"
+import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+
+// What the step must answer with. Nothing downstream parses model text.
+const Tally = Schema.Struct({
+  totalLines: Schema.Number,
+  wrotePath: Schema.String,
+  bytesWritten: Schema.Number
+})
+
+// The step. Its prompt names the two paths, which is how the model learns
+// which files this task is about.
+const Summarize = AgentAction.make("tutorial/SandboxSummarize", {
+  payload: { source: Schema.String, target: Schema.String },
+  output: Tally,
+  seat: "anthropic:claude-sonnet-4-5",
+  system: ["You maintain a repository. Use the file tools rather than guessing at contents."],
+  prompt: ({ source, target }) =>
+    `Count the lines in the source file and write the count to the target file.\nSOURCE: ${source}\nTARGET: ${target}`
+})
+
+const Audit = Flow.make("tutorial/Audit", {
+  payload: { source: Schema.String, target: Schema.String },
+  success: Tally,
+  error: AgentAction.AgentFailure,
+  body: (payload: { readonly source: string; readonly target: string }) => Summarize.call(payload)
+})
+
+const prepared: Route.PreparedRequest = {
+  routeId: "tutorial",
+  protocolId: "tutorial",
+  method: "POST",
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{}"),
+  bodyText: "{}"
+}
+
+// A scripted model: it reads the two paths out of the request and answers
+// with one cell that uses the tools, so the run is deterministic and needs no
+// API key. Point SeatResolver at a provider route and nothing above it changes.
+const scripted: Model.Model = Model.make({
+  stream: (request) =>
+    Stream.suspend(() => {
+      const asked = [
+        ...request.system.map((part) => part.text),
+        ...request.messages.flatMap((message) =>
+          message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+        )
+      ].join("\n")
+      const sourcePath = /SOURCE: (.+)/.exec(asked)?.[1]?.trim() ?? ""
+      const targetPath = /TARGET: (.+)/.exec(asked)?.[1]?.trim() ?? ""
+      const cell = [
+        `const page = await ctx.call("read", { path: ${JSON.stringify(sourcePath)} })`,
+        `const written = await ctx.call("write", {`,
+        `  path: ${JSON.stringify(targetPath)},`,
+        "  content: String(page.totalLines) + \"\\n\"",
+        "})",
+        "ctx.done({",
+        "  totalLines: page.totalLines,",
+        "  wrotePath: written.path,",
+        "  bytesWritten: written.bytesWritten",
+        "})"
+      ].join("\n")
+      return Stream.fromIterable([
+        ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+        ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: "```cell\n" + cell + "\n```" }),
+        ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+        ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+      ])
+    })
+})
+
+const root = join(process.cwd(), "sandbox-work")
+const source = join(root, "notes.md")
+const target = join(root, "line-count.txt")
+
+const program = Effect.gen(function*() {
+  yield* Effect.sync(() => {
+    mkdirSync(root, { recursive: true })
+    writeFileSync(source, "alpha\nbeta\ngamma")
+  })
+
+  // The host's filesystem, handed to the bindings as a context.
+  const services = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
+
+  const host = AgentAction.layerHost({
+    registry: Registry.makeNoop({
+      list: () => Effect.succeed([]),
+      visible: () => Effect.succeed([]),
+      getOption: () => Effect.succeed(Option.none())
+    }),
+    // The catalog the model is shown: the seven standard file capabilities,
+    // over the host's real filesystem.
+    flows: [StandardFlows.filesystem(services)],
+    // The explicit sandbox budget every cell in this composition runs under.
+    limits: { calls: 8 },
+    // The standard flows declare real capabilities, so the run needs a real
+    // envelope. An empty one refuses every declared capability by contract.
+    capabilityEnvelope: [new Capability.CapabilityPattern({ action: "*", resource: "*" })],
+    maxFrames: 3
+  })
+
+  const seats = SeatResolver.layer({
+    resolve: (id) =>
+      Effect.succeed(
+        Seat.make({
+          id,
+          model: scripted,
+          route: { prepare: () => Effect.succeed(prepared) },
+          contextWindowTokens: 200_000
+        })
+      )
+  })
+
+  const stack = Layer.mergeAll(Summarize.layer, Interpreter.layer(Audit)).pipe(
+    Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
+    // This offline run has no approved plan envelope to derive a ceiling from.
+    Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
+    // The QuickJS sandbox the cell's code runs in, and the steering source it
+    // drains. Both are browser-safe defaults.
+    Layer.provideMerge(Agent.layerDefaults),
+    Layer.provideMerge(Action.layerImplementations),
+    Layer.provideMerge(FlowEngine.layerMemory),
+    Layer.provideMerge(NodeCrypto.layer)
+  )
+
+  const tally = yield* Audit.execute({ source, target }, { executionId: "audit-1" }).pipe(
+    Effect.provide(stack)
+  )
+
+  return { tally, written: readFileSync(target, "utf8") }
+})
+
+const main = program.pipe(
+  Effect.provide(Layer.mergeAll(NodeFileSystem.layer, Path.layer, NodeCrypto.layer)),
+  Effect.tap((summary) => Effect.sync(() => console.log(JSON.stringify(summary, null, 2)))),
+  Effect.orDie
+)
+
+NodeRuntime.runMain(main)
+```
+
+Run it. Node {versions.node} runs a TypeScript file directly, so there is no build step:
+
+```bash
+node sandbox.ts
+```
+
+```text
+You should see: the step settles with a tally holding totalLines 3, the
+target path, and bytesWritten 2, and sandbox-work/line-count.txt now holds
+"3". The cell read the source through the read tool and wrote the count
+through the write tool, and every call ran inside the sandbox budget.
+```
+
+## Summary
+
+You learned how to:
+
+- Author a markdown flow with `name`, `description`, `capabilities`, and `model` frontmatter and prose steps, and run it with `smthrs up`.
+- Read a run's final output with `smthrs output <run-id> result`.
+- Declare a model-backed step in a module flow with `AgentAction.make`.
+- Bind the standard file tools into a step's catalog and let the code the model writes run in the QuickJS sandbox.
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Pass typed outputs between agent steps" href="/docs/tutorials/agent-outputs/" description="Declare output schemas and chain one step's typed output into the next." />
+  <LinkCard title="Agent runtime" href="/docs/concepts/agent-runtime/" description="The cell loop, ctx.call, ctx.done, and the sandbox boundary." />
+</CardGrid>

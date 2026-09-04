@@ -1,0 +1,244 @@
+import { describe, it } from "@effect/vitest"
+import { Flow, Graph, Node } from "@smthrs/core"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import { expect } from "vitest"
+import { PatternError } from "../src/PatternError.ts"
+import * as ScanFixVerify from "../src/ScanFixVerify.ts"
+
+const flowNamed = (capability: string): Flow.Any =>
+  Flow.make({
+    name: capability,
+    capabilities: [capability],
+    input: Schema.Unknown,
+    output: Schema.Unknown,
+    body: (input) => Node.succeed(input)
+  })
+
+const scan = flowNamed("sfv/scan")
+const fix = flowNamed("sfv/fix")
+const verify = flowNamed("sfv/verify")
+
+const callsTo = (graph: Graph.Graph, capability: string): ReadonlyArray<Graph.GraphNode> =>
+  Graph.nodes(graph).filter((node) =>
+    node.kind === "FlowCall" &&
+    (node.keyMaterial.body as { readonly capabilities?: ReadonlyArray<string> }).capabilities?.includes(capability) ===
+      true
+  )
+
+interface Issue {
+  readonly id: string
+}
+
+const scripted = (rounds: ReadonlyArray<ReadonlyArray<Issue>>) =>
+(
+  { iteration }: { readonly iteration: number }
+): Effect.Effect<ReadonlyArray<Issue>> => Effect.succeed(rounds[iteration - 1] ?? [])
+
+describe("ScanFixVerify", () => {
+  it("declares a bounded scan, fan-out fix, and verify per retry", () => {
+    const pattern = ScanFixVerify.make({
+      scan,
+      fix,
+      verify,
+      maxRetries: 2,
+      maxIssues: 3,
+      concurrency: 2
+    })
+    const graph = Graph.build(pattern, { path: "src" })
+
+    expect(Flow.isFlow(pattern)).toBe(true)
+    expect(callsTo(graph, "sfv/scan")).toHaveLength(2)
+    expect(callsTo(graph, "sfv/fix")).toHaveLength(6)
+    expect(callsTo(graph, "sfv/verify")).toHaveLength(2)
+    expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(4)
+  })
+
+  it("rejects bounds below one", () => {
+    const options = { scan, fix, verify, maxRetries: 1, maxIssues: 1, concurrency: 1 }
+    for (
+      const invalid of [
+        { ...options, maxRetries: 0 },
+        { ...options, maxIssues: 0 },
+        { ...options, concurrency: 0 }
+      ]
+    ) {
+      expect(() => ScanFixVerify.make(invalid)).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: "ScanFixVerify maxRetries, maxIssues, and concurrency must be positive safe integers"
+        })
+      )
+    }
+  })
+
+  it.effect("fixes every issue, verifies once, and stops when the next scan is clean", () =>
+    Effect.gen(function*() {
+      const events: Array<string> = []
+      const verified: Array<ReadonlyArray<Issue>> = []
+      const report = yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 3,
+        concurrency: 1,
+        scan: scripted([[{ id: "a" }, { id: "b" }], []]),
+        fix: ({ index, issue }) =>
+          Effect.sync(() => events.push(`start-${issue.id}`)).pipe(
+            Effect.andThen(Effect.yieldNow),
+            Effect.andThen(Effect.sync(() => events.push(`end-${issue.id}`))),
+            Effect.as(`fixed-${index}`)
+          ),
+        verify: ({ issues }) =>
+          Effect.sync(() => {
+            verified.push(issues)
+            return { resolved: false }
+          })
+      })
+
+      expect(events).toEqual(["start-a", "end-a", "start-b", "end-b"])
+      expect(verified).toHaveLength(1)
+      expect(report.iterations).toBe(2)
+      expect(report.remaining).toEqual([])
+      expect(report.resolved).toBe(true)
+      expect(report.verifications).toEqual([{ resolved: false }])
+    }))
+
+  it.effect("overlaps fixes up to the concurrency bound", () =>
+    Effect.gen(function*() {
+      const events: Array<string> = []
+      let inFlight = 0
+      let peak = 0
+      yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 1,
+        concurrency: 2,
+        scan: scripted([[{ id: "a" }, { id: "b" }, { id: "c" }]]),
+        fix: ({ issue }) =>
+          Effect.sync(() => {
+            inFlight++
+            peak = Math.max(peak, inFlight)
+            events.push(`start-${issue.id}`)
+          }).pipe(
+            Effect.andThen(Effect.yieldNow),
+            Effect.andThen(Effect.sync(() => {
+              inFlight--
+              events.push(`end-${issue.id}`)
+            })),
+            Effect.as(issue.id)
+          ),
+        verify: () => Effect.succeed({ resolved: false })
+      })
+
+      // Three issues at a bound of two: the third fix cannot start until one of
+      // the first two has finished. Unbounded fan-out would peak at three and
+      // start `c` before any fix ended.
+      expect(peak).toBe(2)
+      expect(events.indexOf("start-c")).toBeGreaterThan(events.indexOf("end-a"))
+      expect(events).toEqual(["start-a", "start-b", "end-a", "start-c", "end-b", "end-c"])
+    }))
+
+  it.effect("rescans after a resolved verification and ends only on a clean scan", () =>
+    Effect.gen(function*() {
+      const scanned: Array<number> = []
+      const rounds = scripted([[{ id: "a" }], []])
+      const report = yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 3,
+        concurrency: 2,
+        scan: (input) => {
+          scanned.push(input.iteration)
+          return rounds(input)
+        },
+        fix: ({ issue }) => Effect.succeed(issue.id),
+        verify: () => Effect.succeed({ resolved: true })
+      })
+
+      // The verifier said the round was resolved. The loop still rescans, and
+      // that second, empty scan is what ends it.
+      expect(scanned).toEqual([1, 2])
+      expect(report.iterations).toBe(2)
+      expect(report.resolved).toBe(true)
+      expect(report.remaining).toEqual([])
+      expect(report.verifications).toEqual([{ resolved: true }])
+    }))
+
+  it.effect("keeps scanning to the bound when a resolved verification is wrong", () =>
+    Effect.gen(function*() {
+      const scanned: Array<number> = []
+      const report = yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 3,
+        concurrency: 2,
+        scan: (input) => {
+          scanned.push(input.iteration)
+          return Effect.succeed([{ id: "a" }])
+        },
+        fix: ({ issue }) => Effect.succeed(issue.id),
+        verify: () => Effect.succeed({ resolved: true })
+      })
+
+      // A verifier verdict is evidence about one round, never the terminal:
+      // the scan that keeps finding the issue outranks it.
+      expect(scanned).toEqual([1, 2, 3])
+      expect(report.iterations).toBe(3)
+      expect(report.resolved).toBe(false)
+      expect(report.remaining).toEqual([{ id: "a" }])
+      expect(report.verifications).toEqual([{ resolved: true }, { resolved: true }, { resolved: true }])
+    }))
+
+  it("reads the signals a verifier may carry", () => {
+    expect(ScanFixVerify.resolved(true)).toBe(true)
+    expect(ScanFixVerify.resolved({ resolved: true })).toBe(true)
+    expect(ScanFixVerify.resolved(false)).toBe(false)
+    expect(ScanFixVerify.resolved("resolved")).toBe(false)
+    expect(ScanFixVerify.resolved({ resolved: "true" })).toBe(false)
+    expect(ScanFixVerify.resolved(undefined)).toBe(false)
+  })
+
+  it.effect("reports the remaining issues when the retry bound is reached", () =>
+    Effect.gen(function*() {
+      const report = yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 2,
+        concurrency: 2,
+        scan: () => Effect.succeed([{ id: "a" }]),
+        fix: ({ issue }) => Effect.succeed(issue.id),
+        verify: () => Effect.succeed({ resolved: false })
+      })
+
+      expect(report.iterations).toBe(2)
+      expect(report.resolved).toBe(false)
+      expect(report.remaining).toEqual([{ id: "a" }])
+      expect(report.verifications).toHaveLength(2)
+    }))
+
+  it.effect("never fixes or verifies when the first scan is clean", () =>
+    Effect.gen(function*() {
+      let fixed = 0
+      let verifications = 0
+      const report = yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 2,
+        concurrency: 1,
+        scan: () => Effect.succeed([] as ReadonlyArray<Issue>),
+        fix: () => Effect.sync(() => ++fixed),
+        verify: () => Effect.sync(() => ({ resolved: ++verifications > 0 }))
+      })
+
+      expect(fixed).toBe(0)
+      expect(verifications).toBe(0)
+      expect(report).toEqual({ iterations: 1, remaining: [], resolved: true, verifications: [] })
+    }))
+
+  it.effect("validates the bounds before scanning", () =>
+    Effect.gen(function*() {
+      let scanned = 0
+      const failure = yield* ScanFixVerify.run({ path: "src" }, {
+        maxRetries: 0,
+        concurrency: 1,
+        scan: () => Effect.sync(() => (++scanned, [] as ReadonlyArray<Issue>)),
+        fix: () => Effect.succeed(0),
+        verify: () => Effect.succeed({ resolved: true })
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(PatternError)
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe(
+        "ScanFixVerify maxRetries, maxIssues, and concurrency must be positive safe integers"
+      )
+      expect(scanned).toBe(0)
+    }))
+})

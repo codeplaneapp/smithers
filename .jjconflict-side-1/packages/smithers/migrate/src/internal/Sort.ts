@@ -1,0 +1,29 @@
+/**
+ * Deterministic ordering helpers.
+ *
+ * Every sorted list this package produces ends up in `report.md` or
+ * `report.json`, and two runs of the same scan must diff cleanly. That rules
+ * out `String.prototype.localeCompare`, whose order depends on the machine's
+ * locale data. These comparators order by UTF-16 code unit, which is the same
+ * everywhere and is the order `Array.prototype.sort` uses by default.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+
+/**
+ * Orders two strings by code unit.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const byText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
+
+/**
+ * Orders two values by the string one projection returns.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const by = <A>(project: (value: A) => string) => (left: A, right: A): number =>
+  byText(project(left), project(right))

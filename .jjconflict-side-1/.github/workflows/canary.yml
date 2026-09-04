@@ -1,0 +1,178 @@
+# Synthetic uptime, latency and error-rate probe against the live deployment
+# (E2E-CANARY-CHECKLIST CN-19, CN-20, CN-21).
+#
+# This workflow never runs on a push or a pull request. It cannot fail a
+# contributor's build, and it cannot run in a fork: the job is guarded on the
+# repository name so a fork's scheduled runs are skipped rather than probing
+# someone else's deployment with someone else's issue tracker.
+#
+# THE ALERT. There is no paging infrastructure in this project and this file
+# invents none. The alert is one GitHub issue under a fixed title: a failing
+# run opens it, later failing runs comment on it, and the first passing run
+# comments and closes it. The decision is made by
+# apps/server/scripts/canary/uptime-report.ts, which is unit-tested; this file
+# only runs `gh`. The accepted failure mode is that notification depends on the
+# maintainer watching this repository's issues — a repository with issue
+# notifications muted learns nothing. That is still strictly better than a red
+# tab in the Actions list, which notifies nobody on a scheduled run.
+#
+# COST. The unmetered probes are free: a static asset read, an unauthenticated
+# scopes read, and a signed-out turn refusal that never reaches an upstream.
+# The metered CN-19 sample — one short model turn — runs only on the hourly
+# tick, and only when $CANARY_SESSION_COOKIE is configured. That is 24 short
+# turns a day, and zero if the secret is absent.
+#
+# LINTING. ci.yml names this file in its actionlint step, and
+# apps/server/scripts/canary/workflow-wiring.test.ts fails when a workflow is
+# missing from that list.
+name: Canary
+
+on:
+  schedule:
+    # Hourly: the full probe, including the one metered turn-seam sample.
+    - cron: '0 * * * *'
+    # The other three quarters: the free probes only. GitHub queues scheduled
+    # runs under load, so treat 15 minutes as a floor, not a guarantee.
+    - cron: '15,30,45 * * * *'
+  workflow_run:
+    workflows: ["Deploy apps"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      metered:
+        description: Also take the metered turn-seam sample (spends model credit)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: probe the live deployment
+    # INERT until this repository owns the deployment; this line keeps it so.
+    # The deployed Worker at canary.smithers.sh and this hourly job are not an
+    # rc.0 validation surface. Pointed at this
+    # repository the schedule would probe a deployment this repository does not
+    # own yet, and the alert steps below would file a GitHub issue every time it
+    # answered wrong. Re-enabling the canary after ownership moves means changing
+    # this line and the assertion in apps/review/tests/action/deployWorkflows.test.ts.
+    if: github.repository == 'smithersai/flows'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # A broken probe must never grade a deployment, so its own decision logic
+      # is checked before it is trusted. This is the same idea as the
+      # launch-checklist dry run in apps-deploy.yml: prove the runner, then run
+      # it. These tests touch no network.
+      - name: Test the probe's decision logic
+        working-directory: apps/server
+        run: bun test scripts/canary/uptime-checks.test.ts scripts/canary/uptime-report.test.ts
+      # continue-on-error, because the probe exits 1 on a failing canary and
+      # the alert steps below must still run. A probe that crashes without
+      # writing its report is handled too: uptime-report.ts turns a missing
+      # report into a failing report rather than a silent pass.
+      - name: Probe
+        id: probe
+        continue-on-error: true
+        working-directory: apps/server
+        env:
+          CANARY_URL: ${{ vars.CANARY_URL || 'https://canary.smithers.sh' }}
+          # Absent on the quarter-hour ticks and on an ordinary manual run, so
+          # those runs spend nothing and say out loud that they measured the
+          # signed-out refusal gate only.
+          CANARY_SESSION_COOKIE: ${{ (github.event.schedule == '0 * * * *' || github.event.inputs.metered == 'true') && secrets.CANARY_SESSION_COOKIE || '' }}
+        # The origin is passed POSITIONALLY and first. The probe reads argv[0]
+        # only, so this is belt and braces with $CANARY_URL rather than the
+        # only thing standing between the run and probing a temp-file path.
+        run: bun scripts/canary/uptime-probe.ts "$CANARY_URL" --json "$RUNNER_TEMP/canary-uptime.json"
+      - name: Find the open alert issue
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'Canary: canary.smithers.sh is failing'
+        run: |
+          set -euo pipefail
+          number="$(gh issue list --state open --limit 100 --json number,title \
+            --jq '.[] | select(.title == env.TITLE) | .number' | head -n 1)"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+      # The verdict is captured rather than raised, so the alert lands before
+      # the job goes red. An exit code other than 0 or 1 means the alert
+      # machinery itself broke, which the last step reports separately.
+      - name: Decide the alert
+        id: decide
+        working-directory: apps/server
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OPEN_ISSUE: ${{ steps.existing.outputs.number }}
+        run: |
+          set -uo pipefail
+          bun scripts/canary/uptime-report.ts \
+            --report "$RUNNER_TEMP/canary-uptime.json" \
+            --run-url "$RUN_URL" \
+            --open-issue "$OPEN_ISSUE" \
+            --body-out "$RUNNER_TEMP/canary-alert.md"
+          echo "verdict=$?" >> "$GITHUB_OUTPUT"
+      - name: Raise or clear the alert
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALERT_ACTION: ${{ steps.decide.outputs.action }}
+          ISSUE: ${{ steps.decide.outputs.issue }}
+          TITLE: ${{ steps.decide.outputs.title }}
+        run: |
+          set -euo pipefail
+          case "$ALERT_ACTION" in
+            create)
+              gh issue create --title "$TITLE" --body-file "$RUNNER_TEMP/canary-alert.md"
+              ;;
+            comment)
+              gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/canary-alert.md"
+              ;;
+            close)
+              gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/canary-alert.md"
+              gh issue close "$ISSUE"
+              ;;
+            none)
+              echo "The canary passed and no alert issue is open."
+              ;;
+            *)
+              echo "The alert decision produced no action: the canary machinery itself is broken." >&2
+              exit 1
+              ;;
+          esac
+      - name: Upload the probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-uptime-report
+          path: ${{ runner.temp }}/canary-uptime.json
+          if-no-files-found: warn
+      - name: Fail the job when the canary failed
+        env:
+          VERDICT: ${{ steps.decide.outputs.verdict }}
+        run: |
+          set -euo pipefail
+          if [ "$VERDICT" = "0" ]; then
+            exit 0
+          fi
+          if [ "$VERDICT" = "1" ]; then
+            echo "The canary failed. The alert issue carries the failing checks." >&2
+            exit 1
+          fi
+          echo "uptime-report.ts exited $VERDICT: the alert machinery is broken, not the deployment." >&2
+          exit 1

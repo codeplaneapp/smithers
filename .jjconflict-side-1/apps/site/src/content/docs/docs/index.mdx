@@ -1,0 +1,43 @@
+---
+title: "Smithers docs"
+description: "Smithers is a durable workflow framework for fast, practical agentic execution over TypeScript workflows."
+---
+
+import { LinkButton, CardGrid, LinkCard } from "@astrojs/starlight/components"
+
+Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
+
+Smithers is similar to monorepo tools like Turborepo, Nx, and Bazel: it helps make work across a codebase fast and efficient.
+
+Fast CI matters even more when agents are doing the work. But traditional monorepo tools largely stop at building and testing code. Smithers extends that model to agentic work, helping agents work on a codebase faster, cheaper, and more intelligently. When the process running a flow stops, Smithers [resumes from the last recorded step](/docs/concepts/durable-execution/) instead of starting the work again.
+
+## Get started
+
+Install the CLI, then scaffold and run your first workflow.
+
+<LinkButton href="/docs/installation/" variant="primary">Install the CLI</LinkButton>
+<LinkButton href="/docs/quickstart/" variant="secondary">Read the quickstart</LinkButton>
+
+```bash
+npm install --global @smthrs/cli@next
+```
+
+Then scaffold your first workflow and run it:
+
+```bash
+smthrs init change
+smthrs up change
+```
+
+That creates `flows/change/flow.mdx`, a workflow that lives with your code, and runs it. The [quickstart](/docs/quickstart/) walks through the same steps with what to expect at each one.
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Tutorials" href="/docs/tutorials/first-flow/" description="Learn Smithers end to end, starting with your first durable flow." />
+  <LinkCard title="Guides" href="/docs/guides/markdown-flows/" description="Task-by-task directions for authoring, running, and operating flows." />
+  <LinkCard title="Drive Smithers from your agent" href="/docs/guides/mcp-setup/" description="Wire the Smithers MCP server into the agent you already use." />
+  <LinkCard title="Upgrade from 0.x" href="/docs/migration/1.0/" description="Move a Smithers 0.x project to the 1.0 authoring model." />
+</CardGrid>
+
+Reading with an agent? [`/llms.txt`](/llms.txt) indexes every page with a one-line description.

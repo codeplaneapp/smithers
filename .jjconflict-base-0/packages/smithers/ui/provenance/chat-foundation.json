@@ -1,0 +1,13 @@
+[
+  {
+    "file": "src/uiCss.ts",
+    "exports": [
+      "chatScrollerCss"
+    ],
+    "collection": "chat/shadcn",
+    "registryItem": "https://ui.shadcn.com/docs/utils/scroll-fade",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": []
+  }
+]

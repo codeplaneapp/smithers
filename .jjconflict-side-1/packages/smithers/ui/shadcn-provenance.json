@@ -1,0 +1,1001 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": 2,
+  "policy": {
+    "registries": [
+      "https://ui.shadcn.com",
+      "https://elements.ai-sdk.dev"
+    ],
+    "collections": [
+      "chat/shadcn",
+      "primitives/shadcn",
+      "agentic/ai-elements"
+    ],
+    "verification": "Each source file in an approved collection must name its upstream registry item URL in a lane manifest under provenance/. Entries record ported anatomy plus explicit omissions and divergences; this is provenance, not cryptographic verification.",
+    "entryFiles": [
+      "provenance/chat-foundation.json",
+      "provenance/agentic-reasoning-tool.json",
+      "provenance/agentic-response-code.json",
+      "provenance/agentic-plan-sources.json",
+      "provenance/node-output-agentic.json",
+      "provenance/conversation-foundation.json",
+      "provenance/prompt-attachments.json",
+      "provenance/reasoning-tools.json",
+      "provenance/plans-tasks-queues.json",
+      "provenance/approvals-checkpoints.json",
+      "provenance/sources-citations.json",
+      "provenance/agent-identity-context.json",
+      "provenance/coding-artifacts.json",
+      "provenance/sandbox-previews.json",
+      "provenance/workflow-canvas.json"
+    ]
+  },
+  "entries": [
+    {
+      "file": "src/uiCss.ts",
+      "exports": [
+        "chatScrollerCss"
+      ],
+      "collection": "chat/shadcn",
+      "registryItem": "https://ui.shadcn.com/docs/utils/scroll-fade",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": []
+    },
+    {
+      "file": "src/chat/MessageScroller.tsx",
+      "exports": [
+        "MessageScroller",
+        "MessageScrollerProvider",
+        "MessageScrollerViewport",
+        "MessageScrollerContent",
+        "MessageScrollerItem",
+        "MessageScrollerButton",
+        "useMessageScroller",
+        "useMessageVisibility",
+        "useMessageScrollerState"
+      ],
+      "collection": "chat/shadcn",
+      "registryItem": "https://ui.shadcn.com/docs/components/base/message-scroller",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Upstream explicitly rejects default auto-scroll (scrollAnchor default 'none'); the flat compat component keeps our opt-out stickToBottom (default true, passed as scrollAnchor 'bottom') because every Smithers surface streams",
+        "Flat compat component retained with its exact legacy props/DOM/classes; inside an ambient MessageScrollerProvider it renders the upstream compound anatomy (Viewport/Content/Item/Button) verbatim with a single provider-owned scroll region",
+        "MessageScrollerItem scrollAnchor marks a turn-start row that anchors near the top while the reply streams (mount-time and prepended rows never anchor)",
+        "Programmatic jumps are tracked with a visible data-autoscrolling attribute and reconciled on scrollend so follow state recovers after scrollbar drags",
+        "MessageScrollerButton stays rendered and goes inert (tabIndex=-1, data-active=false) with nothing to scroll toward, and gains a start direction",
+        "Marker integration slots remain the host's composition responsibility"
+      ]
+    },
+    {
+      "file": "src/chat/ChatTranscript.tsx",
+      "exports": [
+        "ChatTranscript"
+      ],
+      "collection": "chat/shadcn",
+      "registryItem": null,
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "smithers-original: accessible transcript container (role=log, aria-busy while pending) composing MessageScroller with a pending assistant bubble and an empty-state slot"
+      ]
+    },
+    {
+      "file": "src/chat/Message.tsx",
+      "exports": [
+        "Message",
+        "MessageAvatar",
+        "MessageHeader",
+        "MessageContent",
+        "MessageFooter",
+        "MessageActions",
+        "MessageGroup"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/message",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "MessageResponse part (our MessageResponse lives in agentic)"
+      ],
+      "divergences": [
+        "align prop drives row direction instead of upstream from-user/from-assistant classes"
+      ]
+    },
+    {
+      "file": "src/chat/MessageBranch.tsx",
+      "exports": [
+        "MessageBranch",
+        "MessageBranchContent",
+        "MessageBranchSelector",
+        "MessageBranchPrevious",
+        "MessageBranchNext",
+        "MessageBranchPage"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/message",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "MessageBranchContent keeps every branch mounted and hides the inactive ones (upstream behavior) so per-branch state survives navigation"
+      ]
+    },
+    {
+      "file": "src/chat/Bubble.tsx",
+      "exports": [
+        "Bubble",
+        "bubbleVariants",
+        "BubbleContent",
+        "BubbleActions",
+        "BubbleReactions"
+      ],
+      "collection": "chat/shadcn",
+      "registryItem": "https://ui.shadcn.com/docs/components/base/bubble",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "BubbleGroup",
+        "4 of the 7 upstream visual variants (we ship user/assistant/system only)"
+      ],
+      "divergences": [
+        "Clamp-collapse for long content is a Smithers addition; composed mode renders children verbatim"
+      ]
+    },
+    {
+      "file": "src/chat/CompactGroup.tsx",
+      "exports": [
+        "CompactGroup"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": null,
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "smithers-original: collapsed run of compacted turns"
+      ]
+    },
+    {
+      "file": "src/chat/ConversationCheckpoint.tsx",
+      "exports": [
+        "ConversationCheckpoint"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/checkpoint",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "Checkpoint icon/trigger/tooltip parts (owned by the approvals-checkpoints lane)"
+      ],
+      "divergences": [
+        "Marker-style separator row rather than a bookmark list item"
+      ]
+    },
+    {
+      "file": "src/chat/Marker.tsx",
+      "exports": [
+        "Marker"
+      ],
+      "collection": "chat/shadcn",
+      "registryItem": "https://ui.shadcn.com/docs/components/base/marker",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "status variant (streaming rows) is a Smithers addition"
+      ]
+    },
+    {
+      "file": "src/chat/Shimmer.tsx",
+      "exports": [
+        "Shimmer"
+      ],
+      "collection": "chat/shadcn",
+      "registryItem": "https://ui.shadcn.com/docs/utils/shimmer",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": []
+    },
+    {
+      "file": "src/prompt/PromptInput.tsx",
+      "exports": [
+        "PromptInput",
+        "PromptInputHeader",
+        "PromptInputBody",
+        "PromptInputTextarea",
+        "PromptInputFooter",
+        "PromptInputTools",
+        "PromptInputButton",
+        "PromptInputSubmit",
+        "PromptInputStop",
+        "PromptInputActionMenu",
+        "PromptInputActionMenuTrigger",
+        "PromptInputActionMenuContent",
+        "PromptInputActionAddAttachments",
+        "usePromptInputAttachments"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/prompt-input",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "PromptInputSelect family (compose ModelSelector instead)",
+        "PromptInputActionAddScreenshot (deferred)",
+        "usePromptInputController (deferred)",
+        "ReferencedSources (deferred)"
+      ],
+      "divergences": [
+        "PromptInputStop is a Smithers addition",
+        "attachments are managed on the PromptInput root (controlled/uncontrolled) rather than an external controller hook",
+        "action menu is a positioned popover with a hand-rolled roving menu keyboard contract, no Radix dep"
+      ]
+    },
+    {
+      "file": "src/chat/Attachment.tsx",
+      "exports": [
+        "Attachment",
+        "AttachmentMedia",
+        "AttachmentContent",
+        "AttachmentTitle",
+        "AttachmentDescription",
+        "AttachmentActions",
+        "AttachmentAction",
+        "AttachmentTrigger",
+        "AttachmentPreview",
+        "AttachmentRemove",
+        "AttachmentGroup"
+      ],
+      "collection": "chat/shadcn",
+      "registryItem": "https://ui.shadcn.com/docs/components/base/attachment",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "chip DOM is preserved byte-identical when no children are given; children opt into the compound card anatomy",
+        "AttachmentPreview never fabricates a preview: no src renders the extension tile"
+      ]
+    },
+    {
+      "file": "src/agentic/Reasoning.tsx",
+      "exports": [
+        "Reasoning",
+        "ReasoningTrigger",
+        "ReasoningContent",
+        "ReasoningSummary"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/reasoning",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "useReasoning context hook export",
+        "ReasoningTrigger getThinkingMessage render callback"
+      ],
+      "divergences": [
+        "immediate auto-collapse (upstream delays 1s)",
+        "composed opt-in keeps the legacy flat render as the default",
+        "ReasoningContent renders children directly (upstream renders markdown via Streamdown)",
+        "ReasoningSummary presents provider-disclosed summaries only; no raw chain-of-thought channel",
+        "adds a labelled polite live region announcing streaming state transitions; visually hidden (sui-sr-only) so it is reduced-motion safe — upstream announces nothing"
+      ]
+    },
+    {
+      "file": "src/agentic/ChainOfThought.tsx",
+      "exports": [
+        "ChainOfThought",
+        "ChainOfThoughtStep",
+        "chainOfThoughtStepStatus"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/chain-of-thought",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "ChainOfThoughtHeader/ChainOfThoughtContent compositional anatomy (trigger and body are built in)",
+        "ChainOfThoughtSearchResults/ChainOfThoughtSearchResult search-result chips",
+        "ChainOfThoughtImage per-step images"
+      ],
+      "divergences": [
+        "legacy steps-array mode kept alongside the composed ChainOfThoughtStep anatomy",
+        "uncontrolled open follows the streaming flag (upstream defaults closed)",
+        "adds a labelled polite live region announcing streaming state transitions; visually hidden (sui-sr-only) so it is reduced-motion safe — upstream announces nothing"
+      ]
+    },
+    {
+      "file": "src/agentic/ToolCall.tsx",
+      "exports": [
+        "ToolCall",
+        "ToolCallHeader",
+        "ToolCallContent",
+        "ToolCallInput",
+        "ToolCallOutput",
+        "ToolCallError",
+        "ToolCallApproval",
+        "toolCallStatus",
+        "TOOL_CALL_STATE_LABELS"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/tool",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "ToolCallContent corresponds to upstream ToolContent (naming divergence)",
+        "approvalSlot is a seam rather than built-in approval buttons",
+        "ToolCallApproval is a container; approval presentation is composed by the host",
+        "legacy model render kept alongside the compound anatomy"
+      ]
+    },
+    {
+      "file": "src/agentic/MessageResponse.tsx",
+      "exports": [
+        "MessageResponse"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/message",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "Message/MessageContent wrappers",
+        "MessageActions/MessageAction/MessageToolbar action anatomy",
+        "MessageBranch* branching anatomy"
+      ],
+      "divergences": [
+        "renders through the smithers Markdown primitive (upstream renders via Streamdown with remark/rehype plugin seams)"
+      ]
+    },
+    {
+      "file": "src/agentic/AgentOutput.tsx",
+      "exports": [
+        "AgentOutput"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": null,
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "smithers-original",
+        "AgentOutputModel.reasoningSummary is populated ONLY from explicit reasoningSummary/reasoning_summary fields, summary-typed parts, and nested summary payloads on parts carrying a recognized reasoning type/kind (reasoning/thinking/thought/summary family) — a `summary` field on untyped or unrelated part kinds is metadata, never reasoning text; raw reasoning/thinking/thought transcripts and redacted/signed parts are dropped and never rendered; reasoning remains as a deprecated alias"
+      ]
+    },
+    {
+      "file": "src/agentic/CodeBlock.ts",
+      "exports": [
+        "CodeBlock",
+        "CodeBlockHeader",
+        "CodeBlockFilename",
+        "CodeBlockGroup",
+        "CodeBlockTabs"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/code-block",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "upstream CodeBlockTitle/CodeBlockActions header anatomy (CodeBlockHeader/CodeBlockFilename replace them; copy is a seam)",
+        "CodeBlockLanguageSelector family (language selector)",
+        "CodeBlockContainer/CodeBlockContent low-level composition wrappers"
+      ],
+      "divergences": [
+        "copy is a seam not a clipboard dependency",
+        "highlighter is a seam not bundled shiki",
+        "implementation lives in src/primitives/CodeBlock.tsx; this module is the public re-export",
+        "CodeBlockGroup derives tab/tabpanel DOM ids from the item index under a useId prefix — caller item ids are never embedded verbatim in id/aria-controls/aria-labelledby"
+      ]
+    },
+    {
+      "file": "src/agentic/Plan.tsx",
+      "exports": [
+        "Plan",
+        "PlanHeader",
+        "PlanTitle",
+        "PlanDescription",
+        "PlanTrigger",
+        "PlanContent",
+        "PlanStep",
+        "PlanAction",
+        "PlanFooter",
+        "planStepStatus",
+        "PlanProps",
+        "PlanLegacyProps",
+        "PlanCompoundProps",
+        "PlanStepModel",
+        "PlanStepProps",
+        "PlanStepStatus"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/plan",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Upstream is a streaming Card compound; we retain the legacy step-array API alongside the new compound anatomy",
+        "PlanStepModel keeps the legacy step model while PlanStep names only the compound li"
+      ]
+    },
+    {
+      "file": "src/agentic/TaskItem.tsx",
+      "exports": [
+        "TaskItem",
+        "TaskItemFile",
+        "TaskItemProps",
+        "TaskItemFileProps"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/task",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "The collapsible task wrapper ships as AgentTask (Task collides with a smthrs workflow export)"
+      ]
+    },
+    {
+      "file": "src/agentic/AgentTask.tsx",
+      "exports": [
+        "AgentTask",
+        "AgentTaskTrigger",
+        "AgentTaskContent",
+        "AgentTaskGroup",
+        "AgentTaskProps"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/task",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Renamed Task -> AgentTask to avoid the smthrs workflow Task export collision"
+      ]
+    },
+    {
+      "file": "src/agentic/Queue.tsx",
+      "exports": [
+        "Queue",
+        "QueueSection",
+        "QueueSectionTrigger",
+        "QueueSectionLabel",
+        "QueueSectionContent",
+        "QueueList",
+        "QueueItem",
+        "QueueItemIndicator",
+        "QueueItemContent",
+        "QueueItemDescription",
+        "QueueSectionProps",
+        "QueueSectionLabelProps",
+        "QueueItemProps",
+        "QueueItemIndicatorProps"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/queue",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "QueueItemActions",
+        "QueueItemAttachment",
+        "QueueItemImage",
+        "QueueItemFile"
+      ],
+      "divergences": [
+        "Upstream documents a boolean-completed item model; our QueueItem takes a shared-vocabulary status string (status wins over completed)"
+      ]
+    },
+    {
+      "file": "src/agentic/ActivityTimeline.tsx",
+      "exports": [
+        "ActivityTimeline",
+        "ActivityItem",
+        "ActivityGroup",
+        "ActivityKind",
+        "ActivityItemModel",
+        "ActivityTimelineProps",
+        "ActivityItemProps",
+        "ActivityGroupProps"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": null,
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "smithers-original"
+      ]
+    },
+    {
+      "file": "src/approvals/Confirmation.tsx",
+      "exports": [
+        "Confirmation",
+        "ConfirmationTitle",
+        "ConfirmationRequest",
+        "ConfirmationAccepted",
+        "ConfirmationRejected",
+        "ConfirmationActions",
+        "ConfirmationAction",
+        "approvalStateToStatus",
+        "approvalStateLabel"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/confirmation",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "AI SDK tool-approval context wiring (state is a required prop)"
+      ],
+      "divergences": [
+        "Adds synchronizing/expired/unavailable/failed-submission states for durable gateway approvals",
+        "expired/unavailable render a muted note slot instead of hiding"
+      ]
+    },
+    {
+      "file": "src/approvals/ApprovalCard.tsx",
+      "exports": [
+        "ApprovalCard",
+        "ApprovalRisk",
+        "ApprovalResources",
+        "ApprovalNote"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/confirmation",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "smithers-original composition: risk levels, proposed actions, affected resources, reviewer note threading"
+      ]
+    },
+    {
+      "file": "src/approvals/Checkpoint.tsx",
+      "exports": [
+        "Checkpoint",
+        "CheckpointIcon",
+        "CheckpointMetadata",
+        "CheckpointTrigger",
+        "CheckpointActions"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/checkpoint",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "tooltip-only trigger variant without action group"
+      ],
+      "divergences": [
+        "CheckpointActionKind covers host-wired @smthrs/time-travel library operations: fork, replay, rewind",
+        "CheckpointModel carries presentational metadata for an rc.0 pinned-tree checkpoint row"
+      ]
+    },
+    {
+      "file": "src/agentic/Sources.tsx",
+      "exports": [
+        "Sources",
+        "SourcesTrigger",
+        "SourcesContent",
+        "Source"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/sources",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "SourcesContent show/hide animation"
+      ],
+      "divergences": [
+        "Legacy step-array API retained alongside the compound anatomy",
+        "Source renders title/domain/excerpt/favicon rows; no-href sources render as spans",
+        "Favicons are props-driven (faviconUrl) with a domain-initial text fallback"
+      ]
+    },
+    {
+      "file": "src/agentic/InlineCitation.tsx",
+      "exports": [
+        "InlineCitation",
+        "CitationCard",
+        "CitationCarousel",
+        "CitationQuote"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/inline-citation",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "InlineCitationText",
+        "InlineCitationCardTrigger",
+        "InlineCitationCardBody",
+        "InlineCitationCarouselContent",
+        "InlineCitationCarouselItem",
+        "InlineCitationCarouselHeader",
+        "InlineCitationCarouselIndex",
+        "InlineCitationCarouselPrev",
+        "InlineCitationCarouselNext",
+        "InlineCitationSource"
+      ],
+      "divergences": [
+        "Model-driven CitationCard/CitationCarousel/CitationQuote instead of the upstream compound card/carousel anatomy",
+        "Preview content renders inline after the trigger (no portal/hover-card), role=region with Escape-closes-and-refocuses keyboard contract"
+      ]
+    },
+    {
+      "file": "src/agentic/Suggestion.tsx",
+      "exports": [
+        "Suggestion",
+        "SuggestionGroup"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/suggestion",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": []
+    },
+    {
+      "file": "src/agentic/OpenInChat.tsx",
+      "exports": [
+        "OpenInChat"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/open-in-chat",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "built-in chat deep-link routing"
+      ],
+      "divergences": [
+        "Strictly props-driven: subject descriptor in, onOpen callback out; no routing/transport in the base package",
+        "Default label is 'Ask Smithers'"
+      ]
+    },
+    {
+      "file": "src/agents/AgentDefinition.tsx",
+      "exports": [
+        "AgentDefinition",
+        "AgentHeader",
+        "AgentContent",
+        "AgentInstructions",
+        "AgentTools",
+        "AgentTool",
+        "AgentOutputSchema",
+        "AgentAvailabilityBadge"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/agent",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Root renamed AgentDefinition (bare Agent collides with runtime SDK exports)",
+        "availability posture (available|unauthenticated|unavailable|unknown) is a Smithers addition"
+      ]
+    },
+    {
+      "file": "src/agents/AgentCard.tsx",
+      "exports": [
+        "AgentCard"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/agent",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Selectable card renders a real <button aria-pressed> when onSelect is provided"
+      ]
+    },
+    {
+      "file": "src/agents/ModelSelector.tsx",
+      "exports": [
+        "ModelSelector",
+        "ModelSelectorTrigger",
+        "ModelSelectorContent",
+        "ModelSelectorGroup",
+        "ModelSelectorItem"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/model-selector",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "cmdk command-palette input (deferred to a future adapters/* variant)"
+      ],
+      "divergences": [
+        "Composes the existing Radix Select primitives instead of cmdk (no new base dependency); keyboard model is Radix Select arrows + typeahead"
+      ]
+    },
+    {
+      "file": "src/agents/badges.tsx",
+      "exports": [
+        "ModelBadge",
+        "ProviderBadge"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/model-selector",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "Bundled provider logo assets"
+      ],
+      "divergences": [
+        "Text-first badges with an icon slot only; no logo assets shipped in the base package"
+      ]
+    },
+    {
+      "file": "src/agents/ContextUsage.tsx",
+      "exports": [
+        "ContextUsage",
+        "ContextTrigger",
+        "ContextContent",
+        "ContextContentHeader",
+        "ContextContentBody",
+        "ContextContentFooter",
+        "ContextInputUsage",
+        "ContextOutputUsage",
+        "ContextReasoningUsage",
+        "ContextCacheUsage"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/context",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Renamed ContextUsage (avoids React.Context confusion)",
+        "Keyboard contract added over upstream: real button trigger with aria-expanded/aria-controls, Escape closes and restores focus",
+        "No pricing database: costUsd arrives via props"
+      ]
+    },
+    {
+      "file": "src/artifacts/Artifact.tsx",
+      "exports": [
+        "Artifact",
+        "ArtifactHeader",
+        "ArtifactTitle",
+        "ArtifactDescription",
+        "ArtifactActions",
+        "ArtifactAction",
+        "ArtifactClose",
+        "ArtifactContent"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/artifact",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": []
+    },
+    {
+      "file": "src/artifacts/Snippet.tsx",
+      "exports": [
+        "Snippet"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/snippet",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Copy seam matches Smithers CodeBlock (onCopyCode else navigator.clipboard, hidden otherwise)"
+      ]
+    },
+    {
+      "file": "src/artifacts/PackageInfo.tsx",
+      "exports": [
+        "PackageInfo"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/package-info",
+      "ported": "full-anatomy",
+      "omissions": [],
+      "divergences": [
+        "registryUrl sanitized through safeHref; installCommand composes Snippet"
+      ]
+    },
+    {
+      "file": "src/artifacts/SchemaDisplay.tsx",
+      "exports": [
+        "SchemaDisplay"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/schema-display",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "Non-object schema structures render as a CodeBlock fallback instead of dedicated anatomy"
+      ],
+      "divergences": [
+        "Collapsible root with the controlled open triple (defaultOpen true)"
+      ]
+    },
+    {
+      "file": "src/artifacts/StackTrace.tsx",
+      "exports": [
+        "StackTrace",
+        "StackFrame",
+        "parseStackTrace"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/stack-trace",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Structured StackFrameData model with a frozen V8 + JSC/Bun parseStackTrace grammar helper; unmatched lines become raw frames",
+        "Collapsible root (defaultOpen false) with an onFrameClick seam instead of routing"
+      ]
+    },
+    {
+      "file": "src/artifacts/TestResults.tsx",
+      "exports": [
+        "TestResults",
+        "TestResultsHeader",
+        "TestResultsSummary",
+        "TestResultsDuration",
+        "TestResultsProgress",
+        "TestResultsContent",
+        "TestSuite",
+        "TestSuiteName",
+        "TestSuiteStats",
+        "TestSuiteContent",
+        "TestRow",
+        "TestStatus",
+        "TestName",
+        "testCaseStatusToStatus"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/test-results",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Per-test row is named TestRow (bare Test collides with runner vocabulary)",
+        "Failed suites default open; summary-count changes announced via one polite live region"
+      ]
+    },
+    {
+      "file": "src/artifacts/Commit.tsx",
+      "exports": [
+        "Commit",
+        "CommitHeader",
+        "CommitAuthor",
+        "CommitInfo",
+        "CommitMessage",
+        "CommitMetadata",
+        "CommitHash",
+        "CommitTimestamp",
+        "CommitActions",
+        "CommitFiles",
+        "CommitFile",
+        "CommitFileStatus",
+        "CommitFilePath"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/commit",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "jj changeId is first-class: CommitHash prefers it and stamps data-vcs='jj'"
+      ]
+    },
+    {
+      "file": "src/artifacts/ChangeSummary.tsx",
+      "exports": [
+        "ChangeSummary"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": null,
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "smithers-original",
+        "vcs prop switches accessible terminology between git 'diff' and jj 'working-copy change'"
+      ]
+    },
+    {
+      "file": "src/artifacts/EnvironmentVariables.tsx",
+      "exports": [
+        "EnvironmentVariables",
+        "EnvironmentVariable"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/environment-variables",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "secret values render through SecretField"
+      ]
+    },
+    {
+      "file": "src/artifacts/SecretField.tsx",
+      "exports": [
+        "SecretField"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": null,
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "smithers-original",
+        "Masked value never enters the DOM; mask length is fixed and unrelated to value length; copy works without revealing"
+      ]
+    },
+    {
+      "file": "src/sandbox/AgentSandbox.tsx",
+      "exports": [
+        "AgentSandbox",
+        "AgentSandboxHeader",
+        "AgentSandboxStatus",
+        "AgentSandboxActions",
+        "AgentSandboxContent",
+        "Sandbox",
+        "SandboxHeader",
+        "SandboxStatus",
+        "SandboxActions",
+        "SandboxContent",
+        "sandboxStateToStatus"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/sandbox",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "sandbox terminal/output streaming anatomy"
+      ],
+      "divergences": [
+        "frozen compound names (Sandbox/SandboxHeader/SandboxStatus/SandboxActions/SandboxContent) ship as aliases; AgentSandbox-prefixed names kept for back-compat (bare Sandbox collides with the smthrs workflow export in shared scope)",
+        "non-ready states render an honest EmptyState instead of placeholder output",
+        "lifecycle state changes are announced via an aria-live=polite visually-hidden region"
+      ]
+    },
+    {
+      "file": "src/sandbox/WebPreview.tsx",
+      "exports": [
+        "WebPreview",
+        "WebPreviewToolbar",
+        "WebPreviewAddress",
+        "WebPreviewContent"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/web-preview",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "upstream navigation-history state (back/forward/refresh are host callbacks only)"
+      ],
+      "divergences": [
+        "iframe sandbox attribute is always rendered from an explicit token list",
+        "allow-same-origin is dropped with console.warn when combined with allow-scripts",
+        "address bar rejects non-http(s) URLs inline"
+      ]
+    },
+    {
+      "file": "src/sandbox/JSXPreview.tsx",
+      "exports": [
+        "JSXPreview"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/jsx-preview",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "upstream JSX compilation/execution pipeline (props-driven node only)"
+      ],
+      "divergences": [
+        "renders a provided React node inside an inert frame; node === undefined renders an EmptyState instead of fabricating a preview"
+      ]
+    },
+    {
+      "file": "src/canvas/WorkflowCanvas.tsx",
+      "exports": [
+        "WorkflowCanvas",
+        "WorkflowNode",
+        "WorkflowNodeHeader",
+        "WorkflowNodeContent",
+        "WorkflowNodeStatus",
+        "WorkflowEdge",
+        "WorkflowConnection",
+        "WorkflowControls",
+        "WorkflowPanel",
+        "WorkflowToolbar",
+        "WorkflowMinimap"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/canvas",
+      "ported": "partial-anatomy",
+      "omissions": [
+        "NodeTitle, NodeDescription, NodeFooter (upstream Node card sub-parts; our title is a WorkflowNode header prop and description/footer slots are plain children)",
+        "Edge.Temporary and Edge.Animated (upstream edge renderer components; edge geometry is the ReactFlow layer's job)",
+        "Upstream Connection as a ReactFlow connectionLineComponent (pending-connection drag geometry is the renderer's job)",
+        "Upstream Canvas ReactFlow wrapper itself (pre-configured pan/zoom/selection/delete/fitView behaviors bound to the AI SDK data model)"
+      ],
+      "divergences": [
+        "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; a host owns the ReactFlow renderer",
+        "WorkflowEdge and WorkflowConnection are legend/inline representations (from -> to, pending-connection validity) rather than ReactFlow edge/connection-line renderers",
+        "WorkflowNodeStatus is a smithers addition (shared StatusPill) with no upstream equivalent",
+        "WorkflowMinimap is a labelled seam frame with no upstream component; upstream parks ReactFlow's MiniMap as a Canvas child",
+        "WorkflowToolbar is plain canvas chrome; upstream Toolbar wraps ReactFlow's per-node NodeToolbar",
+        "WorkflowControls renders buttons only from caller-provided callbacks; upstream Controls binds the ReactFlow viewport API directly",
+        "WorkflowCanvas is role=group, not role=application: the base layer ships no application-mode keyboard contract",
+        "WorkflowNode renders with role=option when the renderer passes a selection state, so aria-selected is supported by the role and survives into the accessibility tree (on a generic div it is stripped); nodes without a selection model stay generic",
+        "WorkflowEdge status is not color-only: a per-status-class shape glyph plus an sr-only status label accompany the colored signifier",
+        "WorkflowControls and WorkflowToolbar implement the ARIA toolbar keyboard contract: roving tabindex with Arrow/Home/End navigation that never lands on disabled items and ignores modifier-key chords",
+        "WorkflowConnection exposes its validity state via sr-only text instead of aria-hidden"
+      ]
+    },
+    {
+      "file": "src/canvas/canvasCss.ts",
+      "exports": [
+        "canvasCss",
+        "WORKFLOW_CANVAS_CSS_ID"
+      ],
+      "collection": "agentic/ai-elements",
+      "registryItem": "https://elements.ai-sdk.dev/components/canvas",
+      "ported": "partial-anatomy",
+      "omissions": [],
+      "divergences": [
+        "Lane CSS fragment self-injected via useInjectLaneCss until integration composes it into smithersUiCss"
+      ]
+    }
+  ]
+}

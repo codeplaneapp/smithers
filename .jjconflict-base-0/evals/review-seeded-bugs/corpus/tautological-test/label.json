@@ -1,0 +1,10 @@
+{
+  "fixture": "tautological-test",
+  "clean": false,
+  "bugClass": "tautological-test",
+  "category": "tests",
+  "severity": "minor",
+  "file": "src/orderAssertions.ts",
+  "line": 4,
+  "description": "The assertion condition became a contradiction, so the helper never fails for an uncancelled order."
+}

@@ -1,0 +1,78 @@
+---
+title: "Installation"
+description: "Install the Smithers CLI or library, keep Effect pinned, and verify the install."
+---
+
+import { CardGrid, Code, LinkCard } from "@astrojs/starlight/components"
+import versions from "../../../data/versions.json"
+
+## Requirements
+
+- Node.js {versions.node} or later. The durable engine runs on Node only.
+- No database server. Storage is local SQLite, and run state lives in the project's `.flows/` directory.
+
+## Install the CLI
+
+The CLI installs the `smthrs` command, with `smithers` as an alias of the same executable.
+
+To install from npm:
+
+```bash
+npm install --global @smthrs/cli@next
+```
+
+The `@next` suffix is required while 1.0 is a release candidate: release candidates publish to the `next` dist-tag, and `latest` still resolves the Smithers 0.x line.
+
+To build from source, clone [the repository](https://github.com/smithersai/smithers) and follow `CONTRIBUTING.md`, which covers the build system, the target graph, and the gates.
+
+## Install the library
+
+A Node flow program depends on the engine packages, the Node host, and one pinned Effect:
+
+<Code lang="bash" code={`pnpm add @smthrs/flow@next @smthrs/engine@next @smthrs/platform-node@next`} />
+
+:::caution[Effect must stay at exactly the pinned version]
+A project with two Effect instances is unsupported, because schema internals are not interoperable between them.
+
+`@smthrs/platform-node` declares the compatible `effect` and Effect platform packages as exact peer dependencies. npm, Bun, and pnpm therefore install one compatible runtime without requiring an application to pin transitive implementation packages.
+:::
+
+## Verify the install
+
+```bash
+smthrs doctor
+```
+
+`doctor` runs its checks without running any flow and prints one line per check. A healthy report covers:
+
+- registry: the flows discovered under the project's `flows/` directory.
+- state and databases: the `.flows/` state directory and the migrations applied to `control.db` and `engine.db` (both report "not created yet" before the first command that needs them).
+- runtime: the Node.js version against the 22.19.0 floor the durable engine requires.
+- providers: which provider credentials are set, and which are exported but empty.
+
+The command exits 1 when any check reports a failure.
+
+## Stay current
+
+```bash
+smthrs update
+```
+
+`update` reads npm's dist-tags for `@smthrs/cli` and reports whether the installed version is current. It never installs anything. A release candidate is compared against the `next` tag first, so it is never told to downgrade to a 0.x `latest`. When a later version exists, the command prints it with the install command to run:
+
+```text
+npm install -g @smthrs/cli@<version>
+```
+
+When the install is current, it says so:
+
+```text
+@smthrs/cli 1.0.0-rc.0 is current.
+```
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Quickstart" href="/docs/quickstart/" description="Scaffold a flow and run it." />
+  <LinkCard title="CLI reference" href="/docs/reference/cli/" description="Every verb the smthrs command ships." />
+</CardGrid>

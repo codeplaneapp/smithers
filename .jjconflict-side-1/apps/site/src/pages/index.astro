@@ -1,0 +1,57 @@
+---
+import Base from "../layouts/Base.astro"
+import HeroStage from "../components/HeroStage.astro"
+
+/*
+ * The whole page. Nothing below the hero: the tape is the pitch.
+ */
+const title = "Smithers"
+const description =
+  "Build smart workflows for your codebase. Enable agents to work smarter, faster, and cheaper."
+const prompt =
+  "Install the Smithers CLI globally with `npm install --global @smthrs/cli@next`, then run `smthrs suggest` to start onboarding me onto Smithers."
+---
+
+<Base title={title} description={description} header={false} footer={false}>
+  <main class="wrap hero">
+    <h1>The agentic workflow framework</h1>
+    <p class="sub">
+      Build smart workflows for your codebase. Enable agents to work smarter, faster, and cheaper.
+    </p>
+    <div class="actions">
+      <span class="copy" id="copy-shell">
+        <button class="btn primary" id="copy-prompt" type="button" data-prompt={prompt}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+          <span>Copy prompt</span>
+        </button>
+        <span class="copy-tip" aria-live="polite">
+          <span class="tip tip-prompt">{prompt}</span>
+          <span class="tip tip-done">Copied: paste it into your coding agent</span>
+          <span class="tip tip-error">Copy failed. The prompt: {prompt}</span>
+        </span>
+      </span>
+      <a class="btn" href="/docs/">Documentation</a>
+      <a class="btn ghost" href="/demo/">Get a demo</a>
+    </div>
+  </main>
+  <HeroStage />
+  <script>
+    const shell = document.getElementById("copy-shell")
+    const btn = document.getElementById("copy-prompt")
+    const text = btn?.getAttribute("data-prompt") ?? ""
+    let timer: ReturnType<typeof setTimeout> | undefined
+    btn?.addEventListener("click", async () => {
+      if (!shell) return
+      try {
+        await navigator.clipboard.writeText(text)
+        shell.dataset.state = "copied"
+      } catch {
+        shell.dataset.state = "error"
+      }
+      clearTimeout(timer)
+      timer = setTimeout(() => {
+        shell.dataset.state = ""
+      }, 3000)
+    })
+  </script>
+</Base>

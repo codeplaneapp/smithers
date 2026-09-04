@@ -1,0 +1,90 @@
+/**
+ * Poll something until it is ready, and survive a restart in the middle of the
+ * wait.
+ *
+ * `Poll.make` declares a flow whose body is ONE attempt, so a poll is a lineage
+ * of durable rounds rather than a loop inside a step. That is what makes the
+ * waiting free: the round that is sleeping holds no process, and the round that
+ * wakes replays the attempt it already made instead of making it again.
+ *
+ * Each phase below builds its own engine over the same SQLite file, which is
+ * what a restart looks like from the database's point of view. Phase one runs
+ * the first attempt and parks on the durable timer between attempts. The engine
+ * is then dropped while the timer is still pending. Phase two attaches a fresh
+ * engine after the timer is due and drives the poll to a satisfied check.
+ *
+ * `checks` is the contract: one dispatch per attempt, across both phases. A
+ * poll that re-ran attempt one after the restart would show four.
+ */
+import { Action, Interpreter, Poll, Sleep } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+import { durableEngine } from "./durable-layer.ts"
+
+/** The check the poll runs: a deployment that goes live on the third look. */
+export const Status = Action.make("examples/Status", {
+  payload: { id: Schema.String, attempt: Schema.Number },
+  success: Poll.CheckResult(Schema.String)
+})
+
+/** The poll: one attempt per round, 120 ms of durable timer between them. */
+export const Deployment = Poll.make("examples/Deployment", {
+  input: { id: Schema.String },
+  result: Schema.String,
+  intervalMs: 120,
+  backoff: "fixed",
+  maxAttempts: 5,
+  onTimeout: "fail",
+  check: ({ attempt, id }) => Status.call({ attempt, id })
+})
+
+export interface Summary {
+  /** The output of the check that satisfied the poll. */
+  readonly result: string
+  /** The attempt number of every check dispatch, in order. */
+  readonly checks: ReadonlyArray<number>
+  /** The dispatches the first engine made before it was dropped. */
+  readonly checksBeforeRestart: ReadonlyArray<number>
+}
+
+export const main = (filename: string): Effect.Effect<Summary> =>
+  Effect.gen(function*() {
+    const checks: Array<number> = []
+    const status = Status.toLayer(({ attempt }) =>
+      Effect.sync(() => {
+        checks.push(attempt)
+        return { satisfied: attempt >= 3, output: `live:${attempt}` }
+      })
+    )
+    const engine = (hostId: string) =>
+      // `Sleep.layer` is not optional here: the wait between attempts is an
+      // ordinary `system/sleep` node, so a composition without it has a plan
+      // node no implementation answers.
+      Layer.mergeAll(status, Poll.layer, Sleep.layer, Interpreter.layer(Deployment)).pipe(
+        Layer.provideMerge(Action.layerImplementations),
+        Layer.provideMerge(durableEngine(filename, hostId))
+      )
+
+    // Phase one: the first attempt runs and the round parks on its timer.
+    yield* Effect.scoped(
+      Deployment.execute({ id: "web" }, { executionId: "deploy-1", discard: true }).pipe(
+        Effect.provide(engine("worker-a"))
+      )
+    )
+
+    const checksBeforeRestart = [...checks]
+
+    // The process is gone while the timer is still pending. Wait past it, so a
+    // fresh engine finds the clock due rather than arming a second one.
+    yield* Effect.sleep(300)
+
+    // Phase two: a fresh engine picks the lineage up and finishes the poll.
+    const result = yield* Effect.scoped(
+      Deployment.execute({ id: "web" }, { executionId: "deploy-1" }).pipe(
+        Effect.provide(engine("worker-b"))
+      )
+    )
+
+    return { result, checks, checksBeforeRestart }
+  }).pipe(Effect.orDie)

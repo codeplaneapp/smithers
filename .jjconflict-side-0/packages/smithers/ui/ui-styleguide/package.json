@@ -1,0 +1,25 @@
+{
+  "name": "@smthrs/ui-styleguide",
+  "version": "1.0.0-rc.0",
+  "smthrs": {
+    "group": "agent"
+  },
+  "private": true,
+  "description": "Shared CSS tokens and layout primitives for Smithers browser UIs.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test tests"
+  }
+}

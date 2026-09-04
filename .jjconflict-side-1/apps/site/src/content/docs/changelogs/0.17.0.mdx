@@ -1,0 +1,860 @@
+---
+title: "0.17.0"
+description: "0.17.0 ships Gateway v1: the Gateway's RPC schema, scope vocabulary,"
+---
+
+0.17.0 ships **Gateway v1**: the Gateway's RPC schema, scope vocabulary,
+error codes, and OpenAPI document are now a stable, separately published
+package (`@smthrs/gateway`) so external clients (bots,
+dashboards, SDKs in other languages) can build against the contract instead
+of the server source. 0.15.0 launched the Gateway; 0.17.0 commits to its
+wire shape.
+
+Alongside the contract release, the CLI grows a real account/credential
+surface (`agents add` wizard, multi-account isolation via `configDir`,
+machine-readable JSON stdout, a new `chat create` subcommand), `<Task>`
+gains an **auto-hijack** prop for resumable agent handoffs, and the
+Gateway picks up the rest of its production hardening (slowloris timeouts,
+RFC-compliant 413 / Bearer parsing, cross-instance DB transaction
+coordination). GitHub Actions CI returns, this time with a
+single-Effect-version guardrail and a new fault-injection E2E lane.
+
+---
+
+## Breaking changes
+
+- **`pi-plugin` moved to its own workspace package.** The runtime previously lived
+  in `packages/smithers/src/pi-plugin/` and was re-exported from the
+  `smthrs/pi-plugin` subpath. It is now `packages/pi-plugin/`,
+  published as `@smthrs/pi-plugin`. The
+  `smthrs/pi-plugin` and `smthrs/pi-extension`
+  subpath re-exports have been deleted. Update imports:
+
+  ```diff
+  - import { runWorkflow } from "smthrs/pi-plugin";
+  + import { runWorkflow } from "@smthrs/pi-plugin";
+  ```
+
+---
+
+## Gateway v1: Stable RPC Contract as a Standalone Package
+
+0.15.0 shipped the Gateway. 0.17.0 ships the **contract**. The Gateway's RPC
+schema, scope vocabulary, error codes, and OpenAPI document now live in their
+own workspace package (`@smthrs/gateway`) and are the single
+source of truth that both the in-process server and any external client
+codegen against. The server no longer carries its own copy of the method or
+scope tables; clients no longer have to scrape the source to learn the wire
+shape.
+
+If you're building a Slack bot, a status dashboard, a CI integration, or a
+typed client SDK in another language, this is the package you import.
+
+### What ships
+
+- **18 stable v1 RPC methods.** `launchRun`, `resumeRun`, `cancelRun`,
+  `hijackRun`, `rewindRun`, `submitApproval`, `submitSignal`, `getRun`,
+  `listRuns`, `streamRunEvents`, `streamDevTools`, `getNodeOutput`,
+  `getNodeDiff`, `cronList`, `cronCreate`, `cronDelete`, `cronRun`.
+- **Typed request and response shapes** for every method (e.g.
+  `LaunchRunRequest`, `LaunchRunResponse`).
+- **JSON Schema** for every params and result type, exported as data so
+  clients can validate without a TypeScript compiler.
+- **A v1 error vocabulary**: `InvalidRequest`, `InvalidInput`,
+  `Unauthorized`, `Forbidden`, `RunNotFound`, `NodeNotFound`,
+  `IterationNotFound`, `NodeHasNoOutput`, `FrameOutOfRange`, `SeqOutOfRange`,
+  `Busy`, `RateLimited`, `PayloadTooLarge`, `BackpressureDisconnect`,
+  `UnsupportedSandbox`, `VcsError`, `RewindFailed`, `Internal`, each
+  pinned to an HTTP status.
+- **A typed scope vocabulary** (see below) with a hierarchy aware of legacy
+  `read`/`execute`/`approve`/`admin` grants for backward compatibility.
+- **Generated `openapi.yaml`** at `packages/gateway/openapi.yaml`,
+  re-derived by `bun run generate:openapi` and CI-checked.
+- **18 reference docs** under `docs/rpc/`, one per method.
+
+### Importing the contract
+
+The package has three subpath exports. Pick the smallest surface that fits:
+
+```ts
+// Everything (request/response types, schemas, scopes, helpers).
+import {
+  GATEWAY_RPC_DEFINITIONS,
+  SMITHERS_API_VERSION,
+  GATEWAY_SCOPE_VALUES,
+  hasGatewayScope,
+  getGatewayRpcDefinition,
+  getRequiredScopeForGatewayMethod,
+  type LaunchRunRequest,
+  type LaunchRunResponse,
+  type GatewayRpcMethod,
+  type GatewayRpcErrorCode,
+  type GatewayScope,
+} from "@smthrs/gateway";
+
+// Just the wire types and JSON Schemas.
+import type { LaunchRunRequest } from "@smthrs/gateway/rpc";
+
+// Just the scope helpers (e.g. for an auth middleware).
+import {
+  hasGatewayScope,
+  type GatewayScope,
+} from "@smthrs/gateway/auth/scopes";
+```
+
+### Calling a method over HTTP
+
+Every method has a stable URL of the form `POST /v1/rpc/<method>`:
+
+```bash
+curl -X POST http://localhost:7331/v1/rpc/launchRun \
+  -H "Authorization: Bearer operator-token" \
+  -H "Content-Type: application/json" \
+  -d '{"workflow":"deploy","input":{"env":"production"}}'
+# → { "runId": "run_01H...", "workflow": "deploy" }
+```
+
+Or in TypeScript, with the contract types pulled in:
+
+```ts
+import type {
+  LaunchRunRequest,
+  LaunchRunResponse,
+} from "@smthrs/gateway/rpc";
+
+const req: LaunchRunRequest = {
+  workflow: "deploy",
+  input: { env: "production" },
+};
+
+const res = await fetch("http://localhost:7331/v1/rpc/launchRun", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer operator-token",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(req),
+});
+const { runId } = (await res.json()) as LaunchRunResponse;
+```
+
+### Calling a method over WebSocket
+
+The same methods work over a single authenticated WebSocket connection. This
+is the right transport for clients that want to follow events instead of
+polling:
+
+```ts
+import type { StreamRunEventsRequest } from "@smthrs/gateway/rpc";
+
+const ws = new WebSocket("ws://localhost:7331");
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    type: "req",
+    id: "c1",
+    method: "connect",
+    params: { minProtocol: 1, maxProtocol: 1, auth: { token: "operator-token" } },
+  }));
+
+  const stream: StreamRunEventsRequest = { runId: "run_01H..." };
+  ws.send(JSON.stringify({
+    type: "req",
+    id: "s1",
+    method: "streamRunEvents",
+    params: stream,
+  }));
+};
+
+ws.onmessage = (m) => {
+  const frame = JSON.parse(m.data);
+  if (frame.type === "event") console.log(frame.event, frame.payload);
+};
+```
+
+### The scope vocabulary
+
+`@smthrs/gateway/auth/scopes` exports the v1 scope vocabulary.
+Each method declares the scope it requires; `hasGatewayScope()` performs the
+match and understands legacy grants:
+
+| Scope | What it grants |
+|---|---|
+| `run:read` | Read run state, summaries, event streams, node outputs and diffs. |
+| `run:write` | Launch, resume, and cancel runs. |
+| `run:admin` | Elevated run control: hijack and rewind. |
+| `approval:submit` | Submit approval decisions. |
+| `signal:submit` | Submit workflow signals. |
+| `cron:read` | List cron schedules. |
+| `cron:write` | Create, delete, and trigger cron schedules. |
+| `observability:read` | Read DevTools and other observability streams. |
+
+Hierarchical: `run:admin` implies `run:write` implies `run:read`. Same for
+`cron:write` over `cron:read`. The legacy `read`/`execute`/`approve`/`admin`
+grants from 0.15 / 0.16 are still accepted (`admin` matches everything,
+`execute` covers `run:write` / `signal:submit` / `cron:write`, and so on),
+so existing tokens keep working.
+
+```ts
+import {
+  hasGatewayScope,
+  getRequiredScopeForGatewayMethod,
+} from "@smthrs/gateway";
+
+const granted = ["run:write", "signal:submit"]; // from your auth layer
+const required = getRequiredScopeForGatewayMethod("launchRun"); // "run:write"
+hasGatewayScope(granted, required, "launchRun"); // true
+```
+
+### Validating params at the edge
+
+Every method publishes its JSON Schema through `getGatewayRpcDefinition()`,
+which lets a gateway, proxy, or client validate payloads without a generated
+SDK:
+
+```ts
+import { getGatewayRpcDefinition } from "@smthrs/gateway";
+import Ajv from "ajv";
+
+const def = getGatewayRpcDefinition("submitApproval");
+if (!def) throw new Error("unknown method");
+
+const ajv = new Ajv();
+const validate = ajv.compile(def.requestSchema);
+if (!validate(payload)) {
+  // → reject with InvalidInput, status 400
+}
+```
+
+### Generating clients in other languages
+
+The `openapi.yaml` is the same contract in OpenAPI 3.1 form. Anything that
+consumes OpenAPI works:
+
+```bash
+# Python client
+openapi-generator-cli generate \
+  -i node_modules/@smthrs/gateway/openapi.yaml \
+  -g python -o ./clients/python
+
+# Go client
+oapi-codegen -package smithers \
+  node_modules/@smthrs/gateway/openapi.yaml \
+  > ./clients/go/smithers.gen.go
+```
+
+The schema is regenerated from `packages/gateway/src/rpc/index.ts` and
+checked at PR time, so the YAML cannot drift from the runtime.
+
+### Server adoption
+
+`packages/server/src/gateway.js` no longer ships its own method or scope
+table. It imports `getRequiredScopeForGatewayMethod`, `hasGatewayScope`,
+and the per-method JSON Schemas straight from
+`@smthrs/gateway`. A new 283-line contract test
+(`packages/server/tests/gateway-v1-contract.test.jsx`) pins the wire shape
+end-to-end so server changes can't silently break the published v1
+contract.
+
+---
+
+## New: `<Task hijack>`, resumable agent handoffs
+
+`<Task>` gains two new props for handing the active session over to an
+interactive agent without losing run state:
+
+- **`hijack: boolean`**: when set, the engine records a hijack handoff before
+  the task starts running. The next CLI invocation can pick up the same agent
+  session interactively.
+- **`onHijackExit: "complete" | "reopen"`**: controls what happens when the
+  hijacked session closes: `complete` finishes the task as if it ran to
+  completion; `reopen` restarts the task on the next resume.
+
+```tsx
+/** @jsxImportSource smthrs */
+import { Task, Workflow, createSmithers } from "smthrs";
+import { ClaudeCodeAgent } from "@smthrs/agents";
+import { z } from "zod";
+
+const claude = new ClaudeCodeAgent({ model: "claude-opus-4-7" });
+
+const { smithers } = createSmithers({ result: z.object({ ok: z.boolean() }) });
+
+export default smithers(() => (
+  <Workflow name="pair-program">
+    <Task
+      id="implement"
+      agent={claude}
+      hijack
+      onHijackExit="complete"
+      prompt="Pair with the user on the failing test in src/parser.ts."
+    />
+  </Workflow>
+));
+```
+
+Then drive the hijacked session from the terminal:
+
+```bash
+bunx smthrs chat create --agent claude --cwd .
+# Drops you into an interactive Claude Code session inside the run.
+# Send `{}` to hand control back; the task completes and the run continues.
+```
+
+Hijack requires an agent that exposes a CLI engine (`cliEngine` /
+`hijackEngine`).
+
+---
+
+## New: CLI control plane
+
+The CLI grows a proper account/credentials surface so multiple subscriptions
+can run side-by-side and so machine-readable output stays clean.
+
+### `@smthrs/accounts` package
+
+A new workspace package backing per-provider credentials in
+`~/.smithers/accounts.json`:
+
+```ts
+import {
+  addAccount,
+  listAccounts,
+  getAccount,
+  accountToProviderEnv,
+  type Account,
+} from "@smthrs/accounts";
+
+addAccount({
+  provider: "claude-code",
+  label: "work",
+  configDir: "~/.smithers/configs/claude-work",
+});
+
+const accounts: Account[] = listAccounts();
+// → [{ provider: "claude-code", label: "work", configDir: "..." }, ...]
+
+const env = accountToProviderEnv(getAccount("work"));
+// → { CLAUDE_CONFIG_DIR: "/Users/.../claude-work" }
+```
+
+### Interactive `bunx smthrs agents add`
+
+```bash
+$ bunx smthrs agents add
+◇ Detected CLI: claude (1.3.0), codex (0.5.1)
+◇ Which provider?  ›  Claude Code
+◇ Label this account  ›  work
+✔ Wrote ~/.smithers/accounts.json
+✔ Regenerated .smithers/agents.ts to wire `claude.work` into the smart pool
+```
+
+The wizard regenerates `.smithers/agents.ts` if present so the new account
+flows into existing workflows without manual edits.
+
+### `configDir` and `apiKey` for multi-account isolation
+
+All CLI agents (`ClaudeCodeAgent`, `CodexAgent`, `GeminiAgent`, `KimiAgent`)
+accept `configDir` to point at a per-account profile, and `ClaudeCodeAgent`
+accepts `apiKey` to opt into API billing instead of subscription auth.
+Two subscriptions can run concurrently in the same process:
+
+```ts
+import { ClaudeCodeAgent } from "@smthrs/agents";
+
+// Subscription #1, pinned to ~/.smithers/configs/claude-work
+const claudeWork = new ClaudeCodeAgent({
+  model: "claude-opus-4-7",
+  configDir: "~/.smithers/configs/claude-work",
+});
+
+// Subscription #2, pinned to ~/.smithers/configs/claude-personal
+const claudePersonal = new ClaudeCodeAgent({
+  model: "claude-opus-4-7",
+  configDir: "~/.smithers/configs/claude-personal",
+});
+
+// API billing instead of subscription auth.
+const claudeApi = new ClaudeCodeAgent({
+  model: "claude-opus-4-7",
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+```
+
+Each `configDir` is wired through to the right per-CLI environment variable
+(`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_DIR`, `KIMI_SHARE_DIR`).
+
+### `bunx smthrs chat create`
+
+A one-task auto-hijacked chat that drops you into an interactive Claude
+Code, Codex, or Gemini session inside a Smithers run. Built on top of the
+new `Task hijack` prop and now assembled from package-level primitives so
+the command does not need to import the top-level `smthrs`
+bundle just to create its inline workflow:
+
+```bash
+bunx smthrs chat create --agent claude --cwd .
+# (or --agent codex / --agent gemini)
+```
+
+End the chat by sending an empty JSON object `{}`. Control returns to
+the workflow and the task completes.
+
+### MDX and generated workflow packs
+
+The CLI now owns its Bun MDX plugin locally (`apps/cli/src/mdx-plugin.js`)
+instead of importing the plugin through the public `smthrs`
+package. Generated workflow packs also include `@types/node` alongside the
+React and MDX type pins, which keeps freshly initialized packs typecheckable
+when workflows use Node globals or built-ins.
+
+### `bunx smthrs init --agents-only`
+
+Scaffold the agents file without generating workflows. Useful when you
+already have your own workflow pack and just want Smithers to manage
+credentials:
+
+```bash
+bunx smthrs init --agents-only            # just .smithers/agents.ts
+bunx smthrs init --agents-only --addAgents # also launch the wizard
+```
+
+### JSON-clean stdout
+
+A new stderr logger routes progress, warnings, and diagnostic output to
+stderr so commands invoked with `--format json` produce a parseable stdout
+stream:
+
+```bash
+bunx smthrs ps --format json | jq '.[] | select(.status == "running") | .runId'
+# stdout is pure JSON; smithers' own logs go to stderr.
+```
+
+A contract test (`apps/cli/tests/json-stdout-contract.test.js`) pins the
+invariant for every JSON-emitting CLI surface.
+
+---
+
+## New: Server hardening
+
+Three production-relevant fixes land alongside the gateway package
+extraction:
+
+- **Slowloris mitigation.** `GatewayOptions` and `ServerOptions` gain
+  `headersTimeout` (default 30s) and `requestTimeout` (default 60s). Sockets
+  that stall mid-headers or mid-body are now closed instead of held open
+  indefinitely:
+
+  ```ts
+  import { Gateway } from "smthrs";
+
+  const gateway = new Gateway({
+    auth: { mode: "token", tokens: { /* ... */ } },
+    headersTimeout: 30_000, // close socket if headers take >30s
+    requestTimeout: 60_000, // close socket if full body takes >60s
+  });
+  await gateway.listen({ port: 7331 });
+  ```
+
+- **HTTP 413 PayloadTooLarge.** Oversized request bodies now return
+  `413 PayloadTooLarge` instead of the prior `400 INVALID_INPUT`, aligning
+  with RFC 7231.
+
+- **RFC 6750 Bearer parsing.** The auth-scheme match is now case-insensitive,
+  so `bearer`, `Bearer`, and `BEARER` all parse. Affects `gateway.js`,
+  `index.js`, and `serve.js`.
+
+A new edge-case suite covers gateway HTTP boundaries, depth/array/string
+caps, auth-header parsing (CRLF, null bytes, casing), concurrent RPC
+interleaving, and OpenAPI execution / `$ref` cycles.
+
+---
+
+## New: DB schema evolution + transaction coordination
+
+- **`syncZodTableSchema(sqlite, tableName, schema, opts)`** is a new export
+  from `@smthrs/db`. It replaces the bare
+  `CREATE TABLE IF NOT EXISTS` path used at boot: when a Zod schema gains
+  columns between releases, it issues `ALTER TABLE ADD COLUMN` so existing
+  databases catch up without a manual migration. `createSmithers()` and
+  external Smithers initialization use it automatically; user-managed
+  custom tables can opt in:
+
+  ```ts
+  import { syncZodTableSchema } from "@smthrs/db";
+  import { Database } from "bun:sqlite";
+  import { z } from "zod";
+
+  const Audit = z.object({
+    id: z.string(),
+    actor: z.string(),
+    at: z.string(),
+    note: z.string().nullable(), // ← added in a later release
+  });
+
+  const sqlite = new Database("audit.db");
+  syncZodTableSchema(sqlite, "audit", Audit);
+  // First boot: CREATE TABLE audit (...).
+  // Later boot with `note` newly added: ALTER TABLE audit ADD COLUMN note TEXT.
+  ```
+
+- **Cross-instance transaction coordination.** Multiple `SmithersDb` instances
+  that share a single underlying `sqlite` client now coordinate transaction
+  depth, owning thread, and turn acquisition through a global `WeakMap`
+  keyed on the client. This eliminates the `BEGIN IMMEDIATE` collisions
+  that could deadlock concurrent runs on a shared DB connection.
+
+- **Migrations run before index creation.** `SqlMessageStorage` now executes
+  `MIGRATION_STATEMENTS` before `CREATE INDEX`, so indexes that reference
+  newly added columns no longer fail on boot for databases that pre-date
+  those columns.
+
+---
+
+## New: Memory id encoding
+
+`namespaceToString` now percent-encodes `:` and `%` inside `id`, and
+`parseNamespace` decodes them on the way back. IDs containing colons,
+e.g. `{ kind: "workflow", id: "task:subtask:0" }`, round-trip without
+ambiguity:
+
+```ts
+import { namespaceToString, parseNamespace } from "@smthrs/memory";
+
+const ns = { kind: "workflow", id: "task:subtask:0" };
+const s = namespaceToString(ns);
+// → "workflow:task%3Asubtask%3A0"
+parseNamespace(s);
+// → { kind: "workflow", id: "task:subtask:0" }
+```
+
+The remaining synthetic collision case (a non-enumerated `kind` collapsing
+to `global`) is documented and unchanged.
+
+---
+
+## New: Shared metrics and schema exports
+
+Metrics for memory, OpenAPI tools, scorers, and time travel are now owned by
+the observability package and re-exported from the packages that emit them.
+This keeps Prometheus metric instances single-sourced while preserving the
+existing subpath imports:
+
+```ts
+import { memoryRecallDuration } from "@smthrs/memory/metrics";
+import { openApiToolDuration } from "@smthrs/openapi/metrics";
+import { scorerDuration } from "@smthrs/scorers/metrics";
+import { snapshotDuration } from "@smthrs/time-travel/metrics";
+```
+
+The observability catalog now includes counters and histograms for:
+
+- **Memory**: fact reads/writes, recall queries, recall duration, and message
+  saves.
+- **OpenAPI tools**: tool calls, call errors, and duration.
+- **Scorers**: started, finished, failed, and duration.
+- **Time travel**: snapshots captured, run forks created, replays started,
+  and snapshot duration.
+
+The memory and scorer Drizzle table definitions are also centralized under
+`@smthrs/db/internal-schema`; the package-level
+`@smthrs/memory/schema` and
+`@smthrs/scorers/schema` subpaths continue to re-export the
+same tables for callers that already import them there. This removes schema
+ownership cycles between DB, memory, and scorers without changing the table
+names.
+
+---
+
+## New: `<ExtractPrompt>` workflow component
+
+A library-level workflow component for building prompts with a Socratic
+drafter. The drafter loops via `<LoopUntilScored>` with stakes-based
+thresholds (high → 1.0, low → 0.7) and an RCTF (Role / Context / Task /
+Format) scaffold. Approved prompts are persisted to one of three pluggable
+caches:
+
+- **`MarkdownPromptCache`** (default): writes
+  `.smithers/cache/prompts/{slug}.md`.
+- **`SqlitePromptCache`**: single-file durable cache.
+- **`MemoryPromptCache`**: in-process for tests.
+
+```tsx
+/** @jsxImportSource smthrs */
+import { createSmithers } from "smthrs";
+import {
+  ExtractPrompt,
+  MarkdownPromptCache,
+  rctfPromptSchema,
+} from "smthrs/components/extract-prompt";
+import { agents } from "./agents";
+import { z } from "zod";
+
+const cache = new MarkdownPromptCache();
+
+const { Workflow, smithers, outputs } = createSmithers({
+  input: z.object({
+    prompt: z.string().nullable().default(null),
+    cacheKey: z.string().nullable().default(null),
+    stakes: z.enum(["high", "low"]).default("low"),
+    maxTurns: z.number().int().default(10),
+  }),
+  draft: rctfPromptSchema,
+});
+
+export default smithers((ctx) => {
+  const cached = ctx.input.cacheKey ? cache.getSync(ctx.input.cacheKey) : undefined;
+  return (
+    <Workflow name="extract-prompt">
+      <ExtractPrompt
+        idPrefix="extract-prompt"
+        prompt={ctx.input.prompt ?? undefined}
+        cached={cached}
+        output={outputs.draft}
+        agent={agents.smart}
+        stakes={ctx.input.stakes}
+        maxTurns={ctx.input.maxTurns}
+      />
+    </Workflow>
+  );
+});
+```
+
+Run it:
+
+```bash
+bunx smthrs run extract-prompt --input '{"prompt":"Write me a code review prompt","stakes":"high"}'
+# Drafter loops until the score crosses the stakes threshold or the user approves.
+# Approved prompt lands in .smithers/cache/prompts/<cacheKey>.md.
+```
+
+Documented at `docs/components/extract-prompt.mdx` with a design note in
+`docs/design-prompts/extract-prompt-design.md`.
+
+---
+
+## New: Type-level safety
+
+The runtime ships first-class type tests so refactors that break agent and
+workflow contracts fail at `tsc` time rather than at runtime:
+
+- **`AgentLike` assignability suite** in
+  `packages/agents/src/__type-tests__/AgentLike.assignability.test-d.ts`
+  pins every concrete agent class (`AmpAgent`, `AnthropicAgent`,
+  `ClaudeCodeAgent`, `CodexAgent`, `ForgeAgent`, `GeminiAgent`,
+  `KimiAgent`, `OpenAIAgent`, `PiAgent`) to the `AgentLike` interface.
+- **Workflow input** test at
+  `packages/smithers/src/__type-tests__/workflow-input.test-d.ts` pins
+  schema-driven input narrowing.
+- **`AgentGenerateOptions`** is extracted into its own module
+  (`packages/agents/src/BaseCliAgent/AgentGenerateOptions.ts`) so it can be
+  consumed independently of `BaseCliAgent`.
+- **Graph-level agent and scorer types** no longer import the concrete
+  agents or scorers packages. `packages/graph` now carries the structural
+  `AgentLike` capability shape and `ScorersMap`, and `packages/components`
+  imports scorer types from `@smthrs/graph/types`. That keeps
+  the graph and component contracts type-safe without pulling runtime
+  package dependencies into lower-level packages.
+
+---
+
+## New: Fault-injection E2E matrix
+
+0.17.0 adds a private `@smthrs/e2e` workspace package with
+the fault matrix from ticket 0022. The suite is organized as reusable
+fault primitives, per-case tests, explicit latency/RSS budgets, and a flake
+log:
+
+- **Harness primitives**: `killProcess`, `dropWebSocket`, `freezeSqliteLock`,
+  `stallSandbox`, `skewClock`, `corruptHeartbeat`, and `takeoverRun`.
+- **Fault cases**: 30 case files covering crash/recovery, waiting approvals,
+  waiting events/timers, supervisor takeover races, continue-as-new lineage,
+  inspector truthfulness, reconnect-after-seq, time-travel scrub/rewind,
+  Gateway RPC, WebSocket drops, subscriber fanout memory, webhook signature
+  rejection, cron/manual overlap, unsafe replay approvals, approval-scope
+  denial, diff review mode, scorer gating, and live-stream soak behavior.
+- **Budgets**: `e2e/budgets/latency.json` and `e2e/budgets/memory.json`
+  define enforced ceilings such as the 10-minute per-PR wall time, 2-hour
+  nightly soak wall time, reconnect latency, and RSS caps for live stream
+  / subscriber fanout tests.
+- **Explicit blockers**: JJHub/runtime-dependent cases for auth persistence,
+  browser automation, file/VCS pointer integrity, secret redaction, network
+  policy, plus the cron-driver and long-lived JJHub soak cases, are present
+  as skipped tests with their unblockers documented in the file.
+
+Two GitHub Actions lanes run the suite:
+
+- **`.github/workflows/faults.yml`** runs the per-PR fault subset with
+  `pnpm --filter @smthrs/e2e test:faults`.
+- **`.github/workflows/faults-nightly.yml`** runs the soak lane on a daily
+  cron with `SMITHERS_E2E_SOAK=1`.
+
+---
+
+## Fixes
+
+### Engine reliability and retries
+
+- **`SmithersError` details preserved across the Effect promise boundary.**
+  `executeTask` previously dropped `failureRetryable` and other error
+  metadata when an effect was awaited as a promise. The flag now survives,
+  so deterministic errors stop being retried.
+
+- **`failureRetryable=false` is honored.** Agent-thrown SmithersErrors that
+  declare themselves non-retryable now short-circuit the engine's retry
+  loop instead of being attempted up to `maxAttempts` times.
+
+- **New `AGENT_CONFIG_INVALID` error code.** Used for deterministic config
+  failures (expired/invalid CLI credentials, "LLM not set", "unknown
+  model") and marked non-retryable by default. Agents proactively detect
+  expired CLI credentials and classify auth-failure patterns from CLI
+  output.
+
+- **Kimi mid-stream session crashes recover.** When kimi exits with the
+  "To resume this session: kimi -r &lt;id&gt;" hint, the engine surfaces
+  `discardResumeSession: true` so the next attempt starts fresh instead of
+  deterministically replaying the broken session.
+
+- **Kimi OAuth tokens auto-refresh.** `KimiAgent` refreshes expired access
+  tokens against the stored `refresh_token` before falling back to
+  interactive `kimi login`. Concurrent refresh calls dedupe within a
+  process; "no refresh_token stored" and "refresh failed" are reported
+  separately so operators can tell whether to re-authenticate or
+  investigate the auth service.
+
+- **Resume no longer false-positives on VCS revision drift.** Workflows that
+  commit mid-execution (e.g. the kanban merge step) and projects with
+  co-located git+jj repositories now resume cleanly. The strict type and
+  revision checks have been relaxed to record-only.
+
+- **Kimi's interactive resume hint is suppressed in stderr.** It used to
+  drown out real errors. JSON output extraction now also tolerates arrays,
+  byte-order marks, and markdown code fences.
+
+### Type fixes
+
+- **`SmithersCtx.output()` / `outputMaybe()` / `latest()` now narrow by table
+  schema.** The accessors were typed as `(table, key) => OutputRow` even
+  when the workflow declared an output schema, so callers had to cast to
+  get the real row shape that the runtime was already returning. They are
+  now generic over the table parameter and return
+  `OutputForTable<Schema, Table>`. No runtime change; only the types
+  catch up to what the runtime was always producing:
+
+  ```ts
+  const { smithers, outputs } = createSmithers({
+    review: z.object({ score: z.number(), notes: z.string() }),
+  });
+
+  smithers((ctx) => {
+    // Before: row was OutputRow; you had to cast to read .score / .notes.
+    // Now: TypeScript narrows by the schema key.
+    const row = ctx.output("review", "node-1"); // { score: number, notes: string }
+    const latest = ctx.latest("review", "node-1"); // same narrowed shape
+    return /* ... */;
+  });
+  ```
+
+### Other fixes
+
+- **Test infrastructure**: `execSync` `maxBuffer` raised to 10 MB to keep
+  CLI smoke tests from truncating output.
+- **Gateway edge-case assertions now match the hardened behavior.** The
+  previously skipped oversized-body case now asserts `413 PayloadTooLarge`,
+  and lowercase/uppercase Bearer auth-scheme variants now authenticate
+  case-insensitively before falling through to method validation.
+- **Agent usage extraction tests live with the agents package.** The token
+  usage regression suite moved out of `packages/graph/tests` and into
+  `packages/agents/tests`, matching the package that owns
+  `extractUsageFromOutput`.
+
+---
+
+## Refactors
+
+- **Kanban workflow ticket discovery** now walks `.smithers/tickets/`
+  recursively up to depth 4, skipping hidden directories and `README.md`.
+  Subdirectories such as `smithers/`, `jjhub/`, and `gui/` surface as work
+  items. Review filtering scopes match `nodeId.startsWith("${slug}:review:")`
+  instead of a global `reviewer-*` field, eliminating cross-ticket review
+  pollution.
+- **Sandbox child workflow execution is injected instead of imported.**
+  `executeSandbox()` now receives `executeChildWorkflow` through
+  `ExecuteSandboxOptions`, and graph extraction loads the sandbox executor
+  and engine child-workflow executor together at the call site. This removes
+  a direct sandbox-to-engine import while preserving sandbox child workflow
+  behavior.
+- **Lower-level package dependencies were tightened.** Observability no
+  longer imports agents or driver just to build the metric catalog; graph no
+  longer depends on agents; components no longer depend on scorers for
+  shared scorer types; and memory/scorers schema exports now route through
+  DB-owned internal schema definitions.
+
+---
+
+## Internal / chore
+
+- **GitHub Actions CI returns.** `.github/workflows/ci.yml` runs three jobs
+  on PRs and main pushes: typecheck (with the Effect single-version check),
+  lint, and test. The 0.16.0 changelog's note that CI was managed
+  externally no longer applies.
+
+- **`scripts/check-single-effect-version.mjs` guardrail.** Scans
+  `pnpm-lock.yaml`, `bun.lock`, and resolved node_modules paths and fails
+  if more than one `effect` version is reachable from the CLI's
+  dependency tree. Prevents transitive Effect version drift.
+
+- **`scripts/check-dependency-boundaries.mjs` guardrail.** Parses imports
+  across root scripts, `packages/*`, `apps/*`, and `e2e` with the
+  TypeScript parser and fails when a workspace imports a package it has not
+  declared. Runtime files must declare dependencies in `dependencies`; tests,
+  configs, and scripts can use `devDependencies`. `pnpm test` and CI now run
+  this check via `pnpm check:deps`.
+
+- **Test coverage backfill.** Ten new or expanded suites covering VCS
+  round-trips against real `jj` repos (dirty/untracked trees, symlinks,
+  multi-MB binaries, shell meta-args), DevTools delta apply edge cases,
+  reconciler/graph end-to-end, CLI signal handling and flag validation,
+  and first-time test suites for the scheduler, driver, sandbox, memory,
+  and time-travel packages.
+
+- **`ralph.ts` review-plan-implement helper** added at the repo root.
+  Loops `claude` and `codex` until the reviewer returns `LGTM`. Run with
+  `bun ralph.ts`.
+
+- **Tickets archived.** Completed tickets under `.smithers/tickets/`
+  (gateway reference deployment, CLI JSON stdout, pi-tui dependency,
+  smithers workspace typecheck/AgentLike, root validation gaps, gui
+  devtools snapshot, gui cursor ghost) moved to `.done/`. New hardening
+  tickets 0024–0027 from the 2026-04-25 review are added.
+
+- **Misc.** Dropped unused `@types/diff` (the `diff` package ships its
+  own types). `.gitignore` now ignores `.claude/`,
+  `.claude/scheduled_tasks.lock`, `.kanban-reports/`, and `tui-buffer.txt`.
+
+---
+
+## Docs
+
+- **18 RPC method reference pages** under `docs/rpc/`.
+- **`docs/contributing/checks.mdx`** describes the local `pnpm verify`
+  loop.
+- **`docs/deployment/reference.mdx`** lays out the reference deployment.
+- **macOS GUI download instructions** in `docs/llms-core.txt`.
+- **`<ExtractPrompt>` and `<LoopUntilScored>`** component docs.
+- **`e2e/README.md`** documents the fault matrix layout, per-PR and nightly
+  commands, budget files, and flake-promotion rule.
+
+A handful of doc gaps were flagged during release prep and remain open for
+follow-up:
+
+- Update `docs/integrations/pi-integration.mdx` import paths to
+  `@smthrs/pi-plugin`.
+- Add `agents.add`/`agents.list`/`agents.remove`/`agents.test` and
+  `chat.create` to the CLI TOON catalog in `docs/cli/overview.mdx`, and
+  document `configDir` / `apiKey` in `docs/integrations/cli-agents.mdx`.
+- Add a credentials/accounts user guide.
+- Document `<Task hijack>` and `onHijackExit` in `docs/components/task.mdx`,
+  and add `AGENT_CONFIG_INVALID` / `TASK_HIJACK_UNSUPPORTED` to
+  `docs/reference/errors.mdx`.
+- Note id-colon encoding in `docs/concepts/memory.mdx`.
+- Describe ticket discovery rules in the kanban workflow doc.

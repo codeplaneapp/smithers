@@ -1,0 +1,868 @@
+// Deep reviewed and polished by a human on 2026-08-10.
+
+import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
+import { describe, expect, expectTypeOf, it } from "@effect/vitest"
+import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
+import { Node } from "@smthrs/plan"
+import { Effect, Exit, FileSystem, Layer, Logger, Option, Path, References, Schema, Scope } from "effect"
+import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
+import { HttpApi, HttpApiBuilder, HttpApiClient, HttpApiTest } from "effect/unstable/httpapi"
+import { RpcTest } from "effect/unstable/rpc"
+import { FlowEngine, FlowProxy, FlowProxyServer } from "../src/index.ts"
+import { withCrypto } from "./Crypto.ts"
+
+const effect = (name: string, body: () => Effect.Effect<void, unknown, Scope.Scope>) =>
+  it.effect(name, () => withCrypto(Effect.scoped(body())))
+
+const EchoActionDeclaration = Action.make("Proxy/Echo/action", {
+  payload: { value: Schema.Number },
+  success: Schema.Number,
+  error: Schema.Literal("invalid")
+})
+const Echo = Flow.make("Proxy/Echo", {
+  payload: { value: Schema.Number },
+  success: Schema.Number,
+  error: Schema.Literal("invalid"),
+  idempotencyKey: ({ value }) => String(value),
+  body: (payload) => EchoActionDeclaration.call(payload)
+})
+
+const Gate = DurableDeferred.make("Proxy/Gate", { success: Schema.Number })
+
+const SuspendsActionDeclaration = Action.make("Proxy/Suspends/action", {
+  payload: { id: Schema.String },
+  success: Schema.Number
+})
+const Suspends = Flow.make("Proxy/Suspends", {
+  payload: { id: Schema.String },
+  success: Schema.Number,
+  idempotencyKey: ({ id }) => id,
+  body: (payload) => SuspendsActionDeclaration.call(payload)
+})
+
+const flows = [Echo, Suspends] as const
+
+const makeLayer = (echo: (value: number) => Effect.Effect<number, "invalid">) => {
+  let calls = 0
+  let suspendsCalls = 0
+  const counted = (value: number) =>
+    Effect.suspend(() => {
+      calls++
+      return echo(value)
+    })
+  const waitForGate = () =>
+    Effect.suspend(() => {
+      suspendsCalls++
+      return DurableDeferred.await(Gate)
+    })
+  const layer = Layer.mergeAll(
+    Layer.mergeAll(EchoActionDeclaration.toLayer(({ value }) => counted(value)), Interpreter.layer(Echo)).pipe(
+      Layer.provideMerge(Action.layerImplementations)
+    ),
+    Layer.mergeAll(SuspendsActionDeclaration.toLayer(waitForGate), Interpreter.layer(Suspends))
+      .pipe(
+        Layer.provideMerge(Action.layerImplementations)
+      )
+  ).pipe(Layer.provideMerge(FlowEngine.layerMemory))
+  return { layer, calls: () => calls, suspendsCalls: () => suspendsCalls }
+}
+
+describe("FlowProxyServer.layerRpcHandlers", () => {
+  effect("dispatches execute requests to the registered flow", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      const result = yield* client["Proxy/Echo"]({
+        payload: { value: 41 },
+        executionId: "echo-1"
+      })
+      expect(result).toBe(42)
+      expect(calls()).toBe(1)
+    }).pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
+    )
+  })
+
+  effect("deduplicates repeated execute requests for one execution id", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      const first = yield* client["Proxy/Echo"]({ payload: { value: 1 }, executionId: "dedupe" })
+      const second = yield* client["Proxy/Echo"]({ payload: { value: 1 }, executionId: "dedupe" })
+      expect([first, second]).toEqual([2, 2])
+      // the second request replays the completed execution instead of re-running it
+      expect(calls()).toBe(1)
+    }).pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
+    )
+  })
+
+  effect("namespaces RPC execute identity independently for two tenant clients", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    const observed: Array<{
+      readonly flowTag: string
+      readonly operation: string
+      readonly clientValue: string | undefined
+      readonly payload: unknown
+    }> = []
+    const callAsTenant = (tenant: string, repeats: number) =>
+      Effect.gen(function*() {
+        const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+        for (let index = 0; index < repeats; index++) {
+          expect(yield* client["Proxy/Echo"]({ payload: { value: 1 }, executionId: "shared" })).toBe(2)
+        }
+      }).pipe(
+        Effect.provide(
+          FlowProxyServer.layerRpcHandlers(flows, {
+            executionId: (input) => {
+              observed.push({
+                flowTag: input.flow._tag,
+                operation: input.operation,
+                clientValue: input.clientValue,
+                payload: input.payload
+              })
+              return `${tenant}:${input.clientValue}`
+            }
+          })
+        )
+      )
+
+    return Effect.gen(function*() {
+      yield* callAsTenant("tenant-a", 2)
+      expect(calls()).toBe(1)
+      yield* callAsTenant("tenant-b", 1)
+
+      expect(calls()).toBe(2)
+      const tenantA = yield* Echo.poll("tenant-a:shared")
+      const tenantB = yield* Echo.poll("tenant-b:shared")
+      expect(Option.isSome(tenantA) && tenantA.value._tag).toBe("Complete")
+      expect(Option.isSome(tenantB) && tenantB.value._tag).toBe("Complete")
+      expect(observed).toEqual([
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: "shared",
+          payload: { value: 1 }
+        },
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: "shared",
+          payload: { value: 1 }
+        },
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: "shared",
+          payload: { value: 1 }
+        }
+      ])
+    }).pipe(Effect.provide(layer))
+  })
+
+  effect("lets RPC execute fall back to the flow idempotency key", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    const observed: Array<{
+      readonly flowTag: string
+      readonly operation: string
+      readonly clientValue: string | undefined
+      readonly payload: unknown
+    }> = []
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      const first = yield* client["Proxy/Echo"]({
+        payload: { value: 41 },
+        executionId: "ignore-this-id"
+      })
+      const repeat = yield* client["Proxy/Echo"]({ payload: { value: 41 } })
+
+      expect([first, repeat]).toEqual([42, 42])
+      expect(calls()).toBe(1)
+      expect(observed).toEqual([
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: "ignore-this-id",
+          payload: { value: 41 }
+        },
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: undefined,
+          payload: { value: 41 }
+        }
+      ])
+    }).pipe(
+      Effect.provide(
+        FlowProxyServer.layerRpcHandlers(flows, {
+          executionId: (input) => {
+            observed.push({
+              flowTag: input.flow._tag,
+              operation: input.operation,
+              clientValue: input.clientValue,
+              payload: input.payload
+            })
+            return undefined
+          }
+        }).pipe(Layer.provide(layer))
+      )
+    )
+  })
+
+  effect("concurrent execute requests share a single execution", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value * 2))
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      const call = client["Proxy/Echo"]({ payload: { value: 5 }, executionId: "concurrent" })
+      const results = yield* Effect.all([call, call, call], { concurrency: "unbounded" })
+      expect(results).toEqual([10, 10, 10])
+      expect(calls()).toBe(1)
+    }).pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
+    )
+  })
+
+  effect("surfaces flow failures as typed rpc errors", () => {
+    const { layer } = makeLayer(() => Effect.fail("invalid" as const))
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      const exit = yield* Effect.exit(
+        client["Proxy/Echo"]({ payload: { value: 7 }, executionId: "failing" })
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(exit.cause.toString()).toContain("invalid")
+      }
+    }).pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
+    )
+  })
+
+  effect("discard starts the flow without awaiting it, and resume drives it forward", () => {
+    const { layer } = makeLayer((value) => Effect.succeed(value))
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      yield* client["Proxy/SuspendsDiscard"]({
+        payload: { id: "resume-me" },
+        executionId: "resume-me"
+      })
+      yield* Effect.yieldNow
+      const suspended = yield* Suspends.poll("resume-me")
+      expect(Option.isSome(suspended) && suspended.value._tag).toBe("Suspended")
+
+      // resume is a no-op while the deferred is unresolved
+      yield* client["Proxy/SuspendsResume"]({ executionId: "resume-me" })
+      yield* Effect.yieldNow
+      const stillSuspended = yield* Suspends.poll("resume-me")
+      expect(Option.isSome(stillSuspended) && stillSuspended.value._tag).toBe("Suspended")
+
+      const token = DurableDeferred.tokenFromExecutionId(Gate, {
+        flow: Suspends,
+        executionId: "resume-me"
+      })
+      yield* DurableDeferred.succeed(Gate, { token, value: 9 })
+      yield* client["Proxy/SuspendsResume"]({ executionId: "resume-me" })
+      let result = yield* Suspends.poll("resume-me")
+      for (let i = 0; i < 20 && (Option.isNone(result) || result.value._tag !== "Complete"); i++) {
+        yield* Effect.yieldNow
+        result = yield* Suspends.poll("resume-me")
+      }
+      expect(Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)).toBe(true)
+      if (Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)) {
+        expect(result.value.exit.value).toBe(9)
+      }
+    }).pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provideMerge(layer)))
+    )
+  })
+
+  effect("scopes RPC discard and resume requests", () => {
+    const { layer, suspendsCalls } = makeLayer((value) => Effect.succeed(value))
+    const observed: Array<{
+      readonly flowTag: string
+      readonly operation: string
+      readonly clientValue: string | undefined
+      readonly payload: unknown
+    }> = []
+    const rawId = "scoped-resume"
+    const namespacedId = `tenant-a:${rawId}`
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      yield* client["Proxy/SuspendsDiscard"]({
+        payload: { id: rawId },
+        executionId: rawId
+      })
+      yield* Effect.yieldNow
+      const suspended = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(suspended) && suspended.value._tag).toBe("Suspended")
+      expect(suspendsCalls()).toBe(1)
+
+      yield* client["Proxy/SuspendsResume"]({ executionId: rawId })
+      yield* Effect.yieldNow
+      const stillSuspended = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(stillSuspended) && stillSuspended.value._tag).toBe("Suspended")
+      expect(suspendsCalls()).toBe(1)
+
+      yield* client["Proxy/SuspendsResume"]({ executionId: namespacedId })
+      yield* Effect.yieldNow
+      const resumed = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(resumed) && resumed.value._tag).toBe("Suspended")
+      expect(suspendsCalls()).toBe(2)
+
+      const token = DurableDeferred.tokenFromExecutionId(Gate, {
+        flow: Suspends,
+        executionId: namespacedId
+      })
+      yield* DurableDeferred.succeed(Gate, { token, value: 12 })
+      let result = yield* Suspends.poll(namespacedId)
+      for (let index = 0; index < 20 && (Option.isNone(result) || result.value._tag !== "Complete"); index++) {
+        yield* Effect.yieldNow
+        result = yield* Suspends.poll(namespacedId)
+      }
+      expect(Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)).toBe(true)
+      if (Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)) {
+        expect(result.value.exit.value).toBe(12)
+      }
+      expect(observed).toEqual([
+        {
+          flowTag: "Proxy/Suspends",
+          operation: "discard",
+          clientValue: rawId,
+          payload: { id: rawId }
+        },
+        {
+          flowTag: "Proxy/Suspends",
+          operation: "resume",
+          clientValue: rawId,
+          payload: undefined
+        },
+        {
+          flowTag: "Proxy/Suspends",
+          operation: "resume",
+          clientValue: namespacedId,
+          payload: undefined
+        }
+      ])
+    }).pipe(
+      Effect.provide(
+        FlowProxyServer.layerRpcHandlers(flows, {
+          executionId: (input) => {
+            observed.push({
+              flowTag: input.flow._tag,
+              operation: input.operation,
+              clientValue: input.clientValue,
+              payload: input.payload
+            })
+            if (input.operation === "discard") {
+              return namespacedId
+            }
+            if (input.clientValue === rawId) {
+              return `tenant-b:${rawId}`
+            }
+            return undefined
+          }
+        }).pipe(Layer.provideMerge(layer))
+      )
+    )
+  })
+
+  effect("derives the execution identity from the flow's idempotency key when the request omits executionId", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      const first = yield* client["Proxy/Echo"]({ payload: { value: 41 } })
+      const repeat = yield* client["Proxy/Echo"]({ payload: { value: 41 } })
+      expect([first, repeat]).toEqual([42, 42])
+      // Echo declares `idempotencyKey: String(value)`, so both requests
+      // derive one identity and the second replays instead of re-running.
+      expect(calls()).toBe(1)
+      // A different payload derives a different identity and runs.
+      expect(yield* client["Proxy/Echo"]({ payload: { value: 10 } })).toBe(11)
+      expect(calls()).toBe(2)
+    }).pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
+    )
+  })
+
+  effect("resume with an unknown or empty execution id is a no-op success", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value))
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      yield* client["Proxy/EchoResume"]({ executionId: "proxy-never-started" })
+      yield* client["Proxy/SuspendsResume"]({ executionId: "" })
+      // Nothing was started, dispatched, or invented for the unknown id: the
+      // engine still reports it as a typed not-found.
+      const error = yield* Effect.flip(Echo.poll("proxy-never-started"))
+      expect(error).toMatchObject({
+        _tag: "@smthrs/flow/FlowExecutionNotFound",
+        executionId: "proxy-never-started"
+      })
+      expect(calls()).toBe(0)
+    }).pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provideMerge(layer)))
+    )
+  })
+
+  effect("serves prefixed rpc tags when a prefix is configured", () => {
+    const { layer } = makeLayer((value) => Effect.succeed(value + 100))
+    const group = FlowProxy.toRpcGroup(flows, { prefix: "v1/" })
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(group)
+      const result = yield* client["v1/Proxy/Echo"]({
+        payload: { value: 1 },
+        executionId: "prefixed"
+      })
+      expect(result).toBe(101)
+    }).pipe(
+      Effect.provide(
+        FlowProxyServer.layerRpcHandlers(flows, { prefix: "v1/" }).pipe(Layer.provide(layer))
+      )
+    )
+  })
+})
+
+describe("serving a flow is executing it", () => {
+  // Serving happens on the side of the boundary that drives the body, so the
+  // compile-time gate on a missing action implementation has to hold here
+  // too. A type test: `tsc -p tsconfig.test.json` in `pnpm run check` fails on
+  // a red assertion whether or not the suite is run.
+  it("requires the action implementations of every flow it serves", () => {
+    type Served = Layer.Services<ReturnType<typeof FlowProxyServer.layerRpcHandlers<typeof flows>>>
+
+    expectTypeOf<Action.Requirement<"Proxy/Echo/action">>().toExtend<Served>()
+    expectTypeOf<Action.Requirement<"Proxy/Suspends/action">>().toExtend<Served>()
+
+    const engineOnly = Interpreter.layer(Echo).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(FlowEngine.layerMemory)
+    )
+    const unmet = Effect.void.pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(engineOnly)))
+    )
+
+    // An engine and a table satisfy everything except the implementations, and
+    // those are exactly what is left over.
+    expectTypeOf<Effect.Services<typeof unmet>>().toEqualTypeOf<
+      Action.Requirement<"Proxy/Echo/action"> | Action.Requirement<"Proxy/Suspends/action">
+    >()
+
+    // Never invoked: the assertion is that this expression does not compile.
+    // `Effect.runPromise` is the point — the Promise boundary is what refuses
+    // an Effect whose requirements are unmet.
+    // @ts-expect-error -- the served bodies name two actions, and nothing in
+    // this composition implements either.
+    const unimplemented = () => Effect.runPromise(unmet)
+
+    expectTypeOf(unimplemented).toBeFunction()
+  })
+
+  it("has them erased by the composition the suites serve with", () => {
+    const { layer } = makeLayer((value) => Effect.succeed(value))
+    const served = Effect.void.pipe(
+      Effect.provide(FlowProxyServer.layerRpcHandlers(flows).pipe(Layer.provide(layer)))
+    )
+
+    expectTypeOf<Effect.Services<typeof served>>().toEqualTypeOf<never>()
+  })
+})
+
+const HttpTestServices = Layer.mergeAll(
+  Path.layer,
+  Etag.layerWeak,
+  HttpPlatform.layer
+).pipe(Layer.provideMerge(FileSystem.layerNoop({})))
+
+class ProxyApi extends HttpApi.make("proxy").add(
+  FlowProxy.toHttpApiGroup("flows", flows)
+) {}
+
+describe("FlowProxyServer.layerHttpApi", () => {
+  const client = HttpApiTest.groups(ProxyApi, ["flows"])
+
+  const provide = (
+    layer: Layer.Layer<any, never, never>,
+    options?: { readonly executionId?: FlowProxyServer.ExecutionIdScope }
+  ) =>
+  <A, E>(self: Effect.Effect<A, E, any>): Effect.Effect<A, E, never> =>
+    self.pipe(
+      Effect.provide(
+        FlowProxyServer.layerHttpApi(ProxyApi, "flows", flows, options).pipe(
+          Layer.provideMerge(layer)
+        )
+      ),
+      Effect.provide(HttpTestServices)
+    ) as Effect.Effect<A, E, never>
+
+  effect("routes the execute endpoint to the flow handler", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    return Effect.gen(function*() {
+      const api = yield* client
+      const result = yield* api.flows["Proxy/Echo"]({
+        payload: { payload: { value: 1 }, executionId: "http-execute" }
+      })
+      expect(result).toBe(2)
+      expect(calls()).toBe(1)
+    }).pipe(provide(layer))
+  })
+
+  effect("matches execution id scoping over the HTTP adapter", () => {
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    const observed: Array<{
+      readonly flowTag: string
+      readonly operation: string
+      readonly clientValue: string | undefined
+      readonly payload: unknown
+    }> = []
+    const scope = ((input) => {
+      observed.push({
+        flowTag: input.flow._tag,
+        operation: input.operation,
+        clientValue: input.clientValue,
+        payload: input.payload
+      })
+      return input.clientValue === "http-raw" ? "tenant-http:http-raw" : undefined
+    }) satisfies FlowProxyServer.ExecutionIdScope
+    return Effect.gen(function*() {
+      const api = yield* client
+      const first = yield* api.flows["Proxy/Echo"]({
+        payload: { payload: { value: 41 }, executionId: "ignore-http-id" }
+      })
+      const repeat = yield* api.flows["Proxy/Echo"]({
+        payload: { payload: { value: 41 } }
+      })
+      const scoped = yield* api.flows["Proxy/Echo"]({
+        payload: { payload: { value: 10 }, executionId: "http-raw" }
+      })
+
+      expect([first, repeat, scoped]).toEqual([42, 42, 11])
+      expect(calls()).toBe(2)
+      const namespaced = yield* Echo.poll("tenant-http:http-raw")
+      expect(Option.isSome(namespaced) && namespaced.value._tag).toBe("Complete")
+      expect(observed).toEqual([
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: "ignore-http-id",
+          payload: { value: 41 }
+        },
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: undefined,
+          payload: { value: 41 }
+        },
+        {
+          flowTag: "Proxy/Echo",
+          operation: "execute",
+          clientValue: "http-raw",
+          payload: { value: 10 }
+        }
+      ])
+    }).pipe(provide(layer, { executionId: scope }))
+  })
+
+  effect("returns the declared error from the execute endpoint", () => {
+    const { layer } = makeLayer(() => Effect.fail("invalid" as const))
+    return Effect.gen(function*() {
+      const api = yield* client
+      const exit = yield* Effect.exit(
+        api.flows["Proxy/Echo"]({
+          payload: { payload: { value: 2 }, executionId: "http-error" }
+        })
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(exit.cause.toString()).toContain("invalid")
+      }
+    }).pipe(provide(layer))
+  })
+
+  effect("discard and resume endpoints drive a suspended execution", () => {
+    const { layer } = makeLayer((value) => Effect.succeed(value))
+    return Effect.gen(function*() {
+      const api = yield* client
+      yield* api.flows["Proxy/SuspendsDiscard"]({
+        payload: { payload: { id: "http-resume" }, executionId: "http-resume" }
+      })
+      yield* Effect.yieldNow
+      const suspended = yield* Suspends.poll("http-resume")
+      expect(Option.isSome(suspended) && suspended.value._tag).toBe("Suspended")
+
+      const token = DurableDeferred.tokenFromExecutionId(Gate, {
+        flow: Suspends,
+        executionId: "http-resume"
+      })
+      yield* DurableDeferred.succeed(Gate, { token, value: 3 })
+      yield* api.flows["Proxy/SuspendsResume"]({ payload: { executionId: "http-resume" } })
+      let result = yield* Suspends.poll("http-resume")
+      for (let i = 0; i < 20 && (Option.isNone(result) || result.value._tag !== "Complete"); i++) {
+        yield* Effect.yieldNow
+        result = yield* Suspends.poll("http-resume")
+      }
+      expect(Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)).toBe(true)
+      if (Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)) {
+        expect(result.value.exit.value).toBe(3)
+      }
+    }).pipe(provide(layer))
+  })
+
+  effect("scopes HTTP discard and resume requests", () => {
+    const { layer, suspendsCalls } = makeLayer((value) => Effect.succeed(value))
+    const observed: Array<{
+      readonly flowTag: string
+      readonly operation: string
+      readonly clientValue: string | undefined
+      readonly payload: unknown
+    }> = []
+    const rawId = "http-scoped-resume"
+    const namespacedId = `tenant-http:${rawId}`
+    const scope = ((input) => {
+      observed.push({
+        flowTag: input.flow._tag,
+        operation: input.operation,
+        clientValue: input.clientValue,
+        payload: input.payload
+      })
+      if (input.operation === "discard") {
+        return namespacedId
+      }
+      if (input.clientValue === rawId) {
+        return `other-tenant:${rawId}`
+      }
+      return undefined
+    }) satisfies FlowProxyServer.ExecutionIdScope
+    return Effect.gen(function*() {
+      const api = yield* client
+      yield* api.flows["Proxy/SuspendsDiscard"]({
+        payload: { payload: { id: rawId }, executionId: rawId }
+      })
+      yield* Effect.yieldNow
+      const suspended = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(suspended) && suspended.value._tag).toBe("Suspended")
+      expect(suspendsCalls()).toBe(1)
+
+      yield* api.flows["Proxy/SuspendsResume"]({ payload: { executionId: rawId } })
+      yield* Effect.yieldNow
+      const stillSuspended = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(stillSuspended) && stillSuspended.value._tag).toBe("Suspended")
+      expect(suspendsCalls()).toBe(1)
+
+      yield* api.flows["Proxy/SuspendsResume"]({ payload: { executionId: namespacedId } })
+      yield* Effect.yieldNow
+      const resumed = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(resumed) && resumed.value._tag).toBe("Suspended")
+      expect(suspendsCalls()).toBe(2)
+
+      const token = DurableDeferred.tokenFromExecutionId(Gate, {
+        flow: Suspends,
+        executionId: namespacedId
+      })
+      yield* DurableDeferred.succeed(Gate, { token, value: 8 })
+      let result = yield* Suspends.poll(namespacedId)
+      for (let index = 0; index < 20 && (Option.isNone(result) || result.value._tag !== "Complete"); index++) {
+        yield* Effect.yieldNow
+        result = yield* Suspends.poll(namespacedId)
+      }
+      expect(Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)).toBe(true)
+      if (Option.isSome(result) && result.value._tag === "Complete" && Exit.isSuccess(result.value.exit)) {
+        expect(result.value.exit.value).toBe(8)
+      }
+      expect(observed).toEqual([
+        {
+          flowTag: "Proxy/Suspends",
+          operation: "discard",
+          clientValue: rawId,
+          payload: { id: rawId }
+        },
+        {
+          flowTag: "Proxy/Suspends",
+          operation: "resume",
+          clientValue: rawId,
+          payload: undefined
+        },
+        {
+          flowTag: "Proxy/Suspends",
+          operation: "resume",
+          clientValue: namespacedId,
+          payload: undefined
+        }
+      ])
+    }).pipe(provide(layer, { executionId: scope }))
+  })
+
+  effect("logs annotated execute defects through both HTTP and RPC adapters", () => {
+    const DyingAction = Action.make("Proxy/Dies/action", {
+      payload: { id: Schema.String },
+      success: Schema.Void
+    })
+    const Dying = Flow.make("Proxy/Dies", {
+      payload: { id: Schema.String },
+      success: Schema.Void,
+      body: (payload) => DyingAction.call(payload)
+    })
+    const dyingFlows = [Dying] as const
+    class DyingApi extends HttpApi.make("dying").add(
+      FlowProxy.toHttpApiGroup("flows", dyingFlows)
+    ) {}
+    const dyingLayer = Layer.mergeAll(
+      DyingAction.toLayer(() => Effect.die("proxy-handler-defect")),
+      Interpreter.layer(Dying)
+    ).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(FlowEngine.layerMemory)
+    )
+    const logs: Array<{
+      readonly message: unknown
+      readonly logLevel: string
+      readonly annotations: Readonly<Record<string, unknown>>
+    }> = []
+    const capture = Logger.make((entry) => {
+      logs.push({
+        message: entry.message,
+        logLevel: entry.logLevel,
+        annotations: entry.fiber.getRef(References.CurrentLogAnnotations)
+      })
+    })
+    const proxyErrors = () =>
+      logs.filter((entry) =>
+        entry.logLevel === "Error" &&
+        entry.annotations["module"] === "FlowProxyServer" &&
+        entry.annotations["method"] === FlowProxy.operationAddresses(Dying._tag).execute
+      )
+    return Effect.gen(function*() {
+      const httpExit = yield* Effect.gen(function*() {
+        const httpClient = yield* HttpApiTest.groups(DyingApi, ["flows"])
+        return yield* httpClient.flows["Proxy/Dies"]({
+          payload: { payload: { id: "http" }, executionId: "proxy-dies-http" }
+        })
+      }).pipe(
+        Effect.exit,
+        Effect.provide(
+          FlowProxyServer.layerHttpApi(DyingApi, "flows", dyingFlows).pipe(Layer.provideMerge(dyingLayer))
+        ),
+        Effect.provide(HttpTestServices)
+      )
+      expect(Exit.isFailure(httpExit)).toBe(true)
+      expect(proxyErrors().length).toBe(1)
+
+      const rpcExit = yield* Effect.gen(function*() {
+        const rpcClient = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(dyingFlows))
+        return yield* rpcClient["Proxy/Dies"]({
+          payload: { id: "rpc" },
+          executionId: "proxy-dies-rpc"
+        })
+      }).pipe(
+        Effect.exit,
+        Effect.provide(FlowProxyServer.layerRpcHandlers(dyingFlows).pipe(Layer.provideMerge(dyingLayer)))
+      )
+      expect(Exit.isFailure(rpcExit)).toBe(true)
+      expect(proxyErrors().length).toBe(2)
+      expect(proxyErrors().every((entry) => String(entry.message).includes("proxy-handler-defect"))).toBe(true)
+    }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([capture])))
+  })
+})
+
+describe("FlowProxy.toHttpApiGroup path lowering", () => {
+  it("keeps case-distinct and reserved-character tags in distinct path segments", () => {
+    const CaseUpper = Flow.make("Proxy/Collide", {
+      payload: { value: Schema.Number },
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    const caseLower = Flow.make("proxy/collide", {
+      payload: { value: Schema.Number },
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    const group = FlowProxy.toHttpApiGroup("collide", [CaseUpper, caseLower])
+    const endpoints = group.endpoints as Record<string, { readonly path: string; readonly method: string }>
+
+    expect(Object.keys(endpoints).sort()).toEqual([
+      "Proxy/Collide",
+      "Proxy/CollideDiscard",
+      "Proxy/CollideResume",
+      "proxy/collide",
+      "proxy/collideDiscard",
+      "proxy/collideResume"
+    ])
+    expect(endpoints["Proxy/Collide"]!.path).toMatch(/^\/flow-[0-9a-f]+$/)
+    expect(endpoints["Proxy/Collide"]!.path).not.toBe(endpoints["proxy/collide"]!.path)
+    expect(endpoints["Proxy/CollideDiscard"]!.path).not.toBe(endpoints["proxy/collideDiscard"]!.path)
+    expect(endpoints["Proxy/CollideResume"]!.path).not.toBe(endpoints["proxy/collideResume"]!.path)
+    expect(endpoints["Proxy/Collide"]!.path.slice(1)).not.toContain("/")
+
+    const Reserved = Flow.make("Proxy/%?#/\ud83d\ude80", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    const reserved = FlowProxy.toHttpApiGroup("reserved", [Reserved])
+    const reservedEndpoints = reserved.endpoints as Record<string, { readonly path: string }>
+    expect(reservedEndpoints["Proxy/%?#/\ud83d\ude80"]!.path).toMatch(/^\/flow-[0-9a-f]+$/)
+  })
+
+  it("refuses operation names that suffix expansion makes ambiguous", () => {
+    const Foo = Flow.make("Foo", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    const FooDiscard = Flow.make("FooDiscard", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    expect(() => FlowProxy.toRpcGroup([Foo, FooDiscard])).toThrow(FlowProxy.FlowProxyCollision)
+    expect(() => FlowProxy.toHttpApiGroup("ambiguous", [Foo, FooDiscard])).toThrow(
+      FlowProxy.FlowProxyCollision
+    )
+  })
+
+  it("refuses ill-formed UTF-16 tags before constructing a route", () => {
+    for (const tag of ["Proxy/\ud800A", "Proxy/\ud800\uffff", "Proxy/\udc00"]) {
+      const Invalid = Flow.make(tag, {
+        payload: {},
+        success: Schema.Void,
+        body: () => Node.succeed(undefined)
+      })
+      let error: unknown
+      try {
+        FlowProxy.toHttpApiGroup("invalid", [Invalid])
+      } catch (cause) {
+        error = cause
+      }
+      expect(error).toBeInstanceOf(FlowProxy.InvalidFlowTag)
+      expect(error).toMatchObject({ code: "invalid_flow_tag", tag })
+    }
+  })
+})
+
+describe("FlowProxyServer over a real HTTP listener", () => {
+  effect("round-trips execute through a live server, with wire identity deduplication", () => {
+    // Unlike `HttpApiTest`, this serves the API on a real Node listener on an
+    // ephemeral port and calls it through a real fetch-backed client: the
+    // payload and result cross genuine wire serialization.
+    const { calls, layer } = makeLayer((value) => Effect.succeed(value + 1))
+    const served = HttpRouter.serve(
+      HttpApiBuilder.layer(ProxyApi).pipe(
+        Layer.provide(
+          FlowProxyServer.layerHttpApi(ProxyApi, "flows", flows).pipe(Layer.provideMerge(layer))
+        )
+      )
+    ).pipe(Layer.provideMerge(NodeHttpServer.layerTest))
+    return Effect.gen(function*() {
+      const client = yield* HttpApiClient.make(ProxyApi)
+      const result = yield* client.flows["Proxy/Echo"]({
+        payload: { payload: { value: 41 }, executionId: "wire-execute" }
+      })
+      expect(result).toBe(42)
+      expect(calls()).toBe(1)
+      // The same wire identity dedupes across a second real HTTP request.
+      const repeat = yield* client.flows["Proxy/Echo"]({
+        payload: { payload: { value: 41 }, executionId: "wire-execute" }
+      })
+      expect(repeat).toBe(42)
+      expect(calls()).toBe(1)
+    }).pipe(Effect.provide(served))
+  })
+})

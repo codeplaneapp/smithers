@@ -1,0 +1,37 @@
+{
+  "calls": [
+    {
+      "request": {
+        "modelId": "openai:gpt-5-mini",
+        "system": [{ "type": "text", "text": "You summarize pull requests." }],
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "Summarize PR 4821." }] }],
+        "tools": [],
+        "params": { "maxTokens": 128, "temperature": 0 }
+      },
+      "model": "openai:gpt-5-mini",
+      "events": [
+        { "type": "text-start", "id": "text_1" },
+        { "type": "text-delta", "id": "text_1", "text": "PR 4821 updates the replay harness." },
+        { "type": "text-end", "id": "text_1" },
+        { "type": "usage", "inputTokens": 24, "outputTokens": 9, "totalTokens": 33 },
+        { "type": "settle", "stopReason": "stop", "responseId": "resp_1" }
+      ]
+    },
+    {
+      "request": {
+        "modelId": "openai:gpt-5-mini",
+        "system": [{ "type": "text", "text": "You classify review risk." }],
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "Classify risk for PR 4821." }] }],
+        "tools": [],
+        "params": { "maxTokens": 64 }
+      },
+      "model": "openai:gpt-5-mini",
+      "events": [
+        { "type": "text-start", "id": "text_2" },
+        { "type": "text-delta", "id": "text_2", "text": "low" },
+        { "type": "text-end", "id": "text_2" },
+        { "type": "settle", "stopReason": "stop", "responseId": "resp_2" }
+      ]
+    }
+  ]
+}

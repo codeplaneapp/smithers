@@ -1,0 +1,61 @@
+---
+title: "Flows, actions, and plans"
+description: "Actions are the atoms, flows are the composites, and the plan is the keyed graph a body compiles to before anything runs."
+sidebar:
+  order: 2
+---
+
+Everything you author in Smithers is one of three things. An action is the atom that does work. A flow is the composite that names atoms. A plan is the keyed action graph a flow body compiles to, known in full before the first action runs. The admission model for running work is plan, approve, run: the graph exists first, a person or a policy accepts its digest, and only then does a node execute.
+
+## Actions are atoms
+
+An action is schemas and a tag. `Action.make(tag, options)` is pure data: payload fields, success and error schemas, a tier, idempotency identity, an optional retry policy. The implementation attaches later and separately, as a layer:
+
+```ts
+const Compile = Action.make("example/Compile", {
+  payload: { target: Schema.String },
+  success: Schema.String,
+  tier: "sealed"
+})
+
+const compileLayer = Compile.toLayer(({ target }) =>
+  Effect.succeed(`${target}.js`)
+)
+```
+
+Because the declaration carries no code, a plan can name an action whose implementation is wired up somewhere else entirely, and the interpreter reports `unresolved_action` when nothing was wired. Identity comes from what the action declares, not from where the implementation happened to be defined. `Action.makeSystem` is the declared form that mints no requirement, which is how the engine's own steps, `Sleep`, `WaitFor`, `HumanTask`, and `Poll`, ship implementations with the engine instead of pushing a layer obligation onto their callers.
+
+## Flows are composites
+
+A flow is payload and success schemas plus a required pure `body`. There is no `toLayer` on a flow: a flow carries a body and never a handler, and `Interpreter.layer(flow)` is what registers it with a runtime. A flow with nothing to plan is an action. `Flow.make` also accepts a `maxRounds` bound for trampoline lineages, which must be a positive safe integer.
+
+The body names atoms instead of calling them. `Compile.call(payload)` inside a body does not run the compile; it records a node that stands for the compile. When a drive cannot proceed, `InterpreterError` says why with a stable code: `unresolved_action` for an action with no implementation wired up, `duplicate_node_id` for two nodes answering to one dispatch address, `incomplete_graph` for topology the build reported.
+
+## The plan is known before the first action runs
+
+`Graph.build` turns a body into the plan-time graph the interpreter drives, and building is a pure function of the declarations and the payload. The whole shape of a round is known before its first action runs. Branch arms are evaluated once, symbolically, so the exit condition and the handoff site are visible topology before anything executes. A graph the build reported diagnostics for is inspectable but deliberately not compilable, so an incomplete topology is reported rather than half-driven.
+
+The persisted plan in `@smthrs/plan` is the keyed form of that graph. Each node's key is a function of what the node consumes, and the plan digest covers node identity, every computed key, the edge set, and the declared effects. A plan grows by append and is never rewritten. `baseDigest` is the digest at generation 0, what a human approved and what a running run pins, while `digest` advances with each appended elaboration.
+
+Planning performs no I/O. Declared effects carry read and write paths, never digests, because measuring a path is run-time work. The plan says what may touch what; the host says what is actually there.
+
+## What the build refuses
+
+Planning fails rather than guess. Building refuses a nesting depth past its bound and refuses a duplicate node id, because a node id is durable dispatch identity and two nodes answering to one address would let a later settlement overwrite an earlier one. `Plan.compile` refuses a cycle in the material dependencies, a reference to a node that is neither in the drafts nor already in the plan, and a write-set overlap under a `fail` verdict. The refusal codes are a closed set, so a new refusal is a deliberate addition, not a new free-form string.
+
+## Plans are append-only
+
+Recording is first-writer-wins: an identical re-record is not an error, and a different plan under the same id is a `Conflict` carrying the stored digest, never a silent overwrite. Append-only is enforced in SQL, not by convention: triggers raise on any update or delete of the node and edge rows and on any backward move of a plan row. Re-ordering after a reconciliation happens by re-keying future steps, never by rewriting recorded ones.
+
+## Why bodies are planned, not executed inline
+
+Static topology is what makes approval meaningful: there is a complete artifact to approve. It is what makes replay cheap: a re-driven body rebuilds the same graph and serves its recorded nodes from the journal. And it is what keeps the walk honest: the interpreter walks demand-driven from the root, because executing a branch arm to discover it was not taken is exactly what static topology exists to avoid.
+
+The cost is a discipline on the author. A planned value may never be computed on: the type is branded, and the proxy traps throw rather than let a plan be built around `NaN` or `"[object Object]"`. A payload is stored as its inert JSON mirror. And a plan is always a DAG: there is no loop node, and repetition lives one level up, in what a flow settles with.
+
+## Related
+
+- [Plan, approve, run guide](/docs/guides/plan-approve-run/)
+- [Module flows guide](/docs/guides/module-flows/)
+- [`@smthrs/flow` reference](/docs/reference/api/flow/)
+- [`@smthrs/plan` reference](/docs/reference/api/plan/)

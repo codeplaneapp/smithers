@@ -1,0 +1,20 @@
+{
+  "records": [
+    {
+      "case": "adds numbers",
+      "scorer": "exact",
+      "stepKey": "step-a",
+      "suite": "arithmetic",
+      "score": 1
+    },
+    {
+      "case": "multiplies numbers",
+      "scorer": "exact",
+      "stepKey": "step-b",
+      "suite": "arithmetic",
+      "score": 0.875
+    }
+  ],
+  "suite": "arithmetic",
+  "version": 1
+}

@@ -1,0 +1,716 @@
+/**
+ * The assembled cell path, run end-to-end outside a unit test's hand-wiring.
+ *
+ * Every collaborator here is the production one: the real durable engine, the
+ * real QuickJS sandbox, the real registry-backed call bridge, the real
+ * controller. Only the provider is recorded, because a smoke test that calls a
+ * provider is not a smoke test.
+ */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as Capability from "@smthrs/capability/Capability"
+import * as Permission from "@smthrs/capability/Permission"
+import { FlowEngine } from "@smthrs/engine"
+import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as AgentEvent from "@smthrs/harness/AgentEvent"
+import * as Cell from "@smthrs/harness/Cell"
+import type * as CellCalls from "@smthrs/harness/CellCalls"
+import { HarnessError } from "@smthrs/harness/HarnessError"
+import * as MemoryStore from "@smthrs/memory/MemoryStore"
+import * as Recall from "@smthrs/memory/Recall"
+import * as MemorySource from "@smthrs/memory/Source"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import * as ModelRequest from "@smthrs/model/ModelRequest"
+import type * as Route from "@smthrs/model/Route"
+import * as ObservabilityMetric from "@smthrs/observability/Metric"
+import { Node } from "@smthrs/plan"
+import { make as makePlugin } from "@smthrs/plugin"
+import type { FlowsHooks, PluginInput } from "@smthrs/plugin"
+import type { FlowsConfig } from "@smthrs/plugin/Config"
+import type { PluginError } from "@smthrs/plugin/PluginError"
+import * as Descriptor from "@smthrs/registry/Descriptor"
+import * as Registry from "@smthrs/registry/Registry"
+import { Cause, Deferred, Effect, Exit, Layer, Logger, Metric, Option, References, Schema, Scope, Stream } from "effect"
+import type * as Crypto from "effect/Crypto"
+import { describe, expect, it } from "vitest"
+import * as Agent from "../src/Agent.ts"
+import type * as Budget from "../src/Budget.ts"
+import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import type * as QuotaPolicy from "../src/QuotaPolicy.ts"
+import * as Seat from "../src/Seat.ts"
+import * as Safety from "./Safety.ts"
+
+const prepared: Route.PreparedRequest = {
+  routeId: "route-a",
+  protocolId: "test-protocol",
+  method: "POST",
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{}"),
+  bodyText: "{}"
+}
+
+const route: FlowEngineLike.RouteResolver = { prepare: () => Effect.succeed(prepared) }
+
+const cell = `const listed = await ctx.call("fs/list", { path: "." })
+const written = await ctx.call("fs/write", { path: listed[0], text: "done" })
+ctx.done(written)`
+
+/** A recorded model that replies with exactly one cell and records its prompt. */
+const recorded = (requests: Array<string>): Model.Model =>
+  Model.make({
+    stream: (request) =>
+      Stream.suspend(() => {
+        requests.push(
+          request.system.map((part) => part.text).join("\n") +
+            "\n" +
+            request.messages.flatMap((message) =>
+              message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+            ).join("\n")
+        )
+        return Stream.fromIterable([
+          ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+          ModelEvent.ModelEvent.TextDelta({
+            type: "text-delta",
+            id: "cell",
+            text: "```cell\n" + cell + "\n```"
+          }),
+          ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+          ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+        ])
+      })
+  })
+
+const recordedWithSeatSamples = (requests: Array<string>, samples: Array<number>): Model.Model => {
+  const delegate = recorded(requests)
+  return Model.make({
+    stream: (request) =>
+      Stream.unwrap(
+        Effect.map(Metric.value(ObservabilityMetric.activeSeats), (state) => {
+          samples.push(state.value)
+          return delegate.stream(request)
+        })
+      )
+  })
+}
+
+const recordedCells = (requests: Array<string>, cells: ReadonlyArray<string>): Model.Model => {
+  let index = 0
+  return Model.make({
+    stream: (request) =>
+      Stream.suspend(() => {
+        requests.push(
+          request.system.map((part) => part.text).join("\n") +
+            "\n" +
+            request.messages.flatMap((message) =>
+              message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+            ).join("\n")
+        )
+        const source = cells[index++] ?? cells.at(-1) ?? "ctx.done(\"done\")"
+        return Stream.fromIterable([
+          ModelEvent.ModelEvent.TextStart({ type: "text-start", id: `cell-${index}` }),
+          ModelEvent.ModelEvent.TextDelta({
+            type: "text-delta",
+            id: `cell-${index}`,
+            text: "```cell\n" + source + "\n```"
+          }),
+          ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: `cell-${index}` }),
+          ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+        ])
+      })
+  })
+}
+
+const descriptor = (
+  name: string,
+  options: { readonly tier: Descriptor.EffectTier; readonly modelInvocable?: boolean }
+): Descriptor.FlowDescriptor =>
+  new Descriptor.FlowDescriptor({
+    name,
+    description: `The ${name} flow.`,
+    body: new Descriptor.BodyRefModule({ path: `/flows/${name}/flow.ts` }),
+    input: new Descriptor.SchemaRefNone(),
+    output: new Descriptor.SchemaRefNone(),
+    model: Option.none(),
+    flows: [],
+    capabilities: [],
+    effects: { reads: [], writes: [], mode: "hermetic", onConflict: "serialize", tier: options.tier },
+    placement: Option.none(),
+    modelInvocable: options.modelInvocable ?? true,
+    path: `/flows/${name}`,
+    frontmatter: {},
+    provenance: new Descriptor.Provenance({ source: "test", root: "/flows" })
+  })
+
+/**
+ * An in-memory registry over a fixed descriptor set.
+ *
+ * The same instance answers both `visible` — which is what the model is shown —
+ * and `getOption` — which is what the boundary resolves against. That is the
+ * property the composition depends on, so the fixture must not fake it apart.
+ */
+const registryOf = (entries: ReadonlyArray<Descriptor.FlowDescriptor>): Registry.Registry => {
+  const byName = new Map(entries.map((entry) => [entry.name, entry]))
+  return Registry.makeNoop({
+    list: () => Effect.succeed(entries),
+    visible: () => Effect.succeed(entries),
+    getOption: (name) => Effect.succeed(Option.fromNullishOr(byName.get(name)))
+  })
+}
+
+const implementations = (
+  executed: Array<string>
+): ReadonlyMap<string, CellCalls.Implementation> =>
+  new Map<string, CellCalls.Implementation>([
+    [
+      "fs/list",
+      (call) =>
+        Effect.sync(() => {
+          executed.push(`fs/list#${call.identity.ordinal}`)
+          return new Cell.CallResult({ outcome: "success", value: ["alpha.md"] })
+        })
+    ],
+    [
+      "fs/write",
+      (call) =>
+        Effect.sync(() => {
+          executed.push(`fs/write#${call.identity.ordinal}`)
+          return new Cell.CallResult({
+            outcome: "success",
+            value: `wrote ${(call.input as { readonly path: string }).path}`
+          })
+        })
+    ]
+  ])
+
+type Outcome =
+  | { readonly _tag: "completed"; readonly value: unknown }
+  | { readonly _tag: "failed"; readonly error: unknown }
+  | { readonly _tag: "suspended" }
+
+const classify = (exit: Exit.Exit<unknown, unknown>): Outcome =>
+  Exit.isSuccess(exit)
+    ? { _tag: "completed", value: exit.value }
+    : Cause.hasInterruptsOnly(exit.cause)
+    ? { _tag: "suspended" }
+    : { _tag: "failed", error: Cause.squash(exit.cause) }
+
+/**
+ * The one flow every `drive` execution registers. Its body is inert: the
+ * behaviour under test is the `execute` handed to `register`.
+ */
+const driveFlow = Flow.make("agent/test/agent", {
+  payload: {},
+  success: Schema.Unknown,
+  error: Schema.Unknown,
+  body: () => Node.succeed(undefined)
+})
+
+const awaitParked = (
+  engine: FlowRuntime.FlowRuntime["Service"],
+  flow: typeof driveFlow,
+  attempts = 100
+): Effect.Effect<void, FlowRuntime.FlowExecutionNotFound> =>
+  Effect.gen(function*() {
+    const polled = yield* engine.poll(flow, "exec-1")
+    if (Option.isSome(polled) && polled.value._tag === "Suspended") return
+    if (attempts <= 0) throw new Error("the engine never published the parked execution")
+    yield* Effect.yieldNow
+    return yield* awaitParked(engine, flow, attempts - 1)
+  })
+
+/** Runs one body as the whole of one real durable flow execution. */
+const drive = <A, E>(
+  body: Effect.Effect<
+    A,
+    E,
+    | Crypto.Crypto
+    | FlowRuntime.FlowRuntime
+    | FlowRuntime.FlowInstance
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
+  >,
+  options: { readonly resume?: boolean } = {}
+): Promise<Outcome> =>
+  Effect.gen(function*() {
+    const engine = yield* FlowRuntime.FlowRuntime
+    const scope = yield* Effect.scope
+    const flow = driveFlow
+    let settled = Deferred.makeUnsafe<Outcome>()
+    yield* engine.register(flow, () =>
+      Effect.onExit(body, (exit) => Effect.asVoid(Deferred.succeed(settled, classify(exit))))).pipe(
+        Scope.provide(scope)
+      )
+    yield* engine.execute(flow, { executionId: "exec-1", payload: {}, discard: true })
+    const first = yield* Deferred.await(settled)
+    if (options.resume !== true || first._tag !== "suspended") {
+      return first
+    }
+    yield* awaitParked(engine, flow)
+    settled = Deferred.makeUnsafe<Outcome>()
+    yield* engine.resume(flow, "exec-1")
+    return yield* Deferred.await(settled)
+  }).pipe(
+    Effect.provide(Layer.mergeAll(FlowEngine.layerMemory, NodeCrypto.layer, Safety.layer)),
+    Effect.provideService(Metric.MetricRegistry, new Map()),
+    Effect.scoped,
+    Effect.runPromise
+  )
+
+const flows = [descriptor("fs/list", { tier: "sealed" }), descriptor("fs/write", { tier: "irreversible" })]
+
+const collect = (options: {
+  readonly registry: Registry.Registry
+  readonly model: Model.Model
+  readonly implementations?: ReadonlyMap<string, CellCalls.Implementation> | undefined
+  readonly authorize?: ((call: Cell.Call) => Effect.Effect<void, HarnessError>) | undefined
+  readonly plugins?: PluginInput<FlowsHooks> | undefined
+  readonly config?: FlowsConfig | undefined
+  readonly memory?: MemorySource.DeclaredText | undefined
+  readonly activeSeatSamples?: Array<number> | undefined
+}) =>
+  Effect.gen(function*() {
+    const agent = yield* Agent.Agent
+    const events: Array<AgentEvent.AgentEvent> = []
+    yield* agent.run({
+      session: "session-1",
+      seat: Seat.make({
+        id: "anthropic:test-model",
+        model: options.model,
+        route,
+        contextWindowTokens: 0
+      }),
+      prompt: "write the first file",
+      system: ["You are running inside a smoke test."],
+      registry: options.registry,
+      implementations: options.implementations,
+      authorize: options.authorize,
+      plugins: options.plugins,
+      config: options.config,
+      memory: options.memory,
+      maxFrames: 3
+    }).pipe(
+      Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+      Effect.provide(Agent.layerDefaults)
+    )
+    if (options.activeSeatSamples !== undefined) {
+      const state = yield* Metric.value(ObservabilityMetric.activeSeats)
+      options.activeSeatSamples.push(state.value)
+    }
+    return events
+  }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
+
+describe("Agent.run", () => {
+  it("runs a whole cell frame on the assembled production stack", async () => {
+    const requests: Array<string> = []
+    const executed: Array<string> = []
+    const activeSeatSamples: Array<number> = []
+    const outcome = await drive(
+      collect({
+        registry: registryOf(flows),
+        model: recordedWithSeatSamples(requests, activeSeatSamples),
+        implementations: implementations(executed),
+        activeSeatSamples
+      })
+    )
+
+    expect(outcome._tag).toBe("completed")
+    const events = outcome._tag === "completed" ? outcome.value as ReadonlyArray<AgentEvent.AgentEvent> : []
+    const tags = events.map((event) => event._tag)
+
+    // Two data-dependent calls in one frame, each its own boundary, and one
+    // provider round trip for the whole thing.
+    expect(tags.filter((tag) => tag === "cell-call-started")).toHaveLength(2)
+    expect(executed).toEqual(["fs/list#0", "fs/write#1"])
+    expect(requests).toHaveLength(1)
+    expect(activeSeatSamples).toEqual([1, 0])
+
+    // The composition taught the model the cell contract and disclosed exactly
+    // the registry's model-invocable catalog.
+    expect(requests[0]).toContain("You are running inside a smoke test.")
+    expect(requests[0]).toContain("fs/list")
+    expect(requests[0]).toContain("fs/write")
+    expect(requests[0]).toContain("write the first file")
+
+    const resolved = events.find((event) => event._tag === "resolved")
+    expect(resolved?._tag === "resolved" ? resolved.message.content : []).toEqual([
+      { type: "text", text: "wrote alpha.md" }
+    ])
+  })
+
+  it("hides a flow the registry does not disclose, and refuses it catchably at the boundary", async () => {
+    const requests: Array<string> = []
+    const executed: Array<string> = []
+    // `fs/write` exists but is not model-invocable: it must be absent from the
+    // catalog, and calling it anyway must be a failure the cell could catch —
+    // never a crash and never an execution.
+    const outcome = await drive(
+      collect({
+        registry: registryOf([
+          descriptor("fs/list", { tier: "sealed" }),
+          descriptor("fs/write", { tier: "irreversible", modelInvocable: false })
+        ]),
+        model: recorded(requests),
+        implementations: implementations(executed)
+      })
+    )
+
+    expect(outcome._tag).toBe("completed")
+    const events = outcome._tag === "completed" ? outcome.value as ReadonlyArray<AgentEvent.AgentEvent> : []
+    expect(requests[0]).not.toContain("fs/write")
+    expect(executed).toEqual(["fs/list#0"])
+
+    // The refused call resolved with the failure envelope, so the cell ran to
+    // its own end: durable evidence and a further frame, not a failed run.
+    const settled = events.filter((event) => event._tag === "cell-settled")
+    expect(settled.at(0)?._tag === "cell-settled" ? settled.at(0)?.outcome._tag : undefined).toBe("settled")
+  })
+
+  it("carries every declaration the host supplies through to the boundary", async () => {
+    const requests: Array<string> = []
+    const executed: Array<string> = []
+    const authorized: Array<string> = []
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const agent = yield* Agent.Agent
+        const events: Array<AgentEvent.AgentEvent> = []
+        yield* agent.run({
+          session: "session-2",
+          seat: Seat.make({
+            // A bare model id is a degenerate but legal seat, and it is used
+            // verbatim rather than split on a separator that is not there.
+            id: "test-model",
+            model: recorded(requests),
+            route,
+            contextWindowTokens: 200_000
+          }),
+          prompt: "write the first file",
+          registry: registryOf(flows),
+          implementations: implementations(executed),
+          promptRunner: () => Effect.succeed(new Cell.CallResult({ outcome: "success", value: "unused" })),
+          authorize: (call) => Effect.sync(() => void authorized.push(call.flowName)),
+          modelParams: ModelRequest.GenerationParams.make({ maxTokens: 512 }),
+          layers: ["layer-a"],
+          capabilityEnvelope: [],
+          placement: Option.some("local"),
+          maxFrames: 2,
+          readOnlyCap: 5,
+          modelCallMs: 45_000,
+          repeatCap: 0,
+          limits: { calls: 8 }
+        }).pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.provide(Agent.layerDefaults)
+        )
+        return events
+      }).pipe(Effect.provide(Agent.layer))
+    )
+
+    expect(outcome._tag).toBe("completed")
+    const events = outcome._tag === "completed" ? outcome.value as ReadonlyArray<AgentEvent.AgentEvent> : []
+
+    // Authority is decided before each boundary opens, for every call.
+    expect(authorized).toEqual(["fs/list", "fs/write"])
+    expect(executed).toEqual(["fs/list#0", "fs/write#1"])
+
+    // The resolved seat's id — not the record — is what the turn runs under.
+    const opened = events.find((event) => event._tag === "turn-opened")
+    expect(opened?._tag === "turn-opened" ? opened.seat : "").toBe("test-model")
+
+    // Every armed budget the host declared reaches the controller and is
+    // journaled as the host's number. A budget this surface cannot set is a
+    // constant the run records as if it were a choice, and a grader reading
+    // `discipline-armed` cannot tell the two apart.
+    const armed = events.find((event) => event._tag === "discipline-armed")
+    expect(armed).toMatchObject({ readOnlyCap: 5, modelCallMs: 45_000, repeatCap: 0, maxFrames: 2 })
+
+    // The declared layer set and session reach the call identity, which is what
+    // the durable key is derived from.
+    const started = events.filter((event) => event._tag === "cell-call-started")
+    expect(started.map((event) => event._tag === "cell-call-started" ? event.call.identity.session : "")).toEqual([
+      "session-2",
+      "session-2"
+    ])
+    const identities = started.map((event) => event._tag === "cell-call-started" ? event.call.identity.layers : [])
+    expect(identities.every((layers) => layers.includes("layer-a"))).toBe(true)
+    expect(
+      identities.every((layers) => layers.some((layer) => layer.startsWith("flows/cell-composition/v1:")))
+    ).toBe(true)
+  })
+
+  it("dispatches ordered harness plugins with apply and enforce semantics", async () => {
+    const requests: Array<string> = []
+    const decorate = (registry: Registry.Registry, label: string): Registry.Registry => {
+      const transform = (entry: Descriptor.FlowDescriptor): Descriptor.FlowDescriptor =>
+        new Descriptor.FlowDescriptor({ ...entry, description: `${entry.description}|${label}` })
+      return Registry.makeNoop({
+        list: () => Effect.map(registry.list(), (entries) => entries.map(transform)),
+        visible: () => Effect.map(registry.visible(), (entries) => entries.map(transform)),
+        get: (name) => Effect.map(registry.get(name), transform),
+        getOption: (name) => Effect.map(registry.getOption(name), Option.map(transform)),
+        loadBody: registry.loadBody,
+        runPrompt: registry.runPrompt,
+        refresh: registry.refresh,
+        warnings: registry.warnings
+      })
+    }
+    const plugin = (
+      name: string,
+      label: string,
+      options: {
+        readonly enforce?: "pre" | "post" | undefined
+        readonly apply?: "engine" | "harness" | ((config: FlowsConfig) => boolean) | undefined
+      } = {}
+    ) =>
+      makePlugin<FlowsHooks>({
+        name,
+        ...(options.enforce === undefined ? {} : { enforce: options.enforce }),
+        ...(options.apply === undefined ? {} : { apply: options.apply }),
+        hooks: {
+          cellRegistry: (registry) => Effect.succeed(decorate(registry, label)),
+          cellModelRequest: (request) =>
+            Effect.succeed(ModelRequest.ModelRequest.make({
+              ...request,
+              system: [...request.system, ModelRequest.SystemPart.make({ text: `plugin:${label}` })]
+            }))
+        }
+      })
+
+    const outcome = await drive(
+      collect({
+        registry: registryOf(flows),
+        model: recorded(requests),
+        implementations: implementations([]),
+        config: { enableNormal: true },
+        plugins: [
+          plugin("normal", "normal", { apply: (config) => config.enableNormal === true }),
+          plugin("excluded", "excluded", { apply: "engine" }),
+          plugin("pre", "pre", { enforce: "pre", apply: "harness" }),
+          plugin("post-excluded", "post-excluded", { enforce: "post", apply: () => false })
+        ]
+      })
+    )
+
+    expect(outcome._tag).toBe("completed")
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toContain("The fs/list flow.|pre|normal")
+    expect(requests[0]).toContain("plugin:pre\nplugin:normal")
+    expect(requests[0]).not.toContain("excluded")
+  })
+
+  it("reports config observer failures without exposing their causes or failing the run", async () => {
+    const logs: Array<{
+      readonly message: unknown
+      readonly annotations: Readonly<Record<string, unknown>>
+      readonly renderedCause: string
+    }> = []
+    const capture = Logger.make((entry) => {
+      if (String(entry.message).includes("plugin configuration observer")) {
+        logs.push({
+          message: entry.message,
+          annotations: entry.fiber.getRef(References.CurrentLogAnnotations),
+          renderedCause: String(entry.cause)
+        })
+      }
+    })
+    const outcome = await drive(
+      collect({
+        registry: registryOf([]),
+        model: recorded([]),
+        plugins: [makePlugin<FlowsHooks>({
+          name: "failing-observer",
+          hooks: { configResolved: () => Effect.fail({ secret: "must-not-log" }) }
+        })]
+      }).pipe(Effect.provide(Logger.layer([capture], { mergeWithExisting: false })))
+    )
+
+    expect(outcome._tag).toBe("completed")
+    expect(logs).toHaveLength(1)
+    expect(logs[0]?.annotations).toMatchObject({
+      pluginErrorCode: "hook_failed",
+      pluginName: "failing-observer",
+      pluginHook: "configResolved"
+    })
+    expect(JSON.stringify(logs)).not.toContain("must-not-log")
+  })
+
+  it("injects only an explicitly selected memory snapshot and keeps it across a durable restart", async () => {
+    const selectedText = "<flows_memory_context>\n[selected/fact] exact memory\n</flows_memory_context>"
+    const selected = await Effect.runPromise(
+      MemorySource.declaredText(
+        { read: () => Effect.succeed(selectedText) },
+        { lineageId: "lineage-1", iteration: 0, banks: ["selected"], query: "task" }
+      ).pipe(
+        // The source is a literal; the declared store and recall services are
+        // required by the signature but never reached.
+        Effect.provideService(MemoryStore.MemoryStore, MemoryStore.makeNoop()),
+        Effect.provideService(Recall.Recall, Recall.makeNoop())
+      )
+    )
+    const selectedRequests: Array<string> = []
+    let permitted = false
+    const selectedOutcome = await drive(
+      collect({
+        registry: registryOf([descriptor("fs/write", { tier: "irreversible" })]),
+        model: recordedCells(selectedRequests, [
+          "await ctx.call(\"fs/write\", { path: \"alpha.md\", text: \"done\" }); console.log(\"next\")",
+          "ctx.done(\"done\")"
+        ]),
+        implementations: implementations([]),
+        authorize: () =>
+          Effect.suspend(() => {
+            if (permitted) return Effect.void
+            permitted = true
+            return Effect.fail(
+              new HarnessError({
+                code: "engine_failed",
+                message: "permission required",
+                cause: Schema.encodeUnknownSync(Permission.PermissionRequired)(
+                  new Permission.PermissionRequired({
+                    requestId: "memory-restart",
+                    capability: Capability.make("fs:write", "**"),
+                    tier: "irreversible",
+                    meta: {}
+                  })
+                )
+              })
+            )
+          }),
+        memory: selected
+      }),
+      { resume: true }
+    )
+    const unselectedRequests: Array<string> = []
+    const unselectedOutcome = await drive(
+      collect({
+        registry: registryOf([]),
+        model: recordedCells(unselectedRequests, ["ctx.done(\"done\")"])
+      })
+    )
+
+    expect(selectedOutcome._tag).toBe("completed")
+    expect(unselectedOutcome._tag).toBe("completed")
+    expect(selectedRequests).toHaveLength(2)
+    expect(selectedRequests.every((request) => request.includes(selectedText))).toBe(true)
+    expect(unselectedRequests.every((request) => !request.includes(selectedText))).toBe(true)
+  })
+
+  it("preserves a request-hook failure as typed plugin cause at the harness boundary", async () => {
+    const outcome = await drive(
+      collect({
+        registry: registryOf([]),
+        model: recorded([]),
+        plugins: [makePlugin<FlowsHooks>({
+          name: "failing-request",
+          hooks: {
+            cellModelRequest: () => Effect.fail(new Error("request hook failed"))
+          }
+        })]
+      })
+    )
+
+    expect(outcome).toMatchObject({
+      _tag: "failed",
+      error: {
+        code: "engine_failed",
+        cause: { code: "hook_failed", plugin: "failing-request", hook: "cellModelRequest" }
+      }
+    })
+  })
+
+  it("rejects non-JSON config before it enters durable composition identity", async () => {
+    const outcome = await drive(
+      collect({
+        registry: registryOf([]),
+        model: recorded([]),
+        config: { invalidIdentity: () => "not-json" } as unknown as FlowsConfig
+      })
+    )
+
+    // What this package owes its caller is that a config value the composition
+    // identity cannot hash never reaches the identity at all, and that the
+    // refusal names the key. `@smthrs/plugin` owns the admission gate that now
+    // raises it and owns the wording, so the sentence itself is asserted
+    // loosely: pinning a sibling's prose here turns a copy edit there into a
+    // red suite in this package.
+    expect(outcome).toMatchObject({
+      _tag: "failed",
+      error: { code: "config_invalid", path: "$.invalidIdentity" }
+    })
+    expect((outcome as { readonly error: { readonly message: string } }).error.message).toContain("JSON")
+  })
+
+  it("puts ordered plugin and config semantics into every cell-call identity", async () => {
+    const first = makePlugin<FlowsHooks>({ name: "first" })
+    const second = makePlugin<FlowsHooks>({ name: "second" })
+    const identityFor = async (
+      plugins: PluginInput<FlowsHooks>,
+      config: FlowsConfig
+    ): Promise<ReadonlyArray<string>> => {
+      const outcome = await drive(
+        collect({
+          registry: registryOf(flows),
+          model: recorded([]),
+          implementations: implementations([]),
+          plugins,
+          config
+        })
+      )
+      expect(outcome._tag).toBe("completed")
+      const events = outcome._tag === "completed" ? outcome.value as ReadonlyArray<AgentEvent.AgentEvent> : []
+      const started = events.find((event) => event._tag === "cell-call-started")
+      return started?._tag === "cell-call-started" ? started.call.identity.layers : []
+    }
+
+    const a = await identityFor([first, second], { semantic: { mode: "a" } })
+    const replay = await identityFor([first, second], { semantic: { mode: "a" } })
+    const reordered = await identityFor([second, first], { semantic: { mode: "a" } })
+    const reconfigured = await identityFor([first, second], { semantic: { mode: "b" } })
+
+    expect(replay).toEqual(a)
+    expect(reordered).not.toEqual(a)
+    expect(reconfigured).not.toEqual(a)
+  })
+})
+
+describe("Agent service", () => {
+  /**
+   * `Service.run` declares the four services the production loop needs, so a
+   * noop's stream carries them in its type even though it touches none of
+   * them. Erasing the requirement is safe here and nowhere else.
+   */
+  type Collected = Effect.Effect<Array<AgentEvent.AgentEvent>, HarnessError | PluginError>
+
+  const collect = (
+    stream: ReturnType<Agent.Service["run"]>
+  ): Promise<Array<AgentEvent.AgentEvent>> => Effect.runPromise(Stream.runCollect(stream) as Collected)
+
+  const options: Agent.Options = {
+    session: "session-noop",
+    seat: Seat.make({ id: "anthropic:test-model", model: recorded([]), route, contextWindowTokens: 0 }),
+    prompt: "nothing to do",
+    registry: registryOf([])
+  }
+  const aborted = new AgentEvent.Aborted({
+    eventType: "flows.harness.aborted.v1",
+    reason: "the scripted agent stopped"
+  })
+
+  it("emits nothing from the noop, and takes an override for the one method", async () => {
+    const noop = await collect(Agent.makeNoop().run(options))
+    expect(noop).toEqual([])
+
+    const scripted = Agent.makeNoop({ run: () => Stream.fromIterable([aborted]) })
+    expect(await collect(scripted.run(options))).toEqual([aborted])
+  })
+
+  it("provides the noop as a layer, so a composition can be built without a model", async () => {
+    const collected = await Effect.runPromise(
+      Effect.gen(function*() {
+        const agent = yield* Agent.Agent
+        return yield* Stream.runCollect(agent.run(options))
+      }).pipe(Effect.provide(Agent.layerNoop())) as Collected
+    )
+    expect(collected).toEqual([])
+  })
+})

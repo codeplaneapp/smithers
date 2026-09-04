@@ -1,0 +1,125 @@
+---
+title: "0.24.0"
+description: "Minor and the first release since 0.23.0, folding in the unpublished 0.23.1 fixes: the gateway-client and gateway-react sync SDK moves to TanStack DB, new headless gateway and monitor commands, workflow input schemas in inspect and generated skills, jsx-runtime exports, plus engine deps and Loop correctness, detached-run event delivery, durable CLI-agent answers, project-anchored smithers.db, refreshed default model ids, and a broad sweep of Gateway, package-facade, MCP, and Pi-plugin fixes."
+---
+
+0.24.0 is the first release since 0.23.0, so it also carries every fix from the unpublished 0.23.1. The headline change is the Gateway SDK's move to TanStack DB collections. Alongside it are new CLI surfaces, engine correctness work, and a wide set of Gateway and package fixes from dogfooding.
+
+---
+
+## Breaking changes
+
+### Gateway sync SDK rebuilt on TanStack DB
+
+`@smthrs/gateway-client` and `@smthrs/gateway-react` now build their declarative sync SDK on TanStack DB collections, replacing the previous `SyncClient`, `SyncCache`, and `SyncSubscriptionHub` classes.
+
+- `gateway-client` exports `createGatewayCollection`, `gatewayCollectionDefs`, and the run-node helpers (`flattenGatewayRunNode`, `snapshotToGatewayRunNode`, `reconcileSnapshotNodes`), all backed by the gateway RPC and WebSocket transport. The framework-free core stays in `gateway-client`.
+- `gateway-react` adds the `SyncProvider` context, the `GatewayCollections` registry, and the hooks `useSyncQuery`, `useSyncMutation`, and `useSyncSubscription`, plus the typed shortcuts `useGatewayQuery`, `useGatewayMutation`, `useGatewayRunStream`, `useGatewayRunTree`, and `useGatewayConnectionStatus`, backed by `@tanstack/react-db`.
+- The removed exports have no drop-in replacement. Rebuild custom-UI data access on the collection hooks. `apps/smithers` now reads connection status from the registry observer rather than a workflows probe.
+
+This is the Phase 1 foundation for the Postgres-of-record and TanStack DB sync work. `@tanstack/react-db` is a new dependency of `gateway-react`.
+
+## New features
+
+### `bunx smthrs gateway` command
+
+A new `bunx smthrs gateway` command starts the multi-run Gateway RPC and WebSocket control plane headlessly, backed by the workspace database. It exposes `listRuns`, `streamRunEvents`, and `streamDevTools`, and prints the workspace and DB paths it serves on startup.
+
+This is distinct from `bunx smthrs up --serve`, which runs a single workflow and adds a lightweight serve layer. Use `gateway` when you need the full `/v1/rpc/*` control plane without launching a workflow run.
+
+Fixes [#255](https://github.com/smithersai/smithers/issues/255). PR [#268](https://github.com/smithersai/smithers/pull/268).
+
+### Workflow input schemas in `inspect` and generated skills
+
+`bunx smthrs inspect` now returns the machine-readable JSON schema for each workflow's input alongside the run summary. The schema is also surfaced in generated skill docs: real field names, types, defaults, enums, and descriptions appear in the skill file rather than a generic placeholder.
+
+Fixes [#258](https://github.com/smithersai/smithers/issues/258). PR [#272](https://github.com/smithersai/smithers/pull/272).
+
+### `bunx smthrs monitor` command
+
+A new `bunx smthrs monitor [RUN_ID]` command watches a running workflow, diagnoses failures with tool access, optionally applies a gated self-fix (`--autofix`), and writes an HTML report. It drives the seeded `monitor` workflow and supports `--detach` and `--input`. The CLI also auto-mounts workspace custom UIs.
+
+### `smthrs` jsx-runtime and run-control exports
+
+The `smthrs` package now ships `./jsx-runtime` and `./jsx-dev-runtime` subpath exports with types, so `/** @jsxImportSource smthrs */` resolves directly from the published package. The public barrel also exposes the run-control and output API: `runWorkflow`, `getRun`, `listRuns`, `approveNode`, `denyNode`, and `renderFrame`.
+
+### Driver and graph surfaces
+
+- The driver exposes resolved worktree paths to workflow code, and jj worktrees resolve as real git worktrees for child tools.
+- A typed run-annotations option is exposed on the driver.
+- Sandbox egress props thread through the graph.
+
+## Bug fixes
+
+### Engine: dependency and Loop correctness
+
+- **`deps` resolve across loop boundaries, and unsatisfiable deps fail loudly.** A `deps` key pointing at an upstream id that needed remapping used to silently no-op. It now resolves across loop boundaries and raises `DEPENDENCY_DEADLOCK` when a dependency can never be satisfied.
+- **Parallel `<Loop>` iterations no longer starve until total run quiescence.** All three scheduling paths shared the bug: the legacy engine ladder returned `await-trigger` or `schedule-retry` before reaching ready-loop handling, the workflow session gated loop progress behind a global-idle check, and the `WorkflowDriver`'s `Promise.all` batch barrier held all completions until the batch finished. Ready loops now advance whenever a loop node completes, the driver processes completions incrementally, continue-as-new handoffs stay quiescence-only, and unhandled task failures keep precedence over further iterations. Fixes [#267](https://github.com/smithersai/smithers/issues/267). PR [#271](https://github.com/smithersai/smithers/pull/271).
+
+### Detached runs and approvals
+
+- **Gateway streams persisted events from detached runs.** `streamRunEvents` returned heartbeats only for runs started with `bunx smthrs up -d`, because the Gateway host had no visibility into events the detached process wrote. A built-in out-of-process event bridge now tails `_smithers_events` for runs the Gateway host did not execute. It is on by default and configurable via the `outOfProcessEventBridge` (boolean) and `outOfProcessEventBridgePollMs` (number) Gateway options. Fixes [#254](https://github.com/smithersai/smithers/issues/254). PR [#266](https://github.com/smithersai/smithers/pull/266).
+- **Supervisor auto-resumes detached runs after an approval is recorded.** Approving a gate on a detached run recorded the decision but left the run stuck in `waiting-event`. The supervisor now queries `_smithers_approvals` joined to pending nodes on every poll and spawns a detached resume for any decided-but-unconsumed approval. `bunx smthrs approve` prepends a resume command to its CTA when the run is still `waiting-event`, and `bunx smthrs why` emits an `approval-decided-resume-required` blocker. Fixes [#242](https://github.com/smithersai/smithers/issues/242). PR [#250](https://github.com/smithersai/smithers/pull/250).
+- **`approveNode` no longer strands runs on post-commit bridge failure.** Approving through the MCP `resolve_approval` tool could return an error while consuming the approval row, leaving the run permanently stuck. `approveNode` commits the decision first, then treats a post-commit bridge failure as non-fatal: it warns and returns success, because the committed approval is the durable source of truth and the engine processes it on resume. Fixes [#241](https://github.com/smithersai/smithers/issues/241). PR [#246](https://github.com/smithersai/smithers/pull/246).
+
+### CLI agents
+
+- **CLI-agent answers survive captured-stdout truncation.** Long runs overflow the 200 KB captured-stdout cap; the capture kept the head and dropped the terminal result event, so the engine's context-free JSON repair persisted schema-valid but amnesiac rows that claimed the task "was not present in the available context." The capture now keeps the stream tail and reports truncation, the agent prefers the live interpreter's completed answer parsed before the cap, token usage falls back to the completed event, and a warning fires on truncation. Fixes [#277](https://github.com/smithersai/smithers/issues/277).
+- **Completed-event answer is preserved when `result.text` is empty**, and structured-output extraction trusts the CLI output file over stdout fallbacks.
+- **`CodexAgent` honors the `<Worktree>` cwd** and the brittle `--cd` worktree fallback is removed.
+
+### CLI and database
+
+- **`smithers.db` resolves from the project anchor, not raw CWD.** Running commands from inside `.smithers/` (or any subdirectory) created a stray `smithers.db` and silently fragmented run history. Both `apps/cli` and `packages/smithers` now walk upward for a `.smithers/` anchor (excluding HOME and the filesystem root), stop at an anchor whose DB does not exist yet rather than crossing the project boundary, warn when multiple databases are found, and include the consulted DB path in `RUN_NOT_FOUND`. Fixes [#240](https://github.com/smithersai/smithers/issues/240). PR [#248](https://github.com/smithersai/smithers/pull/248).
+- **`bunx smthrs output` resolves camelCase output tables.** A node whose output table schema key is camelCase printed `null`, because state stores the schema key verbatim while the physical table is snake_case. The lookup now tries the stored name first and falls back to the snake_case translation only when no physical table with the stored name exists. Fixes [#276](https://github.com/smithersai/smithers/issues/276).
+- **Large command stdout is flushed synchronously** so piped output is no longer truncated. Fixes [#235](https://github.com/smithersai/smithers/issues/235).
+- **Default agent scaffolding no longer ships broken providers.** Generated `agents.ts` now leads the `smart` and `smartTool` pools with a working Claude subscription provider, drops the opencode-over-Anthropic-API entry from the defaults, and fails with `NO_USABLE_AGENTS` rather than writing a configuration that cannot run. Fixes [#236](https://github.com/smithersai/smithers/issues/236). PR [#270](https://github.com/smithersai/smithers/pull/270).
+- **`bunx smthrs ui` GATEWAY_UNREACHABLE hint** now points at starting a real Gateway instead of a command that does not exist, and clarifies that `up --serve` lacks the `/v1/rpc/*` routes `ui` needs. Fixes [#244](https://github.com/smithersai/smithers/issues/244).
+
+### Gateway and observability
+
+- Approval-submit errors are corrected, duplicate-approval errors are documented, and inactive-cancel errors are mapped.
+- The SSE reconnect loop stops for already-finished runs, due timer runs resume, and devtools sync streams resume after reconnect.
+- `observability` ships its Docker Compose stack assets at the path the CLI resolves, with a clearer prerequisite message (fixes [#262](https://github.com/smithersai/smithers/issues/262), PR [#269](https://github.com/smithersai/smithers/pull/269)). Truncation logs are downgraded from ERROR to WARN, and the `apps/observability` dts build is fixed so the faults CI job is green (fixes [#275](https://github.com/smithersai/smithers/issues/275)).
+
+### Package facades and types
+
+- `VibeAgent` is exposed from the root facade, and `Vibe` is included in the agent-availability type.
+- `time-travel` exposes typed revert helpers, and `vcs` root exports and declarations are aligned.
+- The `db` `runState` subpath is Bun-safe and typed.
+- `components` honors drift-detector alerts and relaxes the DriftDetector poll interval, and the scheduler retry-policy surface is aligned.
+
+### MCP and Pi plugin
+
+- MCP artifact serialization preserves boolean values (fixes [#234](https://github.com/smithersai/smithers/issues/234)), approval-request metadata is inspectable through the semantic tools (fixes [#232](https://github.com/smithersai/smithers/issues/232)), and summaries include the workflow path.
+- Silent structured-output degradation now emits a warning at the prompt-injection fallback, and `ctx.output()` strips the internal harness fields (`runId`, `nodeId`, `iteration`) so they do not leak into downstream prompts. Fixes [#243](https://github.com/smithersai/smithers/issues/243). PR [#247](https://github.com/smithersai/smithers/pull/247).
+- The Pi plugin no longer crashes the inspector on `/smithers` in Pi 0.78.1 (fixes [#233](https://github.com/smithersai/smithers/issues/233)), no longer unconditionally replaces the Pi footer and header (fixes [#231](https://github.com/smithersai/smithers/issues/231)), and no longer blocks Pi session reload on MCP startup.
+
+## Changes
+
+### Default model ids refreshed to the current generation
+
+The built-in provider defaults now point at the current model generation. `bunx smthrs init` scaffolding, the `ask` and `optimize` flows, and the documentation examples were all updated:
+
+- Anthropic, Claude Code, and OpenCode-via-Anthropic default to `claude-fable-5`.
+- OpenAI, Codex, and Pi default to `gpt-5.5`.
+- Cerebras defaults to `zai-glm-4.7`.
+- Kimi and Moonshot default to `kimi-k2.6`.
+
+`bunx smthrs init` also scaffolds a Claude Opus (`claude-opus-4-8`) variant alongside Claude Sonnet, and derives the `smart`, `smartTool`, and `cheapFast` agent pools from provider families instead of placing every detected account in `smart`. If you pin models explicitly in `.smithers/agents.ts`, nothing changes; the new ids only affect freshly scaffolded projects and unpinned defaults.
+
+## Documentation
+
+### Agent-operated CLI framing
+
+The docs now state explicitly that a coding agent operates the Smithers CLI on the human's behalf. The guide, quickstart, CLI cheatsheet, component pages, MCP server docs, and the agent skill make the division of responsibility concrete: the agent runs every command itself, relays approval and human-task prompts to the human in conversation, and submits the resolving command (`approve`, `deny`, `human answer`, `signal`) without asking the human to type Smithers commands. Installation remains the one step a human may run by hand.
+
+### Aspects token and latency budgets enforced
+
+`<Aspects>` `tokenBudget` and `latencySlo` are now enforced by the engine at task-dispatch time: before each descendant task runs, the run's accumulated token total (`tokenBudget.max`) and wall-clock since the run started (`latencySlo.maxMs`) are checked against the budget and `onExceeded` is applied: `fail` raises `ASPECT_BUDGET_EXCEEDED` and fails the run, `warn` logs and continues, `skip-remaining` skips the task. Accumulated token usage survives resume. The USD `costBudget` prop was removed; budget on tokens instead. Per-task limits (`perTask`) are not enforced yet. Implements [#273](https://github.com/smithersai/smithers/issues/273); fixes [#265](https://github.com/smithersai/smithers/issues/265). PRs [#274](https://github.com/smithersai/smithers/pull/274), [#290](https://github.com/smithersai/smithers/pull/290).
+
+The reference docs also document the `@smthrs/review` package and the `sandbox:up` and `sandbox:down` GCP VM scripts in the package-configuration tables.
+
+## Also in this release
+
+The init-pack seeded workflows gained `close-issues` (with a gateway UI), `validated-implement`, `real-stack-e2e`, the `smithering` meta-workflow, and `release-content` (replacing `marketing-thread`), plus regression eval suites for the seeded init workflows that measured and lifted their pass rate from 43/60 to 59/60. More example workflow patterns landed under `examples/`. Internal product work also landed in this period, including the Smithers review cloud service and the Smithers Pair multiplayer proof of concept; these are not part of the published npm packages.

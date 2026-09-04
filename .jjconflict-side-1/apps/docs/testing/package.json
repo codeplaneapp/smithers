@@ -1,0 +1,27 @@
+{
+  "name": "@smithers/docs-testing",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The @smthrs/testing documentation site (testing.smithers.sh)",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "check": "astro check",
+    "preview": "astro preview",
+    "sync:docs": "node ../shared/sync-content.mjs testing",
+    "check:docs": "node ../shared/sync-content.mjs testing --check",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@smithers/docs-shared": "workspace:*",
+    "alchemy": "^0.93.12",
+    "typescript": "~6.0.3"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.36.0",
+    "astro": "^5.13.2"
+  }
+}

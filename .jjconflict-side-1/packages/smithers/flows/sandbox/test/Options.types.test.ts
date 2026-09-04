@@ -1,0 +1,67 @@
+/**
+ * Pins every exported constructor-options name to the argument it describes.
+ *
+ * A consumer writing `const options: ... = {...}` or a factory forwarding
+ * options to one of these constructors has to be able to name the argument.
+ * An exported name that stops matching the parameter is worse than no export
+ * at all.
+ */
+import { expect, it } from "@effect/vitest"
+import { expectTypeOf } from "vitest"
+import * as AwsSandbox from "../src/AwsSandbox/index.ts"
+import * as CloudflareSandbox from "../src/CloudflareSandbox/index.ts"
+import * as ContainerSandbox from "../src/ContainerSandbox/index.ts"
+import * as DaytonaSandbox from "../src/DaytonaSandbox/index.ts"
+import * as DirectorySandbox from "../src/DirectorySandbox/index.ts"
+import * as JustBashSandbox from "../src/JustBashSandbox/index.ts"
+import * as KubernetesSandbox from "../src/KubernetesSandbox/index.ts"
+import * as MicrosandboxSandbox from "../src/MicrosandboxSandbox/index.ts"
+import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
+import * as Sandbox from "../src/Sandbox/index.ts"
+import * as VercelSandbox from "../src/VercelSandbox/index.ts"
+
+interface Binding {
+  readonly namespace: "sandbox"
+}
+
+expectTypeOf<Parameters<typeof AwsSandbox.make>[0]>().toEqualTypeOf<AwsSandbox.AwsSandboxOptions>()
+expectTypeOf<AwsSandbox.AwsSandboxTaskDefinitionOptions>().toExtend<AwsSandbox.AwsSandboxOptions>()
+expectTypeOf<AwsSandbox.AwsSandboxImageOptions>().toExtend<AwsSandbox.AwsSandboxOptions>()
+expectTypeOf<AwsSandbox.AwsSandboxTaskDefinitionOptions>().toExtend<AwsSandbox.AwsSandboxCommonOptions>()
+expectTypeOf<AwsSandbox.AwsSandboxImageOptions>().toExtend<AwsSandbox.AwsSandboxCommonOptions>()
+expectTypeOf<Parameters<typeof CloudflareSandbox.make<Binding>>[0]>()
+  .toEqualTypeOf<CloudflareSandbox.CloudflareSandboxOptions<Binding>>()
+expectTypeOf<Parameters<typeof ContainerSandbox.make>[0]>()
+  .toEqualTypeOf<ContainerSandbox.ContainerSandboxOptions>()
+expectTypeOf<Parameters<typeof DaytonaSandbox.make>[0]>()
+  .toEqualTypeOf<DaytonaSandbox.DaytonaSandboxOptions>()
+expectTypeOf<Parameters<typeof DirectorySandbox.make>[0]>()
+  .toEqualTypeOf<DirectorySandbox.DirectorySandboxOptions>()
+expectTypeOf<Parameters<typeof JustBashSandbox.make>[0]>()
+  .toEqualTypeOf<JustBashSandbox.JustBashSandboxOptions>()
+expectTypeOf<Parameters<typeof KubernetesSandbox.make>[0]>()
+  .toEqualTypeOf<KubernetesSandbox.KubernetesSandboxOptions>()
+expectTypeOf<Parameters<typeof MicrosandboxSandbox.make>[0]>()
+  .toEqualTypeOf<MicrosandboxSandbox.MicrosandboxSandboxOptions>()
+expectTypeOf<Parameters<typeof VercelSandbox.make>[0]>()
+  .toEqualTypeOf<VercelSandbox.VercelSandboxOptions>()
+// The two doubles default their argument, so the parameter itself is the
+// options type or nothing. `NonNullable` names the half a consumer writes.
+expectTypeOf<NonNullable<Parameters<typeof Sandbox.TestSession.make>[0]>>()
+  .toEqualTypeOf<Sandbox.TestSessionOptions>()
+expectTypeOf<NonNullable<Parameters<typeof RemoteChildProcessSpawner.TestRemote.make>[0]>>()
+  .toEqualTypeOf<RemoteChildProcessSpawner.TestRemoteOptions>()
+
+it("exports every options-bearing constructor through its namespace", () => {
+  expect(typeof AwsSandbox.make).toBe("function")
+  expect(typeof CloudflareSandbox.make).toBe("function")
+  expect(typeof ContainerSandbox.make).toBe("function")
+  expect(typeof DaytonaSandbox.make).toBe("function")
+  expect(typeof DirectorySandbox.make).toBe("function")
+  expect(typeof JustBashSandbox.make).toBe("function")
+  expect(typeof KubernetesSandbox.make).toBe("function")
+  expect(typeof MicrosandboxSandbox.make).toBe("function")
+  expect(typeof VercelSandbox.make).toBe("function")
+  expect(typeof Sandbox.TestSession.make).toBe("function")
+  expect(typeof RemoteChildProcessSpawner.TestRemote.make).toBe("function")
+})

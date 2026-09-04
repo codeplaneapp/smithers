@@ -1,0 +1,52 @@
+{
+  "name": "@smithers/site",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The smithers.sh landing page",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "check": "astro check",
+    "preview": "astro preview",
+    "sync:docs": "node scripts/sync-api-docs.mjs && node scripts/ingest-reference.mjs && node scripts/gen-examples.mjs && node scripts/generate-llms.mjs",
+    "check:docs": "node scripts/check-docs.mjs && node scripts/sync-api-docs.mjs --check && node scripts/gen-examples.mjs --check && node scripts/generate-llms.mjs --check",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/platform-node-shared": "4.0.0-rc.108",
+    "@smthrs/agent": "workspace:*",
+    "@smthrs/capability": "workspace:*",
+    "@smthrs/database": "workspace:*",
+    "@smthrs/engine": "workspace:*",
+    "@smthrs/engine-store": "workspace:*",
+    "@smthrs/flow": "workspace:*",
+    "@smthrs/flows": "workspace:*",
+    "@smthrs/harness": "workspace:*",
+    "@smthrs/journal": "workspace:*",
+    "@smthrs/kernel": "workspace:*",
+    "@smthrs/mcp": "workspace:*",
+    "@smthrs/memory": "workspace:*",
+    "@smthrs/model": "workspace:*",
+    "@smthrs/observability": "workspace:*",
+    "@smthrs/plan": "workspace:*",
+    "@smthrs/registry": "workspace:*",
+    "@smthrs/run-store": "workspace:*",
+    "@smthrs/sandbox": "workspace:*",
+    "@smthrs/std": "workspace:*",
+    "@smthrs/sync": "workspace:*",
+    "@smthrs/testing": "workspace:*",
+    "@smthrs/time-travel": "workspace:*",
+    "alchemy": "^0.93.12",
+    "effect": "4.0.0-rc.108",
+    "typescript": "~6.0.3"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.36.0",
+    "@shikijs/themes": "^3.23.0",
+    "astro": "^5.13.2"
+  }
+}

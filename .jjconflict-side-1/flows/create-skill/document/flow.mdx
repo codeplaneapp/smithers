@@ -1,0 +1,28 @@
+---
+description: Summarizes a newly written agent skill for the operator, naming its path and when an agent should reach for it.
+capabilities: []
+---
+
+# Document the new skill
+
+The skill has been written. Produce a short, operator-facing summary of what was
+created and how to use it. Write no files. Summarize only.
+
+The appended arguments carry the skill name, its design, and the list of files
+the scaffolder wrote.
+
+## Task
+
+Write:
+
+- `summary`: one line describing what the skill does and when an agent should
+  reach for it.
+- `skillPath`: the primary `SKILL.md` path from the files written above, or null
+  when none was written.
+- `install`: the directory the skill was written into, and a note that the
+  operator puts it in front of an agent by copying that directory into the
+  agent's own skills directory.
+- `nextAction`: the single next thing the operator should do.
+
+Keep it to a few lines. The operator reads this to decide whether the skill is
+what they asked for, not to learn how skills work.

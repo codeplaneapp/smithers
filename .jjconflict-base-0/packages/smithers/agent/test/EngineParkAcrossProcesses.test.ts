@@ -1,0 +1,610 @@
+/**
+ * What a durable park survives when the process that parked the run exits.
+ *
+ * A park is not a cancellation. `DurableEngineState` says so in its waiting
+ * vocabulary: `timer`, `approval`, and `event` are runs waiting to be woken,
+ * `released` is a run whose owner went away without settling it, and only an
+ * operator cancel is terminal. The release validation found every one of those
+ * collapsed into `cancelled`: `AgentSession`'s driver wrapped `engine.execute`
+ * in an `Effect.onInterrupt` that called `engine.interrupt` — the DURABLE
+ * cancel — for every interruption of the driver fiber, and a park and a
+ * shutdown both interrupt it. The engine row was finalized `cancelled`, the
+ * clock deadline was stamped completed 150 seconds before it fell due, and
+ * `flows.engine.interrupted {"outcome":"cancelled"}` went into the journal of
+ * a run nobody had cancelled.
+ *
+ * Every case here is two compositions over one pair of real SQLite files, and
+ * the first composition's scope CLOSES between them: that close is the
+ * detached `smithers up -d` process exiting, and it is the whole experiment.
+ * The rows are then read with `node:sqlite` rather than through a service, so
+ * the assertion is about what is on disk for the next process to find.
+ */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import { Control, ControlLive, ControlRuntime, ControlSchema, SqlControlRuntime } from "@smthrs/control"
+import * as CoreFlow from "@smthrs/core/Flow"
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
+import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import * as FlowBinding from "@smthrs/harness/FlowBinding"
+import * as Jj from "@smthrs/jj"
+import { Migrations, SqlJournal } from "@smthrs/journal"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import type * as Route from "@smthrs/model/Route"
+import { NotificationQueue } from "@smthrs/notifications"
+import * as Descriptor from "@smthrs/registry/Descriptor"
+import * as Registry from "@smthrs/registry/Registry"
+import { Migrations as RunStoreMigrations, type Ownership, RunStore } from "@smthrs/run-store"
+import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect"
+import { mkdtempSync } from "node:fs"
+import { rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
+import { afterEach, describe, expect, it } from "vitest"
+import * as Agent from "../src/Agent.ts"
+import * as AgentSession from "../src/AgentSession.ts"
+import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import * as Seat from "../src/Seat.ts"
+import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
+
+const prepared: Route.PreparedRequest = {
+  routeId: "route-a",
+  protocolId: "test-protocol",
+  method: "POST",
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{}"),
+  bodyText: "{}"
+}
+
+const route: FlowEngineLike.RouteResolver = { prepare: () => Effect.succeed(prepared) }
+
+const envelope: ControlSchema.Envelope = { capabilities: [], flows: [], budget: {} }
+
+const agentDescriptor = new Descriptor.FlowDescriptor({
+  name: "agents/parker",
+  description: "The parking agent.",
+  body: new Descriptor.BodyRefMarkdown({ path: "/flows/agents/parker/flow.md", baseDirectory: "/flows/agents/parker" }),
+  input: new Descriptor.SchemaRefNone(),
+  output: new Descriptor.SchemaRefNone(),
+  model: Option.some("anthropic:test-model"),
+  flows: [],
+  capabilities: [],
+  effects: { reads: [], writes: [], mode: "expected", onConflict: "serialize", tier: "irreversible" },
+  placement: Option.none(),
+  modelInvocable: false,
+  path: "/flows/agents/parker",
+  frontmatter: {},
+  provenance: new Descriptor.Provenance({ source: "test", root: "/flows" })
+})
+
+const registryLayer = Layer.succeed(Registry.Registry)(
+  Registry.makeNoop({
+    list: () => Effect.succeed([agentDescriptor]),
+    visible: () => Effect.succeed([]),
+    get: () => Effect.succeed(agentDescriptor),
+    getOption: (name) => Effect.succeed(name === agentDescriptor.name ? Option.some(agentDescriptor) : Option.none()),
+    loadBody: () =>
+      Effect.succeed(
+        new Descriptor.FlowBodyPrompt({ text: "Park where you are told to.", baseDirectory: "/flows/agents/parker" })
+      )
+  })
+)
+
+const controlFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
+  { flowId: "agents/parker", description: "The parking agent.", deployClass: false, envelope }
+]
+
+const noteFlow = CoreFlow.make({
+  name: "note/save",
+  description: "Save one line to the run's note log.",
+  input: Schema.Struct({ text: Schema.String }),
+  output: Schema.Struct({ saved: Schema.Number }),
+  effects: { reads: [], writes: ["/notes/**"], mode: "expected", onConflict: "serialize", tier: "irreversible" }
+})
+
+/** A cell that parks on the durable clock: 150 s is above the 60 s in-memory threshold. */
+const timerFrame = `await ctx.call("wait", { seconds: 150, reason: "engine park pin" })
+await ctx.call("note/save", { text: "woke" })
+ctx.done("settled")`
+
+/** A cell that parks on an in-run approval. */
+const askFrame = `const decision = await ctx.call("ask", { question: "park here?", options: ["yes", "no"] })
+await ctx.call("note/save", { text: "decision=" + decision.approved })
+ctx.done("settled")`
+
+/** A cell that is still executing when the process goes away. */
+const busyFrame = `await ctx.call("note/save", { text: "busy" })
+ctx.done("settled")`
+
+/** The frame the scripted model answers with, chosen per case. */
+let frame = timerFrame
+
+const scripted: Model.Model = Model.make({
+  stream: () =>
+    Stream.fromIterable([
+      ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell-0" }),
+      ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell-0", text: "```cell\n" + frame + "\n```" }),
+      ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell-0" }),
+      ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+    ])
+})
+
+const seat: SeatResolver.Service["resolve"] = (id) =>
+  Effect.succeed(
+    Seat.make({
+      id,
+      model: scripted,
+      route,
+      contextWindowTokens: SeatResolver.contextWindowTokensFor("test-model")
+    })
+  )
+
+const jj = Jj.layerNoop({
+  snapshot: () => Effect.succeed({ changeId: "engine-park" }),
+  restore: () => Effect.void,
+  diff: () => Effect.succeed("")
+})
+
+const controlStores = (filename: string) =>
+  Layer.mergeAll(SqlJournal.layer({ capacity: 1024, overflow: "reject" }), RunStore.layer).pipe(
+    Layer.provideMerge(
+      Layer.provideMerge(
+        Layer.merge(Migrations.layer, RunStoreMigrations.layer),
+        Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename }))
+      )
+    )
+  )
+
+const notes: Array<string> = []
+
+/** Held open by `busyFrame`'s note handler so a run can be caught mid-execution. */
+let holdNote: Deferred.Deferred<void> | undefined
+
+/** Resolved by the note handler the instant a run enters it. */
+let noteEntered: Deferred.Deferred<void> | undefined
+
+/**
+ * A composition that hosts executions: control plane, production executor,
+ * real engine over `engine.db`, exactly as `NodeControl` composes them.
+ */
+const host = (root: string, owner: Ownership.OwnerId, engineHost = "engine-park-host") => {
+  const registration = AgentSession.layer({
+    quotaPolicy: Safety.quotaPolicy,
+    budget: Safety.budget,
+    flows: [
+      FlowBinding.source("test/notes", [
+        FlowBinding.make({
+          flow: noteFlow,
+          handler: (input) =>
+            Effect.gen(function*() {
+              notes.push(`${engineHost}:${input.text}`)
+              if (noteEntered !== undefined) yield* Deferred.succeed(noteEntered, void 0)
+              if (holdNote !== undefined) yield* Deferred.await(holdNote)
+              return { saved: notes.length }
+            })
+        })
+      ])
+    ],
+    limits: { memoryBytes: 64 * 1024 * 1024, steps: 5_000_000 },
+    maxFrames: 4
+  }).pipe(
+    Layer.provide(
+      Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seat })).pipe(
+        Layer.provide(Safety.layer)
+      )
+    )
+  )
+  const engine = NodeRuntime.layer(
+    {
+      filename: join(root, "engine.db"),
+      workspaceRoot: root,
+      owner: { hostId: engineHost },
+      isAlive: () => Effect.succeed(false)
+    },
+    StepBoundary.layer,
+    WorkspaceSandbox.layerFileSystem(),
+    registration
+  ).pipe(Layer.provide([NodeFileSystem.layer, NodeCrypto.layer, jj]))
+  return ControlLive.layer.pipe(
+    Layer.provide(engine),
+    Layer.provideMerge(
+      Layer.mergeAll(
+        SqlControlRuntime.layer({ owner, flows: controlFlows }).pipe(Layer.orDie),
+        NotificationQueue.layer,
+        registryLayer
+      )
+    ),
+    Layer.provideMerge(Layer.merge(controlStores(join(root, "control.db")), NodeCrypto.layer))
+  )
+}
+
+const roots = new Set<string>()
+
+afterEach(async () => {
+  notes.length = 0
+  frame = timerFrame
+  holdNote = undefined
+  noteEntered = undefined
+  await Promise.all([...roots].map((root) => rm(root, { recursive: true, force: true })))
+  roots.clear()
+})
+
+const makeRoot = (): string => {
+  const root = mkdtempSync(join(tmpdir(), "flows-engine-park-"))
+  roots.add(root)
+  return root
+}
+
+interface EngineRow {
+  readonly status: string
+  readonly waiting_reason: string | null
+  readonly cancel_requested_at_ms: number | null
+  readonly owner_host_id: string | null
+}
+
+const readEngineRun = (root: string, runId: string): EngineRow | undefined => {
+  const database = new DatabaseSync(join(root, "engine.db"), { readOnly: true })
+  try {
+    return database.prepare(
+      "SELECT status, waiting_reason, cancel_requested_at_ms, owner_host_id FROM flows_runs WHERE run_id = ?"
+    ).get(runId) as unknown as EngineRow | undefined
+  } finally {
+    database.close()
+  }
+}
+
+const readPendingClocks = (root: string, runId: string): ReadonlyArray<{ readonly due_at_ms: number }> => {
+  const database = new DatabaseSync(join(root, "engine.db"), { readOnly: true })
+  try {
+    return database.prepare(
+      "SELECT due_at_ms FROM flows_clock_deadlines WHERE execution_id = ? AND completed_at_ms IS NULL"
+    ).all(runId) as unknown as ReadonlyArray<{ readonly due_at_ms: number }>
+  } finally {
+    database.close()
+  }
+}
+
+/** Every `flows.engine.interrupted` outcome the engine journal holds for a run. */
+const readInterruptOutcomes = (root: string, runId: string): ReadonlyArray<string> => {
+  const database = new DatabaseSync(join(root, "engine.db"), { readOnly: true })
+  try {
+    const rows = database.prepare(
+      "SELECT payload_json FROM flows_journal_events WHERE run_id = ? AND event_type = 'flows.engine.interrupted'"
+    ).all(runId) as unknown as ReadonlyArray<{ readonly payload_json: string }>
+    return rows.map((row) => String((JSON.parse(row.payload_json) as { outcome?: unknown }).outcome))
+  } finally {
+    database.close()
+  }
+}
+
+const hostOwner: Ownership.OwnerId = { hostId: "engine-park-host", pid: 1, nonce: "host" }
+const secondOwner: Ownership.OwnerId = { hostId: "engine-park-second", pid: 2, nonce: "second" }
+
+const awaitStatus = (
+  runtime: ControlRuntime.Service,
+  runId: string,
+  status: ControlSchema.RunStatus,
+  attempts = 3_000
+): Effect.Effect<void, unknown> =>
+  Effect.gen(function*() {
+    const run = yield* runtime.getRun(runId)
+    if (run.status === status) return
+    if (attempts <= 0) return yield* Effect.die(`run ${runId} never reached ${status} (still ${run.status})`)
+    yield* Effect.sleep("10 millis")
+    return yield* awaitStatus(runtime, runId, status, attempts - 1)
+  })
+
+/** Launches the agent run and returns its id and the ask payload, when one was asked. */
+const launch = Effect.gen(function*() {
+  const control = yield* Control.Control
+  const card = yield* control.plan({ flowId: "agents/parker", input: {} })
+  yield* control.approve(card.approval)
+  const receipt = yield* control.run({
+    _tag: "Plan",
+    planId: card.planId,
+    digest: card.digest,
+    envelope: card.envelope,
+    idempotencyKey: "run:parker"
+  })
+  if (receipt._tag !== "Accepted" || receipt.runId === undefined) {
+    return yield* Effect.die("expected an accepted run")
+  }
+  return receipt.runId
+})
+
+/**
+ * Waits for exactly the event the shipped CLI waits for.
+ *
+ * `Command.ts` `settled` counts `control.run.waiting-approval` as "this
+ * process has nothing left to drive", and `awaitRun` returns on it, after
+ * which the run verb renders its receipt and the scope closes. Polling the
+ * control row instead would give the engine a head start the operator loop
+ * does not give it, so the park would look durable in a test and be torn in
+ * the field.
+ */
+const awaitParkEvent = (runId: string) =>
+  Effect.gen(function*() {
+    const control = yield* Control.Control
+    yield* control.watch({ runId }).pipe(
+      Stream.filter((event) => event.kind === "control.run.waiting-approval"),
+      Stream.take(1),
+      Stream.runCollect
+    )
+  })
+
+const askPayload = (runId: string) =>
+  Effect.gen(function*() {
+    const control = yield* Control.Control
+    const requested = yield* control.watch({ runId }).pipe(
+      Stream.filter((event) => event.kind === "control.approval.requested"),
+      Stream.take(1),
+      Stream.runCollect
+    )
+    const payload = (requested[0]?.payload as { readonly payload: unknown }).payload
+    return Schema.decodeUnknownSync(ControlSchema.ApprovalPayload)(payload)
+  })
+
+/**
+ * Reads the engine row repeatedly for a second after the parking composition
+ * is gone. The driver's interrupt handler forked its writes detached, so a
+ * single read the instant the scope closed could pass while the cancellation
+ * was still in flight.
+ */
+const settledEngineRow = async (root: string, runId: string): Promise<EngineRow | undefined> => {
+  let row = readEngineRun(root, runId)
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    row = readEngineRun(root, runId)
+    if (row?.status === "cancelled") return row
+  }
+  return row
+}
+
+describe("a run parked on a durable timer when its process exits", () => {
+  it("stays suspended on `timer` with its deadline still pending, and is never cancelled", async () => {
+    frame = timerFrame
+    const root = makeRoot()
+    // One process's worth of lifetime: launch, park, exit.
+    const runId = await Effect.runPromise(
+      Effect.gen(function*() {
+        const id = yield* launch
+        yield* awaitParkEvent(id)
+        return id
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    const row = await settledEngineRow(root, runId)
+
+    expect(row?.status).toBe("suspended")
+    expect(row?.waiting_reason).toBe("timer")
+    expect(row?.cancel_requested_at_ms).toBeNull()
+    // The wait was 150 seconds; nothing may complete that deadline early.
+    expect(readPendingClocks(root, runId)).toHaveLength(1)
+    expect(readInterruptOutcomes(root, runId)).not.toContain("cancelled")
+  }, 120_000)
+})
+
+describe("a run parked on an in-run ask when its process exits", () => {
+  it("stays suspended on `approval`, and is never cancelled", async () => {
+    frame = askFrame
+    const root = makeRoot()
+    const runId = await Effect.runPromise(
+      Effect.gen(function*() {
+        const id = yield* launch
+        yield* awaitParkEvent(id)
+        return id
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    const row = await settledEngineRow(root, runId)
+
+    expect(row?.status).toBe("suspended")
+    expect(row?.waiting_reason).toBe("approval")
+    expect(row?.cancel_requested_at_ms).toBeNull()
+    expect(readInterruptOutcomes(root, runId)).not.toContain("cancelled")
+  }, 120_000)
+})
+
+describe("a run still executing when its process shuts down", () => {
+  it("is released for reclaim rather than cancelled", async () => {
+    frame = busyFrame
+    const root = makeRoot()
+    const runId = await Effect.runPromise(
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const held = yield* Deferred.make<void>()
+        noteEntered = entered
+        holdNote = held
+        const id = yield* launch
+        // Mid-execution, inside a cell call the handler is holding open.
+        yield* Deferred.await(entered)
+        return id
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    const row = await settledEngineRow(root, runId)
+
+    // the release policy: one cancellation path, and shutdown is not it.
+    expect(row?.status).not.toBe("cancelled")
+    expect(row?.cancel_requested_at_ms).toBeNull()
+    expect(row?.waiting_reason).toBe("released")
+    expect(readInterruptOutcomes(root, runId)).not.toContain("cancelled")
+  }, 120_000)
+})
+
+/** The exit condition `packages/smithers/src/Command.ts` `settled` waits on. */
+const settledKind = (kind: string): boolean =>
+  kind === "control.run.waiting-approval" ||
+  kind === "control.run.pending" ||
+  kind === "control.run.completed" ||
+  kind === "control.run.failed" ||
+  kind === "control.run.cancelled"
+
+describe("a running process whose run is cancelled from another one", () => {
+  it("is told the run settled, so it has something to stop waiting for", async () => {
+    frame = busyFrame
+    const root = makeRoot()
+    const kinds = await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control.Control
+        const entered = yield* Deferred.make<void>()
+        const held = yield* Deferred.make<void>()
+        noteEntered = entered
+        holdNote = held
+        const runId = yield* launch
+        // Mid-execution: the detached `smithers run` process is holding its
+        // executor open and waiting for this run's journal to say it has
+        // nothing left to drive.
+        yield* Deferred.await(entered)
+        // A second process over the same two files cancels it. One host id and
+        // one pid, which is what two local `smithers` processes are to the
+        // store (`SqlControlRuntime` compares host and pid).
+        yield* Effect.promise(() =>
+          Effect.runPromise(
+            Effect.gen(function*() {
+              const peer = yield* Control.Control
+              yield* peer.cancel({ runId, idempotencyKey: `cli:cancel:${runId}` })
+            }).pipe(
+              Effect.provide(host(root, hostOwner, "engine-park-canceller")),
+              Effect.scoped,
+              Effect.orDie
+            )
+          )
+        )
+        yield* Deferred.succeed(held, void 0)
+        const events = yield* Stream.runCollect(control.watch({ runId, follow: false }))
+        return events.map((event) => event.kind)
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    expect(kinds.filter(settledKind)).toContain("control.run.cancelled")
+  }, 120_000)
+})
+
+describe("a parked run resumed by a later process", () => {
+  it("continues the ask-parked run to completion when a second process approves", async () => {
+    frame = askFrame
+    const root = makeRoot()
+    const parked = await Effect.runPromise(
+      Effect.gen(function*() {
+        const id = yield* launch
+        const approval = yield* askPayload(id)
+        yield* awaitParkEvent(id)
+        return { runId: id, approval }
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    // A second process over the same two files: it approves and drives.
+    const settled = await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control.Control
+        const runtime = yield* ControlRuntime.ControlRuntime
+        yield* control.approve(parked.approval)
+        // The bound is `Ownership.heartbeatStaleAfter` (30 s) plus one
+        // delegation poll: a composition that did not park the run may only
+        // adopt a delegation that has stood unanswered that long
+        // (`AgentSession.hostsPark`). 90 s of headroom, so a slow machine is
+        // not read as a wedge.
+        yield* awaitStatus(runtime, parked.runId, "completed", 9_000)
+        return yield* runtime.getRun(parked.runId)
+      }).pipe(
+        Effect.provide(host(root, secondOwner, "engine-park-second")),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+
+    expect(settled.status).toBe("completed")
+    expect(notes).toContain("engine-park-second:decision=true")
+  }, 180_000)
+})
+
+/**
+ * Reads the engine row until it settles, or gives up.
+ *
+ * A cancel against a parked run is durable on the engine row the moment the
+ * control mutation commits; the row itself is finalized by the engine's own
+ * parked-run sweep, which every composition holding `engine.db` ticks once per
+ * `Ownership.heartbeatInterval`. So the bound is one tick of whatever engine is
+ * alive, not an unbounded wait, and this reads for thirty of them.
+ */
+const awaitEngineStatus = (
+  root: string,
+  runId: string,
+  status: string,
+  attempts = 300
+): Effect.Effect<EngineRow | undefined> =>
+  Effect.gen(function*() {
+    const row = readEngineRun(root, runId)
+    if (row?.status === status || attempts <= 0) return row
+    yield* Effect.sleep("100 millis")
+    return yield* awaitEngineStatus(root, runId, status, attempts - 1)
+  })
+
+describe("a run parked on an in-run ask that a later process cancels", () => {
+  it("settles both rows and answers the ask with the run's terminal status", async () => {
+    frame = askFrame
+    const root = makeRoot()
+    // One process's worth of lifetime: launch, park on the ask, exit.
+    const parked = await Effect.runPromise(
+      Effect.gen(function*() {
+        const id = yield* launch
+        const approval = yield* askPayload(id)
+        yield* awaitParkEvent(id)
+        return { runId: id, approval }
+      }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
+    )
+
+    // A second process over the same two files, which is what `smithers
+    // cancel` and `smithers approve` are to the run they name.
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control.Control
+        const runtime = yield* ControlRuntime.ControlRuntime
+        const cancelled = yield* control.cancel({
+          runId: parked.runId,
+          idempotencyKey: `cli:cancel:${parked.runId}`
+        })
+        // Read at once, not polled: the cancelling process drives the park it
+        // just recorded a cancellation for, so both rows are settled by the
+        // time the call returns. The smoke's engine row was still `suspended`
+        // fifteen seconds and six commands later, which is what let `gc` skip
+        // the run in `engine.db` while collecting it in `control.db`.
+        const engineRow = readEngineRun(root, parked.runId)
+        // The operator answers the ask afterwards, which is the release
+        // smoke's own sequence. It hung for 120 s and printed nothing.
+        const decided = yield* control.approve(parked.approval).pipe(Effect.timeout("15 seconds"))
+        const events = yield* Stream.runCollect(control.watch({ runId: parked.runId, follow: false }))
+        return {
+          cancelled,
+          decided,
+          engineRow,
+          summary: yield* runtime.getRun(parked.runId),
+          kinds: events.map((event) => event.kind)
+        }
+      }).pipe(
+        Effect.provide(host(root, secondOwner, "engine-park-canceller")),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+
+    // release policy 5.1: a cancel reaches a terminal state, and both
+    // `flows_runs` tables agree about which one.
+    expect(observed.cancelled).toEqual({ _tag: "Terminal", runId: parked.runId, status: "cancelled" })
+    expect(observed.summary.status).toBe("cancelled")
+    expect(observed.engineRow?.status).toBe("cancelled")
+    expect(observed.engineRow?.cancel_requested_at_ms).not.toBeNull()
+    // The event `smithers run` waits on, and the one `gc` needs to collect the
+    // run: without it the smoke left two permanently non-terminal rows.
+    expect(observed.kinds.filter(settledKind)).toContain("control.run.cancelled")
+    // And the decision answers the run instead of blocking on it.
+    expect(observed.decided).toEqual({ _tag: "Terminal", runId: parked.runId, status: "cancelled" })
+  }, 180_000)
+})

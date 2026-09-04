@@ -1,0 +1,58 @@
+/**
+ * The single typed error returned by every standard flow handler.
+ *
+ * @since 0.1.0
+ */
+import { Schema } from "effect"
+
+/**
+ * Stable, model-facing failure codes shared by the standard flows.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const Code = Schema.Literals([
+  "not_found",
+  "not_a_directory",
+  "not_a_file",
+  "is_directory",
+  "binary_file",
+  "offset_out_of_range",
+  "invalid_pattern",
+  "invalid_input",
+  "no_match",
+  "not_modified",
+  "outside_declared_reads",
+  "outside_declared_writes",
+  "command_failed",
+  "request_failed",
+  "timeout",
+  "provider_unavailable",
+  "unsupported",
+  "unsupported_content_type",
+  "response_too_large"
+])
+
+/**
+ * Stable, model-facing failure codes shared by the standard flows.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Code = typeof Code.Type
+
+/**
+ * A recoverable standard-flow failure.
+ *
+ * Handlers keep ordinary outcomes (a non-zero exit code, an empty match set)
+ * in the success channel; this error is reserved for failures the model must
+ * see as failures.
+ *
+ * @category errors
+ * @since 0.1.0
+ */
+export class StdError extends Schema.TaggedError<StdError>()("flows/std/StdError", {
+  code: Code,
+  message: Schema.String,
+  path: Schema.optional(Schema.String)
+}) {}

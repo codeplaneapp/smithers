@@ -1,0 +1,87 @@
+[
+  {
+    "file": "src/agentic/Plan.tsx",
+    "exports": [
+      "Plan",
+      "PlanHeader",
+      "PlanTitle",
+      "PlanDescription",
+      "PlanTrigger",
+      "PlanContent",
+      "PlanStep",
+      "PlanAction",
+      "PlanFooter",
+      "planStepStatus",
+      "PlanProps",
+      "PlanStepProps",
+      "PlanStepStatus"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/plan",
+    "ported": "full-anatomy",
+    "omissions": [],
+    "divergences": []
+  },
+  {
+    "file": "src/agentic/TaskItem.tsx",
+    "exports": ["TaskItem", "TaskItemFile", "TaskItemProps", "TaskItemFileProps"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/task",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": ["The collapsible task wrapper ships as AgentTask (Task collides with a smthrs workflow export)"]
+  },
+  {
+    "file": "src/agentic/AgentTask.tsx",
+    "exports": ["AgentTask", "AgentTaskTrigger", "AgentTaskContent", "AgentTaskGroup", "AgentTaskProps"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/task",
+    "ported": "full-anatomy",
+    "omissions": [],
+    "divergences": ["Renamed Task -> AgentTask to avoid the smthrs workflow Task export collision"]
+  },
+  {
+    "file": "src/agentic/Queue.tsx",
+    "exports": [
+      "Queue",
+      "QueueSection",
+      "QueueSectionTrigger",
+      "QueueSectionLabel",
+      "QueueSectionContent",
+      "QueueList",
+      "QueueItem",
+      "QueueItemIndicator",
+      "QueueItemContent",
+      "QueueItemDescription",
+      "QueueSectionProps",
+      "QueueSectionLabelProps",
+      "QueueItemProps",
+      "QueueItemIndicatorProps"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/queue",
+    "ported": "partial-anatomy",
+    "omissions": ["QueueItemActions", "QueueItemAttachment", "QueueItemImage", "QueueItemFile"],
+    "divergences": [
+      "Upstream documents a boolean-completed item model; our QueueItem takes a shared-vocabulary status string (status wins over completed)"
+    ]
+  },
+  {
+    "file": "src/agentic/ActivityTimeline.tsx",
+    "exports": [
+      "ActivityTimeline",
+      "ActivityItem",
+      "ActivityGroup",
+      "ActivityKind",
+      "ActivityItemModel",
+      "ActivityTimelineProps",
+      "ActivityItemProps",
+      "ActivityGroupProps"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": null,
+    "ported": "full-anatomy",
+    "omissions": [],
+    "divergences": ["smithers-original"]
+  }
+]

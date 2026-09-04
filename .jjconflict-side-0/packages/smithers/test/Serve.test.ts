@@ -1,0 +1,230 @@
+/**
+ * `smthrs serve`, and the bind it refuses.
+ *
+ * The failure this guards is silent: an unauthenticated control plane on a
+ * laptop's LAN address can launch agents with the operator's credentials, and
+ * nothing about the running server says so.
+ */
+import { ControlRpcs } from "@smthrs/control"
+import { Cause, Effect, Exit, Fiber, Layer } from "effect"
+import { Command } from "effect/unstable/cli"
+import { mkdtempSync, rmSync } from "node:fs"
+import { createServer } from "node:net"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
+import * as CliError from "../src/CliError.ts"
+import { cli } from "../src/Command.ts"
+import * as NodeControl from "../src/NodeControl.ts"
+import * as Serve from "../src/Serve.ts"
+import { packageVersion } from "../src/Version.ts"
+
+const staged: Array<string> = []
+const runCommand = Command.runWith(cli, { version: packageVersion })
+
+afterEach(() => {
+  while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
+})
+
+const freePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      if (address === null || typeof address === "string") {
+        server.close()
+        reject(new Error("expected a TCP test server"))
+        return
+      }
+      server.close((error) => error === undefined ? resolve(address.port) : reject(error))
+    })
+  })
+
+const waitForHealth = async (port: number): Promise<Response> => {
+  const deadline = Date.now() + 20_000
+  let lastFailure: unknown
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`)
+      if (response.ok) return response
+      lastFailure = new Error(`GET /health returned ${response.status}`)
+    } catch (cause) {
+      lastFailure = cause
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw lastFailure instanceof Error ? lastFailure : new Error("GET /health did not become ready")
+}
+
+const bind = (overrides: Partial<Serve.Bind> = {}): Serve.Bind => ({
+  host: "127.0.0.1",
+  port: 3000,
+  listen: false,
+  credential: undefined,
+  ...overrides
+})
+
+describe("the bind rule", () => {
+  it("allows loopback with nothing else", () => {
+    for (const host of Serve.loopbackHosts) {
+      expect(Serve.isLoopback(host)).toBe(true)
+      expect(Serve.refuse(bind({ host }))).toBeUndefined()
+    }
+    expect(Serve.defaultBind).toEqual({ host: "127.0.0.1", port: 3000 })
+  })
+
+  it("refuses a non-loopback bind without --listen", () => {
+    const refusal = Serve.refuse(bind({ host: "0.0.0.0" }))
+
+    expect(refusal).toBeInstanceOf(CliError.UnsupportedError)
+    expect(refusal?.message).toContain("pass --listen")
+    expect(CliError.exitCode(refusal!)).toBe(1)
+  })
+
+  it("refuses a non-loopback bind with --listen but no bearer token", () => {
+    const refusal = Serve.refuse(bind({ host: "10.0.0.4", listen: true }))
+
+    expect(refusal?.message).toContain("without a bearer token")
+    expect(refusal?.message).toContain("SMITHERS_API_KEY")
+    expect(Serve.refuse(bind({ host: "10.0.0.4", listen: true, credential: "" }))?.message)
+      .toContain("without a bearer token")
+  })
+
+  it("allows a non-loopback bind that opted in and carries a token", () => {
+    expect(Serve.refuse(bind({ host: "10.0.0.4", listen: true, credential: "secret" }))).toBeUndefined()
+    expect(Serve.isLoopback("10.0.0.4")).toBe(false)
+  })
+
+  it.each(
+    [
+      ["127.0.0.1", true],
+      ["::1", true],
+      ["localhost", true],
+      ["0.0.0.0", false],
+      ["192.0.2.1", false]
+    ] as const
+  )("keeps every Node bind boundary in parity for %s", (host, expected) => {
+    const auth = { token: "alpha-secret", principal: { id: "alpha", kind: "bearer" as const } }
+    const options = { host, port: 0 }
+    const boundaries = [
+      () => NodeControl.layerServer(ControlRpcs.layerBearerAuth(auth), options),
+      () => NodeControl.layerServerBearerAuth(auth, options),
+      () => NodeControl.layerServerNoopAuth(options),
+      () => NodeControl.layerGateway(Serve.health("/tmp/project"), options, "/tmp/project")
+    ]
+
+    expect(Serve.isLoopback(host)).toBe(expected)
+    for (const boundary of boundaries) {
+      if (expected) expect(boundary).not.toThrow()
+      else expect(boundary).toThrow()
+    }
+  })
+})
+
+describe("the mounts", () => {
+  it("names every route the gateway assembly hosts", () => {
+    // `@smthrs/gateway`'s `GatewayServer.layer` mounts exactly these. The
+    // banner is rendered from this list, so an entry that is not hosted cannot
+    // be advertised, which is the defect the previous banner had: it printed
+    // `/health` while the verb hosted the control server alone.
+    expect(Serve.mounts.map((mount) => mount.path)).toEqual([
+      "/rpc",
+      "/rpc/ws",
+      "/projections",
+      "/projections/ws",
+      "/sync",
+      "/sync/ws",
+      "/health"
+    ])
+    expect(Serve.mounts.filter((mount) => mount.protocol === "ws").map((mount) => mount.path)).toEqual([
+      "/rpc/ws",
+      "/projections/ws",
+      "/sync/ws"
+    ])
+  })
+
+  it("identifies the workspace by its root and nothing else", () => {
+    // A supervisor asks `/health` whether the gateway it found belongs to this
+    // workspace. The answer must not carry the operator's directory names.
+    const identity = Serve.health("/tmp/project-one")
+
+    expect(identity.workspaceHash).toBe(Serve.workspaceHash("/tmp/project-one/"))
+    expect(identity.workspaceHash).not.toBe(Serve.workspaceHash("/tmp/project-two"))
+    expect(identity.workspaceHash).not.toContain("project-one")
+    expect(identity.protocolVersion).toBe("1")
+  })
+})
+
+describe("the serve command", () => {
+  it("fails before composition for a refused bind and defects without a gateway host", async () => {
+    const refused = await Effect.runPromiseExit(
+      Serve.host(bind({ host: "0.0.0.0", listen: false }), "/work")
+    )
+    expect(Exit.isFailure(refused) && Cause.squash(refused.cause)).toBeInstanceOf(CliError.UnsupportedError)
+
+    const missing = await Effect.runPromiseExit(Serve.host(bind(), "/work"))
+    expect(Exit.isFailure(missing) && String(Cause.squash(missing.cause))).toContain("gateway host is missing")
+  })
+
+  it("omits an empty bearer credential from the gateway options", async () => {
+    let options: unknown
+    const gateway = Layer.succeed(Serve.GatewayHost, {
+      launch: (_health, input) =>
+        Effect.sync(() => {
+          options = input
+        }) as Effect.Effect<never>
+    })
+
+    await Effect.runPromise(Serve.host(bind({ credential: "" }), "/work").pipe(Effect.provide(gateway)))
+    expect(options).not.toHaveProperty("credential")
+  })
+
+  it("hosts GET /health until the command fiber is interrupted", async () => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-serve-"))
+    staged.push(root)
+    const port = await freePort()
+    const fiber = Effect.runFork(
+      runCommand(["--root", root, "serve", "--host", "127.0.0.1", "--port", String(port)]).pipe(
+        Effect.provide(NodeControl.layer({ root, migrationRoot: root }))
+      )
+    )
+
+    try {
+      const response = await waitForHealth(port)
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(Serve.health(root))
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(fiber))
+    }
+  }, 60_000)
+})
+
+describe("the banner", () => {
+  it("is rendered from the mount list, so it cannot advertise a 404", () => {
+    const banner = Serve.banner(bind())
+
+    for (const mount of Serve.mounts) {
+      const base = mount.protocol === "ws" ? "ws://127.0.0.1:3000" : "http://127.0.0.1:3000"
+      expect(banner).toContain(`${base}${mount.path}`)
+    }
+  })
+
+  it("names every mount and how the server authenticates", () => {
+    const banner = Serve.banner(bind())
+
+    expect(banner).toContain("http://127.0.0.1:3000")
+    expect(banner).toContain("/rpc")
+    expect(banner).toContain("ws://127.0.0.1:3000/rpc/ws")
+    expect(banner).toContain("/health")
+    expect(banner).toContain("none (loopback only)")
+  })
+
+  it("brackets an IPv6 host and reports bearer authentication", () => {
+    const banner = Serve.banner(bind({ host: "::1", credential: "secret" }))
+
+    expect(banner).toContain("http://[::1]:3000")
+    expect(banner).toContain("bearer token")
+  })
+})

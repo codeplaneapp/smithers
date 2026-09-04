@@ -1,0 +1,14 @@
+/**
+ * `@smthrs/ui/adapters/knowledge-graph`
+ *
+ * The Obsidian-style vault graph. It renders over a `d3-force` simulation, so
+ * like every other heavy renderer in this package it ships behind its own
+ * package subpath and never through the base barrel: `export *` from the vault
+ * lane used to pull 34 KB of d3-force into `src/index.ts` for every consumer,
+ * including the ones that never render a graph. `tests/barrel-weight.test.ts`
+ * holds that line.
+ *
+ * The pure graph math (`computeGraphModel`, `folderTint`, `nodeRadius`, ...)
+ * has no heavy dependency and stays on `@smthrs/ui` and `@smthrs/ui/vault`.
+ */
+export { KnowledgeGraph, type KnowledgeGraphProps } from "../vault/KnowledgeGraph";

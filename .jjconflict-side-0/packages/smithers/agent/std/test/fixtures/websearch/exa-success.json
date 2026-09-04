@@ -1,0 +1,10 @@
+{
+  "results": [
+    {
+      "title": "Recorded result",
+      "url": "https://example.com/recorded",
+      "text": "Recorded fixture result.",
+      "publishedDate": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

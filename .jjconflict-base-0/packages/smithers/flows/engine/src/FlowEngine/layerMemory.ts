@@ -1,0 +1,500 @@
+// Deep reviewed and polished by a human on 2026-08-10.
+
+/**
+ * A volatile, in-memory implementation of the flow runtime port.
+ *
+ * @since 0.1.0
+ */
+import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as FiberMap from "effect/FiberMap"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import type * as Scope from "effect/Scope"
+import { ExecutionIdentityConflict, FlowNotRegistered } from "./Errors.ts"
+import { makeInstance } from "./FlowInstance.ts"
+import { makeUnsafe } from "./make.ts"
+
+/**
+ * Layer that provides an in-memory `FlowRuntime`.
+ *
+ * **When to use**
+ *
+ * Use to run tests and local development flows where durability is not
+ * needed.
+ *
+ * **Gotchas**
+ *
+ * This layer keeps state only in memory and is not suitable for production
+ * flows that require durability.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(FlowRuntime.FlowRuntime)(
+  Effect.gen(function*() {
+    const scope = yield* Effect.scope
+
+    type Registration = {
+      readonly flow: Flow.Any
+      readonly execute: (
+        payload: object,
+        executionId: string
+      ) => Effect.Effect<unknown, unknown, FlowRuntime.FlowInstance | FlowRuntime.FlowRuntime>
+      readonly scope: Scope.Scope
+    }
+    // Registrations of one tag stack: the last still-open one serves, and a
+    // closed inner registration is spliced back out so the outer one serves
+    // again — the same restore `make.register`'s declaration table performs.
+    const flows = new Map<string, Array<Registration>>()
+
+    type ExecutionState = {
+      readonly payload: unknown
+      readonly parent: string | undefined
+      instance: FlowRuntime.FlowInstance["Service"]
+      fiber: Fiber.Fiber<Flow.Result<unknown, unknown>> | undefined
+      /**
+       * The fiber the flow body actually runs in: `Flow.intoResult` forks the
+       * body as a child of the round fiber, and a normal `interrupt` targets
+       * this child so the round fiber survives to CONVERT the interruption
+       * into the recorded cancellation instead of dying on it.
+       */
+      bodyFiber: Fiber.Fiber<unknown, unknown> | undefined
+    }
+    const executions = new Map<string, ExecutionState>()
+
+    // Every child execution request records an edge, including a fan-in that
+    // joins an existing execution. This mirrors the durable engine's edge
+    // table: keeping only ExecutionState.parent would miss second-parent
+    // cycles and let the participants join one another forever.
+    const parents = new Map<string, Set<string>>()
+    const recordParent = (
+      child: string,
+      parent: string
+    ): Effect.Effect<void, FlowRuntime.FlowCycleDetected> =>
+      Effect.suspend(() => {
+        const pending: Array<readonly [string, ReadonlyArray<string>]> = [[parent, [parent]]]
+        const visited = new Set<string>()
+        while (pending.length > 0) {
+          const [current, path] = pending.shift()!
+          if (current === child) {
+            return Effect.fail(
+              new FlowRuntime.FlowCycleDetected({
+                code: "flow_cycle_detected",
+                path: [...path].reverse()
+              })
+            )
+          }
+          if (visited.has(current)) continue
+          visited.add(current)
+          for (const ancestor of parents.get(current) ?? []) {
+            pending.push([ancestor, [...path, ancestor]])
+          }
+        }
+        const existing = parents.get(child)
+        if (existing === undefined) {
+          parents.set(child, new Set([parent]))
+        } else {
+          existing.add(parent)
+        }
+        return Effect.void
+      })
+
+    type ActionState = {
+      readonly settlement: Deferred.Deferred<Flow.Result<unknown, unknown>>
+      exit: Exit.Exit<Flow.Result<unknown, unknown>> | undefined
+    }
+    const actions = new Map<string, ActionState>()
+
+    /**
+     * Rebuilds one payload through the flow's own payload schema.
+     *
+     * The engine stores a rebuilt copy and rebuilds again for every drive, so
+     * neither the caller that submitted the payload nor a handler that mutated
+     * the value it received can reach the value a later drive runs on. The
+     * schema constructor is the copier because it is the only description of
+     * the payload the engine has: it rebuilds each struct, array, and record
+     * it declares, and it hands back by reference the values it declares
+     * opaque, such as a `Schema.declare` reference to a live object. Copying
+     * through `Schema.toCodecJson` instead, as this did until 2026-09-01,
+     * demanded a JSON representation of every member and so refused any
+     * payload holding a declared reference, including every `smithers-build`
+     * target that names a dependency. The constructor also belongs to the
+     * schema object itself, so a flow authored against a second `effect`
+     * instance is rebuilt by the instance that owns it.
+     */
+    const snapshot = (
+      flow: Flow.Any,
+      value: unknown
+    ): Effect.Effect<unknown> => Effect.orDie(flow.payloadSchema.makeEffect(value as never))
+
+    /**
+     * Structural identity of two rebuilt payload snapshots.
+     *
+     * `snapshot` rebuilds each struct, array, and record the payload schema
+     * declares and hands back declared-opaque values by reference, so
+     * recursing into plain objects and arrays and comparing every leaf with
+     * `Object.is` is exactly the identity the schema describes. It is bounded
+     * so a self-referential declared value cannot make the comparison diverge.
+     */
+    const samePayload = (left: unknown, right: unknown, depth: number): boolean => {
+      if (Object.is(left, right)) return true
+      if (depth === 0) return false
+      if (typeof left !== "object" || left === null) return false
+      if (typeof right !== "object" || right === null) return false
+      try {
+        const leftArray = Array.isArray(left)
+        const rightArray = Array.isArray(right)
+        if (leftArray !== rightArray) return false
+        if (!leftArray) {
+          const leftPrototype = Object.getPrototypeOf(left)
+          const rightPrototype = Object.getPrototypeOf(right)
+          if (leftPrototype !== Object.prototype && leftPrototype !== null) return false
+          if (rightPrototype !== Object.prototype && rightPrototype !== null) return false
+        }
+        const leftKeys = Object.keys(left)
+        const rightKeys = Object.keys(right)
+        if (leftKeys.length !== rightKeys.length) return false
+        for (const key of leftKeys) {
+          if (!Object.hasOwn(right, key)) return false
+          if (
+            !samePayload(
+              (left as Record<string, unknown>)[key],
+              (right as Record<string, unknown>)[key],
+              depth - 1
+            )
+          ) return false
+        }
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    // Untraced because resume recursively drives suspended executions.
+    const resume = Effect.fnUntraced(function*(executionId: string): Effect.fn.Return<void> {
+      const state = executions.get(executionId)
+      if (!state) return
+      const exit = state.fiber?.pollUnsafe()
+      // Suspension is the only settlement a re-drive continues from: a round
+      // that completed has its answer, and one that handed off has already
+      // opened the next round, so re-running either would re-run its effects.
+      if (exit && exit._tag === "Success" && exit.value._tag !== "Suspended") {
+        return
+      } else if (state.fiber && !exit) {
+        return
+      }
+
+      // The latest still-open registration serves every drive, so a re-drive
+      // after an inner scoped registration of the tag closed follows the
+      // outer registration exactly as `make.register`'s declaration table
+      // does. With every registration closed the execution stays parked for
+      // a process that registers the flow again — the durable driver takes
+      // the same posture for a run that wakes where its flow is unknown.
+      const entry = flows.get(state.instance.flow._tag)?.at(-1)
+      if (entry === undefined) return
+      const instance = makeInstance(state.instance.flow, state.instance.executionId)
+      instance.interrupted = state.instance.interrupted
+      state.instance = instance
+      const payload = yield* snapshot(state.instance.flow, state.payload) as Effect.Effect<object>
+      state.fiber = yield* entry.execute(payload, state.instance.executionId).pipe(
+        // Runs as the forked body fiber's first instruction: it hands
+        // `interrupt` the fiber the body runs in, and it answers a
+        // cancellation that landed BEFORE the body started — the flag is
+        // already set, so the body self-interrupts instead of dispatching
+        // work whose cancellation was requested.
+        (body) =>
+          Effect.withFiber<unknown, unknown, FlowRuntime.FlowInstance | FlowRuntime.FlowRuntime>(
+            (fiber) => {
+              state.bodyFiber = fiber
+              return instance.interrupted ? Effect.interrupt : body
+            }
+          ),
+        Effect.onExit(() => {
+          if (!instance.interrupted) {
+            return Effect.void
+          }
+          instance.suspended = false
+          return Effect.withFiber((fiber) => Effect.interruptible(Fiber.interrupt(fiber)))
+        }),
+        Flow.intoResult,
+        Effect.provideService(FlowRuntime.FlowInstance, instance),
+        Effect.provideService(FlowRuntime.FlowRuntime, engine),
+        Effect.tap((result) => {
+          if (!state.parent || result._tag !== "Complete") {
+            return Effect.void
+          }
+          return Effect.forkIn(resume(state.parent), scope)
+        }),
+        Effect.forkIn(entry.scope)
+      )
+    })
+
+    const deferredResults = new Map<string, Exit.Exit<any, any>>()
+
+    const clocks = yield* FiberMap.make<string>()
+
+    const engine = makeUnsafe({
+      // Untraced because registration feeds back into the in-memory engine.
+      register: Effect.fnUntraced(function*(flow, execute) {
+        const registration: Registration = {
+          flow,
+          execute,
+          scope: yield* Effect.scope
+        }
+        const existing = flows.get(flow._tag)
+        const entries = existing ?? []
+        if (existing === undefined) flows.set(flow._tag, entries)
+        entries.push(registration)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            entries.splice(entries.indexOf(registration), 1)
+            if (entries.length === 0) flows.delete(flow._tag)
+          })
+        )
+      }),
+      // Untraced because execution recursively invokes child flows.
+      execute: Effect.fnUntraced(function*(flow, options) {
+        const entry = flows.get(flow._tag)?.at(-1)
+        if (!entry) {
+          return yield* Effect.die(
+            new FlowNotRegistered({
+              flowName: flow._tag,
+              message: `Flow ${flow._tag} is not registered`
+            })
+          )
+        }
+
+        let state = executions.get(options.executionId)
+        // An execution id names one run of one flow declaration and one
+        // rebuilt payload snapshot. A reused id may join only when both
+        // identities match, exactly as the durable driver's `ensureCreatedRun`
+        // does. The id is caller-supplied identity, so a multi-tenant server
+        // must namespace it before requests share an engine.
+        if (state !== undefined && state.instance.flow._tag !== flow._tag) {
+          return yield* Effect.die(
+            new ExecutionIdentityConflict({
+              executionId: options.executionId,
+              field: "flow",
+              expected: state.instance.flow._tag,
+              actual: flow._tag,
+              message: `execution ${options.executionId} already belongs to flow ${state.instance.flow._tag}; ` +
+                `it cannot be reused for flow ${flow._tag}`
+            })
+          )
+        }
+        if (state !== undefined) {
+          const requestedPayload = yield* snapshot(flow, options.payload)
+          if (!samePayload(state.payload, requestedPayload, 64)) {
+            return yield* Effect.die(
+              new ExecutionIdentityConflict({
+                executionId: options.executionId,
+                field: "payload",
+                expected: "the payload the execution was admitted with",
+                actual: "a different payload",
+                message: `execution ${options.executionId} already belongs to the payload it was admitted with; ` +
+                  "it cannot be reused for a different payload"
+              })
+            )
+          }
+        }
+        if (options.parent !== undefined) {
+          yield* recordParent(options.executionId, options.parent.executionId)
+        }
+        if (!state) {
+          const storedPayload = yield* snapshot(flow, options.payload)
+          state = {
+            // The stored value never crosses into user code. Every drive
+            // rebuilds its own copy, so caller and handler mutation cannot
+            // alter a replay.
+            payload: storedPayload,
+            instance: makeInstance(flow, options.executionId),
+            fiber: undefined,
+            bodyFiber: undefined,
+            parent: options.parent?.executionId
+          }
+          executions.set(options.executionId, state)
+          yield* resume(options.executionId)
+        }
+        if (options.discard) return
+        return (yield* Fiber.join(state.fiber!)) as any
+      }),
+      // Untraced because interruption is coordinated from recursive execution.
+      interrupt: Effect.fnUntraced(function*(_flow, executionId) {
+        const state = executions.get(executionId)
+        if (!state) return
+        state.instance.interrupted = true
+        // `execute` installs the state and synchronously starts `resume`
+        // before it can return its execution id, so every publicly
+        // observable execution has a round fiber to inspect.
+        const exit = state.fiber!.pollUnsafe()
+        if (exit === undefined) {
+          // The round is LIVE. The interruption is delivered to the body
+          // fiber rather than the round fiber: the round fiber then converts
+          // it into the recorded cancellation — `Complete` with an interrupt
+          // cause, after the body's finalizers ran — where interrupting the
+          // round fiber itself would leave `poll` dying on a bare interrupt
+          // exit. Delivery is a send, not an await: the contract is a
+          // cancellation REQUEST, and a body pinned in an uninterruptible
+          // region settles on its own time with the request already
+          // recorded. A round fiber that has not started yet has no body
+          // fiber; its body observes the flag and self-interrupts on start.
+          if (state.bodyFiber !== undefined) {
+            const bodyFiber = state.bodyFiber
+            yield* Effect.withFiber((fiber) => Effect.sync(() => bodyFiber.interruptUnsafe(fiber.id)))
+          }
+          return
+        }
+        yield* resume(executionId)
+      }),
+      // Untraced because interruption is coordinated from recursive execution.
+      interruptUnsafe: Effect.fnUntraced(function*(_flow, executionId) {
+        const state = executions.get(executionId)
+        if (!state) return
+        state.instance.interrupted = true
+        // `execute` installs the state and synchronously starts `resume`
+        // before it can return its execution id. `resume` assigns this fiber
+        // without yielding, so every publicly observable execution has one.
+        yield* Fiber.interrupt(state.fiber!)
+      }),
+      resume(_flow, executionId) {
+        return resume(executionId)
+      },
+      // Untraced because action execution is a retry-loop hot path.
+      actionExecute: Effect.fnUntraced(function*(options) {
+        const action = options.action
+        const instance = yield* FlowRuntime.FlowInstance
+        const actionId = JSON.stringify([options.key, options.attempt])
+        const state = actions.get(actionId)
+        if (state) {
+          const exit = state.exit
+          if (exit && exit._tag === "Success" && exit.value._tag === "Suspended") {
+            actions.delete(actionId)
+          } else if (exit) {
+            return yield* exit
+          } else {
+            return yield* Deferred.await(state.settlement)
+          }
+        }
+        const owner: ActionState = {
+          exit: undefined,
+          settlement: yield* Deferred.make<Flow.Result<unknown, unknown>>()
+        }
+        actions.set(actionId, owner)
+        const actionInstance = makeInstance(instance.flow, instance.executionId)
+        actionInstance.interrupted = instance.interrupted
+        // DECIDED (2026-08-11, pending review): the waiting classification is
+        // threaded through the dispatch's instance and back, because a driver
+        // gives an action its own instance while `annotateWaiting` is
+        // documented to reach the parked run. An implementation that declares
+        // one — `Sleep` under `timer`, `WaitFor` under `event` with its wake
+        // token — writes it here, so without the thread-back the driver would
+        // park on the derived default and the declaration would be inert for
+        // every action. It is seeded as well as copied back so a body that
+        // annotated before dispatching keeps its own declaration, and so the
+        // consumption `deferredResult` performs on a settled wait travels out
+        // the same way (issue #42).
+        const waitingBefore = instance.waiting
+        actionInstance.waiting = waitingBefore
+        return yield* action.executeEncoded.pipe(
+          Flow.intoResult,
+          Effect.provideService(FlowRuntime.FlowInstance, actionInstance),
+          Effect.onExit((exit) => {
+            owner.exit = exit
+            return Deferred.done(owner.settlement, exit)
+          }),
+          Effect.ensuring(Effect.sync(() => {
+            if (instance.waiting === waitingBefore) instance.waiting = actionInstance.waiting
+          }))
+        )
+      }),
+      poll: (flow, executionId) =>
+        Effect.suspend(() => {
+          const state = executions.get(executionId)
+          if (!state) {
+            // An unknown execution is a typed failure, not `Option.none`:
+            // `none` is reserved for a known run that has not settled yet.
+            return Effect.fail(
+              new FlowRuntime.FlowExecutionNotFound({
+                code: "execution_not_found",
+                executionId
+              })
+            )
+          }
+          // A run owned by another declaration has no settled result from
+          // this flow's view. `none` matches the durable driver's posture and
+          // avoids presenting another flow's encoded result under this one.
+          if (state.instance.flow._tag !== flow._tag) return Effect.succeedNone
+          const exit = state.fiber?.pollUnsafe()
+          if (!exit) {
+            return Effect.succeedNone
+          }
+          return exit._tag === "Success"
+            ? Effect.succeedSome(exit.value)
+            : Effect.die(exit.cause)
+        }),
+      // Untraced because deferred polling is a flow scheduler hot path.
+      deferredResult: Effect.fnUntraced(function*(deferred) {
+        const instance = yield* FlowRuntime.FlowInstance
+        const id = JSON.stringify([instance.flow._tag, instance.executionId, deferred.name])
+        return Option.fromNullishOr(deferredResults.get(id))
+      }),
+      deferredDone: (options) =>
+        Effect.suspend(() => {
+          const execution = executions.get(options.executionId)
+          if (execution !== undefined && execution.instance.flow._tag !== options.flowName) {
+            return Effect.die(
+              new ExecutionIdentityConflict({
+                executionId: options.executionId,
+                field: "flow",
+                expected: execution.instance.flow._tag,
+                actual: options.flowName,
+                message: `execution ${options.executionId} belongs to flow ${execution.instance.flow._tag}; ` +
+                  `a deferred for ${options.flowName} cannot complete it`
+              })
+            )
+          }
+          const id = JSON.stringify([options.flowName, options.executionId, options.deferredName])
+          if (deferredResults.has(id)) return Effect.void
+          deferredResults.set(id, options.exit)
+          return resume(options.executionId)
+        }),
+      deferredDoneIfWaiting: (options) =>
+        Effect.suspend(() => {
+          const execution = executions.get(options.executionId)
+          const waiting = execution?.instance.waiting
+          if (
+            execution === undefined ||
+            execution.instance.flow._tag !== options.flowName ||
+            waiting?.reason !== options.reason ||
+            waiting.token !== options.token
+          ) {
+            return Effect.succeed("NotWaiting" as const)
+          }
+          const id = JSON.stringify([options.flowName, options.executionId, options.deferredName])
+          const outcome = deferredResults.has(id) ? "Existing" as const : "Completed" as const
+          if (outcome === "Completed") deferredResults.set(id, options.exit)
+          return resume(options.executionId).pipe(Effect.as(outcome))
+        }),
+      scheduleClock: (flow, options) =>
+        engine.deferredDone(options.clock.deferred, {
+          flowName: flow._tag,
+          executionId: options.executionId,
+          deferredName: options.clock.deferred.name,
+          exit: Exit.void
+        }).pipe(
+          Effect.delay(options.clock.duration),
+          FiberMap.run(clocks, JSON.stringify([flow._tag, options.executionId, options.clock.name]), {
+            onlyIfMissing: true
+          }),
+          Effect.asVoid
+        )
+    })
+
+    return engine
+  })
+)

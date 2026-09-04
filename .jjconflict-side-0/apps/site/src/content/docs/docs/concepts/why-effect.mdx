@@ -1,0 +1,69 @@
+---
+title: "Why Effect"
+description: "Why flows are Effect programs, why implementations attach as layers, and why the Effect version is pinned."
+sidebar:
+  order: 11
+---
+
+Smithers is a durable-execution engine built on Effect. That is a load-bearing choice, not a style one: the journal, the retry model, the test story, and the package boundaries all come out of what Effect gives a flow program.
+
+## Flows are Effect programs
+
+A flow body is a pure function that returns an Effect, and an action is an Effect with declared payload, success, and error schemas. The engine interprets the program, and every side effect the program performs is journaled as it happens, so a crashed process resumes from the record. Errors are typed: the failure channel of a step is a union the compiler checks, and a retry policy can branch on it instead of parsing messages.
+
+## Layers, not hooks
+
+An implementation attaches to a declaration as a layer, and a composition is layers merged and provided. `Greet.toLayer` supplies an action's code, `Interpreter.layer` drives a flow's body, `FlowEngine.layerMemory` or the SQLite engine store supplies the runtime, and `Layer.mergeAll` with `Layer.provideMerge` wires the stack. There is no global registry and no hook list to mutate. Swapping the engine layer moves a flow, source unchanged, from an in-memory engine to a durable one.
+
+```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+
+const Greet = Action.make("examples/Greet", {
+  payload: { name: Schema.String },
+  success: Schema.String
+})
+
+const Greeting = Flow.make("examples/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  body: (payload) => Greet.call(payload)
+})
+
+const GreetingLayer = Layer.mergeAll(
+  Greet.toLayer(({ name }) => Effect.succeed(`Hello, ${name}.`)),
+  Interpreter.layer(Greeting)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  Layer.provideMerge(NodeCrypto.layer)
+)
+```
+
+Because behavior is context, a test provides a different context: the same flow runs against an in-memory engine, a scripted model, or a stubbed clock, with no edits to the flow source and no module mocking. That is what the feature list means by "Layers, not hooks."
+
+## The FlowRuntime port
+
+`@smthrs/flow` declares `FlowRuntime`, the port the authoring APIs are written against: registration, execution, polling, interruption, resume, deferred lookup and completion, and clock scheduling. The package depends on nothing that implements it. The dependency direction is `@smthrs/flow`, then `@smthrs/engine`, then the durable stores, with no cycle and no type-only escape hatch back. That direction is what lets the whole authoring surface bundle for the browser: durability arrives with whichever runtime you provide.
+
+## The pinned version and what it buys
+
+Effect is pinned to exactly `4.0.0-rc.108`, and a project must resolve one Effect instance. Schema internals are not interoperable between two instances, so a project with two copies would decode the same journal payload two different ways. The pin buys one schema universe: a value encoded in one process decodes identically in every other process of the project, which is what a shared journal and a shared step cache require.
+
+On top of the pin, the engine uses three Effect guarantees everywhere. Typed errors: a step's failure channel is declared and checked, so quarantine and retry decisions branch on structure. Testable layers: any credentialed or environmental piece is swapped at composition time. Structured concurrency: a run is a scope, cancellation propagates at once, and only an interrupt explicitly marked as infrastructure consumes a retry policy.
+
+Effect is not an interchangeable detail. The pin is a hard requirement of the project layout, not a recommendation. [Installation](/docs/installation/) explains how the platform package's peer dependencies keep the runtime on that pin.
+
+## Where Smithers diverges from upstream
+
+Effect ships a workflow package of its own. Smithers vendors that surface rather than depending on it, then diverges by being stricter and more cacheable. Upstream derives a run's identity by hashing the flow tag and payload, so unrelated runs with equal payloads silently join; here the caller chooses the execution id and derivation is opt-in. Upstream derives a step's identity from its activity's name, so renaming an activity corrupts replay; here step keys are content-addressed over canonical JSON. Upstream retries any interruption ten times by default; here cancellation propagates at once.
+
+## Related
+
+- [Installation](/docs/installation/): the pinned install line and repair commands.
+- [Durable execution](/docs/concepts/durable-execution/): what the journaled program buys you.
+- [Module flows](/docs/guides/module-flows/): the authoring surface these layers serve.

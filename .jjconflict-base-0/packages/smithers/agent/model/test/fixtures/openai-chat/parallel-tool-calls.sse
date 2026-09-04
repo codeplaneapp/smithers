@@ -1,0 +1,7 @@
+data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"extra_content":{"google":{"thought_signature":"<signature>"}},"function":{"arguments":"{\"city\":\"Paris\"}","name":"get_weather"},"id":"call_365409","type":"function"}]},"index":0}],"created":1787801955,"id":"YrGPavuGIbah9MoP5_XUmAg","model":"gemini-3-flash-preview","object":"chat.completion.chunk","usage":{"completion_tokens":16,"prompt_tokens":64,"total_tokens":138}}
+
+data: {"choices":[{"delta":{"role":"assistant","tool_calls":[{"function":{"arguments":"{\"city\":\"Tokyo\"}","name":"get_weather"},"id":"call_365410","type":"function"}]},"index":0}],"created":1787801955,"id":"YrGPavuGIbah9MoP5_XUmAg","model":"gemini-3-flash-preview","object":"chat.completion.chunk","usage":{"completion_tokens":32,"prompt_tokens":64,"total_tokens":154}}
+
+data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":"stop","index":0}],"created":1787801955,"id":"YrGPavuGIbah9MoP5_XUmAg","model":"gemini-3-flash-preview","object":"chat.completion.chunk","usage":{"completion_tokens":32,"prompt_tokens":64,"total_tokens":154}}
+
+data: [DONE]

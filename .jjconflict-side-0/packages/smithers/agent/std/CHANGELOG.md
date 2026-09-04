@@ -1,0 +1,59 @@
+# @smthrs/std
+
+## [Unreleased]
+
+## [1.0.0-rc.0] - 2026-09-01
+
+### Added
+
+- Added `Manifest.effectsFor`, a frozen name-to-narrowing registry, and the missing `effectsFor` narrowing on `apply_patch`, `shell_command` and `update_plan`, so a host holding a flow name and a decoded input can narrow the envelope instead of serializing against the registry-time worst case.
+- Added `SearchContract` as a public module: `validatePattern`, `validateGlob`, `canonicalGlob`, `matchesGlob`, `includedByGlobs`, `expression` and `unsatisfiableNotice` are what an external `Search` peer must build on, and they were reachable only through the null-mapped `internal/` subpath.
+- Added default wall-clock timeouts to `bash` and `test` (`DEFAULT_TIMEOUT_MS`, ten minutes) and a capture bound to every buffered command, so a hung command no longer hangs the flow forever and a command printing gigabytes costs the bound rather than the whole of what it printed. `<stream>DroppedBytes` now counts what the process produced rather than what survived the display budget.
+- Added package-owned documentation: `docs/api.md` states the limits, the failure codes and the services a host binds, `docs/Manifest.ts` declares the surfaces, and `scripts/docs.mjs` generates `docs/reference.md` from the barrel's JSDoc and fails when `README.md`'s Public API table no longer matches the barrel. `scripts/check-docs.mjs` discovers the generator, so the drift check is a repository gate. The README's table had named 21 of the 30 exported namespaces, omitting three registry flows a model can call, and stated no limits, no failure codes and no service-binding behaviour.
+- Added a `test` flow bound to the repository's declared runner (`TestRunner`): it answers `{passed, failed[ids], parsed, tail}` read from the runner's own report — pytest, unittest and TAP are recognised — instead of twenty kilobytes of stdout, and `against: "base"` runs the same selection again on the pristine base commit in a detached worktree so `introduced`, `preexisting` and `fixed` come back from one call. The base is the engine's `refs/flows/capture-base`, then HEAD.
+- Added a `Container` transport service, and `script`/`interpreter`/`args`/`stdin`/`container` inputs to `bash`. A script reaches its interpreter on standard input as data, so no caller composes `docker exec c bash -lc '…heredoc…'` again; the argv for a container is built by the injected transport, and a host with none refuses the call by saying so.
+- Added the enclosing definition to every returned `grep` hit where the file's shape says so plainly, so a read window is computed rather than guessed; `symbols: false` turns it off.
+- Added `startLine`/`endLine`/`expect` anchoring to `edit`, so an edit can target the span a prior `read` or `grep` hit reported instead of retyping it.
+- Added `webfetch`, `websearch`, and `lsp` flows with provider-neutral service boundaries.
+- Added one ripgrep-compatible search contract with native `rg` and in-process peer implementations, shared conformance coverage, context lines, case modes, globs, per-file match limits, hidden-file control, and files-with-matches output.
+
+### Changed
+
+- **Breaking.** `read` now returns raw file text in `content`, with the line numbers in the sibling `startLine`/`endLine` fields, instead of rendering `NNN\t` before every line. An anchor copied out of a read used to carry the gutter, so every `edit` built from a read missed and cells wrote string surgery to strip it. A byte-capped page now also ends on a whole line rather than a fragment that reads like an anchor.
+- **Breaking.** `grep` results are match-centric: `limit` counts matches, each hit carries the `before`/`after` context that belongs to it, every context line belongs to exactly one hit, and a hit can no longer be dropped to make room for context. The flat `{file, line, text, kind}` rows are gone. A metacharacter pattern that finds nothing is retried as a literal, with `retriedAsLiteral` set.
+- **Breaking.** `edit` matches its anchor byte-exactly or fails, and reports the file's real text at the nearest region with its line range. The tolerant apply cascade (trailing whitespace, then collapsed whitespace) is gone from the apply path and survives only as that diagnosis: a match that is not the caller's bytes is an edit nobody inspected, which silently dedented a guard on one instance and corrupted a file on another. `edit` also returns the applied hunk, and `edit`, `write` and `apply_patch` all restore permission bits a host write moved.
+- Documented Bash's `stdoutTruncated`/`stderrTruncated` flags as the wire convention `@smthrs/harness/TruncatedOutput` reads, and stated in each stream's description that a truncated capture is a fragment that must not be written to a file.
+- Allowed hermetic Bash invocations to use the resolved base directory as their working directory without declaring it as a read.
+- Exempted `/dev/*` from the hermetic Bash path scan; process plumbing is not a workspace effect.
+
+### Fixed
+
+- **Breaking.** Closed three independent bypasses in the hermetic pre-check, each on its own sufficient to defeat it. A newline is now a command boundary, so `rm` on line two of a `script` is checked against `writes` instead of being classified under line one's command, and a leading `env`/`sudo`/`nice`/`xargs` wrapper no longer lends its own read classification to the command it wraps. Every path token and every declared entry is resolved before comparison, so `/work/../outside/secret.txt` is no longer inside `reads: ["/work"]` and `/dev/../etc/passwd` is checked as `/etc/passwd` rather than dropped as process plumbing. A blank entry in `reads`/`writes` no longer grants every absolute path, `"/"` now means the whole filesystem rather than nothing, and both fields reject the empty string at decode time.
+- Refused a container name that is empty or starts with `-`, and terminated the container argv with `--`, so `container: "--privileged"` can no longer be read as an option by `docker exec`.
+- Stopped `Html.decode` from throwing on an out-of-range or surrogate numeric entity, and bounded the element-skipping scan, which took thirty seconds on a two-megabyte page with unclosed `<script>` tags outside every timeout `webfetch` applies.
+- Made `test` report a reading only when the runner's own counts and the failure ids it named agree. A summary-only capture (`2 failed`, or `Ran 2 tests` with `FAILED (failures=2)` and no headers) used to come back `parsed: true` with an empty failure set, which reported every base failure as fixed.
+- Gave the `against: "base"` worktree the shape `Checkpoints` already proved it needs: a stale checkout is discarded first, the checkout's git pointer is relative so a container can read it, and the repository's format is restored. One killed run used to break every later baseline permanently.
+- Escaped `?` in a fixed-string search, so a literal `foo?` no longer matches `fo` and a bare `?` no longer dies as an unhandled defect instead of a typed failure.
+- Counted lines the way `grep` counts them in `read` and `edit`: a file ending in a newline no longer reports one line more than it has, and an empty file reads as an empty page instead of an out-of-range offset.
+- Refused a `file:`, `data:` or credential-bearing URL in `fetch`, `http-post` and `webfetch` through one shared guard, and bounded every HTTP response before decoding.
+- Made `apply_patch` derive every hunk before writing any of it, so a miss on the third hunk leaves the first two unwritten, and named what had been applied when a write itself fails.
+- Made `edit` refuse `expect` under an `oldString` anchor and `replaceAll` under a line span instead of silently ignoring them, and refuse an `endLine` past the end of the file instead of clamping it.
+- Made `edit` and `apply_patch` read bytes and refuse a non-UTF-8 file the way `read` does, instead of rewriting the whole file with replacement characters where the invalid bytes were.
+- Propagated a permission-restoration failure instead of swallowing it, so a write that moved the mode bits and could not put them back is a failure rather than a success.
+- Ordered `ls` by UTF-16 code unit rather than the host's ICU locale, reported a file as `not_a_directory`, and stat'd only the page it returns rather than every entry in the directory.
+- Turned an Exa HTTP error into a distinguishable failure instead of a successful empty search, and bounded the provider request.
+- Parsed `rg --files` output as NUL-separated, so a legal filename containing a newline is one path rather than two fabricated ones.
+- Reported the truncation notice with the real byte totals, and stopped the cut-repair from eating a replacement character the source itself contained.
+- Classified the invalid-command probe in `test` against the text the caller receives, so its evidence line is always quotable from the returned tail.
+- Anchored the `Probe` recognisers the module documents as whole-line matchers.
+- Bounded the language-server transport: a frame header over 8 KiB and a frame over 8 MiB are refused and resynchronized past, the pending buffer grows by chunks instead of copying itself per chunk, and every outstanding request fails when stdout closes or the child exits.
+- Returned the workspace-wide envelope from `Lsp.effectsFor`, which narrowed reads to the queried file while the server reads the whole project.
+- Dropped the single-in-progress sentence from `update_plan`'s description, which the schema never enforced.
+- Made `edit` report the nearest actual region on a miss, as raw quotable bytes rather than line-number-prefixed text; two benchmark runs burned their whole frame budget on whitespace-guessing loops. Prior art: `reference/opencode` `tool/edit.ts`, where this deviates deliberately by refusing to apply a loose match.
+
+- Stopped `grep` and `glob` walks from descending into version-control, dependency, and cache directories; one `.git` descent held a frame for its whole evaluation ceiling.
+
+- Reported a directory entry whose metadata cannot be read as a plain entry instead of failing the whole `ls` listing.
+
+[Unreleased]: https://github.com/smithersai/smithers/compare/v1.0.0-rc.0...HEAD
+[1.0.0-rc.0]: https://github.com/smithersai/smithers/releases/tag/v1.0.0-rc.0

@@ -1,0 +1,241 @@
+/**
+ * `smithers-build create-app <dir>`: copy a `@smthrs/create-app` template into a new
+ * directory.
+ *
+ * The templates ship inside `@smthrs/create-app`, so the CLI resolves them
+ * through Node rather than knowing a path. Scaffolding is a file copy plus one
+ * substitution: `__APP_NAME__` becomes the directory's own name.
+ *
+ * The `@smthrs/*` packages a template depends on are not published yet, so a
+ * copy made from a source checkout rewrites those specifiers to `link:` paths
+ * into that checkout. `link: false` keeps the declared versions.
+ *
+ * @since 0.1.0
+ */
+import * as NodeFs from "node:fs/promises"
+import { createRequire } from "node:module"
+import * as NodePath from "node:path"
+
+/** File extensions whose contents carry the app name. */
+const substituted = new Set([".css", ".html", ".json", ".jsonc", ".md", ".mjs", ".ts", ".tsx"])
+
+/** The placeholder a template writes wherever the app's own name belongs. */
+const placeholder = "__APP_NAME__"
+
+/** npm's name grammar, minus the scoped form: a directory name is the app name. */
+const appName = /^[a-z0-9][a-z0-9._-]*$/
+
+/**
+ * What one scaffold did.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ScaffoldReport {
+  readonly directory: string
+  readonly name: string
+  readonly template: string
+  readonly files: number
+  /** Dependency names rewritten to `link:` paths, empty when nothing was linked. */
+  readonly linked: ReadonlyArray<string>
+}
+
+/**
+ * What one scaffold takes.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ScaffoldOptions {
+  readonly directory: string
+  /** Template name. Defaults to `default`. */
+  readonly template?: string | undefined
+  /** Template directory. Defaults to the one inside the resolved `@smthrs/create-app`. */
+  readonly templateRoot?: string | undefined
+  /** Rewrite `@smthrs/*` dependencies to `link:` paths. Defaults to whether a checkout was found. */
+  readonly link?: boolean | undefined
+}
+
+/**
+ * Locates the `template` directory of the installed `@smthrs/create-app`.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const templateRoot = (): string => {
+  const require = createRequire(import.meta.url)
+  let manifest: string
+  try {
+    manifest = require.resolve("@smthrs/create-app/package.json")
+  } catch {
+    throw new Error("create-app templates ship in @smthrs/create-app; install it and try again")
+  }
+  return NodePath.join(NodePath.dirname(manifest), "template")
+}
+
+/**
+ * The template names a template directory offers, sorted.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const templates = async (root: string): Promise<ReadonlyArray<string>> => {
+  const entries = await NodeFs.readdir(root, { withFileTypes: true })
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
+}
+
+/**
+ * The `packages` directory of the checkout `@smthrs/create-app` was resolved
+ * from, or undefined when it came from a registry install.
+ *
+ * Found by walking up from the template directory rather than by counting two
+ * segments off it. Packages nest: this one sits at
+ * `<repo>/packages/smithers/create-app`, so the fixed
+ * `dirname(dirname(root))` answered `<repo>/packages/smithers`, whose base name
+ * is not `packages`, and every scaffold cut from this repository reported
+ * `linked: []` while its manifest kept version ranges no registry serves.
+ * An installed copy sits under `node_modules` and has no checkout to link to.
+ */
+const checkoutPackages = (root: string): string | undefined => {
+  if (root.split(NodePath.sep).includes("node_modules")) return undefined
+  let current = NodePath.dirname(root)
+  for (;;) {
+    if (NodePath.basename(current) === "packages") return current
+    const parent = NodePath.dirname(current)
+    if (parent === current) return undefined
+    current = parent
+  }
+}
+
+/**
+ * Every package in the checkout, keyed by the name its manifest declares.
+ *
+ * A package's directory is not its identity: `@smthrs/flow` lives at
+ * `packages/smithers/flows/flow` and `@smthrs/targets` at
+ * `packages/smithers/build/targets`, so `packages/<name after the scope>` finds
+ * neither. The walk descends the whole tree and reads each name instead.
+ */
+const workspacePackages = async (packages: string): Promise<ReadonlyMap<string, string>> => {
+  const found = new Map<string, string>()
+  const walk = async (directory: string): Promise<void> => {
+    const entries = await NodeFs.readdir(directory, { withFileTypes: true }).catch(() => [])
+    try {
+      const manifest = JSON.parse(
+        await NodeFs.readFile(NodePath.join(directory, "package.json"), "utf8")
+      ) as { readonly name?: string }
+      if (typeof manifest.name === "string" && !found.has(manifest.name)) found.set(manifest.name, directory)
+    } catch {
+      // Not a package directory, or a manifest that does not parse. Keep walking.
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue
+      await walk(NodePath.join(directory, entry.name))
+    }
+  }
+  await walk(packages)
+  return found
+}
+
+/**
+ * Directories a template never ships, however dirty the checkout is.
+ *
+ * A template is an ordinary directory, so anything a tool leaves in it is
+ * copied. Running the template's own suite from the checkout writes
+ * `node_modules/.vite`, and that debris was copied into every scaffolded app.
+ * `.smithers` is deliberately absent: templates ship one.
+ */
+const skipped = new Set(["node_modules", "dist", ".wrangler", ".flows"])
+
+/** Copies `from` into `to`, substituting the app name, and counts the files. */
+const copy = async (from: string, to: string, name: string): Promise<number> => {
+  await NodeFs.mkdir(to, { recursive: true })
+  let files = 0
+  for (const entry of await NodeFs.readdir(from, { withFileTypes: true })) {
+    if (skipped.has(entry.name)) continue
+    const source = NodePath.join(from, entry.name)
+    const target = NodePath.join(to, entry.name)
+    if (entry.isDirectory()) {
+      files += await copy(source, target, name)
+      continue
+    }
+    if (substituted.has(NodePath.extname(entry.name))) {
+      const contents = await NodeFs.readFile(source, "utf8")
+      await NodeFs.writeFile(target, contents.replaceAll(placeholder, name))
+    } else {
+      await NodeFs.copyFile(source, target)
+    }
+    files += 1
+  }
+  return files
+}
+
+interface Manifest {
+  dependencies?: Record<string, string>
+  devDependencies?: Record<string, string>
+}
+
+/**
+ * Rewrites every `@smthrs/*` specifier in the scaffolded manifest to a `link:`
+ * path inside `packages`, and answers with the names it rewrote.
+ *
+ * A dependency the checkout does not carry keeps its declared version, so a
+ * template that names a published package is left alone.
+ */
+const linkWorkspace = async (directory: string, packages: string): Promise<ReadonlyArray<string>> => {
+  const path = NodePath.join(directory, "package.json")
+  const manifest = JSON.parse(await NodeFs.readFile(path, "utf8")) as Manifest
+  const workspace = await workspacePackages(packages)
+  const linked: Array<string> = []
+  for (const field of ["dependencies", "devDependencies"] as const) {
+    const block = manifest[field]
+    if (block === undefined) continue
+    for (const dependency of Object.keys(block)) {
+      if (!dependency.startsWith("@smthrs/")) continue
+      const local = workspace.get(dependency)
+      if (local === undefined) continue
+      block[dependency] = `link:${local}`
+      linked.push(dependency)
+    }
+  }
+  if (linked.length > 0) await NodeFs.writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`)
+  return linked.sort()
+}
+
+/**
+ * Copies one template into a new directory.
+ *
+ * @example
+ * ```ts
+ * import { scaffold } from "@smthrs/build-cli/CreateApp"
+ *
+ * await scaffold({ directory: "./ledger", template: "default" })
+ * ```
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const scaffold = async (options: ScaffoldOptions): Promise<ScaffoldReport> => {
+  const template = options.template ?? "default"
+  const root = options.templateRoot ?? templateRoot()
+  const available = await templates(root)
+  if (!available.includes(template)) {
+    throw new Error(`unknown template ${JSON.stringify(template)}; available: ${available.join(", ")}`)
+  }
+
+  const directory = NodePath.resolve(options.directory)
+  const name = NodePath.basename(directory)
+  if (!appName.test(name)) {
+    throw new Error(`${JSON.stringify(name)} is not a usable app name; use lowercase letters, digits, ., _, and -`)
+  }
+  // An existing empty directory is fine; anything in it is not, because the
+  // copy would merge into a tree the caller did not expect it to touch.
+  const existing = await NodeFs.readdir(directory).catch(() => [])
+  if (existing.length > 0) throw new Error(`${directory} is not empty`)
+
+  const files = await copy(NodePath.join(root, template), directory, name)
+  const packages = checkoutPackages(root)
+  const link = options.link ?? packages !== undefined
+  const linked = link && packages !== undefined ? await linkWorkspace(directory, packages) : []
+  return { directory, name, template, files, linked }
+}

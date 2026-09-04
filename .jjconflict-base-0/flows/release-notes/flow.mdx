@@ -1,0 +1,30 @@
+---
+description: Drafts release notes from the commits since the last tag, grouped by the package each one touched.
+capabilities: ["fs:read:**", "proc:spawn:*"]
+model: openai:gpt-5.6-sol
+budget:
+  tokens: 250000
+  milliseconds: 600000
+---
+
+# Draft the release notes
+
+The appended arguments name the range to describe, for example `v0.35.0..HEAD`,
+or a count such as `last 10`. With no arguments, use the last ten commits.
+
+## Read the history
+
+Run `git log --format='%h %s' <range>` through the `bash` tool (the only way
+to run a command here) and read the subjects. Never read `.git` directly. Do not call other
+flows and do not read every diff; the subjects follow conventional commits and
+say which area changed.
+
+## Group and write
+
+Group the commits by area (the scope in parentheses) and write one line per
+commit in plain English, present tense, no emoji. Lead with fixes, then
+features, then everything else.
+
+## Finish
+
+Return the notes as Markdown with one heading per area.

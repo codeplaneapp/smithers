@@ -1,0 +1,568 @@
+/**
+ * Replays the full benchmark's ledger, queue and report over synthesised rows.
+ *
+ * The driver itself needs docker, an image and a funded key; the three things
+ * that decide whether a two-day benchmark is trustworthy do not:
+ *
+ * - **the ledger's fold** — the last row per instance is that instance's state,
+ *   a fresh attempt replaces a dead one's columns, and a line torn by a kill
+ *   does not destroy the rows before it;
+ * - **the resume boundary** — `graded` and `cleaned` are skipped, everything
+ *   else re-runs, and the order is the seeded draw rather than the dataset's;
+ * - **the report** — the scoreboard, the Wilson interval, the per-repo
+ *   breakdown, the extrapolation, the pinned-five comparison, the exclusions
+ *   `lib/excluded.mjs` names and the two denominators that travel with them,
+ *   and the append-only checkpoint log.
+ *
+ * `fullbench-dryrun.sh` proves the other half — real pull, real extract, real
+ * delete, real kill — for one 4 MB image. This file spends nothing, needs no
+ * docker, and needs no dataset.
+ */
+import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
+import { isDone, read } from "../lib/fullbench-manifest.mjs"
+import { drawOrder } from "../lib/fullbench-queue.mjs"
+import { renderCheckpoint, renderReport, summarise, wilson } from "../fullbench-report.mjs"
+import { PINNED } from "../lib/sample.mjs"
+
+const root = resolve(import.meta.dirname, "..")
+const temporary = mkdtempSync(join(tmpdir(), "flows-swebench-fullbench-"))
+
+/** A stable clock, so an ETA is a pinned string rather than today's date. */
+const NOW = Date.UTC(2026, 7, 21, 12, 0, 0)
+const HOUR = 3600_000
+
+try {
+  // -----------------------------------------------------------------------
+  // The Wilson interval
+  // -----------------------------------------------------------------------
+  const eight = wilson(8, 25)
+  assert.ok(Math.abs(eight.point - 0.32) < 1e-12)
+  assert.ok(Math.abs(eight.low - 0.17205190) < 1e-7, `low was ${eight.low}`)
+  assert.ok(Math.abs(eight.high - 0.51589731) < 1e-7, `high was ${eight.high}`)
+
+  // The two ends the normal approximation gets wrong, which is why this is
+  // Wilson: a zero rate still has an upper bound, and a perfect one still has a
+  // lower bound, and neither escapes [0, 1].
+  const none = wilson(0, 10)
+  assert.equal(none.low, 0)
+  assert.ok(none.high > 0.25 && none.high < 0.35, `high was ${none.high}`)
+  const all = wilson(10, 10)
+  assert.ok(all.high > 0.9999, `high was ${all.high}`)
+  assert.ok(all.low > 0.65 && all.low < 0.75, `low was ${all.low}`)
+  assert.deepEqual(wilson(0, 0), { low: 0, high: 1, point: 0 })
+
+  // -----------------------------------------------------------------------
+  // The ledger's fold
+  // -----------------------------------------------------------------------
+  const foldPath = join(temporary, "fold.jsonl")
+  writeFileSync(
+    foldPath,
+    [
+      JSON.stringify({ kind: "header", at: NOW, subject: "s1", jobs: 2 }),
+      // One instance that crashed after `ran`, then re-ran and finished. The
+      // dead attempt's patch size and exit status must not survive.
+      JSON.stringify({ kind: "instance", id: "a__1", state: "pulled", at: NOW }),
+      JSON.stringify({ kind: "instance", id: "a__1", state: "ran", at: NOW + 1, patchBytes: 999, exit: 124 }),
+      JSON.stringify({ kind: "instance", id: "a__1", state: "pulled", at: NOW + 2 }),
+      JSON.stringify({ kind: "instance", id: "a__1", state: "ran", at: NOW + 3, patchBytes: 40, exit: 0 }),
+      JSON.stringify({ kind: "instance", id: "a__1", state: "graded", at: NOW + 4, verdict: "resolved" }),
+      JSON.stringify({ kind: "note", at: NOW + 5, note: "head-moved", from: "aaa", to: "bbb" }),
+      // A row torn by a kill, mid-write. Everything above it still counts.
+      "{\"kind\":\"instance\",\"id\":\"b__2\",\"state\":\"ra"
+    ].join("\n")
+  )
+  const folded = read(foldPath)
+  assert.equal(folded.torn, 1, "the torn tail is reported, not thrown")
+  assert.equal(folded.malformed.length, 0)
+  assert.equal(folded.states.size, 1, "the torn line contributed no instance")
+  const a1 = folded.states.get("a__1")
+  assert.equal(a1.state, "graded")
+  assert.equal(a1.verdict, "resolved")
+  assert.equal(a1.patchBytes, 40, "the re-run's patch size, not the attempt that died")
+  assert.equal(a1.exit, 0, "the re-run's exit status, not the attempt that died")
+  assert.equal(folded.notes.length, 1)
+  assert.equal(folded.header.subject, "s1")
+
+  assert.equal(isDone({ state: "graded" }), true)
+  assert.equal(isDone({ state: "cleaned" }), true)
+  assert.equal(isDone({ state: "ran" }), false)
+  assert.equal(isDone({ state: "pulled" }), false)
+  assert.equal(isDone({ state: "failed" }), false)
+  assert.equal(isDone(undefined), false)
+
+  // A ledger that does not exist yet is an empty one, not an error: that is the
+  // first thing a brand new benchmark reads.
+  assert.deepEqual(read(join(temporary, "absent.jsonl")).states.size, 0)
+
+  // -----------------------------------------------------------------------
+  // The bill counts attempts; the fold counts instances
+  // -----------------------------------------------------------------------
+  // The same replacement that keeps a dead attempt's verdict out of the ledger
+  // would keep its tokens out of the budget, and the tokens were still spent.
+  // A benchmark that crashes and resumes ten times must not be able to spend
+  // past its cap because the cap only ever saw the last attempt of each.
+  const billPath = join(temporary, "bill.jsonl")
+  const usage = { inputTokens: 100_000, cachedInputTokens: 0, outputTokens: 1_000, reasoningTokens: 0 }
+  writeFileSync(
+    billPath,
+    `${
+      [
+        JSON.stringify({ kind: "header", at: NOW, subject: "s1", jobs: 2, budgetUsd: 600 }),
+        JSON.stringify({ kind: "instance", id: "a__1", state: "pulled", at: NOW }),
+        JSON.stringify({ kind: "instance", id: "a__1", state: "ran", at: NOW + 1, wallSeconds: 900, cost: { usd: 1.5, usage } }),
+        // The crash, and the attempt that replaced it.
+        JSON.stringify({ kind: "instance", id: "a__1", state: "pulled", at: NOW + 2 }),
+        JSON.stringify({ kind: "instance", id: "a__1", state: "ran", at: NOW + 3, wallSeconds: 900, cost: { usd: 2, usage } }),
+        JSON.stringify({ kind: "instance", id: "a__1", state: "graded", at: NOW + 4, verdict: "resolved" }),
+        JSON.stringify({ kind: "instance", id: "a__1", state: "cleaned", at: NOW + 5 })
+      ].join("\n")
+    }\n`
+  )
+  const bill = summarise({ manifest: billPath, now: NOW + HOUR, total: 1 })
+  assert.equal(bill.graded, 1, "one instance was graded")
+  assert.equal(bill.attempts, 2, "two attempts were paid for")
+  assert.equal(bill.retried, 1)
+  assert.ok(Math.abs(bill.spentUsd - 3.5) < 1e-9, `spent ${bill.spentUsd}`)
+  assert.ok(Math.abs(bill.meanUsd - 1.75) < 1e-9, `mean ${bill.meanUsd}`)
+  assert.equal(bill.tokens.inputTokens, 200_000, "both attempts' tokens are on the bill")
+  assert.match(renderReport(bill), /\| paid attempts \| 2 \(1 re-run after a crash, and still on the bill\) \|/)
+
+  const billCents = spawnSync(
+    "node",
+    [join(root, "fullbench-report.mjs"), "--spend-cents", "--manifest", billPath],
+    { encoding: "utf8" }
+  )
+  assert.equal(billCents.status, 0, billCents.stderr)
+  assert.equal(
+    billCents.stdout.trim(),
+    "350",
+    "the gate the driver reads before every launch sees both attempts"
+  )
+
+  // -----------------------------------------------------------------------
+  // The scoreboard obeys `lib/excluded.mjs`, and prints both denominators
+  // -----------------------------------------------------------------------
+  // This report reads the same ledgers `compare-runs.mjs` does, so an instance
+  // whose verdict is a statement about the grading environment has to be
+  // outside its rate too — and the raw count has to be printed beside the
+  // scored one, or a reader has no way to tell which number they were handed.
+  const scopedPath = join(temporary, "scoped.jsonl")
+  writeFileSync(
+    scopedPath,
+    `${
+      [
+        JSON.stringify({ kind: "header", at: NOW, subject: "s1", jobs: 2 }),
+        JSON.stringify({ kind: "instance", id: "a__1", state: "graded", at: NOW + 1, verdict: "resolved" }),
+        JSON.stringify({ kind: "instance", id: "a__2", state: "graded", at: NOW + 2, verdict: "unresolved" }),
+        // The pair the r92 report rules out by name: graded, and graded on the
+        // environment rather than on a harness.
+        JSON.stringify({ kind: "instance", id: "psf__requests-1766", state: "graded", at: NOW + 3, verdict: "unresolved" }),
+        JSON.stringify({ kind: "instance", id: "psf__requests-2317", state: "graded", at: NOW + 4, verdict: "unresolved" })
+      ].join("\n")
+    }\n`
+  )
+  const scoped = summarise({ manifest: scopedPath, now: NOW + HOUR, total: 4 })
+  assert.equal(scoped.graded, 4, "every row was graded")
+  assert.equal(scoped.scoredGraded, 2, "the two named rows are outside the scored denominator")
+  assert.equal(scoped.resolved, 1)
+  assert.equal(scoped.scoredResolved, 1, "neither excluded row resolved, so the numerator is unchanged")
+  assert.equal(scoped.excluded.length, 2)
+  assert.ok(Math.abs(scoped.rate.point - 0.25) < 1e-12, `raw rate was ${scoped.rate.point}`)
+  assert.ok(Math.abs(scoped.scoredRate.point - 0.5) < 1e-12, `scored rate was ${scoped.scoredRate.point}`)
+  const scopedReport = renderReport(scoped)
+  assert.match(scopedReport, /\*\*Resolve rate 50\.0%\*\* over 2 scored of 4 run/, "both denominators, one sentence")
+  assert.match(scopedReport, /over all 4 graded, excluded rows included, it is 25\.0%/)
+  assert.match(scopedReport, /\| \*\*scored\*\* \| \*\*2\*\* \| of 4 graded \|/)
+  assert.match(scopedReport, /## Excluded from the scoreboard, by name/)
+  assert.match(scopedReport, /psf__requests-1766/)
+  for (const row of scoped.excluded) {
+    assert.ok(row.cause.length > 0, `${row.id} carries no cause`)
+  }
+
+  // A population that excludes nothing reads exactly as it did before: same
+  // sentence, one denominator, no section.
+  const plain = summarise({ manifest: billPath, now: NOW + HOUR, total: 1 })
+  assert.equal(plain.excluded.length, 0)
+  assert.equal(plain.scoredGraded, plain.graded)
+  assert.match(renderReport(plain), /\*\*Resolve rate 100\.0%\*\* \(95% Wilson/)
+  assert.ok(
+    !renderReport(plain).includes("Excluded from the scoreboard"),
+    "nothing excluded means no section"
+  )
+
+  // -----------------------------------------------------------------------
+  // `--unclean`: the instances whose images nothing will ever revisit
+  // -----------------------------------------------------------------------
+  const uncleanDataset = join(temporary, "unclean-dataset.json")
+  writeFileSync(
+    uncleanDataset,
+    JSON.stringify([{ instance_id: "u__1" }, { instance_id: "u__2" }, { instance_id: "u__3" }])
+  )
+  const uncleanPath = join(temporary, "unclean.jsonl")
+  writeFileSync(
+    uncleanPath,
+    `${
+      [
+        // Killed between the verdict and the `docker rmi`: done as far as
+        // resume is concerned, so nothing ever looks at its image again.
+        JSON.stringify({ kind: "instance", id: "u__1", state: "graded", at: NOW, verdict: "resolved", image: "img/u1:latest" }),
+        JSON.stringify({ kind: "instance", id: "u__2", state: "cleaned", at: NOW, verdict: "unresolved", image: "img/u2:latest" }),
+        // Interrupted before its verdict: the queue re-runs it, so its own
+        // purge deals with the image and this sweep must leave it alone.
+        JSON.stringify({ kind: "instance", id: "u__3", state: "ran", at: NOW, image: "img/u3:latest" })
+      ].join("\n")
+    }\n`
+  )
+  const unclean = spawnSync(
+    "node",
+    [join(root, "lib", "fullbench-queue.mjs"), uncleanDataset, uncleanPath, "--unclean"],
+    { encoding: "utf8" }
+  )
+  assert.equal(unclean.status, 0, unclean.stderr)
+  assert.equal(unclean.stdout.trim(), "u__1 img/u1:latest")
+
+  // -----------------------------------------------------------------------
+  // The queue: seeded draw order, and the resume boundary
+  // -----------------------------------------------------------------------
+  // A dataset that holds the pinned five but does not draw them first is a
+  // dataset revision that moved under the drive, and is refused.
+  assert.throws(
+    () => drawOrder([...PINNED, "extra__one", "extra__two"].map((id) => ({ instance_id: id }))),
+    /did not reproduce the pinned instances/,
+    "a dataset that does not draw the pinned head first is refused, not benchmarked"
+  )
+  // A dataset of any size that does not hold them at all is not the benchmark.
+  assert.throws(
+    () => drawOrder(["a__1", "b__2", "c__3", "d__4", "e__5", "f__6"].map((id) => ({ instance_id: id }))),
+    /is not SWE-bench Verified/,
+    "a dataset with none of the pinned instances cannot be the benchmark"
+  )
+  // The one exception, and it is small enough that nothing real fits through
+  // it: the three-instance stub `fullbench-dryrun.sh` builds.
+  assert.equal(drawOrder([{ instance_id: "s__a" }, { instance_id: "s__b" }]).length, 2)
+
+  const dataset = join(root, "swb-verified.json")
+  if (existsSync(dataset)) {
+    const rows = JSON.parse(readFileSync(dataset, "utf8"))
+    const order = drawOrder(rows)
+    assert.equal(order.length, rows.length, "every instance is queued exactly once")
+    assert.equal(new Set(order).size, rows.length)
+    assert.deepEqual(order.slice(0, PINNED.length), PINNED, "the pinned five come first")
+
+    const queuePath = join(temporary, "queue.jsonl")
+    writeFileSync(
+      queuePath,
+      [
+        JSON.stringify({ kind: "instance", id: order[0], state: "cleaned", at: NOW, verdict: "resolved" }),
+        JSON.stringify({ kind: "instance", id: order[1], state: "graded", at: NOW, verdict: "unresolved" }),
+        // Interrupted: the driver died between `ran` and `graded`.
+        JSON.stringify({ kind: "instance", id: order[2], state: "ran", at: NOW, patchBytes: 12 }),
+        JSON.stringify({ kind: "instance", id: order[3], state: "failed", at: NOW, reason: "pull" }),
+        ""
+      ].join("\n")
+    )
+    const remaining = spawnSync(
+      "node",
+      [join(root, "lib", "fullbench-queue.mjs"), dataset, queuePath, "--remaining"],
+      { encoding: "utf8" }
+    )
+    assert.equal(remaining.status, 0, remaining.stderr)
+    const left = remaining.stdout.trim().split("\n")
+    assert.equal(left.length, rows.length - 2, "only `graded` and `cleaned` are skipped")
+    assert.equal(left[0], order[2], "the interrupted instance re-runs, first")
+    assert.equal(left[1], order[3], "so does the one that failed")
+    assert.ok(!left.includes(order[0]) && !left.includes(order[1]))
+
+    const counts = spawnSync(
+      "node",
+      [join(root, "lib", "fullbench-queue.mjs"), dataset, queuePath, "--count"],
+      { encoding: "utf8" }
+    )
+    assert.equal(counts.stdout.trim(), `2 ${rows.length - 2} ${rows.length}`)
+  }
+
+  // -----------------------------------------------------------------------
+  // Two sessions: the subject of record is the first, the settings are the
+  // session in effect, and a subject that moved between them is stated
+  // -----------------------------------------------------------------------
+  const sessionsPath = join(temporary, "sessions.jsonl")
+  writeFileSync(
+    sessionsPath,
+    `${
+      [
+        JSON.stringify({ kind: "header", at: NOW, subject: "sha256:aaa", subjectSource: "preflight", head: "h1", jobs: 2, budgetUsd: 600 }),
+        JSON.stringify({ kind: "header", at: NOW + HOUR, subject: "sha256:aaa", subjectSource: "adopted", head: "h2", jobs: 3, budgetUsd: 900 })
+      ].join("\n")
+    }\n`
+  )
+  const twoSessions = summarise({ manifest: sessionsPath, now: NOW + 2 * HOUR, total: 4 })
+  assert.equal(twoSessions.header.subject, "sha256:aaa")
+  assert.equal(twoSessions.elapsedSeconds, 2 * 3600, "the ledger spans from the first session, not the latest")
+  assert.equal(twoSessions.header.head, "h1", "the subject of record is the first session's")
+  assert.equal(twoSessions.header.jobs, 3, "the settings are the session in effect")
+  assert.equal(twoSessions.header.budgetUsd, 900)
+  assert.equal(twoSessions.subjectAgreement, "one subject")
+
+  writeFileSync(
+    sessionsPath,
+    `${
+      [
+        JSON.stringify({ kind: "header", at: NOW, subject: "sha256:aaa", jobs: 2 }),
+        JSON.stringify({ kind: "header", at: NOW + HOUR, subject: "sha256:bbb", jobs: 2 })
+      ].join("\n")
+    }\n`
+  )
+  // A budget spliced through the shell arrives as text. The report prints it as
+  // money rather than stopping the checkpoint that carries the pause notice.
+  const rowOut = spawnSync(
+    "node",
+    [join(root, "lib", "fullbench-row.mjs"), "--kind", "header", "--budgetUsd", "0.50", "--jobs", "2", "--id", "a__1"],
+    { encoding: "utf8" }
+  )
+  assert.deepEqual(JSON.parse(rowOut.stdout), { kind: "header", budgetUsd: 0.5, jobs: 2, id: "a__1" })
+  assert.match(renderReport({ ...twoSessions, header: { ...twoSessions.header, budgetUsd: "0.50" } }), /\| cost budget \| \$0\.50 \|/)
+
+  const moved = summarise({ manifest: sessionsPath, now: NOW + 2 * HOUR, total: 4 })
+  assert.match(moved.subjectAgreement, /^MISMATCH: 1 of 2 sessions ran a different subject \(sha256:bbb\)/)
+  assert.match(renderReport(moved), /\| subject agreement \| MISMATCH:/)
+
+  // -----------------------------------------------------------------------
+  // The report, over a synthesised 25-instance checkpoint
+  // -----------------------------------------------------------------------
+  const out = join(temporary, "fullbench")
+  mkdirSync(out, { recursive: true })
+  const manifestPath = join(out, "manifest.jsonl")
+
+  // A dataset of exactly the ids the ledger names, so the per-repo breakdown is
+  // checkable without the real 8 MB file.
+  const repos = ["django/django", "sympy/sympy", "sphinx-doc/sphinx"]
+  const ids = []
+  const datasetRows = []
+  for (let index = 0; index < 30; index++) {
+    const repo = repos[index % repos.length]
+    const id = `${repo.split("/")[1]}__case-${index}`
+    ids.push(id)
+    datasetRows.push({ instance_id: id, repo })
+  }
+  const syntheticDataset = join(temporary, "dataset.json")
+  writeFileSync(syntheticDataset, JSON.stringify(datasetRows))
+
+  // 25 graded: 8 resolved, 13 unresolved, 3 empty, 1 eval error. One more
+  // failed before a verdict and one is still in flight, so the scoreboard has
+  // to keep all four columns apart.
+  const verdicts = []
+  for (let index = 0; index < 25; index++) {
+    verdicts.push(
+      index < 8 ? "resolved" : index < 21 ? "unresolved" : index < 24 ? "empty patch" : "eval error"
+    )
+  }
+  const rows = [
+    JSON.stringify({
+      kind: "header",
+      at: NOW,
+      runId: "fullbench",
+      index: "r90",
+      subject: "sha256:deadbeef",
+      subjectSource: "adopted",
+      head: "abc1234",
+      seat: "openai:gpt-5.6-sol",
+      jobs: 2,
+      instanceBudgetSeconds: 1200,
+      budgetUsd: 600,
+      minFreeMiB: 8192,
+      checkpointEvery: 25,
+      pinnedImages: `${ids[0]} ${ids[1]} ${ids[2]} ${ids[3]} ${ids[4]}`,
+      dataset: syntheticDataset
+    })
+  ]
+  for (const [index, verdict] of verdicts.entries()) {
+    const at = NOW + index * HOUR
+    rows.push(JSON.stringify({ kind: "instance", id: ids[index], state: "pulled", at, image: "img" }))
+    rows.push(JSON.stringify({
+      kind: "instance",
+      id: ids[index],
+      state: "ran",
+      at: at + 60_000,
+      patchBytes: verdict === "empty patch" ? 0 : 800,
+      exit: 0,
+      wallSeconds: 900,
+      cost: {
+        seat: "openai:gpt-5.6-sol",
+        frames: 7,
+        modelCalls: 11,
+        usage: { inputTokens: 200_000, cachedInputTokens: 100_000, outputTokens: 8_000, reasoningTokens: 4_000 },
+        usd: 1.3
+      }
+    }))
+    rows.push(JSON.stringify({ kind: "instance", id: ids[index], state: "graded", at: at + 120_000, verdict }))
+    rows.push(JSON.stringify({ kind: "instance", id: ids[index], state: "cleaned", at: at + 130_000 }))
+  }
+  rows.push(JSON.stringify({ kind: "instance", id: ids[25], state: "failed", at: NOW + 26 * HOUR, reason: "docker pull failed" }))
+  rows.push(JSON.stringify({ kind: "instance", id: ids[26], state: "ran", at: NOW + 27 * HOUR, patchBytes: 10, wallSeconds: 100 }))
+  rows.push(JSON.stringify({ kind: "note", at: NOW + 27 * HOUR, note: "head-moved", from: "abc1234", to: "def5678" }))
+  writeFileSync(manifestPath, `${rows.join("\n")}\n`)
+  writeFileSync(join(out, "waits.jsonl"), `${
+    [
+      JSON.stringify({ kind: "wait", id: ids[3], phase: "pull", at: NOW, freeMiB: 5000, neededMiB: 8192, waitedSeconds: 0 }),
+      JSON.stringify({ kind: "wait", id: ids[3], phase: "pull", at: NOW + 60_000, freeMiB: 6000, neededMiB: 8192, waitedSeconds: 60 })
+    ].join("\n")
+  }\n`)
+
+  const summary = summarise({
+    manifest: manifestPath,
+    dataset: syntheticDataset,
+    now: NOW + 28 * HOUR,
+    freeMiB: 9001
+  })
+
+  assert.equal(summary.total, 30)
+  assert.equal(summary.graded, 25)
+  assert.equal(summary.resolved, 8)
+  assert.equal(summary.unresolved, 13)
+  assert.equal(summary.emptyPatch, 3)
+  assert.equal(summary.evalErrors, 1)
+  assert.equal(summary.failed, 1)
+  assert.equal(summary.inFlight, 1)
+  assert.equal(summary.remaining, 5)
+  assert.ok(Math.abs(summary.rate.point - 0.32) < 1e-12)
+  assert.ok(Math.abs(summary.rate.low - eight.low) < 1e-12)
+  // The rig-fault rate excludes only the instance the evaluator could not grade.
+  assert.ok(Math.abs(summary.rateExcludingRigFaults.point - 8 / 24) < 1e-12)
+
+  // Cost: 25 priced instances at $1.30 plus one in-flight `ran` row with no
+  // cost record. The mean must divide by what was priced, not by what exists.
+  assert.ok(Math.abs(summary.spentUsd - 32.5) < 1e-9, `spent ${summary.spentUsd}`)
+  assert.ok(Math.abs(summary.meanUsd - 1.3) < 1e-9, `mean ${summary.meanUsd}`)
+  assert.ok(Math.abs(summary.projectedUsd - 39) < 1e-9, `projected ${summary.projectedUsd}`)
+  assert.equal(summary.tokens.inputTokens, 25 * 200_000)
+  assert.equal(summary.tokens.outputTokens, 25 * 8_000)
+  assert.equal(summary.waits, 2)
+  assert.equal(summary.waitSeconds, 60)
+  assert.equal(summary.notes.length, 1)
+  assert.equal(summary.sessions, 1)
+
+  // Both finish estimates exist, and the observed one is later than the
+  // modelled one here because the ledger spans an hour per instance while the
+  // agent only ran for 15 minutes of it.
+  assert.ok(summary.etaObserved > summary.now)
+  assert.ok(summary.etaModelled > summary.now)
+  assert.ok(summary.etaObserved > summary.etaModelled)
+
+  const byRepo = new Map(summary.repos.map((entry) => [entry.repo, entry]))
+  assert.equal(byRepo.get("django/django").graded, 9)
+  assert.equal(byRepo.get("sympy/sympy").graded, 8)
+  assert.equal(byRepo.get("sphinx-doc/sphinx").graded, 8)
+  assert.equal(
+    summary.repos.reduce((sum, entry) => sum + entry.graded, 0),
+    25,
+    "every graded instance is in exactly one repo row"
+  )
+  assert.equal(
+    summary.repos.reduce((sum, entry) => sum + entry.resolved, 0),
+    8
+  )
+
+  assert.equal(summary.pinnedRows.length, 5)
+  assert.equal(summary.pinnedGraded, 5)
+  assert.equal(summary.pinnedResolved, 5, "the first five graded were the resolved ones")
+
+  // -----------------------------------------------------------------------
+  // The markdown
+  // -----------------------------------------------------------------------
+  const report = renderReport(summary)
+  assert.match(report, /# SWE-bench Verified — full benchmark/)
+  assert.match(report, /\*\*Resolve rate 32\.0%\*\* \(95% Wilson 17\.2%–51\.6%, n=25\)/)
+  assert.match(report, /\| resolved \| 8 \| 32\.0% \|/)
+  assert.match(report, /\| eval error \| 1 \| 4\.0% \|/)
+  assert.match(report, /\| django\/django \| 9 \|/)
+  assert.match(report, /\| projected for all 30 \| \$39\.00 \|/)
+  assert.match(report, /## Against the pinned five/)
+  assert.match(report, /head-moved/, "a driver note reaches the report")
+  assert.ok(!report.includes("PAUSED"), "nothing claims a pause that did not happen")
+
+  // Nothing graded is not a rate of zero, and the report says so rather than
+  // printing a 0.0% that a reader could quote.
+  const nothing = summarise({
+    manifest: sessionsPath,
+    dataset: syntheticDataset,
+    now: NOW + 2 * HOUR,
+    total: 30
+  })
+  assert.equal(nothing.graded, 0)
+  assert.match(renderReport(nothing), /\*\*No instance has been graded yet\*\*/)
+  assert.ok(!renderReport(nothing).includes("Resolve rate"))
+
+  const paused = renderReport({ ...summary, paused: "cumulative API cost $612.40 reached the $600 budget" })
+  assert.match(paused, /> \*\*PAUSED\*\* — cumulative API cost \$612\.40 reached the \$600 budget/)
+
+  const checkpoint = renderCheckpoint(summary)
+  assert.match(checkpoint, /\| 25\/30 \| 8 \| 32\.0% \(17\.2%–51\.6%\) \| \$1\.30 \| \$32\.50 \| \$39\.00 \|/)
+  assert.match(checkpoint, /9001 MiB \|$/m)
+
+  // The generator run twice over one ledger writes the same report: it holds no
+  // state, so a checkpoint is reproducible from the manifest alone.
+  const first = renderReport(summary)
+  const second = renderReport(summarise({
+    manifest: manifestPath,
+    dataset: syntheticDataset,
+    now: NOW + 28 * HOUR,
+    freeMiB: 9001
+  }))
+  assert.equal(first, second)
+
+  // -----------------------------------------------------------------------
+  // The command line: --checkpoint appends, --spend-cents adds up
+  // -----------------------------------------------------------------------
+  const run = (args) =>
+    spawnSync("node", [join(root, "fullbench-report.mjs"), ...args], { encoding: "utf8" })
+
+  const spend = run(["--spend-cents", "--manifest", manifestPath])
+  assert.equal(spend.status, 0, spend.stderr)
+  assert.equal(spend.stdout.trim(), "3250", "the budget gate reads whole cents")
+
+  const args = [
+    "--checkpoint",
+    "--manifest",
+    manifestPath,
+    "--dataset",
+    syntheticDataset,
+    "--out",
+    out,
+    "--now",
+    String(NOW + 28 * HOUR),
+    "--free-mib",
+    "9001"
+  ]
+  const once = run(args)
+  assert.equal(once.status, 0, once.stderr)
+  const twice = run(args)
+  assert.equal(twice.status, 0, twice.stderr)
+
+  const progress = readFileSync(join(out, "progress.md"), "utf8")
+  const checkpointRows = progress.split("\n").filter((line) => line.startsWith("| 2026-"))
+  assert.equal(checkpointRows.length, 2, "progress.md is append-only: two runs, two rows")
+  assert.match(progress, /# Full benchmark progress/)
+  assert.equal(
+    readFileSync(join(out, "report.md"), "utf8"),
+    first,
+    "the file the driver writes is the report this test pinned"
+  )
+  const json = JSON.parse(readFileSync(join(out, "report.json"), "utf8"))
+  assert.equal(json.graded, 25)
+  assert.equal(json.resolved, 8)
+
+  // A PAUSED marker beside the manifest turns up in both outputs.
+  writeFileSync(join(out, "PAUSED"), "cumulative API cost $612.40 reached the $600 budget\n")
+  const paused3 = run(args)
+  assert.equal(paused3.status, 0, paused3.stderr)
+  assert.match(readFileSync(join(out, "report.md"), "utf8"), /> \*\*PAUSED\*\* — cumulative API cost/)
+  assert.match(readFileSync(join(out, "progress.md"), "utf8"), /> \*\*PAUSED\*\* at 2026-/)
+} finally {
+  rmSync(temporary, { recursive: true, force: true })
+}
+
+console.log("check-fullbench.mjs: the ledger folds, the queue resumes, and the report adds up.")

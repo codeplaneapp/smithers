@@ -1,0 +1,36 @@
+/**
+ * Canonical JSON for digests: the same value always renders the same bytes.
+ *
+ * `JSON.stringify` keeps insertion order, so two equal objects built in a
+ * different order hash differently. Sorting every object's keys, at every
+ * depth, is what makes a digest over a value a digest over its meaning.
+ * Arrays keep their order, because an array's order is part of its meaning.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const sorted = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(sorted)
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .filter((key) => value[key] !== undefined)
+        .map((key) => [key, sorted(value[key])])
+    )
+  }
+  return value
+}
+
+/**
+ * Renders a JSON value with every object's keys sorted, at every depth.
+ * `undefined` properties are omitted, as `JSON.stringify` omits them.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const stringify = (value: unknown): string => JSON.stringify(sorted(value))

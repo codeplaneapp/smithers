@@ -1,0 +1,17 @@
+<!--
+  The tab mark (§28.10). One glyph on the brand square from tokens.css
+  (--brand #994cc3), drawn as SVG so it stays sharp at every tab and
+  bookmark size without shipping a bitmap set.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Smithers">
+  <rect width="64" height="64" rx="14" fill="#994cc3" />
+  <text
+    x="32"
+    y="45"
+    text-anchor="middle"
+    font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif"
+    font-size="40"
+    font-weight="700"
+    fill="#ffffff"
+  >S</text>
+</svg>

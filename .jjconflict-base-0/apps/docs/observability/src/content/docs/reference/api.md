@@ -1,0 +1,134 @@
+---
+title: "API reference"
+description: "Observability for flows: default OTLP export wiring plus Effect-native logger, metric, and OpenTelemetry SDK layers"
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/observability/docs/api.md"
+---
+
+## Runtime and platform contract
+
+The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Endpoint`, `Logger`,
+`JournalLogger`, `Metric`, `Otel`, and `Resource` are reachable from the root
+barrel. `Otlp.layerFetch` uses Effect's HTTP exporter and the host's global
+`fetch`, so that subpath is browser-safe and does not require an OpenTelemetry
+SDK.
+
+The package as a whole is not Effect-only. `Otel` and `Resource` bridge the
+OpenTelemetry API, while `NodeOtel` and `BrowserOtel` use the SDK packages
+declared in this package's manifest. `NodeOtel` resolves Node-only host modules,
+including the bare `async_hooks` specifier that `@opentelemetry/sdk-trace-node`
+reaches through `@opentelemetry/context-async-hooks`, so it does not bundle for
+a browser and must not enter a browser graph. `BrowserOtel` accepts processors
+and readers created by the application and contains no Node module.
+
+## Resource validation
+
+Every public OTEL builder uses the same `Resource.Configuration` decoder.
+Invalid input fails layer acquisition with `InvalidResourceConfiguration`,
+code `invalid_resource_configuration`, and a stable issue path. Rejected
+values are not retained in the error.
+
+- Service name and version are non-empty, well-formed strings of at most 1,024
+  UTF-16 code units.
+- There may be at most 256 resource attributes. Keys are non-empty,
+  well-formed strings of at most 1,024 code units.
+- Values are finite numbers, booleans, strings of at most 65,536 code units,
+  or homogeneous arrays of one of those scalar types.
+- NUL and unpaired UTF-16 surrogates are refused. Valid astral Unicode is
+  preserved.
+
+## Collector endpoints
+
+`Otlp.layer`, `Otlp.layerFetch`, and `NodeOtel.layerOtel` decode their collector
+endpoint the same way they decode a resource. It must be an absolute `http:` or
+`https:` URL of at most 2,048 characters carrying no userinfo. Anything else
+fails layer acquisition with `Endpoint.InvalidExporterEndpoint`, code
+`invalid_exporter_endpoint`, and the name of the option it arrived on:
+`baseUrl` for `Otlp`, `endpoint` for `NodeOtel`. The rejected value is not
+retained in the error.
+
+Acquisition is the only place this can be reported. Export failure is absorbed
+by design, so a layer built against an unusable endpoint would otherwise look
+exactly like a working one and simply never deliver.
+
+Repeated trailing separators are normalized away, so `http://host//` and
+`http://host` both post to `http://host/v1/traces`.
+
+A value carrying a space or any C0 control is refused rather than repaired.
+`new URL` strips leading and trailing padding and removes tab, newline, and
+carriage return from anywhere in its input, so an endpoint read from a file
+with a trailing newline, or pasted with a leading space, parses cleanly while
+the untrimmed original is what the exporter would post to. Trim the value
+before handing it to a builder.
+
+## Journal forwarding
+
+`JournalLogger.layerJournalForwarding` snapshots, bounds, and redacts a log
+record synchronously before placing it on an asynchronous queue. Caller
+mutation after the log call cannot change the queued record. The runtime schema
+`TelemetryLog` preserves ordered failure, defect, and interruption reasons.
+The durable journal allocates `sourceSeq`, so rebuilding or concurrently
+running logger layers for one run cannot reuse an identity.
+
+The queue defaults to 256 records and accepts a configured capacity from 1
+through 65,536. A snapshot accepts at most 1 MiB of encoded data, 4,096
+container members, and 64 container edges. Unreadable values become
+`[Unrenderable]`; values past a ceiling become `[Truncated]`; deep values become
+`[Deep]`. Container-shaped fields keep their shape: annotations whose snapshot
+spent the budget arrive as `{ "[Truncated]": "[Truncated]" }` rather than as a
+scalar. A projection that still fails `TelemetryLog` degrades to a total record
+with an empty cause, so every durable `telemetry.log` row decodes with the
+exported schema. Text is bounded in one pass that never cuts a surrogate pair.
+The same journal redaction rules used for durable events run before queue
+admission.
+
+The callback never blocks. A full queue drops the new record. A journal
+delivery failure is reported as a warning annotated with the run id, and a
+defect raised by a journal implementation is reported the same way and the
+worker keeps draining; interruption still ends it. Each of those three losses
+advances `Metric.droppedLogRecords`. Reporting is safe because the worker is
+forked before the logger it feeds is installed, so its ambient logger set never
+contains that logger. Closing the layer interrupts the worker and can drop
+records queued behind an in-flight write. Invalid run ids or capacities fail
+layer acquisition with `InvalidJournalLoggerOptions`; they are never routed
+through the lossy worker.
+
+The layer replaces the ambient logger set unless `mergeWithExisting` is `true`.
+It provides `References.MinimumLogLevel` only when `minimumLogLevel` is given,
+so an application that chose a level elsewhere keeps it and Effect's own `Info`
+default applies otherwise.
+
+## Logger layers
+
+`Logger.layerPrettyDev`, `Logger.layerStructuredJson`, and `Logger.layer` follow
+the same two rules. `mergeWithExisting` defaults to `false`, matching Effect's
+own `Logger.layer`, so installing one of them replaces the ambient logger set.
+`minimumLogLevel` is applied only when the caller names it. `Logger.layerNoop`
+is the exception: silencing is its purpose, so it pins `None` unless the caller
+names another level.
+
+## Runtime metrics
+
+`Metric` exports three cross-package runtime signals and one of its own.
+`runThroughput` advances only after `RunStore.transitionOwned` commits a
+terminal transition. `activeSeats` is a gauge held for the lifetime of a
+production `Agent.run` stream and released on success, failure, or
+interruption. `quotaParks` advances when the sealed quota decision is first
+executed, not when that decision is replayed after a wake or process restart.
+`droppedLogRecords` counts operational log records lost before durable
+delivery, one per queue overflow, per journal delivery failure, and per defect
+the forwarding worker recovers from.
+
+Step-cache lookup and write counters remain owned by `@smthrs/step-cache`.
+This package does not duplicate those handles.
+
+## OTLP delivery
+
+`Otlp.layer` requires an Effect `HttpClient`; `layerFetch` supplies the global
+fetch implementation. Both install JSON exporters for `/v1/logs`,
+`/v1/metrics`, and `/v1/traces`. Effect's exporter retries transient failure
+three times, then temporarily disables delivery. Export failure does not fail
+the application effect. `shutdownTimeout` bounds the final flush.
+
+`NodeOtel.layerOtel` creates OTLP/HTTP trace, metric, and log exporters only
+when its scoped layer is built. `BrowserOtel.layerOtel` and `Otel.layerOtel`
+instead consume application-created providers, processors, and readers.

@@ -1,0 +1,42 @@
+# Fault-matrix gaps
+
+What the fault matrix does not cover, and what closing each entry would take.
+
+The matrix is not a directory any more. Each case lives in the package whose
+behaviour it asserts, under `packages/<package>/test/faults/`, and each of those
+packages declares a `faults` target, so `//packages/...:faults` is the whole
+matrix and the `e2e-faults` CI job runs exactly that. This file is the one part
+of the old `e2e/` member that belongs to no single package: a coverage record
+read across all of them, audited by `fault-skips.test.mjs` beside it.
+
+Cost bands: **S** is at most two engineering days with the infrastructure this
+repository already has; **M** is roughly three to five days or needs a new CI
+service; **L** is more than a week, needs external credentials, or materially
+lengthens CI.
+
+Every row here is a gap in coverage, not a gap in the product unless it says so. A row never replaces a test: where the matrix is required to cover a behaviour the product does not have yet, the case stays in the matrix as a plain failing test and the row explains it. No case is red today — case 22's terminal-log half was the last one, and the redaction deliverable turned it green with no edit to the test — so the `e2e-faults` CI job is required. The `03, 05, 31` row is the one gap that names a live product defect no case in the matrix reaches.
+
+| Case | What is covered | What is not, and what it would take | Cost |
+| --- | --- | --- | --- |
+| 02 | A real sandbox process is stopped and killed while the engine stays up, and `SandboxHealth` reports `unresponsive` and `ping_failed` from what actually happened to it. | The sandbox is a loopback ping responder, not a supported remote provider. Covering a hosted provider needs credentials and a privileged runtime in CI. | L |
+| 03, 05, 31 | A park that a `SIGKILL` interrupts: the host dies with the question, the deadline, or the orphan still outstanding, and a fresh host answers it, fires it, or reaps it. Every case drives the engine directly through `packages/smithers/flows/test/faults/harness/waitChild.ts` and `packages/smithers/flows/test/faults/harness/engineChild.ts`. | **The other half of a park is uncovered, and it is broken in the product.** A run that parks GRACEFULLY, meaning a detached `smithers up` whose process exits at a `wait` over 60 s or at an in-run `ask`, is finalized `cancelled` at exit instead of left suspended, and `smithers run --resume` and `smithers approve` then accept the request, flip the control row to a non-terminal status, and hang with no output (release rehearsal). No case in the matrix reaches it. Every case injects `SIGKILL`, and the only cases that run the real `smithers` binary are 14 and 15, which spawn `smithers serve` through `packages/smithers/test/faults/harness/serveProcess.ts`: no case drives `up -d`, `run --resume`, or `approve`, which is the path the defect lives on. The matrix was green over it. Closing it means a case that spawns the real `smithers` binary detached, waits for the park, and resumes through the verb, which needs a model seat or a seatless flow fixture the matrix does not have yet. Owner of the product half: the durable-park fix. | M |
+| 05 | A timer parked in durable state survives a `SIGKILL`, comes due while no host is running, and fires once. | Two hosts racing one eligible timer. That needs a second engine incarnation admitted at the exact instant the deadline passes, which the current harness cannot schedule. | M |
+| 06 | Two hosts drive one parked run and the step dispatches once, and two control planes with different identities race for one suspended run and exactly one is admitted while the other is refused with `ClaimLost`. | **Closed in the product since this row was written.** The fence used to tell two planes apart by `hostId` and `pid` only (`packages/smithers/control/src/SqlControlRuntime.ts` `sameProcess`) while `@smthrs/cli` supplied no owner, so every local plane was `{hostId: "local", pid: 0}`, considered every other one the same process, and the loser joined instead of losing the fence. `packages/smithers/src/NodeControl.ts` now stamps `{hostId: hostname(), pid: process.pid, nonce}`, and `packages/smithers/test/TwoProcessClaim.test.ts` drives a second real `smithers` process against a run the first owns and asserts it is refused. What this case still does not cover is the fence under a real race rather than a written row: rc.0 ships no flow the CLI can execute for a controlled span without a model provider, so a spawned pair would be decided by whichever process booted first. | S |
+| 12 | A rewind restores a real jj working copy, archives the journal suffix, and records a completed audit. | Compensation handlers for irreversible effects crossed by the rewind. `CompensationHandlers` is a contribution door with no registered handler here, so a crossed irreversible effect blocks rather than compensating. | M |
+| 16 | Five concurrent subscribers over 500 committed events, against the RSS budget in `packages/smithers/test/faults/budgets/memory.json`. | A long-lived soak: hours of streaming with a growth budget. It would add at least ten minutes to every run, so it belongs in a nightly tier this matrix does not yet have a runner for. | L |
+| 22 | The journal redacts a credential out of every committed row, structurally by field name and textually inside a value, checked by reading the SQLite file rather than an API that could redact on the way out. **The operator's terminal is covered too, by a test that is now green.** | The rules recognise credential shapes, not arbitrary strings, so a secret that matches no `@smthrs/journal` `Redaction` rule and sits under no credential-named field is not detected, and neither half of that case nor any other test proves a negative about a shape the rules do not know. Covering that means a taint-tracking seam that follows a declared secret through the run rather than a rule set that recognises one, which is a design this candidate does not have. A second uncovered shape: a child process that writes its own stderr without going through the logger, such as a spawned agent binary, is that process's own output and no logger rewrites it; reaching it needs a case that spawns a real provider binary. Both limits are stated in `docs/pages/release/known-limitations.md#credential-redaction-in-logs`. | M |
+| 25 | Unauthenticated and wrongly authenticated callers are refused, and an approval is refused when its envelope or digest does not match what the server issued. | A durable denial audit: actor, scope, target, and timestamp persisted for a refused approval. No audit sink exists to assert against. | M |
+| 32 | A checkpoint survives the process that took it, and a reading taken at one sees the pinned tree while the live tree has moved on. | The pinned-tree path driven end to end through an agent cell, rather than through `Checkpoints` and `Checkpointed.relocate` directly. That needs a recorded model fixture. | M |
+
+## Cases the 0.x matrix had and this one does not
+
+| 0.x case | Outcome |
+| --- | --- |
+| 07 continue-as-new lineage | Continue-as-new is not supported. A case for it would assert a feature the release does not ship. |
+| 10 ghost state on unmount, 13 collapsed-ancestor failure marker, 26 diff review mode | Inspector GUI behaviour. The UI is `apps/ui`, whose own Playwright tiers own these; a fault case here could only assert the DTOs, which the gateway family already does. |
+| 17 webhook bad signature | Owned by the integrations lane, which holds the webhook contract tests. |
+| 18 cron manual overlap | Trigger scheduling is `@smthrs/triggers`; the overlap policy is not an RC commitment. |
+| 19 auth persistence, 20 browser automation in a hosted workspace, 23 network policy, 30 hosted soak | All need hosted-provider credentials. Owned by the providers-hosts lane where a real provider exists to run them against. |
+| 24 replay-unsafe approval | Folded into case 25: the RC refuses an approval whose envelope or digest does not match, which is the same fence stated on the shipped API. |
+| 27 scorer failure blocks downstream | `@smthrs/scorers` has no engine scheduling dependency in the RC. |
+| 28, 29 soak tiers | No nightly runner is declared for the RC. Reinstating one means a scheduled workflow and a growth budget per case, not a new case file. |

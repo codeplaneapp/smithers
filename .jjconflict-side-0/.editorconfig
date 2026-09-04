@@ -1,0 +1,25 @@
+# EditorConfig https://editorconfig.org
+#
+# These values mirror the per-package dprint.json files, which are what
+# actually enforce formatting (`pnpm run lint` checks, `pnpm --filter <pkg> run
+# format` writes). dprint does not read .editorconfig, so keep the two in sync
+# by hand: indentWidth 2 and lineWidth 120 here must match every dprint.json.
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,mdx,yml,yaml,html,css,scss}]
+indent_size = 2
+max_line_length = 120
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

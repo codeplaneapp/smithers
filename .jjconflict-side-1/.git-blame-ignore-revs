@@ -1,0 +1,21 @@
+# Revisions to skip when running `git blame`.
+#
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub reads this file automatically. Add a commit here only when it moved or
+# reformatted code without changing behavior: a repository-wide reformat, or a
+# wholesale import that rewrites paths.
+
+# style: format the repo with oxfmt (adopting oxfmt as the formatter)
+39b59f5fb406b10c5a76d77c2846f8c38f992849
+
+# remove the superseded JSX/reconciler execution architecture
+2716e98558559a46c24212906837a7450246a12d
+
+# phase2: import the Smithers Flows workspace wholesale from
+# smithersai/flows@393253c2b4adb1330fab518a3075b8ecd25cd927
+378c182a752fb3e39183428f1972b18a6f081b2e
+
+# phase2: catch up Flows import through 4464c7e
+b8af974334ede245ea6cd9acc4b5f5b37056441d

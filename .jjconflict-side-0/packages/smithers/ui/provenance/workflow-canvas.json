@@ -1,0 +1,49 @@
+[
+  {
+    "file": "src/canvas/WorkflowCanvas.tsx",
+    "exports": [
+      "WorkflowCanvas",
+      "WorkflowNode",
+      "WorkflowNodeHeader",
+      "WorkflowNodeContent",
+      "WorkflowNodeStatus",
+      "WorkflowEdge",
+      "WorkflowConnection",
+      "WorkflowControls",
+      "WorkflowPanel",
+      "WorkflowToolbar",
+      "WorkflowMinimap"
+    ],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/canvas",
+    "ported": "partial-anatomy",
+    "omissions": [
+      "NodeTitle, NodeDescription, NodeFooter (upstream Node card sub-parts; our title is a WorkflowNode header prop and description/footer slots are plain children)",
+      "Edge.Temporary and Edge.Animated (upstream edge renderer components; edge geometry is the ReactFlow layer's job)",
+      "Upstream Connection as a ReactFlow connectionLineComponent (pending-connection drag geometry is the renderer's job)",
+      "Upstream Canvas ReactFlow wrapper itself (pre-configured pan/zoom/selection/delete/fitView behaviors bound to the AI SDK data model)"
+    ],
+    "divergences": [
+      "Renderer-neutral presentational anatomy: upstream Canvas wraps ReactFlow directly, while @xyflow/react never enters this package; a host owns the ReactFlow renderer",
+      "WorkflowEdge and WorkflowConnection are legend/inline representations (from -> to, pending-connection validity) rather than ReactFlow edge/connection-line renderers",
+      "WorkflowNodeStatus is a smithers addition (shared StatusPill) with no upstream equivalent",
+      "WorkflowMinimap is a labelled seam frame with no upstream component; upstream parks ReactFlow's MiniMap as a Canvas child",
+      "WorkflowToolbar is plain canvas chrome; upstream Toolbar wraps ReactFlow's per-node NodeToolbar",
+      "WorkflowControls renders buttons only from caller-provided callbacks; upstream Controls binds the ReactFlow viewport API directly",
+      "WorkflowCanvas is role=group, not role=application: the base layer ships no application-mode keyboard contract",
+      "WorkflowNode renders with role=option when the renderer passes a selection state, so aria-selected is supported by the role and survives into the accessibility tree (on a generic div it is stripped); nodes without a selection model stay generic",
+      "WorkflowEdge status is not color-only: a per-status-class shape glyph plus an sr-only status label accompany the colored signifier",
+      "WorkflowControls and WorkflowToolbar implement the ARIA toolbar keyboard contract: roving tabindex with Arrow/Home/End navigation that never lands on disabled items and ignores modifier-key chords",
+      "WorkflowConnection exposes its validity state via sr-only text instead of aria-hidden"
+    ]
+  },
+  {
+    "file": "src/canvas/canvasCss.ts",
+    "exports": ["canvasCss", "WORKFLOW_CANVAS_CSS_ID"],
+    "collection": "agentic/ai-elements",
+    "registryItem": "https://elements.ai-sdk.dev/components/canvas",
+    "ported": "partial-anatomy",
+    "omissions": [],
+    "divergences": ["Lane CSS fragment self-injected via useInjectLaneCss until integration composes it into smithersUiCss"]
+  }
+]

@@ -1,0 +1,61 @@
+---
+title: "Content addressing"
+description: "Step keys are derived from canonical content, so renaming an activity cannot corrupt replay and a changed declaration re-keys exactly its dependent cone."
+sidebar:
+  order: 3
+---
+
+A durable engine faces an identity question on every step: when this run resumes, which recorded result belongs to this step? Effect's own workflow package answers with the activity's name, so renaming an activity corrupts replay: the resumed run asks for a name nothing was recorded under. Smithers answers with content. A step is keyed by what it is, not by what it is called.
+
+## Keys are derived from canonical content
+
+A key is derived in three fixed steps: encode the input with `@smthrs/canonical` (RFC 8785 canonical JSON), hash the canonical UTF-8 document with SHA-256, and prefix the lowercase digest with `key1_`:
+
+```ts
+const key = await Effect.runPromise(
+  deriveKey({ domain: "example/compile", version: 1, input: "main.ts" }).pipe(
+    Effect.provide(NodeCrypto.layer)
+  )
+)
+// key1_<64 lowercase hex>
+```
+
+Canonicalization is what makes the hash meaningful across hosts and across time: object keys sort, so two hosts that build the same content derive the same key. Decoding fails rather than approximates. A value carrying a lone surrogate, a non-finite number, or a cycle has no canonical form, and a best-effort string would produce a digest that silently disagrees with another host's.
+
+## What folds into a step key
+
+A call node's key material folds the declared schemas of the callee as their JSON Schema documents, so a change to what a callee accepts or produces re-keys the call. A plan node's key is a function of what the node consumes: an edited declaration re-keys that node and its dependent cone, and nothing else. Structural names are lookup addresses only and never enter the hashed value, so renaming an action or a node re-keys nothing.
+
+The reference itself is hashed with its tag, so a pending reference and a resolved reference to the same dependency cannot collide. A dependency digest is resolved as an own property, so a reference naming `toString` or `constructor` is a refusal, not a colliding key.
+
+That is the entire invalidation mechanism. There is no reverse-dependency index and no invalidating node visitor, because content addressing subsumes both.
+
+## Sealed content keys and run-local ordinals
+
+Only `sealed` material may become a content key. Compensable, irreversible, or unsealed work gets an ordinal key instead, which is deliberately run-local. The difference decides what a cache may do with the record: only a content-key record has an address another run can reproduce, so cross-run reuse exists only for sealed steps, and an ordinal-key record remains visible inside its own run and nowhere else.
+
+## Namespaces keep identities apart
+
+Callers own their domain material. A key input carries a stable domain and a material-schema version, for example `{ domain: "engine/action", version: 1, ... }`, whenever two protocols must not share an identity namespace. The runtime's own facts are namespaced the same way: the environment a sealed key is computed under is hashed separately from caller-owned identity, so caller declarations and environment layers can never alias each other.
+
+## The stated limit
+
+Key identity is JSON-Schema-shaped, and the limit is worth stating exactly: two schemas whose decoders disagree can serialize to the same JSON Schema document. Changing only a codec's behavior does not re-key the call, and a result recorded under the old codec replays under the new one. Effect codecs are not serializable, so nothing can close this automatically. An author who changes a transformation and needs the call re-keyed renames the declaration.
+
+A plan diff's attribution, which fields changed, is a report for a human comparing declarations field by field, and it is deliberately part of no digest.
+
+## Boundaries and trade-offs
+
+A key is opaque. Only `@smthrs/keys` owns the `key<n>_` wire form, and `StoredKey` is the union of representations this release supports; `key2_` is invalid until a complete version-two contract exists. Parsing a stored key validates the exact text and needs no crypto service, so a key crossing persistence, RPC, or journal boundaries is checked without deriving anything.
+
+Derivation fails with `KeyDerivationError` carrying a stable code: `canonicalization_failed` when the input has no accepted canonical form, `digest_failed` when the injected hash operation fails. Deriving a key is one-shot and holds the input, the canonical document, and the hash snapshot in memory, so an external boundary imposes its own size limits before derivation.
+
+Canonicalization inherits JSON's erasures: negative zero canonicalizes as zero, an undefined object member is omitted, and an undefined array element canonicalizes as null. A distinction that matters to identity has to be encoded explicitly.
+
+Content addressing trades a rename's convenience for replay's integrity. Keying on content means a stale result can never be served under a fresh declaration; it also means a refactor that changes payloads re-executes steps a name-keyed system would have served. The engine chooses re-execution, because a wrong replay is silent and a re-execution is visible.
+
+## Related
+
+- [Flows, actions, and plans](/docs/concepts/flows-actions-plans/)
+- [`@smthrs/canonical` reference](/docs/reference/api/canonical/)
+- [`@smthrs/keys` reference](/docs/reference/api/keys/)

@@ -1,0 +1,54 @@
+---
+description: Repairs a newly scaffolded Smithers flow until its typecheck, discovery, and test all pass.
+capabilities: ["fs:read:**", "fs:write:**", "proc:spawn:*"]
+---
+
+# Fix the flow until it verifies
+
+The new flow failed verification. Read the errors, fix the files, and make every
+check pass. You have file and shell tools.
+
+The appended arguments carry the flow name, its file paths, the failing commands,
+their output, and the intended design.
+
+## What verification runs
+
+1. **Typecheck.** The project's own typecheck command over the new files. A flow
+   that does not compile is not a flow.
+2. **Discovery.** `smthrs ls` must list the flow by its path-derived name. A
+   flow missing from that list has metadata the registry could not read: a
+   description built at runtime instead of stated literally, an entry file with
+   the wrong name, or a parse error.
+3. **Plan.** `smthrs plan <flow>` must compile a plan and print its card
+   without executing anything. A failure here is a graph error, not a runtime
+   one.
+4. **Test.** The sibling test, run through the project's test command.
+
+The design is the source of truth for behavior. The errors tell you what is
+broken; the design tells you what correct looks like.
+
+## How to fix
+
+1. Read the entry file, its actions, its test, and anything it imports.
+2. Map each error to a cause. The common ones:
+   - **Module not found.** An import path is wrong, or a named export does not
+     exist. Check the package's real exports rather than assuming.
+   - **Schema mismatch.** An action's declared `output` does not match what the
+     body reads from it, or a `payload` field is missing.
+   - **Graph error.** A body that returns an Effect where a `Node` is required,
+     a `map` that decides what happens next (that is a `branch`), or a
+     recursive body (a plan is a DAG; repetition belongs in a pattern).
+   - **Missing description.** Discovery needs a literal description in the
+     exported entry value.
+   - **Tier and retry conflict.** An `irreversible` action with a retry and no
+     idempotency key.
+3. Fix the cause, not the symptom. Do not widen a schema to silence a decode
+   error, and do not delete an assertion to make a test pass.
+4. Re-run the failing command yourself and confirm it now passes before you
+   report success.
+
+## Output
+
+Report each file you changed, what was wrong, and what the fix was. Report any
+check that still fails, with its exact output. Never claim a check passed
+without having run it.

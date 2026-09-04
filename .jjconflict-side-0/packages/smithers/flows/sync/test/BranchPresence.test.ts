@@ -1,0 +1,269 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Duration, Effect, Fiber, Layer, Redacted, Stream } from "effect"
+import { TestClock } from "effect/testing"
+import * as BranchPresence from "../src/BranchPresence.ts"
+import * as BranchProtocol from "../src/BranchProtocol.ts"
+import * as BranchShare from "../src/BranchShare.ts"
+import { SyncError } from "../src/SyncError.ts"
+
+const branchId = "live-branch" as BranchProtocol.BranchId
+const otherBranchId = "other-branch" as BranchProtocol.BranchId
+const participant = (id: string) => id as BranchProtocol.ParticipantId
+
+const leaseMs = 30_000
+
+const layer = BranchPresence.layer({ leaseMs }).pipe(
+  Layer.provideMerge(BranchShare.layerHmac({ secret: Redacted.make("presence-secret") }))
+)
+
+const run = <A, E>(effect: Effect.Effect<A, E, BranchPresence.BranchPresence | BranchShare.BranchShare>) =>
+  effect.pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
+
+const capabilityFor = (target: BranchProtocol.BranchId, access: BranchProtocol.Access) =>
+  Effect.flatMap(
+    BranchShare.BranchShare,
+    (share) => share.mint({ branchId: target, capabilityId: `cap-${target}`, access, ttlMs: 600_000 })
+  )
+
+describe("BranchPresence", () => {
+  it.effect("keeps a roster scoped to one branch, sorted, and out of the journal", () =>
+    Effect.gen(function*() {
+      const [here, there] = yield* run(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.BranchPresence
+          const capability = yield* capabilityFor(branchId, "write")
+          const otherCapability = yield* capabilityFor(otherBranchId, "write")
+          for (const id of ["carol", "alice", "bob"]) {
+            yield* presence.announce({
+              capability,
+              branchId,
+              participantId: participant(id),
+              displayName: id,
+              cursor: null
+            })
+          }
+          yield* presence.announce({
+            capability: otherCapability,
+            branchId: otherBranchId,
+            participantId: participant("mallory"),
+            displayName: "mallory",
+            cursor: null
+          })
+          return [
+            yield* presence.list({ capability, branchId }),
+            yield* presence.list({ capability: otherCapability, branchId: otherBranchId })
+          ] as const
+        })
+      )
+
+      expect(here.map((entry) => entry.participantId)).toEqual(["alice", "bob", "carol"])
+      expect(there.map((entry) => entry.participantId)).toEqual(["mallory"])
+    }))
+
+  it.effect("carries a cursor and re-announcing renews the lease in place", () =>
+    Effect.gen(function*() {
+      const [first, renewed] = yield* run(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.BranchPresence
+          const capability = yield* capabilityFor(branchId, "write")
+          const announcement = {
+            capability,
+            branchId,
+            participantId: participant("alice"),
+            displayName: "Alice",
+            cursor: new BranchProtocol.Cursor({ cardId: "card-1", offset: 4 })
+          }
+          const initial = yield* presence.announce(announcement)
+          yield* TestClock.adjust(Duration.seconds(10))
+          const again = yield* presence.announce(announcement)
+          const roster = yield* presence.list({ capability, branchId })
+          expect(roster).toHaveLength(1)
+          return [initial, again] as const
+        })
+      )
+
+      expect(first.cursor?.cardId).toBe("card-1")
+      expect(first.cursor?.offset).toBe(4)
+      expect(renewed.leaseExpiresAtMs).toBe(first.leaseExpiresAtMs + 10_000)
+    }))
+
+  it.effect("expires a lease without any disconnect notice, on every branch", () =>
+    Effect.gen(function*() {
+      const [beforeExpiry, afterExpiry, otherAfterExpiry] = yield* run(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.BranchPresence
+          const capability = yield* capabilityFor(branchId, "write")
+          const otherCapability = yield* capabilityFor(otherBranchId, "write")
+          yield* presence.announce({
+            capability,
+            branchId,
+            participantId: participant("alice"),
+            displayName: "Alice",
+            cursor: null
+          })
+          yield* presence.announce({
+            capability: otherCapability,
+            branchId: otherBranchId,
+            participantId: participant("mallory"),
+            displayName: "Mallory",
+            cursor: null
+          })
+          yield* TestClock.adjust(Duration.millis(leaseMs - 1))
+          const live = yield* presence.list({ capability, branchId })
+          yield* TestClock.adjust(Duration.millis(1))
+          return [
+            live,
+            yield* presence.list({ capability, branchId }),
+            yield* presence.list({ capability: otherCapability, branchId: otherBranchId })
+          ] as const
+        })
+      )
+
+      expect(beforeExpiry).toHaveLength(1)
+      expect(afterExpiry).toEqual([])
+      expect(otherAfterExpiry).toEqual([])
+    }))
+
+  it.effect("drops a participant on an explicit leave and publishes the change", () =>
+    Effect.gen(function*() {
+      const [changes, roster] = yield* run(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.BranchPresence
+          const capability = yield* capabilityFor(branchId, "write")
+          const collected = yield* Stream.runCollect(Stream.take(presence.changes, 2)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Effect.yieldNow
+          yield* presence.announce({
+            capability,
+            branchId,
+            participantId: participant("alice"),
+            displayName: "Alice",
+            cursor: null
+          })
+          yield* presence.leave({ capability, branchId, participantId: participant("alice") })
+          return [
+            Array.from(yield* Fiber.join(collected)),
+            yield* presence.list({ capability, branchId })
+          ] as const
+        })
+      )
+
+      expect(changes).toEqual([branchId, branchId])
+      expect(roster).toEqual([])
+    }))
+
+  it.effect("refuses cross-branch and read-only writes to a roster", () =>
+    Effect.gen(function*() {
+      const failures = yield* run(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.BranchPresence
+          const foreign = yield* capabilityFor(otherBranchId, "write")
+          const readOnly = yield* capabilityFor(branchId, "read")
+          return [
+            yield* Effect.flip(
+              presence.announce({
+                capability: foreign,
+                branchId,
+                participantId: participant("mallory"),
+                displayName: "Mallory",
+                cursor: null
+              })
+            ),
+            yield* Effect.flip(
+              presence.leave({ capability: foreign, branchId, participantId: participant("alice") })
+            ),
+            yield* Effect.flip(presence.list({ capability: foreign, branchId })),
+            yield* Effect.flip(
+              presence.announce({
+                capability: readOnly,
+                branchId,
+                participantId: participant("watcher"),
+                displayName: "Watcher",
+                cursor: null
+              })
+            )
+          ] as const
+        })
+      )
+
+      expect(failures.map((failure) => failure.code)).toEqual([
+        "unauthorized",
+        "unauthorized",
+        "unauthorized",
+        "unauthorized"
+      ])
+      expect(failures[3]?.message).toBe("The share capability is read-only")
+    }))
+
+  it.effect("lets a read-only capability watch the roster it may not join", () =>
+    Effect.gen(function*() {
+      const roster = yield* run(
+        Effect.gen(function*() {
+          const presence = yield* BranchPresence.BranchPresence
+          const writer = yield* capabilityFor(branchId, "write")
+          const reader = yield* Effect.flatMap(
+            BranchShare.BranchShare,
+            (share) => share.mint({ branchId, capabilityId: "cap-read", access: "read", ttlMs: 600_000 })
+          )
+          yield* presence.announce({
+            capability: writer,
+            branchId,
+            participantId: participant("alice"),
+            displayName: "Alice",
+            cursor: null
+          })
+          return yield* presence.list({ capability: reader, branchId })
+        })
+      )
+
+      expect(roster.map((entry) => entry.displayName)).toEqual(["Alice"])
+    }))
+
+  it.effect("holds no one through the noop layer, and honours overrides", () =>
+    Effect.gen(function*() {
+      const noop = BranchPresence.makeNoop()
+      const capability = new BranchProtocol.ShareCapability({
+        claims: new BranchProtocol.ShareClaims({
+          branchId,
+          capabilityId: "cap",
+          access: "write",
+          issuedAtMs: 0,
+          expiresAtMs: 1
+        }),
+        signature: ""
+      })
+      const announcement = {
+        capability,
+        branchId,
+        participantId: participant("alice"),
+        displayName: "Alice",
+        cursor: null
+      }
+
+      expect((yield* (Effect.flip(noop.announce(announcement)))).code).toBe("closed")
+      expect(
+        (yield* (Effect.flip(noop.leave({ capability, branchId, participantId: participant("a") }))))
+          .code
+      ).toBe("closed")
+      expect(yield* (noop.list({ capability, branchId }))).toEqual([])
+      expect(Array.from(yield* (Stream.runCollect(noop.changes)))).toEqual([])
+      expect(
+        yield* (
+          Effect.flatMap(BranchPresence.BranchPresence, (service) => service.list({ capability, branchId })).pipe(
+            Effect.provide(BranchPresence.layerNoop)
+          )
+        )
+      ).toEqual([])
+      expect(
+        (yield* (
+          Effect.flip(
+            BranchPresence.makeNoop({
+              list: () => Effect.fail(new SyncError({ code: "unauthorized", message: "overridden" }))
+            }).list({ capability, branchId })
+          )
+        )).message
+      ).toBe("overridden")
+      expect(BranchPresence.make(noop).list).toBe(noop.list)
+    }))
+})

@@ -1,0 +1,865 @@
+/**
+ * A model-backed step declared the way a workflow author declares one, run as
+ * a step inside an ordinary flow.
+ *
+ * Everything under the declaration is production: the real durable engine, the
+ * real QuickJS sandbox, the real cell controller, the real registry-backed call
+ * bridge. Only the provider is scripted, which is what makes the test
+ * deterministic and CI-safe — there is no API key anywhere in it.
+ */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import { HarnessError } from "@smthrs/harness/HarnessError"
+import * as Model from "@smthrs/model/Model"
+import { ModelError } from "@smthrs/model/ModelError"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import type * as Route from "@smthrs/model/Route"
+import { make as makePlugin } from "@smthrs/plugin"
+import type { FlowsHooks } from "@smthrs/plugin"
+import * as Registry from "@smthrs/registry/Registry"
+import { Cause, Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
+import { describe, expect, it } from "vitest"
+import * as Agent from "../src/Agent.ts"
+import * as AgentAction from "../src/AgentAction.ts"
+import * as EventSink from "../src/EventSink.ts"
+import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import * as Seat from "../src/Seat.ts"
+import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
+
+const prepared: Route.PreparedRequest = {
+  routeId: "route-a",
+  protocolId: "test-protocol",
+  method: "POST",
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{}"),
+  bodyText: "{}"
+}
+
+const route: FlowEngineLike.RouteResolver = { prepare: () => Effect.succeed(prepared) }
+
+/**
+ * A model that answers with one scripted cell per call and records the prompt
+ * it was given, so the test can assert what the schema teaching contained.
+ */
+const scripted = (cells: ReadonlyArray<string>, requests: Array<string>): Model.Model => {
+  let index = 0
+  return Model.make({
+    stream: (request) =>
+      Stream.suspend(() => {
+        requests.push(
+          request.system.map((part) => part.text).join("\n") + "\n" +
+            request.messages.flatMap((message) =>
+              message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+            ).join("\n")
+        )
+        const source = cells[index] ?? cells.at(-1)!
+        index++
+        return Stream.fromIterable([
+          ModelEvent.ModelEvent.TextStart({ type: "text-start", id: `cell-${index}` }),
+          ModelEvent.ModelEvent.TextDelta({
+            type: "text-delta",
+            id: `cell-${index}`,
+            text: "```cell\n" + source + "\n```"
+          }),
+          ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: `cell-${index}` }),
+          ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+        ])
+      })
+  })
+}
+
+/** A cell that completes immediately with a literal answer. */
+const answering = (output: string): string => `ctx.done(${JSON.stringify(output)})`
+
+const emptyRegistry: Registry.Registry = Registry.makeNoop({
+  list: () => Effect.succeed([]),
+  visible: () => Effect.succeed([]),
+  getOption: () => Effect.succeed(Option.none())
+})
+
+const host: AgentAction.Host = {
+  registry: emptyRegistry,
+  limits: { calls: 8 },
+  capabilityEnvelope: [],
+  maxFrames: 3
+}
+
+/** The other half of the seam: a scripted model behind the host's resolver. */
+const seats = (model: Model.Model): Layer.Layer<SeatResolver.SeatResolver> =>
+  SeatResolver.layer({
+    resolve: (id) => Effect.succeed(Seat.make({ id, model, route, contextWindowTokens: 200_000 }))
+  })
+
+const Review = Schema.Struct({
+  approved: Schema.Boolean,
+  issues: Schema.Array(Schema.String)
+})
+
+const Reviewer = AgentAction.make("agent/test/Reviewer", {
+  payload: { diff: Schema.String },
+  output: Review,
+  seat: "anthropic:test-model",
+  system: ["You review diffs."],
+  prompt: ({ diff }) => `Review this diff:\n${diff}`
+})
+
+const ReviewFlow = Flow.make("agent/test/ReviewFlow", {
+  payload: { diff: Schema.String },
+  success: Review,
+  error: AgentAction.AgentFailure,
+  body: ({ diff }) => Reviewer.call({ diff })
+})
+
+/** A step whose frame budget runs out before the cell ever completes. */
+const Staller = AgentAction.make("agent/test/Staller", {
+  payload: { diff: Schema.String },
+  output: Review,
+  seat: "anthropic:test-model",
+  prompt: ({ diff }) => `Review this diff:\n${diff}`,
+  maxFrames: 1
+})
+
+const Stalling = Flow.make("agent/test/Stalling", {
+  payload: { diff: Schema.String },
+  success: Review,
+  error: AgentAction.AgentFailure,
+  body: ({ diff }) => Staller.call({ diff })
+})
+
+const run = (
+  cells: ReadonlyArray<string>,
+  requests: Array<string>,
+  executionId: string
+) =>
+  ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId }).pipe(
+    Effect.provide(
+      Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)).pipe(
+        Layer.provideMerge(AgentAction.layerHost(host)),
+        Layer.provideMerge(seats(scripted(cells, requests))),
+        Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+        Layer.provideMerge(Safety.layer),
+        Layer.provideMerge(Action.layerImplementations),
+        Layer.provideMerge(FlowEngine.layerMemory),
+        Layer.provideMerge(NodeCrypto.layer)
+      )
+    )
+  )
+
+describe("AgentAction.make", () => {
+  it("runs the cell loop as one step and yields the schema-typed answer", async () => {
+    const requests: Array<string> = []
+    const result = await Effect.runPromise(
+      run([answering(`{"approved":true,"issues":[]}`)], requests, "review-1")
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+
+    // The declaration's own teaching and the rendered output schema both
+    // reached the provider, and so did the prompt built from the payload.
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toContain("You review diffs.")
+    expect(requests[0]).toContain("Required output shape")
+    expect(requests[0]).toContain("\"approved\"")
+    expect(requests[0]).toContain("Review this diff:")
+  })
+
+  it("extracts the answer from prose around it rather than demanding a bare document", async () => {
+    const requests: Array<string> = []
+    const result = await Effect.runPromise(
+      run(
+        [answering(`Here is my review:\n\n{"approved":false,"issues":["missing test"]}\n\nHope that helps.`)],
+        requests,
+        "review-2"
+      )
+    )
+
+    expect(result).toEqual({ approved: false, issues: ["missing test"] })
+    expect(requests).toHaveLength(1)
+  })
+
+  it("spends one correction slot re-prompting a decode miss, then succeeds", async () => {
+    const requests: Array<string> = []
+    const result = await Effect.runPromise(
+      run(
+        [
+          answering("Looks fine to me."),
+          answering(`{"approved":true,"issues":[]}`)
+        ],
+        requests,
+        "review-3"
+      )
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+    expect(requests).toHaveLength(2)
+    // The correction restates the task and adds the diagnostics; it never
+    // reinterprets the step.
+    expect(requests[1]).toContain("Review this diff:")
+    expect(requests[1]).toContain("did not validate")
+  })
+
+  it("fails typed when the run ends without a completed answer", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Stalling.execute({ diff: "-  old\n+  new" }, { executionId: "review-5" }).pipe(
+          Effect.provide(
+            Layer.mergeAll(Staller.layer, Interpreter.layer(Stalling)).pipe(
+              Layer.provideMerge(AgentAction.layerHost(host)),
+              Layer.provideMerge(
+                seats(scripted([""], requests))
+              ),
+              Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+              Layer.provideMerge(Safety.layer),
+              Layer.provideMerge(Action.layerImplementations),
+              Layer.provideMerge(FlowEngine.layerMemory),
+              Layer.provideMerge(NodeCrypto.layer)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(JSON.stringify(exit._tag === "Failure" ? exit.cause : undefined)).toContain(
+      "ended without a completed answer"
+    )
+  })
+
+  it("fails typed when the correction budget is exhausted", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(run([answering("Looks fine to me.")], requests, "review-4"))
+    )
+
+    expect(exit._tag).toBe("Failure")
+    const failure = exit._tag === "Failure" ? exit.cause : undefined
+    const rendered = JSON.stringify(failure)
+    expect(rendered).toContain("StructuredOutputFailure")
+    // One first attempt plus one correction, and no third call.
+    expect(requests).toHaveLength(2)
+  })
+})
+
+/**
+ * Composes the host half beneath one declared step.
+ *
+ * The seam is the point: an action's own layer plus its flow's interpreter go
+ * on top, and everything under them — the host composition, the seat resolver
+ * and its scripted model, the agent, the engine — is what a case varies.
+ */
+const stack = <ROut, RIn>(
+  step: Layer.Layer<ROut, never, RIn>,
+  host: AgentAction.Host,
+  model: Model.Model
+) =>
+  step.pipe(
+    Layer.provideMerge(AgentAction.layerHost(host)),
+    Layer.provideMerge(seats(model)),
+    Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+    Layer.provideMerge(Safety.layer),
+    Layer.provideMerge(Action.layerImplementations),
+    Layer.provideMerge(FlowEngine.layerMemory),
+    Layer.provideMerge(NodeCrypto.layer)
+  )
+
+/** A cell that continues forever, projecting a different window every frame. */
+const stalling = `var seen = (typeof seen === "number" ? seen : 0) + 1
+console.log("again " + seen)`
+
+describe("AgentAction correction budgets", () => {
+  it("rejects non-finite, fractional, and negative budgets at declaration time", () => {
+    for (const corrections of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5]) {
+      expect(() =>
+        AgentAction.make("agent/test/InvalidBudget", {
+          payload: { diff: Schema.String },
+          output: Review,
+          seat: "anthropic:test-model",
+          prompt: ({ diff }) => diff,
+          corrections
+        })
+      ).toThrow(AgentAction.InvalidCorrectionBudget)
+    }
+  })
+
+  const Zero = AgentAction.make("agent/test/Zero", {
+    payload: { diff: Schema.String },
+    output: Review,
+    seat: "anthropic:test-model",
+    prompt: ({ diff }) => `Review this diff:\n${diff}`,
+    corrections: 0
+  })
+  const ZeroFlow = Flow.make("agent/test/ZeroFlow", {
+    payload: { diff: Schema.String },
+    success: Review,
+    error: AgentAction.AgentFailure,
+    body: ({ diff }) => Zero.call({ diff })
+  })
+
+  const Three = AgentAction.make("agent/test/Three", {
+    payload: { diff: Schema.String },
+    output: Review,
+    seat: "anthropic:test-model",
+    prompt: ({ diff }) => `Review this diff:\n${diff}`,
+    corrections: 3
+  })
+  const ThreeFlow = Flow.make("agent/test/ThreeFlow", {
+    payload: { diff: Schema.String },
+    success: Review,
+    error: AgentAction.AgentFailure,
+    body: ({ diff }) => Three.call({ diff })
+  })
+
+  it("makes the first miss terminal when no correction is budgeted", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ZeroFlow.execute({ diff: "-  old\n+  new" }, { executionId: "corrections-0" }).pipe(
+          Effect.provide(
+            stack(
+              Layer.mergeAll(Zero.layer, Interpreter.layer(ZeroFlow)),
+              host,
+              scripted([answering("Looks fine to me.")], requests)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(JSON.stringify(exit)).toContain("StructuredOutputFailure")
+    // Zero really is zero: the model was asked once and never re-prompted.
+    expect(requests).toHaveLength(1)
+  })
+
+  it("spends every budgeted correction before it gives up", async () => {
+    const requests: Array<string> = []
+    // Each answer differs, so each correction re-prompt is a distinct request.
+    // Repeating one answer would make the later re-prompts byte-identical and
+    // the engine would replay a recorded provider call instead of making one,
+    // which would count the step cache rather than the budget.
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ThreeFlow.execute({ diff: "-  old\n+  new" }, { executionId: "corrections-3-exhausted" }).pipe(
+          Effect.provide(
+            stack(
+              Layer.mergeAll(Three.layer, Interpreter.layer(ThreeFlow)),
+              host,
+              scripted(
+                ["nope one", "nope two", "nope three", "nope four", "nope five"].map(answering),
+                requests
+              )
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(JSON.stringify(exit)).toContain("StructuredOutputFailure")
+    // One first attempt plus three corrections, and no fifth call.
+    expect(requests).toHaveLength(4)
+  })
+
+  it("stops re-prompting the moment a correction lands, short of the budget", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ThreeFlow.execute({ diff: "-  old\n+  new" }, { executionId: "corrections-3-recovered" }).pipe(
+          Effect.provide(stack(
+            Layer.mergeAll(Three.layer, Interpreter.layer(ThreeFlow)),
+            host,
+            scripted(
+              [answering("nope"), answering("still nope"), answering(`{"approved":true,"issues":[]}`)],
+              requests
+            )
+          ))
+        )
+      )
+    )
+
+    expect(exit).toMatchObject({ _tag: "Success", value: { approved: true, issues: [] } })
+    expect(requests).toHaveLength(3)
+    // Every correction restates the task and adds the diagnostics.
+    expect(requests[1]).toContain("did not validate")
+    expect(requests[2]).toContain("did not validate")
+  })
+})
+
+describe("AgentAction output schemas", () => {
+  const Nested = Schema.Struct({
+    verdict: Schema.Struct({ approved: Schema.Boolean, score: Schema.Number }),
+    notes: Schema.Array(Schema.Struct({ file: Schema.String, line: Schema.Number }))
+  })
+  const NestedAction = AgentAction.make("agent/test/Nested", {
+    payload: { diff: Schema.String },
+    output: Nested,
+    seat: "anthropic:test-model",
+    prompt: () => "Review it."
+  })
+  const NestedFlow = Flow.make("agent/test/NestedFlow", {
+    payload: { diff: Schema.String },
+    success: Nested,
+    error: AgentAction.AgentFailure,
+    body: ({ diff }) => NestedAction.call({ diff })
+  })
+
+  const Empty = Schema.Struct({})
+  const EmptyAction = AgentAction.make("agent/test/Empty", {
+    payload: { diff: Schema.String },
+    output: Empty,
+    seat: "anthropic:test-model",
+    prompt: () => "Review it."
+  })
+  const EmptyFlow = Flow.make("agent/test/EmptyFlow", {
+    payload: { diff: Schema.String },
+    success: Empty,
+    error: AgentAction.AgentFailure,
+    body: ({ diff }) => EmptyAction.call({ diff })
+  })
+
+  it("teaches and enforces a nested schema, and refuses an answer that misses one leaf", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        NestedFlow.execute({ diff: "-  old\n+  new" }, { executionId: "nested-1" }).pipe(
+          Effect.provide(stack(
+            Layer.mergeAll(NestedAction.layer, Interpreter.layer(NestedFlow)),
+            host,
+            scripted(
+              [
+                // The first answer omits `line` from one note: the miss is one level
+                // down inside an array, which is exactly where a flat check passes
+                // and a real decode does not.
+                answering(`{"verdict":{"approved":true,"score":1},"notes":[{"file":"a.ts"}]}`),
+                answering(`{"verdict":{"approved":true,"score":1},"notes":[{"file":"a.ts","line":4}]}`)
+              ],
+              requests
+            )
+          ))
+        )
+      )
+    )
+
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: { verdict: { approved: true, score: 1 }, notes: [{ file: "a.ts", line: 4 }] }
+    })
+    expect(requests).toHaveLength(2)
+    expect(requests[0]).toContain("verdict")
+    expect(requests[0]).toContain("notes")
+  })
+
+  it("accepts an empty document for a schema that declares no fields", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        EmptyFlow.execute({ diff: "-  old\n+  new" }, { executionId: "empty-1" }).pipe(
+          Effect.provide(
+            stack(
+              Layer.mergeAll(EmptyAction.layer, Interpreter.layer(EmptyFlow)),
+              host,
+              scripted([answering("{}")], requests)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit).toMatchObject({ _tag: "Success", value: {} })
+    expect(requests).toHaveLength(1)
+  })
+})
+
+describe("AgentAction frame budgets and system teaching", () => {
+  const Inheriting = AgentAction.make("agent/test/Inheriting", {
+    payload: { diff: Schema.String },
+    output: Review,
+    seat: "anthropic:test-model",
+    system: ["The action's own teaching."],
+    prompt: () => "Review it."
+  })
+  const InheritingFlow = Flow.make("agent/test/InheritingFlow", {
+    payload: { diff: Schema.String },
+    success: Review,
+    error: AgentAction.AgentFailure,
+    body: ({ diff }) => Inheriting.call({ diff })
+  })
+
+  const Overriding = AgentAction.make("agent/test/Overriding", {
+    payload: { diff: Schema.String },
+    output: Review,
+    seat: "anthropic:test-model",
+    prompt: () => "Review it.",
+    maxFrames: 1
+  })
+  const OverridingFlow = Flow.make("agent/test/OverridingFlow", {
+    payload: { diff: Schema.String },
+    success: Review,
+    error: AgentAction.AgentFailure,
+    body: ({ diff }) => Overriding.call({ diff })
+  })
+
+  const hostFrames = (maxFrames: number): AgentAction.Host => ({ ...host, maxFrames })
+
+  it("inherits the host's frame budget when the action declares none", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        InheritingFlow.execute({ diff: "-  old\n+  new" }, { executionId: "frames-inherit" }).pipe(
+          Effect.provide(
+            stack(
+              Layer.mergeAll(Inheriting.layer, Interpreter.layer(InheritingFlow)),
+              hostFrames(3),
+              scripted([stalling], requests)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(JSON.stringify(exit)).toContain("ended without a completed answer")
+    expect(requests).toHaveLength(3)
+  })
+
+  it("overrides the host's frame budget with its own, in the narrowing direction", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        OverridingFlow.execute({ diff: "-  old\n+  new" }, { executionId: "frames-narrow" }).pipe(
+          Effect.provide(
+            stack(
+              Layer.mergeAll(Overriding.layer, Interpreter.layer(OverridingFlow)),
+              hostFrames(3),
+              scripted([stalling], requests)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(requests).toHaveLength(1)
+  })
+
+  it("overrides the host's frame budget with its own, in the widening direction", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        InheritingFlow.execute({ diff: "-  old\n+  new" }, { executionId: "frames-host-one" }).pipe(
+          Effect.provide(
+            stack(
+              Layer.mergeAll(Inheriting.layer, Interpreter.layer(InheritingFlow)),
+              hostFrames(1),
+              scripted([stalling], requests)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    // The host's own budget applies, so the same declaration that got three
+    // frames above gets one here: the two numbers are not merged.
+    expect(requests).toHaveLength(1)
+  })
+
+  it("orders host teaching, then the action's, then the schema's, in one system context", async () => {
+    const requests: Array<string> = []
+    await Effect.runPromise(
+      Effect.exit(
+        InheritingFlow.execute({ diff: "-  old\n+  new" }, { executionId: "system-order" }).pipe(
+          Effect.provide(
+            stack(Layer.mergeAll(Inheriting.layer, Interpreter.layer(InheritingFlow)), {
+              ...hostFrames(2),
+              system: ["The host's shared teaching."]
+            }, scripted([answering(`{"approved":true,"issues":[]}`)], requests))
+          )
+        )
+      )
+    )
+
+    const rendered = requests[0]!
+    const hostAt = rendered.indexOf("The host's shared teaching.")
+    const actionAt = rendered.indexOf("The action's own teaching.")
+    const schemaAt = rendered.indexOf("Required output shape")
+    expect(hostAt).toBeGreaterThanOrEqual(0)
+    expect(hostAt).toBeLessThan(actionAt)
+    expect(actionAt).toBeLessThan(schemaAt)
+  })
+})
+
+describe("AgentAction refusals that never reach the provider", () => {
+  const Checked = AgentAction.make("agent/test/Checked", {
+    payload: { diff: Schema.String.check(Schema.isMinLength(8)) },
+    output: Review,
+    seat: "anthropic:test-model",
+    prompt: ({ diff }) => `Review this diff:\n${diff}`
+  })
+  const CheckedFlow = Flow.make("agent/test/CheckedFlow", {
+    payload: { diff: Schema.String },
+    success: Review,
+    error: AgentAction.AgentFailure,
+    body: ({ diff }) => Checked.call({ diff })
+  })
+
+  it("fails a payload that does not satisfy its own declared check, without calling the model", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        CheckedFlow.execute({ diff: "short" }, { executionId: "payload-check" }).pipe(
+          Effect.provide(
+            Layer.mergeAll(Checked.layer, Interpreter.layer(CheckedFlow)).pipe(
+              Layer.provideMerge(AgentAction.layerHost(host)),
+              Layer.provideMerge(seats(scripted([answering(`{"approved":true,"issues":[]}`)], requests))),
+              Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+              Layer.provideMerge(Safety.layer),
+              Layer.provideMerge(Action.layerImplementations),
+              Layer.provideMerge(FlowEngine.layerMemory),
+              Layer.provideMerge(NodeCrypto.layer)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    expect(requests).toEqual([])
+  })
+
+  it("reports an unresolved seat as a typed failure, without calling the model", async () => {
+    const requests: Array<string> = []
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ReviewFlow.execute({ diff: "-  old" }, { executionId: "seat-unresolved" }).pipe(
+          Effect.provide(
+            Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)).pipe(
+              Layer.provideMerge(AgentAction.layerHost(host)),
+              Layer.provideMerge(
+                SeatResolver.layer({
+                  resolve: (id) => Effect.fail(new Seat.SeatUnresolved({ seat: id, message: "No API key" }))
+                })
+              ),
+              Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+              Layer.provideMerge(Safety.layer),
+              Layer.provideMerge(Action.layerImplementations),
+              Layer.provideMerge(FlowEngine.layerMemory),
+              Layer.provideMerge(NodeCrypto.layer)
+            )
+          )
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    const rendered = JSON.stringify(exit)
+    expect(rendered).toContain("SeatUnresolved")
+    expect(rendered).toContain("No API key")
+    expect(requests).toEqual([])
+  })
+
+  it("keeps a text approximation of a request-plugin cause JSON cannot render", async () => {
+    const requests: Array<string> = []
+    // A request-audit plugin can report a database offset wider than JSON can
+    // represent. Its failure must survive the action encoder so the operator
+    // still learns which host extension stopped the model request.
+    class RequestAuditOverflow extends Error {
+      readonly offset = 2n ** 63n
+    }
+    const cause = new RequestAuditOverflow("the request audit offset exceeded its column")
+    const failingHost: AgentAction.Host = {
+      ...host,
+      plugins: [makePlugin<FlowsHooks>({
+        name: "request-audit",
+        hooks: {
+          cellModelRequest: () => Effect.fail(cause)
+        }
+      })]
+    }
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ReviewFlow.execute({ diff: "-  old" }, { executionId: "request-plugin-bigint" }).pipe(
+          Effect.provide(stack(
+            Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+            failingHost,
+            scripted([answering(`{"approved":true,"issues":[]}`)], requests)
+          ))
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    const failure = exit._tag === "Failure" ? Cause.squash(exit.cause) : undefined
+    expect(failure).toBeInstanceOf(HarnessError)
+    const harnessFailure = failure as HarnessError
+    expect(harnessFailure.code).toBe("engine_failed")
+    expect(harnessFailure.message).toBe("A cell model-request plugin failed")
+    expect(typeof harnessFailure.cause).toBe("string")
+    expect(harnessFailure.cause).toContain("hook \"cellModelRequest\" failed in plugin \"request-audit\"")
+    expect(requests).toEqual([])
+  })
+
+  it("does not spend a correction on a provider that refuses", async () => {
+    let attempts = 0
+    const failing = Model.make({
+      stream: () =>
+        Stream.suspend(() => {
+          attempts++
+          return Stream.fail(new ModelError({ code: "authentication", message: "invalid credential" }))
+        })
+    })
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        ReviewFlow.execute({ diff: "-  old" }, { executionId: "model-refused" }).pipe(
+          Effect.provide(stack(Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)), host, failing))
+        )
+      )
+    )
+
+    expect(exit._tag).toBe("Failure")
+    // A provider refusal is not a decode miss, so the correction budget is
+    // untouched: the run is asked once and the step fails.
+    expect(attempts).toBe(1)
+  })
+})
+
+describe("AgentAction event sink", () => {
+  const decodes = answering(`{"approved":true,"issues":[]}`)
+
+  it("hands every event to the host sink as it happens, before the step resolves", async () => {
+    const requests: Array<string> = []
+    const seen: Array<string> = []
+    const outcome = await Effect.runPromise(
+      Effect.gen(function*() {
+        const reached = yield* Deferred.make<void>()
+        const gate = yield* Deferred.make<void>()
+        let settled = false
+        // The sink holds the third event inside the run. Whatever it has seen
+        // when the gate is still shut is what it saw while the model was still
+        // working, which is the whole claim: the events are not a replay of a
+        // buffer handed over at the end.
+        const sink = EventSink.layer({
+          emit: (event) =>
+            Effect.suspend(() => {
+              seen.push(event._tag)
+              return seen.length === 3
+                ? Effect.andThen(Deferred.succeed(reached, void 0), Deferred.await(gate))
+                : Effect.void
+            })
+        })
+        const fiber = yield* ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-order" }).pipe(
+          Effect.tap(() => Effect.sync(() => (settled = true))),
+          Effect.provide(
+            Layer.merge(
+              stack(
+                Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+                host,
+                scripted([decodes], requests)
+              ),
+              sink
+            )
+          ),
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Deferred.await(reached)
+        const during = [...seen]
+        const settledDuring = settled
+        yield* Deferred.succeed(gate, void 0)
+        const value = yield* Fiber.join(fiber)
+        return { during, settledDuring, value }
+      })
+    )
+
+    expect(outcome.settledDuring).toBe(false)
+    expect(outcome.during).toEqual(["discipline-armed", "turn-opened", "model-delta"])
+    expect(outcome.value).toEqual({ approved: true, issues: [] })
+    // The decode still reads the buffered run, so the step's answer is
+    // unchanged by the sink watching it.
+    expect(seen).toContain("transition-applied")
+    expect(seen.length).toBeGreaterThan(outcome.during.length)
+  })
+
+  it("sees the correction attempt's events as well as the first attempt's", async () => {
+    const requests: Array<string> = []
+    const turns: Array<number> = []
+    let frames = 0
+    const result = await Effect.runPromise(
+      ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-corrections" }).pipe(
+        Effect.provide(
+          Layer.merge(
+            stack(
+              Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+              host,
+              scripted([answering("Looks fine to me."), decodes], requests)
+            ),
+            EventSink.layer({
+              emit: (event) =>
+                Effect.sync(() => {
+                  frames++
+                  if (event._tag === "turn-opened") turns.push(frames)
+                })
+            })
+          )
+        )
+      )
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+    // Two provider calls, and the sink saw a turn open for each of them: a
+    // re-prompt is a new run and its events reach the host like any other.
+    expect(requests).toHaveLength(2)
+    expect(turns).toHaveLength(2)
+  })
+
+  it("drops every event under the explicit noop, leaving the step's answer unchanged", async () => {
+    const requests: Array<string> = []
+    // `layerNoop()` writes down what a composition with no sink already does,
+    // so the step it wraps must answer exactly as the sink-less runs above do.
+    const result = await Effect.runPromise(
+      ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-noop" }).pipe(
+        Effect.provide(
+          Layer.merge(
+            stack(
+              Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+              host,
+              scripted([decodes], requests)
+            ),
+            EventSink.layerNoop()
+          )
+        )
+      )
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+    expect(requests).toHaveLength(1)
+  })
+
+  it("lets an override replace the noop's method", async () => {
+    const requests: Array<string> = []
+    const seen: Array<string> = []
+    const result = await Effect.runPromise(
+      ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "sink-noop-override" }).pipe(
+        Effect.provide(
+          Layer.merge(
+            stack(
+              Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)),
+              host,
+              scripted([decodes], requests)
+            ),
+            EventSink.layerNoop({ emit: (event) => Effect.sync(() => seen.push(event._tag)) })
+          )
+        )
+      )
+    )
+
+    expect(result).toEqual({ approved: true, issues: [] })
+    // The override is the only method the service has, so it saw the same run
+    // the layer form sees.
+    expect(seen.slice(0, 3)).toEqual(["discipline-armed", "turn-opened", "model-delta"])
+    expect(seen).toContain("transition-applied")
+  })
+})

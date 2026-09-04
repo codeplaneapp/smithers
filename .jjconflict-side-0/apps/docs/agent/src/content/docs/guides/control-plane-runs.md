@@ -1,0 +1,147 @@
+---
+title: "Run the agent as a control-plane run"
+description: "Compose AgentSession, the production ControlExecutor: what a launch does, the approval gate, steering, the journal trail, and cross-process resume."
+sidebar:
+  order: 4
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/docs/guides/control-plane-runs.md"
+---
+
+`AgentSession.layer(options)` is the production `ControlExecutor` for
+[`@smthrs/control`](https://control.smithers.sh/reference/api/). When the control plane accepts a launch, the
+session looks the flow up in the registry, loads its markdown prompt body,
+resolves its declared seat through `SeatResolver`, and runs `Agent` as the body
+of one durable flow execution whose id is the control run id.
+
+The session is the adapter, not the agent. Everything about how a frame is
+built, sealed, and replayed belongs to `Agent`; what belongs here is the
+control-plane half: status fencing, the resume bridge, the approval gate, and
+the journal trail. The CLI wiring, `NodeControl.layerExecutor` in
+[`@smthrs/cli`](https://cli.smithers.sh/reference/api/), composes this layer with a `SeatResolver` over real
+provider routes and the kernel's guarded host layers.
+
+## Declare the composition
+
+```ts
+import * as AgentSession from "@smthrs/agent/AgentSession"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
+
+const executor = AgentSession.layer({
+  // Explicit, never unlimited. These are illustrative values; size them for
+  // the cells you expect.
+  limits: { calls: 64, memoryBytes: 268_435_456, steps: 100_000, timeMs: 60_000, totalMs: 3_600_000 },
+  quotaPolicy: QuotaPolicy.layerDefault(),
+  budget: (envelope) => Budget.layerFromEnvelope(envelope),
+  flows: [/* the host's executable catalog: filesystem, shell, memory */],
+  approvalChannel: true
+})
+```
+
+Two options are required by the spec, not defaulted by the session:
+
+- `limits` is the explicit sandbox budget every cell runs under. There is no
+  default-unlimited path, because an unlimited QuickJS cell can hang the frame.
+- `quotaPolicy` and `budget` are the two policies every model call in the run
+  is decided under. `budget` is a function from the approved `Envelope` to a
+  `Budget` layer, so the ceiling a run is held to is derived from the plan that
+  was admitted rather than from anything the host held. A host that means to
+  enforce nothing says so with `QuotaPolicy.layerUnclassified()` and
+  `Budget.layerUnbounded()`.
+
+The remaining options shape the loop's discipline: `system`, `maxFrames`,
+`readOnlyCap`, `modelCallMs`, `repeatCap`, `narrowingCap`, `unmovedCap`,
+`unresolvedCap`, `approvalChannel`, and `reasoningEffort`. The field table is
+in the [API reference](/reference/api/#agentsessionoptions). Two deserve a note:
+
+- `approvalChannel` defaults to false. The executor wires an approval gate on
+  every run, but a gate is not an answerer: a benchmark, a cron, and a CI lane
+  all register approvals that nobody will ever decide. A run that claims false
+  has its `park` transitions refused and answered in-frame.
+- `reasoningEffort` is the host's default beneath the flow's own `effort:`
+  frontmatter, which wins. The built-in default is `high`: an unset effort is
+  not neutral, it is near-zero thinking.
+
+## What a launch does
+
+1. The executor looks the planned flow up in the registry. A flow this
+   composition does not know stays `pending`, because another host may run it.
+   A flow with a module body also stays `pending`: only prompt flows run on the
+   agent. A prompt flow with no `model:` frontmatter is refused with
+   `LaunchFailed`, because no agent host can ever run one.
+2. The declared seat is resolved at launch, so a missing key refuses the launch
+   as a typed failure instead of failing the run after it was accepted.
+3. The driver waits for the control plane's own `running` transition, then
+   starts the engine on the one durable flow every agent run executes,
+   `agent/run`, with the execution id equal to the control run id.
+4. Status writes stay fenced: `waiting-approval` when the execution parks, and
+   the terminal status when it settles, with a terminal `failed` carrying the
+   rendered cause into the journal.
+
+## The approval gate
+
+A cell asks a person through the `ask` flow. The session gates it in the
+`authorize` hook, before the durable boundary opens: it registers an in-run
+approval token with the control plane, journals the exact
+`control.approval.requested` payload an operator replays through
+`smithers approve`, and fails the call with an encoded
+`Permission.PermissionRequired`, which the controller turns into a real durable
+park annotated `reason: "approval"`. `Control.approve` resolves the token and
+installs the grant; the resumed attempt re-asks against the grant store as it
+now stands and proceeds.
+
+The park is decided outside the activity on purpose: an activity's outcome is
+journaled, so a permission requirement raised from inside one would replay
+forever and no later grant could unblock it. The ask's identity is derived from
+the run id and the whole input, so a grant for a byte-identical question in one
+run never answers it in another, while remaining stable across this run's park
+and resumed attempt.
+
+## Steering
+
+The run's `Steering.Source` is `@smthrs/harness`'s `Notifications` over the same
+journal-backed notification queue `Control.steer` admits into, so an operator's
+message reaches the loop at the next frame boundary. The drain itself is
+journaled through the engine port's `record`, so a resumed run replays the
+recorded drain instead of reading an already-drained queue.
+
+## The journal trail
+
+The executor consumes the agent's event stream itself and projects it onto the
+journal's lossy channel through [`trace`](/reference/api/#agentsessiontrace): model
+settlements with usage and per-call latency, produced cells, call starts and
+settlements, transitions, mutation observations, discipline demands, and the
+run's terminal resolution. `model-delta` is the one omission, because deltas
+are the token-by-token prefix of `model-settled`.
+
+Two properties keep the trail trustworthy:
+
+- **Identity.** A resumed attempt republishes its whole prefix, so each event
+  is journaled under a derived identity, [`traceIdentity`](/reference/api/#agentsessiontraceidentity),
+  that the journal's unique index deduplicates. An event produced after a
+  divergence derives a different identity and is admitted normally.
+- **No stall.** The trail is buffered in memory and written by a fiber of its
+  own, never by the stream's consumer: the consumer runs inside the frame that
+  produced the event, and a journal write there deadlocks against the engine
+  transaction the frame is holding.
+
+Fields larger than `maxTracedBytes` (65,536) are replaced with a truncation
+marker carrying the byte count and digest.
+
+## Resume across processes
+
+Resumption is event-driven and durable at once. The executor follows the
+journal for the control plane's resume events and re-drives the parked engine
+execution, and a once-per-second follower drains the control database's pending
+resume delegations, because a decision taken in another process reaches this
+executor through nothing else. A parked run has no owner, so the follower takes
+up a delegation only when this composition is the run's host: the fence the
+park was written under, which only the parking incarnation holds. A delegation
+left standing past the engine's heartbeat-stale cutoff belongs to a process
+that has exited, and any host may adopt it.
+
+The module exports the pieces this half is built from
+(`waitForRunning`, `waitForParked`, `preserveDriverInterrupt`,
+`registerDriver`, `settleDriverFailure`, `requestCancel`, `deliverSignal`,
+`drainRecordedSignals`), because a host that runs the agent its own way needs
+the same ones. Their signatures are in the
+[API reference](/reference/api/#wait-and-driver-helpers).

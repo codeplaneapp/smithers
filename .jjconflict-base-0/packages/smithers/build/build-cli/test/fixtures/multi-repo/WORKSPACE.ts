@@ -1,0 +1,15 @@
+import { Smithers as S } from "@smthrs/targets"
+
+const runtime = S.Runtime.Node({ version: ">=22.19.0" })
+
+export const Workspace = S.Workspace("multi-repo-parent", {
+  repository: "git+https://example.invalid/multi-repo-parent.git",
+  cache: S.Cache({ directory: ".flows" }),
+  runtime,
+  packageManager: S.PackageManager.Pnpm({ version: "11.21.0", runtime }),
+  nodeModules: S.Npm.NodeModules({ packageJson: S.file("//package.json") }),
+  repos: {
+    child: S.LocalRepository("child"),
+    broken: S.LocalRepository("broken")
+  }
+})

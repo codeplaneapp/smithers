@@ -1,0 +1,35 @@
+{
+  "name": "smithers-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Smithers closed-alpha Cloudflare Worker: same-origin agent API, gateway relay, and host for the smithers-ui build",
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "deploy:dry-run": "bun scripts/deploy.ts --dry-run",
+    "deploy": "bun scripts/deploy.ts",
+    "deploy:dry": "bun scripts/deploy.ts --dry-run",
+    "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src scripts",
+    "seed:allowlist": "node scripts/seed-allowlist.mjs",
+    "canary:build": "bun scripts/canary/build-probe.ts",
+    "canary:workers": "bun scripts/canary/workers-health.ts",
+    "canary:uptime": "bun scripts/canary/uptime-probe.ts",
+    "canary:invite": "bun scripts/canary/invite-probe.ts",
+    "canary:rollback": "bun scripts/canary/rollback-probe.ts"
+  },
+  "dependencies": {
+    "@smthrs/rpc": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.2"
+  }
+}

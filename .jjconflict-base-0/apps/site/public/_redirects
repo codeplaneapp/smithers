@@ -1,0 +1,10 @@
+# The 1.0 CLI links removed 0.x spellings to https://smithers.sh/migration/1.0#<anchor>
+# (packages/smithers/src/Unsupported.ts). A 301 keeps the fragment; an Astro
+# redirect page (meta refresh) drops it, so this file is the redirect.
+/migration/1.0  /docs/migration/1.0/  301
+/migration/1.0/  /docs/migration/1.0/  301
+
+# Recover the pre-Starlight routes while preserving their fragments.
+/api/*        /docs/reference/api/:splat/       301
+/concepts/*   /docs/concepts/:splat/            301
+/reference/*  /docs/reference/:splat/           301

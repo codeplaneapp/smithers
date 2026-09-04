@@ -1,0 +1,22 @@
+# Cargo workspace for the Rust side of flows.
+#
+# The pinned jj fork is a git dependency of `crates/flows-jj`, so cargo fetches
+# and builds it out of its own checkout; nothing about it lives in this tree.
+
+[workspace]
+resolver = "3"
+members = ["crates/flows-jj"]
+
+# No debuginfo in dev builds: jj-lib's debuginfo multiplies the target dir
+# several times over, and this workspace is exercised through tests, not
+# debuggers.
+[profile.dev]
+debug = false
+
+# The release profile tunes for the wasm32-wasip1 artifact that ships to the
+# browser: small and predictable beats fast-to-compile.
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+strip = "debuginfo"

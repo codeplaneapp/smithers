@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The suite reaches the review app, whose walkthrough renderer and server
+    // sources are typed against DOM, as the modules that own them declare.
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "inlineSources": false,
+    "sourceMap": false,
+    // `score.test.ts` and `deterministicReviewer.test.ts` are `bun:test`
+    // suites, so the checked set needs Bun's globals as well as Node's.
+    "types": ["bun-types", "node"]
+  },
+  "include": ["*.ts"],
+  "exclude": ["PACKAGE.ts"]
+}

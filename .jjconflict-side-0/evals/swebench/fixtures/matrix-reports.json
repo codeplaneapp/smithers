@@ -1,0 +1,135 @@
+{
+  "note": [
+    "Evaluator reports replayed as a best-of-5 matrix, so fixtures/check-matrix-report.mjs can check",
+    "the report generator without grading anything.",
+    "The five flows rounds are the verdicts waves 7 to 11 actually recorded on the same five instances,",
+    "copied verbatim from the official evaluator's own reports. The codex rounds are the four codex",
+    "gradings the drive has on those instances, so most codex cells read `not graded` \u2014 the case the",
+    "generator has to keep distinct from `empty patch`, and the case a real matrix produces whenever a",
+    "round was not run.",
+    "Two things here are constructed rather than recorded, and check-matrix-report.mjs says so where it",
+    "uses them: the `selected` verdicts, because no best-of-5 selection has been graded yet, and the",
+    "extra instance `stub__never`, which exists only to exercise the row where nothing resolved."
+  ],
+  "flows": {
+    "r1": {
+      "provenance": "flows-cell-harness.w7.json",
+      "resolved_ids": [
+        "astropy__astropy-8707",
+        "django__django-16612",
+        "pydata__xarray-7393",
+        "sphinx-doc__sphinx-11445"
+      ],
+      "unresolved_ids": [
+        "pytest-dev__pytest-6197"
+      ],
+      "empty_patch_ids": [],
+      "error_ids": []
+    },
+    "r2": {
+      "provenance": "flows-cell-harness.w8.json",
+      "resolved_ids": [
+        "astropy__astropy-8707",
+        "django__django-16612",
+        "pydata__xarray-7393",
+        "sphinx-doc__sphinx-11445"
+      ],
+      "unresolved_ids": [
+        "pytest-dev__pytest-6197"
+      ],
+      "empty_patch_ids": [],
+      "error_ids": []
+    },
+    "r3": {
+      "provenance": "flows-cell-harness.w9.json",
+      "resolved_ids": [
+        "astropy__astropy-8707",
+        "pydata__xarray-7393",
+        "sphinx-doc__sphinx-11445"
+      ],
+      "unresolved_ids": [
+        "pytest-dev__pytest-6197"
+      ],
+      "empty_patch_ids": [
+        "django__django-16612"
+      ],
+      "error_ids": []
+    },
+    "r4": {
+      "provenance": "flows-cell-harness.w10.json",
+      "resolved_ids": [
+        "astropy__astropy-8707",
+        "sphinx-doc__sphinx-11445"
+      ],
+      "unresolved_ids": [
+        "pytest-dev__pytest-6197"
+      ],
+      "empty_patch_ids": [
+        "django__django-16612",
+        "pydata__xarray-7393"
+      ],
+      "error_ids": []
+    },
+    "r5": {
+      "provenance": "flows-cell-harness.w11.json",
+      "resolved_ids": [
+        "astropy__astropy-8707",
+        "django__django-16612",
+        "pytest-dev__pytest-6197",
+        "sphinx-doc__sphinx-11445"
+      ],
+      "unresolved_ids": [],
+      "empty_patch_ids": [
+        "pydata__xarray-7393"
+      ],
+      "error_ids": []
+    }
+  },
+  "codex": {
+    "r1": {
+      "provenance": "codex-cli.codexbase-2026-08-19.json",
+      "resolved_ids": [
+        "django__django-16612",
+        "pydata__xarray-7393"
+      ],
+      "unresolved_ids": [
+        "sphinx-doc__sphinx-11445"
+      ],
+      "empty_patch_ids": [],
+      "error_ids": [
+        "astropy__astropy-8707",
+        "pytest-dev__pytest-6197"
+      ]
+    },
+    "r2": {
+      "provenance": "codex-cli.codexbase-rest.json",
+      "resolved_ids": [
+        "astropy__astropy-8707",
+        "pytest-dev__pytest-6197"
+      ],
+      "unresolved_ids": [
+        "sphinx-doc__sphinx-11445"
+      ],
+      "empty_patch_ids": [],
+      "error_ids": []
+    },
+    "r3": {
+      "provenance": "codex-cli.codex-nonet.json",
+      "resolved_ids": [
+        "pytest-dev__pytest-6197"
+      ],
+      "unresolved_ids": [],
+      "empty_patch_ids": [],
+      "error_ids": []
+    },
+    "r4": {
+      "provenance": "baseline/evidence/codex-cli.wave4-codex-sphinx-clean.json",
+      "resolved_ids": [
+        "sphinx-doc__sphinx-11445"
+      ],
+      "unresolved_ids": [],
+      "empty_patch_ids": [],
+      "error_ids": []
+    }
+  }
+}

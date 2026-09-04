@@ -1,0 +1,297 @@
+/**
+ * Aggregate Bun Host bundle.
+ *
+ * Runtime-specific dependencies stay inside this package; callers get the same
+ * closed five-service Host surface every other bundle provides.
+ *
+ * There is no Bun shell module: running a command is Effect's
+ * `ChildProcessSpawner`, and `@effect/platform-bun`'s implementation is
+ * `@effect/platform-node-shared`'s re-exported: the same code on both
+ * runtimes, so no runtime detection is needed here.
+ *
+ * There is no Bun HTTP module either: outgoing requests are Effect's
+ * `HttpClient`, and `@effect/platform-bun/BunHttpClient` is Effect's own
+ * fetch-backed implementation. Bun reaches for it directly rather than
+ * borrowing a browser package to get at `fetch`. The one thing configured here
+ * is `redirect: "manual"`, so the runtime never walks to a second origin
+ * behind the capability kernel's back; following a redirect is
+ * `@smthrs/kernel`'s guarded `HttpClient.layer`, which rechecks every hop.
+ *
+ * The filesystem slot is `@smthrs/platform-node`'s `AtomicFileSystem`, byte for
+ * byte the layer `NodeHost` uses, so a guarded path operation is
+ * descriptor-relative and no-follow on both runtimes.
+ *
+ * @since 1.0.0-rc.0
+ */
+import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
+import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
+import type { Jj } from "@smthrs/jj"
+import * as BunJj from "@smthrs/jj/bun/BunJj"
+import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
+import type { HostServiceIds } from "@smthrs/kernel/HostServices"
+import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
+import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
+import type { FileSystem } from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+import type { HttpClient } from "effect/unstable/http/HttpClient"
+import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { isAbsolute } from "node:path"
+import * as BunFileSystem from "./BunFileSystem.ts"
+
+/**
+ * Bun platform modules for selectively providing individual services.
+ *
+ * `AtomicFileSystem` is here for the same reason `NodeHost` re-exports it: it
+ * owns the only configuration escape hatch the filesystem slot has, and a Bun
+ * program whose python3 is not at `/usr/bin/python3` needs to reach
+ * `AtomicFileSystem.layerWith` without hand-composing the other four tags.
+ *
+ * `BunJj` is deliberately absent: it belongs to `@smthrs/jj` and is imported
+ * from there, never re-exported here.
+ *
+ * @category re-exports
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export { AtomicFileSystem, BunChildProcessSpawner, BunFileSystem, BunHttpClient }
+
+/**
+ * The complete closed Host service union provided by Bun.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export type BunHost = FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpClient
+
+/**
+ * The stable codes a `BunHost` factory refuses with.
+ *
+ * A code is the contract a caller branches on; the message beside it is for a
+ * person. `invalid_repository_root` is the root handed to {@link layerAt} or
+ * {@link layerContainedAt} not being absolute, the empty string included.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type BunHostErrorCode = "invalid_repository_root"
+
+/**
+ * The refusal a `BunHost` factory throws before it builds a layer.
+ *
+ * It is thrown rather than failed because a factory is called while a program
+ * composes its layers, where there is no fiber to fail yet and a wrong root is
+ * a composition mistake, not a runtime outcome. It is this package's class,
+ * not the `Jj` adapter's, because a Bun caller composes `BunHost` and should
+ * learn nothing about the adapter behind the `Jj` slot from an error message.
+ *
+ * @category errors
+ * @since 1.0.0-rc.0
+ */
+export class BunHostError extends Error {
+  override readonly name = "BunHostError"
+  readonly code: BunHostErrorCode
+  constructor(options: { readonly code: BunHostErrorCode; readonly message: string }) {
+    super(options.message)
+    this.code = options.code
+  }
+}
+
+/** How many code points of a refused root the message repeats. */
+const previewLimit = 64
+
+/**
+ * A bounded, quoted excerpt of a refused root.
+ *
+ * Counted in code points rather than UTF-16 units so a cut never splits a
+ * surrogate pair, and passed through `JSON.stringify` so a newline in the root
+ * cannot break the log line the message lands on.
+ */
+const preview = (root: string): string => {
+  const points = Array.from(root)
+  if (points.length <= previewLimit) return JSON.stringify(root)
+  return `${JSON.stringify(points.slice(0, previewLimit).join(""))}... (${points.length} characters)`
+}
+
+/**
+ * Refuses a root the `Jj` adapter underneath would refuse, here and in this
+ * package's name.
+ *
+ * `BunJj.layerAt` and `BunJj.layerSpawnerAt` are `NodeJj`'s, and those throw a
+ * bare `TypeError` that names `NodeJj`, carries no code, and echoes the whole
+ * string. The predicate here is the same `isAbsolute` the adapter applies, so
+ * a root that passes this check cannot reach that throw.
+ */
+const absoluteRoot = (factory: "layerAt" | "layerContainedAt", root: string): string => {
+  if (isAbsolute(root)) return root
+  throw new BunHostError({
+    code: "invalid_repository_root",
+    message: `BunHost.${factory} requires an absolute repository root, got ${preview(root)}`
+  })
+}
+
+/**
+ * Stable implementation identities keyed by the closed Host service slots.
+ *
+ * Each value names the module actually behind that slot. They are identity
+ * tokens rather than import specifiers: the filesystem entry is
+ * `@smthrs/platform-node/AtomicFileSystem` because that is the implementation,
+ * even though a consumer reaches it through `@smthrs/platform-bun`.
+ *
+ * Nothing digests them yet. `@smthrs/plan`'s step key carries a `layers`
+ * component these values are meant to feed, but no planner derives it from a
+ * host bundle today, so changing one invalidates no cached step.
+ *
+ * The keys are written as literals rather than `HostServiceIds` positions so
+ * that reordering the closed list cannot silently pair a slot with another
+ * slot's implementation.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export const implementationIds: Readonly<Record<(typeof HostServiceIds)[number], string>> = {
+  "effect/FileSystem": "@smthrs/platform-node/AtomicFileSystem",
+  "effect/Path": "effect/Path",
+  "effect/process/ChildProcessSpawner": "@effect/platform-bun/BunChildProcessSpawner",
+  "@smthrs/jj/Jj": "@smthrs/jj/bun/BunJj",
+  "effect/HttpClient": "@effect/platform-bun/BunHttpClient"
+}
+
+/**
+ * What a caller may configure about containment.
+ *
+ * `ContainedSpawner.Options.platform` is deliberately not part of it. It
+ * decides one thing, whether a command that names no `detached` option gets a
+ * process group of its own, and the spawner underneath IS Effect's Node
+ * spawner, which detaches by `process.platform` whatever a record claims. A
+ * caller-supplied `"win32"` on a POSIX host would therefore record
+ * `pgid: null` for a child that really does lead a group, and
+ * {@link ProcessReaper.reap} would retire that record as `no-group` and leave
+ * the orphan running forever: a durable lie rather than a compile error.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type ContainedOptions = Omit<ContainedSpawner.Options, "platform"> & ProcessReaper.Options
+
+/**
+ * The spawner half of {@link ContainedOptions}, with the REAL platform last.
+ *
+ * Split from the reaper half rather than passed as one merged object, so a
+ * property meant for one of them can never be read by the other, and read here
+ * rather than at layer-build time, so a caller that mutates the object it
+ * handed over cannot change what either layer was built with.
+ */
+const containment = (options?: ContainedOptions): ContainedSpawner.Options => ({
+  graceMs: options?.graceMs,
+  platform: process.platform
+})
+
+/** The reaper half of {@link ContainedOptions}. */
+const reaping = (options?: ContainedOptions): ProcessReaper.Options => ({
+  ownerPid: options?.ownerPid,
+  system: options?.system
+})
+
+/** The two services `BunChildProcessSpawner` resolves paths and files with. */
+const platform = Layer.mergeAll(BunFileSystem.layer, Path.layer)
+
+/** Effect's fetch client, told never to follow a redirect on its own. */
+const layerHttpClient: Layer.Layer<HttpClient> = Layer.provide(
+  BunHttpClient.layer,
+  Layer.succeed(BunHttpClient.RequestInit)({ redirect: "manual" })
+)
+
+/**
+ * Provides all five Bun Host services, including the runtime-independent Path
+ * service.
+ *
+ * @category layers
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export const layer: Layer.Layer<BunHost> = Layer.mergeAll(
+  platform,
+  Layer.provide(BunChildProcessSpawner.layer, platform),
+  BunJj.layer,
+  layerHttpClient
+)
+
+/**
+ * Provides all five Bun Host services bound to one absolute repository root.
+ *
+ * Throws {@link BunHostError} with code `invalid_repository_root` when `root`
+ * is not absolute; the empty string counts. The check runs when the factory is
+ * called, before any layer exists.
+ *
+ * @category layers
+ * @since 1.0.0-rc.0
+ */
+export const layerAt = (root: string): Layer.Layer<BunHost> => {
+  const repositoryRoot = absoluteRoot("layerAt", root)
+  return Layer.mergeAll(
+    platform,
+    Layer.provide(BunChildProcessSpawner.layer, platform),
+    BunJj.layerAt(repositoryRoot),
+    layerHttpClient
+  )
+}
+
+/**
+ * Provides the Bun host with process containment turned on.
+ *
+ * Bun runs Effect's Node child-process implementation, so containment is the
+ * same story it is under Node: `@smthrs/kernel`'s `ContainedSpawner` gives
+ * every child an escalation deadline and a ledger entry, and
+ * `ProcessReaper` sweeps the entries a crashed incarnation of this host left
+ * behind. The reaper module lives in `@smthrs/platform-node` because the calls
+ * it makes, `process.kill` and `taskkill`, are Node's, and Bun implements
+ * them unchanged.
+ *
+ * @category layers
+ * @since 1.0.0-rc.0
+ */
+export const layerContained = (
+  options?: ContainedOptions
+): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> => {
+  const spawner = Layer.provide(
+    ContainedSpawner.layer(containment(options)),
+    Layer.provide(BunChildProcessSpawner.layer, platform)
+  )
+  return Layer.mergeAll(
+    platform,
+    layerHttpClient,
+    // jj goes through the CONTAINED spawner here, not around it, exactly as in
+    // `NodeHost.layerContained`: a jj child that starts its own process leads
+    // no recorded group, is in no ledger, and outlives the host that ran it.
+    Layer.provideMerge(BunJj.layerSpawner, spawner)
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(reaping(options))))
+}
+
+/**
+ * Provides the contained Bun host bound to one absolute repository root.
+ *
+ * Refuses a root exactly as {@link layerAt} does: {@link BunHostError} with
+ * code `invalid_repository_root`, thrown when the factory is called.
+ *
+ * @category layers
+ * @since 1.0.0-rc.0
+ */
+export const layerContainedAt = (
+  root: string,
+  options?: ContainedOptions
+): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> => {
+  const repositoryRoot = absoluteRoot("layerContainedAt", root)
+  const spawner = Layer.provide(
+    ContainedSpawner.layer(containment(options)),
+    Layer.provide(BunChildProcessSpawner.layer, platform)
+  )
+  return Layer.mergeAll(
+    platform,
+    layerHttpClient,
+    Layer.provideMerge(BunJj.layerSpawnerAt(repositoryRoot), spawner)
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(reaping(options))))
+}

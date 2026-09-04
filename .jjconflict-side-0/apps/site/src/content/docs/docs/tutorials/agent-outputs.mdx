@@ -1,0 +1,336 @@
+---
+title: "Pass typed outputs between agent steps"
+description: "Declare output schemas on model-backed steps, chain one step's typed output into the next, and read the recorded outputs back."
+sidebar:
+  order: 7
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components"
+import versions from "../../../../data/versions.json"
+
+In this tutorial you'll build a two-step research-then-write flow. The first step's answer must decode against a schema you declare, the second step reads the typed fields, and afterwards you record the run in your project and read both steps' outputs back. It takes about 15 minutes.
+
+A declared `output` schema is rendered into the step's system teaching as JSON Schema, and the model's final answer is decoded by it with one correction re-prompt before the step fails, so a downstream step reads `research.summary` as a `string` instead of prose somebody has to parse. [Agent runtime](/docs/concepts/agent-runtime/) explains the loop this runs in.
+
+## Before you begin
+
+- The project from [Build your first agent flow](/docs/tutorials/first-agent-flow/), with its library install.
+- Node.js {versions.node} or later.
+- Two more packages for part 3's durable engine:
+
+```bash
+pnpm add @smthrs/plan@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/kernel@next @smthrs/run-store@next
+```
+
+## 1. Declare the research step's output schema
+
+A model call is an ordinary action, so `AgentAction.make` declares one the way `Action.make` declares any other. The difference is that the author does not write the implementation: a model call runs the cell loop, and that loop ships with the declaration as `.layer`.
+
+Write `article.ts` with the research step, its schema, and the host composition:
+
+```ts title="article.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as Agent from "@smthrs/agent/Agent"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
+import * as Seat from "@smthrs/agent/Seat"
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import type * as Route from "@smthrs/model/Route"
+import * as Registry from "@smthrs/registry/Registry"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+
+const ResearchResult = Schema.Struct({
+  summary: Schema.String,
+  keyPoints: Schema.Array(Schema.String)
+})
+
+// The research step: a model call whose answer must be a ResearchResult.
+const Research = AgentAction.make("research/Research", {
+  payload: { topic: Schema.String },
+  output: ResearchResult,
+  seat: "anthropic:claude-sonnet-4-5",
+  system: ["You are a research assistant. Provide concise, accurate summaries."],
+  prompt: ({ topic }) => `Research the topic "${topic}" and report what matters about it.`
+})
+
+const Brief = Flow.make("research/Brief", {
+  payload: { topic: Schema.String },
+  success: ResearchResult,
+  error: AgentAction.AgentFailure,
+  body: ({ topic }) => Research.call({ topic })
+})
+
+const prepared: Route.PreparedRequest = {
+  routeId: "tutorial",
+  protocolId: "tutorial",
+  method: "POST",
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{}"),
+  bodyText: "{}"
+}
+
+// A scripted model, so the run is deterministic and needs no API key. Point
+// the resolver at a provider route and nothing above it changes.
+const scripted: Model.Model = Model.make({
+  stream: (request) =>
+    Stream.suspend(() => {
+      const asked = [
+        ...request.system.map((part) => part.text),
+        ...request.messages.flatMap((message) =>
+          message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+        )
+      ].join("\n")
+      const answer = asked.includes("Write a short article")
+        ? {
+          article: "Durable workflows survive restarts because their steps are recorded, not remembered.",
+          wordCount: 12
+        }
+        : {
+          summary: "Durable workflows record every step so a restart resumes instead of repeating.",
+          keyPoints: ["steps are journaled", "replay is deterministic"]
+        }
+      const cell = `ctx.done(${JSON.stringify(answer)})`
+      return Stream.fromIterable([
+        ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+        ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: "```cell\n" + cell + "\n```" }),
+        ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+        ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+      ])
+    })
+})
+
+// The host: one registry and one sandbox budget, shared by every model-backed
+// action in the composition.
+const host = AgentAction.layerHost({
+  registry: Registry.makeNoop({
+    list: () => Effect.succeed([]),
+    visible: () => Effect.succeed([]),
+    getOption: () => Effect.succeed(Option.none())
+  }),
+  limits: { calls: 8 },
+  capabilityEnvelope: [],
+  maxFrames: 4
+})
+
+const seats = SeatResolver.layer({
+  resolve: (id) =>
+    Effect.succeed(
+      Seat.make({
+        id,
+        model: scripted,
+        route: { prepare: () => Effect.succeed(prepared) },
+        contextWindowTokens: 200_000
+      })
+    )
+})
+
+const stack = Layer.mergeAll(Research.layer, Interpreter.layer(Brief)).pipe(
+  Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
+  // This offline run has no approved plan envelope to derive a ceiling from.
+  Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
+  Layer.provideMerge(Agent.layerDefaults),
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  Layer.provideMerge(NodeCrypto.layer)
+)
+
+const main = Brief.execute({ topic: "durable workflows" }, { executionId: "brief-1" }).pipe(
+  Effect.provide(stack),
+  Effect.tap((brief) => Effect.sync(() => console.log(JSON.stringify(brief, null, 2)))),
+  Effect.orDie
+)
+
+NodeRuntime.runMain(main)
+```
+
+Run it:
+
+```bash
+node article.ts
+```
+
+```text
+You should see: the research step's answer as JSON with a summary string and
+a keyPoints array. The model's final answer was decoded against the declared
+schema, so the program holds research.summary as a string, not as text
+somebody has to parse.
+```
+
+## 2. Chain the typed output into the writing step
+
+Add the writing step. Its payload is the research step's output, field for field:
+
+```ts title="article.ts"
+const ArticleResult = Schema.Struct({
+  article: Schema.String,
+  wordCount: Schema.Number
+})
+
+// The writing step, which consumes the first step's typed fields.
+const Write = AgentAction.make("research/Write", {
+  payload: {
+    summary: Schema.String,
+    keyPoints: Schema.Array(Schema.String)
+  },
+  output: ArticleResult,
+  seat: "anthropic:claude-sonnet-4-5",
+  system: ["You are a technical writer. Write clear, engaging content."],
+  prompt: ({ keyPoints, summary }) =>
+    `Write a short article from this research.\n\nSummary: ${summary}\n\nKey points:\n${
+      keyPoints.map((point) => `- ${point}`).join("\n")
+    }`
+})
+```
+
+Add a flow that chains the two steps; `Brief` stays as the single-step flow. Nothing executes at plan time: `Research.call` records one node, and `Node.andThen` feeds its planned result into `Write.call`:
+
+```ts title="article.ts"
+import { Node } from "@smthrs/plan"
+
+const Article = Flow.make("research/Article", {
+  payload: { topic: Schema.String },
+  success: ArticleResult,
+  error: AgentAction.AgentFailure,
+  body: ({ topic }) =>
+    Research.call({ topic }).pipe(
+      Node.andThen((research) => Write.call({ summary: research.summary, keyPoints: research.keyPoints }))
+    )
+})
+```
+
+Add `Write.layer` to the stack's first `Layer.mergeAll`, and change `main` to execute the chain:
+
+```ts fragment
+const main = Article.execute({ topic: "durable workflows" }, { executionId: "article-1" }).pipe(
+  Effect.provide(stack),
+  Effect.tap((article) => Effect.sync(() => console.log(JSON.stringify(article, null, 2)))),
+  Effect.orDie
+)
+
+NodeRuntime.runMain(main)
+```
+
+Run it:
+
+```bash
+node article.ts
+```
+
+```text
+You should see: the finished article as JSON with an article string and a
+wordCount number. The writing step received the research step's fields as
+typed values, and no step parsed model text.
+```
+
+## 3. Record the run and read both outputs
+
+So far the runs lived in memory, and their outputs died with the process. To read a step's output afterwards, drive the same flow on the project's durable engine at `.flows/engine.db`, and then read the recorded outputs with `smthrs output`.
+
+Add the durable engine composition as `engine.ts`:
+
+```ts title="engine.ts"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import { Jj } from "@smthrs/kernel"
+import { Ownership } from "@smthrs/run-store"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { dirname } from "node:path"
+
+// A Jujutsu service that records nothing.
+const stubJj = Layer.succeed(
+  Jj.Jj,
+  Jj.make({
+    snapshot: () => Effect.succeed({ changeId: "tutorial-snapshot" as never }),
+    restore: () => Effect.void,
+    diff: () => Effect.succeed(""),
+    workspaceAdd: () => Effect.void,
+    workspaceForget: () => Effect.void,
+    status: () => Effect.succeed("")
+  })
+)
+
+// A durable FlowEngine over the project's engine database.
+export const durableEngine = (filename: string, hostId: string) =>
+  NodeRuntime.layer(
+    { filename, workspaceRoot: dirname(filename), owner: { hostId }, isAlive: Ownership.sameHostPidProbe },
+    StepBoundary.layer,
+    WorkspaceSandbox.layerFileSystem(),
+    Layer.empty
+  ).pipe(
+    Layer.provideMerge(stubJj),
+    Layer.provideMerge(NodeCrypto.layer),
+    Layer.provideMerge(NodeFileSystem.layer)
+  )
+```
+
+In `article.ts`, swap the in-memory engine for the durable one in the stack, and scope the run so the database closes when it ends:
+
+```ts fragment
+import { durableEngine } from "./engine.ts"
+
+// In the stack, replace FlowEngine.layerMemory and NodeCrypto.layer with:
+const stack = Layer.mergeAll(Research.layer, Write.layer, Interpreter.layer(Article)).pipe(
+  Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
+  Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
+  Layer.provideMerge(Agent.layerDefaults),
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(durableEngine(".flows/engine.db", "article"))
+)
+
+const main = Article.execute({ topic: "durable workflows" }, { executionId: "article-1" }).pipe(
+  Effect.provide(stack),
+  Effect.tap((article) => Effect.sync(() => console.log(JSON.stringify(article, null, 2)))),
+  Effect.scoped,
+  Effect.orDie
+)
+
+NodeRuntime.runMain(main)
+```
+
+Run it, then read what the run recorded. `smthrs output` prints what one step of a run produced, projected from the run's journaled events; node ids are `<flowName>#<ordinal>`, and the reserved id `result` names the run's final output:
+
+```bash
+node article.ts
+smthrs output article-1
+smthrs output article-1 result
+```
+
+The [smthrs output reference](/docs/reference/cli/output/) covers the listing, the single-node read, and `--json`.
+
+{/* verify: does smthrs output project runs a host program recorded on the project's durable engine (.flows/engine.db), or only runs the CLI's own control plane launched (smthrs up/run)? Command.ts reads the control plane's run list and event watch, which points at control.db and suggests host-program runs answer "Run not found" with exit 2. */}
+
+```text
+You should see: the first command lists one entry per recorded node in the
+order the calls started, plus result for the run's final output. The second
+prints the node's outcome line followed by its recorded value.
+```
+
+## Summary
+
+You learned how to:
+
+- Declare an `output` schema on a model-backed step with `AgentAction.make`.
+- Chain one step's typed output into another with `Node.andThen`.
+- Drive a flow on the project's durable engine so the run's outputs are recorded.
+- Read recorded step outputs with `smthrs output <run-id> [node-id]`.
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Remember facts across runs" href="/docs/tutorials/memory/" description="Record facts in one run and recall them in a later run under one memory policy." />
+  <LinkCard title="Agent runtime" href="/docs/concepts/agent-runtime/" description="How a model-backed step runs, from prompt to decoded output." />
+</CardGrid>

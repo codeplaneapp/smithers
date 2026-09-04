@@ -1,0 +1,163 @@
+---
+import Base from "../../layouts/Base.astro"
+import HeroStage from "../../components/HeroStage.astro"
+
+/*
+ * The demo page, modeled on LangSmith's "See LangSmith in action" contact
+ * page: pitch on the left, the form on the right, no logos row and no
+ * support link. The form posts to the intake worker (apps/bug-worker,
+ * /api/demo-requests), which stores each request in Cloudflare KV. The
+ * interactive editor below is the same one as the home page.
+ */
+const title = "Get a demo — Smithers"
+const description =
+  "See Smithers in action. Tell us about your codebase and we will walk you through a tailored demo of the agentic workflow framework."
+
+// apps/bug-worker serves bug.smithers.sh; demo requests are a route on it.
+const endpoint = "https://bug.smithers.sh/api/demo-requests"
+---
+
+<Base title={title} description={description}>
+  <main class="wrap demo">
+    <div class="grid">
+      <section class="pitch">
+        <h1>See Smithers in action</h1>
+        <p>
+          Smithers brings authoring, execution, and oversight together: typed targets and flows that
+          live in your repo, a durable engine that replays every run from its journal, and approvals
+          on everything that reaches out — so your agents work smarter, faster, and cheaper.
+        </p>
+        <p>
+          Get in touch and we will walk you through a tailored demo on a codebase like yours: what
+          the target graph looks like, where agents plug in, and what a run costs. We will answer
+          your questions and show you the whole lifecycle, from <code>WORKSPACE.ts</code> to a
+          gated release.
+        </p>
+      </section>
+
+      <form class="card" id="demo-form" action={endpoint} method="post" novalidate>
+        <div class="row">
+          <label>
+            First name <em>*</em>
+            <input name="firstName" type="text" placeholder="Jane" required autocomplete="given-name" />
+          </label>
+          <label>
+            Last name <em>*</em>
+            <input name="lastName" type="text" placeholder="Smith" required autocomplete="family-name" />
+          </label>
+        </div>
+        <label>
+          Work email <em>*</em>
+          <input name="workEmail" type="email" placeholder="jane@company.com" required autocomplete="email" />
+        </label>
+        <label>
+          Message <em>*</em>
+          <textarea name="message" rows="5" placeholder="Tell us how we can help..." required></textarea>
+        </label>
+        <button class="btn primary" type="submit">
+          <span data-label>Continue</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 8h9m-4-4 4 4-4 4" /></svg>
+        </button>
+        <p class="status" data-status role="status" aria-live="polite"></p>
+      </form>
+
+      <div class="thanks" data-thanks hidden>
+        <h2>Thanks — we'll be in touch.</h2>
+        <p>Your request is in. We read every one and usually reply within a day.</p>
+      </div>
+    </div>
+
+    <section class="play">
+      <h2>Poke around a real workspace</h2>
+      <p>
+        These are files from the Smithers repository itself. A root
+        <code>WORKSPACE.ts</code> declares the toolchains every target runs on — the Node
+        runtime, pnpm, the install, the Rust toolchain — and there is a
+        <code>PACKAGE.ts</code> per package declaring its targets. The one open here takes the
+        standard targets and adds an agentic review lint built from a reusable rule. Click the
+        files to swap the pane; fold the directories.
+      </p>
+      <HeroStage />
+    </section>
+  </main>
+</Base>
+
+<style>
+  .demo { padding: 3.5rem 0 4rem; }
+  .grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 3.5rem; align-items: start; }
+
+  .pitch h1 { font-size: clamp(1.9rem, 3.4vw, 2.7rem); letter-spacing: -0.02em; margin: 0 0 1.2rem; }
+  .pitch p { color: var(--text-muted); line-height: 1.65; margin: 0 0 1.1rem; max-width: 34rem; }
+  .pitch code, .play code { font-family: var(--font-mono); font-size: 0.88em; color: var(--brand); }
+
+  .card {
+    display: flex; flex-direction: column; gap: 1.1rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+    padding: 1.8rem; box-shadow: var(--shadow-2);
+  }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
+  label { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.88rem; font-weight: 500; }
+  label em { color: var(--brand); font-style: normal; }
+  input, textarea {
+    font: inherit; font-weight: 400; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border-strong); border-radius: 10px;
+    padding: 0.65rem 0.8rem; width: 100%; box-sizing: border-box;
+    transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease);
+  }
+  input::placeholder, textarea::placeholder { color: var(--text-faint); }
+  input:focus, textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent); }
+  textarea { resize: vertical; min-height: 6rem; }
+  .card .btn { justify-content: center; cursor: pointer; font: inherit; font-weight: 600; }
+  .card .btn[disabled] { opacity: 0.6; cursor: progress; transform: none; box-shadow: none; }
+  .status { margin: 0; font-size: 0.85rem; min-height: 1.2em; }
+  .status.error { color: #e06c75; }
+
+  .thanks { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 2.2rem 1.8rem; box-shadow: var(--shadow-2); }
+  .thanks h2 { margin: 0 0 0.6rem; font-size: 1.25rem; }
+  .thanks p { margin: 0; color: var(--text-muted); line-height: 1.6; }
+
+  .play { margin-top: 4.5rem; text-align: center; }
+  .play h2 { font-size: clamp(1.4rem, 2.4vw, 1.9rem); letter-spacing: -0.01em; margin: 0 0 0.7rem; }
+  .play > p { color: var(--text-muted); max-width: 46rem; margin: 0 auto; line-height: 1.65; }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr; gap: 2.2rem; }
+    .row { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script define:vars={{ endpoint }}>
+  const form = document.querySelector("#demo-form")
+  const thanks = document.querySelector("[data-thanks]")
+  const status = form.querySelector("[data-status]")
+  const button = form.querySelector("button[type=submit]")
+  const label = button.querySelector("[data-label]")
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault()
+    status.textContent = ""
+    status.classList.remove("error")
+
+    const data = Object.fromEntries(new FormData(form))
+    for (const key of Object.keys(data)) data[key] = String(data[key]).trim()
+    if (!form.reportValidity()) return
+
+    button.disabled = true
+    label.textContent = "Sending…"
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(data),
+      })
+      if (!res.ok) throw new Error(`intake answered ${res.status}`)
+      form.hidden = true
+      thanks.hidden = false
+    } catch {
+      status.textContent = "Something went wrong sending that. Try again, or email will@smithers.sh."
+      status.classList.add("error")
+      button.disabled = false
+      label.textContent = "Continue"
+    }
+  })
+</script>

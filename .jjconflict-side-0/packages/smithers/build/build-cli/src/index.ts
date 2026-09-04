@@ -1,0 +1,63 @@
+/**
+ * Programmatic smithers-build CLI modules.
+ *
+ * The barrel is a curated convenience, not the surface. `package.json` maps
+ * `./*` onto `src/*.ts`, so every module is importable by its own path whether
+ * or not it is named here. A module earns a namespace re-export when a host
+ * embedding the CLI drives it directly: the session and gate fakes an
+ * integration test injects, the target executors it invokes on their own, the
+ * planner and the renderers it reads results through, and the workspace
+ * loader it opens a tree with. The planner internals, the cache, and the
+ * build-system execution engine are reached through those, so they are left to
+ * the wildcard rather than listed twice.
+ *
+ * @since 0.1.0
+ */
+
+/** @category namespace exports @since 0.1.0 */
+export * as AgentFake from "./AgentFake.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as AgentSession from "./AgentSession.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as CreateApp from "./CreateApp.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as GitCommit from "./GitCommit.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as GitHooks from "./GitHooks.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as GithubRender from "./GithubRender.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as Label from "./Label.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as MemoryBackend from "./MemoryBackend.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as Planner from "./Planner.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as Query from "./Query.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as Reporter from "./Reporter.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as Resolver from "./Resolver.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as RspackRunner from "./RspackRunner.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as ServiceSupervisor from "./ServiceSupervisor.ts"
+/** @category namespace exports @since 0.1.0 */
+export * as Workspace from "./Workspace.ts"
+/** @category constructors @since 0.1.0 */
+export { cli, makeCli } from "./Cli.ts"
+/**
+ * The process-scoped configuration {@link makeCli} takes.
+ *
+ * The barrel exported both functions and neither of their types, so a consumer
+ * of `@smthrs/build-cli` could call `makeCli` and `runInstall` without being
+ * able to name what either one accepts or returns.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type { RuntimeConfig } from "./Cli.ts"
+/** @category execution @since 0.1.0 */
+export { runInstall } from "./engine.ts"
+/** @category models @since 0.1.0 */
+export type { InstallResult, Toolchain } from "./engine.ts"

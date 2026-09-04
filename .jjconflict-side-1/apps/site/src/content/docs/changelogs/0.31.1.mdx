@@ -1,0 +1,151 @@
+---
+title: "0.31.1"
+description: "Smithers 0.31.1 adds monitor workflows that watch and heal runs, lets you resume a run after editing its workflow, hardens child-run durability across a large batch of subflow fixes, and fixes the network sandbox so loopback stays reachable."
+---
+
+**Smithers 0.31.1 is a hardening release.** Of its 417 commits, 197 are fixes,
+most aimed at the places durable runs break in production: resumed runs, child
+workflows, sandboxed networks, and time travel. Two features land alongside
+the fixes: monitor workflows that watch a run and heal it, and a resume path
+that accepts an edited workflow instead of refusing to continue. The release
+touches 1,234 files, with 108,016 insertions and 20,757 deletions.
+
+## Upgrading
+
+```bash
+bunx smthrs update        # upgrade the CLI
+bunx smthrs upgrade       # agent-assisted: reads the changelogs and applies what your project needs
+bunx smthrs packs update  # refresh installed workflow packs
+```
+
+Behavior changes are collected in the [upgrade notes](#upgrade-notes).
+
+## Monitor workflows: a workflow that watches your workflow
+
+Long runs fail in boring ways: a node wedges, an agent stalls, and nobody is
+watching at 3am. Now you can ship a monitor alongside any workflow. Drop a
+file at `.smithers/monitor/<workflowId>.tsx` and Smithers runs it against
+every run of that workflow: it observes health, applies the healing actions
+you define for stalled or wedged-node conditions, and escalates to a durable
+`HumanTask` when it cannot fix things itself.
+
+- Healing actions are ordinary workflow code, so a monitor can retry a node,
+  resume a parked run, or gather diagnostics before waking you.
+- Escalations are durable human requests, so the question survives restarts
+  and shows up in `bunx smthrs human inbox` and the Monitor UI.
+- This is a first release of the surface; expect the condition vocabulary to
+  grow in coming versions.
+
+## Resume a run whose workflow you edited
+
+Editing a workflow file while one of its runs was parked used to be a dead
+end: resuming failed with `RESUME_METADATA_MISMATCH` and your only option was
+forking a fresh run. Now you decide:
+
+```bash
+bunx smthrs retry-task RUN_ID TASK_ID --accept-workflow-change
+bunx smthrs up --resume RUN_ID --accept-workflow-change
+```
+
+- The run carries the edited workflow forward from the resume point.
+- The mismatch error now names the flag, so the fix is in the message.
+
+## The CLI watcher speaks up sooner
+
+`smithers claude monitor` used to alert only on discrete bad transitions, so a
+run that was quietly retrying the same node forever, or emitting nothing at
+all, never broke the silence. It now fires on retry churn (`node-retrying`)
+and on long silence from a live run (`run-progress`), so a wedged detached run
+pings you instead of wasting an afternoon.
+
+Oneshots got the same attention: `smithers monitor <runId>` now serves a
+dedicated live UI for built-in oneshots where you can watch the transcript and
+steer the agent mid-run. The oneshot and hijack surfaces now share one
+`OneshotSurface` component, so steering works the same everywhere.
+
+## Right-sized authoring and honest review verdicts
+
+Two authoring-loop fixes reduce wasted runs:
+
+- `create-workflow` now right-sizes the request before building anything. A
+  trivial edit is routed directly, a well-scoped goal goes to
+  `smithers oneshot`, and only genuinely multi-stage work gets a full
+  workflow scaffold.
+- Review verdicts now distinguish `blocked` (the verification could not run
+  for an environmental reason, such as a missing service) from
+  `approved: false` (a real rejection). Harness faults no longer read as
+  rejected work.
+
+`smithers oneshot` also warns when the working copy is dirty and has the agent
+triage the leftover changes before starting on your goal, instead of silently
+building on top of them.
+
+## Durability hardening
+
+This is where much of the release's hardening work went.
+
+- **Async `deps` callbacks complete when they finish, not before.** A
+  `<Task deps>` async function child could be claimed complete while its
+  work, including a launched child run, was still pending, so downstream
+  tasks read an empty payload. The engine now awaits the callback before
+  claiming completion (#1415).
+- **Child runs behave like part of the run.** A large batch of subflow fixes
+  landed: cancel and pause now propagate to child runs, approvals keep the
+  right owner, signals are preserved across child waits (#1405), snapshot
+  lineage stays isolated, failed child branches all reset on retry (#1410),
+  subflow rewind leases are hardened (#1411), and child runs keep gateway
+  attribution (#1389) and appear in run lists.
+- **Time travel restores real bytes.** jj attempt pointers recorded the
+  change id, and since jj resolves a change id to its current commit,
+  `revert` and `timetravel` could resolve to the very state you were trying
+  to leave: a silent filesystem no-op. Pointers now pin the immutable commit
+  id.
+- **The network sandbox keeps loopback open.** `allowNetwork: false` was
+  cutting off local dev servers, local Postgres, and unix sockets along with
+  the internet. Loopback now stays reachable while remote egress is still
+  denied, and denial errors name the `--allow-network` escape hatch.
+- **Evals stop blaming your workflow for harness deaths.** A red case whose
+  failure matches a harness signature (network, DNS, OOM, rate limit) is now
+  graded INCONCLUSIVE instead of failed, and `bunx smthrs eval` exits with code
+  5 when every red case is inconclusive, so CI can retry instead of
+  reverting good work.
+
+## Other improvements
+
+- Gateway RPC, REST, SDK, and MCP surfaces gained typed queries for a run's
+  child-run descendants and direct children, with regenerated contracts and
+  docs (#1391).
+- New `packages/ui-core` and `packages/tui-ui` packages extract the shared
+  runs domain (run list, tree, event frames, health, and view models) used by
+  both the TUI and the web UI.
+- The approval panel gained accessibility improvements, loading skeletons,
+  and richer decision feedback.
+- A new `eval-driven-development` skill documents red-classify-first,
+  green-ratchet, and circuit-breaker discipline for automated repair loops.
+- Dependency ranges widened for effect, zod, and pglite, and mermaid is now
+  an optional peer dependency.
+- New docs: capability pages, a monitor workflows guide, and a compatibility
+  policy page.
+
+## Upgrade notes
+
+- If a resumed run previously failed with `RESUME_METADATA_MISMATCH` after an
+  in-flight workflow edit, re-run with `retry-task --accept-workflow-change`
+  (or `up --resume --accept-workflow-change`) instead of forking a fresh run.
+- Workflows using `<Task deps>` with async function children should confirm
+  downstream consumers were not silently reading an empty `{}` payload before
+  this release; the compute bridge now awaits the callback before claiming
+  completion.
+- Sandboxed tasks with `allowNetwork: false` can now reach loopback services.
+  If you relied on loopback being blocked, that is no longer the case.
+- `bunx smthrs eval` can now exit with code 5 (all red cases inconclusive).
+  CI scripts that treat any nonzero exit as a regression should handle it as
+  a retry signal.
+
+## The full changelog
+
+This page is the tour, not the inventory. The complete commit-level list is in
+[CHANGELOG.md on GitHub](https://github.com/smithersai/smithers/blob/main/CHANGELOG.md).
+
+Found a bug? `bunx smthrs bug` files it with run context
+attached.

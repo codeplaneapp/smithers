@@ -1,0 +1,160 @@
+# @smthrs/agent
+
+## [Unreleased]
+
+## [1.0.0-rc.0] - 2026-09-01
+
+### Added
+
+- Added `defaultModelRetryWindowMillis` (45,000 ms), a wall clock on the transport retry ladder. Five rungs bounds how many attempts are made, not what they cost: r92 of the SWE-bench full benchmark burned ten `transport` retries and $0.85 across two instances against a socket that stayed dead for half a minute, and each of those attempts re-sent a whole prompt and streamed a partial body before dying. The window is the declared ladder's own jittered ceiling plus a rung's headroom, so a transport that fails fast still gets all five rungs, while one whose attempts are slow stops when the window closes. Elapsed time is the schedule's own, on the injected clock.
+
+- `AgentSession.trace` now journals `control.agent.vacuous-verification-observed` with its payload — the stored check, the flow, and the controller's identity for that call — rather than letting it fall through to an empty one. The control that emits it is unwired from `CellTurn` as of the r93 verdict, so no new run produces the row; the mapping stays so the r93 journals that carry it keep reading and so a controlled re-measure needs no change here.
+
+- Added `StandardFlows.tests`, which binds `@smthrs/std`'s `test` flow to a
+  host's `TestRunner` declaration. A tool no production composition offers is a
+  tool that does not exist, which is the same reason all seven filesystem flows
+  are bound rather than two.
+
+- `StandardFlows.shell` now supplies a `Container` transport, defaulting to the
+  docker/podman CLI, so `bash`'s `container` field means something in the
+  production composition. Without one the field resolves `{ ok: false }` with
+  "this host has no container transport", and the agent goes back to typing
+  `docker exec c bash -lc '…'` itself — the quoting stack that cost the measured
+  SWE-bench program twelve failed probes and one instance's most expensive frame.
+  A host with a different route passes its own transport; a host with neither
+  docker nor podman fails the spawn with the shell's own "not found", which is
+  the honest answer.
+
+- Journaled `control.agent.discipline-armed` once at run start with the
+  read-only and frame caps and every effective sandbox limit, so a run that
+  never reaches completion still proves what it armed.
+
+- Added `Agent.Options.readOnlyCap`, armed by `AgentSession` for every task run
+  (`AgentSession.Options.readOnlyCap`, default `CellTurn.defaultReadOnlyFrames`).
+  It caps consecutive frames that write nothing; a run that is meant only to
+  answer leaves it unset.
+- Journaled `durationMillis` on `control.agent.model-settled`, the wall-clock
+  duration of that one sealed model call.
+- Added `Seat`: the resolved seat record, `Seat.modelIdOf`, and the typed
+  `Seat.SeatUnresolved` failure. The declared half stays an unvalidated string,
+  because the resolver owns the seat vocabulary.
+- Added `SeatResolver`, the host seam that turns a declared seat string into a
+  live model. `AgentSession` and `AgentAction` both take it as a service instead
+  of a `resolveSeat` option, so a composition installs one resolver rather than
+  threading a function through every entry point. The context-window catalog
+  moved here as `SeatResolver.contextWindowTokensFor`.
+
+- Placed the run's task prompt in a prefix segment so it survives every frame; it previously lived in the rebuilt tail and vanished after frame one.
+- Widened the sealed step's transient retry to five one-second-doubling attempts; a destroyed HTTP/2 session outlives a half-second backoff.
+
+- Made agent reasoning effort configurable: the flow's `effort:` frontmatter wins, then the host's `Options.reasoningEffort`, then the `high` default.
+
+- Defaulted every executor-launched run to medium reasoning effort; an unset effort left the model with near-zero thinking budget.
+
+- Added durable `control.agent.*` trail projections with occurrence timestamps
+  and bounded failure causes for executor runs.
+- Added workspace-relative file boundary conversion for cell calls.
+- Added transient sealed-model retries while preserving non-retryable model
+  failures.
+
+- Added package-owned documentation: `docs/Manifest.ts`, `docs/`, and
+  `scripts/docs.mjs` generate `docs/pages/api/agent.md` from the package's own
+  JSDoc and prose, so the API page has one source rather than three.
+
+### Changed
+
+- Production `Agent.run` now reports each failed `configResolved` observer as
+  one warning with only its stable code, plugin, and hook. Startup remains
+  nonfatal and the observer cause is never copied into the log record.
+- Renamed the cost field of the durable `flows.agent.usage.v1` payload from
+  `tokens` to `spent`, and gave the payload an owning schema,
+  `Budget.UsageRecord`. `@smthrs/journal`'s redactor strips one trailing plural
+  and tests the suffix, so `tokens` read as a credential and the production
+  `SqlJournal` persisted `"[REDACTED]"` where the number was. Every usage record
+  written under a real journal therefore came back unreadable, and the old read
+  side dropped it silently, so a resumed run recovered nothing and was handed
+  its whole token allowance again. Records written under the old name do not
+  decode; they never carried a readable number either.
+- Made durable budget recovery fail closed. A `flows.agent.usage.v1` or
+  `flows.agent.budget-started.v1` record that does not decode now raises
+  `Budget.AccountingUnavailable` naming the entry's sequence and journal source,
+  instead of contributing nothing to the ledger.
+- Made the latency budget's clock zero durable. The first budget question of a
+  run writes `Budget.budgetStartedEvent`, and a later incarnation recovers the
+  earliest recorded zero, so a park, reclaim, or process restart no longer
+  re-arms the whole `milliseconds` allowance.
+- Fixed `QuotaPolicy.parseDelay` reading "retry after 5 minutes" as five
+  seconds. The `retry-after` pattern made its unit optional, so a minute- or
+  hour-scale wait woke sixty or thirty-six hundred times too early and burned
+  every park the step was allowed.
+- Fixed the bare `Retry-After` pattern reading a PREFIX of a number whose unit
+  it does not know. Its trailing lookahead forbade a unit word but not a digit,
+  which a shorter capture satisfies: `Retry-After: 120ms` parked for twelve
+  seconds and `Retry after 12 days` for one. An unknown unit now falls back to
+  `defaultWaitMillis`, which is what the module always claimed it did.
+- Made `StandardFlows.clock` clamp an invalid `maxSeconds` to
+  `defaultMaxWaitSeconds` instead of comparing against it. `NaN` made every
+  ceiling test false and `Infinity` admitted an unbounded park, so a host could
+  remove the wait bound while the documentation said hosts may only lower it.
+- Bounded the remaining two trail fields at `AgentSession.maxTracedBytes`:
+  `cell-call-started`'s input and `cell-call-settled`'s failure message. A
+  `write` carries its whole file in the input and a test runner writes megabytes
+  of message, so only the result value was actually bounded.
+- Made `AgentSession.launch` carry the registry's typed failure on
+  `LaunchFailed.cause` rather than its `toString`. `body_unavailable` and
+  `body_unreadable` need different operator answers and a stringified cause
+  offers no field to route on.
+- Made `AgentSession.settlementFailure` render a non-JSON PRIMITIVE as text.
+  `JSON.stringify` does not refuse `Infinity` and `NaN`, it rewrites both to
+  `null`, so an arithmetic failure settled as the same recorded value as a run
+  that failed with a literal `null`. The JSON round trip is now reserved for
+  objects.
+- Made a child start that succeeds without creating a run row a
+  `ChildError { code: "failed" }`. `not_found` is the answer that tells a cell
+  the flow does not exist here, and the declaration had already been found, so
+  spending it on a runtime's refusal told the cell to give up on a flow it has.
+- Made a latched `skip-remaining` budget report the refusal it actually latched
+  on. A latency latch previously answered every later call with a fabricated
+  `tokens` scope and `max: 0`.
+- Added `cause` to `Budget.AccountingUnavailable`, so the journal error under an
+  accounting failure keeps its tag and fields instead of being stringified.
+- Taught `packages/agent/scripts/docs.mjs` to follow named re-exports. It read
+  documented declarations and `export *` forms only, so
+  `FlowEngineLike.defaultModelOverruns`, published with an `export { }` clause,
+  had no row in the generated table. A re-exported member the target module does
+  not document now fails the generator rather than disappearing from the page.
+- Renamed the package from `@smthrs/engine-harness` to `@smthrs/agent`. The
+  package is named for what it ships: the Smithers agent, plus the two adapters
+  that run it.
+- Renamed `CellHarness` to `Agent` and made it a `Context.Service`. The loop is
+  reached through the `Agent` tag rather than a bare `run` export, so a future
+  agent that drives a foreign CLI is another implementation of the same service.
+  `Agent.layer` provides the production one, `Agent.layerNoop` a silent one, and
+  `Agent.layerDefaults` the browser-safe sandbox and steering defaults the old
+  `CellHarness.layer` provided.
+- Renamed `HarnessExecutor` to `AgentSession`, and its durable flow id from
+  `engine-harness/agent` to `agent/run`.
+- Collapsed `Options.seat` / `model` / `route` / `contextWindowTokens` into one
+  resolved `Seat.Seat`. There is now exactly one resolved-seat record, produced
+  only by a `SeatResolver`.
+- Changed the composition identity folded into every step key this package
+  derives from `flows/engine-harness/composition/v1:` to
+  `flows/agent/composition/v1:` (`FlowEngineLike.ts`). Every step cached under
+  the old prefix therefore misses. That is intentional: pre-release identity
+  strings track module paths, and the package moved.
+- Changed the failure an `AgentAction` reports when the host cannot serve its
+  declared seat. It is now `Seat.SeatUnresolved` rather than a `HarnessError`,
+  and `AgentAction.AgentFailure` carries the new member.
+
+### Removed
+
+- Removed `FlowEngineLike.ChildRunner`, `FlowEngineLike.appendBatch`,
+  `FlowEngineLike.Options.children`, and `FlowEngineLike.Options.plan`.
+  `splice` now refuses an elaborated batch because the cell loop superseded
+  the provider-tool-call path, and rc.0 does not ship API it does not support.
+
+## [0.1.0] - 2026-08-05
+
+### Added
+
+- Initial release.

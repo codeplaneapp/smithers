@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The scorecard imports `@smthrs/cli`'s forensics projection, which reaches
+    // the control package's WebCrypto sources; those are typed against DOM, as
+    // the packages that own them declare.
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "inlineSources": false,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["*.ts"],
+  "exclude": ["PACKAGE.ts"]
+}

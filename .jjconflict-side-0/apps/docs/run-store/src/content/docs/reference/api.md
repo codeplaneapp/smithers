@@ -1,0 +1,140 @@
+---
+title: "API reference"
+description: "Effect services for flows run state, attempts, and ownership arbitration"
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/run-store/docs/api.md"
+---
+
+`RunStore` and `AttemptStore` are the executable authority a restart reads.
+The journal is history, audit, and replay evidence; these rows say what is
+running and which process may mutate it. Both stores write through
+[`@smthrs/database`](https://database.smithers.sh/reference/api/), so a surrounding `Journal.transact`
+commits a projection and its durable events in one serialized transaction.
+
+```ts
+import { AttemptStore, Migrations, RunStore } from "@smthrs/run-store"
+import * as Layer from "effect/Layer"
+
+const layer = Layer.mergeAll(RunStore.layer, AttemptStore.layer).pipe(
+  Layer.provideMerge(Migrations.layer)
+)
+```
+
+## Entry points
+
+| Import                                | Source                                                                                                                                  | Platform |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `@smthrs/run-store`                   | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/run-store/src/index.ts)                         | any      |
+| `@smthrs/run-store/Heartbeat`         | [src/Heartbeat.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/run-store/src/Heartbeat.ts)                 | any      |
+| `@smthrs/run-store/test/TestRunStore` | [src/test/TestRunStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/run-store/src/test/TestRunStore.ts) | Node     |
+
+The root is driver-neutral and browser-bundleable. Migration implementations
+and internal admission helpers are deliberately blocked from package exports.
+`Heartbeat` is the lease-constant leaf. `Ownership` re-exports all four
+durations, so the subpath exists for a consumer that wants the numbers without
+the stores, and `packages/smithers/flows` uses it that way in its containment test.
+
+## Ownership and clocks
+
+Every ownership mutation is fenced by the complete `OwnerId`: host, process
+id, and nonce. Claiming is two phase (`claim` then `activate`) or atomic
+(`claimAndOwn`). Heartbeats, attempt writes, and owned transitions compare all
+three fields in the same SQL statement as their mutation.
+
+A run row carries readings from two clock sources. Operations that accept or
+verify `LivenessEvidence` (`claim`, `claimAndOwn`, `steal`, `heartbeat`,
+`requestCancel`, and `recoverClaim`) take the caller's `nowMs` and judge it
+literally: it is the staleness cutoff they compare against and the value they
+persist. Lifecycle stamps read the Effect `Clock`: `create` writes
+`created_at_ms`, `activate` writes `started_at_ms` and `heartbeat_at_ms`, and
+`transitionOwned` writes `finished_at_ms`. A composition must give both sources
+the same reading.
+
+Every `nowMs` and `LivenessEvidence.checkedAtMs` is validated as a non-negative
+safe integer. The lease operations (`claim`, `claimAndOwn`, `steal`,
+`heartbeat`, and `recoverClaim`) also refuse a `nowMs` that runs ahead of the
+store's `Clock` by more than `heartbeatSkewAllowance` with `invalid_run`, so a
+runaway caller clock can neither steal a fresh owner nor pin a lease past the
+cutoff. A reading behind the clock is admitted; it only makes staleness
+judgments more conservative. `requestCancel` keeps its literal reading, which
+is request data rather than a lease predicate, and `claimedAtMs` fence tokens
+are compared against the row rather than bounded. Inside the allowance the
+reading is trusted: the store cannot distinguish a slow clock from a lie. That
+is correct for an in-process library over a local SQLite file whose caller can
+issue raw SQL itself, and it must not cross a trust boundary.
+Evidence binds to one instant by exact equality, so a probe taken at T is
+refused by a call made at T+1. Heartbeats are monotonic, so a pulse delayed
+past a newer one reports `Updated` without moving the lease backwards.
+
+`sameHostPidProbe` treats only `ESRCH` as proof of death. Permission errors,
+unexpected failures, invalid pids, and synthetic pid zero fail closed. A pid
+is inspected only when observer and owner name the same host; cross-host
+recovery relies on the persisted lease.
+
+## Run state
+
+`create` inserts a pending row. `RunSnapshot` is the exact status, owner, and
+heartbeat tuple used by claim compare-and-swap operations. Partial ownership
+snapshots are invalid: running requires both owner and heartbeat, while every
+other status requires neither. Terminal rows cannot be reopened.
+
+`transitionOwned` changes status and optional executable state under one owner
+fence. Its optional cancellation guard is compiled into that same update, so
+a request cannot arrive between a check and a terminal write. `requestCancel`
+is idempotent, never writes a terminal row, and distinguishes absence from a
+run that settled during the transaction.
+
+Run identifiers and lineage fields are bounded, non-empty, well-formed durable
+text. State is inert JSON copied without invoking getters or `toJSON`, bounded
+in shape by `maximumRunJsonDepth` and `maximumRunJsonNodes` and checked again
+on read. It carries no byte ceiling: executable state is what a resume
+re-enters, so a large state has to persist. Lifecycle timestamps must be
+non-negative safe integers; they are range-checked independently, not against
+each other. Diagnostics retain field names and sizes, never executable state.
+
+## Attempts
+
+`AttemptStore` addresses a row by `(runId, stepKeyDigest, attempt)` and fences
+`put`, `heartbeat`, `finish`, and `patch` against the owning running run.
+Default `put` is first-writer-wins; `putMode: "upsert"` may update an in-flight
+row but never reopen a terminal attempt. `inProgressStates` and checkpoint
+limits are validated, detached, and frozen when the store is built.
+
+Checkpoint, error, outcome, and metadata values cross the same inert JSON
+admission, which bounds depth and node count but not bytes. Only the
+checkpoint has a byte ceiling, set by `Options.maxCheckpointBytes` within
+`maximumCheckpointBytes`. Inputs are snapped before persistence can yield. An
+attempt heartbeat never moves backward, but attempt timestamps are otherwise
+range-checked independently: a finish recorded before its start persists as
+written, because the store does not adjudicate the caller's timeline. The
+values are not redacted: they are executable resume data, so
+rewriting a field because its name resembles a credential would corrupt the
+run. Secrets belong at host-owned outbound I/O boundaries instead.
+
+## Outcomes and failures
+
+Compare-and-swap competition is represented by tagged success values such as
+`FenceLost`, `SnapshotChanged`, `HeartbeatFresh`, `AlreadyClaimed`, and
+`EvidenceRequired`. A steal with evidence that does not match its snapshot,
+host relation, or observation time reports `LivenessUnconfirmed` before any
+compare-and-swap; `SnapshotChanged` remains reserved for matching evidence
+whose comparison loses to a changed row. Invalid input, corrupt durable rows,
+and persistence failures use the typed `RunStoreError` or `AttemptStoreError`
+channel. This separation lets callers retry contention without treating
+corruption as a race.
+
+`RunStoreMetrics` provides attributed views for every claim, activation,
+recovery, heartbeat, and transition outcome. A fence loss is therefore visible
+without parsing logs.
+
+## Migrations and testing
+
+`Migrations.set` owns `flows_runs` and `flows_attempts` in migration block
+1000. `Migrations.layer` installs this package alone;
+[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) composes the complete storage
+ladder. `@smthrs/run-store/test/TestRunStore` supplies migrated in-memory
+SQLite services for adapter tests. Cross-process fencing tests use a real
+SQLite file.
+
+See [Execution IDs and ownership](https://smithers.sh/docs/concepts/ownership/),
+[Durable execution](https://smithers.sh/docs/concepts/durable-execution/), and the
+[`@smthrs/journal` reference](https://journal.smithers.sh/reference/api/).

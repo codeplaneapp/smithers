@@ -1,0 +1,221 @@
+import * as Config from "effect/Config"
+import * as ConfigProvider from "effect/ConfigProvider"
+import * as Effect from "effect/Effect"
+import * as Redacted from "effect/Redacted"
+import { createHash } from "node:crypto"
+import * as Fs from "node:fs/promises"
+import * as NodePath from "node:path"
+import { fileURLToPath } from "node:url"
+import { describe, expect, it } from "vitest"
+import {
+  artifactLifecycleRules,
+  cacheBucketOptions,
+  cacheCredentialBindings,
+  cacheCredentialVerifiers,
+  cacheDatabaseOptions,
+  cacheStackOutputs,
+  cacheTokenDigest,
+  cacheTokenVerifier,
+  cacheWorkerOptions,
+  maxCacheTokenBytes,
+  minCacheTokenBytes,
+  retentionCron,
+  stackName,
+  workerCompatibilityDate,
+  workerEntry,
+  workerStageOptions
+} from "../../deployment.ts"
+import { retentionDays } from "../index.ts"
+
+const readToken = "SMITHERS_CACHE_READ_TOKEN"
+const writeToken = "SMITHERS_CACHE_WRITE_TOKEN"
+const infraRoot = fileURLToPath(new URL("../../", import.meta.url).href)
+const digestOf = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex")
+
+const configured = (value: string): Promise<string> =>
+  Effect.runPromise(
+    Effect.provide(
+      Effect.map(cacheTokenVerifier(readToken), Redacted.value),
+      ConfigProvider.layer(ConfigProvider.fromUnknown({ [readToken]: value }))
+    )
+  )
+
+/** Runs `effect` against a deploying shell that exported the two credentials. */
+const deployed = <A, E>(effect: Effect.Effect<A, E>, read: string, write: string): Promise<A> =>
+  Effect.runPromise(
+    Effect.provide(effect, ConfigProvider.layer(ConfigProvider.fromUnknown({ [readToken]: read, [writeToken]: write })))
+  )
+
+const distinct = { read: "read-credential-with-entropy", write: "write-credential-with-entropy" } as const
+
+describe("cache credential verification", () => {
+  it("hands the Worker a digest rather than the credential", async () => {
+    const token = "x".repeat(minCacheTokenBytes)
+
+    expect(cacheTokenDigest(readToken, token)).toBe(createHash("sha256").update(token, "utf8").digest("hex"))
+    await expect(configured(token)).resolves.toBe(createHash("sha256").update(token, "utf8").digest("hex"))
+  })
+
+  it("refuses a credential that is too short, too long, or not printable ASCII", () => {
+    const cases = [
+      "x".repeat(minCacheTokenBytes - 1),
+      "x".repeat(maxCacheTokenBytes + 1),
+      `${"x".repeat(minCacheTokenBytes)} withspace`,
+      `${"x".repeat(minCacheTokenBytes)}\u0000`,
+      `${"x".repeat(minCacheTokenBytes)}é`,
+      ""
+    ]
+
+    for (const value of cases) {
+      expect(() => cacheTokenDigest(readToken, value)).toThrow(readToken)
+    }
+  })
+
+  it("fails the deployment rather than deploying with one credential", async () => {
+    // A Worker that received only one secret would answer every request from
+    // whichever half was configured, which is the posture the split ends.
+    await expect(
+      Effect.runPromise(
+        Effect.provide(
+          cacheTokenVerifier("SMITHERS_CACHE_WRITE_TOKEN"),
+          ConfigProvider.layer(ConfigProvider.fromUnknown({ [readToken]: "x".repeat(minCacheTokenBytes) }))
+        )
+      )
+    ).rejects.toThrow()
+    await expect(
+      Effect.runPromise(
+        Effect.provide(
+          cacheTokenVerifier(readToken),
+          ConfigProvider.layer(ConfigProvider.fromUnknown({ [readToken]: "short" }))
+        )
+      )
+    ).rejects.toThrow(readToken)
+  })
+
+  it("gives production the custom domain and every other stage a workers.dev URL", () => {
+    expect(workerStageOptions("prod")).toEqual({ domain: "build.smithers.sh", workersDev: false })
+    expect(workerStageOptions("dev_alice")).toEqual({ workersDev: true })
+    expect(workerStageOptions("production")).toEqual({ workersDev: true })
+  })
+
+  it("exposes the credential as a Config so a deployment reads it from the environment", () => {
+    expect(Config.isConfig(cacheTokenVerifier(readToken))).toBe(true)
+  })
+
+  it("keeps retention policy internally bounded and ordered", () => {
+    const ids = artifactLifecycleRules.map((rule) => rule.id)
+    const maxAges = artifactLifecycleRules.map((rule) =>
+      "deleteObjectsTransition" in rule
+        ? rule.deleteObjectsTransition.condition.maxAge
+        : rule.abortMultipartUploadsTransition.condition.maxAge
+    )
+    const artifactRule = artifactLifecycleRules.find((rule) => rule.id === "expire-cache-artifacts")
+    const artifactMaxAge = artifactRule !== undefined && "deleteObjectsTransition" in artifactRule
+      ? artifactRule.deleteObjectsTransition.condition.maxAge
+      : 0
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(maxAges.every((maxAge) => Number.isInteger(maxAge) && maxAge > 0)).toBe(true)
+    expect(artifactMaxAge).toBeGreaterThan(retentionDays * 24 * 60 * 60)
+    expect(retentionCron.trim().split(/\s+/)).toHaveLength(5)
+  })
+
+  /**
+   * The Worker refuses an equal pair when it builds its handler, but that
+   * happens on the first request, after a deployment has already replaced a
+   * healthy Worker. The pair has to fail while the deployment resolves its
+   * configuration, before any Worker request exists.
+   */
+  it("refuses equal credentials while the deployment resolves its configuration", async () => {
+    const equal = "one-credential-wearing-two-names"
+
+    await expect(deployed(cacheCredentialVerifiers, equal, equal)).rejects.toThrow(
+      "SMITHERS_CACHE_READ_TOKEN and SMITHERS_CACHE_WRITE_TOKEN must differ"
+    )
+    // Both Worker bindings derive from the pair, so whichever one Alchemy
+    // resolves first is the one that fails the deployment.
+    await expect(deployed(cacheCredentialBindings.CACHE_READ_TOKEN, equal, equal)).rejects.toThrow("must differ")
+    await expect(deployed(cacheCredentialBindings.CACHE_WRITE_TOKEN, equal, equal)).rejects.toThrow("must differ")
+    // A single invalid credential still names itself rather than the pair.
+    await expect(deployed(cacheCredentialVerifiers, "short", distinct.write)).rejects.toThrow(readToken)
+  })
+
+  it("hands the Worker one digest per direction for a distinct pair", async () => {
+    const pair = await deployed(cacheCredentialVerifiers, distinct.read, distinct.write)
+    const read = await deployed(cacheCredentialBindings.CACHE_READ_TOKEN, distinct.read, distinct.write)
+    const write = await deployed(cacheCredentialBindings.CACHE_WRITE_TOKEN, distinct.read, distinct.write)
+
+    expect(Redacted.value(pair.read)).toBe(digestOf(distinct.read))
+    expect(Redacted.value(pair.write)).toBe(digestOf(distinct.write))
+    expect(Redacted.value(read)).toBe(digestOf(distinct.read))
+    expect(Redacted.value(write)).toBe(digestOf(distinct.write))
+  })
+
+  it("configures the Worker from the seams the resource graph applies", async () => {
+    const production = cacheWorkerOptions({ database: "the-database", bucket: "the-bucket" })({ stage: "prod" })
+    const development = cacheWorkerOptions({ database: "the-database", bucket: "the-bucket" })({ stage: "dev_alice" })
+
+    expect(production).toEqual({
+      main: workerEntry,
+      compatibility: { date: workerCompatibilityDate },
+      crons: [retentionCron],
+      env: {
+        CACHE_DATABASE: "the-database",
+        CACHE_BUCKET: "the-bucket",
+        CACHE_READ_TOKEN: cacheCredentialBindings.CACHE_READ_TOKEN,
+        CACHE_WRITE_TOKEN: cacheCredentialBindings.CACHE_WRITE_TOKEN
+      },
+      domain: "build.smithers.sh",
+      workersDev: false
+    })
+    expect(development).toEqual({ ...production, domain: undefined, workersDev: true })
+    expect(development).not.toHaveProperty("domain")
+    // The entry and the migrations the seams name exist where the graph
+    // resolves them, relative to this directory.
+    await expect(Fs.access(NodePath.join(infraRoot, workerEntry))).resolves.toBeUndefined()
+    await expect(Fs.readdir(NodePath.join(infraRoot, cacheDatabaseOptions.migrationsDir))).resolves.toEqual([
+      "0001_initial.sql",
+      "0002_bound_cache_rows.sql"
+    ])
+    expect(cacheBucketOptions.lifecycleRules).toEqual([...artifactLifecycleRules])
+    expect(/^\d{4}-\d{2}-\d{2}$/.test(workerCompatibilityDate)).toBe(true)
+  })
+
+  it("reads the credential pair before it touches any resource", async () => {
+    const touched: Array<string> = []
+    const resource = <A>(name: string, value: A): Effect.Effect<A> =>
+      Effect.sync(() => {
+        touched.push(name)
+        return value
+      })
+    const program = cacheStackOutputs({
+      stack: resource("stack", { stage: "prod" }),
+      database: resource("database", { databaseName: "cache-db" }),
+      bucket: resource("bucket", { bucketName: "cache-bucket" }),
+      worker: resource("worker", { url: "https://build.smithers.sh" })
+    })
+    const equal = "one-credential-wearing-two-names"
+
+    await expect(deployed(program, equal, equal)).rejects.toThrow("must differ")
+    expect(touched).toEqual([])
+
+    await expect(deployed(program, distinct.read, distinct.write)).resolves.toEqual({
+      stage: "prod",
+      url: "https://build.smithers.sh",
+      databaseName: "cache-db",
+      bucketName: "cache-bucket"
+    })
+    expect(touched).toEqual(["stack", "database", "bucket", "worker"])
+  })
+
+  it("declares the Cloudflare resource graph from those seams", async () => {
+    // Importing the graph declares its resources without applying them, so
+    // the wiring itself runs under the suite even though only a deployment
+    // can execute the resources.
+    const stack = (await import("../../alchemy.run.ts")).default as unknown as Record<string, unknown>
+
+    expect(stack["stackName"]).toBe(stackName)
+    expect(stack["state"]).toBeDefined()
+    expect(stack["providers"]).toBeDefined()
+  })
+})

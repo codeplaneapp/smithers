@@ -1,0 +1,116 @@
+---
+title: "Recall memory"
+description: "Choose and wire a recall binding in @smthrs/memory: keyword, SQLite full text, or semantic, with budgets and tag filters."
+sidebar:
+  order: 2
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/memory/docs/guides/recall-memory.md"
+---
+
+Recall reads advisory rows out of named banks through one replaceable service. You pick a binding once, provide its layer, and every caller of the `recall` flow or `Flows.runRecall` uses it. [How recall works](/concepts/recall/) explains the model; this guide wires it.
+
+Every binding answers the same input:
+
+```ts
+import * as Flows from "@smthrs/memory/Flows"
+
+const rows = yield* Flows.handlers.recall({
+  banks: ["global-notes", "flow-release-notes"],
+  query: "changelog",
+  maxTokens: 2048,
+  tagGroups: [{ tags: ["scope:project"], match: "any" }]
+})
+// rows: [{ bank, key, text, score, updatedAtMs? }, ...]
+```
+
+`banks` accepts at most 16 names, de-duplicated on the resolved namespace. `maxTokens` is a UTF-8 byte ceiling over the serialized result array, at most 65,536; rows with empty text drop out before the budget fills. `tagGroups` accepts at most 16 groups, and every group must match a row's tags for the row to rank.
+
+## Keyword recall
+
+`RecallKeyword.layer` needs only the store. It scores each row by the number of normalized query terms occurring in its key and text, breaks ties by newest update, and applies the byte cap:
+
+```ts
+import * as RecallKeyword from "@smthrs/memory/RecallKeyword"
+import * as TestMemory from "@smthrs/memory/test/TestMemory"
+import { Layer } from "effect"
+
+const memory = Layer.provideMerge(RecallKeyword.layer, TestMemory.layer)
+```
+
+Pick keyword recall when you want zero moving parts: no enablement step, no embeddings, no provider. Both query and row text are normalized to NFKC before matching.
+
+## Full text recall
+
+`RecallFts.layer` ranks by SQLite FTS5 BM25. Enable FTS once per namespace kind before the first query, or the store fails the read with `fts_not_enabled`:
+
+```ts
+import * as MemoryStore from "@smthrs/memory/MemoryStore"
+import * as RecallFts from "@smthrs/memory/RecallFts"
+import * as TestMemory from "@smthrs/memory/test/TestMemory"
+import { Effect, Layer } from "effect"
+
+const memory = Layer.provideMerge(RecallFts.layer, TestMemory.layer)
+
+const setup = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  yield* store.enableFts("global")
+  yield* store.enableFts("flow")
+})
+```
+
+The store maintains the FTS projection on every write, so no reindex step exists. Pass the raw query string: the binding and the store share one escaper, and a query you escape yourself gets escaped again.
+
+## Semantic recall
+
+`RecallSemantic.layer` ranks rows by cosine similarity between each row's stored vector and the query embedding, decayed by a recency half-life. It needs an `Embedding` service and a vector store. The authoritative store writes no vectors itself, so decorate it: every `putFact` and `putNote` then projects a vector after commit, retrying once and logging failures without changing the write result.
+
+```ts
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as Embedding from "@smthrs/memory/Embedding"
+import * as MemoryStore from "@smthrs/memory/MemoryStore"
+import * as RecallSemantic from "@smthrs/memory/RecallSemantic"
+import * as TestMemory from "@smthrs/memory/test/TestMemory"
+import { Effect } from "effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+
+const program = Effect.gen(function*() {
+  const sql = yield* Effect.service(SqlClient.SqlClient)
+  const writer = yield* DurableWriter.DurableWriter
+  const store = yield* MemoryStore.MemoryStore
+  const embedding = yield* Embedding.Embedding
+
+  const vectorStore = RecallSemantic.makeSqlVectorStore({ sql, write: writer.write })
+  const options = { vectorStore }
+  const decorated = RecallSemantic.decorateStore(store, RecallSemantic.makeProjector(options), embedding)
+
+  yield* decorated.putNote({
+    namespace: "flow-bank",
+    id: "note",
+    text: "semantic note",
+    tags: [],
+    provenance: {}
+  })
+
+  return yield* RecallSemantic.recall({ banks: ["flow-bank"], query: "semantic" }, options)
+}).pipe(
+  Effect.provide(Embedding.layerInProcess),
+  Effect.provide(TestMemory.layerWithDatabase)
+)
+```
+
+`Embedding.layerInProcess` computes a deterministic 64-dimensional embedding with no provider, which makes the whole setup self-contained. To plug in a provider, implement `Embedding.EmbedMany` and pass it to `Embedding.layer`; an invalid batch from the provider fails with `embedding_unavailable`.
+
+Three details shape the answers:
+
+- Recall only lists vectors written under the model it was asked for. `options.model` defaults to the in-process model, and a stored vector under that model with the wrong dimension fails with `vector_model_mismatch`.
+- `input.budget` selects the result count deterministically: `"low"` answers 3 rows, `"mid"` answers 8, `"high"` answers 20. The byte cap still applies after the count.
+- `options.halfLifeMs` controls the recency decay and defaults to seven days.
+
+## Bind the slot in a flow graph
+
+When a host composes flows rather than calling handlers directly, bind the flow-valued slot instead of providing the service. `Flows.recallSlot` is the shared slot, and `Flows.bindRecall(supplied)` resolves it to a flow you supply. See the [`@smthrs/patterns` API](https://patterns.smithers.sh/reference/api/) for `Pattern.bind`.
+
+## Next steps
+
+- Constrain which banks a flow tree may read: [Scope a flow tree to a namespace](/guides/scope-a-flow-tree/).
+- Freeze recall into an agent's opening context: [Give an agent opening memory](/guides/agent-opening-context/).
+- Diagnose empty results: [Troubleshooting](/troubleshooting/).

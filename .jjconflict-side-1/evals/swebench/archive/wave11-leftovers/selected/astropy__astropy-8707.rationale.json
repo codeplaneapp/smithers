@@ -1,0 +1,74 @@
+{
+  "instance": "astropy__astropy-8707",
+  "selected": "r1",
+  "selectedRunId": "astropy__astropy-8707-r1",
+  "selectedPatch": "selected/astropy__astropy-8707.patch",
+  "read": {
+    "journals": "journals",
+    "patches": "patches"
+  },
+  "neverRead": "the official evaluator's reports, the dataset's tests, and every other record of the answer",
+  "predicateOrder": [
+    "preEditFailure",
+    "mutationAfter",
+    "greenOverFinalTree",
+    "cleanCompletion"
+  ],
+  "tieBreaks": [
+    "broader final check",
+    "non-empty patch",
+    "lower cost",
+    "lower run index"
+  ],
+  "candidates": [
+    {
+      "rank": 1,
+      "index": "r1",
+      "runId": "astropy__astropy-8707-r1",
+      "score": 3,
+      "patchBytes": 1039,
+      "finalCheckTerms": null,
+      "usd": 1.189,
+      "tokens": {
+        "inputTokens": 150671,
+        "cachedInputTokens": 90508,
+        "outputTokens": 28099,
+        "reasoningTokens": 11913
+      },
+      "seat": "openai:gpt-5.6-sol",
+      "frames": 18,
+      "modelCalls": 18,
+      "demands": {
+        "unmoved": 0,
+        "unresolved": 0,
+        "narrowed": 0,
+        "narrowOnly": 0,
+        "readOnly": 0,
+        "repeat": 0
+      },
+      "sufficiencyObservations": 1,
+      "predicates": {
+        "preEditFailure": {
+          "held": true,
+          "seq": 66,
+          "epoch": 0,
+          "check": "bash {\"command\":\"docker exec flowsbench-astropy--astropy-8707 bash -lc 'cd /testbed && python - <<'\\\"'\\\"'PY'\\\"'\\\"'\\nfrom astropy.io.fits import Header, Card\\nraw_ca…"
+        },
+        "mutationAfter": {
+          "held": true,
+          "seq": 176,
+          "digest": "922770446afc3edc479638e5e0d402877c0fe0816ceafffbcd9c5d8979e977de"
+        },
+        "greenOverFinalTree": {
+          "held": false,
+          "why": "no check the run had watched fail went green over the tree it finished on"
+        },
+        "cleanCompletion": {
+          "held": true,
+          "seq": 903,
+          "digest": "821d8c9eda895745abd0a3ac4f9a5894ee9407f4be4681796c117574879b1bb5"
+        }
+      }
+    }
+  ]
+}

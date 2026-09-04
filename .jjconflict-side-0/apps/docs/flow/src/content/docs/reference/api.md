@@ -1,0 +1,296 @@
+---
+title: "API reference"
+description: "The flow authoring model: flows, actions, durable waits, retry policy, and the runtime port they execute against"
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/flow/docs/api.md"
+---
+
+The flow authoring model: typed flow and action definitions, durable primitives, step identity, retry policy, and the runtime port they execute against. The whole package bundles for the browser; durability comes from whichever runtime you provide.
+
+An `Action` carries an implementation, attached separately as a layer. A `Flow` carries a required pure `body`, and `Interpreter.layer` drives it.
+
+```ts
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+
+const Compile = Action.make("example/Compile", {
+  payload: { target: Schema.String },
+  success: Schema.String,
+  tier: "sealed"
+})
+
+const Build = Flow.make("example/Build", {
+  payload: { target: Schema.String },
+  success: Schema.String,
+  body: (payload) => Compile.call(payload)
+})
+
+const layer = Layer.mergeAll(
+  Compile.toLayer(({ target }) => Effect.succeed(`${target}.js`)),
+  Interpreter.layer(Build)
+).pipe(Layer.provideMerge(Action.layerImplementations), Layer.provideMerge(FlowEngine.layerMemory))
+```
+
+## Entry point
+
+| Import         | Source                                                                                                     | Platform |
+| -------------- | ---------------------------------------------------------------------------------------------------------- | -------- |
+| `@smthrs/flow` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/flow/src/index.ts) | any      |
+
+This page is the public API reference for the flow authoring model: typed flows, recorded actions, durable deferreds, clocks and queues, the system timer and wait point, polling, human tasks, plan-time graph building, the body interpreter, retry policy, step identity, and the runtime port those APIs execute against. It contains no engine implementation: that is [`@smthrs/engine`](https://engine.smithers.sh/reference/api/).
+
+The export tables at the end of the page are generated from the package sources, so every documented declaration appears there. The sections below say how the pieces fit together.
+
+## `Flow`
+
+`Flow.make(tag, options)` accepts struct payload fields, success and error schemas, an optional `idempotencyKey`, annotations, a `suspendedRetryPolicy`, and a `maxRounds` bound for trampoline lineages. `body` is required: a flow with nothing to plan is an action, whose implementation attaches separately as a layer. `maxRounds` must be a positive safe integer, and `Flow.make` throws a `RangeError` when it is not.
+
+The returned definition exposes:
+
+- `execute(payload, { executionId?, discard? })`
+- `poll(executionId)`
+- `interrupt(executionId)` and `resume(executionId)`
+- `executionId(payload)`
+- `call(payload)`, `child(payload)`, and `to(payload)` for use inside a body
+- `annotate` and `annotateMerge`
+- `withRollback`
+
+There is no `toLayer` on a flow. A flow carries a body and never a handler, so the seam that registers one is internal and `Interpreter.layer(flow)` is the public way to make a flow executable.
+
+### Execution identity
+
+Identity has three sources, consulted in this order:
+
+1. the `executionId` the caller named on `execute`;
+2. the `idempotencyKey` the flow declared, hashed together with the flow tag;
+3. the ambient `CurrentExecutionIds` source, whose default `derived` hashes the flow tag with the payload's canonical form.
+
+`layerExecutionIds(source)` replaces the third. Replace it when two equal payloads of one flow are not one piece of work in this host, for example one request per user in a coding agent; callers that name an `executionId` and flows that declare an `idempotencyKey` are unaffected, because both are decided before the source is consulted.
+
+`ExecutionIdRequired` is a defect, not a typed failure. The derived source raises it when the payload has no canonical form, for example a non-finite number, a lone surrogate, or a cycle, and `derived.mint` dies with it rather than starting a run under a guessed identity. `Flow.executionId(payload)` likewise dies when the payload fails the flow's own payload schema, where `Flow.execute` fails with a typed `Schema.SchemaError` instead. Precompute an id with `executionId` only for a payload you have already validated.
+
+### Results
+
+A flow settles with one of three results:
+
+| Result      | Meaning                                                                  |
+| ----------- | ------------------------------------------------------------------------ |
+| `Complete`  | the flow finished, carrying an `Exit`                                    |
+| `Suspended` | the flow parked on a durable wait and will be re-driven                  |
+| `Handoff`   | the round ended by handing off to the next round of a trampoline lineage |
+
+`Result` is that union, `ResultEncoded` is its codec, `isResult` is the guard, `intoResult` turns a suspension interrupt into `Suspended`, and `wrapActionResult` encodes an action exit for storage. `MaxRoundsExceeded` is the typed failure a lineage gets when it opens a round past its `maxRounds` budget.
+
+`Outcome` is the vocabulary a trampoline body settles a round with: `Done(value)` ends the lineage, `To(payload)` opens the next round, and `Park` suspends it. `isOutcome` is its guard.
+
+Scope helpers are `scope`, `provideScope`, `addFinalizer`, `withRollback`, and `suspend`. Policy references are `CaptureDefects` and `SuspendOnFailure`. `Execution` is a type-level marker that ties a service to a flow tag; it carries no runtime value and identifies nothing at run time.
+
+## `Action`
+
+`Action.make(options)` defines a named effect with success and error schemas, a `tier`, idempotency identity, metadata, annotations, an optional `retryPolicy`, and an optional `interruptRetryPolicy`. `Action.make(tag, options)` is the declared form: pure data whose implementation attaches later through `toLayer`. `Action.makeSystem` is the declared form that mints no requirement, which is how `Sleep`, `WaitFor`, `HumanTask`, and `Poll` ship implementations with the engine instead of pushing a layer obligation onto their callers.
+
+| Export                                                                           | Purpose                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Tier`                                                                           | `sealed`, `compensable`, or `irreversible`                                                                                                                                                                                                                                                                |
+| `InfraInterrupt`                                                                 | host-loss or rebalancing marker, retried only under `interruptRetryPolicy`                                                                                                                                                                                                                                |
+| `InfraInterruptRetriesExhausted`                                                 | the typed identity an exhausted `interruptRetryPolicy` dies with, carrying the action, the attempts, and the final interrupt                                                                                                                                                                              |
+| `IrreversibleRetryRequiresIdempotencyKey`                                        | an irreversible action retried without a declared key                                                                                                                                                                                                                                                     |
+| `ConcurrentKeylessDispatch`                                                      | two live dispatches of one keyless allocation scope                                                                                                                                                                                                                                                       |
+| `UncanonicalIdempotencyKey`                                                      | a caller-declared object-form `idempotencyKey` carrying material canonical serialization rejects, such as a `Date`, an `undefined`, a class instance, or a `Redacted`. It surfaces as a typed, non-retryable recorded completion naming the offending path, never as an untyped fiber defect (issue #151) |
+| `retry(effect, options)`                                                         | Effect retry with durable attempt context                                                                                                                                                                                                                                                                 |
+| `raceAll(name, actions)`                                                         | a durable action race, persisting one winner                                                                                                                                                                                                                                                              |
+| `idempotencyKey(name, options?)`                                                 | the run-local invocation key                                                                                                                                                                                                                                                                              |
+| `DispatchSite`                                                                   | the structural node address the interpreter scopes one dispatch to                                                                                                                                                                                                                                        |
+| `CurrentCacheEnvironment`                                                        | the complete `{ layers, capabilities }` a sealed cache key is computed under. It is hashed separately from caller-owned identity, and when it is absent the engine scopes the key to the current execution                                                                                                |
+| `CachePolicy` and `withCache`                                                    | a declaration-level annotation bounding the age of a reusable sealed result                                                                                                                                                                                                                               |
+| `FileInput`, `FileBoundary`, `BoundaryMode`, `Filegroup`, `Glob`, `TreeArtifact` | the file-boundary vocabulary an action declares its reads and writes with                                                                                                                                                                                                                                 |
+
+`CurrentAttempt` is the one-based durable attempt. `CurrentOrdinal` carries an `OrdinalSlot` (`{ values, cursors }`) rather than a number: the engine allocates each dispatch's ordinal under its declaration-identity scope and pins it per scope by dispatch position, so every attempt of one `Action.retry` sequence reuses its own action's ordinals even when the block dispatches several distinct actions or one declaration several times (issues #73, #84, #100). Nested blocks share the pinned `values` with the enclosing block (issue #108) but own a private `cursors` view seeded at block entry and merged back on exit, so a concurrent sibling block's attempt boundary never rewinds another block's mid-flight cursor (issue #116). Concurrent dispatch of one allocation scope is refused with `ConcurrentKeylessDispatch` for every ordinal-keyed action, keyless or keyed at a non-sealed tier, because arrival order would otherwise assign the ordinals; only a sealed action with an `idempotencyKey`, which is a pure cache key, may overlap on the same declared key, and distinct keys are distinct scopes that overlap freely (issues #111, #130).
+
+An action is itself an `Effect`; `action.execute` bypasses engine recording and should normally be used only by engine implementations.
+
+Sealed idempotency identity has two forms. A string is namespaced by the action name and the declared schemas. An object is caller-owned canonical JSON and stays stable across action renames. The engine separately adds the complete cache environment and any file boundary derived from `metadata`, so caller identity cannot override runtime facts.
+
+## Durable primitives
+
+| Namespace         | Public surface                                                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `DurableDeferred` | `make`, `await`, `into`, `raceAll`, branded token parsing and creation, and `done`, `succeed`, `fail`, `failCause` completion |
+| `DurableClock`    | `make({ name, duration })` and `sleep({ name, duration, inMemoryThreshold? })`                                                |
+| `DurableQueue`    | `make`, `process`, `makeWorker`, and `worker` over Effect's `PersistedQueue`                                                  |
+
+A deferred token encodes the flow name, the execution id, and the deferred name, so another process can complete the correct durable address. `TokenInvalid` is the typed failure every completion surface returns for a token that does not parse or that names a different deferred than the one it was submitted through. Completing a deferred is first-writer-wins: the first recorded exit is the one every later read replays.
+
+`DurableQueue.process` offers a payload, attaches a token, and suspends until a worker records the handler's exit against it. Its `retrySchedule` option bounds how a failing offer is retried; the default retries with exponential backoff, capped at one minute, and never gives up before the call dies. `DurableQueue.worker` and `makeWorker` take a `concurrency` that must be a positive safe integer.
+
+## `Graph`
+
+`Graph.build(flowOrNode, payload, options)` turns a body, or a bare node, into the plan-time graph the interpreter drives and the planner compiles. Building is a pure function of the declarations and the payload, so the whole shape of a round is known before its first action runs.
+
+| Export                                                                     | Purpose                                                                                   |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `build`                                                                    | builds the graph, flattening inline flow calls and expanding combinators into keyed nodes |
+| `nodes`, `edges`, `drafts`, `diagnostics`                                  | read what the build produced                                                              |
+| `Graph`, `GraphNode`, `Edge`, `EdgeReason`, `LayerRequest`, `BuildOptions` | the models                                                                                |
+
+A graph carrying diagnostics is inspectable but deliberately not compilable, so a body whose topology is incomplete is reported rather than half-driven. Building refuses a nesting depth past its bound and refuses a duplicate node id, because a node id is durable dispatch identity and two nodes answering to one address would let a later settlement overwrite an earlier one.
+
+A call node's key material folds in the declared schemas as their JSON Schema documents, so a change to what a callee accepts or produces re-keys the call. That identity is JSON-Schema-shaped, and the limit is worth stating: two schemas whose decoders disagree can serialize to the same document, so changing only a codec's behaviour does NOT re-key the call, and a result recorded under the old codec is replayed under the new one. Effect codecs are not serializable, so nothing can close this automatically. An author who changes a transformation and needs the call re-keyed renames the declaration.
+
+## `Interpreter`
+
+`Interpreter.layer(flow)` registers a flow with the runtime and installs the handler that drives its body. `Interpreter.interpret(flowOrNode, payload, options)` is that drive on its own, for a body you want to run without registering it.
+
+| Export             | Purpose                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `layer`            | registers a flow and installs its body handler                                                                |
+| `interpret`        | builds and walks the graph, returning an `Interpretation`                                                     |
+| `Interpretation`   | the root value, every node that settled, the typed failures a catch recovered, and the nodes a branch skipped |
+| `childExecutionId` | the deterministic id a `.child()` boundary opens its child execution under                                    |
+| `InterpreterError` | the graph refusals, each with a stable `code`                                                                 |
+
+`InterpreterError` codes name what the run cannot recover from on its own: `incomplete_graph` for topology the build reported, `duplicate_node_id` for two nodes answering to one dispatch address, `unresolved_action` for an action with no implementation wired up, `unresolved_reference` for a payload reading a node this graph does not hold, `unsupported_call` for a call whose declaration did not survive serialization, and `missing_operation` for a deferred function that did not either.
+
+The walk is demand-driven from the root rather than a sweep over the node list, because dependency order puts both branch arms before the branch that chooses between them, and executing an arm to discover it was not taken is exactly what static topology exists to avoid.
+
+## `Sleep`
+
+`Sleep.action` is the declared `system/sleep` step: a wait that is a keyed plan node rather than a second execution mechanism. Call it in a body wherever a round has to wait for time to pass, and provide `Sleep.layer` beside the other implementation layers.
+
+```ts
+Sleep.action.call({ millis: 60_000 })
+```
+
+A payload names exactly one deadline: a relative `millis`, or an absolute `until` in epoch milliseconds. `SleepRequestInvalid` is the typed refusal, with three codes:
+
+| Code                 | Meaning                                                                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `missing_deadline`   | the payload named neither `millis` nor `until`                                                                                         |
+| `ambiguous_deadline` | it named both, which are the same fact stated two ways                                                                                 |
+| `invalid_deadline`   | it named a number that is not a length of time: a non-finite or negative `millis`, a non-finite `until`, or an addition that overflows |
+
+Two waits of the same length are two waits: each call is its own node with its own identity, so `sleep` followed by `sleep` waits twice. A deadline that has already passed settles the node instead of parking it, because a run that resumes after its own deadline has to make progress.
+
+## `WaitFor`
+
+`WaitFor.action` is the declared `system/wait-for` step: a rendezvous with something outside the run. A payload names the wait point by `name`, relative to the running execution, or by an absolute `token`. `WaitFor.deferred(name)` is the resolver's half, the value to hand `DurableDeferred.tokenFromExecutionId` and `DurableDeferred.succeed`.
+
+```ts
+const gate = WaitFor.deferred("approval")
+const token = DurableDeferred.tokenFromExecutionId(gate, { flow, executionId })
+yield * DurableDeferred.succeed(gate, { token, value: { approved: true } })
+```
+
+`WaitForRequestInvalid` carries four codes: `missing_target` and `ambiguous_target` for a payload naming neither or both, `malformed_token` for a token that does not parse, and `foreign_execution` for a token addressed to another flow or another execution. A deferred result is recorded against the flow and execution that own it, so awaiting a foreign token would park forever while the value it names was recorded elsewhere.
+
+## `Poll`
+
+`Poll.make(tag, options)` declares a durable poller and returns an ordinary flow. Its body is one attempt: run `check`, and either settle the lineage with the check's own output or sleep for this attempt's delay and hand off to the next round with the attempt counter raised. Each attempt is therefore a durable round with its own keyed plan nodes, a check that already ran replays from its recorded outcome, and the wait between attempts is a durable timer that survives a process restart.
+
+| Option                  | Meaning                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `input`                 | the author's payload fields. `attempt` is added to them and defaults to one                                                                                   |
+| `result`                | the schema the poll settles with                                                                                                                              |
+| `check`                 | a body fragment returning `{ satisfied, output }`. It may not fail; state what a failure means with `Node.catch` inside the fragment                          |
+| `intervalMs`, `backoff` | the wait before the next attempt: `fixed`, `linear` (interval multiplied by attempt), or `exponential` (interval multiplied by 2 raised to attempt minus one) |
+| `maxAttempts`           | the attempt bound. It is also the flow's `maxRounds`, so a lineage that opened another round is refused by the engine                                         |
+| `onTimeout`             | `fail` fails `PollExhausted` at the bound; `return-last` answers with the last check output                                                                   |
+
+`delayMillis` is the exported schedule function, `CheckResult(result)` is the success schema a check action declares, `Failure` is the union a poll's rounds can fail with, and `Poll.layer` implements the `system/poll-exhausted` step. `PollExhausted` carries the stable code `poll_exhausted`.
+
+`Poll.make` refuses a schedule no clock can keep, with a `RangeError` naming the option that is wrong: an `intervalMs` that is not finite or is negative becomes a `system/sleep` node whose timer never fires, and a `maxAttempts` below one whole attempt reaches `Flow.make` as a complaint about `maxRounds`, an option the author never wrote. The check is on the schedule rather than on the interval alone, because `delayMillis` multiplies the interval by the backoff: `{ intervalMs: 1000, maxAttempts: 2000, backoff: "exponential" }` states three finite options and still asks for a wait of `Infinity`. The last wait a poll can arm, the one before the final attempt, has to be a length too, since the attempt at the budget gives up rather than sleeps.
+
+### Bounding a check that can hang
+
+A per-attempt time limit on the check is deliberately not a `Poll.make` option. A plan node's duration is not something the body around it can bound, so the bound goes in the check's own implementation, where `DurableDeferred.raceAll` races the work against a durable clock:
+
+```ts
+const Status = Action.make("deploy/status", {
+  payload: { id: Schema.String, attempt: Schema.Number },
+  success: Poll.CheckResult(Schema.String)
+})
+
+const statusLayer = Status.toLayer(({ attempt, id }) =>
+  DurableDeferred.raceAll({
+    name: `deploy/status#${attempt}`,
+    success: Poll.CheckResult(Schema.String),
+    error: Schema.Never,
+    effects: [
+      readDeployment(id),
+      Effect.as(
+        DurableClock.sleep({
+          name: `deploy/status#${attempt}`,
+          duration: Duration.seconds(30),
+          inMemoryThreshold: Duration.zero
+        }),
+        { satisfied: false, output: "unknown" }
+      )
+    ]
+  })
+)
+```
+
+Three things make this the durable bound rather than a wall-clock one. The race records its winner under a name that carries the attempt, so a re-driven round reads the recorded outcome instead of racing again. The clock parks the execution rather than holding a fiber, so the bound outlives the process waiting on it. And the clock's branch answers `satisfied: false`, so a check that ran out of time costs the poll one attempt and nothing else: the round takes its declared interval and hands off to the next attempt exactly as an unsatisfied check does.
+
+## `HumanTask`
+
+`HumanTask.action` is the declared `system/human-task` step: a typed question with re-asking and a deadline, built on `WaitFor`'s wait points and `DurableClock`.
+
+| Payload field | Meaning                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------ |
+| `name`        | addresses the question. Two calls naming one question in one execution await one answer                      |
+| `kind`        | `ask` (prose), `confirm` (a boolean), `select` (one of `options`), `json` (a value `schema` accepts)         |
+| `prompt`      | what the person is asked                                                                                     |
+| `options`     | the choices a `select` offers                                                                                |
+| `schema`      | a JSON Schema in the bounded subset, valid only with `kind: "json"`                                          |
+| `maxAttempts` | how many answers may be refused before the task fails. Defaults to `defaultMaxAttempts` (10)                 |
+| `timeoutMs`   | how long the question stays open, across every attempt. A finite number of milliseconds that is not negative |
+
+The bounded schema subset is `type` (`object`, `array`, `string`, `number`, `integer`, `boolean`, `null`), `enum`, `properties`, `required`, `items`, `nullable`, `description`, and `title`. `enum` members may be any JSON value, including objects and arrays, and membership is compared structurally rather than by reference. A schema supplied with any kind other than `json` is refused as `request_invalid`, because nothing would check it.
+
+Each attempt is its own durable wait point, `WaitFor/<name>#<attempt>`, so an answer is recorded through the ordinary durable deferred path and a refused answer stays recorded under the attempt that refused it. The refusal itself is recorded as a sealed step named `HumanTask/<name>#<attempt>/rejected`, carrying the task, the attempt, and the reason, so a reader of the journal sees why an answer was sent back. The run parks under the `approval` waiting reason carrying the current attempt's token, and `HumanTask.answer({ token, value })` records an answer against it. A re-driven round replays every answer it already has and parks on the first attempt that has none, so a restart between the park and the answer resumes on the same token.
+
+`HumanTaskFailed` carries `code`, `task`, `attempts`, the `rejections` it collected, and a message. `request_invalid` refuses an unanswerable question before anyone is asked: a `select` with no options, an attempt budget below one or above the documented ceiling, a `timeoutMs` that is not a length of time, a schema outside the subset, a schema past the depth or node bound, or a schema supplied with the wrong kind. `rejected` means the budget was spent on answers the task refused. `timeout` means the deadline passed with the question open.
+
+Sizes are bounded so one question cannot grow a durable record without limit. The attempt budget is refused above `maxAttemptBudget`, the schema is refused past `maxSchemaDepth` levels or `maxSchemaNodes` nodes, an answer is refused past `maxAnswerNodes` visited values, a value echoed into a rejection message is truncated at `maxDiagnosticChars` with an explicit marker, and the retained `rejections` array stops at `maxRetainedRejectionChars` and records how many further rejections it omitted. The per-attempt journal step still records its own full reason: only the accumulated array is capped, because a refused answer stays recorded so the record shows what was actually said.
+
+`timeoutMs` races the answer against one `DurableClock` per task through `DurableDeferred.raceAll`. The race parks and settles on whichever arrives first, on both hosts: the in-process engine and the SQLite engine store each re-enter a parked race on the next drive, re-registering the raced deferreds against their persisted completions. A parked dispatch keeps its attempt row and its attempt number, so a question that waits out a person costs nothing against the action's retry budget.
+
+`validate(value, request)` returns the reason an answer was refused, or `undefined`; run it in the interface so a typo is refused while the person is still looking at it. `validateSchema(schema)` checks that a schema stays inside the subset at every depth. `decode(schema)` gives the `Schema.Json` answer the caller's own type; the two schema descriptions must agree, and a disagreement surfaces as a defect rather than as a failure a body could catch.
+
+## `RetryPolicy`
+
+A `RetryPolicy` is a plain value, so the next retry delay is derived from a persisted attempt count instead of fiber-local `Schedule` state. `nextDelay` mirrors Temporal's `ComputeNextDelay`, and `decide` is the engine's single retry decision point.
+
+`RetryPolicy.make` validates its bounds and throws a `RangeError` naming the field that is wrong: `initialMs` finite and not negative, `factor` finite and positive, `maxMs` finite and not below `initialMs`, `maxAttempts` a safe integer of at least one, `expirationMs` finite and positive, and `jitterRatio` finite and within zero and one inclusive. It also copies and freezes the `nonRetryable` array, so a later mutation of the caller's array cannot change what a parked policy means.
+
+`nextDelay` is total even for a policy that never went through `make`, which is what a policy decoded from a persisted row is: a non-finite attempt, elapsed time, bound, or computed delay answers `None` rather than handing the engine a negative or `NaN` duration to sleep for.
+
+`decide` classifies non-retryable errors here and nowhere else, by the policy's declared tags and by `defaultNonRetryable`, which lists the integrity verdicts that must reach the driver unretried under every policy. `RetryPolicyExpired` and `RetryAttemptsExhausted` are the terminal failures, each with a stable code.
+
+## `StepIdentity`
+
+| Export               | Purpose                                                |
+| -------------------- | ------------------------------------------------------ |
+| `AllocationIdentity` | an action name refined by a declared string key        |
+| `allocationScope`    | the scope an ordinal is allocated from                 |
+| `invocationKey`      | the run-local ordinal step key                         |
+| `DispatchSite`       | the structural graph address one dispatch is scoped to |
+
+## `FlowRuntime`
+
+`FlowRuntime` is the service tag the authoring APIs are written against: registration, execution, polling, safe and unsafe interruption, resume, action execution, deferred lookup and completion, and clock scheduling. This package declares the port and depends on nothing that implements it, so the dependency direction is `@smthrs/flow` then `@smthrs/engine` then the durable stores, with no cycle and no type-only escape hatch back.
+
+| Export                  | Purpose                                                                                                                                                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FlowRuntime`           | the port itself                                                                                                                                                                                             |
+| `FlowInstance`          | one execution's mutable frontier state: execution id, flow, scope, suspension and interruption flags, the waiting annotation, and action coordination                                                       |
+| `annotateWaiting`       | declares how the flow is about to wait, so a durable driver parks the run under that reason and token                                                                                                       |
+| `WaitingAnnotation`     | `{ reason, wakeAt?, token? }`                                                                                                                                                                               |
+| `FlowCycleDetected`     | executing a flow would close a cycle in the persisted parent chain                                                                                                                                          |
+| `FlowExecutionNotFound` | `poll` and `resume` were given an execution id the runtime does not hold                                                                                                                                    |
+| `CancelRequestFailed`   | a durable runtime could not record a cancellation, with `cancel_request_failed` for a storage failure and `unsafe_interrupt_unsupported` for `interruptUnsafe`, which the durable engine does not implement |
+
+No shipped runtime reads `FlowInstance.awaitedDeferreds`. It is reserved for a runtime that wants to preempt a suspension when a completion lands in the read-to-park window; a completion wakes a parked run through `FlowRuntime.resume` today.

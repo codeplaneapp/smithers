@@ -1,0 +1,74 @@
+/** Redirect fail-closed contract for NodeHost's Undici-backed HttpClient. */
+import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { HttpClient } from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import { createServer, type Server } from "node:http"
+import type { AddressInfo } from "node:net"
+import * as NodeHost from "../../src/NodeHost.ts"
+
+const listen = (server: Server): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const onError = (error: Error) => reject(error)
+    server.once("error", onError)
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", onError)
+      resolve((server.address() as AddressInfo).port)
+    })
+  })
+
+const close = (server: Server): Promise<void> => {
+  if (!server.listening) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    server.close((error) => error === undefined ? resolve() : reject(error))
+  })
+}
+
+let destinationHits = 0
+let destinationPort = 0
+let originPort = 0
+const destination = createServer((_request, response) => {
+  destinationHits += 1
+  response.writeHead(200, { "content-type": "text/plain" })
+  response.end("redirect destination")
+})
+const origin = createServer((_request, response) => {
+  response.writeHead(302, {
+    location: `http://127.0.0.1:${destinationPort}/must-not-be-hit`
+  })
+  response.end()
+})
+
+beforeAll(async () => {
+  destination.unref()
+  origin.unref()
+  destinationPort = await listen(destination)
+  originPort = await listen(origin)
+})
+
+afterAll(async () => {
+  await Promise.all([close(origin), close(destination)])
+})
+
+describe("NodeHost redirect contract", () => {
+  it.effect("does not follow a 302 redirect to a second origin", () =>
+    Effect.gen(function*() {
+      destinationHits = 0
+      const response = yield* (
+        Effect.gen(function*() {
+          const client = yield* HttpClient
+          const response = yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${originPort}/redirect`)
+          )
+          yield* response.text
+          return { location: response.headers.location, status: response.status }
+        }).pipe(Effect.provide(NodeHost.layer))
+      )
+
+      expect(response).toEqual({
+        location: `http://127.0.0.1:${destinationPort}/must-not-be-hit`,
+        status: 302
+      })
+      expect(destinationHits).toBe(0)
+    }))
+})

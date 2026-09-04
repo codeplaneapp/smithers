@@ -1,0 +1,54 @@
+---
+title: "smthrs memory"
+description: "Read and write namespaced facts in the control database"
+---
+
+import { Code } from "@astrojs/starlight/components"
+import help from "../../../../../data/help/memory.txt?raw"
+
+## Synopsis
+
+```text
+smthrs memory list [--namespace <kind:id>] [--prefix <prefix>]
+smthrs memory get <key> [--namespace <kind:id>]
+smthrs memory set <key> <value> [--namespace <kind:id>]
+smthrs memory rm <key> [--namespace <kind:id>]
+```
+
+## Description
+
+`memory` reads and writes namespaced facts in the project's control database, the same structured memory a flow uses across runs. Reach for it to inspect what a flow remembered, seed a fact before a run starts, or remove one afterwards. It has four subcommands: `list` lists facts in a namespace, `get` reads one fact, `set` writes one fact, and `rm` deletes one fact. It never reads or writes run history.
+
+## Arguments
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `key` (`get`, `set`, `rm`) | string | yes | The fact's key within the namespace. |
+| `value` (`set`) | string | yes | The value to store. A value that parses as JSON is stored as JSON; anything else is stored as the string as typed. |
+
+## Flags
+
+| Flag | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--namespace <kind:id>` | string | `user:cli` | The namespace to read or write: `flow:<id>`, `agent:<id>`, `user:<id>`, or `global:<id>`. Any other spelling, or an id containing control characters, exits 2. |
+| `--prefix <prefix>` (`list`) | string | none | Only facts whose key starts with this prefix. |
+
+## Output
+
+- `list` prints one entry per fact with `key`, `value`, and `updatedAtMs`.
+- `get` prints the fact's value: a string prints as typed, and a JSON value prints as JSON. A key the namespace does not hold exits 2.
+- `set` prints `{ "key": "...", "written": true }`. Writing an existing key replaces its value.
+- `rm` prints `{ "key": "...", "removed": ... }`, where `removed` reports whether the fact existed.
+
+`--json` prints the same data in compact JSON; for `get` the value is JSON-encoded, so a string prints quoted.
+
+## Help output
+
+The flag list above is curated. This is what the binary prints, captured by `apps/site/scripts/gen-cli-data.mjs`.
+
+<Code code={help} lang="text" title="smthrs memory --help" />
+
+## See also
+
+- [`smthrs gc`](/docs/reference/cli/gc/): delete old run history from the same state directory.
+- [Operate on memory](/docs/guides/memory-ops/): namespaces and fact workflows in practice.

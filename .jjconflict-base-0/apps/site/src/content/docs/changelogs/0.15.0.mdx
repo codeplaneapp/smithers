@@ -1,0 +1,319 @@
+---
+title: "0.15.0"
+description: "0.15.0 is the biggest release since launch. The headline is the Gateway: a"
+---
+
+0.15.0 is the biggest release since launch. The headline is the **Gateway**: a
+server that turns your workflows into a remotely controllable service, enabling
+bots, dashboards, and CI integrations. Under the hood, the engine has been
+rebuilt on top of the Effect ecosystem for durable execution, and tasks now retry
+infinitely by default.
+
+---
+
+## Gateway: Deploy Workflows as a Service
+
+Until now, smithers workflows ran locally from the CLI. The Gateway changes
+that: it's a server that exposes your workflows over WebSocket and HTTP so that
+external systems (bots, dashboards, CI pipelines, webhooks, cron jobs) can
+start runs, stream progress, approve human-in-the-loop gates, and deliver
+signals, all programmatically.
+
+If you've wanted to build a Slack bot that kicks off a code review workflow when
+a PR opens, or a dashboard where your team monitors and approves deployments,
+the Gateway is how you do it.
+
+### Quick start
+
+```ts
+import { SmithersGateway } from "smthrs/gateway";
+
+const gateway = new SmithersGateway({
+  auth: {
+    mode: "token",
+    tokens: {
+      "my-secret-token": { role: "operator", scopes: ["*"] },
+    },
+  },
+});
+
+gateway.register("deploy", deployWorkflow);
+gateway.register("code-review", codeReviewWorkflow);
+await gateway.listen({ port: 7331 });
+```
+
+Clients connect over WebSocket, authenticate, and call RPC methods:
+
+```ts
+// Start a run
+ws.send(JSON.stringify({
+  type: "req", id: "1", method: "runs.create",
+  params: { workflow: "deploy", input: { env: "production" } },
+}));
+
+// Server streams real-time events
+// → { type: "event", event: "node.started", payload: { nodeId: "build" } }
+// → { type: "event", event: "approval.requested", payload: { nodeId: "confirm" } }
+
+// Approve a gate
+ws.send(JSON.stringify({
+  type: "req", id: "2", method: "approvals.decide",
+  params: { runId: "abc123", nodeId: "confirm", decision: "approved" },
+}));
+```
+
+### HTTP fallback
+
+Every RPC method works via `POST /rpc` for stateless integrations:
+
+```bash
+curl -X POST http://localhost:7331/rpc \
+  -H "Authorization: Bearer my-secret-token" \
+  -H "Content-Type: application/json" \
+  -d '{"method": "runs.create", "params": {"workflow": "deploy", "input": {"env": "staging"}}}'
+```
+
+### Authentication
+
+| Mode | Use case |
+|---|---|
+| **`token`** | Static bearer tokens mapped to roles/scopes. Simplest option. |
+| **`jwt`** | Verify HS256 JWTs with configurable issuer, audience, and claim mapping. |
+| **`trusted-proxy`** | Behind a reverse proxy that handles auth. Identity from headers. |
+
+### Access control
+
+Every method requires a minimum access level:
+
+| Level | Can do | Methods |
+|---|---|---|
+| `read` | View runs, frames, attempts | `runs.list`, `runs.get`, `frames.list` |
+| `execute` | Start, cancel, signal runs | `runs.create`, `runs.cancel`, `signals.send` |
+| `approve` | Decide human-in-the-loop gates | `approvals.decide` |
+| `admin` | Manage cron schedules | `cron.add`, `cron.remove` |
+
+### Cron scheduling
+
+```ts
+gateway.register("nightly-report", reportWorkflow, {
+  schedule: "0 2 * * *",
+});
+```
+
+Manage at runtime: `cron.list`, `cron.add`, `cron.remove`, `cron.trigger`.
+
+### Approval modes
+
+Approval nodes surface as gateway events. Four modes: **gate** (yes/no),
+**decision** (approve/deny with notes), **select** (pick from options),
+**rank** (order by preference). Restrict who can approve with `allowedScopes`
+and `allowedUsers`, or set `autoApprove` policies for fully autonomous workflows.
+
+---
+
+## Durability
+
+### Infinite retry by default
+
+Tasks now retry indefinitely with exponential backoff (1s, then 2s, then 4s, and
+so on, capped at 5 minutes). Transient failures, rate limits, and model errors are
+absorbed automatically. Your workflows are durable by default.
+
+```tsx
+{/* Retries forever until it succeeds */}
+<Task id="analyze" output={outputs.analysis} agent={analyst}>
+  Analyze the codebase.
+</Task>
+
+{/* Opt out explicitly */}
+<Task id="quick-check" output={outputs.check} agent={checker} noRetry>
+  One-shot validation.
+</Task>
+```
+
+### Side-effect safety
+
+When a task retries after a previous attempt invoked non-idempotent tools, the
+agent prompt now includes an explicit warning that those side effects may have
+already occurred, preventing duplicate deployments, duplicate emails, etc.
+
+### Resume contract hardening
+
+Resume now acquires a durable DB claim before reactivating a run, which closes
+the split-brain window around stale-run recovery and detached supervisor
+handoff.
+
+- **Live owner protection**: A `running` run will not be resumed if its recorded
+  owner PID is still alive, even when `--force` is used.
+- **Stricter code drift detection**: Resume compatibility now checks both the
+  workflow entry file hash and the local import graph hash. Changing an imported
+  workflow module invalidates resume the same way changing the entry file does.
+- **Child workflow provenance**: Subflows now inherit workflow identity/root
+  provenance so the same resume safety checks apply to child runs.
+- **Retry exhaustion stays terminal**: Failed tasks with no retries remaining
+  stay failed on resume unless the workflow definition now allows more retries.
+
+### Deterministic durable outputs
+
+Approval-style components and `SuperSmithers` no longer write wall-clock
+timestamps into durable task outputs. Human decision timing still exists in the
+approval records and append-only event log, but replayed durable outputs stay
+deterministic.
+
+---
+
+## New Components & APIs
+
+- **`<Signal>`**: Typed wrapper over `<WaitForEvent>`. Validates the incoming
+  payload against a Zod schema and passes typed data to children.
+  ```tsx
+  <Signal id="feedback" schema={z.object({ rating: z.number() })}>
+    {(data) => <Task id="process" output={outputs.result}>Rate: {data.rating}</Task>}
+  </Signal>
+  ```
+
+- **`defineTool()`**: First-class custom tool authoring with automatic event
+  logging, idempotency keys, and side-effect tracking.
+  ```ts
+  const deploy = defineTool({
+    name: "deploy",
+    schema: z.object({ env: z.string() }),
+    sideEffect: true,
+    async execute(args, ctx) {
+      return await pushBuild(args.env, ctx.idempotencyKey);
+    },
+  });
+  ```
+
+- **`usePatched()`**: Workflow versioning hook. Returns `true` for new runs,
+  `false` for replaying runs. Enables safe rolling deployments.
+
+- **Task-level `allowTools`**: Restrict which CLI tools an agent can invoke per
+  task. Combine with `cliAgentToolsDefault: "explicit-only"` for fine-grained
+  agent sandboxing.
+
+- **Semantic MCP tools**: Stable agent-facing tool surface: `list_workflows`,
+  `run_workflow`, `get_run`, `resolve_approval`, `revert_attempt`, and more.
+
+- **IDE integration**: `smithers-ide` MCP surface for editor tooling: open
+  files, show diffs, run terminals, ask the user, render webviews.
+
+---
+
+## CLI
+
+- **`bunx smthrs signal`**: Deliver structured data to a `<Signal>` or
+  `<WaitForEvent>` node from the command line.
+- **`bunx smthrs retry-task`**: Retry a specific task without time travel. Resets
+  the node and dependents, re-executes only what changed.
+- **`bunx smthrs timetravel`**: Revert to a previous task state. Optionally
+  restore the VCS filesystem and resume immediately.
+- **`bunx smthrs ask` diagnostics**: `--dump-prompt`, `--tool-surface`,
+  `--list-agents`, `--print-bootstrap` for debugging agent bootstrap.
+
+---
+
+## Engine Redesign
+
+The engine has been incrementally rebuilt on the Effect ecosystem. This is an
+internal change (your workflow code doesn't change) but it gives smithers
+proper durable execution semantics: replay-safe activities, crash-recoverable
+deferred waits, workflow-level determinism, and a worker model that can scale
+beyond a single process.
+
+**What changed:**
+
+- Task execution is now wrapped in Effect Activities with structured retries,
+  heartbeat propagation, and idempotency keys
+- Approvals and signals are backed by DurableDeferred for replay-safe resolution
+- The scheduler loop is wrapped in Workflow.make() with parent-child linkage
+- Internal tables route through SqlMessageStorage (`@effect/sql-sqlite-bun`)
+  instead of raw drizzle; user output tables are unchanged
+- Task dispatch routes through a worker entity model (in-process by default,
+  zero overhead), enabling future multi-process and remote execution
+- Sandbox execution routes through entity-based runners with crash recovery
+
+**New dependency:** `@effect/workflow`, `@effect/cluster`, `@effect/rpc`,
+`@effect/sql-sqlite-bun` are now used at runtime. They were already in
+`package.json` but previously unused.
+
+---
+
+## Observability
+
+- **Prometheus context-window usage buckets**: Agent token reporting now emits
+  `smithers_tokens_context_window_per_call` plus
+  `smithers_tokens_context_window_bucket_total{bucket=...}` so you can alert on
+  prompt/context size ranges: `<50k`, `50k-100k`, `100k-200k`, `200k-500k`,
+  `500k-1m`, and `>=1m`.
+
+---
+
+## Breaking Changes
+
+- **Zod v3 support removed.** The `zodV3Compat.ts` shim has been deleted. All
+  schema handling uses Zod v4 natively. If your workflows import from `"zod"`,
+  you're already on v4 and nothing changes. If you were on Zod v3, upgrade
+  before adopting 0.15.0.
+
+---
+
+## Run Status Reclassification
+
+- **Stale runs surfaced as `continued`**: Runs whose heartbeat has gone stale
+  now appear as `"continued"` instead of `"running"` in `getRun`, `listRuns`,
+  and the API. Filtering by `status=running` also includes `continued` for
+  backwards compatibility.
+
+## New Run Status
+
+- `waiting-event`: paused on a `<WaitForEvent>` or `<Signal>` node
+
+---
+
+## New Workflows
+
+- **`<Sweep>`**: Cross-topic feature auditing workflow. Scans multiple areas of
+  the codebase in a single pass to surface inconsistencies and missing coverage.
+
+---
+
+## Fixes
+
+- **Failed resume no longer corrupts run state**: If resume is rejected before
+  the run is durably claimed and activated, smithers now leaves the existing run
+  record untouched instead of marking it failed.
+- **Child process cleanup on cancel**: Agents now spawn with `detached: true`
+  and kill the entire process group on abort. Fixes zombie accumulation.
+- **Input schema table generation**: Input tables now get a `run_id`-only
+  primary key instead of the composite task key.
+- **OpenAI schema sanitization**: `sanitizeForOpenAI()` fixes Zod v4 JSON
+  Schema output for OpenAI's `response_format` constraints.
+- **Codex resume flag**: `--output-schema` omitted when resuming Codex sessions.
+- **Heartbeat timeouts**: Raised from 60s/120s to 300s/300s. CLI agents need
+  time to think.
+- **`picocolors` dependency**: Now declared explicitly in `package.json`.
+- **Stop retrying invalid heartbeat payloads**: Heartbeats with malformed data
+  no longer trigger infinite retry loops.
+- **Stop retrying deterministic invalid outputs**: Tasks that fail with
+  non-transient output validation errors are no longer retried.
+- **HTTP request metrics deterministic**: Prometheus HTTP request metrics no
+  longer drift due to timing races in tests.
+- **Kanban column retry configuration**: Kanban columns can now configure
+  per-task retry behavior.
+- **Preserve devtools hook instrumentation**: DevTools hooks are no longer
+  stripped during engine teardown.
+- **Settle aborted tasks before cancelling runs**: Aborted tasks are now
+  awaited before the run is marked cancelled, preventing orphaned state.
+- **Continue-on-fail tasks default to single-shot**: Tasks with
+  `continueOnFail` now default to `noRetry` to avoid masking permanent failures.
+
+## Tooling
+
+- **oxlint**: Added as a fast lint pass. Existing autofixable issues resolved.
+
+---
+
+## Error Codes
+
+- **Added**: `EXTERNAL_BUILD_FAILED`, `SCHEMA_DISCOVERY_FAILED`

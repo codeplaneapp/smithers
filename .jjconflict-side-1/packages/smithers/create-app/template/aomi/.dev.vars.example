@@ -1,0 +1,23 @@
+# Copy to .dev.vars for local development. .dev.vars is gitignored.
+# In production the seat credential is a Cloudflare secret, not a var:
+#   wrangler secret put OPENAI_API_KEY --config worker/wrangler.jsonc
+
+# The agent seat's credential. AGENT.ts declares openai:gpt-5.5, and seats.ts
+# reads the key for whichever provider the seat names, so switching AGENT.ts to
+# an anthropic: seat means setting ANTHROPIC_API_KEY here instead.
+OPENAI_API_KEY=
+
+# JSON-RPC the Tevm fork reads chain state from. Any archive-capable endpoint.
+# Only test/tevm.test.ts reads it; the Worker never does, so it is not a deploy
+# secret.
+TEVM_FORK_RPC_URL=
+
+# 1 streams the mock turn (milestone 1). 0 asks for the real Agent.run path,
+# which does not run under workerd yet — see worker/README.md.
+APP_MOCK_TURN=1
+
+# The shared credential every /api/* route but GET /api/health requires.
+# Leave it empty locally: an empty or absent value keeps the API open, which is
+# what `pnpm dev` wants. A DEPLOY must set it as a secret, not as a var:
+#   wrangler secret put APP_API_TOKEN --config worker/wrangler.jsonc
+APP_API_TOKEN=

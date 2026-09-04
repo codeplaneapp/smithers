@@ -1,0 +1,1516 @@
+import { z } from "zod"
+import { AgentRoleIdSchema, AgentRoleModelSchema } from "./AgentRoles"
+import {
+  ChangeAnalyzerRunSchema,
+  ChangeCheckSchema,
+  ChangeDiffSchema,
+  ChangeFacetSchema,
+  ChangeFindingSchema,
+  ChangeLandedSchema,
+  ChangeOwnersSchema,
+  ChangeReviewRequestSchema,
+  ChangeRevisionSchema,
+  ChangeThreadSchema,
+  ChangeTurnSchema,
+  ChangeVerdictSchema,
+  ChangeWalkthroughSchema,
+  ChangesetStateSchema,
+  LandingBlockSchema,
+  RevisionPinSchema
+} from "./Changes"
+import { HARNESS_IDS, LSP_DIAGNOSTICS_CAP, LSP_HOVER_CAP_CHARS, LspDiagnosticSchema, RepoSchema, TargetSchema } from "./LocalApp"
+import {
+  AffectedCardPayloadSchema,
+  CiMatrixCardPayloadSchema,
+  GraphCardPayloadSchema,
+  GraphNodeSchema,
+  NodeTimingSchema,
+  RunHistoryCardPayloadSchema,
+  RunRecordSchema,
+  RunSummarySchema,
+  RunTimelineCardPayloadSchema
+} from "./TargetGraph"
+
+/*
+ * The targets card's table state (apps/ui cards/TargetsTable.ts): the filter
+ * the user set, the row they selected, and what the card has read about
+ * individual targets. All optional: cards persisted before the table parse.
+ */
+export const TARGET_RUN_STATES = ["never", "passed", "failed", "running"] as const
+export const TargetRunStateSchema = z.enum(TARGET_RUN_STATES)
+export type TargetRunState = z.infer<typeof TargetRunStateSchema>
+
+/** The table's views: the repository's essentials, everything, or what ran most recently. */
+export const TARGETS_VIEW_MODES = ["featured", "all", "recent"] as const
+export const TargetsViewModeSchema = z.enum(TARGETS_VIEW_MODES)
+export type TargetsViewMode = z.infer<typeof TargetsViewModeSchema>
+
+export const TargetsViewSchema = z.object({
+  /** Featured / All / Recent; absent = Featured when the repo has featured or starred targets, else All. */
+  mode: TargetsViewModeSchema.optional(),
+  /** Substring match on the label or the workspace. */
+  query: z.string().optional(),
+  /** Kind chips that are ON; absent or empty = every kind. */
+  kinds: z.array(z.string()).optional(),
+  /** Last-run state chips that are ON; absent or empty = every state. */
+  states: z.array(TargetRunStateSchema).optional(),
+  /** One workspace, or absent for all. */
+  workspace: z.string().optional(),
+  /** The row whose detail drawer is open. */
+  selected: z.string().optional(),
+  /** Grouped rows (same name across packages, `//...:name`) the user expanded, by group label. */
+  expanded: z.array(z.string()).optional(),
+  /** Per group label, the member labels picked to run; absent = every member. */
+  picked: z.record(z.string(), z.array(z.string())).optional()
+})
+export type TargetsView = z.infer<typeof TargetsViewSchema>
+
+/** What the card has read about one target through `graph <label> --plan`. */
+export const TargetDetailSchema = z.object({
+  status: z.enum(["pending", "done", "failed"]),
+  node: GraphNodeSchema.optional(),
+  deps: z.array(z.string()).optional(),
+  rdeps: z.array(z.string()).optional(),
+  error: z.string().optional()
+})
+export type TargetDetail = z.infer<typeof TargetDetailSchema>
+
+/*
+ * The card wire model, shared by the server boundary (which validates frames off
+ * the upstream stream), the web agent, and the client store. A card is how the
+ * agent surfaces structured state — a plan, an approval request, a status — into
+ * the transcript; the client renders it with zero UI changes per DESIGN.md §5.
+ */
+
+export const CardPlanItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.enum(["pending", "active", "done"])
+})
+export type CardPlanItem = z.infer<typeof CardPlanItemSchema>
+
+/** The seams a form field's select may draw its options from (apps/ui flows/FlowForms.ts OPTION_PROVIDERS). */
+export const FORM_OPTION_PROVIDERS = [
+  "harnesses",
+  "agent-harnesses",
+  "harness-models",
+  "open-repos",
+  "cloud-repos",
+  "bookmarks",
+  "workspaces",
+  "agents"
+] as const
+
+const cardBaseShape = {
+  id: z.string(),
+  title: z.string(),
+  body: z.string().optional(),
+  status: z.enum(["active", "acted", "error"]),
+  createdAt: z.number(),
+  ordinal: z.number().int().nonnegative(),
+  /**
+   * The conversation this card belongs to (LOCAL-APP.md "Tabs"). There is
+   * one Smithers, so live cards carry no id; the field stays so cards
+   * persisted by a build that had conversation tabs parse unchanged.
+   */
+  tabId: z.string().optional()
+}
+
+/*
+ * Lane sync (ADR 0005 "Rate limits"): a GitHub-proxied call's rate-limit
+ * facts, carried on the card that made the refused call (or whose status
+ * read reports them). `resetAt` is the wire's reset timestamp; null when
+ * the wire names none. The line renders only from these fields — a plain
+ * 429 with no structured body (plue#472's shape is not deployed) reads as
+ * the verbatim error, never an invented reset.
+ */
+export const GitHubRateLimitSchema = z.object({
+  limit: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+  resetAt: z.string().nullable()
+})
+export type GitHubRateLimit = z.infer<typeof GitHubRateLimitSchema>
+
+/*
+ * Lane L3 (ADR 0002, plue#446): the workspace DTO's own head — what the guest
+ * last reported after jj snapshotted the working copy. Distinct from
+ * `bookmarkHead`, which is the TARGET BOOKMARK's head off the bookmarks call.
+ * Both ids are empty strings on the wire when the guest has reported none;
+ * the parser turns those into null and the card renders nothing.
+ */
+export const WorkspaceHeadSchema = z.object({
+  changeId: z.string().nullable(),
+  commitId: z.string().nullable()
+})
+export type WorkspaceHead = z.infer<typeof WorkspaceHeadSchema>
+
+/*
+ * The NixOS environment a workspace was built from (ADR 0002: no image
+ * picker; the repository's `.smithers/environment.nix` is the source).
+ * `revision` and `closureHash` are empty on the wire until a build pins them.
+ * Lane L3b: `image` is the registry reference a vm or desktop workspace
+ * BOOTED — empty for a container, and optional so a card written before this
+ * lane still parses. The header renders its TAG only, never the whole path.
+ */
+export const WorkspaceEnvironmentSchema = z.object({
+  source: z.string(),
+  revision: z.string().nullable(),
+  closureHash: z.string().nullable(),
+  image: z.string().nullable().optional()
+})
+export type WorkspaceEnvironment = z.infer<typeof WorkspaceEnvironmentSchema>
+
+/*
+ * Lane L3b — the DTO's `desktop` object, present ONLY when `kind` is
+ * `desktop`. `streamUrl` is the RELATIVE path plue publishes on the workspace
+ * (never credentialed, safe to persist); `session` is the last mint's id and
+ * expiry, or null before the first one. The credentialed absolute URL, the
+ * session token and the VNC password come from the session POST and live only
+ * in the facet's ephemeral holder — they are deliberately absent from this
+ * schema, because everything in a card payload is written to disk.
+ */
+export const WorkspaceDesktopSchema = z.object({
+  /**
+   * plue#496 `ready`: true only after the guest's `smithers-desktop-start`
+   * verified the noVNC endpoint. A desktop workspace stays `starting` until
+   * then, and a mint before then is refused 503 `desktop_not_ready`.
+   */
+  ready: z.boolean().nullable().optional(),
+  streamUrl: z.string().nullable(),
+  session: z.object({ id: z.string(), expiresAt: z.string().nullable() }).nullable()
+})
+export type WorkspaceDesktop = z.infer<typeof WorkspaceDesktopSchema>
+
+/*
+ * Lane L3b — one row of `GET /api/repos/{o}/{r}/environment-images`: a built
+ * NixOS closure and the image it produced. `platformBase` is plue's
+ * `repository_id 0`; `coldPull` is an empty `golden_snapshot_id`, which means
+ * the first boot of that closure pays a 20–40 s registry pull.
+ */
+export const EnvironmentImageRowSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  source: z.string(),
+  sourceRevision: z.string().nullable(),
+  closureHash: z.string().nullable(),
+  image: z.string().nullable(),
+  status: z.string(),
+  platformBase: z.boolean(),
+  coldPull: z.boolean()
+})
+export type EnvironmentImageRow = z.infer<typeof EnvironmentImageRowSchema>
+
+/**
+ * One row of `GET …/workspaces/{id}/files?path=` (plue#449,
+ * services.WorkspaceFileEntry). `type` is plue's own word — `file`, `dir`, or
+ * `symlink` — kept verbatim; the shared file-list row the card reuses only
+ * knows file and dir, so the mapping happens at the render, never here.
+ */
+export const WorkspaceFileEntrySchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.string(),
+  size: z.number().int().nonnegative().nullable()
+})
+export type WorkspaceFileEntry = z.infer<typeof WorkspaceFileEntrySchema>
+
+/**
+ * One row of `GET …/workspaces/{id}/services` (plue#449, and #483's
+ * `port` / `url`, services.WorkspaceManagedService). The port and the url
+ * are `omitempty` on the wire, so a service that publishes neither carries
+ * neither and the row shows a name and a state alone.
+ */
+export const WorkspaceServiceSchema = z.object({
+  name: z.string(),
+  state: z.string(),
+  /** plue#483 `port`; null when the service publishes none. */
+  port: z.number().int().nullable().optional(),
+  /** plue#483 `url`; null when the service publishes none. */
+  url: z.string().nullable().optional()
+})
+export type WorkspaceService = z.infer<typeof WorkspaceServiceSchema>
+
+/*
+ * One row of the sandbox egress audit (`GET …/workspaces/{id}/egress` and
+ * `GET …/agent-sessions/{id}/egress`, services.SandboxEgressAuditEntry): what
+ * the computer called and which secret NAMES the proxy swapped in. The values
+ * are never on the wire and never rendered.
+ */
+export const SandboxEgressRowSchema = z.object({
+  occurredAt: z.string(),
+  host: z.string(),
+  method: z.string(),
+  path: z.string(),
+  status: z.number().int(),
+  allowed: z.boolean(),
+  swappedSecretNames: z.array(z.string())
+})
+export type SandboxEgressRow = z.infer<typeof SandboxEgressRowSchema>
+
+export const CardSchema = z.discriminatedUnion("kind", [
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("plan"),
+    payload: z.object({ items: z.array(CardPlanItemSchema) })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("approval"),
+    payload: z.object({
+      capability: z.string(),
+      detail: z.string().optional(),
+      /*
+       * The run identity an approval decision round-trips against (the
+       * gateway's `Approval.Submit` procedure). Optional so demo cards stay
+       * valid; a card without them cannot be decided against a backend.
+       */
+      runId: z.string().optional(),
+      /** The gate's own id, which is what identifies it to the engine. */
+      requestId: z.string().optional(),
+      /*
+       * The submit-ready `ApprovalTarget.Node` envelope the gateway published
+       * with the request. A decision hands this back unchanged, so the client
+       * never reconstructs the authority it is exercising.
+       */
+      approval: z.record(z.string(), z.unknown()).optional(),
+      /** The loaded repository whose per-user gateway the run lives on. */
+      repo: z.string().optional(),
+      decision: z.enum(["approved", "denied"]).optional(),
+      decidedAt: z.number().optional(),
+      /** A decision is in flight to the backend: the card must not be re-decided. */
+      pending: z.boolean().optional(),
+      /** The last decision attempt failed; the card stays retryable. */
+      error: z.string().optional(),
+      /*
+       * A chain approval park (DESIGN.md §14): the decision resolves against
+       * the in-app chain runtime (runId = the lineage) and resumes it, not
+       * against the workflow gateway — so requestId never applies.
+       * `background` marks a lineage the runtime resumes itself: the
+       * controller freezes the card and starts no turn.
+       */
+      chain: z.boolean().optional(),
+      background: z.boolean().optional(),
+      /** The parked call's flow name; with `capability` it reconstructs the ask after a reload. */
+      flow: z.string().optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("balance"),
+    payload: z.object({
+      totalUsd: z.string(),
+      state: z.enum(["ok", "low", "empty"]),
+      allowedToStartWork: z.boolean(),
+      lifetimeChargedUsd: z.string(),
+      chargeCount: z.number().int().nonnegative(),
+      /** The one-time first-run grant ("You have $500 of usage on us."), when unspent. */
+      introUsd: z.string().nullable()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("status"),
+    payload: z.object({
+      progress: z.number().min(0).max(1).optional(),
+      note: z.string().optional()
+    })
+  }),
+  /* The admin plugin's cards (Launch Checklist §E — registered only for admin sessions). */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("grant-confirm"),
+    payload: z.object({
+      login: z.string(),
+      amountUsd: z.number().positive(),
+      phase: z.enum(["confirm", "sending", "granted", "failed"]),
+      grantId: z.string().optional(),
+      error: z.string().optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("request-queue"),
+    payload: z.object({
+      requests: z.array(
+        z.object({
+          login: z.string(),
+          note: z.string().nullable(),
+          createdAt: z.string()
+        })
+      ),
+      /** The login an allowlist-add is in flight for (one at a time). */
+      approving: z.string().nullable(),
+      error: z.string().optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("admin-health"),
+    payload: z.object({
+      services: z.array(
+        z.object({
+          name: z.string(),
+          status: z.enum(["ok", "failed", "unconfigured"]),
+          detail: z.string()
+        })
+      ),
+      queueDepth: z.number().int().nonnegative().nullable(),
+      charges: z
+        .object({
+          chargeCount: z.number().int().nonnegative(),
+          lifetimeChargedUsd: z.string()
+        })
+        .nullable(),
+      checkedAt: z.string()
+    })
+  }),
+  /* The connect surface as an embedded chat card (the agent's connect form; §2c″). */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("connect"),
+    payload: z.object({
+      github: z.object({ connected: z.boolean(), login: z.string().nullable() }),
+      nativeAvailable: z.boolean()
+    })
+  }),
+  /* A world query's embedded answer card (the agent's world form; §2c″). */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("world"),
+    payload: z.object({
+      documents: z.array(
+        z.object({ path: z.string(), title: z.string(), confidence: z.number() })
+      )
+    })
+  }),
+  /*
+   * The browser surface (Wave 10, §2d′): an embedded, maximizable view of a
+   * URL. `frameable:false` carries the honest blocked reason (the site
+   * refused framing) — never a silent blank.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("browser"),
+    payload: z.object({
+      url: z.string(),
+      finalUrl: z.string().nullable(),
+      status: z.number().int().nullable(),
+      frameable: z.boolean(),
+      blockReason: z.string().nullable(),
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * Wave 11 — the embedded run card: a workflow run on the user's workspace
+   * gateway, tracked live from the relay event stream. `steps` is the node
+   * progress in words (a short tail); `result` leads once the run settles.
+   * `lastSeq` is the per-run event cursor so a reload resumes the pump from
+   * exactly where it stopped (reconnect-and-replay).
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("flow-run"),
+    payload: z.object({
+      repo: z.string(),
+      runId: z.string(),
+      workflow: z.string(),
+      phase: z.enum([
+        "launching",
+        "running",
+        "waiting-approval",
+        "reconnecting",
+        /*
+         * Wave 12 §3 — the bounded client stance. A run the workspace never
+         * finishes goes QUIET rather than being polled forever: after a
+         * generous stale bound with no event progress the card says so
+         * plainly and offers stop/retry. Honest, not silent, and not a
+         * pump hammering a workspace that has stopped answering.
+         */
+        "quiet",
+        /*
+         * The human stopped WATCHING. This seam relays no cancelRun, so
+         * "cancelled" would be a claim about the workspace that nothing
+         * proves — the honest state is the one about this client.
+         */
+        "stopped",
+        "completed",
+        "failed",
+        "cancelled",
+        "no-capacity"
+      ]),
+      steps: z.array(z.string()),
+      result: z.string().nullable(),
+      error: z.string().optional(),
+      lastSeq: z.number().int().nonnegative(),
+      /** How long the run had gone without progress when it went quiet. */
+      quietForMs: z.number().int().nonnegative().optional(),
+      /*
+       * Lane runs — the run lifecycle the card surfaces. All optional so
+       * cards persisted before the lane parse.
+       */
+      /** The launch input, so `runs.rerun` relaunches the same flow with the same arguments. */
+      input: z.record(z.string(), z.unknown()).optional(),
+      /** Why a live run is not moving, in the control plane's word ("approval", "timer", "executor" when accepted). */
+      waiting: z.string().optional(),
+      /** Whether an operator steer is queued for the run. */
+      steeringPending: z.boolean().optional(),
+      /** Which body tab the card shows; the steps tail by default. */
+      facet: z.enum(["steps", "transcript", "events"]).optional(),
+      /** Whether the transcript keeps following the live run. */
+      follow: z.boolean().optional(),
+      /** The transcript tab's rows, merged from the transcript projection while the card follows. */
+      transcriptRows: z
+        .array(
+          z.object({
+            sequence: z.number(),
+            turn: z.number().optional(),
+            at: z.number().optional(),
+            kind: z.string(),
+            text: z.string()
+          })
+        )
+        .optional(),
+      /** The events tab's records: the run's raw control events in journal order. */
+      events: z.array(z.record(z.string(), z.unknown())).optional()
+    })
+  }),
+  /* The workspace's workflows as an embedded card (flow.list). */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("workflow-list"),
+    payload: z.object({
+      repo: z.string(),
+      workflows: z.array(
+        z.object({ key: z.string(), description: z.string().nullable() })
+      )
+    })
+  }),
+  /*
+   * Lane runs §2 — the run inbox: every run on the workspace, one summary row
+   * each, with the filters the listing was cut at so the card states what it
+   * shows. A row opens its run card; the filters are the flow's arguments,
+   * never hidden state.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("run-list"),
+    payload: z.object({
+      repo: z.string(),
+      /** Every status the unfiltered workspace carried when listed; the filter chips read it. Optional for older cards. */
+      statuses: z.array(z.string()).optional(),
+      status: z.string().optional(),
+      flow: z.string().optional(),
+      lineage: z.string().optional(),
+      runs: z.array(
+        z.object({
+          runId: z.string(),
+          flowId: z.string(),
+          status: z.string(),
+          waiting: z.string().optional(),
+          createdAt: z.number(),
+          turns: z.number().int().nonnegative(),
+          calls: z.number().int().nonnegative()
+        })
+      )
+    })
+  }),
+  /*
+   * Lane runs §5 — the approvals inbox: every pending gate across the
+   * workspace's runs. Each row carries the submit-ready envelope the gateway
+   * published, so a decision goes back with it unchanged — the client never
+   * reconstructs authority.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("approvals-inbox"),
+    payload: z.object({
+      repo: z.string(),
+      approvals: z.array(
+        z.object({
+          runId: z.string(),
+          requestId: z.string(),
+          title: z.string(),
+          approval: z.record(z.string(), z.unknown()),
+          requestedAt: z.number(),
+          decision: z.enum(["approved", "denied"]).optional(),
+          decisionError: z.string().optional(),
+          /** A decision is in flight: the buttons hide until the server answers, so a second click cannot send a contradicting decision. */
+          pending: z.boolean().optional()
+        })
+      )
+    })
+  }),
+  /*
+   * Wave 12 §2 — which loaded repository. With more than one loaded repo and
+   * no `owner/repo` argument, the target is a genuine user choice (the
+   * ≤3-questions law permits it), so it is asked as an embedded card among the
+   * loaded set — never guessed, never a takeover. One act answers it.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("workflow-repo"),
+    payload: z.object({
+      /** The pending intent this choice completes. */
+      intent: z.literal("create"),
+      description: z.string(),
+      repos: z.array(z.string()),
+      chosen: z.string().nullable()
+    })
+  }),
+  /*
+   * The multi-parity domain cards (MULTI-ACTIONS-GAP.md Tier 1/2): issues,
+   * landings ("PRs" — landing is QUEUED, never "merged"), BYOK keys,
+   * notifications, the agent environment, and the repo import job. Payloads
+   * mirror the platform answers trimmed to what the card states; bodies live
+   * in src/mainview/cards/*.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("issue-list"),
+    payload: z.object({
+      repo: z.string(),
+      filter: z.enum(["open", "closed", "all"]),
+      issues: z.array(
+        z.object({
+          number: z.number().int(),
+          title: z.string(),
+          state: z.enum(["open", "closed"]),
+          author: z.string().nullable(),
+          comments: z.number().int().nonnegative(),
+          updatedAt: z.string().nullable(),
+          /** Where the row came from: jjhub's own tracker, or GitHub for a mirrored repo. Optional so older cards parse. */
+          source: z.enum(["jjhub", "github"]).optional(),
+          htmlUrl: z.string().optional()
+        })
+      ),
+      /**
+       * The GitHub read's provenance (X-Metadata-* headers on
+       * /api/user/github-repos/{o}/{r}/issues): "synced" with a syncedAt, or
+       * "live"; stale=true when the store is behind; a sync error verbatim.
+       * Absent when GitHub was not read (not linked, not mirrored, refused).
+       */
+      github: z.object({
+        source: z.string(),
+        syncedAt: z.string().nullable(),
+        stale: z.boolean(),
+        syncError: z.string().nullable(),
+        refusal: z.string().nullable()
+      }).optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("issue"),
+    payload: z.object({
+      repo: z.string(),
+      number: z.number().int(),
+      title: z.string(),
+      state: z.enum(["open", "closed"]),
+      author: z.string().nullable(),
+      issueBody: z.string(),
+      labels: z.array(z.string()),
+      /*
+       * Lane sync (ADR 0005 "Link an issue to Linear"): the Linear mapping
+       * when the issue DTO carries one (`Linear ENG-482`); absent until
+       * plue#473, and absent-vs-null is not distinguished — no mapping line
+       * renders without the DTO field. Optional so older cards parse.
+       */
+      linear: z.object({ identifier: z.string(), url: z.string() }).nullable().optional(),
+      comments: z.array(
+        z.object({
+          author: z.string().nullable(),
+          commentBody: z.string(),
+          createdAt: z.string().nullable()
+        })
+      )
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("pr-list"),
+    payload: z.object({
+      repo: z.string(),
+      landings: z.array(
+        z.object({
+          number: z.number().int(),
+          title: z.string(),
+          state: z.string(),
+          author: z.string().nullable(),
+          updatedAt: z.string().nullable()
+        })
+      )
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("pr"),
+    payload: z.object({
+      repo: z.string(),
+      number: z.number().int(),
+      title: z.string(),
+      /** Platform landing state; "queued" after a land — never "merged". */
+      state: z.string(),
+      author: z.string().nullable(),
+      prBody: z.string(),
+      reviews: z.array(
+        z.object({
+          author: z.string().nullable(),
+          type: z.string(),
+          reviewBody: z.string()
+        })
+      ),
+      checks: z.array(z.object({ context: z.string(), state: z.string() }))
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("keys"),
+    payload: z.object({
+      keys: z.array(z.object({ provider: z.string(), masked: z.string() }))
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("notifications"),
+    payload: z.object({
+      unread: z.number().int().nonnegative(),
+      items: z.array(
+        z.object({
+          id: z.string(),
+          title: z.string(),
+          repo: z.string().nullable(),
+          reason: z.string().nullable(),
+          createdAt: z.string().nullable(),
+          read: z.boolean()
+        })
+      )
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("env"),
+    payload: z.object({
+      repo: z.string(),
+      vars: z.array(z.object({ name: z.string(), value: z.string() })),
+      setupScript: z.string().nullable(),
+      /** Secret NAMES only — values are write-only upstream and never surface. */
+      secretNames: z.array(z.string())
+    })
+  }),
+  /*
+   * Lane sync (ADR 0005): the import becomes a job card. `stage`, `counts`,
+   * `error`, `repository`, and `workspaceId` are the progress fields of
+   * plue#471 — all optional, parsed only when the wire carries them, never
+   * invented (today's answer carries stage and error only).
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("repo-import"),
+    payload: z.object({
+      repo: z.string(),
+      jobId: z.string().nullable(),
+      phase: z.enum(["starting", "running", "done", "failed"]),
+      detail: z.string().nullable(),
+      /** The job's raw stage word (`provisioning_workspace`); optional — older answers carry none. */
+      stage: z.string().nullable().optional(),
+      /** Progress counts (`refs 214 of 214 · objects … · issues …`); absent until plue#471's wire fields. */
+      counts: z.object({
+        refs: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
+        objects: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
+        issues: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+      }).optional(),
+      /** The job's error verbatim; the failed phase renders it with Retry. */
+      error: z.string().nullable().optional(),
+      /** The imported repository, when the job's answer names it (the done state links it). */
+      repository: z.object({ owner: z.string(), name: z.string() }).nullable().optional(),
+      /** The workspace the import created, when it created one (the done state links its card). */
+      workspaceId: z.string().nullable().optional(),
+      /** A refused GitHub call's rate-limit line (lane sync; GitHubRateLimitSchema below). */
+      rateLimit: GitHubRateLimitSchema.optional()
+    })
+  }),
+  /*
+   * Lane sync (ADR 0005): the connector-setup card — one kind serves both
+   * handoffs. The steps are the wizard (`linear`: authorize → team →
+   * repository → confirm; `github`: install → reconcile), rendered as rows
+   * that fill in; a failed step reads the server error verbatim on its own
+   * line. On confirm the SAME card turns into the connected state (`phase:
+   * "connected"`), which for Linear carries the integration and for GitHub
+   * the installation. The setup key is the OAuth callback's opaque one-time
+   * handle (plue#469's team pick; expires in minutes — an expired one reads
+   * `authorization expired · Open Linear again`, never a silent retry).
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("connector-setup"),
+    payload: z.object({
+      connector: z.enum(["linear", "github"]),
+      /** `org/repo` — the repository being connected. */
+      repo: z.string(),
+      phase: z.enum(["setup", "connected"]),
+      steps: z.array(
+        z.object({
+          id: z.string(),
+          label: z.string(),
+          state: z.enum(["pending", "active", "done", "error"]),
+          /** The row's filled-in value (`authorized as <actor>`, `ENG · Engineering`); null while unset. */
+          detail: z.string().nullable(),
+          /** The server error verbatim, under the step that failed. */
+          error: z.string().optional()
+        })
+      ),
+      /** The OAuth callback's setup handle (Linear only); the team pick and the create consume it. */
+      setupKey: z.string().optional(),
+      setupExpiresAt: z.string().optional(),
+      /** `authorized as <actor>` — only when the setup answer names the viewer; never invented. */
+      actor: z.string().nullable().optional(),
+      /** The teams the setup key can see (Linear step 2). */
+      teams: z.array(z.object({ id: z.string(), name: z.string(), key: z.string() })).optional(),
+      /** The picked team (Linear step 2's one click). */
+      teamId: z.string().optional(),
+      /** The connected Linear integration (the connected state's header and last-sync line). */
+      integration: z.object({
+        id: z.number().int(),
+        teamKey: z.string(),
+        teamName: z.string(),
+        active: z.boolean(),
+        lastSyncAt: z.string().nullable()
+      }).optional(),
+      /** The GitHub App installation (the connected state's `installation <id> · configured`). */
+      installationId: z.number().int().nullable().optional(),
+      configured: z.boolean().optional(),
+      /** The trusted install URL (https://github.com only) step 1 opens. */
+      installUrl: z.string().optional(),
+      /** The rate-limit line: below 20% remaining, and always on a card whose call was refused. */
+      rateLimit: GitHubRateLimitSchema.optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * Lane sync (ADR 0005): the sync-ops card — one kind serves Linear syncs
+   * and GitHub mirror syncs. Rows are the durable ops, newest first, a
+   * failed row carrying the server's error verbatim with a Retry act
+   * (`sync.retry <opId>`); failures are never filtered out. The header's
+   * run state and counts stay live while the run is polled.
+   *
+   * Lane L5 (plue#468/#470 live): the state words are the WIRE's, never a
+   * vocabulary of this app's own — a Linear run is `pending | running |
+   * completed | failed`, a mirror run `queued | running | succeeded |
+   * failed`, a Linear op `pending | success | failed | skipped`, a mirror
+   * ref `pending | succeeded | failed`. They are strings here because the
+   * two backends disagree and inventing a shared enum would rename one of
+   * them on screen; `@smthrs/ui`'s status vocabulary already tints every
+   * one of those words.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("sync-ops"),
+    payload: z.object({
+      /** The header subject: `Linear ENG ↔ org/repo` or `Mirror · org/repo`. */
+      subject: z.string(),
+      source: z.enum(["linear", "github-mirror"]),
+      /** The Linear integration id the run belongs to (Linear only). */
+      integrationId: z.string().optional(),
+      /** `org/repo` (the mirror's repository). */
+      repo: z.string().optional(),
+      /** The run the trigger answered with (`run_id`), when it named one. */
+      runId: z.string().nullable().optional(),
+      /** The run's state VERBATIM off the run DTO; null before a run answers. */
+      runState: z.string().nullable(),
+      /** The header counts from the run DTO; absent with it. */
+      counts: z.object({
+        total: z.number().int().nonnegative(),
+        done: z.number().int().nonnegative(),
+        failed: z.number().int().nonnegative()
+      }).nullable().optional(),
+      /**
+       * The repository's `mirror_status` word off the repository DTO
+       * (`synced | behind | failed | unconfigured`); absent when the app
+       * never read it. Header word for a mirror card only.
+       */
+      mirrorStatus: z.string().optional(),
+      /**
+       * plue#491: the repository DTO's `behind_refs` / `failed_refs` beside
+       * `mirror_status`, so `behind GitHub · 3 refs` states a count instead
+       * of the bare word. Absent when the DTO named none.
+       */
+      behindRefs: z.number().int().nonnegative().optional(),
+      failedRefs: z.number().int().nonnegative().optional(),
+      /** The one fact the trigger answered (`sync started`, `already running`, `synced`); null when it said nothing. */
+      trigger: z.string().nullable().optional(),
+      /** The ops, newest first; empty while a run has produced none. */
+      ops: z.array(
+        z.object({
+          id: z.string(),
+          source: z.string(),
+          target: z.string(),
+          entity: z.string(),
+          entityId: z.string().nullable(),
+          action: z.string(),
+          /** The wire's own status word (see the note above); never remapped. */
+          status: z.string(),
+          /** The server error verbatim, on its own line. */
+          error: z.string().optional(),
+          retryable: z.boolean(),
+          at: z.string().nullable()
+        })
+      ),
+      /** Why the ops list is empty (the ADR's degraded wording); absent when the feed answered. */
+      opsNote: z.string().optional(),
+      /** The activity window this card was cut at (`24h`), when it is the activity view. */
+      window: z.string().optional(),
+      /** `show more` revealed the whole cut; the first N rows show by default. */
+      expanded: z.boolean().optional(),
+      /** Older ops exist beyond this cut (`load older` pages the feed). */
+      hasOlder: z.boolean().optional(),
+      /**
+       * plue#491: the opaque `rel="next"` cursor of the LAST ops page this
+       * card read — the position `load older` continues from. Absent when
+       * the feed is exhausted, which is also when `hasOlder` is false.
+       */
+      opsCursor: z.string().nullable().optional(),
+      /** The rate-limit line when a GitHub call behind this card was refused. */
+      rateLimit: GitHubRateLimitSchema.optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  /* Wave 2 of the multi parity: bookmarks (jj branches) and repo file reads. */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("branches"),
+    payload: z.object({
+      repo: z.string(),
+      bookmarks: z.array(z.object({ name: z.string(), head: z.string().nullable() }))
+    })
+  }),
+  /*
+   * Lane piper (ADR 0001): file cards carry the GLOBAL path
+   * (`/org/repo/path`) and the position they were read at. `readAt.commitId`
+   * is what "head moved" compares — a change id survives a rebase, a commit
+   * id does not. Optional so cards persisted before the fields parse.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("file-list"),
+    payload: z.object({
+      repo: z.string(),
+      path: z.string(),
+      entries: z.array(z.object({ name: z.string(), kind: z.enum(["file", "dir"]) })),
+      /** True when the listing was cut (a local directory past its cap); optional so older cards parse. */
+      truncated: z.boolean().optional(),
+      /** The global path (`/org/repo/path`); absent on cards written before lane piper. */
+      address: z.string().optional(),
+      readAt: z.object({
+        changeId: z.string().nullable(),
+        commitId: z.string().nullable(),
+        /** `head` = read at the repository head (head-moved applies); `working-copy` = read at a checkout's `@` (drift is "N ahead", never "head moved"). */
+        source: z.enum(["head", "working-copy"]).optional()
+      }).optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("file"),
+    payload: z.object({
+      repo: z.string(),
+      path: z.string(),
+      content: z.string(),
+      /** True when the read was cut at the card cap; the full file stays upstream. */
+      truncated: z.boolean(),
+      /*
+       * The file's bytes are not text. The card states that instead of
+       * printing them: base64 rendered as source is one 42626px line the
+       * reader cannot use and cannot reach (§8.27). Optional so cards
+       * persisted before the field parse without a schema reset.
+       */
+      binary: z.boolean().optional(),
+      /** The global path (`/org/repo/path`); absent on cards written before lane piper. */
+      address: z.string().optional(),
+      /*
+       * Lane change (ADR 0003 §3): the revision pin `{ changeId, seq,
+       * commitId }`. `seq` stays absent until plue#450 records revisions —
+       * a card read from a local working copy pins by commit id, never a
+       * server seq. Optional so cards persisted before the lane parse.
+       */
+      readAt: z.object({
+        changeId: z.string().nullable(),
+        commitId: z.string().nullable(),
+        seq: z.number().int().positive().nullable().optional(),
+        source: z.enum(["head", "working-copy"]).optional()
+      }).optional(),
+      /*
+       * Code intelligence (apps/ui/docs/code-intel/PLAN.md §5). Components
+       * project these; the seams write them through `card.updated`. All
+       * optional so cards persisted before the lane parse and state none.
+       */
+      /** The anchored line and column (`files.read <path>:<line>[:<col>]`), 1-based: scrolled to and marked. */
+      line: z.number().int().min(1).optional(),
+      column: z.number().int().min(1).optional(),
+      /**
+       * The digest of the bytes the card shows (RepoFilesResponse.digest). A
+       * language server answers about the file on disk and names that
+       * digest; the seam re-reads a card whose digest differs before it
+       * draws the answer. Absent on cloud reads and cards persisted before.
+       */
+      digest: z.string().optional(),
+      /** What the language server published for this file, up to the cap; absent until it answered (an unread file has no count). */
+      diagnostics: z.array(LspDiagnosticSchema).max(LSP_DIAGNOSTICS_CAP).optional(),
+      /** How many the server published when `diagnostics` is the capped head of them; absent when the list is complete. */
+      diagnosticsTotal: z.number().int().nonnegative().optional(),
+      /** The last hover answer at a position: null when the server had nothing there; absent when never asked. */
+      hover: z.object({
+        line: z.number().int().min(1),
+        character: z.number().int().min(1),
+        contents: z.string().max(LSP_HOVER_CAP_CHARS),
+        /** True when the host cut the server's text at its cap; the box says so. */
+        truncated: z.boolean().optional()
+      }).nullable().optional(),
+      /** The language server as far as this card knows; absent until a `code.*` flow ran on the file. */
+      intel: z.object({
+        state: z.enum(["ready", "starting", "missing", "unavailable"]),
+        /** What the card prints under the state: the install line on `missing`, the host's message on `unavailable`. */
+        note: z.string().optional()
+      }).optional()
+    })
+  }),
+  /*
+   * Lane change (ADR 0003 — the change is the unit): the change card. One
+   * fact per line of the ADR's mockup and nothing else: the header (change
+   * id, `rev N of M` once plue#450 records revisions, stack position,
+   * landing state), the description, the per-repo stat, checks / findings /
+   * review at the current revision, the conflict line, the current
+   * revision's provenance, and the facet strip (Diff, Findings, Checks,
+   * Review, History), plus Walkthrough when an artifact exists and Owners
+   * when the change GET carries `owners` (ADR 0004, lane L1).
+   *
+   * Every revision-shaped field is what plue's routes state (#450–#467); a
+   * field a route omits stays null or absent, and nothing is inferred from
+   * timestamps. The lane-L1 fields (`turn`, `owners`, `landed`,
+   * `walkthrough`, `analyzers`, `checksAt`, the stack's `blockedBy`) are
+   * optional so cards persisted before the lane parse.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("change"),
+    payload: z.object({
+      /** `org/repo` the change was read from. */
+      repo: z.string(),
+      changeId: z.string(),
+      description: z.string(),
+      /** The current revision's commit. */
+      commitId: z.string().nullable(),
+      /** plue's `current_seq` when it names a recorded revision; `revisions.length`. Null when the DTO carries neither. */
+      currentSeq: z.number().int().positive().nullable(),
+      revisionCount: z.number().int().nonnegative().nullable(),
+      revisions: z.array(ChangeRevisionSchema),
+      /** The current revision's provenance: the author and timestamp the DTO states. */
+      authorName: z.string().nullable(),
+      timestamp: z.string().nullable(),
+      /** One entry per repo touched, with its stat (one repo is one entry, not a group header). */
+      repos: z.array(
+        z.object({
+          repo: z.string(),
+          additions: z.number().int().nonnegative(),
+          deletions: z.number().int().nonnegative()
+        })
+      ),
+      /** The diff the Diff facet renders at its pins; null while unread. */
+      diff: ChangeDiffSchema.nullable(),
+      /** Check rows at `checksAt`'s commit (the statuses route); null while unread. */
+      checks: z.array(ChangeCheckSchema).nullable(),
+      /** The revision the checks were read at; null when no revision is recorded (the current commit). */
+      checksAt: z.number().int().positive().nullable().optional(),
+      /** Findings per revision (the findings route); null while unread. */
+      findings: z.array(ChangeFindingSchema).nullable(),
+      /** The analyzer runs the findings route states beside the findings; null while unread. */
+      analyzers: z.array(ChangeAnalyzerRunSchema).nullable().optional(),
+      /**
+       * Verdicts (the change GET's `reviews[]`) and threads (the landing's
+       * comments); null while unread (`unread.reviews` / `unread.threads` name
+       * why), [] when read and empty.
+       */
+      reviews: z.array(ChangeVerdictSchema).nullable(),
+      threads: z.array(ChangeThreadSchema).nullable(),
+      /**
+       * plue#488: the landing request's `review_requests[]` — who has been
+       * asked to review. null while unread (`unread.reviewRequests` names
+       * why), [] when the landing answered and nobody is asked.
+       */
+      reviewRequests: z.array(ChangeReviewRequestSchema).nullable().optional(),
+      /** The change's per-file conflicts; null while unread (`unread.conflicts` names why). */
+      conflicts: z.array(z.object({ path: z.string(), state: z.string() })).nullable(),
+      /** The landing request carrying this change: its state, the change's stack position, the target, the gate's blocks. */
+      stack: z.object({
+        landingNumber: z.number().int(),
+        state: z.string(),
+        /** 1-based from the bottom, like `jj log`. */
+        position: z.number().int().positive(),
+        size: z.number().int().positive(),
+        /** The request's change ids in request order; the last is the top, whose Land lands 1 → size. */
+        changeIds: z.array(z.string()),
+        targetBookmark: z.string(),
+        conflictStatus: z.string(),
+        /** Whether `position` is plue's own (`stack.position` on the change GET) or the request-order index the list implies. */
+        positionFrom: z.enum(["server", "request-order"]).optional(),
+        /** plue#452: how many changes from the bottom may land now; null when the list did not state it. */
+        landablePrefix: z.number().int().nonnegative().nullable().optional(),
+        /** plue#452: the gate's blocks for THIS change, in the gate's own fields. */
+        blockedBy: z.array(LandingBlockSchema).optional()
+      }).nullable(),
+      /** Whose turn it is on the landing request (plue#460); absent when the DTO carried none. */
+      turn: ChangeTurnSchema.nullable().optional(),
+      /** Path ownership (plue#467); absent when the DTO carried none. */
+      owners: ChangeOwnersSchema.nullable().optional(),
+      /** A landed change's provenance (plue#464); null until landed. */
+      landed: ChangeLandedSchema.nullable().optional(),
+      /** The walkthrough artifact for the current revision (plue#465); null when none exists or it was not read. */
+      walkthrough: ChangeWalkthroughSchema.nullable().optional(),
+      /** The changeset this change belongs to (live at /api/orgs/{org}/changesets); null when none. */
+      changeset: ChangesetStateSchema.nullable(),
+      /**
+       * Why an auxiliary above is null: the failed read's reason in the
+       * platform's words. One rule (ChangeSeam `surfaceChange`): a read writes
+       * every auxiliary from its own answer, a failed read writes null and
+       * names it here, and nothing from an earlier read survives.
+       */
+      unread: z.object({
+        diff: z.string().optional(),
+        conflicts: z.string().optional(),
+        checks: z.string().optional(),
+        findings: z.string().optional(),
+        reviews: z.string().optional(),
+        threads: z.string().optional(),
+        reviewRequests: z.string().optional(),
+        stack: z.string().optional(),
+        changeset: z.string().optional(),
+        walkthrough: z.string().optional()
+      }).optional(),
+      /** Which body tab the card shows; the diff by default. */
+      facet: ChangeFacetSchema.optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * Lane change (ADR 0003 §1/§3): the `diff` card — one change's diff at two
+   * pinned revisions (`parent ▾ → rev 5 ▾`; degraded: `parent → current`
+   * only). The header carries the revision pin; when the change's current
+   * revision moves past the pin and BOTH seqs are known, one mono line
+   * `rev N exists · view` — never a claim a commit comparison cannot name.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("diff"),
+    payload: z.object({
+      repo: z.string(),
+      changeId: z.string(),
+      /** The pickers' tokens: "parent", "current", or "rev N" once revisions exist. */
+      from: z.string(),
+      to: z.string(),
+      /** Where the `to` side pins: seq null until plue#450 records revisions. */
+      pin: RevisionPinSchema,
+      files: ChangeDiffSchema.shape.files,
+      /** The one file this card was cut at, when the flow named one. */
+      path: z.string().optional(),
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * Lane citc (ADR 0002), completed by lane L3: the workspace card — a
+   * persistent cloud computer bound to a repository bookmark. plue#446 landed,
+   * so the DTO now carries `kind`, `environment`, `head`, `ahead`/`behind`,
+   * `persistence`, `ssh_host` and `started_at`, and the payload carries them
+   * too — every one optional and nullable, so a card written before this lane
+   * parses and an absent field renders NOTHING rather than a guess.
+   * `bookmarkHead` is still the TARGET BOOKMARK's head from the bookmarks
+   * call, labeled as such and distinct from the workspace's own `head`.
+   * plue#449 landed too: `files` and `services` carry what the workspace
+   * routes answered. `egress` is the sandbox egress audit — what the computer
+   * called and with which secret NAMES, never a value.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("workspace"),
+    payload: z.object({
+      workspaceId: z.string(),
+      /** `org/repo` — the repository the workspace is bound to. */
+      repo: z.string(),
+      name: z.string(),
+      targetBookmark: z.string().nullable(),
+      /** plue's six statuses: pending, starting, running, suspended, stopped, failed. */
+      status: z.enum(["pending", "starting", "running", "suspended", "stopped", "failed"]),
+      /**
+       * plue#482: why a `failed` workspace failed — the provider's own code
+       * and message, off the DTO and off the status stream. Absent when the
+       * platform recorded none; never paraphrased.
+       */
+      failureCode: z.string().nullable().optional(),
+      failureMessage: z.string().nullable().optional(),
+      provisioningStage: z.string().nullable(),
+      /** When the workspace last suspended (DTO); optional so older cards parse. */
+      suspendedAt: z.string().nullable().optional(),
+      /** The target bookmark's head from the bookmarks call — the BOOKMARK head, never the workspace head. */
+      bookmarkHead: z.object({
+        changeId: z.string().nullable(),
+        commitId: z.string().nullable()
+      }).nullable(),
+      /**
+       * The sandbox kind the DTO names (`container`, `vm`, `desktop`, and —
+       * RFD-004 — `agent` for the computer an agent run executed in); no
+       * picker, ADR 0002.
+       */
+      workspaceKind: z.string().nullable().optional(),
+      /** The agent session that drove this workspace (RFD-004); absent for a workspace a human opened. */
+      agentSessionId: z.string().nullable().optional(),
+      /** The workspace's OWN head, as the guest last reported it (DTO `head`). */
+      head: WorkspaceHeadSchema.nullable().optional(),
+      /** Commits ahead of / behind the target bookmark (DTO `ahead` / `behind`). */
+      ahead: z.number().int().nullable().optional(),
+      behind: z.number().int().nullable().optional(),
+      /** When the VM last started; the uptime line reads it and is absent when it is null. */
+      startedAt: z.string().nullable().optional(),
+      /** The NixOS environment the DTO points at (`.smithers/environment.nix` and its revision). */
+      environment: WorkspaceEnvironmentSchema.nullable().optional(),
+      /** `persistent` / `ephemeral`, verbatim from the DTO. */
+      persistence: z.string().nullable().optional(),
+      /** `<vm>@ssh.jjhub.tech` — the copyable line (plue#446). */
+      sshHost: z.string().nullable().optional(),
+      snapshots: z.array(
+        z.object({ id: z.string(), name: z.string(), createdAt: z.string().nullable() })
+      ),
+      sessions: z.array(
+        z.object({
+          id: z.string(),
+          status: z.string(),
+          createdAt: z.string().nullable(),
+          /** plue #505: `terminal` or `lsp`, and the lsp session's language; absent on rows written before. */
+          kind: z.string().nullable().optional(),
+          language: z.string().nullable().optional()
+        })
+      ),
+      /**
+       * Lane L6 (plue #505): the languages the workspace relays a language
+       * server for (DTO `lsp.languages`); the header states them. Null when
+       * the DTO carried none; absent on cards written before.
+       */
+      lspLanguages: z.array(z.string()).nullable().optional(),
+      /** The Files facet's listing at `filesPath`; absent until the facet loads it. */
+      files: z.array(WorkspaceFileEntrySchema).optional(),
+      /** Which directory `files` lists; `""` is the working copy's root. */
+      filesPath: z.string().optional(),
+      /** The Services facet's rows; absent until the facet loads them. */
+      services: z.array(WorkspaceServiceSchema).optional(),
+      /** The Egress facet's rows, newest first; absent until the facet loads them. */
+      egress: z.array(SandboxEgressRowSchema).optional(),
+      /** plue's opaque next-page cursor; null when the audit is exhausted. */
+      egressCursor: z.string().nullable().optional(),
+      /**
+       * Lane L3b: the DTO's `desktop` object, present only for a desktop
+       * workspace. It carries the relative stream path and the last mint's id
+       * and expiry — never the token, the VNC password, or the credentialed
+       * absolute URL, all of which stay out of anything persisted.
+       */
+      desktop: WorkspaceDesktopSchema.nullable().optional(),
+      /**
+       * Lane L3b: how the desktop session POST refused, plue's status beside
+       * its own words. A 409 (the workspace is not running) is the one the
+       * facet answers with a Resume; a 400 (this kind has no desktop) reads
+       * the message alone.
+       */
+      desktopRefusal: z.object({
+        status: z.number().int(),
+        message: z.string(),
+        /**
+         * plue's machine-readable code, which survives the 5xx message
+         * sanitizer (`writeRouteError` keeps `Code` and replaces the text
+         * with the status text). `desktop_not_ready` is the one the facet
+         * retries on its own, because the server asked it to.
+         */
+        code: z.string().nullable().optional(),
+        /** The `Retry-After` header's seconds, when the refusal carried one. */
+        retryAfterSeconds: z.number().int().nonnegative().nullable().optional()
+      }).nullable().optional(),
+      /**
+       * plue#504: how the terminal session POST refused, on the terminal
+       * facet. The same four facts as `desktopRefusal` — a 503
+       * `guest_not_ready` is the one the seam retries on its own, because the
+       * server asked it to with a `Retry-After`.
+       */
+      terminalRefusal: z.object({
+        status: z.number().int(),
+        message: z.string(),
+        code: z.string().nullable().optional(),
+        retryAfterSeconds: z.number().int().nonnegative().nullable().optional()
+      }).nullable().optional(),
+      /** Which body tab the card shows; the terminal by default. */
+      facet: z.enum(["terminal", "files", "services", "snapshots", "egress", "desktop"]).optional(),
+      /** The plue session the card's Terminal facet (and its tab) is attached to. */
+      terminalSessionId: z.string().optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional(),
+      /**
+       * The workspace's creation was refused with plue's `egress_proxy_unavailable`
+       * code: the card names that code exactly, never a paraphrase.
+       */
+      egressProxyUnavailable: z.boolean().optional()
+    })
+  }),
+  /*
+   * Lane L3b: the environment images a repository has built (ADR 0002 — the
+   * environment is stated, never chosen). One row per closure: what kind of
+   * sandbox it boots, the closure short, the image, its status, and whether
+   * its first boot is a cold registry pull.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("environment-images"),
+    payload: z.object({
+      /** `org/repo` — the repository whose catalogue this is. */
+      repo: z.string(),
+      images: z.array(EnvironmentImageRowSchema)
+    })
+  }),
+  /*
+   * Lane citc: one workspace service's log (WORKBENCH-UX §3.1 Services
+   * facet). The routes that would feed it do not exist yet (plue#449), so no
+   * flow produces this card today — the schema lands with the workspace card
+   * so the contract is one change, and the body renders what it is handed.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("service-log"),
+    payload: z.object({
+      workspaceId: z.string(),
+      repo: z.string(),
+      service: z.string(),
+      lines: z.array(z.string()),
+      follow: z.boolean()
+    })
+  }),
+  /*
+   * The /theme picker: one swatch per palette, painted in that palette's own
+   * colors. `selected` is the palette live when the card last synced; the
+   * mainview owns the palette list, so the payload carries only the key.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("theme-picker"),
+    payload: z.object({
+      selected: z.string()
+    })
+  }),
+  /*
+   * The local app's repository cards (apps/ui/docs/LOCAL-APP.md "Cards"):
+   * the opened repository, its trusted typed target list, and one streamed
+   * target run.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("targets"),
+    payload: z.object({
+      repoId: z.string(),
+      repoName: z.string(),
+      status: z.enum(["pending", "done", "failed"]),
+      targets: z.array(TargetSchema),
+      warnings: z.array(z.string()),
+      /** The row an explicit target.open flow pointed at; the list highlights it. */
+      highlighted: z.string().optional(),
+      /** The table's filter and selection (TargetsViewSchema). */
+      view: TargetsViewSchema.optional(),
+      /** The repository's recorded runs, read from /api/targets/runs; the table derives each row's last run. */
+      runs: z.array(RunRecordSchema).optional(),
+      /** Per-label facts the drawer read (declaration site, plan, deps/rdeps), keyed by label. */
+      details: z.record(z.string(), TargetDetailSchema).optional(),
+      /** The labels this user starred for the repository (target.star), mirrored from app-starred-targets. */
+      starred: z.array(z.string()).optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("target-run"),
+    /*
+     * One execution: a single target (`label`) or a pattern run (`verb` +
+     * `pattern`, e.g. `ci //packages/...`, the way "run everything" runs).
+     * `nodes` fills as the executor reports each target, `summary` lands at
+     * the end; `output` is the raw stream for the Raw output accordion, and
+     * `nodeOutput` the chunks the backend attributed to one target.
+     */
+    payload: z.object({
+      runId: z.string(),
+      repoId: z.string(),
+      label: z.string(),
+      verb: z.string().optional(),
+      pattern: z.string().optional(),
+      status: z.enum(["running", "done", "failed"]),
+      exitCode: z.number().nullable(),
+      output: z.string(),
+      startedAt: z.number().optional(),
+      endedAt: z.number().optional(),
+      nodes: z.array(NodeTimingSchema).optional(),
+      summary: RunSummarySchema.optional(),
+      nodeOutput: z.record(z.string(), z.string()).optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("repo"),
+    payload: z.object({ repo: RepoSchema })
+  }),
+  /*
+   * The target-graph cards (@smthrs/rpc/TargetGraph): the typed DAG with
+   * plan facts and an optional live run overlay, one run's timeline with its
+   * critical path, the run history with replay, the diff-affected set, and
+   * the generated CI matrix.
+   */
+  z.object({ ...cardBaseShape, kind: z.literal("graph"), payload: GraphCardPayloadSchema }),
+  z.object({ ...cardBaseShape, kind: z.literal("run-timeline"), payload: RunTimelineCardPayloadSchema }),
+  z.object({ ...cardBaseShape, kind: z.literal("run-history"), payload: RunHistoryCardPayloadSchema }),
+  z.object({ ...cardBaseShape, kind: z.literal("affected"), payload: AffectedCardPayloadSchema }),
+  z.object({ ...cardBaseShape, kind: z.literal("ci-matrix"), payload: CiMatrixCardPayloadSchema }),
+  /*
+   * An agent launched from the `+` menu as a subagent of the conversation
+   * (LOCAL-APP.md "Tabs"): the harness runs in its own tab, and this card is
+   * the conversation's record of it — which harness, where, whether it is
+   * still running, and the way back to its tab.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("agent"),
+    payload: z.object({
+      harnessId: z.enum(HARNESS_IDS),
+      displayName: z.string(),
+      /** The named role the agent was launched as (AgentRoles.ts); absent for a raw harness. */
+      roleId: AgentRoleIdSchema.optional(),
+      /** The role's purpose at launch (a custom agent's is not in any table); absent on cards written before custom agents. */
+      purpose: z.string().optional(),
+      /** The task it was delegated, when it was launched with one. */
+      task: z.string().optional(),
+      /** The tab the agent runs in; the tab id is the PTY session id. */
+      tabId: z.string(),
+      sessionId: z.string(),
+      cwd: z.string(),
+      phase: z.enum(["running", "exited"]),
+      /** The process exit code once it has exited; null when unknown (the tab was closed). */
+      exitCode: z.number().nullable()
+    })
+  }),
+  /*
+   * The explainer's answer (AgentRoles.ts "explainer"): `explain <what>` runs
+   * a side turn that asks for the explainer role, and this card is where the
+   * answer streams in — embedded in the conversation, never a takeover.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("explain"),
+    payload: z.object({
+      question: z.string(),
+      answer: z.string(),
+      phase: z.enum(["asking", "answered", "failed"]),
+      /**
+       * What the serving side told us about who answered. The request names
+       * the explainer role; a server that ignores the hint answers on its
+       * default model, and the card says so rather than claiming Kimi.
+       */
+      answeredBy: z.string(),
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * The agents as data (docs/workbench-lanes/custom-agents.md): the Agents
+   * card lists every built-in and custom agent with its harness's live
+   * availability (from the harness signals, never guessed); the form card
+   * holds the New-agent draft IN ITS PAYLOAD (form edits are card-payload
+   * updates, never component state); the models card is what a harness's
+   * own list command printed.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("agents"),
+    payload: z.object({
+      /** False on the web host: no local harnesses, so nothing local is listed. */
+      native: z.boolean(),
+      agents: z.array(
+        z.object({
+          id: AgentRoleIdSchema,
+          label: z.string(),
+          purpose: z.string(),
+          harness: z.enum(HARNESS_IDS),
+          /** The harness's display name from the table; the id when the table lacks it. */
+          harnessName: z.string(),
+          model: AgentRoleModelSchema,
+          builtin: z.boolean(),
+          available: z.boolean(),
+          /** Why it cannot launch here (roleMenuEntries); empty when available. */
+          reason: z.string(),
+          /** The account the harness reports; empty when none. */
+          account: z.string()
+        })
+      ),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * THE FORM LAW (apps/ui/AGENTS.md; docs/workbench-lanes/flow-forms.md): a
+   * flow invoked without its required input renders this card for the
+   * missing fields. The fields derive from the flow's input schema; the
+   * draft IS the payload (a field commit is a card-payload update, never
+   * component state); `given` is what the slash line already carried; an
+   * option the human cannot pick carries its reason.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("flow-form"),
+    payload: z.object({
+      flow: z.string(),
+      /** Who invoked the flow the form continues: the submit runs it as that actor, so an agent's ask still confirms. */
+      via: z.enum(["user", "agent"]),
+      fields: z.array(
+        z.object({
+          name: z.string(),
+          label: z.string(),
+          kind: z.enum(["text", "number", "boolean", "select"]),
+          required: z.boolean(),
+          placeholder: z.string().optional(),
+          options: z.array(
+            z.object({
+              value: z.string(),
+              label: z.string(),
+              disabled: z.boolean().optional(),
+              reason: z.string().optional()
+            })
+          ).optional(),
+          optionsFrom: z.enum(FORM_OPTION_PROVIDERS).optional()
+        })
+      ),
+      draft: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+      given: z.record(z.string(), z.unknown()),
+      /** The last submit's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("agent-models"),
+    payload: z.object({
+      harnessId: z.enum(HARNESS_IDS),
+      displayName: z.string(),
+      models: z.array(z.string()),
+      source: z.enum(["list", "suggestions"]),
+      reason: z.string().optional()
+    })
+  })
+])
+export type Card = z.infer<typeof CardSchema>
+
+export const CardPatchSchema = z.object({
+  title: z.string().optional(),
+  body: z.string().optional(),
+  status: z.enum(["active", "acted", "error"]).optional(),
+  payload: z.unknown().optional(),
+  createdAt: z.number().optional(),
+  ordinal: z.number().int().nonnegative().optional()
+})
+export type CardPatch = z.infer<typeof CardPatchSchema>

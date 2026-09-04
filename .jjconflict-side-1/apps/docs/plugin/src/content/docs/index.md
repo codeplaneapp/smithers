@@ -1,0 +1,50 @@
+---
+title: "@smthrs/plugin"
+description: "Vite-style typed plugin kernel for flows: hooks, resolution, and config execution"
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/plugin/docs/README.md"
+---
+
+Install the plugin kernel with the exact Effect release used by Smithers rc.0:
+
+```sh
+pnpm add @smthrs/plugin effect@4.0.0-rc.108
+```
+
+The kernel is the bounded extension point for an assembled cell host. It does
+not expose durable-engine lifecycle hooks. Retry, storage, concurrency, cache,
+wait, journal, and ownership policy remain Effect services or constructor
+options at the component that applies them.
+
+```ts
+import { type FlowsPlugin, Kernel } from "@smthrs/plugin"
+import { Effect } from "effect"
+
+const feature: FlowsPlugin = {
+  name: "flows-plugin-feature",
+  hooks: {
+    config: () => Effect.succeed({ feature: { enabled: true } }),
+    configResolved: (config) => Effect.log(`feature enabled: ${config["feature"] !== undefined}`)
+  }
+}
+
+const kernel = await Effect.runPromise(Kernel.make([feature]))
+```
+
+The root exports hook, plugin, and error declarations and the `Config`,
+`Kernel`, `Plugins`, and `Resolve` namespaces. Direct module subpaths are
+`@smthrs/plugin/Config`, `@smthrs/plugin/Hooks`, `@smthrs/plugin/Kernel`,
+`@smthrs/plugin/Plugin`, `@smthrs/plugin/PluginError`,
+`@smthrs/plugin/Plugins`, and `@smthrs/plugin/Resolve`.
+
+Plugin names use exact Unicode equality and are never normalized. Resolution
+validates every plugin record and hook entry before `apply` filtering, checks
+hook names against the host catalog for the plugins it selected, snapshots
+plugin records and hook objects, and exposes an immutable handler-map facade.
+Config and cache identity are detached, bounded, strict JSON snapshots.
+Configuration holds strict JSON only: an `undefined` member is refused, not
+dropped. Caller mutation after startup cannot change dispatch or sealed cache
+keys.
+
+See the [API reference](/reference/api/) for error codes,
+dispatch semantics, and limits. The production cell hooks are documented by
+[`@smthrs/agent`](https://agent.smithers.sh/reference/api/).

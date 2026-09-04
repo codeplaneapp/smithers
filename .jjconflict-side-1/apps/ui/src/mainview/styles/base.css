@@ -1,0 +1,126 @@
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	min-width: 320px;
+	/*
+	 * 100vh on mobile includes the browser chrome, so a fixed 100vh shell with
+	 * hidden overflow strands the composer below the fold whenever the URL bar
+	 * is showing. vh stays as the fallback; dvh tracks the visible area.
+	 */
+	min-height: 100vh;
+	min-height: 100dvh;
+	overflow: hidden;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font-ui);
+	font-size: var(--fs-body);
+	line-height: 1.5;
+}
+
+#root {
+	display: flex;
+	height: 100vh;
+	height: 100dvh;
+	flex-direction: column;
+}
+
+button,
+textarea {
+	font: inherit;
+	color: inherit;
+}
+
+button {
+	padding: 0;
+	cursor: pointer;
+	border: none;
+	background: none;
+}
+
+textarea {
+	caret-color: var(--brand);
+}
+
+.mono {
+	font-family: var(--font-mono);
+}
+
+:focus-visible {
+	outline: 2px solid var(--brand);
+	outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+	width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+	border: 3px solid transparent;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--ink-400) 32%, transparent);
+	background-clip: content-box;
+}
+
+@keyframes view-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+/*
+ * The server session shell (SessionShell.tsx): the HTML that paints before
+ * the client bundle hydrates. These classes appear in no component the
+ * client renders, so without rules here the first ~800ms of every cold web
+ * load was a bare paragraph and link in the page corner. The bubble borrows
+ * the transcript's incoming-message treatment so the hydration swap lands on
+ * a surface that already looks like the chat it becomes.
+ */
+.smithers-app {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.server-session-shell {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 14px;
+	padding: 24px;
+}
+
+.server-session-shell p {
+	max-width: min(78%, 580px);
+	margin: 0;
+	padding: 7px 10px 6px;
+	border-radius: 12px;
+	background: var(--bubble-incoming);
+	box-shadow: var(--shadow-1);
+	line-height: 1.42;
+}
+
+.server-session-shell a {
+	padding: 6px 14px;
+	border: 1px solid var(--ring-border);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+	color: var(--text);
+	font-weight: 500;
+	text-decoration: none;
+}

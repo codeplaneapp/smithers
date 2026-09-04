@@ -1,0 +1,124 @@
+---
+title: "Troubleshooting"
+description: "Every failure code @smthrs/evals raises, what it means, and who fixes it."
+---
+
+Failures arrive as `EvalError` values with a stable `code`, a `message`
+written for a CI log, and usually a `path` locating the offending value. The
+`code` is the branch point, and each code names one owner for the fix.
+
+## invalid_suite
+
+The suite declaration is wrong. The suite author fixes it.
+
+| Symptom in the message | Path | Cause |
+| --- | --- | --- |
+| `Suite name must not be empty`, or names a control character | `name` | The suite name is blank or holds a character below U+0020, or U+007F |
+| `Suite must contain at least one case` | `cases` | The `cases` array is empty |
+| `Suite must contain at most 10000 cases` | `cases` | The suite exceeds `Suite.limits.cases` |
+| `Suite concurrency must be a positive safe integer` | `concurrency` | Zero, negative, fractional, or `NaN` concurrency |
+| `Suite concurrency must be at most 1024` | `concurrency` | The suite exceeds `Suite.limits.concurrency` |
+| `Suite case name must not be empty`, or names a control character | `cases[N].name` | A case name is blank or holds a control character |
+| `Duplicate suite case` | `cases[N].name` | Two cases share a name |
+| `Suite data must be structured-cloneable` | `cases[N].input`, `cases[N].expected`, `bindings[N].sampling`, `bindings[N].groundTruth`, `bindings[N].context` | The value holds a function, a class instance, or anything else `structuredClone` rejects |
+| `JSON Lines fixture must be at most 8388608 characters` | `text` | The fixture exceeds `Suite.limits.fixtureLength`; it was rejected before parsing |
+| `Invalid JSON on line N` | `line[N]` | The 1-based fixture line is not JSON |
+| `Invalid suite case on line N` | `line[N]` | The fixture line is not a `{ name, input, expected? }` case |
+| `Invalid sampling policy for scorer` | `bindings[N].sampling` | The scorers package cannot decide the policy; see the [scorers API](/api/scorers) |
+
+## invalid_run_options
+
+`Runner.run`'s own options are wrong, not the suite. The caller fixes them.
+
+- `Deterministic runs require a non-empty runId`, at `options.runId`: pass a
+  run identity.
+- `Deterministic runs require a canonical UTC timestamp such as
+  2026-01-01T00:00:00.000Z`, at `options.at`: the value must carry millisecond
+  precision and round-trip through parse and re-render.
+  `new Date().toISOString()` satisfies the format.
+
+## invalid_baseline
+
+The committed baseline is unreadable or belongs to another suite. Regenerate
+it from a green run of the suite it belongs to.
+
+- `Baseline is not valid JSON` or `Baseline must be an object`: the file is
+  not a baseline artifact. These two carry no `path`.
+- `Baseline version must be 1`, at `version`: the artifact was written by a
+  different version of the format.
+- `Baseline records must be an array`, at `records`.
+- A record that is not an object, a non-string identity field, or a score
+  outside [0, 1]: the record index and field are in `path`, as in
+  `records[3].score`.
+- `Baseline belongs to suite '<name>', but the run is suite '<name>'`, at
+  `baseline.suite` or `baseline.records`: comparison loaded the wrong file.
+  Check the path CI reads.
+
+## invalid_tolerance
+
+A comparison tolerance is not a finite non-negative number, at
+`tolerances.absolute` or `tolerances.relative`. Fix the call, not the
+baseline.
+
+## executor
+
+The target flow failed for a case, or no executor was available.
+
+- `Target failed for case '<name>': ...`: the executor failed. The run keeps
+  the typed error, locates it with the executor's own `path` or with
+  `cases['<name>']`, and produces no observations for the case. The rest of
+  the suite still ran. Read the retained `cause`.
+- `No executor is available for case '<name>'`: the run was provided
+  `CaseExecutor.makeNoop()` or `CaseExecutor.layerNoop`. Wire a real executor.
+
+## ambiguous_score_job
+
+Two score jobs share a step key and a scorer, so an order-only batch runner
+cannot attribute their results to a case. Give each case its own step key, or
+provide a batch runner that implements `runBatchCorrelated`.
+
+## scorer_protocol
+
+A batch runner broke the `runBatch` or `runBatchCorrelated` contract: the
+wrong number of results, a duplicate identity, an unknown identity, or an
+observation that does not echo its job's `targetStepKey` and `scorerKey`.
+Nothing it returned can be trusted. The message names the offending call, as
+in `runBatchCorrelated[0]`. Compare the adapter against `Runner.makeInline()`,
+the reference implementation of the protocol.
+
+## scorer_unavailable
+
+No batch runner was available to score with. This is `Runner.layerNoop`
+working as declared: every bound score becomes an inconclusive observation,
+and a gate grades the run undecidable rather than red. When the suite should
+score, provide `Runner.layerInline` or a real adapter.
+
+## Failures that are not EvalError
+
+Two wiring mistakes fail outside the `EvalError` channel:
+
+- `CaseExecutor.make` with no callback throws a `TypeError` synchronously.
+  Pass a function, or an object with a `run` or `execute` callback.
+- `Gate.check` with a threshold outside [0, 1] fails with a `ScoreGateError`,
+  code `invalid_threshold`, from [@smthrs/testing](/api/testing). Catch it in
+  the error channel and report it.
+
+## Symptoms
+
+- Every score is inconclusive. Read the observation's `reason`. A
+  `Scorer execution failed: ...` reason names a scorer that threw, a
+  `Scorer batch failed: ...` reason names a batch runner that failed, and a
+  reason about a score outside [0, 1] or an unusable observation kind names a
+  scorer that returned a bad result. A suite provided `Runner.layerNoop` also
+  lands here.
+- A binding graded nothing. The execution's `target` is not the exact flow
+  value the binding's `appliesTo` holds (reference identity, not structure),
+  the case failed before scoring, or the sampling policy decided against the
+  execution.
+- The gate exits 5. The gate could not decide, or it passed with unresolved
+  observations. The Markdown report's Case failures, Missing observations, and
+  Inconclusive sections name what is missing. Exit 5 is an unusable harness to
+  repair, not a result to read.
+- The report printed a secret. `Report.json` embeds each case's raw
+  `execution.output` and redacts nothing. Keep the report out of readable logs
+  when cases carry secrets.

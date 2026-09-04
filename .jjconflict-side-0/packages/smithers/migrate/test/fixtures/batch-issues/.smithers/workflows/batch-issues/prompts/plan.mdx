@@ -1,0 +1,34 @@
+BACKLOG PLANNING — Prioritize {props.issueCount} Issues
+
+You have {props.issueCount} issues from the Smithers Linear backlog. Order them for batch processing.
+
+RESEARCH SUMMARY (from spec analysis):
+{props.researchSummary}
+
+ALL ISSUES:
+{props.issuesJson}
+
+KNOWN BLOCKED ISSUES (skip these — blocked by 3rd-party SDK bugs):
+- JJH-357: Binary file roundtrip broken (double base64)
+- JJH-358: watchFiles() relative URL bug
+- JJH-359: Empty file creation silently fails
+- JJH-360: readTextFile through symlink fails
+Any issue blocked by these (e.g. JJH-341) should also be skipped.
+
+ORDERING RULES:
+1. **Skip** issues blocked by 3rd-party dependencies or SDK bugs (mark skip=true with reason)
+2. **Skip** issues that depend on skipped issues (transitive blocking)
+3. Foundation/infrastructure issues first (DB schema, core services)
+4. Issues with no dependencies before issues with dependencies
+5. Higher priority (lower number) issues before lower priority ones
+6. Group related issues together so they can share context
+7. Trivial/small issues can be interleaved to provide quick wins
+
+OUTPUT:
+- Order all issues by processing priority
+- Mark `skip: true` for issues that cannot be processed
+- Estimate complexity for each issue
+
+**REQUIRED OUTPUT** — JSON matching this schema:
+{props.schema}
+DO NOT skip JSON output. Workflow fails without it.

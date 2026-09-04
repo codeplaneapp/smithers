@@ -1,0 +1,14 @@
+# Terraform working state. The provider lock file is deliberately not ignored.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Alchemy and Cloudflare infrastructure working files.
+.alchemy/
+infra/coverage/
+infra/.env
+infra/.env.*
+infra/.dev.vars
+infra/.wrangler/
+infra/deployment-report.html

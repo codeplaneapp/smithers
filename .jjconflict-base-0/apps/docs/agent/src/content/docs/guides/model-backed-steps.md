@@ -1,0 +1,139 @@
+---
+title: "Add a model-backed step to a flow"
+description: "Declare an AgentAction with a typed output, compose the host and the policies, and watch the step's events as it runs."
+sidebar:
+  order: 1
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/docs/guides/model-backed-steps.md"
+---
+
+A model call is an ordinary action. `AgentAction.make` declares one with the
+same tag, payload schema, `.call()`, plan node, and durable replay as any other
+action, and ships the implementation with it: you never write `toLayer` for a
+model call, because there is exactly one implementation, the agent loop.
+
+This guide is the composition reference for that step. For a runnable first
+success, start with the [Quickstart](/quickstart/).
+
+## Declare the step
+
+```ts
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Schema from "effect/Schema"
+
+const Research = AgentAction.make("docs/Research", {
+  payload: { topic: Schema.String },
+  output: Schema.Struct({ summary: Schema.String }),
+  seat: "anthropic:claude-sonnet-4-5",
+  system: ["You are a research assistant."],
+  prompt: ({ topic }) => `Research ${topic}.`
+})
+```
+
+The four decisions every declaration makes:
+
+- `output` is the schema the answer must satisfy. It is rendered into the run's
+  system teaching and enforced against the run's final answer.
+- `seat` is an opaque string the host's `SeatResolver` resolves. The resolver
+  owns the vocabulary, so `anthropic:claude-sonnet-4-5`, a bare model id, and a
+  logical name like `reviewer` are all legal declarations.
+- `prompt` builds the task from the decoded payload.
+- `system` is stable teaching for this step, placed after the host's and before
+  the schema's.
+
+Optional bounds are `corrections`, `repair`, `modelParams`, and `maxFrames`.
+For the correction ladder and the repair slot, see
+[Shape a model's answer into typed output](/guides/structured-output/).
+
+## Call it from a flow
+
+The declaration is an ordinary action in the graph:
+
+```ts
+import { Flow } from "@smthrs/flow"
+import { Node } from "@smthrs/plan"
+
+export const SimpleWorkflow = Flow.make("docs/SimpleWorkflow", {
+  payload: { topic: Schema.String },
+  success: Schema.Struct({ article: Schema.String }),
+  error: AgentAction.AgentFailure,
+  body: ({ topic }) =>
+    Research.call({ topic }).pipe(
+      Node.andThen((research) => Write.call({ summary: research.summary }))
+    )
+})
+```
+
+`research.summary` is a `string` here, not text somebody has to parse, because
+the step owes its caller one decoded value.
+
+## Compose the host and the policies
+
+`AgentAction.layerHost` provides the composition every model-backed action in a
+run shares. Only `registry` and `limits` are required; the rest are
+composition-wide defaults:
+
+```ts
+const host = AgentAction.layerHost({
+  registry,
+  limits: { calls: 8 },
+  capabilityEnvelope: [],
+  maxFrames: 4,
+  defaultCorrections: 2
+})
+```
+
+The composition stacks, from the inside out:
+
+1. The action's own `.layer` and the flow's `Interpreter.layer`.
+2. `AgentAction.layerHost(...)`, a `SeatResolver`, and `Agent.layer`.
+3. The two policies, which are required: `QuotaPolicy.layerDefault()` and a
+   `Budget` layer. A composition that means to enforce nothing says so with
+   `QuotaPolicy.layerUnclassified()` and `Budget.layerUnbounded()`; omitting
+   either is a type error.
+4. `Agent.layerDefaults`, the QuickJS sandbox and an empty steering source.
+5. Ordinary flow composition: `Action.layerImplementations`, a durable engine
+   such as `FlowEngine.layerMemory`, and a crypto service.
+
+The complete listing is in the [Quickstart](/quickstart/#compose-the-layers),
+and the field-by-field tables are in the
+[API reference](/reference/api/#agentactionhost).
+
+## Watch the step run
+
+A step answers with one decoded value, which it only knows at the end. Provide
+`EventSink` to also receive each agent event as it happens: token deltas, the
+cell that was produced, the calls it made:
+
+```ts
+import { EventSink } from "@smthrs/agent"
+import * as Effect from "effect/Effect"
+
+const watched = Layer.merge(
+  layer,
+  EventSink.layer({ emit: (event) => Effect.sync(() => render(event)) })
+)
+```
+
+The step still buffers every event for the decode, so the answer, the
+correction budget, and the failures are the same with a sink as without one.
+One rule governs a sink: `emit` runs inside the frame that produced the event,
+and that frame holds the engine's write transaction. Push onto a queue, write
+to a socket, or resolve a deferred. A sink that waits on a durable write
+stalls the run.
+
+## Handle the failures
+
+A step fails with a member of `AgentAction.AgentFailure`:
+
+- `StructuredOutputFailure`: the model answered and the answer did not fit the
+  schema after its correction budget. This is the one an author handles.
+- `SeatUnresolved`: the host has no model for the declared seat.
+- `BudgetExceeded` and `Budget.Skipped`: the run has spent what it was approved
+  for. See [Park on quota refusals and cap run spend](/guides/quota-and-budgets/).
+- `HarnessError` and `PluginError`: the composition failed underneath the step.
+
+Provider refusals do not reach the caller as-is. The model boundary runs a
+bounded transport retry ladder (five jittered retries inside a 45-second
+window by default), a quota-shaped refusal parks the step instead of failing
+it, and a terminal model error arrives inside the `HarnessError` cause with its
+code and reset fields intact.

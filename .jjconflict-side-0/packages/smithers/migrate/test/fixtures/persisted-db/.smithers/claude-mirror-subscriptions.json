@@ -1,0 +1,11 @@
+{
+  "contract": 1,
+  "subscriptions": [
+    {
+      "runId": "run-1783757199651",
+      "sessionId": "00000000-0000-4000-8000-000000000001",
+      "subscribedAtMs": 1783757199651,
+      "expiresAtMs": 1783843599651
+    }
+  ]
+}

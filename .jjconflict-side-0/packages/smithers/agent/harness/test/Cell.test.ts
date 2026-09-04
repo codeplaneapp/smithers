@@ -1,0 +1,373 @@
+import * as Descriptor from "@smthrs/registry/Descriptor"
+import { Option, Result } from "effect"
+import { describe, expect, it } from "vitest"
+import * as Cell from "../src/Cell.ts"
+import * as FlowBinding from "../src/FlowBinding.ts"
+import { batchedReply } from "./fixtures/batchedReplies.ts"
+import { rejectedCell, rejectedCellNames } from "./fixtures/rejectedCells.ts"
+
+const fenced = (info: string, body: string): string => "```" + info + "\n" + body + "\n```"
+
+describe("Cell.extract", () => {
+  it("runs every fenced cell of a reply, in order, as one program", () => {
+    // Wave 10's django frame 1 wrote a near-par program as seven blocks and
+    // the harness ran block seven — the imagined completion — against a tree
+    // where blocks one through six had never run. Every block is the frame now.
+    const text = [
+      "First I look:",
+      fenced("cell", "const files = await ctx.call(\"fs/list\", { path: \".\" })"),
+      "then I decide:",
+      fenced("cell", "ctx.done(files.length + \" entries\")")
+    ].join("\n\n")
+
+    const extracted = Result.getOrThrow(Cell.extract(text))
+    expect(extracted.source.text).toBe(
+      "const files = await ctx.call(\"fs/list\", { path: \".\" })\n" +
+        "ctx.done(files.length + \" entries\")"
+    )
+    expect(extracted.source.language).toBe("javascript")
+    expect(extracted.blocks).toBe(2)
+  })
+
+  it("counts one block for the ordinary single-cell reply", () => {
+    const extracted = Result.getOrThrow(Cell.extract(fenced("cell", "return 1")))
+    expect(extracted.blocks).toBe(1)
+    expect(extracted.source.text).toBe("return 1")
+  })
+
+  it("drops a byte-identical repeat of a block instead of declaring its names twice", () => {
+    // Wave 10's astropy multi-block reply is the same state-echo block twice.
+    // A repeat is one program restated, never a second step.
+    const echo = "const s = ctx.state\nreturn { intent: \"continue\", state: s, context: [] }"
+    const extracted = Result.getOrThrow(Cell.extract([fenced("cell", echo), fenced("cell", echo)].join("\n\n")))
+    expect(extracted.source.text).toBe(echo)
+    expect(extracted.blocks).toBe(2)
+  })
+
+  it("stops at the first block that returns, because a return ends the function", () => {
+    // The documented semantics of concatenation, stated as a test rather than
+    // as prose: block two is dead code the compiler still has to accept. The
+    // blocks keep the old filing surface on purpose. This test is about what a
+    // return does to the concatenated program, so it needs a return in it.
+    const text = [
+      fenced("cell", "return { intent: \"complete\", state: {}, output: \"first\" }"),
+      fenced("cell", "return { intent: \"complete\", state: {}, output: \"second\" }")
+    ].join("\n\n")
+    const extracted = Result.getOrThrow(Cell.extract(text))
+    expect(extracted.source.text.indexOf("first")).toBeLessThan(extracted.source.text.indexOf("second"))
+  })
+
+  it("reads a program as typescript when any of its blocks declared a typed fence", () => {
+    // Both bindings run TypeScript by erasing type-only syntax, so erasure is
+    // harmless to a plain-JavaScript block and the mixed reply compiles.
+    const text = [fenced("cell", "const a = 1"), fenced("ts", "const b: number = 2\nreturn null")].join("\n\n")
+    expect(Result.getOrThrow(Cell.extract(text)).source.language).toBe("typescript")
+  })
+
+  it("prioritizes a typed fence token independently of token order", () => {
+    expect(Result.getOrThrow(Cell.extract(fenced("cell ts", "const value: number = 1"))).source.language).toBe(
+      "typescript"
+    )
+    expect(Result.getOrThrow(Cell.extract(fenced("ts cell", "const value: number = 1"))).source.language).toBe(
+      "typescript"
+    )
+    expect(Result.getOrThrow(Cell.extract(fenced("cell", "const value = 1"))).source.language).toBe("javascript")
+  })
+
+  it("accepts the js and javascript fences a model reaches for", () => {
+    expect(Result.getOrThrow(Cell.extract(fenced("js", "return 1"))).source.language).toBe("javascript")
+    expect(Result.getOrThrow(Cell.extract(fenced("javascript", "return 1"))).source.language).toBe("javascript")
+    expect(Result.getOrThrow(Cell.extract(fenced("ts", "return 1"))).source.language).toBe("typescript")
+    expect(Result.getOrThrow(Cell.extract(fenced("typescript", "return 1"))).source.language).toBe("typescript")
+  })
+
+  it("reads the fence tag case-insensitively and past decoration the model adds", () => {
+    for (const info of ["CELL", "  cell  ", "js title=plan.js", "linenums ts", "Cell showLineNumbers"]) {
+      const extracted = Cell.extract(fenced(info, "return 1"))
+      expect(extracted._tag, info).toBe("Success")
+    }
+    expect(Result.getOrThrow(Cell.extract(fenced("linenums ts", "return 1"))).source.language).toBe("typescript")
+  })
+
+  it("ignores a fence with no tag at all", () => {
+    // An untagged fence is the shape a model reaches for when it is quoting
+    // output, not committing to a cell.
+    const extracted = Cell.extract(fenced("", "return 1"))
+    expect(extracted._tag).toBe("Failure")
+    expect((extracted as Result.Failure<never, Cell.Rejected>).failure.code).toBe("no_cell")
+  })
+
+  it("ignores a fence tagged as something other than a cell", () => {
+    for (const info of ["python", "json", "diff", "sh"]) {
+      const extracted = Cell.extract(fenced(info, "return 1"))
+      expect(extracted._tag, info).toBe("Failure")
+      expect((extracted as Result.Failure<never, Cell.Rejected>).failure.code, info).toBe("no_cell")
+    }
+  })
+
+  it("takes only the cell fences and leaves every other fence out of the program", () => {
+    const text = [
+      fenced("cell", "const first = 1"),
+      fenced("json", "{ \"not\": \"a cell\" }"),
+      fenced("", "untagged"),
+      fenced("cell", "return first"),
+      fenced("text", "trailing prose block")
+    ].join("\n\n")
+
+    const extracted = Result.getOrThrow(Cell.extract(text))
+    expect(extracted.source.text).toBe("const first = 1\nreturn first")
+    expect(extracted.source.language).toBe("javascript")
+    expect(extracted.blocks).toBe(2)
+  })
+
+  it("keeps the language of the recognized fence when a later one is unrecognized", () => {
+    const text = [fenced("ts", "return 1"), fenced("python", "print(1)")].join("\n\n")
+    expect(Result.getOrThrow(Cell.extract(text)).source.language).toBe("typescript")
+  })
+
+  it("accepts an empty cell body as an empty cell", () => {
+    const extracted = Result.getOrThrow(Cell.extract("```cell\n```"))
+    expect(extracted.source.text).toBe("")
+    expect(extracted.source.digest).toBe(Cell.source("").digest)
+  })
+
+  it("finds no cell in an unterminated fence", () => {
+    const extracted = Cell.extract("```cell\nctx.done(\"x\")")
+    expect(extracted._tag).toBe("Failure")
+    expect((extracted as Result.Failure<never, Cell.Rejected>).failure.code).toBe("no_cell")
+  })
+
+  it("finds no cell in an empty response", () => {
+    expect((Cell.extract("") as Result.Failure<never, Cell.Rejected>).failure.code).toBe("no_cell")
+  })
+
+  it("rescans from the start of every response, so one extraction cannot skip the next", () => {
+    // The fence pattern is a module-level global regexp, which carries a
+    // cursor between calls unless it is reset.
+    const text = fenced("cell", "return \"repeatable\"")
+    expect(Result.getOrThrow(Cell.extract(text)).source.text).toBe("return \"repeatable\"")
+    expect(Result.getOrThrow(Cell.extract(text)).source.text).toBe("return \"repeatable\"")
+  })
+
+  it("reports a missing cell as a correctable rejection, not a failure", () => {
+    const extracted = Cell.extract("I think we should stop here.")
+    expect(extracted._tag).toBe("Failure")
+    const rejection = (extracted as Result.Failure<never, Cell.Rejected>).failure
+    expect(rejection.code).toBe("no_cell")
+    expect(rejection.message).toContain("fenced ```cell block")
+  })
+
+  it("reads text and leaves every judgement about syntax to the compiler", () => {
+    // Extraction used to match `import` against the raw source, which read a
+    // quoted Python import as a module import. Whether a cell uses module
+    // syntax is `Sandbox.compile`'s question, answered by parsing.
+    for (
+      const body of [
+        "import { readFile } from \"node:fs\"\nreturn null",
+        "const important = ctx.flows\nctx.park(\"waiting-input\", \"who owns this?\")"
+      ]
+    ) {
+      expect(Cell.extract(fenced("cell", body))._tag, body).toBe("Success")
+    }
+  })
+})
+
+describe("Cell.extract on the frames one benchmark wave rejected", () => {
+  // Verbatim final cells from SWE-bench wave 5, each recorded in its run's
+  // journal beside the `imports_forbidden` rejection it drew. Every one of them
+  // only mentions an import inside a bash command or a grep pattern, and the
+  // sphinx cell is that instance's opening frame, so the run began by spending
+  // a turn on a rule it had not broken.
+  for (const name of rejectedCellNames) {
+    it(`extracts the cell ${name} carried`, () => {
+      const extracted = Cell.extract(rejectedCell(name))
+      expect(extracted._tag).toBe("Success")
+      expect(Result.getOrThrow(extracted).source.text).toContain("ctx.call")
+    })
+  }
+})
+
+describe("Cell.extract on the two multi-block replies one benchmark wave produced", () => {
+  it("reads django's seven-block near-par program as one program of seven blocks", () => {
+    const extracted = Result.getOrThrow(Cell.extract(batchedReply("django-16612-seq12")))
+
+    expect(extracted.blocks).toBe(7)
+    // Block one is the recon cell and it is now in the program; under the old
+    // rule the program was block seven alone, an imagined completion over a
+    // tree where nothing before it had run.
+    expect(extracted.source.text.startsWith("const site = await ctx.call(\"read\"")).toBe(true)
+    expect(extracted.source.text).toContain("force_append_slash=True")
+    // Five of the seven blocks open `const st = ctx.state`, so one program
+    // declares `st` five times. The compiler names it, which is a durable
+    // observation the next frame can act on — unlike silently running one
+    // block of seven, which is not observable at all.
+    expect(() => new Function(`return (async () => {${extracted.source.text}})()`)).toThrow(
+      /Identifier 'st' has already been declared/
+    )
+  })
+
+  it("reads astropy's duplicated block as the one program it restates", () => {
+    const extracted = Result.getOrThrow(Cell.extract(batchedReply("astropy-8707-seq77")))
+
+    expect(extracted.blocks).toBe(2)
+    // De-duplication is what keeps this a frame that runs: joining the repeat
+    // would declare `s` twice and turn it into a compile failure.
+    expect(extracted.source.text.match(/const s = ctx\.state/g)).toHaveLength(1)
+    expect(() => new Function(`return (async () => {${extracted.source.text}})()`)).not.toThrow()
+  })
+})
+
+describe("Cell.source", () => {
+  it("digests source stably and separates one character of difference", () => {
+    expect(Cell.source("return 1").digest).toBe(Cell.source("return 1").digest)
+    expect(Cell.source("return 1").digest).not.toBe(Cell.source("return 2").digest)
+    expect(Cell.source("return 1", "javascript").digest).not.toBe(Cell.source("return 1", "typescript").digest)
+  })
+})
+
+describe("Cell.declarationDigest", () => {
+  const base = new Descriptor.FlowDescriptor({
+    name: "inspect",
+    description: "Inspect one value.",
+    body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts", contentDigest: "1".repeat(64) }),
+    input: new Descriptor.SchemaRefInline({ document: { type: "object" } }),
+    output: new Descriptor.SchemaRefInline({ document: { type: "string" } }),
+    model: Option.some("anthropic/claude"),
+    flows: ["inspect/child"],
+    capabilities: ["fs:write", "fs:read"],
+    effects: { reads: ["src/**"], writes: [], mode: "hermetic", onConflict: "serialize", tier: "sealed" },
+    placement: Option.some("sandbox"),
+    modelInvocable: true,
+    budget: { tokens: 4_096, milliseconds: 30_000 },
+    path: "flows/inspect.ts",
+    frontmatter: { retries: 2, title: "Inspect" },
+    provenance: new Descriptor.Provenance({
+      source: "project",
+      root: "/repo",
+      pack: { name: "tools", version: "1.0.0", origin: "local" }
+    })
+  })
+
+  /** Every material descriptor field, and a declaration differing only there. */
+  const material: ReadonlyArray<readonly [string, Partial<Descriptor.FlowDescriptor>]> = [
+    ["name", { name: "inspect2" }],
+    ["description", { description: "Inspect two values." }],
+    ["body", {
+      body: new Descriptor.BodyRefModule({ path: "flows/inspect2.ts", contentDigest: "1".repeat(64) })
+    }],
+    ["body contents", {
+      body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts", contentDigest: "2".repeat(64) })
+    }],
+    ["input", { input: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
+    ["output", { output: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
+    ["model", { model: Option.some("openai/gpt") }],
+    ["flows", { flows: ["inspect/other-child"] }],
+    ["capabilities", { capabilities: ["fs:write", "fs:read", "net:read"] }],
+    ["effects", {
+      effects: { reads: ["src/**"], writes: ["src/**"], mode: "hermetic", onConflict: "serialize", tier: "sealed" }
+    }],
+    ["placement", { placement: Option.some("remote") }],
+    ["modelInvocable", { modelInvocable: false }],
+    ["budget", { budget: undefined }],
+    ["path", { path: "elsewhere/inspect.ts" }],
+    ["frontmatter", { frontmatter: { retries: 3, title: "Inspect" } }],
+    ["provenance.source", {
+      provenance: new Descriptor.Provenance({ source: "installed", root: "/repo", pack: base.provenance.pack })
+    }],
+    ["provenance.root", {
+      provenance: new Descriptor.Provenance({ source: "project", root: "/elsewhere", pack: base.provenance.pack })
+    }]
+  ]
+
+  it.each(material)("changes when %s changes", (_field, change) => {
+    // The digest is the drift detector CellCalls raises `declaration_changed`
+    // from. A field it does not cover is a field a refreshed registry can move
+    // without the boundary noticing, and the call is then dispatched to a
+    // declaration the model was never shown.
+    expect(Cell.declarationDigest(new Descriptor.FlowDescriptor({ ...base, ...change })))
+      .not.toBe(Cell.declarationDigest(base))
+  })
+
+  it("deliberately excludes pack provenance", () => {
+    expect(Cell.declarationDigest(
+      new Descriptor.FlowDescriptor({
+        ...base,
+        provenance: new Descriptor.Provenance({
+          source: base.provenance.source,
+          root: base.provenance.root,
+          pack: { name: "tools", version: "2.0.0", origin: "installed" }
+        })
+      })
+    )).toBe(Cell.declarationDigest(base))
+  })
+
+  it("does not depend on key order or on capability order", () => {
+    const reordered = new Descriptor.FlowDescriptor({
+      provenance: base.provenance,
+      frontmatter: { title: "Inspect", retries: 2 },
+      path: base.path,
+      budget: base.budget,
+      modelInvocable: base.modelInvocable,
+      placement: base.placement,
+      effects: base.effects,
+      capabilities: ["fs:read", "fs:write"],
+      flows: base.flows,
+      model: base.model,
+      output: base.output,
+      input: base.input,
+      body: base.body,
+      description: base.description,
+      name: base.name
+    })
+
+    expect(Cell.declarationDigest(reordered)).toBe(Cell.declarationDigest(base))
+  })
+
+  it("pins one fully populated declaration", () => {
+    // A golden vector, so a change to the algorithm is a change to a number
+    // somebody had to write down rather than a silent re-keying of every call.
+    expect(Cell.declarationDigest(base)).toBe("cc7a8bd540a0be9e239d8dcc70c113b841b44079df80ce9ff118f7c9bf6a5bae")
+  })
+})
+
+describe("Cell.FlowProjection", () => {
+  const declaration: FlowBinding.Declared = {
+    name: "inspect",
+    description: "Inspect one value.",
+    capabilities: [],
+    effects: undefined
+  }
+
+  it("defaults a constructed projection to no input document", () => {
+    const projection = new Cell.FlowProjection({
+      name: "inspect",
+      description: "Inspect one value.",
+      capabilities: [],
+      tier: "sealed",
+      placement: Option.none()
+    })
+
+    expect(projection.input).toEqual(Option.none())
+  })
+
+  it("projects an inline input document", () => {
+    const document = { type: "object", properties: { value: { type: "string" } } } as const
+    const descriptor = FlowBinding.descriptorOf(declaration, { inputDocument: document })
+
+    expect(Cell.project(descriptor).input).toEqual(Option.some(document))
+  })
+
+  it("projects input locators and absent schemas to none", () => {
+    const descriptor = FlowBinding.descriptorOf(declaration)
+    const inputs: ReadonlyArray<Descriptor.SchemaRef> = [
+      descriptor.input,
+      new Descriptor.SchemaRefMarkdownArgs(),
+      new Descriptor.SchemaRefMarkdownOutput(),
+      new Descriptor.SchemaRefNone()
+    ]
+
+    for (const input of inputs) {
+      expect(Cell.project(new Descriptor.FlowDescriptor({ ...descriptor, input })).input).toEqual(Option.none())
+    }
+  })
+})

@@ -1,0 +1,535 @@
+import { NodeServices } from "@effect/platform-node"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Fs from "node:fs/promises"
+import * as Os from "node:os"
+import * as NodePath from "node:path"
+import { describe, expect, it } from "vitest"
+import * as Runtime from "../src/Runtime.ts"
+
+const platform = { os: "linux", arch: "x64", libc: null }
+
+/** Runs an effect that is expected to fail, and returns the typed error. */
+const refusalOf = <A>(effect: Effect.Effect<A, Runtime.RuntimeError, never>): Promise<Runtime.RuntimeError> =>
+  Effect.runPromise(Effect.flip(effect))
+
+const withFixture = async <A>(use: (root: string) => Promise<A>): Promise<A> => {
+  const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-runtime-")))
+  try {
+    return await use(root)
+  } finally {
+    await Fs.rm(root, { recursive: true, force: true })
+  }
+}
+
+const writeExecutable = async (path: string, body: string): Promise<void> => {
+  await Fs.writeFile(path, `#!/usr/bin/env node\n${body}\n`, "utf8")
+  await Fs.chmod(path, 0o755)
+}
+
+describe("Runtime.satisfies", () => {
+  it("accepts an exact version and rejects any other", () => {
+    expect(Runtime.satisfies("24.9.0", "24.9.0")).toBe(true)
+    expect(Runtime.satisfies("=24.9.0", "24.9.0")).toBe(true)
+    expect(Runtime.satisfies("24.9.0", "24.9.1")).toBe(false)
+    expect(Runtime.satisfies("24.9.0", "24.10.0")).toBe(false)
+  })
+
+  it("compares each comparator form", () => {
+    expect(Runtime.satisfies(">=22.19.0", "24.9.0")).toBe(true)
+    expect(Runtime.satisfies(">=22.19.0", "22.19.0")).toBe(true)
+    expect(Runtime.satisfies(">=22.19.0", "22.18.9")).toBe(false)
+    expect(Runtime.satisfies(">22", "24.0.0")).toBe(true)
+    expect(Runtime.satisfies(">22", "22.0.0")).toBe(false)
+    expect(Runtime.satisfies("<=24", "24.0.0")).toBe(true)
+    expect(Runtime.satisfies("<=24", "24.0.1")).toBe(false)
+    expect(Runtime.satisfies("<25", "24.9.0")).toBe(true)
+    expect(Runtime.satisfies("<25", "25.0.0")).toBe(false)
+  })
+
+  it("treats a shorter version as zero-padded", () => {
+    expect(Runtime.satisfies(">=22", "22.0.0")).toBe(true)
+    expect(Runtime.satisfies("22", "22.0.0")).toBe(true)
+    expect(Runtime.satisfies("22.0", "22.0.0")).toBe(true)
+  })
+
+  it("refuses a prerelease against an exact pin on the release", () => {
+    expect(Runtime.satisfies("1.3.0", "1.3.0-canary.2")).toBe(false)
+    expect(Runtime.satisfies("=1.3.0", "1.3.0-canary.2")).toBe(false)
+    expect(Runtime.satisfies("1.3.0", "1.3.0")).toBe(true)
+  })
+
+  it("accepts the prerelease an exact pin names, and no other", () => {
+    expect(Runtime.satisfies("=1.3.0-canary.2", "1.3.0-canary.2")).toBe(true)
+    expect(Runtime.satisfies("1.3.0-canary.2", "v1.3.0-canary.2")).toBe(true)
+    expect(Runtime.satisfies("=1.3.0-canary.2", "1.3.0-canary.3")).toBe(false)
+    expect(Runtime.satisfies("=1.3.0-canary.2", "1.3.0")).toBe(false)
+    expect(Runtime.satisfies("=1.3.0-canary.2", "1.3.0-canary.2+build.7")).toBe(true)
+  })
+
+  it("compares a prerelease as its release version under a comparator", () => {
+    expect(Runtime.satisfies(">=1.3.0", "1.3.0-canary.2")).toBe(true)
+    expect(Runtime.satisfies("<1.4.0", "1.3.0-canary.2")).toBe(true)
+  })
+
+  it("treats build metadata as the release it annotates", () => {
+    expect(Runtime.satisfies(">=1.3.0", "1.3.0+build.7")).toBe(true)
+    expect(Runtime.satisfies("1.3.0", "1.3.0+build.7")).toBe(true)
+  })
+
+  it("accepts a leading v on either side", () => {
+    expect(Runtime.satisfies("24.9.0", "v24.9.0")).toBe(true)
+    expect(Runtime.satisfies("v24.9.0", "24.9.0")).toBe(true)
+  })
+
+  it("reports an unsupported requirement rather than passing it", () => {
+    expect(Runtime.satisfies("^24.0.0", "24.9.0")).toBe("unsupported_requirement")
+    expect(Runtime.satisfies("~24.9", "24.9.0")).toBe("unsupported_requirement")
+    expect(Runtime.satisfies(">=22 <25", "24.9.0")).toBe("unsupported_requirement")
+    expect(Runtime.satisfies("latest", "24.9.0")).toBe("unsupported_requirement")
+    expect(Runtime.satisfies("", "24.9.0")).toBe("unsupported_requirement")
+    expect(Runtime.satisfies("24.9.0", "not-a-version")).toBe("unsupported_requirement")
+  })
+})
+
+describe("Runtime.makeNoop", () => {
+  it("reports the declaration and the fixed version without spawning", async () => {
+    const service = Runtime.makeNoop("node", { requirement: ">=22.19.0", version: "24.9.0", platform })
+    expect(service.name).toBe("node")
+    expect(service.executable).toBe("node")
+    expect(service.requirement).toBe(">=22.19.0")
+    expect(service.platform).toEqual(platform)
+    expect(await Effect.runPromise(service.version)).toBe("24.9.0")
+    expect(await Effect.runPromise(service.verify)).toBe("24.9.0")
+  })
+
+  it("honours an executable override", () => {
+    const service = Runtime.makeNoop("bun", {
+      requirement: "1.3.0",
+      version: "1.3.0",
+      platform,
+      executable: "/opt/bun/bin/bun"
+    })
+    expect(service.executable).toBe("/opt/bun/bin/bun")
+  })
+
+  it("refuses a host that does not satisfy the declaration", async () => {
+    const service = Runtime.makeNoop("node", { requirement: ">=24.0.0", version: "22.19.0", platform })
+    const error = await refusalOf(service.verify)
+    expect(error.code).toBe("unsatisfied")
+    expect(error.message).toMatch(/this host runs node 22\.19\.0, and the workspace declares >=24\.0\.0/)
+  })
+
+  /**
+   * The double used to collapse the third outcome into the second, so it
+   * reported `unsatisfied` and the sentence "this host runs node 24.9.0, and
+   * the workspace declares ^24.0.0" for a host that does satisfy `^24.0.0`.
+   * That sends an operator to upgrade Node when the legacy declaration declaration is
+   * what needs fixing, and it makes the two codes indistinguishable in every
+   * composition that asserts the refusal path through the double.
+   */
+  it("reports an unsupported requirement as itself, not as an unsatisfied host", async () => {
+    const service = Runtime.makeNoop("node", { requirement: "^24.0.0", version: "24.9.0", platform })
+    const error = await refusalOf(service.verify)
+    expect(error.code).toBe("unsupported_requirement")
+    expect(error.message).toMatch(/is not an exact version or a single comparator/)
+  })
+
+  it("refuses construction options the measuring implementation would refuse", () => {
+    const base = { requirement: ">=22.19.0", version: "24.9.0", platform }
+    expect(() => Runtime.makeNoop("node", { ...base, timeoutMs: 5 } as never)).toThrow(/unknown property/)
+    expect(() => Runtime.makeNoop("node", { ...base, requirement: "" })).toThrow(/requirement must be/)
+    expect(() => Runtime.makeNoop("node", { ...base, version: "" })).toThrow(/version must be/)
+    expect(() => Runtime.makeNoop("node", { ...base, platform: { ...platform, os: "" } })).toThrow(/os and arch/)
+    expect(() => Runtime.makeNoop("node", { ...base, platform: { ...platform, libc: "" } })).toThrow(/libc/)
+    expect(() => Runtime.makeNoop("node", { ...base, executable: "" })).toThrow(/executable must be/)
+    const withGetter = { ...base }
+    Object.defineProperty(withGetter, "requirement", { enumerable: true, get: () => ">=22.19.0" })
+    expect(() => Runtime.makeNoop("node", withGetter)).toThrow(/enumerable data property/)
+  })
+
+  /**
+   * `verify` used to close over the options object and re-read `requirement`
+   * when it ran, so a caller that edited the object afterwards left the service
+   * reporting one declaration and enforcing another. `platform` was shared by
+   * reference and unfrozen, so editing it changed every store manifest minted
+   * from the service.
+   */
+  it("snapshots its options, so a later mutation changes neither the report nor the check", async () => {
+    const options = {
+      requirement: ">=22.19.0",
+      version: "24.9.0",
+      platform: { os: "linux", arch: "x64", libc: null as string | null }
+    }
+    const service = Runtime.makeNoop("node", options)
+    options.requirement = ">=99.0.0"
+    options.platform.os = "win32"
+    expect(service.requirement).toBe(">=22.19.0")
+    expect(service.platform.os).toBe("linux")
+    expect(await Effect.runPromise(service.verify)).toBe("24.9.0")
+    expect(() => {
+      ;(service.platform as { os: string }).os = "win32"
+    }).toThrow(TypeError)
+  })
+
+  it("provides itself as a layer", async () => {
+    const layer = Runtime.layerNoop("bun", { requirement: "1.3.0", version: "1.3.0", platform })
+    const name = await Effect.runPromise(
+      Effect.gen(function*() {
+        const runtime = yield* Runtime.Runtime
+        return runtime.name
+      }).pipe(Effect.provide(layer))
+    )
+    expect(name).toBe("bun")
+  })
+})
+
+describe("Runtime measurement", () => {
+  it("measures a version and holds the host to the declaration", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "fake-node.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"v24.9.0\\n\")")
+      const service = await Effect.runPromise(
+        Runtime.make("node", { requirement: ">=22.19.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(await Effect.runPromise(service.version)).toBe("24.9.0")
+      expect(await Effect.runPromise(service.verify)).toBe("24.9.0")
+    })
+  })
+
+  it("reads the first version-shaped token on the first line", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "chatty-bun.mjs")
+      await writeExecutable(
+        executable,
+        "process.stdout.write(\"bun 1.3.0 (stable)\\nwebkit 1.2\\ntypescript 5.6\\n\")"
+      )
+      const service = await Effect.runPromise(
+        Runtime.make("bun", { requirement: "1.3.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(await Effect.runPromise(service.version)).toBe("1.3.0")
+    })
+  })
+
+  /**
+   * `satisfies` matches an exact pin on prerelease identity, but the probe's
+   * own parser accepted only `^v?\d+(\.\d+)*$`, so a real interpreter printing
+   * `1.3.0-canary.2` was refused as `probe_failed` before the comparator ever
+   * saw it. `=1.3.0-canary.2` was therefore a requirement no host could meet,
+   * and the unit tests for the comparator could not show it.
+   */
+  it("measures a prerelease and holds an exact pin to its identity", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "canary-bun.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"1.3.0-canary.2\\n\")")
+      const pinned = await Effect.runPromise(
+        Runtime.make("bun", { requirement: "=1.3.0-canary.2", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(await Effect.runPromise(pinned.version)).toBe("1.3.0-canary.2")
+      expect(await Effect.runPromise(pinned.verify)).toBe("1.3.0-canary.2")
+
+      const release = await Effect.runPromise(
+        Runtime.make("bun", { requirement: "=1.3.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      const refused = await refusalOf(release.verify)
+      expect(refused.code).toBe("unsatisfied")
+      expect(refused.message).toMatch(/this host runs bun 1\.3\.0-canary\.2, and the workspace declares =1\.3\.0/)
+    })
+  })
+
+  it("measures a version carrying build metadata", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "built-node.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"v24.9.0+build.7\\n\")")
+      const service = await Effect.runPromise(
+        Runtime.make("node", { requirement: ">=22.19.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(await Effect.runPromise(service.version)).toBe("24.9.0+build.7")
+      expect(await Effect.runPromise(service.verify)).toBe("24.9.0+build.7")
+    })
+  })
+
+  it("refuses a measured version the declaration excludes", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "old-node.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"v20.11.0\\n\")")
+      const service = await Effect.runPromise(
+        Runtime.make("node", { requirement: ">=22.19.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      await expect(Effect.runPromise(service.verify)).rejects.toThrow(
+        /this host runs node 20\.11\.0, and the workspace declares >=22\.19\.0/
+      )
+    })
+  })
+
+  it("reports an unsupported requirement against the measured version", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "fake-node.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"v24.9.0\\n\")")
+      const service = await Effect.runPromise(
+        Runtime.make("node", { requirement: "^24.0.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      await expect(Effect.runPromise(service.verify)).rejects.toThrow(
+        /is not an exact version or a single comparator/
+      )
+    })
+  })
+
+  it("fails when the probe prints no version", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "silent.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"no idea\\n\")")
+      const service = await Effect.runPromise(
+        Runtime.make("node", { requirement: "24.9.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      await expect(Effect.runPromise(service.version)).rejects.toThrow(/printed no version/)
+    })
+  })
+
+  it("fails when the probe exits non-zero", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "broken.mjs")
+      await writeExecutable(executable, "process.exit(3)")
+      const service = await Effect.runPromise(
+        Runtime.make("node", { requirement: "24.9.0", platform, executable }).pipe(
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      await expect(Effect.runPromise(service.version)).rejects.toThrow(/exited with status 3/)
+    })
+  })
+
+  it("fails when the executable does not exist", async () => {
+    await withFixture(async (root) => {
+      const service = await Effect.runPromise(
+        Runtime.make("node", {
+          requirement: "24.9.0",
+          platform,
+          executable: NodePath.join(root, "absent")
+        }).pipe(Effect.provide(NodeServices.layer))
+      )
+      await expect(Effect.runPromise(service.version)).rejects.toThrow(/failed/)
+    })
+  })
+
+  /**
+   * The probe's byte bound was exported and documented and applied to nothing:
+   * the implementation collected stdout with an unbounded `Stream.mkString`,
+   * so a declared interpreter printing megabytes drove the build process's
+   * memory through a path the constant said was bounded.
+   */
+  it("accepts output up to the bound and refuses the first byte past it", async () => {
+    await withFixture(async (root) => {
+      const bound = Runtime.maximumVersionOutputBytes
+      const prefix = "1.0.0\n"
+      const atBound = NodePath.join(root, "at-bound.mjs")
+      await writeExecutable(
+        atBound,
+        `process.stdout.write(${JSON.stringify(prefix)} + "a".repeat(${bound - prefix.length}))`
+      )
+      const accepted = await Effect.runPromise(
+        Runtime.make("node", { requirement: "1.0.0", platform, executable: atBound }).pipe(
+          Effect.flatMap((service) => service.version),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(accepted).toBe("1.0.0")
+
+      const overBound = NodePath.join(root, "over-bound.mjs")
+      await writeExecutable(
+        overBound,
+        `process.stdout.write(${JSON.stringify(prefix)} + "a".repeat(${bound - prefix.length + 1}))`
+      )
+      const error = await refusalOf(
+        Runtime.make("node", { requirement: "1.0.0", platform, executable: overBound }).pipe(
+          Effect.flatMap((service) => service.version),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(error.code).toBe("probe_failed")
+      expect(error.message).toMatch(/version output exceeds/)
+    })
+  })
+
+  it("bounds output that arrives as many small chunks", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "chatty.mjs")
+      const chunks = Math.ceil((Runtime.maximumVersionOutputBytes + 1) / 64)
+      await writeExecutable(
+        executable,
+        `for (let index = 0; index < ${chunks}; index += 1) process.stdout.write("a".repeat(64))`
+      )
+      const error = await refusalOf(
+        Runtime.make("node", { requirement: "1.0.0", platform, executable }).pipe(
+          Effect.flatMap((service) => service.version),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(error.message).toMatch(/version output exceeds/)
+    })
+  })
+
+  it("kills a producer that keeps writing after the bound is refused", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "runaway.mjs")
+      const marker = NodePath.join(root, "kept-running")
+      await writeExecutable(
+        executable,
+        `import { writeFileSync } from "node:fs"\n` +
+          `const write = () => process.stdout.write("a".repeat(4096))\n` +
+          `for (let index = 0; index < ${
+            Math.ceil(Runtime.maximumVersionOutputBytes / 4096) + 8
+          }; index += 1) write()\n` +
+          `setTimeout(() => writeFileSync(${JSON.stringify(marker)}, "yes"), 700)`
+      )
+      const error = await refusalOf(
+        Runtime.make("node", { requirement: "1.0.0", platform, executable }).pipe(
+          Effect.flatMap((service) => service.version),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(error.message).toMatch(/version output exceeds/)
+      await new Promise((resolve) => setTimeout(resolve, 900))
+      await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
+    })
+  })
+
+  /**
+   * `extendEnv: false` alone selects nothing: `resolveEnvironment` in
+   * `@effect/platform-node-shared` returns an absent `env` unchanged, and
+   * `spawn` reads an absent `env` as inherit-everything. Supplying an
+   * environment is what makes the probe hermetic, and this is the assertion
+   * that says which names survive the selection.
+   */
+  it("gives a supplied environment's lookup names to the probe and nothing else", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "reporting.mjs")
+      const observed = NodePath.join(root, "observed.json")
+      await writeExecutable(
+        executable,
+        `import { writeFileSync } from "node:fs"\n` +
+          `writeFileSync(${JSON.stringify(observed)}, JSON.stringify(Object.keys(process.env).sort()))\n` +
+          `process.stdout.write("1.0.0\\n")`
+      )
+      const measured = await Effect.runPromise(
+        Runtime.make("node", {
+          requirement: "1.0.0",
+          platform,
+          executable,
+          environment: {
+            PATH: process.env.PATH,
+            HOME: "/hidden/home",
+            UNRELATED_SECRET: "must-not-leak"
+          }
+        }).pipe(Effect.flatMap((service) => service.version), Effect.provide(NodeServices.layer))
+      )
+      expect(measured).toBe("1.0.0")
+      // Darwin's own `posix_spawn` adds `__CF_USER_TEXT_ENCODING` below this
+      // seam, so the assertion is over the names the selection put there.
+      const names = JSON.parse(await Fs.readFile(observed, "utf8")) as ReadonlyArray<string>
+      expect(names.filter((name) => !name.startsWith("__"))).toEqual(["PATH"])
+      expect(names).not.toContain("HOME")
+      expect(names).not.toContain("UNRELATED_SECRET")
+    })
+  })
+
+  /**
+   * The gap this package cannot close on its own, pinned so it stays visible.
+   *
+   * With no `environment` the child inherits the whole process environment,
+   * which on CI is the job's entire secret set. An empty environment is not an
+   * alternative, because a child given one cannot resolve a bare executable
+   * name through `PATH`, so only a composition root can supply the four
+   * bootstrap names. `layerRuntime` in `@smthrs/build-cli` is the one that has
+   * to; when it does, this test's expectation becomes the one above.
+   */
+  it("inherits the ambient environment when no environment is supplied", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "inheriting.mjs")
+      const observed = NodePath.join(root, "observed.json")
+      await writeExecutable(
+        executable,
+        `import { writeFileSync } from "node:fs"\n` +
+          `writeFileSync(${
+            JSON.stringify(observed)
+          }, JSON.stringify(process.env.SMITHERS_BUILD_PROBE_MARKER ?? null))\n` +
+          `process.stdout.write("1.0.0\\n")`
+      )
+      process.env.SMITHERS_BUILD_PROBE_MARKER = "ambient"
+      try {
+        await Effect.runPromise(
+          Runtime.make("node", { requirement: "1.0.0", platform, executable }).pipe(
+            Effect.flatMap((service) => service.version),
+            Effect.provide(NodeServices.layer)
+          )
+        )
+      } finally {
+        delete process.env.SMITHERS_BUILD_PROBE_MARKER
+      }
+      expect(JSON.parse(await Fs.readFile(observed, "utf8"))).toBe("ambient")
+    })
+  })
+
+  /**
+   * `Action.executeEncoded` encodes a declared error through
+   * `Schema.toCodecJson` and `Effect.orDie`s the encode, so an error carrying a
+   * raw platform `Error` turned an ordinary probe failure into a defect that
+   * killed the run instead of journaling `probe_failed`.
+   */
+  it("encodes a real probe failure, cause and all, as JSON", async () => {
+    await withFixture(async (root) => {
+      const error = await refusalOf(
+        Runtime.make("node", {
+          requirement: "1.0.0",
+          platform,
+          executable: NodePath.join(root, "absent")
+        }).pipe(Effect.flatMap((service) => service.version), Effect.provide(NodeServices.layer))
+      )
+      const encoded = await Effect.runPromise(
+        Schema.encodeEffect(Schema.toCodecJson(Runtime.RuntimeError))(error)
+      )
+      expect(JSON.parse(JSON.stringify(encoded))).toMatchObject({
+        code: "probe_failed",
+        cause: { name: "PlatformError", code: "ENOENT" }
+      })
+    })
+  })
+
+  it("builds each runtime layer", async () => {
+    await withFixture(async (root) => {
+      const executable = NodePath.join(root, "fake.mjs")
+      await writeExecutable(executable, "process.stdout.write(\"1.3.0\\n\")")
+      for (
+        const [name, layer] of [
+          ["node", Runtime.layerNode({ requirement: "1.3.0", platform, executable })],
+          ["bun", Runtime.layerBun({ requirement: "1.3.0", platform, executable })]
+        ] as const
+      ) {
+        const measured = await Effect.runPromise(
+          Effect.gen(function*() {
+            const runtime = yield* Runtime.Runtime
+            expect(runtime.name).toBe(name)
+            return yield* runtime.verify
+          }).pipe(Effect.provide(layer), Effect.provide(NodeServices.layer))
+        )
+        expect(measured).toBe("1.3.0")
+      }
+    })
+  })
+})

@@ -1,0 +1,265 @@
+/**
+ * `smthrs gc`: the duration an operator types, and the databases the sweep
+ * runs against.
+ *
+ * The retention operation itself is tested in `@smthrs/engine-store`; what is
+ * pinned here is that a project's two databases are both swept, that a project
+ * which has never run anything is a no-op rather than an error, and that the
+ * lineage guard the facade delegates to holds over a real `.flows` — a settled
+ * child under a parked parent is what `agent/await` still reads out of a run
+ * row, and collecting it is data loss the operator did not ask for.
+ */
+import { Cause, Effect, Exit } from "effect"
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
+import { afterEach, describe, expect, it } from "vitest"
+import * as CliError from "../src/CliError.ts"
+import * as Gc from "../src/Gc.ts"
+
+const staged: Array<string> = []
+
+const project = (...files: ReadonlyArray<string>): string => {
+  const root = mkdtempSync(join(tmpdir(), "smithers-gc-"))
+  staged.push(root)
+  mkdirSync(join(root, ".flows"), { recursive: true })
+  for (const file of files) {
+    const database = new DatabaseSync(join(root, ".flows", file))
+    database.close()
+  }
+  return root
+}
+
+/**
+ * A project whose `.flows/engine.db` carries the run rows and the spawn edges
+ * a real engine writes: the two tables the lineage guard walks.
+ */
+const engineProject = (
+  runs: ReadonlyArray<{ readonly runId: string; readonly status: string; readonly finishedAtMs: number | null }>,
+  edges: ReadonlyArray<readonly [child: string, parent: string]>
+): string => {
+  const root = mkdtempSync(join(tmpdir(), "smithers-gc-lineage-"))
+  staged.push(root)
+  mkdirSync(join(root, ".flows"), { recursive: true })
+  const database = new DatabaseSync(join(root, ".flows", "engine.db"))
+  // The 1.0 marker table: `NodeDatabase.layer` refuses to open a file that
+  // holds tables and no `flows_migrations`, which is how a 0.x `smithers.db`
+  // is told apart from this one.
+  database.exec(`CREATE TABLE flows_migrations (
+    namespace TEXT NOT NULL,
+    id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    applied_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (namespace, id)
+  )`)
+  database.exec(`CREATE TABLE flows_runs (
+    run_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    finished_at_ms INTEGER,
+    parent_run_id TEXT REFERENCES flows_runs(run_id)
+  )`)
+  // No foreign key, exactly as the engine declares it: the two tables live in
+  // different migration lanes, and the trigger is what keeps edges from
+  // outliving their runs.
+  database.exec(`CREATE TABLE flows_run_parents (
+    child_id TEXT NOT NULL,
+    parent_id TEXT NOT NULL,
+    seq BIGINT NOT NULL,
+    PRIMARY KEY (child_id, parent_id)
+  )`)
+  database.exec(`CREATE TRIGGER flows_run_parents_gc
+    AFTER DELETE ON flows_runs
+    BEGIN
+      DELETE FROM flows_run_parents
+      WHERE child_id = OLD.run_id OR parent_id = OLD.run_id;
+    END`)
+  for (const run of runs) {
+    database
+      .prepare("INSERT INTO flows_runs (run_id, status, created_at_ms, finished_at_ms) VALUES (?, ?, ?, ?)")
+      .run(run.runId, run.status, 1, run.finishedAtMs)
+  }
+  for (const [child, parent] of edges) {
+    database.prepare("INSERT INTO flows_run_parents (child_id, parent_id, seq) VALUES (?, ?, 0)").run(child, parent)
+  }
+  database.close()
+  return root
+}
+
+/** Every run id left in a project's engine database, sorted. */
+const runIdsIn = (root: string, file = "engine.db"): ReadonlyArray<string> => {
+  const database = new DatabaseSync(join(root, ".flows", file))
+  const rows = database.prepare("SELECT run_id FROM flows_runs ORDER BY run_id").all()
+  database.close()
+  return rows.map((row) => String(row["run_id"]))
+}
+
+afterEach(() => {
+  while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
+})
+
+describe("the retention window", () => {
+  it("parses the durations an operator types", () => {
+    expect(Gc.duration("30d")).toBe(30 * 24 * 60 * 60 * 1000)
+    expect(Gc.duration("12h")).toBe(12 * 60 * 60 * 1000)
+    expect(Gc.duration("90 m")).toBe(90 * 60 * 1000)
+    expect(Gc.duration("2w")).toBe(2 * 7 * 24 * 60 * 60 * 1000)
+    expect(Gc.duration("45s")).toBe(45_000)
+  })
+
+  it("refuses a spelling it cannot read rather than guessing a window", () => {
+    for (const value of ["", "forever", "30", "d30", "-1d", "30y", "0s", "0d"]) {
+      expect(Gc.duration(value)).toBeUndefined()
+    }
+    expect(Gc.duration("30d")).toBe(30 * 24 * 60 * 60 * 1000)
+  })
+
+  it("keeps a month by default", () => {
+    expect(Gc.defaultRetention).toBe("30d")
+  })
+
+  it("renders singular and plural database failures", () => {
+    expect(Gc.failureMessage([{ database: "control.db", reason: "locked" }]))
+      .toContain("1 database, so nothing was collected from it")
+    expect(Gc.failureMessage([
+      { database: "control.db", reason: "locked" },
+      { database: "engine.db", reason: "corrupt" }
+    ])).toContain("2 databases, so nothing was collected from them")
+  })
+})
+
+describe("the sweep", () => {
+  it("names both of a project's databases, in the order it runs them", () => {
+    const root = project("control.db", "engine.db")
+
+    expect(Gc.databases(root)).toEqual([
+      join(root, ".flows", "control.db"),
+      join(root, ".flows", "engine.db")
+    ])
+  })
+
+  it("names only the databases that exist", () => {
+    const root = project("engine.db")
+
+    expect(Gc.databases(root)).toEqual([join(root, ".flows", "engine.db")])
+  })
+
+  it("is a no-op on a project that has never run anything", async () => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-gc-empty-"))
+    staged.push(root)
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "30d", dryRun: true }))
+
+    expect(result).toEqual({ olderThan: "30d", dryRun: true, reports: [], failures: [] })
+  })
+
+  it("reports one entry per database", async () => {
+    const root = project("control.db", "engine.db")
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1d", dryRun: true }))
+
+    expect(result.reports.map((report) => report.database)).toEqual(Gc.databases(root))
+    expect(result.reports.every((report) => report.runs.length === 0)).toBe(true)
+  })
+
+  it("aborts before deleting from either database when one cannot participate", async () => {
+    // An empty report of an unopenable file is the worst answer available:
+    // `gc --dry-run` is trusted to name exactly what a real pass would delete,
+    // and "nothing" is indistinguishable from "nothing to do". Probing every
+    // file first keeps a bad engine database from deleting the control half of
+    // a run.
+    const root = engineProject([
+      { runId: "settled", status: "completed", finishedAtMs: 1 }
+    ], [])
+    renameSync(join(root, ".flows", "engine.db"), join(root, ".flows", "control.db"))
+    mkdirSync(join(root, ".flows", "engine.db"))
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
+
+    expect(result.failures.map((failure) => failure.database)).toEqual([join(root, ".flows", "engine.db")])
+    expect(result.failures[0]!.reason).not.toBe("")
+    expect(result.reports).toEqual([])
+    expect(runIdsIn(root, "control.db")).toEqual(["settled"])
+  })
+
+  it("reports no failure when every database opened", async () => {
+    const result = await Effect.runPromise(
+      Gc.sweep(project("control.db", "engine.db"), { olderThan: "1d", dryRun: true })
+    )
+
+    expect(result.failures).toEqual([])
+  })
+
+  it("sweeps both databases after both probes succeed", async () => {
+    const root = engineProject([
+      { runId: "engine-run", status: "completed", finishedAtMs: 1 }
+    ], [])
+    const control = new DatabaseSync(join(root, ".flows", "control.db"))
+    control.exec(`CREATE TABLE flows_migrations (
+      namespace TEXT NOT NULL,
+      id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      applied_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (namespace, id)
+    )`)
+    control.exec(`CREATE TABLE flows_runs (
+      run_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      created_at_ms INTEGER NOT NULL,
+      finished_at_ms INTEGER,
+      parent_run_id TEXT REFERENCES flows_runs(run_id)
+    )`)
+    control.prepare("INSERT INTO flows_runs VALUES (?, ?, ?, ?, ?)")
+      .run("control-run", "completed", 1, 1, null)
+    control.close()
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
+
+    expect(result.failures).toEqual([])
+    expect(result.reports.map((report) => report.database)).toEqual(Gc.databases(root))
+    expect(runIdsIn(root, "control.db")).toEqual([])
+    expect(runIdsIn(root)).toEqual([])
+  })
+
+  it("keeps a spawned settled child whose parent is still parked", async () => {
+    // The child is aged and terminal, so a guard that looked only at status
+    // and age would collect it. Its parent is `suspended` — parked on an
+    // approval — and reads the child's result out of the run row through
+    // `agent/await`, so it stays until the parent settles. The edge is a
+    // `flows_run_parents` row with a NULL `parent_run_id`, which is exactly
+    // the relation the column-only guard missed.
+    const root = engineProject([
+      { runId: "parked-parent", status: "suspended", finishedAtMs: null },
+      { runId: "settled-child", status: "completed", finishedAtMs: 1 }
+    ], [["settled-child", "parked-parent"]])
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
+
+    const engine = result.reports.find((report) => report.database.endsWith("engine.db"))!
+    expect(engine.runs).toEqual([])
+    expect(runIdsIn(root)).toEqual(["parked-parent", "settled-child"])
+  })
+
+  it("collects that child once its parent has settled", async () => {
+    const root = engineProject([
+      { runId: "settled-parent", status: "completed", finishedAtMs: 1 },
+      { runId: "settled-child", status: "completed", finishedAtMs: 1 }
+    ], [["settled-child", "settled-parent"]])
+
+    const result = await Effect.runPromise(Gc.sweep(root, { olderThan: "1s", dryRun: false, now: 60_000 }))
+
+    const engine = result.reports.find((report) => report.database.endsWith("engine.db"))!
+    expect([...engine.runs].sort()).toEqual(["settled-child", "settled-parent"])
+    expect(runIdsIn(root)).toEqual([])
+  })
+
+  it("refuses a threshold it cannot read", async () => {
+    const exit = await Effect.runPromiseExit(Gc.sweep(project(), { olderThan: "forever", dryRun: true }))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+    expect(error).toBeInstanceOf(CliError.UsageError)
+    expect((error as CliError.UsageError).message).toContain("--older-than must be a duration")
+  })
+})
