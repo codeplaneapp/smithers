@@ -5,7 +5,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
-import { PACKAGE_EXECUTION_FORMAT } from "../src/PackageExec.ts"
+import { PACKAGE_EXECUTION_FORMAT, takesExclusiveTreePermit } from "../src/PackageExec.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
 const temporaryDirectories: Array<string> = []
@@ -1778,5 +1778,26 @@ export const Package = S.Package({ targets: { test } })
     expect(text).toContain("this loader exports no such namespace")
     expect(text).toContain("Shell")
     expect(text).toContain("Github")
+  })
+})
+
+describe("the whole-tree permit", () => {
+  it("is exclusive for every rule that snapshots the tree, not only for write mode", () => {
+    // Docs.Page, Agent.Diff and Agent.Pr reach the write-set guard through the
+    // candidate applier while their mode is `execute`, so a permit keyed on
+    // write mode alone let them snapshot and revert the whole repository
+    // beside a peer that was writing its own declared outputs.
+    for (const rule of ["Docs.Page", "Agent.Diff", "Agent.Pr"]) {
+      expect(takesExclusiveTreePermit({ rule, mode: "execute" })).toBe(true)
+    }
+    // Every other guarded call site is reached only in write mode, and a
+    // reader must stay on the shared side or the executor loses its
+    // concurrency.
+    expect(takesExclusiveTreePermit({ rule: "Generate", mode: "write" })).toBe(true)
+    expect(takesExclusiveTreePermit({ rule: "Generate", mode: "check" })).toBe(false)
+    expect(takesExclusiveTreePermit({ rule: "Shell.Build", mode: "execute" })).toBe(false)
+    // Agent.Lint returns its report before it touches the applier in check
+    // mode, and its fix mode is write mode, so it needs no special case.
+    expect(takesExclusiveTreePermit({ rule: "Agent.Lint", mode: "check" })).toBe(false)
   })
 })

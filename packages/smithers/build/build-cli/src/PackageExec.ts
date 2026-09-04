@@ -142,6 +142,18 @@ const checkModeRules: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Whether a node can snapshot and restore the whole workspace.
+ *
+ * Candidate appliers enter the write-set guard even in execute mode, so they
+ * must exclude every peer while the snapshot is live.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const takesExclusiveTreePermit = (node: Pick<PackageNode, "rule" | "mode">): boolean =>
+  node.mode === "write" || node.rule === "Docs.Page" || node.rule === "Agent.Diff" || node.rule === "Agent.Pr"
+
+/**
  * Rules that act outward or run for their side effects. They never gate:
  * a gate must be a check/test-capable target that can execute or cache-hit
  * green immediately before its consumer acts, and a Run or outward target
@@ -5747,12 +5759,9 @@ export const execute = async (
     const node = byLabel.get(label)!
     const started = performance.now()
     if (!node.dependencies.some((dependency) => notGreen.has(dependency))) reporter.targetStarted(label)
-    // Write mode is the mode every `enforceWriteSet` call site is reached
-    // through, so it is the exclusive side of the gate. Taking the permit
-    // around the whole node, rather than around the guarded body alone, keeps
-    // the acquisition on one side of the dispatch and out of the eight places
-    // the guard is entered.
-    const exclusive = node.mode === "write"
+    // Hold the permit across dispatch so every snapshot and restoration has
+    // the same exclusion, including candidate appliers in execute mode.
+    const exclusive = takesExclusiveTreePermit(node)
     await treeGate.acquire(exclusive)
     let outcome: Outcome
     try {
