@@ -540,9 +540,7 @@ describe("QuickJSSandbox interruption", () => {
 })
 
 describe("QuickJSSandbox memory pressure", () => {
-  // Last in the file on purpose: the failure it pins aborts the WebAssembly
-  // instance, and nothing after it in this module may depend on that instance.
-  it("fails the frame rather than handing the cell a half-materialized reply", async () => {
+  it("rejects a result larger than the remaining heap without aborting the frame", async () => {
     const exit = await evaluate(
       `const listed = await ctx.call("fs/list", {})
        ctx.done(String(listed.blob.length))`,
@@ -555,6 +553,9 @@ describe("QuickJSSandbox memory pressure", () => {
       }
     )
 
-    expect(Exit.isFailure(exit)).toBe(true)
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: { _tag: "rejected", code: "limit_exceeded", reason: "heap" }
+    })
   }, 60_000)
 })

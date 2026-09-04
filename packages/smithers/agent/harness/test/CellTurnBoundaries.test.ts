@@ -1228,6 +1228,23 @@ describe("CellTurn defaults and refusals a shipped binding cannot reach", () => 
 })
 
 describe("CellTurn frame failures", () => {
+  it("records an oversized flow result as a typed heap rejection", async () => {
+    const { engine, events, failure } = await run({
+      script: [emits(`const result = await ctx.call("fs/list", {})\nctx.done(String(result.blob.length))`)],
+      calls: [{ _tag: "Success", value: { blob: "z".repeat(3 * 1024 * 1024) } }],
+      state: state({ maxFrames: 1 }),
+      limits: { memoryBytes: Sandbox.minimumMemoryBytes, steps: Number.MAX_SAFE_INTEGER }
+    })
+
+    expect(failure).toBeUndefined()
+    expect(of(events, "cell-settled")[0]?.outcome).toMatchObject({
+      _tag: "rejected",
+      code: "limit_exceeded",
+      reason: "heap"
+    })
+    expect(engine.recorder.records.filter((record) => record.name === "cell-frame")).toHaveLength(1)
+  }, 60_000)
+
   it("reports a limit the binding cannot honour when the realm opens", async () => {
     const { events, failure } = await run({
       script: [emits(`ctx.done("done")`)],

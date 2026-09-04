@@ -245,7 +245,9 @@ export class Raised extends Schema.TaggedClass<Raised>("flows/harness/Cell/Raise
  */
 export class Rejected extends Schema.TaggedClass<Rejected>("flows/harness/Cell/Rejected")("rejected", {
   code: RejectionCode,
-  message: Schema.String
+  message: Schema.String,
+  /** The spent resource when `code` is `limit_exceeded`. */
+  reason: Schema.optional(Schema.Literals(["heap"]))
 }) {}
 
 /**

@@ -997,6 +997,16 @@ const openRealm = (
       handle.dispose()
     }
 
+    const heapUsed = (): number => {
+      const snapshot = runtime.computeMemoryUsage()
+      try {
+        const usage = context.dump(snapshot) as { readonly memory_used_size?: unknown }
+        return typeof usage.memory_used_size === "number" ? usage.memory_used_size : memoryBytes
+      } finally {
+        snapshot.dispose()
+      }
+    }
+
     const queue = (
       kind: "call" | "checkpoint",
       flow: string,
@@ -1005,6 +1015,20 @@ const openRealm = (
     ): QuickJSHandle => {
       const deferred = context.newPromise()
       const reply = (payload: Schema.Json): void => {
+        const payloadBytes = bytes.size(JSON.stringify(payload))
+        const remaining = Math.max(0, memoryBytes - heapUsed())
+        if (payloadBytes >= remaining) {
+          exhausted = exhausted ?? new Cell.Rejected({
+            code: "limit_exceeded",
+            reason: "heap",
+            message:
+              `The flow result needs at least ${payloadBytes} bytes of QuickJS heap, but only ${remaining} bytes remain ` +
+              `under this run's ceiling of ${memoryBytes}. The result was not materialized.`
+          })
+          deferred.resolve(context.undefined)
+          deferred.dispose()
+          return
+        }
         const handle = handleFromJson(context, defineDataProperty, payload)
         try {
           deferred.resolve(handle)

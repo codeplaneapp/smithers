@@ -378,7 +378,9 @@ produced a well-formed transition), `Raised` (ran and threw; the thrown value
 is projected into stable `name` and `message` text), and `Rejected` (never
 ran, or produced no transition). `Cell.RejectionCode` is `no_cell`,
 `imports_forbidden`, `compile_failed`, `invalid_transition`,
-`unsupported_language`, `limit_exceeded`, or `stalled`.
+`unsupported_language`, `limit_exceeded`, or `stalled`. A result that cannot
+fit in the remaining QuickJS heap is rejected before materialization with
+`code: "limit_exceeded"` and `reason: "heap"`, so the frame remains recordable.
 
 **The catalog.** `Cell.FlowProjection` is the read-only projection of one
 callable flow handed to a cell: `name`, `description`, `capabilities`,
