@@ -46,7 +46,7 @@
 - [Operate the memory store](https://smithers.sh/docs/guides/memory-ops/): Inspect, seed, and prune namespaced facts with the smthrs memory command, and run memory maintenance.
 - [Run flows in CI](https://smithers.sh/docs/guides/ci/): Run Smithers flows from a CI pipeline with the --json output contract, the exit-code vocabulary, provider keys as secrets, and a GitHub Actions workflow.
 - [Test your flows](https://smithers.sh/docs/guides/testing-flows/): Run flows on the in-memory engine under vitest, assert on recorded results and journal entries, and replay recorded model responses instead of calling a provider.
-- [Review pull requests with the Smithers action](https://smithers.sh/docs/guides/pr-review-action/): Add the smthrs review GitHub Action to a repository, trigger agent reviews with a PR comment, and run the same review from a terminal.
+- [Review pull requests with the Smithers action](https://smithers.sh/docs/guides/pr-review-action/): Add the Smithers review GitHub Action to a repository, trigger agent reviews with a PR comment, and run the same review from a terminal.
 
 ## Concepts
 

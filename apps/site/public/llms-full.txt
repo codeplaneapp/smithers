@@ -37215,6 +37215,9 @@ smthrs bug <summary...> [--run <run-id>] [--dry-run] [--yes]
 | --- | --- | --- | --- |
 | `summary` | string (one or more words) | yes | The one-line summary; the words are joined with spaces. An empty summary exits 2. |
 
+The summary may be quoted or supplied as separate words. Omitting it prompts on a TTY;
+on a pipe, the CLI exits 2 before opening project state.
+
 ## Flags
 
 | Flag | Type | Default | Description |

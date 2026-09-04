@@ -7,7 +7,7 @@ description: "Schema-first Effect model protocols, routes, and streaming events 
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/agent/model/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/model/docs/api.md) · [package docs](https://model.smithers.sh)
 
-> **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/kernel`](/docs/reference/api/kernel/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/kernel`](/docs/reference/api/kernel/)
 
 A model call is one composition: a `Protocol` owns the wire shape of an API
 family, an `Endpoint` owns where to send it, an `Auth` owns the credential,
@@ -483,3 +483,4 @@ must describe the bytes sent. Everything both encoders accept they encode
 identically, including an own member literally named `__proto__`. The
 [`@smthrs/canonical` encoder](/docs/reference/api/canonical/) mirrors `JSON.stringify` and is
 the right choice everywhere that is not a provider request body.
+

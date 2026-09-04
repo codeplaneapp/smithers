@@ -2,11 +2,11 @@ DESCRIPTION
   Preview a redacted bug report; post with --yes or TTY confirmation, or inspect with --dry-run
 
 USAGE
-  smthrs bug [flags] <summary> [<summary-word...>]
+  smthrs bug [flags] <summary> [<summary...>]
 
 ARGUMENTS
-  summary string           
-  summary-word... string    (optional)
+  summary string       
+  summary... string     (optional)
 
 FLAGS
   --credential string    Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv
