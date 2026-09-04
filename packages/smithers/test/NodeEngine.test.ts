@@ -12,7 +12,7 @@ import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { PlanCard } from "@smthrs/control/ControlSchema"
 import { Registry } from "@smthrs/registry"
 import { Effect, Layer } from "effect"
-import { existsSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
@@ -51,6 +51,41 @@ const withEngine = <A, E>(
   )
 
 describe("NodeControl.engineDurable", () => {
+  it.skipIf(process.platform === "win32").each([false, true])(
+    "restricts new and existing state (existing: %s)",
+    async (existing) => {
+      const isolated = await mkdtemp(join(tmpdir(), "flows-cli-permissions-"))
+      const state = join(isolated, ".flows")
+      const database = NodeControl.databasePath(isolated)
+      try {
+        if (existing) {
+          mkdirSync(state, { recursive: true })
+          writeFileSync(database, "")
+          chmodSync(state, 0o755)
+          chmodSync(database, 0o644)
+        }
+
+        const modes = await Effect.runPromise(
+          Effect.gen(function*() {
+            const runtime = yield* ControlRuntime
+            yield* runtime.plan({ flowId: "system/test", input: { permissions: true } })
+            const files = [database, `${database}-wal`, `${database}-shm`].filter(existsSync)
+            return {
+              directory: statSync(state).mode & 0o777,
+              files: files.map((file) => [file, statSync(file).mode & 0o777] as const)
+            }
+          }).pipe(Effect.provide(NodeControl.engineDurable(isolated).runtime), Effect.scoped, Effect.orDie)
+        )
+
+        expect(modes.directory).toBe(0o700)
+        expect(modes.files.map(([file]) => file)).toEqual([database, `${database}-wal`, `${database}-shm`])
+        for (const [file, mode] of modes.files) expect([file, mode]).toEqual([file, 0o600])
+      } finally {
+        await rm(isolated, { recursive: true, force: true })
+      }
+    }
+  )
+
   it("stamps launch fences with the real process identity", async () => {
     const isolated = await mkdtemp(join(tmpdir(), "flows-cli-owner-"))
     try {

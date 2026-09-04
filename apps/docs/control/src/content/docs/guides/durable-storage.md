@@ -50,6 +50,18 @@ Build the storage once. `Layer.provideMerge` builds what it provides privately,
 so composing it twice hands the control plane its own empty copy of the rows it
 is supposed to be reading.
 
+`SqlControlRuntime` stores the decoded plan input and the plan card summary as
+raw plaintext JSON. The durable adapter does not redact or encrypt those
+columns because the input must be replayed exactly. Never put a credential in
+plan input: store it through `Credential`, pass only a `CredentialRef`, and
+resolve that reference at the adapter boundary that needs the secret.
+
+The Node CLI creates its `.flows/` directory with mode `0700` and, on POSIX,
+repairs existing directory permissions to `0700` and SQLite database, WAL,
+and shared-memory file permissions to `0600` when opening the control store.
+Windows does not use this POSIX chmod policy. If you embed the durable adapter
+with your own database layer, configure equivalent storage access controls.
+
 ### Options
 
 | Option      | Meaning                                                                                                                                                                                 |

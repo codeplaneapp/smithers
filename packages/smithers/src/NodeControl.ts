@@ -72,7 +72,7 @@ import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
 import { hostname } from "node:os"
@@ -569,11 +569,23 @@ export const engineDurable = (
     Layer.provideMerge(
       DurableWriter.layer(),
       Layer.suspend(() => {
-        mkdirSync(dirname(file), { recursive: true })
+        const stateDirectory = dirname(file)
+        mkdirSync(stateDirectory, { recursive: true, mode: 0o700 })
+        if (process.platform !== "win32") chmodSync(stateDirectory, 0o700)
         return NodeDatabase.layer({ filename: file })
       })
     )
-  ).pipe(Layer.orDie)
+  ).pipe(
+    Layer.tap(() =>
+      Effect.sync(() => {
+        if (process.platform === "win32") return
+        for (const sqliteFile of [file, `${file}-wal`, `${file}-shm`]) {
+          if (existsSync(sqliteFile)) chmodSync(sqliteFile, 0o600)
+        }
+      })
+    ),
+    Layer.orDie
+  )
   // A control plane that cannot open its own database has nothing to serve, so
   // a failed open, migration, or journal start is a startup defect rather than
   // a typed control-plane error every command would have to carry.

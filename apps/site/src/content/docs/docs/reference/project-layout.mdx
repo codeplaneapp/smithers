@@ -51,6 +51,15 @@ Everything the runtime writes lives here, and nowhere else.
 | `.flows/logs/<runId>.log` | a detached run | Everything the detached child wrote. The launcher opens it as `pending-<nonce>.log` and renames it onto the run id once the run row is durable. |
 | `.flows/logs/<runId>.superseded-<nonce>.log` | `smthrs up -d` | An earlier log moved aside when a relaunched run id took the canonical path. |
 
+On POSIX, opening the Node control store restricts `.flows/` to `0700` and
+`control.db`, `control.db-wal`, and `control.db-shm` (when present) to `0600`,
+including existing stores. Windows does not use this chmod policy.
+
+Decoded plan inputs and plan card summaries are stored as raw plaintext JSON
+for replay. Keep credentials out of plan input: store secrets through
+`Credential`, pass a `CredentialRef`, and resolve it only at the adapter that
+needs it. File permissions do not encrypt the database or its backups.
+
 ## Root resolution
 
 Every command that touches durable state resolves the same project root, in this order:
