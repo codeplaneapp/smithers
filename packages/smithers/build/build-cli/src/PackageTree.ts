@@ -1323,16 +1323,16 @@ export const scratchCopy = async (
         source !== cacheAbsolute && source !== nodeModulesAbsolute && !skipped.has(source) &&
         !versionControl.has(NodePath.basename(source)) && !nestedCheckout(source)
     })
+    if (await Fs.lstat(nodeModulesAbsolute).then(() => true, () => false)) {
+      await Fs.symlink(nodeModulesAbsolute, NodePath.join(destination, "node_modules"), "dir")
+    }
+    return destination
   } catch (error) {
-    // A copy that dies part-way (ENOSPC, a vanished file) must not leave a
-    // half-built tree in the temporary directory for the next run to find.
+    // Neither copying nor linking dependencies can leave a half-built tree
+    // in the temporary directory for the next run to find.
     await Fs.rm(destination, { recursive: true, force: true })
     throw error
   }
-  if (await Fs.lstat(nodeModulesAbsolute).then(() => true, () => false)) {
-    await Fs.symlink(nodeModulesAbsolute, NodePath.join(destination, "node_modules"), "dir")
-  }
-  return destination
 }
 
 /**

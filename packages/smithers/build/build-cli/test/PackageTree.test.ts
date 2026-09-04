@@ -167,6 +167,37 @@ describe("captureOutDir heals a tampered CAS blob", () => {
 })
 
 describe("scratchCopy keeps installed dependencies as host state", () => {
+  it.skipIf(process.platform === "win32")("removes the scratch tree when copying fails", async () => {
+    const temporary = NodePath.join(outside, "tmp")
+    await Fs.mkdir(temporary)
+    vi.stubEnv("TMPDIR", temporary)
+    try {
+      await Fs.writeFile(NodePath.join(root, "source.txt"), "partially copied")
+      ChildProcess.execFileSync("mkfifo", [NodePath.join(root, "pipe")])
+      await expect(PackageTree.scratchCopy(root, ".flows")).rejects.toThrow()
+      expect(await Fs.readdir(temporary)).toEqual([])
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("removes the scratch tree when linking installed dependencies fails", async () => {
+    const temporary = NodePath.join(outside, "tmp")
+    await Fs.mkdir(temporary)
+    await Fs.mkdir(NodePath.join(root, "node_modules"))
+    await Fs.writeFile(NodePath.join(root, "source.txt"), "copied")
+    vi.stubEnv("TMPDIR", temporary)
+    const failure = new Error("symlink failed")
+    const link = vi.spyOn(Fs, "symlink").mockRejectedValueOnce(failure)
+    try {
+      await expect(PackageTree.scratchCopy(root, ".flows")).rejects.toBe(failure)
+      expect(await Fs.readdir(temporary)).toEqual([])
+    } finally {
+      link.mockRestore()
+      vi.unstubAllEnvs()
+    }
+  })
+
   it("links a real node_modules directory instead of copying its contents", async () => {
     await Fs.mkdir(NodePath.join(root, "node_modules", "fixture"), { recursive: true })
     await Fs.writeFile(NodePath.join(root, "node_modules", "fixture", "index.js"), "export {}")
