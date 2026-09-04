@@ -141,9 +141,7 @@ const ci = Smithers.GithubCiGen({
             ".github/workflows/release.yml",
             ".github/workflows/apps-deploy.yml",
             ".github/workflows/canary.yml",
-            ".github/workflows/pr-review.yml",
-            ".github/workflows/issue-triage.yml",
-            ".github/workflows/pr-triage.yml"
+            ".github/workflows/pr-review.yml"
           ]
         })
       }),
@@ -186,6 +184,16 @@ const ci = Smithers.GithubCiGen({
         // smithers.sh: the landing page and the Starlight docs. `astro check`
         // and `astro build` over apps/site/src/content/docs.
         { name: "Site", verb: Smithers.Verb.Ci, pattern: "//apps/site/..." },
+        // The 53 per-package documentation sites (<slug>.smithers.sh). Each
+        // one's `contentSync` target restitches the site from its package's
+        // colocated `docs/`, so this step is what fails a change that edits a
+        // package's docs without regenerating the committed content tree. The
+        // committed tree is the cache, not the source: without this gate a
+        // stale copy deploys silently, which is exactly the drift the
+        // colocated-docs convention exists to prevent. `astro build` runs
+        // beside it, so a docs page that breaks its site fails here and not on
+        // the deploy.
+        { name: "Package docs sites", verb: Smithers.Verb.Ci, pattern: "//apps/docs/..." },
         {
           name: "Review eval suite (offline, baseline-gated)",
           verb: Smithers.Verb.Test,
@@ -388,100 +396,6 @@ const ci = Smithers.GithubCiGen({
   ]
 })
 
-// --- repository intake automation -----------------------------------------
-// These workflows deliberately split GitHub mutation from model execution.
-// The agent sees untrusted issue/PR text but never receives GITHUB_TOKEN, and
-// pull-request triage runs from the trusted base branch without checking out
-// the contributor's head. `github-triage.mjs` is the narrow, validated write
-// boundary that applies an allowlisted report or posts a useful fallback.
-const triageCheckout = {
-  uses: "actions/checkout@v4",
-  with: { "persist-credentials": "false" }
-} as const
-
-const triageSetup = [
-  triageCheckout,
-  { uses: "pnpm/action-setup@v6" },
-  { uses: "actions/setup-node@v4", with: { "node-version": "22.19.0", cache: "pnpm" } },
-  { name: "Install the declared workspace", run: "pnpm install --frozen-lockfile --ignore-scripts" }
-] as const
-
-const issueTriageWorkflow = Smithers.Github.Workflow({
-  name: "issue-triage",
-  on: { issues: { types: ["opened", "edited", "reopened"] }, workflowDispatch: true },
-  permissions: { contents: "read", issues: "write" },
-  concurrency: { group: "issue-triage-${{ github.event.issue.number || github.run_id }}", cancelInProgress: true },
-  steps: [
-    ...triageSetup,
-    {
-      name: "Prepare untrusted issue context",
-      run: "node scripts/github-triage.mjs prepare issue",
-      env: { GH_TOKEN: "${{ github.token }}" }
-    },
-    {
-      name: "Investigate and build a minimal reproduction",
-      run: [
-        "set +e",
-        "pnpm exec smthrs up issue-triage --data '{\"args\":\".triage/context.json\"}'",
-        "echo \"flow_exit=$?\" >> \"$GITHUB_STEP_SUMMARY\"",
-        "exit 0"
-      ],
-      env: { OPENAI_API_KEY: "${{ secrets.OPENAI_API_KEY }}" }
-    },
-    {
-      name: "Publish validated triage or ask the opener for help",
-      run: "node scripts/github-triage.mjs apply issue",
-      env: { GH_TOKEN: "${{ github.token }}" }
-    }
-  ]
-})
-
-const prTriageWorkflow = Smithers.Github.Workflow({
-  name: "pr-triage",
-  on: {
-    pullRequestTarget: { types: ["opened", "edited", "reopened", "synchronize", "ready_for_review"] },
-    workflowDispatch: true
-  },
-  permissions: { contents: "read", issues: "write", "pull-requests": "write" },
-  concurrency: { group: "pr-triage-${{ github.event.pull_request.number || github.run_id }}", cancelInProgress: true },
-  steps: [
-    ...triageSetup,
-    {
-      name: "Prepare the PR diff without checking out its head",
-      run: "node scripts/github-triage.mjs prepare pr",
-      env: { GH_TOKEN: "${{ github.token }}" }
-    },
-    {
-      name: "Assess review readiness",
-      run: [
-        "set +e",
-        "pnpm exec smthrs up pr-triage --data '{\"args\":\".triage/context.json\"}'",
-        "echo \"flow_exit=$?\" >> \"$GITHUB_STEP_SUMMARY\"",
-        "exit 0"
-      ],
-      env: { OPENAI_API_KEY: "${{ secrets.OPENAI_API_KEY }}" }
-    },
-    {
-      name: "Publish validated triage or a concrete retry request",
-      run: "node scripts/github-triage.mjs apply pr",
-      env: { GH_TOKEN: "${{ github.token }}" }
-    }
-  ]
-})
-
-const triageWorkflows = Smithers.Github.CiGen({
-  workflows: [issueTriageWorkflow, prTriageWorkflow],
-  preserve: [
-    ".github/workflows/apps-deploy.yml",
-    ".github/workflows/canary.yml",
-    ".github/workflows/ci.yml",
-    ".github/workflows/pr-review.yml",
-    ".github/workflows/release.yml"
-  ],
-  changes: [".github/workflows/**"]
-})
-// --- end repository intake automation -------------------------------------
-
 // The two workspace-wide model reviews. They cover every package's sources
 // with one wildcard rather than a hand-kept list of packages, so a new package
 // is under both rubrics the day it exists. A package that wants a narrower or
@@ -575,17 +489,5 @@ export const packageDefaults = Smithers.PackageDefaults({
 })
 
 export const Package = Smithers.Package({
-  targets: {
-    changelog,
-    ci,
-    docsReferenceSync,
-    issueTriageWorkflow,
-    jsdocRules,
-    jsdocTruthfulness,
-    lockfile,
-    nodeModules,
-    prTriageWorkflow,
-    triageWorkflows,
-    tsconfig
-  }
+  targets: { changelog, ci, docsReferenceSync, jsdocRules, jsdocTruthfulness, lockfile, nodeModules, tsconfig }
 })
