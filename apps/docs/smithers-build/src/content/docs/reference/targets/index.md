@@ -83,6 +83,8 @@ exists for future additions and is unused. See
 | Target                       | Kinds  | Cacheable | Status   | Summary                                                |
 | ---------------------------- | ------ | --------- | -------- | ------------------------------------------------------ |
 | [DocsParity](/reference/targets/docs-parity/) | `docs` | Always    | Executes | Requires a substantive README beside a package's code. |
+| [Docs.Page](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/docs/reference/targets/docs-page.md) | `docs` | Never | Executes | Writes one documentation page with an agent; `ci` never selects it. |
+| [Docs.Check](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/docs/reference/targets/docs-check.md) | `lint`, `docs` | Check form | Executes | Fails when a committed agent-written page is older than its inputs, or was hand-edited. |
 | [Markdown.CodeBlocks](/reference/targets/markdown-code-blocks/) | `build`, `test` | Always | Executes | Compiles a page's fenced code blocks; `title=` fences concatenate into files, `fragment` fences are skipped. |
 
 `PackageJson` uses separate targets for checking and source-tree writes.
