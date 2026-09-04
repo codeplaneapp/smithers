@@ -16,6 +16,11 @@ import * as Read from "@smthrs/std/Read"
 
 `@smthrs/std/internal/*` and `@smthrs/std/<Module>/index` are not public.
 
+Host child processes receive only `PATH`, `HOME`, `USER`, `LANG`, `LC_*`,
+`TERM`, `TMPDIR`, and `SHELL` from the Smithers process, plus names explicitly
+declared by the caller. Credential-shaped ambient names are withheld; an
+explicit declaration is applied last and therefore opts that name in.
+
 For the input and output fields of each flow, see the
 [Flow reference](/reference/flows/). This page is the module and export
 surface.

@@ -5,6 +5,7 @@
  *
  * @since 0.1.0
  */
+import * as ChildProcessEnvironment from "@smthrs/kernel/ChildProcessEnvironment"
 import { Effect, Redacted as EffectRedacted } from "effect"
 import { ModelError } from "./ModelError.ts"
 
@@ -24,8 +25,7 @@ import { ModelError } from "./ModelError.ts"
  * @category constants
  * @slop
  */
-export const credentialNamePattern =
-  /authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|api[-_]?token|session[-_]?token|bearer|(?:^|[-_])token$|secret|credential|password|passphrase|passwd|signature|x-amz-signature|cookie|set[-_]?cookie|chatgpt[-_]?account[-_]?id/i
+export const credentialNamePattern = ChildProcessEnvironment.credentialNamePattern
 
 /**
  * Reports whether a field name conventionally carries credentials.
@@ -34,7 +34,7 @@ export const credentialNamePattern =
  * @category predicates
  * @slop
  */
-export const isCredentialName = (name: string): boolean => credentialNamePattern.test(name)
+export const isCredentialName = ChildProcessEnvironment.isCredentialName
 
 /**
  * A value whose normal string and JSON representations conceal its contents.

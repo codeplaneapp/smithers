@@ -52,6 +52,18 @@ Six input combinations are refused with `invalid_input`, each naming the fix:
 `command` with `script`, neither of the two, `script` with `stdin`, `command`
 with `args`, `command` with `interpreter`, and a hermetic containerised call.
 
+## Declare the environment
+
+Host commands inherit a bootstrap allowlist, not the whole Smithers process
+environment: `PATH`, `HOME`, `USER`, `LANG`, every `LC_*` locale variable,
+`TERM`, `TMPDIR`, and `SHELL`. Add a variable to `env` when the command needs
+it. Caller-declared names are applied last, including credential-shaped names,
+so declaring one is an explicit decision to make its value readable by the
+command. Undeclared provider keys and tokens are withheld.
+
+Containerised commands receive the `env` entries through the container
+transport; their remaining environment belongs to the container image.
+
 ## Route it into a container
 
 ```ts

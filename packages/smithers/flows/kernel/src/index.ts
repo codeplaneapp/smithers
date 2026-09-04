@@ -35,6 +35,14 @@ export * as CapabilitySet from "./CapabilitySet.ts"
 export * as ChildProcessSpawner from "./ChildProcessSpawner.ts"
 
 /**
+ * Least-authority child-process environment construction.
+ *
+ * @category namespace exports
+ * @since 1.0.0-rc.0
+ */
+export * as ChildProcessEnvironment from "./ChildProcessEnvironment.ts"
+
+/**
  * Process containment middleware over Effect's own `ChildProcessSpawner` tag.
  *
  * @category namespace exports

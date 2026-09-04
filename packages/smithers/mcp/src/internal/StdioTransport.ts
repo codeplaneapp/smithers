@@ -14,6 +14,7 @@
  *
  * @since 1.0.0-rc.0
  */
+import * as ChildProcessEnvironment from "@smthrs/kernel/ChildProcessEnvironment"
 import { Deferred, Effect, HashMap, Option, Queue, Ref, Stream } from "effect"
 import type { Scope } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -46,7 +47,7 @@ export interface ConnectOptions {
   readonly command: string
   readonly args: ReadonlyArray<string>
   readonly cwd?: string | undefined
-  /** Values merged into the inherited child environment rather than replacing it. */
+  /** Values merged into the bootstrap allowlist rather than the full host environment. */
   readonly env?: Record<string, string | undefined> | undefined
   /** Default deadline for a request/reply exchange. See {@link defaultRequestTimeoutMs}. */
   readonly requestTimeoutMs?: number | undefined
@@ -226,7 +227,8 @@ export const connect = (
 
     const handle = yield* ChildProcess.make(options.command, options.args, {
       cwd: options.cwd,
-      ...(options.env === undefined ? {} : { env: options.env, extendEnv: true }),
+      env: ChildProcessEnvironment.make(process.env, options.env),
+      extendEnv: false,
       stdin: "pipe",
       stdout: "pipe",
       // Stderr is diagnostic only: a scoped drainer below retains at most the

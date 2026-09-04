@@ -35,8 +35,9 @@ await Effect.runPromise(Effect.provide(program, NodeServices.layer))
 ```
 
 Each tool becomes a flow named `mcp/<server>/<tool>`. The connection's lifetime
-is the scope's lifetime, and `env` is merged into the inherited child
-environment rather than replacing it.
+is the scope's lifetime. The child inherits `PATH`, `HOME`, `USER`, `LANG`,
+`LC_*`, `TERM`, `TMPDIR`, and `SHELL`; `env` explicitly adds or replaces names.
+Other ambient variables, including provider credentials, are withheld.
 
 Catalog tools must declare `inputSchema.type: "object"`. Structured-only tool
 results are accepted with `content: []`, and declared `outputSchema` documents

@@ -3,6 +3,7 @@
  *
  * @since 0.1.0
  */
+import * as ChildProcessEnvironment from "@smthrs/kernel/ChildProcessEnvironment"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Stream from "effect/Stream"
@@ -44,9 +45,9 @@ const failure = providerFailure
  * `acquire` creates one scratch directory per session key and serves the
  * session contract from it: `spawn` runs the command line through the host
  * spawner's shell with the directory as its default working directory — a
- * relative `cwd` is taken under it, the caller's `env` extends the host's
- * rather than replacing it, and `stdin` bytes become the command's whole
- * standard input — file transfer is the host filesystem, `kill` delivers
+ * relative `cwd` is taken under it, the caller's `env` extends a narrow host
+ * bootstrap environment, and `stdin` bytes become the command's whole standard
+ * input — file transfer is the host filesystem, `kill` delivers
  * real signals, and closing the scope removes the directory.
  *
  * This is the trusted local backend — a workspace boundary, **not a security
@@ -113,10 +114,8 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
           const settings: ChildProcess.CommandOptions = {
             shell: true,
             cwd: resolve(spawnOptions.cwd ?? ""),
-            // The caller's variables extend the host environment the way
-            // `docker exec --env` extends a container's; replacing it would
-            // strip PATH from every spawn that sets a single variable.
-            ...spawnOptions.env === undefined ? {} : { env: spawnOptions.env, extendEnv: true },
+            env: ChildProcessEnvironment.make(globalThis.process.env, spawnOptions.env),
+            extendEnv: false,
             ...spawnOptions.stdin === undefined ? {} : { stdin: Stream.make(spawnOptions.stdin) }
           }
           const handle = yield* options.spawner.spawn(ChildProcess.make(command, settings)).pipe(

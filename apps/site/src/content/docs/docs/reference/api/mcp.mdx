@@ -106,7 +106,7 @@ The result of one `tools/call`.
 | `command`               | `string`                                           | The executable to spawn. Required.                                              |
 | `args`                  | `ReadonlyArray<string>`                            | Its arguments. Required.                                                        |
 | `cwd`                   | `string \| undefined`                              | The child's working directory.                                                  |
-| `env`                   | `Record<string, string \| undefined> \| undefined` | Values merged into the inherited child environment rather than replacing it.    |
+| `env`                   | `Record<string, string \| undefined> \| undefined` | Values overlaid on the bootstrap child environment.                              |
 | `handshakeTimeoutMs`    | `number \| undefined`                              | Deadline for each `initialize` and `tools/list` request. Default 10000.         |
 | `requestTimeoutMs`      | `number \| undefined`                              | Deadline for each later tool request. Default 120000.                           |
 | `queueCapacity`         | `number \| undefined`                              | Maximum outbound frames waiting to be written. Default 64.                      |
@@ -119,6 +119,10 @@ The result of one `tools/call`.
 
 Every numeric field must be a positive integer. Anything else fails with
 `protocol_error` naming the option, before the process is spawned.
+
+The bootstrap child environment contains only `PATH`, `HOME`, `USER`, `LANG`,
+`LC_*`, `TERM`, `TMPDIR`, and `SHELL`. Other ambient names are withheld;
+entries in `env` are explicit declarations and are applied last.
 
 ### McpClient.ConnectOptionsSchema
 

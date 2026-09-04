@@ -64,6 +64,16 @@ const program = Read.run({ path: "/workspace/notes.md" }).pipe(
 
 The root entry point is Node-only: `NodeLanguageServer` pulls in `node:url`. The four subpaths `@smthrs/std/Grep`, `@smthrs/std/Glob`, `@smthrs/std/Search` and `@smthrs/std/PortableSearch` are browser-safe and are the entries the repository's browser contract checks.
 
+## Child process environment
+
+Commands started by `bash`, `shell_command`, `test`, and the package's internal
+process helpers do not inherit the full Smithers process environment. They
+receive only `PATH`, `HOME`, `USER`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, and
+`SHELL`, plus variables the caller explicitly declares. Credential-shaped
+ambient names such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GH_TOKEN` are
+withheld; an explicitly declared name is intentional and is delivered even
+when its name looks sensitive.
+
 ## Limits
 
 Every limit is a display budget disclosed to the caller, never a silent cut. A capped result says so in its own output: `truncated`, `<stream>Truncated`, or a `notice` line naming what was shown and what there was.

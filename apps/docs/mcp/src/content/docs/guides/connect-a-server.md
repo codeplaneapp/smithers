@@ -52,22 +52,23 @@ declarations were derived from.
 `cwd` is passed to the child process unchanged. A server that resolves paths
 relative to its own directory needs it; most do.
 
-## Merge, do not replace, the environment
+## Declare the server environment
 
-`env` values are merged into the inherited child environment rather than
-replacing it. A server spawned with a credential still receives `PATH`, `HOME`,
-and everything else the parent process had, which is what makes
-`command: "npx"` resolvable.
+The child inherits only `PATH`, `HOME`, `USER`, `LANG`, `LC_*`, `TERM`,
+`TMPDIR`, and `SHELL`. This keeps a bare executable such as `npx` resolvable
+without exposing every provider credential held by the Smithers process.
+`env` values are explicit declarations applied on top of that bootstrap set.
 
 ```ts
-// The child gets the parent's environment plus GITHUB_TOKEN.
+// The child gets the bootstrap environment plus GITHUB_TOKEN.
 env: {
   GITHUB_TOKEN: "..."
 }
 ```
 
-There is no option to start from an empty environment. If a server must not see
-a variable, remove it from the parent process before connecting.
+A credential-shaped name is delivered when it appears in `env`, because the
+declaration is the caller's explicit authority for this server. Undeclared
+ambient names are withheld.
 
 ## Know which revisions the handshake accepts
 

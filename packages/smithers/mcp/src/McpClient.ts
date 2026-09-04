@@ -77,7 +77,7 @@ export interface ConnectOptions {
   readonly command: string
   readonly args: ReadonlyArray<string>
   readonly cwd?: string | undefined
-  /** Values merged into the inherited child environment rather than replacing it. */
+  /** Values merged into the bootstrap allowlist rather than the full host environment. */
   readonly env?: Record<string, string | undefined> | undefined
   /** Deadline for each initialize/catalog request. See {@link defaultHandshakeTimeoutMs}. */
   readonly handshakeTimeoutMs?: number | undefined

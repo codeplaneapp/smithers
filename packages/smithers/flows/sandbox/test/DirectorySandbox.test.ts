@@ -222,25 +222,45 @@ describe("DirectorySandbox", () => {
               )
             )
             expect(elsewhere.trim()).toBe(root)
-            // The caller's variables extend the host's rather than replace
-            // them, so PATH survives an override, and an `undefined` value
-            // unsets an inherited variable instead of arriving as text.
+            // Only bootstrap names and caller declarations cross the process
+            // boundary; an `undefined` declaration removes even an inherited
+            // value instead of arriving as text.
             const hostPath = globalThis.process.env.PATH
-            globalThis.process.env.DIRECTORY_SANDBOX_INHERITED = "kept"
+            const previousAnthropic = globalThis.process.env.ANTHROPIC_API_KEY
+            const previousOpenAi = globalThis.process.env.OPENAI_API_KEY
+            const previousGithub = globalThis.process.env.GH_TOKEN
             globalThis.process.env.DIRECTORY_SANDBOX_DROPPED = "inherited"
+            globalThis.process.env.ANTHROPIC_API_KEY = "ambient-anthropic"
+            globalThis.process.env.OPENAI_API_KEY = "ambient-openai"
+            globalThis.process.env.GH_TOKEN = "ambient-github"
             const merged = yield* Effect.scoped(
               Effect.flatMap(
                 session.spawn(
-                  `printf '%s|%s|%s' "$PATH" "$DIRECTORY_SANDBOX_INHERITED" "\${DIRECTORY_SANDBOX_DROPPED-unset}"`,
+                  "printenv",
                   { env: { DIRECTORY_SANDBOX_PROOF: "delivered", DIRECTORY_SANDBOX_DROPPED: undefined } }
                 ),
                 stdoutOf
               )
             ).pipe(Effect.ensuring(Effect.sync(() => {
-              delete globalThis.process.env.DIRECTORY_SANDBOX_INHERITED
               delete globalThis.process.env.DIRECTORY_SANDBOX_DROPPED
+              if (previousAnthropic === undefined) delete globalThis.process.env.ANTHROPIC_API_KEY
+              else globalThis.process.env.ANTHROPIC_API_KEY = previousAnthropic
+              if (previousOpenAi === undefined) delete globalThis.process.env.OPENAI_API_KEY
+              else globalThis.process.env.OPENAI_API_KEY = previousOpenAi
+              if (previousGithub === undefined) delete globalThis.process.env.GH_TOKEN
+              else globalThis.process.env.GH_TOKEN = previousGithub
             })))
-            expect(merged).toBe(`${hostPath}|kept|unset`)
+            const environment = Object.fromEntries(
+              merged.trim().split("\n").map((entry) => {
+                const separator = entry.indexOf("=")
+                return [entry.slice(0, separator), entry.slice(separator + 1)]
+              })
+            )
+            expect(environment).toMatchObject({ PATH: hostPath, DIRECTORY_SANDBOX_PROOF: "delivered" })
+            expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY")
+            expect(environment).not.toHaveProperty("OPENAI_API_KEY")
+            expect(environment).not.toHaveProperty("GH_TOKEN")
+            expect(environment).not.toHaveProperty("DIRECTORY_SANDBOX_DROPPED")
           })
         )
       }),

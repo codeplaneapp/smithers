@@ -241,6 +241,12 @@ const provider = DirectorySandbox.make({
 
 `acquire` creates the deterministic scratch directory, runs shell commands there by default, exposes native host file operations, delivers real process signals, and removes the directory when the scope closes. The filesystem and spawner are injected values; the package takes no ambient host dependency. Closing a spawn's scope signals the whole process tree the command started, not only the wrapper shell, so a pipeline or a background job cannot outlive the scope that owned it.
 
+Each child receives only the host's `PATH`, `HOME`, `USER`, `LANG`, `LC_*`,
+`TERM`, `TMPDIR`, and `SHELL`, plus names explicitly declared in the spawn's
+`env`. Undeclared provider keys, tokens, and other ambient variables are
+withheld. An explicitly declared name is delivered even when it looks
+credential-bearing.
+
 This is a trusted local workspace backend, **not a security boundary**. A spawned process is not confined to the scratch directory and can address whatever its host credentials permit. Use it for local composition, tests, or CI placement where the body is trusted.
 
 ### ContainerSandbox

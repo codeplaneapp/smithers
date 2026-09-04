@@ -51,21 +51,23 @@ crossed the seam.
 
 ## What each provider's boundary actually is
 
-| Provider              | The boundary                                                                             | Shaping options it forwards                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `DirectorySandbox`    | none. Real host processes with your credentials, in a directory they are not confined to | none                                                                                                           |
-| `JustBashSandbox`     | none. Commands are interpreted in process against a shared virtual filesystem            | none                                                                                                           |
-| `ContainerSandbox`    | the container runtime's                                                                  | `image`, `network` (`none` by default; another mode opts into egress), `env`, `createArgs`                     |
-| `KubernetesSandbox`   | the cluster's: the image, the service account, and the namespace's policies              | `image`, `serviceAccount`, `namespace`, `nodeSelector`, `resources`, `labels`, `createArgs`                    |
-| `MicrosandboxSandbox` | a local microVM                                                                          | `image` or `snapshot`, `cpus`, `memoryMib`, `maxDurationSecs`, `idleTimeoutSecs`, `security`, `disableNetwork` |
-| `VercelSandbox`       | Vercel's sandbox tenancy                                                                 | `runtime`, `timeoutMs`, `maxDurationMs`                                                                        |
-| `DaytonaSandbox`      | Daytona's sandbox tenancy                                                                | `startTimeoutSeconds`, `deleteTimeoutSeconds`                                                                  |
-| `AwsSandbox`          | the Fargate task, its task role, and its security groups                                 | `image` or `taskDefinition`, `taskRoleArn`, `securityGroups`, `subnets`, `assignPublicIp`, `cpu`, `memory`     |
-| `CloudflareSandbox`   | the Durable Object and its container, deployed by you                                    | `sleepAfter`, `keepAlive`                                                                                      |
+| Provider              | The boundary                                                                            | Shaping options it forwards                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `DirectorySandbox`    | no filesystem, user, or network boundary. Real host processes with a narrow environment | child env inherits `PATH`, `HOME`, `USER`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, and `SHELL`, plus declared names  |
+| `JustBashSandbox`     | none. Commands are interpreted in process against a shared virtual filesystem           | none                                                                                                           |
+| `ContainerSandbox`    | the container runtime's                                                                 | `image`, `network` (`none` by default; another mode opts into egress), `env`, `createArgs`                     |
+| `KubernetesSandbox`   | the cluster's: the image, the service account, and the namespace's policies             | `image`, `serviceAccount`, `namespace`, `nodeSelector`, `resources`, `labels`, `createArgs`                    |
+| `MicrosandboxSandbox` | a local microVM                                                                         | `image` or `snapshot`, `cpus`, `memoryMib`, `maxDurationSecs`, `idleTimeoutSecs`, `security`, `disableNetwork` |
+| `VercelSandbox`       | Vercel's sandbox tenancy                                                                | `runtime`, `timeoutMs`, `maxDurationMs`                                                                        |
+| `DaytonaSandbox`      | Daytona's sandbox tenancy                                                               | `startTimeoutSeconds`, `deleteTimeoutSeconds`                                                                  |
+| `AwsSandbox`          | the Fargate task, its task role, and its security groups                                | `image` or `taskDefinition`, `taskRoleArn`, `securityGroups`, `subnets`, `assignPublicIp`, `cpu`, `memory`     |
+| `CloudflareSandbox`   | the Durable Object and its container, deployed by you                                   | `sleepAfter`, `keepAlive`                                                                                      |
 
-The first two rows say `none` deliberately. `DirectorySandbox` is a trusted
-local workspace backend and the conformance reference; a spawned process can
-address whatever its host credentials permit. `JustBashSandbox` is a workspace
+The first two rows say there is no confinement deliberately. `DirectorySandbox`
+is a trusted local workspace backend and the conformance reference; its child
+environment withholds undeclared ambient credentials, but a spawned process can
+still address whatever its host user, filesystem, and network permit.
+`JustBashSandbox` is a workspace
 boundary for hosts that cannot spawn at all; an interpreted command can address
 anything its shared virtual filesystem permits. Neither is a security boundary,
 and neither becomes one by being wrapped in `Sandbox.layerHost`.

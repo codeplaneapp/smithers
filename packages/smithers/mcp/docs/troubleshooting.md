@@ -18,10 +18,10 @@ One failure is not an `McpError` at all, and it is the most common one: see
 spawn error and, when the child produced any, a bounded tail of its stderr.
 
 **What to change.** Check that `command` is on the parent process's `PATH`, that
-`cwd` exists, and that the entry file is readable. `env` is merged into the
-inherited environment rather than replacing it, so a missing `PATH` is not the
-cause; a wrong `command` usually is. For a server started through `npx`, run the
-same command by hand first.
+`cwd` exists, and that the entry file is readable. The child receives `PATH`
+from the bootstrap allowlist even when `env` declares other names, so a wrong
+`command` usually is the cause. For a server started through `npx`, run the same
+command by hand first.
 
 ## ... speaks protocol "X"; this client speaks ...
 

@@ -13,6 +13,7 @@
  *
  * @since 0.1.0
  */
+import * as ChildProcessEnvironment from "@smthrs/kernel/ChildProcessEnvironment"
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -183,7 +184,8 @@ const unbounded = (
     const settings: ChildProcess.CommandOptions = {
       ...(options.args === undefined ? { shell: true } : {}),
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-      ...(options.env === undefined ? {} : { env: options.env }),
+      env: ChildProcessEnvironment.make(process.env, options.env),
+      extendEnv: false,
       ...(options.stdin === undefined
         ? {}
         : { stdin: Stream.make(new TextEncoder().encode(options.stdin)) })

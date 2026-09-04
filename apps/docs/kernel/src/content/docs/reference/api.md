@@ -723,6 +723,21 @@ of what a grant authorizes. `cwd` and the **names** of overridden environment
 variables reach an attended surface as display metadata; the values do not. A
 command that cannot be snapshotted fails with an `InvalidData` `PlatformError`.
 
+## ChildProcessEnvironment
+
+Least-authority construction for a child process's replacement environment.
+
+| Export                  | Type                                             | Meaning                                                                                         |
+| ----------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `inheritedNames`        | `ReadonlyArray<string>`                          | `PATH`, `HOME`, `USER`, `LANG`, `TERM`, `TMPDIR`, and `SHELL`; `LC_*` is admitted by prefix.    |
+| `credentialNamePattern` | `RegExp`                                         | The credential-name rule shared with `@smthrs/model/Auth`.                                      |
+| `isCredentialName`      | `(name: string) => boolean`                      | Tests one name against that rule.                                                               |
+| `make`                  | `(ambient, declared?) => Record<string, string>` | Selects bootstrap names, withholds sensitive ambient names, and overlays explicit declarations. |
+
+`make` returns a null-prototype record suitable for `CommandOptions.env` with
+`extendEnv: false`. An explicitly declared name is applied last, even when it
+looks sensitive; an `undefined` declaration removes an inherited name.
+
 ## ContainedSpawner
 
 Kill-escalation and ledger recording over the same spawner tag.

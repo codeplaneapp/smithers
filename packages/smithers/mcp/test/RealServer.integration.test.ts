@@ -299,6 +299,9 @@ reader?.on("line", (line) => {
           type: "environment",
           token: process.env.MCP_FIXTURE_TOKEN,
           hasPath: typeof process.env.PATH === "string" && process.env.PATH.length > 0,
+          anthropic: process.env.ANTHROPIC_API_KEY,
+          openai: process.env.OPENAI_API_KEY,
+          github: process.env.GH_TOKEN,
           cwd: process.cwd()
         }],
         isError: false
@@ -565,17 +568,35 @@ describe("McpClient against a real MCP server", () => {
     expect(client.tools.map((tool) => tool.name)).toEqual(["add", "error"])
   })
 
-  it("inherits PATH while merging configured environment values", async () => {
-    const result = await execute(Effect.scoped(Effect.gen(function*() {
-      const client = yield* connectNode("echo-env", [], {
-        env: { MCP_FIXTURE_TOKEN: "fixture-token" }
-      })
-      return yield* client.callTool("add", {})
-    })))
-    expect(result.content).toEqual([expect.objectContaining({
-      token: "fixture-token",
-      hasPath: true
-    })])
+  it("inherits only bootstrap variables while merging configured environment values", async () => {
+    const inherited = {
+      ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"],
+      GH_TOKEN: process.env["GH_TOKEN"],
+      OPENAI_API_KEY: process.env["OPENAI_API_KEY"]
+    }
+    process.env["ANTHROPIC_API_KEY"] = "ambient-anthropic"
+    process.env["GH_TOKEN"] = "ambient-github"
+    process.env["OPENAI_API_KEY"] = "ambient-openai"
+    try {
+      const result = await execute(Effect.scoped(Effect.gen(function*() {
+        const client = yield* connectNode("echo-env", [], {
+          env: { MCP_FIXTURE_TOKEN: "fixture-token" }
+        })
+        return yield* client.callTool("add", {})
+      })))
+      expect(result.content).toEqual([expect.objectContaining({
+        token: "fixture-token",
+        hasPath: true
+      })])
+      expect(result.content[0]).not.toHaveProperty("anthropic")
+      expect(result.content[0]).not.toHaveProperty("openai")
+      expect(result.content[0]).not.toHaveProperty("github")
+    } finally {
+      for (const [name, value] of Object.entries(inherited)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    }
   })
 
   it("starts the child in the configured working directory", async () => {

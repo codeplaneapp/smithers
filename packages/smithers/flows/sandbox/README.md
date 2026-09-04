@@ -114,6 +114,13 @@ hold. `signals-a-running-command` watches the process rather than the call: a
 and leaks a process for every cancelled action, so the check waits
 `Commands.stopsWithin` for the command to stop and names it when it does not.
 
+`DirectorySandbox` starts local children with a replacement environment. The
+host contributes only `PATH`, `HOME`, `USER`, `LANG`, `LC_*`, `TERM`, `TMPDIR`,
+and `SHELL`; `Session.spawn` adds the names its caller explicitly declares.
+Ambient credentials and other unrelated host variables do not enter the
+directory-backed session. This narrows credential exposure, but it does not
+turn a host directory into a filesystem, user, or network security boundary.
+
 ## Limits
 
 Two paths are bounded: a command's standard input at 16 MiB, refused above it

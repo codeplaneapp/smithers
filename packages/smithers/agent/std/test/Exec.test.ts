@@ -24,6 +24,41 @@ const host = Layer.provide(
 const print = (text: string): string => `node -e ${JSON.stringify(`process.stdout.write(${JSON.stringify(text)})`)}`
 
 describe.skipIf(process.platform === "win32")("Exec capture", () => {
+  it.live("inherits only bootstrap variables and explicitly declared names", () =>
+    Effect.gen(function*() {
+      const inherited = {
+        ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"],
+        GH_TOKEN: process.env["GH_TOKEN"],
+        OPENAI_API_KEY: process.env["OPENAI_API_KEY"]
+      }
+      process.env["ANTHROPIC_API_KEY"] = "ambient-anthropic"
+      process.env["GH_TOKEN"] = "ambient-github"
+      process.env["OPENAI_API_KEY"] = "ambient-openai"
+      const result = yield* Exec.exec(process.execPath, {
+        args: [
+          "-e",
+          "process.stdout.write(JSON.stringify({" +
+          "anthropic: process.env.ANTHROPIC_API_KEY," +
+          "github: process.env.GH_TOKEN," +
+          "openai: process.env.OPENAI_API_KEY," +
+          "path: process.env.PATH," +
+          "declared: process.env.SMITHERS_EXPLICIT" +
+          "}))"
+        ],
+        env: { SMITHERS_EXPLICIT: "visible" }
+      }).pipe(Effect.ensuring(Effect.sync(() => {
+        for (const [name, value] of Object.entries(inherited)) {
+          if (value === undefined) delete process.env[name]
+          else process.env[name] = value
+        }
+      })))
+
+      expect(JSON.parse(result.stdout)).toEqual({
+        path: process.env.PATH,
+        declared: "visible"
+      })
+    }).pipe(Effect.provide(host)), 30_000)
+
   it.live("keeps every byte and drops none when no bound is given", () =>
     Effect.gen(function*() {
       const result = yield* Exec.exec(print("abcdefghij"))
