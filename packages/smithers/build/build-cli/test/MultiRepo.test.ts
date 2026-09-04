@@ -199,7 +199,10 @@ describe("opaque local repositories", () => {
     const gated = await serveCli(root, ["//:gated"])
     expect(gated.exitCode).toBe(0)
     expect(`${gated.stdout}\n${gated.stderr}`).toContain("//:gated  ran")
-  }, 60_000)
+    // Query, alias execution, and the gated run each launch a cold child CLI.
+    // The full coverage gate exceeded 60 s under host contention; use the
+    // same bounded budget as the three-launch metadata case above.
+  }, 240_000)
 
   it("admits a parent file input that explicitly enters the child", async () => {
     const root = await workspace()
