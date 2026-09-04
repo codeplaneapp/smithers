@@ -197,6 +197,7 @@ export const make: (options: {
   /** Initial budget; a seat steer recomputes it from the model catalog. */
   readonly contextWindowTokens?: number | undefined
   readonly frame?: number | undefined
+  /** Zero disarms the frame limit; exhausted positive limits spend no new frame. */
   readonly maxFrames?: number | undefined
   readonly readOnlyCap?: number | undefined
   readonly modelCallMs?: number | undefined

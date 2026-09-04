@@ -49,7 +49,7 @@ const NonNegativeSafeInt = Schema.Int.check(
 )
 
 /**
- * Default number of frames one admitted task may spend.
+ * Default number of frames one admitted task may spend. Zero disarms this limit.
  *
  * @category constants
  * @since 0.1.0
@@ -1254,7 +1254,7 @@ const remember = (
  */
 const parkRefusal = (
   message: string,
-  framesLeft: number,
+  framesLeft: number | "unlimited",
   frameSeconds: number | undefined
 ): string =>
   `No human is available: this run has no approval channel, so nobody can answer a park and the transition is not honored. What you asked — "${message}" — is now yours to settle. You have ${framesLeft} frame${
@@ -1924,7 +1924,7 @@ const frame = (
       changes: Partial<ConstructorParameters<typeof State>[0]> = {},
       echo: number = liveCellEcho
     ): Step => {
-      if (state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
+      if (state.maxFrames > 0 && state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
       return {
         _tag: "Continue",
         state: advance(state, {
@@ -1955,7 +1955,7 @@ const frame = (
       drained: Steering.DrainRecord,
       changes: Partial<ConstructorParameters<typeof State>[0]> = {}
     ): Step => {
-      if (state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
+      if (state.maxFrames > 0 && state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
       const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
       const context = appended(
         contextWindow,
@@ -2479,7 +2479,7 @@ const frame = (
         const step = observe(
           parkRefusal(
             transition.message,
-            Math.max(0, state.maxFrames - state.frame - 1),
+            state.maxFrames === 0 ? "unlimited" : Math.max(0, state.maxFrames - state.frame - 1),
             limits.totalMs === undefined ? undefined : Math.floor(limits.totalMs / 1000)
           ),
           {
@@ -2694,7 +2694,7 @@ const frame = (
       //   that what comes back next is the answer that stands, and three of
       //   them fire on one transition, so the frame written to answer one is
       //   never judged by the next. See {@link State.demandedFrame}.
-      const room = state.frame + 1 < state.maxFrames &&
+      const room = (state.maxFrames === 0 || state.frame + 1 < state.maxFrames) &&
         (cap === 0 || readOnlyFrames + 1 < cap * 2) &&
         state.demandedFrame !== state.frame
       const unmoved = room && state.unmovedDemands < state.unmovedCap
@@ -2855,7 +2855,7 @@ const frame = (
         messages: drained.inserts
       })
     )
-    if (state.frame + 1 >= state.maxFrames) {
+    if (state.maxFrames > 0 && state.frame + 1 >= state.maxFrames) {
       yield* emit(
         new AgentEvent.TurnClosed({
           eventType: eventType.turnClosed,
@@ -3078,6 +3078,15 @@ export const run = (
       )
 
       for (;;) {
+        if (current.maxFrames > 0 && current.frame >= current.maxFrames) {
+          yield* emit(
+            new AgentEvent.Resolved({
+              eventType: eventType.resolved,
+              message: ModelRequest.Message.assistant(budgetMessage(current), { stopReason: "stop" })
+            })
+          )
+          return
+        }
         const step = yield* frame({ ...input, state: current }, engine, sandbox, realm, steering, emit).pipe(
           Effect.catch((error) => {
             const request = permissionRequired(error)

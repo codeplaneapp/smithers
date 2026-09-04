@@ -353,20 +353,34 @@ describe("CellTurn seat and placement", () => {
 })
 
 describe("CellTurn frame budget", () => {
-  it("spends one frame on a budget of zero and stops on the budget message", async () => {
+  it("disarms the frame budget at zero", async () => {
     const { events, model } = await run({
-      script: [
-        emits(`console.log("again")`),
-        emits(`console.log("again")`)
-      ],
+      script: [emits("console.log(\"again\")"), emits("ctx.done(\"finished\")")],
       state: state({ maxFrames: 0 })
     })
+    expect(model.recorder.requests).toHaveLength(2)
+    expect(resolvedText(events)).toBe("finished")
+  })
 
-    // A budget of zero still buys the frame already in flight; what it forbids
-    // is the next one.
-    expect(model.recorder.requests).toHaveLength(1)
-    expect(resolvedText(events)).toContain("frame budget of 0 is exhausted")
-    expect(of(events, "turn-closed").at(-1)?.outcome).toBe("resolved")
+  it.each([
+    "throw new Error(\"retry\")",
+    "ctx.park(\"waiting-input\", \"which branch?\")"
+  ])("keeps a zero budget disarmed after %s", async (cell) => {
+    const { events, failure } = await run({
+      state: state({ maxFrames: 0 }),
+      script: [emits(cell), emits("ctx.done(\"recovered\")")]
+    })
+    expect(failure).toBeUndefined()
+    expect(resolvedText(events)).toBe("recovered")
+  })
+
+  it("does not spend a model call when the initial frame already exhausted its budget", async () => {
+    const { events, model } = await run({
+      script: [emits("ctx.done(\"never reached\")")],
+      state: state({ frame: 2, maxFrames: 2 })
+    })
+    expect(model.recorder.requests).toHaveLength(0)
+    expect(resolvedText(events)).toContain("frame budget of 2 is exhausted")
   })
 
   it("spends exactly one frame on a budget of one", async () => {
