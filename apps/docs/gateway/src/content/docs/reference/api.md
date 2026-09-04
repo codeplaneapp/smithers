@@ -38,15 +38,15 @@ to a socket.
 
 ### Types and constants
 
-| Export                       | Signature                                                                    | Meaning                                                                                                     |
-| ---------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `Health`                     | `Schema.Struct` and its type                                                 | What `GET /health` answers: `GatewaySchema.GatewayHealth` plus the `version` of the package serving it.     |
-| `LayerOptions`               | `{ heartbeatMillis?: number; ingress?: IngressOptions }`                     | How an assembled gateway is configured.                                                                     |
-| `IngressOptions`             | `{ maxRequestBodyBytes?: number; authorize?: (headers) => Effect<boolean> }` | The ingress policy the RPC mounts run behind.                                                               |
-| `rpcPaths`                   | `ReadonlyArray<string>`                                                      | `["/rpc", "/projections", "/sync"]`: the `POST` mounts that carry RPC request messages.                     |
-| `protectedPaths`             | `ReadonlyArray<string>`                                                      | `["/projections", "/sync", "/rpc/ws", "/projections/ws", "/sync/ws"]`: paths that pass edge authentication. |
-| `defaultMaxRequestBodyBytes` | `number`                                                                     | 1,048,576. The default maximum request body accepted by an RPC mount.                                       |
-| `watchHeartbeatKind`         | `"control.gateway.heartbeat"`                                                | The `ControlEvent` kind a `Watch` keepalive carries.                                                        |
+| Export                       | Signature                                                                                            | Meaning                                                                                                     |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `Health`                     | `Schema.Struct` and its type                                                                         | What `GET /health` answers: `GatewaySchema.GatewayHealth` plus the `version` of the package serving it.     |
+| `LayerOptions`               | `{ heartbeatMillis?: number; ingress?: IngressOptions }`                                             | How an assembled gateway is configured.                                                                     |
+| `IngressOptions`             | `{ maxRequestBodyBytes?: number; loopbackOnly?: boolean; authorize?: (headers) => Effect<boolean> }` | The ingress policy the RPC mounts run behind.                                                               |
+| `rpcPaths`                   | `ReadonlyArray<string>`                                                                              | `["/rpc", "/projections", "/sync"]`: the `POST` mounts that carry RPC request messages.                     |
+| `protectedPaths`             | `ReadonlyArray<string>`                                                                              | `["/projections", "/sync", "/rpc/ws", "/projections/ws", "/sync/ws"]`: paths that pass edge authentication. |
+| `defaultMaxRequestBodyBytes` | `number`                                                                                             | 1,048,576. The default maximum request body accepted by an RPC mount.                                       |
+| `watchHeartbeatKind`         | `"control.gateway.heartbeat"`                                                                        | The `ControlEvent` kind a `Watch` keepalive carries.                                                        |
 
 `POST /rpc` is deliberately not in `protectedPaths`, and `GET /health` is
 deliberately unauthenticated. Both decisions, and the alias handling behind
@@ -55,16 +55,16 @@ deliberately unauthenticated. Both decisions, and the alias handling behind
 
 ### Layers
 
-| Export                 | Signature                                                                   | Provides                                                                                     |
-| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `layer`                | `(health: Health, options?: LayerOptions) => Layer<..., GatewayError, ...>` | The whole surface. Fails with `bind_failed` for a non-positive cadence or body limit.        |
-| `layerHealth`          | `(health: Health) => Layer<never, never, HttpRouter>`                       | The unauthenticated `GET /health` probe.                                                     |
-| `layerHandlers`        | `Layer<Handler<...>, never, Control \| Projections>`                        | The gateway's own RPC handlers over the read path and the approval mutation.                 |
-| `layerControlHttp`     | `(millis?: number) => Layer<RpcServer.Protocol, never, ...>`                | `/rpc` and `/rpc/ws`, with the keepalive merged into `watch`.                                |
-| `layerProjectionsHttp` | `Layer<RpcServer.Protocol, never, ...>`                                     | `/projections` and `/projections/ws`. Both protocols mount together so they cannot disagree. |
-| `layerSyncHttp`        | `Layer<RpcServer.Protocol, never, ...>`                                     | `/sync` and `/sync/ws`.                                                                      |
-| `layerIngress`         | `(options?: IngressOptions) => Layer<...>`                                  | The global middleware: edge authentication, body limit, and RPC-message check.               |
-| `layerKeepAlive`       | `(millis?: number) => Layer<Control, never, Control>`                       | Wraps the ambient `Control` so `watch` emits a keepalive when idle.                          |
+| Export                 | Signature                                                                   | Provides                                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `layer`                | `(health: Health, options?: LayerOptions) => Layer<..., GatewayError, ...>` | The whole surface. Fails with `bind_failed` for a non-positive cadence or body limit.                    |
+| `layerHealth`          | `(health: Health) => Layer<never, never, HttpRouter>`                       | The unauthenticated `GET /health` probe.                                                                 |
+| `layerHandlers`        | `Layer<Handler<...>, never, Control \| Projections>`                        | The gateway's own RPC handlers over the read path and the approval mutation.                             |
+| `layerControlHttp`     | `(millis?: number) => Layer<RpcServer.Protocol, never, ...>`                | `/rpc` and `/rpc/ws`, with the keepalive merged into `watch`.                                            |
+| `layerProjectionsHttp` | `Layer<RpcServer.Protocol, never, ...>`                                     | `/projections` and `/projections/ws`. Both protocols mount together so they cannot disagree.             |
+| `layerSyncHttp`        | `Layer<RpcServer.Protocol, never, ...>`                                     | `/sync` and `/sync/ws`.                                                                                  |
+| `layerIngress`         | `(options?: IngressOptions) => Layer<...>`                                  | The global middleware: local Host/Origin policy, edge authentication, body limit, and RPC-message check. |
+| `layerKeepAlive`       | `(millis?: number) => Layer<Control, never, Control>`                       | Wraps the ambient `Control` so `watch` emits a keepalive when idle.                                      |
 
 `layerKeepAlive` wraps the service rather than re-declaring handlers, which
 keeps `@smthrs/control` `ControlServer` the single definition of what every
@@ -112,6 +112,12 @@ A loopback bind with no credential is allowed and is the local default. One
 shared bearer authenticates every mount and binds one principal: there are no
 users, no roles, no per-run ownership, and no scopes. See
 [Serve beyond loopback](/guides/serve-beyond-loopback/).
+
+Without that bearer, `NodeGateway.layer` enables `loopbackOnly`: every request
+must carry a loopback `Host`, and a browser `Origin` must use `http` or `https`
+on `localhost`, `127.0.0.1`, or `[::1]`, with an optional port. An Origin-less
+CLI request remains accepted. The same guard runs on HTTP and WebSocket
+upgrades before any mount handles them.
 
 ## `Projections`
 
@@ -278,7 +284,7 @@ already applied, so a client rendering a run card calls neither. See
 
 | Export             | Signature                                                                 | Meaning                                                                                     |
 | ------------------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `GatewayErrorCode` | seven literals                                                            | The whole failure vocabulary.                                                               |
+| `GatewayErrorCode` | nine literals                                                             | The whole failure vocabulary.                                                               |
 | `GatewayError`     | `Schema.TaggedError` tagged `flows/gateway/GatewayError`                  | `{ code, message, cause? }`, where `cause` is a `{ _tag, code? }` summary and nothing more. |
 | `settingRefusal`   | `(name: string, value: number \| undefined) => GatewayError \| undefined` | The refusal a numeric setting earns when it is not a positive safe integer.                 |
 
@@ -288,6 +294,8 @@ the set those paths produce.
 | Code                | Status | Produced by                                                                                                                                              |
 | ------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bind_failed`       | none   | `NodeGateway.bindRefusal`, `NodeGateway.listenOptions`, `GatewayServer.layer`, `GatewayServer.layerIngress`, and `Projections.make`, at composition time |
+| `invalid_host`      | 421    | the local-only ingress guard, when `Host` does not name `localhost`, `127.0.0.1`, or `[::1]`                                                             |
+| `invalid_origin`    | 403    | the local-only ingress guard, when a supplied browser `Origin` does not name HTTP(S) on a loopback host                                                  |
 | `unauthorized`      | 401    | the ingress guard, on any protected path without the configured credential                                                                               |
 | `malformed_request` | 400    | the ingress guard, for a `POST` body carrying no RPC request message or a body it could not read, and the read path, for an invalid resume cursor        |
 | `request_too_large` | 413    | the ingress guard, for a body over the configured limit                                                                                                  |

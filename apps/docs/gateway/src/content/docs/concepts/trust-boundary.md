@@ -37,8 +37,12 @@ release has no route for. See
    machine, an unauthenticated control plane is a remote execution service.
 
 A loopback bind with no credential is allowed, and is the local default. The
-trust boundary there is the machine account, and requiring a token to talk to
-your own workspace would only teach people to write it down.
+trust boundary there is the machine account, so the ingress guard requires a
+loopback `Host` value. A browser request carrying `Origin` must also name
+`http` or `https` on `localhost`, `127.0.0.1`, or `[::1]`, with an optional
+port. That rejects cross-site WebSockets and DNS-rebound hostnames without
+requiring a CLI to invent a credential: non-browser clients carrying no
+`Origin` remain accepted.
 `NodeGateway.isLoopbackHost` accepts `127.0.0.1`, `::1`, and `localhost`, and
 nothing else.
 
@@ -47,6 +51,20 @@ it before composing anything. `listenOptions` returns the same refusal in its
 typed effect channel, and `layer` fails through its layer channel. Operating
 system listen failures, an address already in use among them, are mapped to the
 same sanitized `bind_failed` contract, so a caller has one shape to handle.
+
+## Local request identity is checked before authentication
+
+`NodeGateway.layer` enables `IngressOptions.loopbackOnly` whenever no bearer
+credential is configured. Before any route, request body, or WebSocket upgrade
+is handled, `layerIngress` refuses a foreign or absent `Host` with 421
+`invalid_host`. It refuses an `Origin` that is not HTTP(S) on `localhost`,
+`127.0.0.1`, or `[::1]`, with an optional port, with 403 `invalid_origin`.
+
+The Origin header is optional on purpose. Browsers attach it to WebSocket and
+cross-origin requests; CLI clients normally do not. A loopback Origin and an
+Origin-less request both continue to reach the mount. A bearer-protected
+non-loopback gateway does not enable this local-only policy; its configured
+credential remains the request boundary.
 
 ## Edge authentication, and where it deliberately stops
 
@@ -102,19 +120,23 @@ unauthenticated caller nothing it was entitled to.
 
 ## Ingress runs before the transport parses anything
 
-`GatewayServer.layerIngress` is one global middleware, and it does three things
-in order for a `POST` to an RPC mount:
+`GatewayServer.layerIngress` is one global middleware, and it applies these
+checks in order:
 
-1. Refuses an unauthenticated request to a protected path with 401
+1. When configured as `loopbackOnly`, refuses a non-loopback `Host` with 421
+   `invalid_host`, then a non-loopback browser `Origin` with 403
+   `invalid_origin`. These checks cover HTTP and WebSocket upgrades alike.
+2. Refuses an unauthenticated request to a protected path with 401
    `unauthorized`.
-2. Refuses a body over the limit with 413 `request_too_large`. A declared
+3. For a `POST` to an RPC mount, refuses a body over the limit with 413
+   `request_too_large`. A declared
    `content-length` over the limit is refused without reading the body; a body
    that declares no length, or declares less than it sends, is measured as it
    is read.
-3. Refuses a body carrying no RPC request message with 400
+4. Refuses a body carrying no RPC request message with 400
    `malformed_request`.
 
-The third check exists because `effect/unstable/rpc` hands every decoded
+The fourth check exists because `effect/unstable/rpc` hands every decoded
 message to the server loop, and a body that decodes to something else, `{}`,
 `[]`, prose, or nothing at all, reached it as a message with no tag and died
 there. The gateway answered `500 Internal Server Error` with an empty body,

@@ -20,7 +20,7 @@ From the project root:
 smthrs serve
 ```
 
-The server binds `127.0.0.1:3000` by default and keeps serving until the process is interrupted. A loopback bind (`127.0.0.1`, `::1`, or `localhost`) needs nothing else. To change the bind, pass `--host` and `--port`; to suppress the listening banner, pass `--quiet`.
+The server binds `127.0.0.1:3000` by default and keeps serving until the process is interrupted. A loopback bind (`127.0.0.1`, `::1`, or `localhost`) needs no bearer. It accepts only loopback Host values and, when a browser supplies `Origin`, loopback HTTP(S) origins; Origin-less CLI requests remain accepted. To change the bind, pass `--host` and `--port`; to suppress the listening banner, pass `--quiet`.
 
 The server mounts these routes:
 
@@ -38,7 +38,7 @@ The server mounts these routes:
 
 ## 2. Bind a non-loopback address safely
 
-The bind rule is strict: loopback needs nothing, and anything else needs both `--listen` and a bearer token. An unauthenticated control plane on a network address can launch agents with your credentials, so the server refuses both half-measures.
+The bind rule is strict: loopback needs no bearer but rejects foreign Host and browser Origin values, and anything else needs both `--listen` and a bearer token. An unauthenticated control plane on a network address can launch agents with your credentials, so the server refuses both half-measures.
 
 To serve on a network address, pass `--listen` and a token:
 
@@ -107,7 +107,7 @@ exit 1
 
 ## Verify it worked
 
-- The banner on stderr prints `smthrs serve listening on http://127.0.0.1:3000`, one line per mounted route with its URL and purpose, and an `auth` line reading `none (loopback only)` or `bearer token`.
+- The banner on stderr prints `smthrs serve listening on http://127.0.0.1:3000`, one line per mounted route with its URL and purpose, and an `auth` line reading `no bearer (loopback Host; loopback browser Origin)` or `bearer token`.
 - `curl --fail --silent http://127.0.0.1:3000/health` exits 0 and prints the workspace identity document.
 - From a second terminal, `smthrs ps --remote http://127.0.0.1:3000` prints the same run listing a local `smthrs ps` prints. A loopback server needs no credential.
 

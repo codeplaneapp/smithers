@@ -24,10 +24,13 @@ smthrs serve listening on http://127.0.0.1:3000
   /sync             http://127.0.0.1:3000/sync             journal sync
   /sync/ws          ws://127.0.0.1:3000/sync/ws            journal sync stream
   /health           http://127.0.0.1:3000/health           workspace identity
-  auth  none (loopback only)
+  auth  no bearer (loopback Host; loopback browser Origin)
 ```
 
-The default bind is `127.0.0.1:3000`. `--host` and `--port` change it. The
+The default bind is `127.0.0.1:3000`. It needs no bearer, but requests must
+carry a loopback `Host`; when a browser supplies `Origin`, that origin must use
+`http` or `https` on `localhost`, `127.0.0.1`, or `[::1]`. Origin-less CLI
+requests remain accepted. `--host` and `--port` change the bind. The
 banner is rendered from `Serve.mounts`, the same list the composition is built
 from, so it cannot advertise a route that answers 404. The server lives exactly
 as long as the command.
@@ -40,8 +43,9 @@ smthrs --remote http://127.0.0.1:3000 ps
 
 ## The bind rule
 
-Loopback needs nothing. `Serve.loopbackHosts` is `127.0.0.1`, `::1`, and
-`localhost`.
+Loopback needs no credential. `Serve.loopbackHosts` is `127.0.0.1`, `::1`, and
+`localhost`; the local ingress guard rejects foreign Host values and browser
+origins so a web page or rebound hostname cannot inherit the local operator.
 
 Anything else needs both an explicit `--listen` and a bearer token:
 

@@ -5,9 +5,10 @@ sidebar:
   order: 5
 ---
 
-A loopback gateway needs no credential. Anything reachable from another machine
-needs two opt-ins, and the policy refuses the bind rather than serving without
-them.
+A loopback gateway needs no credential. Its ingress still accepts only a
+loopback `Host` and, when present, a loopback browser `Origin`; Origin-less CLI
+requests keep working. Anything reachable from another machine needs two
+opt-ins, and the policy refuses the bind rather than serving without them.
 
 ## The two rules
 
@@ -62,6 +63,10 @@ smthrs serve --host 0.0.0.0 --port 3000 --listen --credential "$SMITHERS_API_KEY
 One credential authenticates every mount and binds one principal,
 `{ id: "gateway", kind: "bearer" }`. There are no users, no roles, no per-run
 ownership, and no scopes.
+
+The loopback Host/Origin restriction belongs to the credential-less local
+mode. A bearer-protected non-loopback gateway accepts the network hostname it
+was deployed under and relies on the configured credential instead.
 
 Clients send it as a bearer token:
 

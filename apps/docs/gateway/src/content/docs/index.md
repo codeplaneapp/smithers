@@ -69,9 +69,12 @@ const gateway = NodeGateway.layer(
 )
 ```
 
-That bind is loopback, so it needs no credential and no opt-in. Anything else
-needs both, and the layer fails with a typed `bind_failed` `GatewayError`
-rather than binding. See [Serve beyond loopback](/guides/serve-beyond-loopback/).
+That bind is loopback, so it needs no credential and no opt-in. Its requests
+still need a loopback `Host`, and any supplied browser `Origin` must be
+loopback; Origin-less CLI clients remain accepted. Anything else needs both a
+bind opt-in and a bearer, and the layer fails with a typed `bind_failed`
+`GatewayError` rather than binding. See
+[Serve beyond loopback](/guides/serve-beyond-loopback/).
 
 For a gateway you can probe and read within a minute, start with the
 [Quickstart](/quickstart/).
@@ -90,7 +93,7 @@ importable from `@smthrs/gateway/<Module>`:
 | `GatewaySchema`             | The wire schemas: selectors, cursors, snapshots, and subscription frames.                          |
 | `GatewayRpcs`               | The served read procedures and the one composite approval mutation.                                |
 | `Diagnosis`                 | What happened to a run, folded and rendered from that run's own events.                            |
-| `GatewayError`              | The seven-code failure vocabulary every gateway operation answers in.                              |
+| `GatewayError`              | The nine-code failure vocabulary every gateway operation answers in.                               |
 | `SuperviseRuntime`          | The host seam a supervisor would implement. Declared, not installed.                               |
 | `Sync`                      | `@smthrs/sync` whole, so a host gets the journal read path from one import.                        |
 | `test/TestSuperviseRuntime` | A controllable supervision runtime for tests.                                                      |

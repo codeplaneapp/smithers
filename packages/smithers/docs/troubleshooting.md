@@ -66,8 +66,9 @@ non-blocking notice reports each `SMITHERS_POSTGRES_*` or
 **Symptom.** `smthrs serve` on a non-loopback host exits 1 before the server is
 built.
 
-**Cause.** `Serve.refuse`. Loopback needs nothing; anything else needs both an
-explicit `--listen` and a bearer token, because an unauthenticated control
+**Cause.** `Serve.refuse`. Loopback needs no credential, but its ingress still
+requires a loopback `Host` and, when present, a loopback browser `Origin`.
+Anything else needs both an explicit `--listen` and a bearer token, because an unauthenticated control
 plane on a LAN address can launch agents with your credentials and nothing
 about that looks wrong from the outside.
 

@@ -39,13 +39,15 @@ smthrs serve listening on http://127.0.0.1:3000
   /sync             http://127.0.0.1:3000/sync             journal sync
   /sync/ws          ws://127.0.0.1:3000/sync/ws            journal sync stream
   /health           http://127.0.0.1:3000/health           workspace identity
-  auth  none (loopback only)
+  auth  no bearer (loopback Host; loopback browser Origin)
 ```
 
 That is `@smthrs/gateway`'s assembly, bound by `NodeGateway.layer`. The bind is
-loopback, so it needs no credential: the trust boundary is the machine account.
-The server lives exactly as long as the command, so leave it running and open a
-second terminal for everything below.
+loopback, so it needs no credential. It accepts only loopback `Host` values,
+and a browser request that carries `Origin` must name `http` or `https` on
+`localhost`, `127.0.0.1`, or `[::1]`; an Origin-less CLI request remains
+accepted. The server lives exactly as long as the command, so leave it running
+and open a second terminal for everything below.
 
 ## Ask which workspace it is
 

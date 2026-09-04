@@ -3,7 +3,7 @@ title: "Troubleshooting"
 description: "The refusals a gateway answers with, grouped by where they come from: the bind, the ingress guard, the read path, a subscription, and the data a projection can and cannot see."
 ---
 
-Every refusal this package produces is a `GatewayError` carrying one of seven
+Every refusal this package produces is a `GatewayError` carrying one of nine
 stable codes. Find the symptom, then the code, then the change.
 
 ## The gateway will not bind
@@ -56,6 +56,20 @@ deliberately not on the error, because that error reaches every bearer holder;
 it is in the server log.
 
 ## The gateway is up but a request is refused
+
+### 421 invalid_host or 403 invalid_origin on a local gateway
+
+**Symptom** A credential-less loopback gateway answers with `invalid_host`, or
+a browser request or WebSocket upgrade answers with `invalid_origin`.
+
+**Cause** Local mode accepts `Host` values naming only `localhost`,
+`127.0.0.1`, or `[::1]`, with an optional port. If an `Origin` header is
+present, it must use `http` or `https` on one of the same hosts. This prevents
+a web page or DNS-rebound hostname from acting as the local operator.
+
+**Fix** Connect through the loopback URL the server printed. Browser clients
+must be served from a loopback origin. CLI clients should omit `Origin`, as
+usual; an Origin-less request is accepted.
 
 ### 401 on /projections or /sync, but /rpc answers something else
 

@@ -19,19 +19,24 @@ Every route `GatewayServer.layer` mounts, in the order the startup banner prints
 | `/sync/ws` | WebSocket | Journal sync stream | Bearer at the edge when a credential is configured |
 | `/health` | HTTP `GET` | Workspace identity | None, by design |
 
-On the loopback default no credential is configured at all, so every mount answers without one. The banner prints `auth  none (loopback only)` in that case and `auth  bearer token` otherwise.
+On the loopback default no bearer credential is configured. Every request must
+still carry a loopback `Host`, and a supplied browser `Origin` must use HTTP(S)
+on `localhost`, `127.0.0.1`, or `[::1]`; Origin-less CLI requests remain
+accepted. The banner prints
+`auth  no bearer (loopback Host; loopback browser Origin)` in that case and
+`auth  bearer token` otherwise.
 
 ## Authentication
 
 The bind rule is strict and fails closed.
 
-- The default bind is `127.0.0.1:3000`. A loopback host (`127.0.0.1`, `::1`, or `localhost`) needs no opt-in and no credential: the trust boundary is the machine account.
+- The default bind is `127.0.0.1:3000`. A loopback host (`127.0.0.1`, `::1`, or `localhost`) needs no opt-in and no credential. The ingress guard rejects foreign Host values and browser origins before HTTP or WebSocket RPC handling.
 - A non-loopback bind requires an explicit `--listen`. Without it the verb refuses: `Refusing to bind <host>: pass --listen to serve on a non-loopback address.`
 - A non-loopback bind also requires a bearer credential, passed with `--credential` or set as `SMITHERS_API_KEY`. Without one the verb refuses: `Refusing to bind <host> without a bearer token: pass --credential or set SMITHERS_API_KEY.`
 
 One shared bearer authenticates every mount and binds one principal. There are no users, no roles, no per-run ownership, and no scopes.
 
-Two mounts are deliberate exceptions to edge authentication. `POST /rpc` authenticates in band through the `ControlRpcs.ControlAuth` middleware, whose refusal is the typed control error `Unauthorized`, not an edge status; the `/rpc/ws` upgrade stays edge-authenticated because a refused handshake has no RPC channel to answer on. `GET /health` is unauthenticated so a supervisor can ask which workspace a gateway belongs to before deciding to keep or replace it. On the edge-authenticated paths the guard's refusal vocabulary is `unauthorized` (401) without the credential, `malformed_request` (400) for a body carrying no RPC request message, and `request_too_large` (413) for a body over the limit (default 1 MiB).
+Two mounts are deliberate exceptions to edge authentication. `POST /rpc` authenticates in band through the `ControlRpcs.ControlAuth` middleware, whose refusal is the typed control error `Unauthorized`, not an edge status; the `/rpc/ws` upgrade stays edge-authenticated because a refused handshake has no RPC channel to answer on. `GET /health` is unauthenticated so a supervisor can ask which workspace a gateway belongs to before deciding to keep or replace it. The local request guard answers `invalid_host` (421) or `invalid_origin` (403) before those exceptions. On the edge-authenticated paths the remaining refusal vocabulary is `unauthorized` (401) without the credential, `malformed_request` (400) for a body carrying no RPC request message, and `request_too_large` (413) for a body over the limit (default 1 MiB).
 
 ## The RPC surface
 
