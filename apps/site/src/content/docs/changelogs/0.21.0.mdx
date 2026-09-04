@@ -1,0 +1,166 @@
+---
+title: "0.21.0"
+description: "Minor release: Smithers now has tracked database migrations, a hosted"
+---
+
+Minor release: Smithers now has tracked database migrations, a hosted
+control-plane package, a default Gateway console, stricter CLI input
+handling, a process-backed sandbox runner, hardened hot reload, and a
+recordable keyboard-driven demo deck.
+
+---
+
+## Database
+
+- **Tracked SQLite schema migrations.** Internal schema setup now records
+  applied migrations in `_smithers_schema_migrations` and runs the DB
+  migration path idempotently on startup. The legacy startup
+  pseudo-migration code was moved into the DB package, including the
+  rebuild that restores missing run foreign keys on split schema tables.
+
+- **`SqlMessageStorage` was split into a lowercase module.** The old
+  `SqlMessageStorage.js` entry is now a compatibility shim over
+  `sql-message-storage.js`, keeping imports stable while making the
+  implementation easier to maintain.
+
+- **Node diff cache upserts are safer.** Cache writes now use a stricter
+  upsert path and have regression coverage for repeated writes and schema
+  setup.
+
+## Runtime And Engine
+
+- **Durability and operator flows were hardened.** Runtime recovery,
+  workflow metadata generation, and operator-console paths received
+  regression fixes before landing this release.
+
+- **Workflow metadata and skill generation are now first-class.** The CLI
+  can discover richer workflow metadata and generated workflow skill files
+  from the seeded workflow pack.
+
+- **Cache policy logic was extracted and tested.** Engine cache scoping,
+  TTL behavior, and schema validation now live behind a focused cache policy
+  module with unit and integration coverage.
+
+- **Hot watch is more robust.** The hot reload watcher now handles rapid
+  file changes and rebuild boundaries more defensively.
+
+- **`jumpToFrame` is hardened.** Time-travel frame jumps now preserve the
+  expected audit and state invariants more reliably.
+
+## CLI
+
+- **Antigravity CLI support landed for Google agent workflows.**
+  Smithers now includes `AntigravityAgent`, CLI detection, init templates,
+  hijack support, account-provider environment wiring, trace normalization,
+  and docs for the `agy` CLI. `GeminiAgent` and `GeminiAgentOptions` remain
+  available for legacy and enterprise Gemini CLI setups, but are now marked
+  deprecated in favor of Antigravity for new Google CLI integrations.
+
+- **JSON arguments are preflighted before workflow modules load.**
+  Malformed `--input` and `--annotations` values now fail with Smithers
+  errors instead of surfacing raw runtime stack traces.
+
+- **`--input -` and `--annotations -` read JSON from stdin.** Stdin JSON is
+  capped at 1 MiB, parsed before detached child processes are spawned, and
+  documented in the CLI reference.
+
+- **Raw JSON stdout is preserved.** JSON-format command output avoids
+  accidental human formatting so automation can parse it reliably.
+
+- **Argument parsing helpers were split out.** Shared argv and JSON parsing
+  utilities reduce duplicated command handling and make flag behavior easier
+  to test.
+
+- **Architecture budgets are enforced.** `scripts/check-architecture-budget.mjs`
+  now guards major CLI, engine, and Gateway files from growing past agreed
+  line-count budgets.
+
+## Gateway And Control Plane
+
+- **New `@smthrs/control-plane` package.** Hosted
+  deployments now have a tested SQLite store for organizations, teams,
+  projects, billing records, identity providers, usage events and limits,
+  secret manager references, and audit export.
+
+- **Facade export for hosted control-plane APIs.** Consumers can import
+  `ControlPlaneStore` through `smthrs/control-plane` or the
+  scoped package.
+
+- **Default Gateway console.** Gateway can now mount a built-in operator UI
+  for workflow inventory, active runs, approvals, and common run actions.
+  The UI was extracted into focused auth, bundle, and default-console
+  modules so custom Gateway apps have a cleaner integration point.
+
+- **Production hardening docs.** Deployment docs now cover durable storage,
+  Gateway tokens, sandbox boundaries, cache policy, audit trail retention,
+  and release checks.
+
+## Sandbox
+
+- **`<Sandbox>` now supports injectable providers.** Workflow authors can
+  pass a provider object or registered provider id instead of hardcoding a
+  runtime such as Docker. Provider-backed sandboxes run remotely, return a
+  validated result bundle, and record the same sandbox lifecycle events as
+  built-in transports.
+
+- **Sandbox result bundles can carry `diffBundle`s.** Providers may return a
+  structured result with output, remote ids, artifacts, logs, and a
+  `diffBundle`; Smithers materializes the bundle, review-gates changes, and
+  applies accepted diffs through the engine diff-bundle path.
+
+- **Runtime selection now fails closed.** Unknown runtimes are rejected, and
+  Docker no longer silently falls back to bubblewrap when Docker is
+  unavailable. The legacy local transport path still defaults to bubblewrap
+  only when no provider and no runtime are supplied.
+
+- **Nested sandboxes are explicit.** Sandbox execution tracks parent sandbox
+  context and rejects nested sandboxes unless the nested component opts in
+  with `allowNested`, making diff-base, cleanup, quota, and secret-boundary
+  risks visible at the API boundary.
+
+- **Freestyle is documented as a third-party sandbox provider.** The new
+  `examples/freestyle/` adapter shows how a provider can create a Freestyle VM,
+  write request files with the VM file API, run `vm.exec()`, read a result JSON
+  file, and return a Smithers sandbox bundle. The sandbox docs now use this as
+  the provider-extension example.
+
+- **Process runner transport.** Sandbox execution can now use a
+  process-backed runner with request/result bundle boundaries and persisted
+  sandbox metadata.
+
+- **Bundle safety was tightened.** Bundle manifests, produced diffs,
+  artifact paths, and cleanup behavior now have stronger path containment,
+  size-boundary, and review-decision coverage.
+
+## Eval Suite And DevTools
+
+- **Workflow eval suites landed in the CLI.** `bunx smthrs eval` can run
+  workflow cases, write reports, detect duplicate run IDs, dry-run plans,
+  and evaluate exact or partial output assertions.
+
+- **Eval assertions are more flexible.** `outputContains` now matches array
+  entries outside prefix position, and docs cover the `continued` status.
+
+- **DevTools tree utilities gained nested ordering coverage.** Tests now
+  assert depth-first task collection through nested containers.
+
+## Demo, Docs, And CI
+
+- **Keyboard-driven demo deck.** `.smithers/scripts/run-demo.sh` now launches
+  a 35-slide terminal deck with keyboard navigation, replay, mute, auto mode,
+  and a live durability/time-travel sequence.
+
+- **Dynamic demo workflow.** A lightweight dynamic workflow was added for
+  smoke-testing task graph behavior without running the full deck.
+
+- **Demo output is cleaner for recording.** The live deck no longer inherits
+  `NO_COLOR` into forced-color child commands, avoiding Bun color warnings
+  during the durability slide.
+
+- **Workflow catalog and docs were refreshed.** The seeded workflow catalog,
+  MCP/server docs, caching docs, eval quickstart, and quickstart copy were
+  updated alongside the new behavior.
+
+- **CI now runs the test gate on pull requests.** The GitHub workflow includes
+  the repository test job, and agent timeout tests were hardened so idle
+  timeout coverage is less timing-sensitive.

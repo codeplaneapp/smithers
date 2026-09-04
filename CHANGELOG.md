@@ -2,14 +2,16 @@
 
 This is the complete, commit-level changelog. For the guided tour of each
 release (what changed and why it matters, with screenshots and examples), see
-the release notes at [smithers.sh/changelogs](https://smithers.sh/changelogs).
+the release notes at
+[smithers.sh/changelogs/1.0.0-rc.0](https://smithers.sh/changelogs/1.0.0-rc.0).
 
 ## 1.0.0-rc.0 (2026-08-31)
 
 The first release candidate of Smithers 1.0. 366 commits since
 [cfb570f193](https://github.com/smithersai/smithers/commit/cfb570f193), the
 0.x tree: 13,100 files changed, +1,041,392 / -1,601,527 lines, measured at
-`f63809382b`. Release notes: `docs/releases/1.0.0-rc.0.md`.
+`f63809382b`. Release notes:
+https://smithers.sh/changelogs/1.0.0-rc.0.
 
 This is not an increment on 0.x. The 0.x JSX workflow engine is replaced
 wholesale by a durable Effect engine. A flow is a typed Effect program whose
@@ -18,14 +20,9 @@ journal and continues from the record. No JSX authoring API, no React
 reconciler, no old graph, scheduler, driver, or execution loop, and no
 dual-engine runtime survive.
 
-Consumer install note: pin `@effect/platform-node-shared` to `4.0.0-rc.108` in
-your project's `overrides` (in `pnpm-workspace.yaml` for pnpm 11); the registry
-serves `4.0.0-rc.112` for the declared range and `npm ls` exits 1 without the
-pin, although the install runs on a single Effect copy either way.
-
-Read `docs/releases/1.0.0-rc.0.md` before upgrading and the
-[migration guide](docs/pages/migration/1.0.md) for what is gone and what
-replaces it.
+Read https://smithers.sh/changelogs/1.0.0-rc.0 before upgrading and the
+[migration guide](https://smithers.sh/docs/migration/1.0/) for what is gone and
+what replaces it.
 
 ### The new architecture
 
@@ -154,7 +151,7 @@ The paragraphs below describe the candidate's enforced limits.
 > **Source migration.** See the compatibility promise below.
 
 The compatibility promise is quoted in full in
-`docs/releases/1.0.0-rc.0.md`, the README, and the migration guide.
+https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
@@ -3447,7 +3444,8 @@ The compatibility promise is quoted in full in
 - chore(release): bump to 0.28.0 + review follow-ups for the ui library ([ce4e519806](https://github.com/smithersai/smithers/commit/ce4e519806))
 ## 0.27.0 and earlier
 
-Release notes for every earlier version are at
-[smithers.sh/changelogs](https://smithers.sh/changelogs). Commit-level history
+Release notes for every earlier version are available from the Changelogs
+sidebar, including
+[Smithers 0.27.0](https://smithers.sh/changelogs/0.27.0). Commit-level history
 before 0.28.0 is available with
 `git log v0.26.1..v0.27.0` and the corresponding tags.

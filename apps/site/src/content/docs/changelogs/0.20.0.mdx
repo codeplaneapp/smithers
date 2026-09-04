@@ -1,0 +1,107 @@
+---
+title: "0.20.0"
+description: "0.20.0 is a minor release with one breaking change. Since 0.19.0, the"
+---
+
+0.20.0 is a **minor release** with one breaking change. Since 0.19.0, the
+Effect authoring surface has been rebuilt around first-class graph values:
+`Smithers.workflow` and `Smithers.fragment` replace the previous
+`Smithers.createWorkflow` / `Smithers.createComponent` callback-builder API.
+The runtime, persistence model, scheduler, and JSX surface are unchanged.
+
+---
+
+## Effect API
+
+The 0.19.0 callback-builder API is gone. The new shape is a typed workflow
+handle whose constructors return ordinary graph values:
+
+```ts
+const G = Smithers.workflow({ name: "review", input: inputSchema });
+
+const analyze = G.step("analyze", { output: analysisSchema, run: ... });
+const report  = G.step("report",  { needs: { analyze }, ... });
+
+export const reviewWorkflow = G.from(G.sequence(analyze, report));
+```
+
+Highlights:
+
+- **First-class graph values.** `G.step`, `G.approval`, `G.sequence`,
+  `G.parallel`, `G.match`, `G.branch`, `G.loop`, `G.worktree`, and
+  `G.scope` all return values you can export, return from a function,
+  or compose with other graph values. No callback scope, no builder token.
+
+- **One reuse mechanism.** `G.scope(instanceId, fragment)` applies a
+  durable ID prefix to every step inside `fragment`, so the same fragment
+  can be mounted under multiple scopes without collision. The previous
+  `createComponent` / `buildWithPrefix` machinery is removed; reuse is
+  now plain functions returning graph values plus `G.scope` for
+  multi-mount.
+
+- **Cross-workflow fragments via `Smithers.fragment(inputSchema)`.**
+  Returns the same constructors as a workflow handle minus `.from`, so
+  fragments can be authored once and mounted into any matching workflow.
+
+- **`G.worktree` and `G.branch` are now reachable from the Effect
+  surface.** They were already in the underlying graph union but weren't
+  exposed to Effect-API authors; both now have ordinary constructors.
+
+- **`.pipe()` on every graph value.** Left-to-right function application
+  matching `Effect.pipe`. No pipeable combinators ship in this release;
+  the method is forward-compat for future data-last forms.
+
+- **Compilation is internal but inspectable.** `G.from(graph)` returns
+  `{ execute, node }`, where `node` is the compiled `BuilderNode` tree.
+  Useful for tooling and tests; the runtime path is unchanged.
+
+- **Memoization is part of the contract.** Compilation is keyed on
+  `(activeScopePrefix, graphValue)`. The same step value referenced as
+  both a child and a `needs` source compiles to one handle. The same
+  fragment mounted under two scopes produces two distinct handle sets.
+
+### Breaking change
+
+`Smithers.createWorkflow`, `Smithers.createComponent`, the `.build(($) => …)`
+callback, and the `WorkflowDefinitionBuilder` / `ComponentDefinition` /
+`ComponentDefinitionBuilder` types are removed.
+
+Migration is mechanical:
+
+1. Lift step and approval declarations out of the `.build` callback.
+2. Replace `$.x` with `G.x`, where `G = Smithers.workflow(opts)`.
+3. Replace the trailing `return $.sequence(...)` with
+   `export default G.from(G.sequence(...))`.
+4. Replace `createComponent(name).build(($, params) => ...)` with a
+   function returning a graph fragment, mounted with
+   `G.scope(instanceId, fragment(params))`.
+
+A counter-proposal documenting the design decisions and rejected
+alternatives lives in `research/effect-combinator-api.md`.
+
+## Docs
+
+- **New "Background agents are here" article in the Learn group.** A
+  direct quote-and-respond to the recent debate over background agents,
+  framing Smithers as a substrate for production-ready agentic workflows
+  rather than a wrapper around any single agent runtime. Iterated through
+  several rewrites and is linked from the introduction under the "But…
+  Why?" section.
+
+- **Effect API page rewritten end-to-end** to use the new graph-value
+  surface. Covers steps, dependencies, control flow (`sequence`,
+  `parallel`, `match`, `branch`, `loop`, `worktree`), `G.scope`-based
+  reuse, `Smithers.fragment` for cross-workflow fragments, the `.pipe()`
+  hook, and operational notes (idempotency, signals, retry, cache).
+
+- **Why React? page reorganized** into the "But… Why?" section of the
+  navigation alongside the new background-agents article.
+
+## LLM bundles
+
+- **`llms-effect.txt` is now generated.** `scripts/generate-llms.ts`
+  picks up the rewritten Effect overview as its own opt-in fragment and
+  bundles it into `llms-full.txt`. The index in `llms.txt` points at it.
+
+- **Regenerated `llms-*.txt`.** All bundles refreshed for the new Effect
+  API surface and the updated articles.

@@ -1,0 +1,20 @@
+---
+title: "0.16.2"
+description: "Patch release: declare the missing @effect/sql-sqlite-bun runtime dependency"
+---
+
+Patch release: declare the missing `@effect/sql-sqlite-bun` runtime dependency
+in `@smthrs/engine` so a fresh install of `smthrs`
+can actually run the CLI.
+
+---
+
+## Fixes
+
+- **`@smthrs/engine` now declares `@effect/sql-sqlite-bun`** as
+  a direct dependency. `src/effect/single-runner.js` imports
+  `@effect/sql-sqlite-bun/SqliteClient` but the package wasn't listed in the
+  engine's `package.json`, so a clean `pnpm install smthrs`
+  produced an unresolvable `Cannot find module '@effect/sql-sqlite-bun/SqliteClient'`
+  as soon as anything touched the engine (including `bunx smthrs ps`). Downstream
+  consumers previously had to add the dep themselves to unblock.

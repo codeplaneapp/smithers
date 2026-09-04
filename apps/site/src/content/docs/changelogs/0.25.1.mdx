@@ -1,0 +1,66 @@
+---
+title: "0.25.1"
+description: "Smithers 0.25.1 hardens the 0.25 migration path, accounts loading, CLI flag parsing, Gateway auth, Codex subscription preflight, child-failure visibility, and Pi diagnostics after real store migration dogfooding."
+---
+
+Smithers 0.25.1 is a focused maintenance release for operators and workflow authors upgrading from 0.25.0. It improves failure messages around legacy SQLite migrations, keeps old account files from blocking CLI commands, fixes documented negated flags, hardens Gateway auth with JWT canonicalization and an Origin allow-list for token and JWT modes, honors Codex CLI subscription auth in `<Task>` preflight, surfaces masked child failures on finished runs, and makes Pi launch diagnostics provider-aware.
+
+The release was dogfooded by migrating 12 real stores and checking run-ID parity, inspect parity, fresh compute runs, Gateway reads, and time-travel behavior on the migrated PGlite backend.
+
+---
+
+## Migration hardening
+
+`bunx smthrs migrate` now wraps corrupt legacy SQLite source stores with actionable `DB_QUERY_FAILED` guidance instead of leaking raw SQLite engine errors. The source store is left untouched when these failures are reported.
+
+Migration also now wraps unopenable legacy SQLite source stores, including locked files, permission failures, and incomplete copies missing SQLite sidecar files, with Smithers guidance that points operators at the source-store problem.
+
+For PostgreSQL migrations, `bunx smthrs migrate --to postgres` validates the target URL before opening the source store. Missing `--url`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL` configuration is now reported directly instead of being masked by unrelated source-store failures.
+
+## Accounts loading
+
+Legacy or unknown `accounts.json` providers are now skipped with a warning instead of failing the entire accounts file. This keeps commands such as `bunx smthrs init` working when an old account file still contains a removed provider entry, while valid accounts continue to load.
+
+## CLI flags
+
+Documented negated flags now parse correctly. `--no-vcs`, `--no-deps`, and `--no-mcp` are no longer rejected as unknown flags on the commands that document them.
+
+## Gateway auth
+
+Gateway JWT auth now rejects non-canonical base64url signature encodings. This closes an edge case where a mutated compact JWT signature segment could decode to the same HMAC bytes on some runtimes because of unused trailing base64url bits.
+
+The Gateway's `allowedOrigins` Origin allow-list now applies to the `token` and `jwt` auth modes, not just `trusted-proxy`. Those are the modes a browser-facing `bunx smthrs ui` or operator-UI deployment actually uses, so operators running a localhost or LAN gateway can now restrict which web origins may connect as defense-in-depth. The check is enforced uniformly at both the HTTP RPC path and the WebSocket upgrade handler: a browser `Origin` not on the list is rejected before the socket opens, a missing `Origin` (server-to-server or CLI) is allowed, and an unset list keeps the previous allow-all behavior.
+
+## Codex subscription preflight
+
+`<Task>` preflight now honors Codex CLI subscription auth. When `OPENAI_API_KEY` is unset, Smithers mirrors the codex binary's own auth resolution and reads `<CODEX_HOME>/auth.json` (default `~/.codex`). ChatGPT subscription tokens pass, a stored API key is probed against `GET /v1/models` so an invalid or exhausted key still fails preflight, and no credentials produces an actionable message. This fixes subscription-authed `<Task>` runs that previously failed the codex `api_key_valid` diagnostic with no `OPENAI_API_KEY` set.
+
+## Child-failure visibility
+
+Finished runs now surface masked child failures. A run can reach a `finished` terminal even when child tasks failed, because `continueOnFail` tasks and transient agent failures (rate limits, timeouts, aborts) are deliberately not run-level failures. Smithers now carries `failedChildren` and `failedChildKeys` on the finished result without a new persisted terminal status: the public `RunResult` type, the `RunFinished` event row, the run span, and the finish log all expose the count. `inspect` derives it from persisted node states with a `node` CTA, and `events` renders it on the finished line.
+
+## Pi diagnostics
+
+Pi launch diagnostics no longer default unknown providers to Google auth checks. When Smithers cannot infer the provider, diagnostics skip provider auth preflight and let Pi handle auth.
+
+Known provider or model hints now map to the correct API key environment variable for OpenAI, Anthropic, or Google diagnostics.
+
+## Migration notes
+
+No breaking changes are identified in 0.25.1.
+
+The new `failedChildren` and `failedChildKeys` fields are additive on the run result and event row, so existing consumers are unaffected. Operators relying on the binary finished status to imply full success should switch to checking `failedChildren`.
+
+Gateway operators running `token` or `jwt` auth can now set `allowedOrigins` to restrict browser origins. Leaving it unset preserves the existing allow-all behavior.
+
+Smithers no longer commits PGlite runtime state: `bunx smthrs init` now scaffolds `.smithers/.gitignore` rules for the `.smithers/pg` data dir and the `.smithers/migrated.json` marker. Existing repositories should add the same ignores and untrack any already-committed `pg/` cluster or `migrated.json`.
+
+Users migrating a legacy SQLite store to PostgreSQL must provide `--url`, `SMITHERS_POSTGRES_URL`, or `DATABASE_URL`. Smithers now reports that requirement before trying to open the source database.
+
+If migration reports `DB_QUERY_FAILED` for a corrupt or unopenable source store, follow the emitted guidance. These failure paths do not modify the source SQLite store.
+
+If an old `accounts.json` contains a removed provider such as a legacy `gemini` subscription account, Smithers now skips that entry and loads the remaining valid accounts. Remove stale entries manually to silence the warning.
+
+## Verification
+
+Regression coverage was added or updated for migration error handling, account parsing with unknown providers, negated CLI flag parsing, Gateway JWT rejection cases, Gateway Origin allow-list rejection over WebSocket and HTTP for the token and JWT modes, Codex subscription auth resolution in `<Task>` preflight, the `failedChildren` signal on degraded finished runs, the `bunx smthrs init` scaffold ignoring the PGlite data dir and migration marker, and Pi diagnostics provider mapping.

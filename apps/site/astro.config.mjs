@@ -81,7 +81,8 @@ export default defineConfig({
           ]
         },
         { label: "Troubleshooting", autogenerate: { directory: "docs/troubleshooting" }, collapsed: true },
-        { label: "Migration", autogenerate: { directory: "docs/migration" }, collapsed: true }
+        { label: "Migration", autogenerate: { directory: "docs/migration" }, collapsed: true },
+        { label: "Changelogs", autogenerate: { directory: "changelogs" }, collapsed: true }
       ]
     })
   ]

@@ -1,0 +1,22 @@
+---
+title: "0.26.1"
+description: "A fast follow-up to 0.26.0: smithers init no longer crashes on machines with the Hermes agent installed (or a legacy provider account), plus migrate source inference from the receipt and a friendlier ps in a fresh directory."
+---
+
+Smithers 0.26.1 is a patch release. The most important fix: `bunx smthrs init` no longer crashes on machines where the Hermes agent is installed, which 0.26.0 regressed. If you hit `INIT_FAILED` on 0.26.0, upgrade.
+
+---
+
+## CLI
+
+- **`init` no longer crashes on a detected agent that has no SDK constructor mapping yet.** 0.26.0 threw `INIT_FAILED: undefined is not an object (evaluating CONSTRUCTORS[provider.id].importName)` and left an empty `.smithers/` whenever a provider was detected (for example the Hermes agent, present at `~/.hermes/config.yaml`) or `~/.smithers/accounts.json` held an account for a provider id that was since renamed. Init now skips the unmapped provider with a warning and scaffolds the workspace normally.
+- **`bunx smthrs ps` returns an empty list in a never-initialized directory** instead of a `PS_FAILED` error. A fresh directory simply has zero runs, the same way `inspect` and `output` treat a missing store. A genuinely unreadable store still reports an error.
+- **`bunx smthrs hermes` prints a clean result** instead of a nested object dump.
+
+## Backends
+
+- **`bunx smthrs migrate --to sqlite` infers the source backend from `migrated.json`** when `--from` is omitted. After migrating from sqlite to pglite, you can migrate back with just `--to sqlite`; the migration receipt is the authority on which backend currently holds the data, so you no longer have to pass `--from pglite` by hand.
+
+## Migration notes
+
+No breaking changes. 0.26.1 is a strict superset of 0.26.0; upgrade if you saw the `init` crash on a machine with Hermes installed.
