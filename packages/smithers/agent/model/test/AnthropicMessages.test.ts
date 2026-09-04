@@ -137,6 +137,7 @@ const activatedRequest = (
       params: GenerationParams.make({ maxTokens: 512, temperature: 0.2 }),
       tools: [loader, weather],
       messages: [
+        Message.user("Load weather"),
         Message.assistant(call, { stopReason: "tool-calls" }),
         Message.tool(result)
       ],
@@ -147,6 +148,7 @@ const activatedRequest = (
       modelId,
       system: [SystemPart.make({ text: "Be concise." })],
       messages: [
+        Message.user("Load weather"),
         Message.assistant(call, { stopReason: "tool-calls" }),
         Message.tool(result)
       ],
@@ -237,7 +239,7 @@ describe("AnthropicMessages streaming", () => {
     const followUp = ModelRequest.make({
       modelId: "claude-sonnet-4-5",
       system: [],
-      messages: [ModelEvent.settledMessage(events).message],
+      messages: [Message.user("Use weather"), ModelEvent.settledMessage(events).message],
       tools: [],
       params: GenerationParams.make()
     })
@@ -246,7 +248,7 @@ describe("AnthropicMessages streaming", () => {
     )
     const wire = JSON.parse(prepared.bodyText) as { readonly messages: ReadonlyArray<{ readonly content: unknown }> }
 
-    expect(wire.messages[0]?.content).toEqual([
+    expect(wire.messages[1]?.content).toEqual([
       { type: "redacted_thinking", data: redactedData },
       { type: "tool_use", id: "toolu_redacted", name: "weather", input: { city: "Paris" } }
     ])
@@ -609,7 +611,7 @@ describe("AnthropicMessages body lowering", () => {
         defer_loading: true
       }
     ])
-    expect(requestBody.messages[1]).toEqual({
+    expect(requestBody.messages[2]).toEqual({
       role: "user",
       content: [
         {
@@ -855,6 +857,27 @@ describe("AnthropicMessages body lowering", () => {
     })
     expect(invalid("[1,2]")).toMatchObject({ code: "invalid_request" })
     expect(invalid("")).toMatchObject({ code: "invalid_request" })
+  })
+
+  it("rejects an assistant-first request before preparing a network call", () => {
+    const error = Effect.runSync(
+      AnthropicMessages.protocol.body.from(
+        ModelRequest.make({
+          modelId: "claude-sonnet-4-5",
+          system: [],
+          messages: [Message.assistant("orphaned summary", { stopReason: "stop" })],
+          tools: [],
+          params: GenerationParams.make()
+        }),
+        { native: true }
+      ).pipe(Effect.flip)
+    )
+
+    expect(error).toMatchObject({
+      code: "invalid_request",
+      message: "Anthropic Messages requests must begin with a user message",
+      path: "messages[0].role"
+    })
   })
 
   it("drops message parts no Anthropic wire block represents", () => {

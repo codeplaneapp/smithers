@@ -1774,7 +1774,7 @@ const compacted = (
         message: "The sealed compaction step returned no text summary"
       })
     }
-    const summary = ModelRequest.Message.assistant(text, { stopReason: settled.message.stopReason })
+    const summary = ModelRequest.Message.user(text)
     const contextWindow = yield* Compaction.apply(state.contextWindow, step, summary).pipe(Effect.orDie)
     yield* emit(
       new AgentEvent.CompactionSettled({

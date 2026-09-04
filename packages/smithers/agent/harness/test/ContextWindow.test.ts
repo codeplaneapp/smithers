@@ -679,10 +679,17 @@ describe("ContextWindow", () => {
     })
 
     it("compacts a window that is already a summary plus a tail", () => {
-      const once = Result.getOrThrow(ContextWindow.compactPrefix(base(), 1, Request.Message.user("first summary")))
-      const twice = Result.getOrThrow(ContextWindow.compactPrefix(once, 2, Request.Message.user("second summary")))
+      const once = Result.getOrThrow(
+        ContextWindow.compactPrefix(base(), 1, Request.Message.assistant("first summary", { stopReason: "stop" }))
+      )
+      expect(ContextWindow.render(once).messages[0]?.role).toBe("user")
+
+      const twice = Result.getOrThrow(
+        ContextWindow.compactPrefix(once, 2, Request.Message.assistant("second summary", { stopReason: "stop" }))
+      )
       expect(twice.segments.filter((segment) => segment.kind === "summary")).toHaveLength(1)
       expect(texts(ContextWindow.render(twice))).toEqual(["second summary"])
+      expect(ContextWindow.render(twice).messages[0]?.role).toBe("user")
       expect(twice.replaced).not.toBe(once.replaced)
     })
   })

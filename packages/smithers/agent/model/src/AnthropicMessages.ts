@@ -384,6 +384,16 @@ const buildBody = (
     ]
     const system = request.system.map((part) => ({ type: "text" as const, text: part.text }))
     const params = request.params
+    const messages = yield* lowerMessages(request, resolution.deferred.map((tool) => tool.name))
+    if (messages[0]?.role === "assistant") {
+      return yield* Result.fail(
+        new ModelError({
+          code: "invalid_request",
+          message: "Anthropic Messages requests must begin with a user message",
+          path: "messages[0].role"
+        })
+      )
+    }
 
     // Field order is explicit even though Route performs canonical encoding.
     // A model call is a sealed step, so this keeps construction itself
@@ -392,7 +402,7 @@ const buildBody = (
       model: request.modelId,
       max_tokens: params.maxTokens ?? 4096,
       ...(system.length === 0 ? {} : { system }),
-      messages: yield* lowerMessages(request, resolution.deferred.map((tool) => tool.name)),
+      messages,
       ...(tools.length === 0 ? {} : { tools }),
       stream: true,
       ...(params.temperature === undefined ? {} : { temperature: params.temperature }),

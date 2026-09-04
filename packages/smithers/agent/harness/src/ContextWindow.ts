@@ -437,9 +437,13 @@ export const activateTools: {
 })
 
 const summaryMessages = (summary: ModelRequest.Message | ReadonlyArray<ModelRequest.Message>): Content =>
-  Array.isArray(summary)
-    ? [...(summary as ReadonlyArray<ModelRequest.Message>)]
-    : [summary as ModelRequest.Message]
+  (Array.isArray(summary) ? summary : [summary]).map((message) =>
+    message.role === "user"
+      ? message
+      : ModelRequest.Message.user(
+        message.content.filter((part): part is ModelRequest.TextPart => part.type === "text")
+      )
+  )
 
 const compactableSegments = (self: ContextWindow): ReadonlyArray<Segment> =>
   self.segments.filter((segment) =>

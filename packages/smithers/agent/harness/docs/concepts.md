@@ -117,6 +117,10 @@ The volatile block, the frame's state section, sits in one trailing user
 message after the transcript rather than inside the system context, so the whole
 stable span is byte-identical for the life of a run.
 
+Compaction summaries are rendered as user messages, including summaries read
+from older journal records. This keeps every compacted request anchored by a
+leading user turn on providers that reject assistant-first conversations.
+
 Implemented by `ContextWindow.ts`, `Tokens.ts`, `Compaction.ts`.
 
 ## Structured output

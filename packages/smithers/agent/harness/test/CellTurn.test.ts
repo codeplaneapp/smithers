@@ -2659,7 +2659,8 @@ describe("CellTurn compaction", () => {
       Result.getOrThrow(ContextWindow.prefixDigest(crowded, prefixLength))
     )
     const summary = settled[0]?.summary
-    expect(summary?.role).toBe("assistant")
+    expect(summary?.role).toBe("user")
+    expect(model.recorder.requests[1]?.messages[0]?.role).toBe("user")
 
     // Replay rebuilds the exact next model context: applying the recorded
     // settlement to the original window reproduces what the second sealed step

@@ -810,7 +810,8 @@ invoking a model; `summaryRequest` builds the model request input for the
 step, with `summaryInstruction` as its stable instruction; and `apply`
 splices a recorded summary into a projected window, failing with
 `InvalidStep` when the declaration does not match the window it is applied
-to.
+to. Summary segments render as user messages, including summaries replayed
+from older records, so compaction cannot create an assistant-first request.
 
 ## Plan
 
@@ -945,4 +946,3 @@ renders it for one frame's prompt, printing at most `bound` (64) names before it
 counts instead. A binding rewritten to a value of the same type and size
 reads as unchanged: the panel is a roster, and the run's own prints are what
 say a value moved.
-
