@@ -21,10 +21,11 @@ Redaction has two halves.
 
 **Structural.** A field whose name reads as a credential has its value replaced
 wholesale, whatever the value is: `authorization`, `cookie`, `apiKey`, `token`,
-`password`, `secret`, `credential`, `dsn`, `connectionString`, `privateKey`,
-and the rest of that family, plus a trailing `key` that is a word of its own
-(`key`, `api_key`, `x-api-key`). `Redaction.isSensitiveKey` is the predicate,
-and `Redaction.placeholder` is the string that lands, `"[REDACTED]"`.
+`password`, `passphrase`, `secret`, `secretAccessKey`, `credential`, `dsn`,
+`connectionString`, `privateKey`, `sshKey`, `session`, `signature`, `auth`, and
+the rest of that family, plus a trailing `key` that is a word of its own (`key`,
+`api_key`, `x-api-key`). `Redaction.isSensitiveKey` is the predicate, and
+`Redaction.placeholder` is the string that lands, `"[REDACTED]"`.
 
 The match is a suffix test on the separator-free lowercase form of the name,
 not a substring test, so `tokenizer`, `secretary`, `monkey`, and
@@ -37,7 +38,9 @@ bearer material.
 
 **Textual.** `Redaction.defaultRules` scans inside any string for credential
 shapes seen in real bug reports: provider keys, bearer tokens, GitHub, AWS,
-Slack, and Google credentials, URL passwords, `SECRET=value` assignments, and
+Slack, and Google credentials, URL passwords, Basic authorization, bare JWTs,
+PEM private-key blocks, INI/YAML credential assignments such as
+`SECRET = value` and `password: value`, cookie and session assignments, and
 embedded JSON credential members.
 
 The rule set is a best-effort net, not a proof. A value that must never persist

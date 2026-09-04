@@ -79,6 +79,20 @@ export const defaultRules: ReadonlyArray<Rule> = [
     replace: "Bearer [REDACTED_TOKEN]"
   },
   {
+    id: "basic-authorization",
+    pattern: /\bBasic\s+[A-Za-z0-9+/]{4,}={0,2}/gi,
+    replace: "Basic [REDACTED_TOKEN]"
+  },
+  {
+    id: "jwt",
+    pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+    replace: "[REDACTED_TOKEN]"
+  },
+  {
+    id: "private-key-block",
+    pattern: /-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?-----END[^-]*-----/g
+  },
+  {
     id: "api-key",
     // Not `\b`, for the reason the assignment rule below gives: an underscore
     // is a word character, so `\bsk` never fires after `ANTHROPIC_` or after
@@ -118,8 +132,14 @@ export const defaultRules: ReadonlyArray<Rule> = [
     // The output drops quotes consistently. Excluding that exact output keeps
     // repeated journal and export passes at a fixed point.
     pattern:
-      /\b([A-Za-z0-9_-]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?)=(?!\[REDACTED\])("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(?!["'])\S+)/gi,
-    replace: "$1=[REDACTED]"
+      /(?<![A-Za-z0-9-])([A-Za-z0-9_-]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?)(\s*[:=]\s*)(?!\[REDACTED\])("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(?!["'])\S+)/gi,
+    replace: "$1$2[REDACTED]"
+  },
+  {
+    id: "cookie-session-assignment",
+    pattern:
+      /(?<![A-Za-z0-9-])((?:COOKIE|SESSION)S?)(\s*=\s*)(?!\[REDACTED\])("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|(?!["'])[^\s;,]+)/gi,
+    replace: "$1$2[REDACTED]"
   },
   {
     id: "embedded-json-credential",
@@ -147,12 +167,15 @@ export const defaultRules: ReadonlyArray<Rule> = [
  * for the opposite reason: it would redact `monkey` and `turkey`.
  */
 const sensitiveKeySuffixes = [
+  "auth",
   "authorization",
   "cookie",
   "apikey",
   "token",
   "password",
+  "passphrase",
   "secret",
+  "secretaccesskey",
   "credential",
   "dsn",
   "connection",
@@ -161,8 +184,11 @@ const sensitiveKeySuffixes = [
   "connectionurl",
   "secretkey",
   "privatekey",
+  "sshkey",
   "signingkey",
+  "signature",
   "encryptionkey",
+  "session",
   "sessionkey"
 ]
 

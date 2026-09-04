@@ -144,6 +144,60 @@ describe("Redaction", () => {
   })
 
   it.each([
+    [
+      "spaced AWS secret assignment",
+      "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      `aws_secret_access_key = ${Redaction.placeholder}`
+    ],
+    ["YAML password", "password: hunter2", `password: ${Redaction.placeholder}`],
+    ["YAML API key", "api_key: 9f8e7d6c5b4a", `api_key: ${Redaction.placeholder}`],
+    [
+      "Basic authorization",
+      "Authorization: Basic dXNlcjpwYXNz",
+      "Authorization: Basic [REDACTED_TOKEN]"
+    ],
+    [
+      "bare JWT",
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+      "[REDACTED_TOKEN]"
+    ],
+    [
+      "OpenSSH private key block",
+      "before\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\nafter",
+      `before\n${Redaction.placeholder}\nafter`
+    ],
+    [
+      "session cookie",
+      "Set-Cookie: session=4f3c2b1a; Path=/; HttpOnly",
+      `Set-Cookie: session=${Redaction.placeholder}; Path=/; HttpOnly`
+    ]
+  ])("redacts an incident-derived %s", (_name, source, expected) => {
+    expect(Redaction.redact(source)).toBe(expected)
+  })
+
+  it("redacts incident-derived structured credential members", () => {
+    expect(
+      Redaction.redact({
+        secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        passphrase: "correct horse battery staple",
+        sshKey: "private material"
+      })
+    ).toEqual({
+      secretAccessKey: Redaction.placeholder,
+      passphrase: Redaction.placeholder,
+      sshKey: Redaction.placeholder
+    })
+  })
+
+  it.each([
+    ["ordinary prose", "A password manager protects ordinary prose."],
+    ["eyJ inside a word", "prefixeyJabcdefghijk.payload.signature"],
+    ["non-credential URL query", "https://example.test/search?q=a=b&page=2"]
+  ])("preserves a %s negative control", (_name, source) => {
+    expect(Redaction.redact(source)).toBe(source)
+  })
+
+  it.each([
     ["GitHub token", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", Redaction.placeholder],
     ["GitHub fine-grained token", "github_pat_11ABCDEFG0abcdefghijklmnop", Redaction.placeholder],
     ["AWS access key", "AKIAIOSFODNN7EXAMPLE", Redaction.placeholder],
