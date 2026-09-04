@@ -178,6 +178,28 @@ describe("smithers executable", processBudget, () => {
     expect(result.status).toBe(2)
   })
 
+  it("reports a missing project root as a usage error", () => {
+    inEmptyDirectory((cwd) => {
+      const path = join(cwd, "absent")
+      const result = runIn(cwd, ["--root", path, "ls"])
+      expect(result.status).toBe(2)
+      expect(result.stderr).toContain("--root")
+      expect(result.stderr).toContain(path)
+      expect(result.stderr).not.toMatch(/ENOENT|realpath|stat '/)
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it.each([
+    ["memory", ["list", "get", "set", "rm"]],
+    ["claude", ["tick", "node-wait", "monitor", "subscribe", "unsubscribe"]],
+    ["mcp", ["add"]]
+  ])("requires a subcommand for %s", (verb, subcommands) => {
+    const result = run([verb as string])
+    expect(result.status).toBe(2)
+    for (const subcommand of subcommands) expect(result.stdout + result.stderr).toContain(subcommand)
+  })
+
   it("reports invalid pre-parse configuration as flag-specific usage errors", () => {
     inEmptyDirectory((cwd) => {
       const missing = join(cwd, "missing.json")

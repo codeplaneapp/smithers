@@ -1,17 +1,21 @@
 ---
 title: "Review pull requests with the Smithers action"
-description: "Add the smthrs review GitHub Action to a repository, trigger agent reviews with a PR comment, and run the same review from a terminal."
+description: "Add the Smithers review GitHub Action to a repository, trigger agent reviews with a PR comment, and run the same review from a terminal."
 sidebar:
   order: 24
 ---
 
 Get an agent review with a narrated HTML walkthrough on your pull requests, without running inference yourself.
 
-`smthrs review` runs one review agent per changed file, then a narrator agent writes a walkthrough of the whole change: chapters in logical reading order, prose explaining why each group of files changed, diffs embedded at the right point in the narrative, and Mermaid diagrams wherever structure changed. The output is a single self-contained HTML file you can open, share, or publish to a hosted URL.
+The Smithers review service runs one review agent per changed file, then a narrator agent writes a walkthrough of the whole change: chapters in logical reading order, prose explaining why each group of files changed, diffs embedded at the right point in the narrative, and Mermaid diagrams wherever structure changed. The output is a single self-contained HTML file you can open, share, or publish to a hosted URL.
 
 Pointed at a GitHub pull request, it also posts the review onto the PR: the narrative summary as the review body, and every finding as an inline comment with a `suggestion` block when there is replacement code to apply.
 
-Findings never fail the build. smthrs review reports; humans decide.
+Findings never fail the build. The review service reports; humans decide.
+
+This guide covers the review action and the separate `smithers-review` executable.
+The `review` subcommand was removed from the rc.0 CLI; see the
+[CLI migration reference](/docs/migration/1.0/#review).
 
 ## Before you start
 

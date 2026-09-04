@@ -211,6 +211,23 @@ const main = Effect.gen(function*() {
         pending.length = 0
         return Effect.fail(missing.cause)
       }
+      if (error.errors.length === 0 && !argv.some((arg) => arg === "--help" || arg === "-h" || arg === "--help=true")) {
+        let group: Command.Command.Any = cli
+        for (const name of error.commandPath.slice(1)) {
+          const child = group.subcommands.flatMap((entry) => entry.commands).find((command) => command.name === name)
+          if (child !== undefined) group = child
+        }
+        const choices = group.subcommands.flatMap((entry) => entry.commands)
+          .filter((command) => !command.unlisted).map((command) => command.name)
+        pending.length = 0
+        return Effect.fail(
+          new CliError.UsageError({
+            message: `Choose a subcommand for ${error.commandPath.join(" ")}: ${
+              choices.join(", ")
+            }. Use --wizard for guided input`
+          })
+        )
+      }
       return Effect.fail(error)
     }),
     Effect.ensuring(Effect.sync(flush)),

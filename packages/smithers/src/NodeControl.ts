@@ -72,7 +72,7 @@ import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { randomUUID } from "node:crypto"
-import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
 import { hostname } from "node:os"
@@ -248,7 +248,21 @@ export const makeConfig = (
  * @since 0.1.0
  */
 export const config: Effect.Effect<Application.Config, CliError.UsageError> = Effect.try({
-  try: () => makeConfig(process.argv.slice(2), process.env, process.cwd()),
+  try: () => {
+    const configured = makeConfig(process.argv.slice(2), process.env, process.cwd())
+    const projectRoot = configured.root ?? process.cwd()
+    try {
+      if (!statSync(projectRoot).isDirectory()) {
+        throw new CliError.UsageError({ message: `--root ${JSON.stringify(projectRoot)} must be a directory` })
+      }
+    } catch (cause) {
+      if (cause instanceof CliError.UsageError) throw cause
+      throw new CliError.UsageError({
+        message: `--root ${JSON.stringify(projectRoot)} is not an accessible directory`
+      })
+    }
+    return configured
+  },
   catch: (cause) =>
     cause instanceof CliError.UsageError
       ? cause

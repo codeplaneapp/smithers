@@ -41,6 +41,10 @@ Cancelling a prompt exits 130 without submitting the command. With piped stdin,
 a missing argument exits 2, names the argument, and points to `--wizard` for
 guided input. Optional arguments keep their documented defaults.
 
+A nonexistent or inaccessible `--root` exits 2 and names the path. A command
+group such as `memory`, `claude`, or `mcp` without a subcommand also exits 2
+and lists its subcommands; use `--help` to request help with exit 0.
+
 ## The shipped list
 
 `Verb.shipped` is the catalog. Every entry carries its `--help` line, its
