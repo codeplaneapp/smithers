@@ -248,6 +248,27 @@ describe("Cargo.Clippy", () => {
     expect(args(Cargo.Clippy({ package: "aomi-ext", allFeatures: true, locked: true, data: [] })))
       .toEqual(["clippy", "-p", "aomi-ext", "--all-features", "--locked"])
   })
+
+  /**
+   * `--lib` and `--all-targets` select different work: the default lints the
+   * library alone, so a benchmark or an integration test that stops compiling
+   * passes the gate until the declaration asks for every target.
+   */
+  it("lints every cargo target when the declaration asks for it", () => {
+    expect(args(Cargo.Clippy({ workspace: true, allTargets: true, locked: true, data: [] })))
+      .toEqual(["clippy", "--workspace", "--all-targets", "--locked"])
+  })
+})
+
+describe("Cargo.packageArgs", () => {
+  /**
+   * The planner reads attrs off metadata, and a rule with no attrs of its own
+   * hands over nothing. Rendering the bare command is the answer; reading
+   * fields off a non-object would throw inside the planner instead.
+   */
+  it.each([[undefined], [null], ["Cargo.toml"]])("renders the bare command for %o attrs", (attrs) => {
+    expect(Cargo.packageArgs("Cargo.Fetch", attrs, workspaceSelection)).toEqual(["fetch"])
+  })
 })
 
 describe("Cargo.Fmt", () => {

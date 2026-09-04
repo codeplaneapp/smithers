@@ -91,6 +91,26 @@ describe("Owners.declare", () => {
     )
     expect(() => Owners.declare({ owners: ["will"], extra: 1 } as never)).toThrow(/unknown option/)
   })
+
+  /**
+   * The bound is on the declaration, not on the rendered CODEOWNERS line: a
+   * roster longer than this is a team reference written out by hand, and the
+   * generated line would be long enough that GitHub silently truncates it.
+   */
+  it("refuses a roster longer than the owner bound, at the declaration and per file", () => {
+    const roster = Array.from({ length: Owners.maximumOwners + 1 }, (_, index) => `owner${index}`)
+    expect(roster).toHaveLength(65)
+    expect(() => Owners.declare({ owners: roster })).toThrow(
+      `Owners owners lists more than ${Owners.maximumOwners} owners`
+    )
+    expect(() => Owners.declare({ owners: ["will"], perFile: { "*.sql": roster } })).toThrow(
+      `lists more than ${Owners.maximumOwners} owners`
+    )
+    // One under the bound is still a legal declaration.
+    expect(Owners.declare({ owners: roster.slice(0, Owners.maximumOwners) }).owners).toHaveLength(
+      Owners.maximumOwners
+    )
+  })
 })
 
 describe("Owners.Teams", () => {

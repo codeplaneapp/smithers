@@ -83,6 +83,42 @@ describe("Target metadata traversal", () => {
     expect(() => Target.metadata(malformed as never)).toThrow(/not a well-formed smithers build target/)
   })
 
+  /**
+   * A marker whose metadata is well formed except for one field. `{ target:
+   * "forged" }` is refused by the first field it reads, so every collection
+   * field below it went unchecked; each case here starts from real metadata
+   * and breaks exactly one thing, which is the shape a forgery that copied a
+   * genuine target and edited it would have.
+   */
+  const forged = (overrides: Readonly<Record<string, unknown>>): unknown => {
+    const marker = (): void => undefined
+    Object.defineProperty(marker, Target.TargetTypeId, {
+      configurable: false,
+      enumerable: false,
+      value: { ...Target.metadata(Leaf({})), ...overrides },
+      writable: false
+    })
+    return marker
+  }
+
+  it.each([
+    ["accepts metadata copied from a real target", {}, true],
+    ["refuses a kinds field that is not an array", { kinds: "build" }, false],
+    ["refuses a kind the build system does not define", { kinds: ["deploy"] }, false],
+    ["refuses a hole where a kind should be", { kinds: [, "build"] }, false],
+    ["refuses a verb gate that is not an array of kinds", { verbGate: "build" }, false],
+    ["refuses a verb gate naming an undefined kind", { verbGate: ["deploy"] }, false],
+    ["refuses outputs that are not an object", { outputs: "dist" }, false],
+    ["refuses outputs without a string cwd", { outputs: { cwd: 1, paths: [] } }, false],
+    ["refuses outputs whose paths are not strings", { outputs: { cwd: ".", paths: [1] } }, false],
+    ["accepts well-formed outputs and verb gate", {
+      outputs: { cwd: ".", paths: ["dist/index.js"] },
+      verbGate: ["build"]
+    }, true]
+  ])("%s", (_description, overrides, accepted) => {
+    expect(Target.isTarget(forged(overrides))).toBe(accepted)
+  })
+
   it("rejects target proxies without invoking their traps", () => {
     let invoked = false
     const proxy = new Proxy(Leaf({}), {

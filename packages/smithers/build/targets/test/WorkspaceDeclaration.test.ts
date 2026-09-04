@@ -148,7 +148,12 @@ describe("Sandbox declarations", () => {
       { environment: { flake: "//flake.nix" } },
       "Sandbox.Microsandbox environment must be an S.Nix.Environment declaration"
     ],
-    [{ flake: Input.file("//flake.nix") }, "Sandbox.Microsandbox received unknown option \"flake\""]
+    [{ flake: Input.file("//flake.nix") }, "Sandbox.Microsandbox received unknown option \"flake\""],
+    // `null` is what a caller reading options out of parsed JSON hands over
+    // when the key is present and empty; the default parameter only covers
+    // `undefined`, so it reaches the body and would otherwise be walked.
+    [null, "Sandbox.Microsandbox options must be an object"],
+    ["nixos/nix:2.24.10", "Sandbox.Microsandbox options must be an object"]
   ])("rejects an invalid Microsandbox declaration", (value, message) => {
     const error = thrown(() => WorkspaceDeclaration.Sandbox.Microsandbox(value as never))
     expect(error).toBeInstanceOf(TypeError)

@@ -79,6 +79,18 @@ describe("Rust.Toolchain", () => {
     expect(RustToolchain.Toolchain({ channel: "1.91", rustup: "rustup-1.91" }).rustup).toBe("rustup-1.91")
   })
 
+  /**
+   * A misspelled option is silence otherwise: the declaration builds, the
+   * value never reaches the install argv, and the workspace runs whatever
+   * channel the host happens to have.
+   */
+  it("names an option it does not accept instead of ignoring it", () => {
+    expect(() => RustToolchain.Toolchain({ channel: "1.91", chanel: "1.90" } as never))
+      .toThrow("Rust.Toolchain received unknown option \"chanel\"")
+    expect(() => RustToolchain.Toolchain({ components: ["clippy"] } as never))
+      .toThrow(/unknown option "components"/)
+  })
+
   it("refuses a pin that is not a declared file input", () => {
     expect(() => RustToolchain.Pinned({ pin: "rust-toolchain.toml" as never }))
       .toThrow(/must be an S.file declaration/)

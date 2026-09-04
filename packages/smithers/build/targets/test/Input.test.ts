@@ -531,6 +531,20 @@ describe("Input.digestFiles", () => {
       await expect(Input.digestFiles(root, [], { maximumFiles })).rejects.toThrow(/digest file limit/)
     }
   )
+
+  /**
+   * A limit read out of an environment variable or a JSON config arrives as
+   * text. Rendering it back verbatim would read as an accepted value that was
+   * refused anyway, so the message names the type it actually got.
+   */
+  it("names the type of a bound that is not a number at all", async () => {
+    await expect(Input.digestFiles(root, [], { maximumFiles: "500" as never })).rejects.toThrow(
+      `digest file limit must be an integer from 0 to ${Input.maximumDigestFiles}, received string`
+    )
+    await expect(Input.digestFiles(root, [], { concurrency: true as never })).rejects.toThrow(
+      `digest concurrency must be an integer from 1 to ${Input.defaultDigestConcurrency}, received boolean`
+    )
+  })
 })
 
 describe("Input.rootRelative", () => {

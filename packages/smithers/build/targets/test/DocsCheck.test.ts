@@ -11,6 +11,7 @@ import * as DocsCheck from "../src/DocsCheck.ts"
 import { Smithers as S } from "../src/index.ts"
 import * as Input from "../src/Input.ts"
 import * as Target from "../src/Target.ts"
+import { plannedCalls } from "./plan.ts"
 
 const brief = { path: "apps/site/pages/intro/brief.md", digest: "a".repeat(64) }
 const style = { path: "apps/site/prompts/style.md", digest: "b".repeat(64) }
@@ -215,5 +216,33 @@ describe("Docs.Check attrs", () => {
     expect(() => declare({ inputs: [S.file("//apps/site/pages/intro/stamp.json")] })).toThrow(/its own input/)
     expect(() => declare({ inputs: [S.file("//apps/site/src/content/docs/docs/intro.mdx")] })).toThrow(/its own input/)
     expect(() => declare({ output: S.file("//apps/site/pages/intro/stamp.json") })).toThrow(/same file/)
+  })
+
+  /**
+   * `S.glob(["a", "b"])` returns an array, so an author writes
+   * `inputs: [brief, S.glob([...])]` and one member is itself an array. The
+   * self-input check has to see through that nesting; a page listed inside a
+   * nested member would otherwise stamp itself and never go stale.
+   */
+  it("looks inside a nested member for the stamp and the page", () => {
+    expect(() => declare({ inputs: [[S.file("//apps/site/pages/intro/stamp.json")]] })).toThrow(/its own input/)
+    expect(() => declare({ inputs: [[S.file("//apps/site/src/content/docs/docs/intro.mdx")]] })).toThrow(
+      /its own input/
+    )
+    const target = declare({ inputs: [[S.file("//apps/site/pages/intro/brief.md")]] })
+    expect(Target.metadata(target).inputs.map((input) => (input as Input.File).path)).toContain(
+      "//apps/site/pages/intro/brief.md"
+    )
+  })
+
+  /**
+   * The verdict is computed by the package executor, so under a bare Flow
+   * runtime the body must refuse by name rather than plan a check that
+   * silently passes.
+   */
+  it("plans the not-implemented action naming itself", () => {
+    expect(plannedCalls(declare())).toEqual([
+      { action: "smithers-build/not-implemented", payload: { target: "Docs.Check" } }
+    ])
   })
 })

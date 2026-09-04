@@ -61,6 +61,20 @@ describe("parseWorkflow", () => {
     expect(() => parseStrictWorkflow("on:\n  not-a-mapping\njobs:\n")).toThrow(/expected a "key: value"/)
   })
 
+  /**
+   * A trigger block whose lines do not line up is the defect this parser has
+   * to name rather than guess at: YAML would read the outdented key as a
+   * sibling of `on`, so a workflow that looks like it runs on two events runs
+   * on one and silently gains a top-level key nothing checks.
+   */
+  it("refuses a trigger block whose events do not share one indentation", () => {
+    const job = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm run check\n"
+    expect(() => parseStrictWorkflow(`on:\n    push:\n  pull_request:\n${job}`))
+      .toThrow(/inconsistent indentation in the workflow trigger block/)
+    // The same events at one indentation are the accepted form.
+    expect(parseStrictWorkflow(`on:\n  push:\n  pull_request:\n${job}`).jobs).toHaveLength(1)
+  })
+
   it("accepts scalar, sequence, and block-mapping trigger forms", () => {
     const job = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: pnpm run check\n"
     for (const trigger of ["on: push", "on: [push, pull_request]", "on:\n  push:\n  workflow_dispatch:"]) {

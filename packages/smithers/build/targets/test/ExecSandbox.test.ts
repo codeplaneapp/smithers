@@ -140,6 +140,21 @@ describe("plan", () => {
     expect(plan.cwd).toBe("/work/ws/pkg")
   })
 
+  /**
+   * A write is the one declaration that would open a hole: binding a path
+   * that resolves outside the root would give the tool a writable window on
+   * the host. It is dropped, not anchored back inside and not refused, which
+   * is the same answer an escaping read gets.
+   */
+  it("drops a declared write and a read-only path that escape the root", () => {
+    const plan = planned(linux, {
+      writes: ["dist", "../outside", "../../etc/passwd"],
+      readOnly: [".flows/cache", "../outside"]
+    })
+    expect(plan.writes).toEqual(["/work/ws/dist"])
+    expect(plan.readOnly).toEqual(["/work/ws/.flows/cache"])
+  })
+
   it("collapses a path covered by a broader entry", () => {
     const plan = planned(
       host("linux", { bwrap: "/usr/bin/bwrap" }, ["/work/ws/src/a.ts", "/work/ws/src/b.ts"], [
