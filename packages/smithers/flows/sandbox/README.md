@@ -84,9 +84,12 @@ is the host surface an agent's standard tools consume.
 ```ts
 import { ContainerSandbox, Sandbox } from "@smthrs/sandbox"
 
-const provider = ContainerSandbox.make({ spawner, image: "node:22", network: "none" })
+const provider = ContainerSandbox.make({ spawner, image: "node:22" })
 const host = Sandbox.layerHost(provider, { session: "run:01J..." })
 ```
+
+`ContainerSandbox` passes `--network none` when `network` is omitted. Set an
+engine network mode explicitly to opt into egress.
 
 A provider that can be pinged can also be supervised. `SandboxSupervision`
 probes the open session on a cadence and retires it when the probe says it is

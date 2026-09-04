@@ -220,6 +220,21 @@ const output = (session: Session, command: string, options: Parameters<Session["
   )
 
 describe("ContainerSandbox", () => {
+  it.effect("disables container networking when the provider omits a network mode", () =>
+    Effect.gen(function*() {
+      const fake = engine()
+      yield* acquired(ContainerSandbox.make({ spawner: fake.spawner, image: "img", workdir }), Effect.succeed)
+      expect(fake.calls[0]!.args.slice(0, 7)).toEqual([
+        "create",
+        "--name",
+        expect.stringMatching(/^smthrs-sbx-run-1-/),
+        "--workdir",
+        workdir,
+        "--network",
+        "none"
+      ])
+    }))
+
   it.effect("drives the full container lifecycle through the engine CLI", () =>
     Effect.gen(function*() {
       const spaced = join(root, "work dir")

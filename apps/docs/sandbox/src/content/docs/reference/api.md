@@ -250,12 +250,11 @@ import { ContainerSandbox } from "@smthrs/sandbox"
 
 const provider = ContainerSandbox.make({
   spawner,
-  image: "node:22",
-  network: "none"
+  image: "node:22"
 })
 ```
 
-The default CLI is `docker`; set `program: "podman"` for Podman or name a compatible wrapper. `acquire` deterministically names the container, runs `create` then `start`, and reattaches when that name already exists: a refused create is followed by `container inspect`, so the reattach turns on whether the engine has the container rather than on the English wording of its conflict message. Commands, reads, and writes all travel through `exec` to the same guest workdir. The scope finalizer runs `rm --force`, ending the container and everything still inside it.
+The default CLI is `docker`; set `program: "podman"` for Podman or name a compatible wrapper. Network access is disabled by default with `--network none`; setting `network` to another engine mode is an explicit egress opt-in. `acquire` deterministically names the container, runs `create` then `start`, and reattaches when that name already exists: a refused create is followed by `container inspect`, so the reattach turns on whether the engine has the container rather than on the English wording of its conflict message. Commands, reads, and writes all travel through `exec` to the same guest workdir. The scope finalizer runs `rm --force`, ending the container and everything still inside it.
 
 The exec's own shell is named absolutely and a caller's environment travels as an `env(1)` prefix on the inner shell, never as `--env` on the exec and never through `export`. Both rules exist for the same reason: the engine resolves an exec's argv through the exec environment's `PATH`, so a caller's `PATH` override would otherwise break the wrapper before the command ran, and `export` refuses a name the session contract accepts (`a-b=1`) and would abort the whole line. Every shell the provider starts for itself is absolute for that same reason, workspace preparation, file reads and writes, and signal delivery included, since `options.env` is applied to the whole container. A spawn value of `undefined` deletes the variable with `env -u` rather than merely omitting it, so a name the container was created with is genuinely gone from the command's environment; every `-u` precedes every assignment, because `env` stops reading options at its first operand.
 

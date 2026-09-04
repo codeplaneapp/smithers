@@ -20,7 +20,7 @@ A provider is the value that turns a session key into a machine. Nine ship in `@
 | Provider | A machine is |
 | --- | --- |
 | `DirectorySandbox` | one host directory under `root` |
-| `ContainerSandbox` | one container from `image`, held on `sleep infinity` |
+| `ContainerSandbox` | one container from `image`, held on `sleep infinity`; its network is `none` unless explicitly set |
 | `KubernetesSandbox` | one Pod from `image`, held on `sleep infinity` |
 | `JustBashSandbox` | one directory in a shared virtual filesystem, commands interpreted in-process |
 | `MicrosandboxSandbox` | one local microVM from an image or a snapshot |

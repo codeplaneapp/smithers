@@ -39,7 +39,7 @@ export interface ContainerSandboxOptions {
   readonly workdir?: string | undefined
   /** Container-wide environment, applied at creation. */
   readonly env?: Readonly<Record<string, string>> | undefined
-  /** The engine's network mode for the container, passed verbatim (`none` isolates). */
+  /** The engine's network mode for the container, passed verbatim. Default `none`; another value explicitly opts in. */
   readonly network?: string | undefined
   /** Extra `create` arguments, an escape hatch for engine-specific shaping. */
   readonly createArgs?: ReadonlyArray<string> | undefined
@@ -98,6 +98,7 @@ const pidDirectory = "/tmp/.smthrs-sbx"
 export const make = (options: ContainerSandboxOptions): Provider => {
   const program = options.program ?? "docker"
   const workdir = options.workdir ?? "/workspace"
+  const network = options.network ?? "none"
   const prefix = options.namePrefix ?? "smthrs-sbx-"
   const run = (args: ReadonlyArray<string>): Effect.Effect<GatheredRun, ProviderError> =>
     Effect.scoped(
@@ -138,7 +139,8 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               name,
               "--workdir",
               workdir,
-              ...options.network === undefined ? [] : ["--network", options.network],
+              "--network",
+              network,
               ...Object.entries(options.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
               ...options.createArgs ?? [],
               options.image,

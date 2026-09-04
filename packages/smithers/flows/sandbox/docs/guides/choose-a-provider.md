@@ -51,8 +51,7 @@ const local = DirectorySandbox.make({ fs, spawner, root: "/var/tmp/smithers" })
 
 const contained = ContainerSandbox.make({
   spawner,
-  image: "node:22",
-  network: "none"
+  image: "node:22"
 })
 
 const microVm = MicrosandboxSandbox.make({
@@ -67,6 +66,9 @@ const microVm = MicrosandboxSandbox.make({
 
 `fs` and `spawner` are Effect's `FileSystem` and `ChildProcessSpawner`, taken
 from the host that composes the provider.
+
+`ContainerSandbox` defaults to the engine's `none` network. Set `network`
+explicitly to opt the container into an egress-capable engine mode.
 
 ## Select one by name
 

@@ -56,7 +56,7 @@ crossed the seam.
 | --------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `DirectorySandbox`    | none. Real host processes with your credentials, in a directory they are not confined to | none                                                                                                           |
 | `JustBashSandbox`     | none. Commands are interpreted in process against a shared virtual filesystem            | none                                                                                                           |
-| `ContainerSandbox`    | the container runtime's                                                                  | `image`, `network` (pass `none` to isolate), `env`, `createArgs`                                               |
+| `ContainerSandbox`    | the container runtime's                                                                  | `image`, `network` (`none` by default; another mode opts into egress), `env`, `createArgs`                     |
 | `KubernetesSandbox`   | the cluster's: the image, the service account, and the namespace's policies              | `image`, `serviceAccount`, `namespace`, `nodeSelector`, `resources`, `labels`, `createArgs`                    |
 | `MicrosandboxSandbox` | a local microVM                                                                          | `image` or `snapshot`, `cpus`, `memoryMib`, `maxDurationSecs`, `idleTimeoutSecs`, `security`, `disableNetwork` |
 | `VercelSandbox`       | Vercel's sandbox tenancy                                                                 | `runtime`, `timeoutMs`, `maxDurationMs`                                                                        |
@@ -134,7 +134,7 @@ Ask the question in this order.
    you coherence and lifetime with no provisioning cost, and that is a
    legitimate use.
 2. **Do you need the code contained on this machine?** Use
-   `ContainerSandbox` with `network: "none"` or `MicrosandboxSandbox` with
+   `ContainerSandbox` (which defaults to `network: "none"`) or `MicrosandboxSandbox` with
    `disableNetwork`, and accept the boundary each one actually has: a container
    shares the host kernel, and a microVM does not.
 3. **Do you need it off this machine?** Use `KubernetesSandbox`,
