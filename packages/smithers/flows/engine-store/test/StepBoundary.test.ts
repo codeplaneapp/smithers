@@ -26,54 +26,6 @@ const descriptor: FileBoundary = {
 }
 
 describe("StepBoundary", () => {
-  it.effect("fails hard mode for an undeclared write", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare(descriptor)
-        return yield* Effect.flip(boundary.settle(prepared))
-      }).pipe(Effect.provide(StepBoundary.layerTest({ changedPaths: ["surprise.txt"], diffIdentity: "d1" })))
-      expect(yield* withCrypto(program)).toMatchObject({
-        _tag: "@smthrs/engine-store/UndeclaredWrite",
-        code: "undeclared_write",
-        paths: ["surprise.txt"],
-        diffIdentity: "d1"
-      })
-    }))
-
-  it.effect("records expected-mode deviations", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare({ ...descriptor, boundaryMode: "expected" })
-        return yield* boundary.settle(prepared)
-      }).pipe(Effect.provide(StepBoundary.layerTest({ changedPaths: ["surprise.txt"], diffIdentity: "d2" })))
-      expect(yield* withCrypto(program)).toMatchObject({
-        declaredOutputs: { paths: ["output.txt"] },
-        deviation: { _tag: "ExpectedSetDeviation", paths: ["surprise.txt"], diffIdentity: "d2" }
-      })
-    }))
-
-  it.effect("recognizes tree and glob coverage in the deterministic whole-tree fixture", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare({
-          readSet: [],
-          writeSet: [
-            { _tag: "TreeArtifact", path: "tree" },
-            { _tag: "Glob", include: ["generated/**/*.js"] }
-          ],
-          boundaryMode: "hard"
-        })
-        return yield* boundary.settle(prepared)
-      }).pipe(Effect.provide(StepBoundary.layerTest({
-        changedPaths: ["tree/a.txt", "generated/nested/a.js"],
-        hermeticReadDetection: false
-      })))
-      expect(yield* withCrypto(program)).toMatchObject({ wholeTreeWritesVerified: true })
-    }))
-
   it.effect("captures outputs and re-materializes them on replay", () =>
     Effect.gen(function*() {
       const replayed: Array<StepBoundary.BoundaryEvidence> = []
@@ -90,86 +42,6 @@ describe("StepBoundary", () => {
       }).pipe(Effect.provide(layer))
       expect(yield* withCrypto(program)).toMatchObject({ declaredOutputs: { output: "value" } })
       expect(replayed).toHaveLength(1)
-    }))
-
-  it.effect("fails hard mode for a declared output the step never produced", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare(descriptor)
-        return yield* Effect.flip(boundary.settle(prepared))
-      }).pipe(Effect.provide(StepBoundary.layerTest({ missingOutputs: ["output.txt"], diffIdentity: "d4" })))
-      expect(yield* withCrypto(program)).toMatchObject({
-        _tag: "@smthrs/engine-store/MissingDeclaredOutput",
-        code: "missing_declared_output",
-        paths: ["output.txt"],
-        diffIdentity: "d4"
-      })
-    }))
-
-  it.effect("records a missing declared output as an expected-mode deviation", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare({ ...descriptor, boundaryMode: "expected" })
-        return yield* boundary.settle(prepared)
-      }).pipe(Effect.provide(StepBoundary.layerTest({ missingOutputs: ["output.txt"], diffIdentity: "d5" })))
-      // A deviation of ANY variant bars the evidence from the shared cache —
-      // `ActionPersistence` gates `recordCache` on `deviation === undefined` —
-      // so an unexplained absence never reaches another host in either mode.
-      expect(yield* withCrypto(program)).toMatchObject({
-        deviation: { _tag: "MissingDeclaredOutput", paths: ["output.txt"], diffIdentity: "d5" }
-      })
-    }))
-
-  it.effect("legalizes an absence the boundary declared as a removal", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare({
-          ...descriptor,
-          writeSet: ["output.txt"],
-          removes: ["stale.txt"]
-        })
-        return yield* boundary.settle(prepared)
-      }).pipe(Effect.provide(StepBoundary.layerTest({ missingOutputs: ["stale.txt"], changedPaths: ["stale.txt"] })))
-      const evidence = yield* withCrypto(program)
-      expect(evidence.deviation).toBeUndefined()
-    }))
-
-  it.effect("hard-fails a surviving removal the fixture reports", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare({
-          ...descriptor,
-          writeSet: ["output.txt"],
-          removes: ["stale.txt"]
-        })
-        return yield* Effect.flip(boundary.settle(prepared))
-      }).pipe(Effect.provide(StepBoundary.layerTest({ survivingRemovals: ["stale.txt"] })))
-      const failure = yield* withCrypto(program)
-      expect(failure).toMatchObject({
-        _tag: "@smthrs/engine-store/SurvivingDeclaredRemoval",
-        code: "surviving_declared_removal",
-        paths: ["stale.txt"]
-      })
-    }))
-
-  it.effect("records a fixture-reported surviving removal as a deviation in expected mode", () =>
-    Effect.gen(function*() {
-      const program = Effect.gen(function*() {
-        const boundary = yield* StepBoundary.StepBoundary
-        const prepared = yield* boundary.prepare({
-          ...descriptor,
-          boundaryMode: "expected",
-          writeSet: ["output.txt"],
-          removes: ["stale.txt"]
-        })
-        return yield* boundary.settle(prepared)
-      }).pipe(Effect.provide(StepBoundary.layerTest({ survivingRemovals: ["stale.txt"] })))
-      const evidence = yield* withCrypto(program)
-      expect(evidence.deviation).toMatchObject({ _tag: "SurvivingDeclaredRemoval", paths: ["stale.txt"] })
     }))
 
   it.effect("fails closed when the host does not support boundaries", () =>
@@ -992,6 +864,36 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
           }).pipe(Effect.provide(empty.layer))
         ))
       ).toBeDefined()
+    }))
+
+  it.effect("settles and replays a combined tree and glob write set over the real filesystem layer", () =>
+    Effect.gen(function*() {
+      const producer = memoryFs({
+        "tree/a.txt": "tree output",
+        "generated/nested/a.js": "glob output",
+        "outside.txt": "unowned"
+      })
+      const evidence = yield* withCrypto(
+        Effect.gen(function*() {
+          const boundary = yield* StepBoundary.StepBoundary
+          return yield* boundary.settle(
+            yield* boundary.prepare({
+              readSet: [],
+              writeSet: [{ _tag: "TreeArtifact", path: "tree" }, { _tag: "Glob", include: ["generated/**/*.js"] }],
+              boundaryMode: "hard"
+            })
+          )
+        }).pipe(Effect.provide(producer.layer))
+      )
+      const consumer = memoryFs({})
+      yield* withCrypto(
+        Effect.flatMap(StepBoundary.StepBoundary, (boundary) => boundary.replayOutputs(evidence))
+          .pipe(Effect.provide(consumer.layer))
+      )
+      expect([...consumer.files.keys()].sort()).toEqual(["generated/nested/a.js", "tree/a.txt"])
+      expect(decoder.decode(consumer.files.get("tree/a.txt"))).toBe("tree output")
+      expect(decoder.decode(consumer.files.get("generated/nested/a.js"))).toBe("glob output")
+      expect(evidence.deviation).toBeUndefined()
     }))
 
   it.effect("makes a warm replay write-free without recreating parent directories", () =>

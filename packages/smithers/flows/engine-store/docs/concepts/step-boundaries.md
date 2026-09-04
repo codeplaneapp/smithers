@@ -93,7 +93,7 @@ so a write outside the declared set is a map comparison rather than an
 inference, and `ActionPersistence` sets the flag structurally.
 
 `StepBoundary.layerTest(options)` is deterministic and supports
-changed-path, deviation, replay, and `readSnapshot` assertions, but it does not
+explicit `failure` or `deviation` fixtures, replay, and `readSnapshot` assertions, but it does not
 enforce a real sandbox. Its `wholeTreeWriteDetection` default of `true` is a
 fixture, not a proof.
 
@@ -118,3 +118,5 @@ fixture, not a proof.
   must meet before another run may use it.
 - [Share a cache across machines](../guides/share-a-cache-across-machines.md):
   publishing the digests this evidence references.
+
+Test filesystem classification with `StepBoundary.layer` over an in-memory `FileSystem` and `ArtifactStore`. `layerTest` returns supplied settlement evidence or failure verbatim; it does not classify changed paths, missing outputs, or surviving removals.

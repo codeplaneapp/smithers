@@ -262,10 +262,11 @@ interface Service {
 
 ### TestOptions
 
-`changedPaths`, `missingOutputs`, `survivingRemovals`, `readSnapshot`,
+`failure`, `deviation`, `readSnapshot`,
 `declaredOutputs`, `diffIdentity`, `supported`, `wholeTreeWriteDetection`,
 `hermeticReadDetection`, and `onReplay`. Defaults describe a well-behaved,
-fully-supported host. `wholeTreeWriteDetection` defaults to `true`, which is a
+fully-supported host. Failures and deviations are returned verbatim; use the real
+filesystem layer to test classification. `wholeTreeWriteDetection` defaults to `true`, which is a
 fixture claim rather than a proof: the real whole-tree observation comes from
 [`WorkspaceSandbox`](#workspacesandbox).
 

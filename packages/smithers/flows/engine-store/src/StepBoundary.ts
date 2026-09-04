@@ -350,7 +350,7 @@ export interface Service {
 }
 
 /**
- * The service key for a {@link Service}. Provide it with `layerFileSystem` for
+ * The service key for a {@link Service}. Provide it with `layer` for
  * a real workspace or `layerTest` for a deterministic in-memory one.
  *
  * @since 0.1.0
@@ -914,8 +914,8 @@ export const layer: Layer.Layer<Service, never, FileSystem.FileSystem | Artifact
 /**
  * What the deterministic test boundary should pretend the host observed.
  *
- * Every field is a fixture, not a behaviour knob: a test states the writes it
- * wants seen, the read snapshot it wants measured, and whether the host claims
+ * Every field is a fixture, not a classification rule: a test supplies settlement
+ * evidence or failure, the read snapshot, and whether the host claims
  * to support the boundary at all — then asserts on the resulting evidence or
  * refusal. Defaults describe a well-behaved, fully-supported host.
  *
@@ -923,21 +923,10 @@ export const layer: Layer.Layer<Service, never, FileSystem.FileSystem | Artifact
  * @category models
  */
 export interface TestOptions {
-  /** The paths `settle` reports as written. Defaults to none. */
-  readonly changedPaths?: ReadonlyArray<string> | undefined
-  /**
-   * Declared writes `settle` reports the step never produced. Paths the
-   * descriptor declares as `removes` are filtered out, exactly as the
-   * filesystem layer filters them: a declared removal is what makes an absence
-   * legitimate. Defaults to none.
-   */
-  readonly missingOutputs?: ReadonlyArray<string> | undefined
-  /**
-   * Declared removals `settle` reports as still present — the dual of
-   * `missingOutputs`. Paths not declared in `removes` are ignored. Defaults
-   * to none.
-   */
-  readonly survivingRemovals?: ReadonlyArray<string> | undefined
+  /** A settlement failure supplied verbatim by an integration fixture. */
+  readonly failure?: UndeclaredWrite | MissingDeclaredOutput | SurvivingDeclaredRemoval | undefined
+  /** Settlement evidence supplied verbatim; classification belongs to the real layer. */
+  readonly deviation?: BoundaryDeviation | undefined
   /**
    * What `prepare` reports as measured for the declared read set. Defaults
    * to the declaration itself; a test supplies a different snapshot to stand
@@ -951,7 +940,7 @@ export interface TestOptions {
   readonly diffIdentity?: string | undefined
   /** When false, every call fails with {@link UnsupportedBoundary}. Defaults to true. */
   readonly supported?: boolean | undefined
-  /** Whether `changedPaths` represents a whole-tree observation. Defaults to true. */
+  /** Whether the fixture attests a whole-tree observation. Defaults to true. */
   readonly wholeTreeWriteDetection?: boolean | undefined
   /** Whether the fixture models an isolated read surface. Defaults to true. */
   readonly hermeticReadDetection?: boolean | undefined
@@ -980,7 +969,6 @@ const unsupported = (): UnsupportedBoundary =>
  * @category layers
  */
 export const layerTest = (options: TestOptions = {}): Layer.Layer<Service> => {
-  const changedPaths = options.changedPaths ?? []
   const diffIdentity = options.diffIdentity ?? "test-diff"
   const service = make({
     prepare: Effect.fn("StepBoundary.prepare")(function*(descriptor) {
@@ -992,52 +980,13 @@ export const layerTest = (options: TestOptions = {}): Layer.Layer<Service> => {
     }),
     settle: Effect.fn("StepBoundary.settle")(function*(prepared) {
       if (options.supported === false) return yield* Effect.fail(unsupported())
-      const removes = prepared.descriptor.removes ?? []
-      const declared = [...prepared.descriptor.writeSet, ...removes]
-      const undeclared = changedPaths.filter((path) =>
-        !declared.some((entry) =>
-          typeof entry === "string"
-            ? entry === path
-            : entry._tag === "TreeArtifact"
-            ? path === entry.path || path.startsWith(`${entry.path}/`)
-            : FileSet.matchesGlob(entry, path)
-        )
-      )
-      // The fixture states which declared writes the step failed to produce,
-      // so the test boundary can exercise the same rule the real one enforces
-      // rather than pretending every declaration was honoured.
-      const missing = (options.missingOutputs ?? []).filter((path) => !removes.includes(path))
-      // Stated explicitly rather than inferred from `changedPaths`: a
-      // correctly-deleted removal is a changed path too, so presence has to be
-      // the fixture's own claim.
-      const surviving = (options.survivingRemovals ?? []).filter((path) => removes.includes(path))
-      if (prepared.descriptor.boundaryMode === "hard") {
-        if (undeclared.length > 0) {
-          return yield* Effect.fail(new UndeclaredWrite({ code: "undeclared_write", paths: undeclared, diffIdentity }))
-        }
-        if (missing.length > 0) {
-          return yield* Effect.fail(
-            new MissingDeclaredOutput({ code: "missing_declared_output", paths: missing, diffIdentity })
-          )
-        }
-        if (surviving.length > 0) {
-          return yield* Effect.fail(
-            new SurvivingDeclaredRemoval({ code: "surviving_declared_removal", paths: surviving, diffIdentity })
-          )
-        }
-      }
+      if (options.failure !== undefined) return yield* Effect.fail(options.failure)
       return {
         declaredOutputs: options.declaredOutputs ?? { paths: prepared.descriptor.writeSet },
         diffIdentity,
         ...(options.wholeTreeWriteDetection === false ? {} : { wholeTreeWritesVerified: true as const }),
         ...(options.hermeticReadDetection === false ? {} : { hermeticReadsVerified: true as const }),
-        ...(undeclared.length > 0
-          ? { deviation: { _tag: "ExpectedSetDeviation" as const, paths: undeclared, diffIdentity } }
-          : missing.length > 0
-          ? { deviation: { _tag: "MissingDeclaredOutput" as const, paths: missing, diffIdentity } }
-          : surviving.length > 0
-          ? { deviation: { _tag: "SurvivingDeclaredRemoval" as const, paths: surviving, diffIdentity } }
-          : {})
+        ...(options.deviation === undefined ? {} : { deviation: options.deviation })
       }
     }),
     replayOutputs: Effect.fn("StepBoundary.replayOutputs")(function*(evidence) {

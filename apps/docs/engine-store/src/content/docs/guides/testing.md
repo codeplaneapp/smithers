@@ -58,7 +58,7 @@ and `DurableWriter`.
 | Seam                 | Deterministic layer        | What it does                                                                                                                        |
 | -------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `DurableEngineState` | `layerMemory`              | An in-memory implementation that, given a `runs` lookup, enforces the same park, wake, and clock ownership fences as the SQL layer. |
-| `StepBoundary`       | `layerTest(options)`       | Supports changed-path, deviation, replay, and `readSnapshot` assertions.                                                            |
+| `StepBoundary`       | `layerTest(options)`       | Supports explicit `failure` or `deviation` fixtures, replay, and `readSnapshot` assertions.                                         |
 | `WorkspaceSandbox`   | `makeMemory(initialFiles)` | Deterministic and browser-safe, and the conformance implementation.                                                                 |
 | `StepSandbox`        | `layerTest(initialFiles)`  | The same transaction behind the scope-safe front door.                                                                              |
 | `StepSandbox`        | `layerNoop`                | Fails closed with `UnsupportedBoundary`, which models a host that cannot sandbox.                                                   |
@@ -113,3 +113,5 @@ attributed by outcome, so a test can assert that a dispatch settled as a
   pattern in full.
 - [Compose a durable engine](/guides/compose-a-durable-engine/): the production
   composition these layers substitute into.
+
+Test filesystem classification with `StepBoundary.layer` over an in-memory `FileSystem` and `ArtifactStore`. `layerTest` returns supplied settlement evidence or failure verbatim; it does not classify changed paths, missing outputs, or surviving removals.

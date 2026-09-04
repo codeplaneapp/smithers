@@ -219,7 +219,17 @@ describe("engine-store action tiers", () => {
         }).pipe(Effect.result)
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(TestStores.layer(), StepBoundary.layerTest({ changedPaths: ["other"] }), jjLayer([], []))
+          Layer.mergeAll(
+            TestStores.layer(),
+            StepBoundary.layerTest({
+              failure: new StepBoundary.UndeclaredWrite({
+                code: "undeclared_write",
+                paths: ["other"],
+                diffIdentity: "test-diff"
+              })
+            }),
+            jjLayer([], [])
+          )
         ),
         Effect.scoped
       )
@@ -251,7 +261,13 @@ describe("engine-store action tiers", () => {
         }
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(TestStores.layer(), StepBoundary.layerTest({ changedPaths: ["other"] }), jjLayer([], []))
+          Layer.mergeAll(
+            TestStores.layer(),
+            StepBoundary.layerTest({
+              deviation: { _tag: "ExpectedSetDeviation", paths: ["other"], diffIdentity: "test-diff" }
+            }),
+            jjLayer([], [])
+          )
         ),
         Effect.scoped
       )

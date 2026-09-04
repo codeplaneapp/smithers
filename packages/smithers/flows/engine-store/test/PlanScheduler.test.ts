@@ -444,6 +444,27 @@ describe("PlanScheduler over a static graph", () => {
   })
 })
 
+// These admission cases have one deviator (`own.out`) and a separate writer.
+// Supply the deviator's evidence explicitly; classification is tested over a real filesystem.
+const admissionBoundary = Layer.effect(
+  StepBoundary.StepBoundary,
+  Effect.gen(function*() {
+    const boundary = yield* StepBoundary.StepBoundary
+    return StepBoundary.make({
+      ...boundary,
+      settle: (prepared) =>
+        boundary.settle(prepared).pipe(Effect.map((evidence) =>
+          prepared.descriptor.writeSet.includes("own.out")
+            ? {
+              ...evidence,
+              deviation: { _tag: "ExpectedSetDeviation" as const, paths: ["shared.out"], diffIdentity: "test-diff" }
+            }
+            : evidence
+        ))
+    })
+  })
+).pipe(Layer.provide(StepBoundary.layerTest()))
+
 describe("PlanScheduler admission", () => {
   it("admits by cap and effective priority while journaling event-driven aging", async () => {
     const plan = await runPromise(compile([
@@ -610,7 +631,7 @@ describe("PlanScheduler admission", () => {
           harness({
             runId: "run-deviation-order",
             executor,
-            boundary: StepBoundary.layerTest({ changedPaths: ["shared.out"] }),
+            boundary: admissionBoundary,
             reconciliation
           })
         ).pipe(Effect.forkChild({ startImmediately: true }))
@@ -962,7 +983,8 @@ describe("PlanScheduler conflict strategies", () => {
 })
 
 describe("PlanScheduler reconciliation", () => {
-  const deviating = (paths: ReadonlyArray<string>) => StepBoundary.layerTest({ changedPaths: paths })
+  const deviating = (paths: ReadonlyArray<string>) =>
+    StepBoundary.layerTest({ deviation: { _tag: "ExpectedSetDeviation", paths, diffIdentity: "test-diff" } })
 
   it("attributes an identical-key deviation to the node that executed", async () => {
     const shared = {
@@ -1510,7 +1532,7 @@ describe("PlanScheduler invalidation and journal plumbing", () => {
           harness({
             runId: "run-reorder-ahead",
             executor,
-            boundary: StepBoundary.layerTest({ changedPaths: ["shared.out"] }),
+            boundary: admissionBoundary,
             reconciliation: Reconciliation.layer(Reconciliation.make(Reconciliation.makeDefault()))
           })
         )

@@ -654,7 +654,13 @@ describe("action executor failure paths", () => {
           const events = yield* journalState("settle-fails")
           return { exit, row, cached, events }
         }),
-        StepBoundary.layerTest({ changedPaths: ["undeclared.txt"] })
+        StepBoundary.layerTest({
+          failure: new StepBoundary.UndeclaredWrite({
+            code: "undeclared_write",
+            paths: ["undeclared.txt"],
+            diffIdentity: "test-diff"
+          })
+        })
       )
 
       const failure = Exit.isFailure(result.exit)
