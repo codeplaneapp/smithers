@@ -10,8 +10,7 @@
  * @private
  */
 
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
+import { isRecord } from "@smthrs/canonical/Record"
 
 const sorted = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(sorted)

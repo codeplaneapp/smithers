@@ -41,6 +41,7 @@
  *
  * @since 0.1.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { DerivedKey, digest } from "@smthrs/keys"
 import * as KeyMaterial from "@smthrs/plan/KeyMaterial"
 import * as Node from "@smthrs/plan/Node"
@@ -129,7 +130,6 @@ type Services = Crypto.Crypto | FlowRuntime | FlowInstance | Implementations
  *
  * @private
  */
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 /** Reads one own data property without invoking an accessor or letting a proxy trap escape. */
 const ownDataProperty = (value: unknown, key: PropertyKey): unknown => {

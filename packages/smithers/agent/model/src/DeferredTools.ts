@@ -3,6 +3,7 @@
  *
  * @since 0.1.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import type { ModelRequest, ToolDefinition } from "./ModelRequest.ts"
 
 /**
@@ -74,9 +75,6 @@ const OPENAI_DEFERRED_MODELS = new Set([
 ])
 
 const isOpenAiDeferredModel = (modelId: string): boolean => OPENAI_DEFERRED_MODELS.has(modelId.toLowerCase())
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const toolCallNames = (value: unknown): ReadonlyArray<string> => {
   const names: Array<string> = []

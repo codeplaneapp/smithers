@@ -131,7 +131,8 @@
   "dependencies": {
     "@smthrs/crypto": "1.0.0-rc.0",
     "@smthrs/keys": "1.0.0-rc.0",
-    "@smthrs/plan": "1.0.0-rc.0"
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/canonical": "1.0.0-rc.0"
   },
   "peerDependencies": {
     "effect": "4.0.0-rc.108"

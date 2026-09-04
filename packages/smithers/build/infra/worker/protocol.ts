@@ -4,6 +4,8 @@
  * @since 0.1.0
  */
 
+import { isRecord } from "@smthrs/canonical/Record"
+
 const hexDigest = /^[0-9a-f]{64}$/
 const jsonContentType = /^application\/(?:[a-z0-9!#$&^_.+-]+\+)?json$/
 const decimalDigits = /^[0-9]+$/
@@ -506,9 +508,6 @@ const readJson = async (request: Request, limit: number): Promise<JsonRead> => {
   if (irreversible !== null) return { ok: false, response: json(400, { error: irreversible }) }
   return { ok: true, text, value }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 /**
  * Renders an inert JSON value with deterministic member order and hard bounds.

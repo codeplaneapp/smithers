@@ -1,3 +1,4 @@
+import { isRecord } from "@smthrs/canonical/Record"
 import { createHash, randomUUID } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
@@ -68,8 +69,6 @@ interface FileIdentity {
   readonly ctimeNs: bigint
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 /**
  * What one redaction run walks and what it may leave in place.

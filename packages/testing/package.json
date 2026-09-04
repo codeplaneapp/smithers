@@ -95,7 +95,8 @@
     "@smthrs/journal": "1.0.0-rc.0",
     "@smthrs/kernel": "1.0.0-rc.0",
     "@smthrs/model": "1.0.0-rc.0",
-    "@smthrs/plan": "1.0.0-rc.0"
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/canonical": "1.0.0-rc.0"
   },
   "peerDependencies": {
     "@effect/vitest": "4.0.0-rc.108",

@@ -72,13 +72,13 @@ describe("AgentTurnFrame — chain family (DESIGN.md §14)", () => {
  * never imports it. This keeps the Worker and both bridges effect-free.
  */
 describe("src/shared stays runtime-free", () => {
-  test("no shared module imports @smthrs/* or effect", () => {
+  test("only the runtime-free canonical record guard crosses the Smithers boundary", () => {
     const dir = join(import.meta.dir)
     for (const file of readdirSync(dir)) {
       if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue
       const source = readFileSync(join(dir, file), "utf8")
       // Covers bare, subpath, single-quoted, and dynamic import specifiers.
-      expect(source).not.toMatch(/(from\s+|import\()\s*["']@smthrs\//)
+      expect(source).not.toMatch(/(from\s+|import\()\s*["']@smthrs\/(?!canonical\/Record["'])/)
       expect(source).not.toMatch(/(from\s+|import\()\s*["']effect(["']|\/)/)
     }
   })

@@ -25,6 +25,7 @@
  *
  * @since 1.0.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { Effect } from "effect"
 import { createHash } from "node:crypto"
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
@@ -230,9 +231,6 @@ const configError = (message: string, details?: Record<string, unknown>, cause?:
 const ID = /^[a-z0-9][a-z0-9._-]*$/
 const REPOSITORY = /^[^/\s]+\/[^/\s]+$/
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const validateCallbackUrl = (value: unknown, flowId: string, issues: Array<string>, at: string): void => {
   if (typeof value !== "string") {

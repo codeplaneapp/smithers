@@ -9,6 +9,7 @@
  *
  * @since 0.1.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { Option, Schema } from "effect"
 import { type PlatformError, systemError } from "effect/PlatformError"
 import {
@@ -367,8 +368,6 @@ export type PermissionError = PermissionRequired | PermissionDenied | GrantStore
  */
 export const PermissionError = Schema.Union([PermissionRequired, PermissionDenied, GrantStoreError])
 
-const isRecord = (input: unknown): input is Readonly<Record<PropertyKey, unknown>> =>
-  typeof input === "object" && input !== null
 const isAction = Schema.is(Action)
 const isEffectTier = Schema.is(EffectTier)
 const isPermissionMeta = Schema.is(PermissionMeta)

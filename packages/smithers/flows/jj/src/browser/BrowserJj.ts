@@ -21,6 +21,7 @@
  *
  * @since 0.1.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
@@ -108,8 +109,6 @@ export interface BrowserJjOptions {
 const isJjErrorCode = Schema.is(JjErrorCode)
 
 const messageOf = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 /** A realm-independent test for raw, non-shared wasm bytes. */
 const isArrayBuffer = (value: unknown): value is ArrayBuffer =>

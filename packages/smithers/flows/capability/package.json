@@ -100,5 +100,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.9"
+  },
+  "dependencies": {
+    "@smthrs/canonical": "1.0.0-rc.0"
   }
 }

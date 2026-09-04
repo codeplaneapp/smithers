@@ -10,6 +10,7 @@
  *
  * @since 0.1.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import type * as Permission from "@smthrs/capability/Permission"
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
 import * as Clock from "effect/Clock"
@@ -252,9 +253,6 @@ const headerResetCandidates = (
   }
   return candidates
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 const encodeJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.String))

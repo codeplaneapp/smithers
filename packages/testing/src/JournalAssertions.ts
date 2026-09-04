@@ -3,6 +3,7 @@
  *
  * @since 0.0.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import * as Effect from "effect/Effect"
 import type { JournalEntryLike } from "./EngineSubject.ts"
 import { ExactlyOnceUnsupportedError, type JournalAssertionCode, JournalAssertionError } from "./TestingError.ts"
@@ -77,9 +78,6 @@ const failure = (
       ...(actual === undefined ? {} : { actual })
     })
   )
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null
 
 const idempotencyKeyOf = (entry: JournalEntryLike): unknown =>
   isRecord(entry.value) ? entry.value.idempotencyKey : undefined

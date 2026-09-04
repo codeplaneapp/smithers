@@ -8,6 +8,7 @@
  *
  * @since 1.0.0-rc.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Boundary from "./internal/Boundary.ts"
@@ -125,9 +126,6 @@ const snapshotRecord = (input: unknown): ResolvedConfig => {
   }
   return record
 }
-
-const isRecord = (value: ConfigValue): value is Readonly<Record<string, ConfigValue>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const define = (target: Record<string, ConfigValue>, key: string, value: ConfigValue): void => {
   Object.defineProperty(target, key, {

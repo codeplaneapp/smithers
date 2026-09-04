@@ -10,6 +10,7 @@
  *
  * @since 1.0.0-rc.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { Effect, Result, Schema } from "effect"
 import type { Scope } from "effect"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -231,9 +232,6 @@ const invalidResponse = (server: string, message: string): McpError =>
 
 const protocolError = (server: string, message: string): McpError =>
   new McpError({ code: "protocol_error", message, server })
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const positiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0
 

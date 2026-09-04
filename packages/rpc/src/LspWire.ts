@@ -9,6 +9,7 @@
  * — and both convert HERE, so a hover reads the same whichever machine the
  * server runs on. Runtime-free: strings and numbers only.
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { LSP_HOVER_CAP_CHARS } from "./LocalApp"
 import type { LspDiagnostic, LspHover, LspRange, LspSeverity } from "./LocalApp"
 
@@ -46,7 +47,6 @@ export interface LspHoverWire {
 
 const SEVERITIES: Readonly<Record<number, LspSeverity>> = { 1: "error", 2: "warning", 3: "information", 4: "hint" }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 /** 0-based, end-exclusive → 1-based, end-exclusive. */
 export const toWireRange = (range: LspRangeWire): LspRange => ({

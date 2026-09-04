@@ -5,6 +5,7 @@
  *
  * @since 0.1.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { Effects, Flow, Node } from "@smthrs/core"
 import * as Schema from "effect/Schema"
 import { PatternError } from "../PatternError.ts"
@@ -209,9 +210,6 @@ const schemaDocument = (schema: Schema.Top): unknown | undefined => {
     return undefined
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const step = (path: string, key: string): string => path === "" ? key : `${path}.${key}`
 

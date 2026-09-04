@@ -20,6 +20,7 @@
  *
  * @since 1.0.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { hasSmithersErrorShape, SmithersError } from "@smthrs/errors/SmithersError"
 import { Context, Duration, Effect, Layer, Schedule } from "effect"
 import { isMessageId } from "../core/ActionFailure.ts"
@@ -335,9 +336,6 @@ export interface TelegramClient {
 export const TelegramClient: Context.Service<TelegramClient, TelegramClient> = Context.Service(
   "@smthrs/integrations/TelegramClient"
 )
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const linkInterrupt = (signal: AbortSignal, controller: AbortController): void => {
   if (signal.aborted) {

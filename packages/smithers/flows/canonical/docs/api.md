@@ -1,17 +1,16 @@
 ---
 title: "API reference"
-description: "Every public export of @smthrs/canonical: the canonicalize function, the Canonical schema and its branded type, CanonicalError, and the nine stable failure codes."
+description: "Every public export of @smthrs/canonical: the canonicalize function, the Canonical schema and its branded type, CanonicalError, the stable failure codes, and the shared isRecord guard."
 ---
 
-The surface is one serializer offered two ways, plus the failure it reports.
+The package provides canonical serialization, its schema and errors, and an array-excluding record guard.
 
 ```ts
 import { Canonical, CanonicalError, canonicalize } from "@smthrs/canonical"
 import type { CanonicalErrorCode } from "@smthrs/canonical"
 ```
 
-The schema is also importable as `@smthrs/canonical/Canonical`. Nothing else is
-public: `@smthrs/canonical/internal/*` and `@smthrs/canonical/*/index` are
+The schema is also importable as `@smthrs/canonical/Canonical`. The shape guard is importable as `@smthrs/canonical/Record`. Private paths `@smthrs/canonical/internal/*` and `@smthrs/canonical/*/index` are
 blocked in the export map.
 
 The behavior every entry below shares is on
@@ -167,3 +166,7 @@ shape or a host's runtime.
 
 Each code, with its cause and its fix, is in
 [Troubleshooting](./troubleshooting.md).
+
+## isRecord
+
+`isRecord(value)` accepts non-null objects and excludes arrays. It preserves member types for typed JSON-like values. It does not read properties or validate their contents, and accepts class instances; use `canonicalize` or a schema when validating serialization. Import it from the package root or `@smthrs/canonical/Record`.

@@ -5,6 +5,7 @@
  *
  * @since 0.0.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -31,9 +32,6 @@ const invoke = <A, E>(operation: string, evaluate: () => Effect.Effect<A, E>): E
 const waitUntil = (predicate: () => boolean, message: string) => Pin.waitUntil(interruptPin, predicate, message)
 
 const awaitFiber = <A, E>(fiber: Fiber.Fiber<A, E>, message: string) => Pin.awaitFiber(interruptPin, fiber, message)
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null
 
 const isWellFormedEntry = (value: unknown): value is JournalEntryLike =>
   isRecord(value) &&

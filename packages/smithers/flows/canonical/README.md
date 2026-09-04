@@ -26,3 +26,5 @@ canonicalize({ b: 2, a: 1 })
 `canonicalize` follows `JSON.stringify` for JSON data, `toJSON(key)`, boxed primitives, and sparse arrays, then sorts keys by UTF-16 code units. It rejects non-finite numbers, BigInt, lone surrogates, cycles, digest-unsafe non-plain built-ins, and nesting beyond 10,000 levels. Failures are `CanonicalError` values with stable `code` and `path` fields.
 
 Canonical output is digest-critical: changing its bytes changes every downstream digest.
+
+`isRecord` is the shared array-excluding object guard, available from the package root and `@smthrs/canonical/Record`. It checks shape without reading members; it is not a plain-object or JSON validator.

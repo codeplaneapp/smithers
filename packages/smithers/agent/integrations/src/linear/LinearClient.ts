@@ -24,6 +24,7 @@
  *
  * @since 1.0.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { Context, Effect, Layer } from "effect"
 import { IntegrationError } from "../core/IntegrationError.ts"
 import * as Environment from "../Environment.ts"
@@ -280,9 +281,6 @@ interface NamedNode {
   readonly id: string
   readonly name?: string | undefined
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const decodeFailed = (path: string, expected: string): IntegrationError =>
   new IntegrationError(

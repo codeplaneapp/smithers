@@ -35,6 +35,7 @@
  * @private
  * @slop
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import type { Schema } from "effect"
 import * as Sandbox from "../Sandbox.ts"
@@ -75,9 +76,6 @@ export interface Statement {
   readonly bytes: number
 }
 
-const isRecord = (value: Schema.Json): value is Schema.JsonObject =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
-
 const cell = (value: Schema.Json): string =>
   typeof value === "string" && !value.includes("\n") && !value.includes("|")
     ? value
@@ -101,12 +99,12 @@ const cell = (value: Schema.Json): string =>
 export const table = (value: Schema.Json): string | undefined => {
   if (!Array.isArray(value) || value.length < tableRows) return undefined
   const first = value[0]
-  if (!isRecord(first)) return undefined
+  if (!isRecord<Schema.Json>(first)) return undefined
   const columns = Object.keys(first)
   if (columns.length < 2) return undefined
   const rows: Array<string> = []
   for (const element of value) {
-    if (!isRecord(element)) return undefined
+    if (!isRecord<Schema.Json>(element)) return undefined
     const keys = Object.keys(element)
     if (keys.length !== columns.length || columns.some((column, index) => keys[index] !== column)) return undefined
     // Every column is a key of this element: the key sets were compared above,
@@ -146,7 +144,7 @@ export const render = (value: Schema.Json): string => {
   if (typeof value === "string") return value
   const flat = table(value)
   if (flat !== undefined) return flat
-  if (!isRecord(value)) return CanonicalJson.stringify(value)
+  if (!isRecord<Schema.Json>(value)) return CanonicalJson.stringify(value)
   const tabled = Object.entries(value).flatMap(([key, member]) => {
     const rendered = table(member)
     return rendered === undefined ? [] : [[key, member as ReadonlyArray<unknown>, rendered] as const]

@@ -87,7 +87,8 @@
     "@smthrs/harness": "1.0.0-rc.0",
     "@smthrs/journal": "1.0.0-rc.0",
     "@smthrs/kernel": "1.0.0-rc.0",
-    "@smthrs/registry": "1.0.0-rc.0"
+    "@smthrs/registry": "1.0.0-rc.0",
+    "@smthrs/canonical": "1.0.0-rc.0"
   },
   "peerDependencies": {
     "effect": "4.0.0-rc.108"

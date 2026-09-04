@@ -23,6 +23,7 @@
  *
  * @since 0.1.0
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import { digestSync } from "@smthrs/crypto"
 import { identity } from "effect/Function"
 import type * as Pipeable from "effect/Pipeable"
@@ -727,7 +728,6 @@ const identityAlgorithms: ReadonlySet<unknown> = new Set<FunctionIdentity["algor
 const callModes: ReadonlySet<unknown> = new Set<CallMode>(["inline", "boundary", "handoff"])
 
 /** @private */
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 /** @private */
 const isFunctionIdentity = (value: unknown): value is FunctionIdentity =>

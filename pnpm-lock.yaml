@@ -1895,6 +1895,9 @@ importers:
 
   packages/rpc:
     dependencies:
+      '@smthrs/canonical':
+        specifier: 1.0.0-rc.0
+        version: link:../smithers/flows/canonical
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -3184,6 +3187,9 @@ importers:
 
   packages/smithers/build/infra:
     dependencies:
+      '@smthrs/canonical':
+        specifier: 1.0.0-rc.0
+        version: link:../../flows/canonical
       alchemy:
         specifier: 2.0.0-beta.72
         version: 2.0.0-beta.72(@effect/platform-bun@4.0.0-rc.108(effect@4.0.0-rc.108))(@effect/platform-node@4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2)))(@types/react@19.2.18)(effect@4.0.0-rc.108)(react-devtools-core@7.0.1)(supports-color@10.2.2)(typescript@6.0.3)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))(vitest@4.1.9)(ws@8.21.3)

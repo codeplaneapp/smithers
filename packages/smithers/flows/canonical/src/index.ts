@@ -35,3 +35,11 @@
 export * from "./Canonical.ts"
 export { CanonicalError, canonicalize } from "./internal/canonicalize.ts"
 export type { CanonicalErrorCode } from "./internal/canonicalize.ts"
+
+/**
+ * Object-shape guard for values crossing a wire boundary.
+ *
+ * @since 1.0.0
+ * @category guards
+ */
+export { isRecord } from "./Record.ts"
