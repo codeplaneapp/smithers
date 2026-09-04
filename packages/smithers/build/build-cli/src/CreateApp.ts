@@ -88,21 +88,71 @@ export const templates = async (root: string): Promise<ReadonlyArray<string>> =>
  * The `packages` directory of the checkout `@smthrs/create-app` was resolved
  * from, or undefined when it came from a registry install.
  *
- * A checkout has the package at `<repo>/packages/smithers/create-app` with its siblings
- * beside it; an installed copy sits under `node_modules`.
+ * Found by walking up from the template directory rather than by counting two
+ * segments off it. Packages nest: this one sits at
+ * `<repo>/packages/smithers/create-app`, so the fixed
+ * `dirname(dirname(root))` answered `<repo>/packages/smithers`, whose base name
+ * is not `packages`, and every scaffold cut from this repository reported
+ * `linked: []` while its manifest kept version ranges no registry serves.
+ * An installed copy sits under `node_modules` and has no checkout to link to.
  */
 const checkoutPackages = (root: string): string | undefined => {
-  const packages = NodePath.dirname(NodePath.dirname(root))
-  if (NodePath.basename(packages) !== "packages") return undefined
-  if (packages.split(NodePath.sep).includes("node_modules")) return undefined
-  return packages
+  if (root.split(NodePath.sep).includes("node_modules")) return undefined
+  let current = NodePath.dirname(root)
+  for (;;) {
+    if (NodePath.basename(current) === "packages") return current
+    const parent = NodePath.dirname(current)
+    if (parent === current) return undefined
+    current = parent
+  }
 }
+
+/**
+ * Every package in the checkout, keyed by the name its manifest declares.
+ *
+ * A package's directory is not its identity: `@smthrs/flow` lives at
+ * `packages/smithers/flows/flow` and `@smthrs/targets` at
+ * `packages/smithers/build/targets`, so `packages/<name after the scope>` finds
+ * neither. The walk descends the whole tree and reads each name instead.
+ */
+const workspacePackages = async (packages: string): Promise<ReadonlyMap<string, string>> => {
+  const found = new Map<string, string>()
+  const walk = async (directory: string): Promise<void> => {
+    const entries = await NodeFs.readdir(directory, { withFileTypes: true }).catch(() => [])
+    try {
+      const manifest = JSON.parse(
+        await NodeFs.readFile(NodePath.join(directory, "package.json"), "utf8")
+      ) as { readonly name?: string }
+      if (typeof manifest.name === "string" && !found.has(manifest.name)) found.set(manifest.name, directory)
+    } catch {
+      // Not a package directory, or a manifest that does not parse. Keep walking.
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue
+      await walk(NodePath.join(directory, entry.name))
+    }
+  }
+  await walk(packages)
+  return found
+}
+
+/**
+ * Directories a template never ships, however dirty the checkout is.
+ *
+ * A template is an ordinary directory, so anything a tool leaves in it is
+ * copied. Running the template's own suite from the checkout writes
+ * `node_modules/.vite`, and that debris was copied into every scaffolded app.
+ * `.smithers` is deliberately absent: templates ship one.
+ */
+const skipped = new Set(["node_modules", "dist", ".wrangler", ".flows"])
 
 /** Copies `from` into `to`, substituting the app name, and counts the files. */
 const copy = async (from: string, to: string, name: string): Promise<number> => {
   await NodeFs.mkdir(to, { recursive: true })
   let files = 0
   for (const entry of await NodeFs.readdir(from, { withFileTypes: true })) {
+    if (skipped.has(entry.name)) continue
     const source = NodePath.join(from, entry.name)
     const target = NodePath.join(to, entry.name)
     if (entry.isDirectory()) {
@@ -128,22 +178,22 @@ interface Manifest {
 /**
  * Rewrites every `@smthrs/*` specifier in the scaffolded manifest to a `link:`
  * path inside `packages`, and answers with the names it rewrote.
+ *
+ * A dependency the checkout does not carry keeps its declared version, so a
+ * template that names a published package is left alone.
  */
 const linkWorkspace = async (directory: string, packages: string): Promise<ReadonlyArray<string>> => {
   const path = NodePath.join(directory, "package.json")
   const manifest = JSON.parse(await NodeFs.readFile(path, "utf8")) as Manifest
+  const workspace = await workspacePackages(packages)
   const linked: Array<string> = []
   for (const field of ["dependencies", "devDependencies"] as const) {
     const block = manifest[field]
     if (block === undefined) continue
     for (const dependency of Object.keys(block)) {
       if (!dependency.startsWith("@smthrs/")) continue
-      const local = NodePath.join(packages, dependency.slice("@smthrs/".length))
-      try {
-        await NodeFs.access(NodePath.join(local, "package.json"))
-      } catch {
-        continue
-      }
+      const local = workspace.get(dependency)
+      if (local === undefined) continue
       block[dependency] = `link:${local}`
       linked.push(dependency)
     }

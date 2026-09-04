@@ -15,17 +15,27 @@ import { scaffold, templateRoot, templates } from "../src/CreateApp.ts"
 const temporary = async (prefix: string): Promise<string> =>
   Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), prefix)))
 
-/** A two-file template plus a `packages/` sibling, so `link:` has something to find. */
+/**
+ * A two-file template inside a checkout whose packages nest, so `link:` has
+ * something to find and has to find it by name.
+ *
+ * The layout mirrors this repository: the template ships inside
+ * `packages/smithers/create-app`, and `@smthrs/targets` lives at
+ * `packages/smithers/build/targets`, which `packages/<name after the scope>`
+ * would never reach.
+ */
 const fixture = async (): Promise<{ readonly root: string; readonly templates: string }> => {
   const root = await temporary("smthrs-create-app-")
-  const templateDir = NodePath.join(root, "packages", "create-app", "template", "demo")
+  const createApp = NodePath.join(root, "packages", "smithers", "create-app")
+  const targets = NodePath.join(root, "packages", "smithers", "build", "targets")
+  const templateDir = NodePath.join(createApp, "template", "demo")
   await Fs.mkdir(NodePath.join(templateDir, "app"), { recursive: true })
   await Fs.writeFile(
     NodePath.join(templateDir, "package.json"),
     JSON.stringify(
       {
         name: "__APP_NAME__",
-        dependencies: { "@smthrs/create-app": "0.1.0", effect: "4.0.0-rc.108" },
+        dependencies: { "@smthrs/create-app": "0.1.0", "@smthrs/targets": "0.1.0", effect: "4.0.0-rc.108" },
         devDependencies: { "@smthrs/absent": "0.1.0", typescript: "6.0.3" }
       },
       null,
@@ -35,13 +45,18 @@ const fixture = async (): Promise<{ readonly root: string; readonly templates: s
   await Fs.writeFile(NodePath.join(templateDir, "README.md"), "# __APP_NAME__\n")
   await Fs.writeFile(NodePath.join(templateDir, "app", "page.tsx"), "export default () => \"__APP_NAME__\"\n")
   await Fs.writeFile(NodePath.join(templateDir, "logo.svg"), "<svg><!-- __APP_NAME__ --></svg>")
-  // The sibling package `link:` should find. `@smthrs/absent` has no directory
+  // The two packages `link:` should find. `@smthrs/absent` is in no directory
   // here, so it must keep its declared version.
   await Fs.writeFile(
-    NodePath.join(root, "packages", "create-app", "package.json"),
+    NodePath.join(createApp, "package.json"),
     JSON.stringify({ name: "@smthrs/create-app", version: "0.1.0" })
   )
-  return { root, templates: NodePath.join(root, "packages", "create-app", "template") }
+  await Fs.mkdir(targets, { recursive: true })
+  await Fs.writeFile(
+    NodePath.join(targets, "package.json"),
+    JSON.stringify({ name: "@smthrs/targets", version: "0.1.0" })
+  )
+  return { root, templates: NodePath.join(createApp, "template") }
 }
 
 describe("templates", () => {
@@ -70,23 +85,42 @@ describe("scaffold", () => {
     expect(await Fs.readFile(NodePath.join(directory, "logo.svg"), "utf8")).toContain("__APP_NAME__")
   })
 
-  it("links the @smthrs packages that exist beside the template, and only those", async () => {
+  it("links the @smthrs packages the checkout carries, and only those", async () => {
     const source = await fixture()
     const directory = NodePath.join(await temporary("smthrs-scaffold-"), "ledger")
     const report = await scaffold({ directory, template: "demo", templateRoot: source.templates })
 
-    expect(report.linked).toEqual(["@smthrs/create-app"])
+    expect(report.linked).toEqual(["@smthrs/create-app", "@smthrs/targets"])
     const manifest = JSON.parse(await Fs.readFile(NodePath.join(directory, "package.json"), "utf8")) as {
       readonly dependencies: Record<string, string>
       readonly devDependencies: Record<string, string>
     }
     expect(manifest.dependencies["@smthrs/create-app"]).toBe(
-      `link:${NodePath.join(source.root, "packages", "create-app")}`
+      `link:${NodePath.join(source.root, "packages", "smithers", "create-app")}`
     )
-    // A package with no directory beside the template keeps its version, and a
+    // Found by the name its manifest declares, not by its path: this one is
+    // two directories deeper than the scope suggests.
+    expect(manifest.dependencies["@smthrs/targets"]).toBe(
+      `link:${NodePath.join(source.root, "packages", "smithers", "build", "targets")}`
+    )
+    // A package the checkout does not carry keeps its version, and a
     // non-@smthrs dependency is never touched.
     expect(manifest.devDependencies["@smthrs/absent"]).toBe("0.1.0")
     expect(manifest.dependencies["effect"]).toBe("4.0.0-rc.108")
+  })
+
+  it("leaves a dirty template's build output behind", async () => {
+    const source = await fixture()
+    // What running the template's own suite from a checkout leaves in it.
+    const debris = NodePath.join(source.templates, "demo", "node_modules", ".vite")
+    await Fs.mkdir(debris, { recursive: true })
+    await Fs.writeFile(NodePath.join(debris, "results.json"), "{}")
+    const directory = NodePath.join(await temporary("smthrs-scaffold-"), "ledger")
+
+    const report = await scaffold({ directory, template: "demo", templateRoot: source.templates })
+
+    expect(report.files).toBe(4)
+    await expect(Fs.access(NodePath.join(directory, "node_modules"))).rejects.toThrow()
   })
 
   it("keeps the declared versions under --no-link", async () => {
