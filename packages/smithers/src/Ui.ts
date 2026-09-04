@@ -32,10 +32,10 @@ import { packageVersion } from "./Version.ts"
  * @category constants
  * @since 1.0.0-rc.0
  */
-export const brand = `smithers ${packageVersion}`
+export const brand = `smthrs ${packageVersion}`
 
 /**
- * One line of a checklist: `smithers doctor`'s checks, or any report that is
+ * One line of a checklist: `smthrs doctor`'s checks, or any report that is
  * a list of named facts at three levels.
  *
  * @category models

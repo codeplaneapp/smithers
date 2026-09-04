@@ -120,6 +120,11 @@ export * as Serve from "./Serve.ts"
  * @category refusals
  * @since 1.0.0
  */
+export * as Ui from "./Ui.ts"
+/**
+ * @category output
+ * @since 1.0.0-rc.0
+ */
 export * as Unsupported from "./Unsupported.ts"
 /**
  * @category update

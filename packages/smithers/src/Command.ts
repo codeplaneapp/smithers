@@ -45,6 +45,7 @@ import * as NodeOutput from "./NodeOutput.ts"
 import { Output, renderValue } from "./Output.ts"
 import * as Project from "./Project.ts"
 import * as Serve from "./Serve.ts"
+import * as Ui from "./Ui.ts"
 import * as Unsupported from "./Unsupported.ts"
 import * as Update from "./Update.ts"
 import * as Verb from "./Verb.ts"
@@ -1577,7 +1578,15 @@ const doctor = Command.make("doctor", {}, () =>
       discoveredFlows: catalog.items.filter((item) => !Unsupported.isReservedFlow(item.flowId)),
       discoveryWarnings: catalog.warnings
     })
-    yield* render(root.json ? report : Doctor.render(report))
+    // `--json` prints the report verbatim. The human rendering goes through
+    // `Ui`: clack symbols and a verdict line on a terminal, and on a pipe the
+    // same one-line-per-check text `Doctor.render` has always produced.
+    const ui = yield* Ui.current
+    yield* render(
+      root.json
+        ? report
+        : Ui.renderChecklist(`smithers doctor: ${report.root}`, report.checks, { interactive: ui.interactive })
+    )
     if (Doctor.failed(report)) {
       yield* Effect.fail(new CliError.UnsupportedError({ message: "doctor found a blocking problem" }))
     }
