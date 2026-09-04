@@ -476,3 +476,9 @@ macOS seatbelt supports the loopback policy.
 allowlisted child environment shared by execution and cache-key planning.
 Declared values override inherited defaults, cache credentials are withheld,
 and explicitly minted secret placeholders are applied last.
+
+`Smithers.GithubCiGen` groups concurrent runs by pull request number, falling
+back to the commit SHA for other events. With the default
+`cancelInProgress: true`, a new PR run cancels the previous run for that PR;
+each pushed commit retains its own run and verdict. Set
+`cancelInProgress: false` to disable cancellation.
