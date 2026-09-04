@@ -6,6 +6,8 @@
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as PlatformError from "effect/PlatformError"
+import * as Sink from "effect/Sink"
+import * as Stream from "effect/Stream"
 import { fileInfo } from "./fileInfo.ts"
 import { platformError } from "./platformError.ts"
 import { readDirectory } from "./readDirectory.ts"
@@ -96,20 +98,21 @@ const writeText = (
  *
  * `FileSystem.makeNoop` fails most unimplemented operations with `NotFound`
  * but hardcodes the `makeTemp*` family to a defect, so the documented
- * NotFound contract for those four has to be wired explicitly.
+ * typed refusal for those four has to be wired explicitly.
  *
  * @private
  */
+const unsupportedError = (method: string): PlatformError.PlatformError =>
+  PlatformError.systemError({
+    _tag: "PermissionDenied",
+    module: "FileSystem",
+    method,
+    description: `the browser backend does not support ${method}`,
+    pathOrDescriptor: method
+  })
+
 const unsupported = (method: string): Effect.Effect<never, PlatformError.PlatformError> =>
-  Effect.fail(
-    PlatformError.systemError({
-      _tag: "NotFound",
-      module: "FileSystem",
-      method,
-      description: "the browser backend does not support this operation",
-      pathOrDescriptor: method
-    })
-  )
+  Effect.fail(unsupportedError(method))
 
 /**
  * The permission bits `access` checks a stats `mode` against.
@@ -146,21 +149,10 @@ const denied = (path: string): PlatformError.PlatformError =>
 /**
  * Constructs a `FileSystem` over a ZenFS-shaped backend.
  *
- * Only the operations a browser backend can actually serve are wired up.
- * Everything else answers with `FileSystem.makeNoop`'s refusal — a `NotFound`
- * failure — which is the honest answer for a backend that has no symlinks,
- * writable handles, or watchers: `chmod`, `chown`, `copy`, `copyFile`, `glob`,
- * `link`, `symlink`, `readLink`, `open`, `rename`, `sink`, `truncate`,
- * `utimes`, `watch`, and the `makeTemp*` family all fail rather than pretend.
- * The `makeTemp*` four are wired explicitly because `makeNoop` hardcodes them
- * to a defect rather than the `NotFound` failure this contract documents.
- * `sink` is in that list because the slice has no writable file handle to
- * append through, so there is no way to honour its incremental contract.
+ * Unsupported operations fail with `PermissionDenied` naming the operation,
+ * so callers cannot mistake a host limitation for an absent file. Publication
+ * uses the backend's rename and timestamp operations when available.
  * Reads use bounded file-handle chunks rather than loading the whole file.
- * `readFileString` and `writeFileString` are wired explicitly, because
- * `makeNoop` — unlike `make` — does not derive them. Each gap that
- * turns out to matter becomes a ticket, not a silently-wrong implementation
- * (`Concepts/Tickets Not Exceptions.md`).
  *
  * The operations that *are* served honour their options rather than dropping
  * them: `readDirectory` walks the tree for `recursive`, `access` answers
@@ -186,6 +178,28 @@ const denied = (path: string): PlatformError.PlatformError =>
  */
 export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
   FileSystem.makeNoop({
+    chmod: () => unsupported("chmod"),
+    chown: () => unsupported("chown"),
+    copy: () => unsupported("copy"),
+    copyFile: () => unsupported("copyFile"),
+    glob: () => unsupported("glob"),
+    link: () => unsupported("link"),
+    symlink: () => unsupported("symlink"),
+    readLink: () => unsupported("readLink"),
+    open: () => unsupported("open"),
+    truncate: () => unsupported("truncate"),
+    sink: () => Sink.fail(unsupportedError("sink")),
+    watch: () => Stream.fail(unsupportedError("watch")),
+    rename: (from, to) =>
+      fs.rename === undefined ? unsupported("rename") : Effect.tryPromise({
+        try: () => fs.rename!(from, to),
+        catch: platformError("rename", from)
+      }),
+    utimes: (path, atime, mtime) =>
+      fs.utimes === undefined ? unsupported("utimes") : Effect.tryPromise({
+        try: () => fs.utimes!(path, atime, mtime),
+        catch: platformError("utimes", path)
+      }),
     makeTempDirectory: () => unsupported("makeTempDirectory"),
     makeTempDirectoryScoped: () => unsupported("makeTempDirectoryScoped"),
     makeTempFile: () => unsupported("makeTempFile"),

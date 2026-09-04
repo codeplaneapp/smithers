@@ -115,6 +115,10 @@ export const makeMemoryFs = (
       }
       return [...names].sort()
     },
+    realpath: async (path) => {
+      get(path)
+      return normalize(path)
+    },
     stat: async (path) => {
       const entry = get(path)
       return {
@@ -263,7 +267,7 @@ export const layer = (options?: {
   readonly seed?: number
 }): Layer.Layer<TestHost> => {
   // The browser layer already attests filesystem isolation.
-  const isolatedFileSystem = BrowserFileSystem.layer(makeMemoryFs(options?.files))
+  const isolatedFileSystem = BrowserFileSystem.layer(makeMemoryFs(options?.files)).pipe(Layer.orDie)
   const platform = Layer.mergeAll(
     isolatedFileSystem,
     Path.layer

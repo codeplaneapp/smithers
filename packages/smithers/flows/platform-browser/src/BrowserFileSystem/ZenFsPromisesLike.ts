@@ -41,11 +41,14 @@ export interface ZenFsPromisesLike {
   readonly lstat?: ((path: string) => Promise<ZenFsStatsLike>) | undefined
   /**
    * Canonicalizes a path, following every symlink on the way. Optional
-   * because a purely in-memory volume has no links to follow: when it is
-   * absent, `realPath` normalizes lexically instead. `@zenfs/core` and
+   * for minimal adapters; when absent, `realPath` fails with PermissionDenied. `@zenfs/core` and
    * `node:fs/promises` both provide it.
    */
   readonly realpath?: ((path: string) => Promise<string>) | undefined
+  /** Atomic publication when the mounted backend supports it. */
+  readonly rename?: ((from: string, to: string) => Promise<void>) | undefined
+  /** Timestamp updates used by artifact publication and garbage collection. */
+  readonly utimes?: ((path: string, atime: number | Date, mtime: number | Date) => Promise<void>) | undefined
   readonly rm: (
     path: string,
     options?: { readonly recursive?: boolean; readonly force?: boolean }

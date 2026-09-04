@@ -47,15 +47,13 @@ explicit decision at the one place a caller can still get it right.
 
 ## Optional members change the answer, not the contract
 
-`ZenFsPromisesLike` marks `lstat` and `realpath` optional, because a purely
-in-memory volume has no links and cannot tell a link from its target. A backend
-that omits them still works, and two behaviours degrade in stated ways:
+`ZenFsPromisesLike` marks `lstat`, `realpath`, `rename`, and `utimes` optional
+so minimal adapters can still provide supported operations.
 
-- Without `realpath`, `realPath` normalizes lexically, so a symlink resolves to
-  its own name rather than its target. A volume that can hold symlinks must
-  supply `realpath`, because the capability kernel's workspace boundary is
-  resolved through it. See
-  [The isolation attestation](./isolation-attestation.md).
+- Without `realpath`, `realPath` fails with `PermissionDenied`; omitting the
+  method does not prove the backend lacks symlinks.
+- Without `rename` or `utimes`, artifact publication is unavailable; each
+  operation fails typed with `PermissionDenied` naming the missing method.
 - Without `lstat`, a recursive `readDirectory` classifies entries with `stat`
   and therefore follows a directory link. The walk refuses to revisit a
   directory it has already canonicalized, and a backend supplying neither member

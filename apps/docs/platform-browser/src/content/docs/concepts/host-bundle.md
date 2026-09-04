@@ -58,9 +58,8 @@ than walk it.
 A tab is stricter about what that leaves visible than a server is. Under the
 Fetch standard, `redirect: "manual"` produces an **opaque-redirect** response:
 status `0`, no headers, no body. The kernel's redirect loop has no `location` to
-read, so it returns the response as it stands. A redirect therefore fails closed
-in a browser rather than being followed, and it can never become an unauthorized
-hop.
+read, so it returns the response as it stands. The opaque response succeeds with status 0, which callers must handle;
+the browser does not follow it to another origin.
 
 The same bundle running under Node or Bun, which is how the package's network
 contract test runs it, sees the ordinary 3xx with its `location` header instead.
@@ -73,3 +72,7 @@ contacted.
   covers.
 - [Injected backends](/concepts/injected-backends/), for the one-mount rule the jj
   slice participates in.
+
+Only `BrowserHost.layer` is exposed. The memory engine, adapters, and kernel
+run in a tab; durable execution needs the Node-only SqlClient and NodeRuntime.
+Use one workspace per mount and set `jj.root` to `/` (the default).

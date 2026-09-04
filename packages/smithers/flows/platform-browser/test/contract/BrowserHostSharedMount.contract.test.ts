@@ -99,7 +99,7 @@ fsModule.mkdirSync(join(host, "repo"))
 const layer = BrowserHost.layer({
   bash: bashFor(host),
   fs: rootedPromisesFs(host, canonicalHost),
-  jj: { wasm: wasmBytes, fs: rootedSyncFs(host), root: "/repo" }
+  jj: { wasm: wasmBytes, fs: rootedSyncFs(host), root: "/" }
 })
 
 afterAll(() => {
@@ -115,13 +115,13 @@ describe("BrowserHost shared mount contract", () => {
           const spawner = yield* ChildProcessSpawner
           const jj = yield* Jj
 
-          yield* fileSystem.writeFileString("/repo/shared.txt", "first\n")
+          yield* fileSystem.writeFileString("/shared.txt", "first\n")
           const bashRead = yield* spawner.string(
-            ChildProcess.make("read-shared", [], { cwd: "/repo" })
+            ChildProcess.make("read-shared", [], { cwd: "/" })
           )
           const { changeId: first } = yield* jj.snapshot("shared mount first")
 
-          yield* fileSystem.writeFileString("/repo/shared.txt", "second\n")
+          yield* fileSystem.writeFileString("/shared.txt", "second\n")
           const status = yield* jj.status()
           const { changeId: second } = yield* jj.snapshot("shared mount second")
           const diff = yield* jj.diff(first, second)

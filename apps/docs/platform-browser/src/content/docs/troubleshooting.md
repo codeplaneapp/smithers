@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-description: "The failures @smthrs/platform-browser reports: a split mount, writes lost on reload, the spawner's refused options, the operations a mounted volume cannot serve, a stalled interpreter, and a redirect that fails closed."
+description: "The failures @smthrs/platform-browser reports: a split mount, writes lost on reload, the spawner's refused options, the operations a mounted volume cannot serve, a stalled interpreter, and an opaque redirect returned with status 0."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/platform-browser/docs/troubleshooting.md"
 ---
 
@@ -148,47 +148,20 @@ would let a second interpreter run over a mount with a write still in flight.
 the interpreter or the stub standing in for it. The
 [testing page](/testing/) shows the stub shape that makes this observable.
 
-## NotFound on a path that exists
+## PermissionDenied for an unsupported operation
 
-**Symptom.** A filesystem call fails immediately, and the path in the message is
-one you can `stat`:
+Unsupported filesystem operations fail with a typed `PermissionDenied` naming
+the operation. `NotFound` is reserved for paths the backend reports absent.
+Publication needs backend `rename` and `utimes`; provide those methods to use
+best-effort/process artifact storage. Canonicalization requires `realpath`.
+An isolation-layer refusal means the workspace root is not the mount root `/`;
+mount a separate volume for each workspace.
 
-```text
-NotFound: FileSystem.rename (/workspace/old.txt): No such file or directory
-NotFound: FileSystem.makeTempFile (makeTempFile): the browser backend does not support this operation
-```
+## PermissionDenied from realPath
 
-**Cause.** Fifteen operations are refused rather than faked, because a
-promises-shaped volume has no symlink creation, no writable file handles, and no
-watcher: `chmod`, `chown`, `copy`, `copyFile`, `glob`, `link`, `symlink`,
-`readLink`, `open`, `rename`, `sink`, `truncate`, `utimes`, `watch`, and the
-`makeTemp*` family. The first fourteen keep Effect's own `makeNoop` refusal,
-which reports `NotFound` against the path you passed. The `makeTemp*` family
-carries this package's own description, because `makeNoop` turns those four into
-a defect rather than a failure, so the documented `NotFound` had to be wired
-here explicitly.
-
-**Fix.** Use a served operation. Copy a file by reading and writing it, and
-append with `writeFile({ flag: "a" })` where you would have reached for `sink`.
-[Read and write files on a mounted volume](/guides/work-with-files/) lists
-what is served. A gap that turns out to matter becomes a ticket, not a
-silently-wrong implementation.
-
-## realPath answers with the link's own name
-
-**Symptom.** `realPath` returns a path that is still a symlink, and a guarded
-operation then refuses a path you expect to be inside the workspace.
-
-**Cause.** The backend supplies no `realpath`. `ZenFsPromisesLike` marks it
-optional because a purely in-memory volume has no links to follow, so the
-adapter normalizes lexically instead, resolving `.` and `..` against the volume
-root.
-
-**Fix.** Supply `realpath` on any volume that can hold symlinks.
-[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/) resolves every guarded path through `realPath`
-before it checks the grant, and `readLink` is one of the refused operations, so
-without it the workspace boundary is a naming convention rather than a
-resolution. See [The isolation attestation](/concepts/isolation-attestation/).
+The backend supplies no `realpath`. Canonicalization fails typed because lexical
+normalization cannot prove where symlinks resolve. Supply `realpath` before
+using guarded filesystem operations. Both ZenFS and node:fs/promises provide it.
 
 ## BadResource: a directory link loops, or the tree is nested too deep
 

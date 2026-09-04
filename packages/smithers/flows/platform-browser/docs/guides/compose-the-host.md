@@ -47,7 +47,7 @@ import * as BrowserHost from "@smthrs/platform-browser/BrowserHost"
 const layer = BrowserHost.layer({
   bash,
   fs: fs.promises,
-  jj: { wasm, fs, root: "/repo" }
+  jj: { wasm, fs, root: "/" }
 })
 ```
 
@@ -107,3 +107,5 @@ assert it once in a test: write a file through `FileSystem`, read it back
 through a spawned command, and snapshot it with jj. That is exactly what this
 package's shared-mount contract test does, over one real directory. See
 [Testing](../testing.md).
+
+Use one workspace per mount: the workspace root must be `/`.

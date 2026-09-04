@@ -13,7 +13,7 @@ volume has no user identity, `makeDirectory` forwards `mode`, and `realPath`
 canonicalizes rather than echoing its input, which matters because
 `@smthrs/kernel` resolves every guarded path through it before checking the
 grant. Operations the slice cannot serve at all, symlink creation and writable
-handles and watchers among them, fail with `NotFound` rather than pretending.
+handles and watchers among them, fail with `PermissionDenied` rather than pretending.
 
 Its `ChildProcessSpawner` runs one command at a time behind a permit held until
 the interpreter promise settles. Interruption, timeout, and `kill` abort the

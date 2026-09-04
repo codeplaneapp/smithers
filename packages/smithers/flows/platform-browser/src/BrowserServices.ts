@@ -22,6 +22,7 @@ import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import type { Path } from "effect/Path"
 import * as EffectPath from "effect/Path"
+import type * as PlatformError from "effect/PlatformError"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as BrowserChildProcessSpawner from "./BrowserChildProcessSpawner/index.ts"
 import * as BrowserFileSystem from "./BrowserFileSystem/index.ts"
@@ -46,12 +47,13 @@ export type BrowserServices = ChildProcessSpawner | FileSystem | Path
  */
 export const layer = (options: {
   readonly bash: BrowserChildProcessSpawner.JustBashLike
+  readonly workspaceRoot?: string
   readonly fs: BrowserFileSystem.ZenFsPromisesLike
-}): Layer.Layer<BrowserServices> =>
+}): Layer.Layer<BrowserServices, PlatformError.PlatformError> =>
   Layer.provideMerge(
     BrowserChildProcessSpawner.layer(options.bash),
     Layer.mergeAll(
-      BrowserFileSystem.layer(options.fs),
+      BrowserFileSystem.layer(options.fs, { workspaceRoot: options.workspaceRoot ?? "/" }),
       EffectPath.layer
     )
   )

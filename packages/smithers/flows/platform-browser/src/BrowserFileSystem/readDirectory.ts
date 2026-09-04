@@ -6,9 +6,13 @@
 import * as Effect from "effect/Effect"
 import * as PlatformError from "effect/PlatformError"
 import { platformError } from "./platformError.ts"
-import { realPath } from "./realPath.ts"
+import { normalizePath, realPath } from "./realPath.ts"
 import type { ZenFsPromisesLike } from "./ZenFsPromisesLike.ts"
 import type { ZenFsStatsLike } from "./ZenFsStatsLike.ts"
+
+// Listing without canonicalization remains bounded by maximumDepth below.
+const directoryIdentity = (fs: ZenFsPromisesLike, path: string) =>
+  fs.realpath === undefined ? Effect.succeed(normalizePath(path)) : realPath(fs, path, "readDirectory")
 
 /**
  * How many levels a walk descends when nothing else can stop it.
@@ -93,7 +97,7 @@ const collect = (
       const child = `${directory}/${name}`
       const stats = yield* inspect(fs, child)
       if (!stats.isDirectory()) continue
-      const canonical = yield* realPath(fs, child, "readDirectory")
+      const canonical = yield* directoryIdentity(fs, child)
       if (seen.has(canonical)) continue
       seen.add(canonical)
       // Appended rather than spread: a wide subtree spread into `push` passes
@@ -128,7 +132,7 @@ export const readDirectory = (
 ): Effect.Effect<Array<string>, PlatformError.PlatformError> =>
   options?.recursive === true
     ? Effect.flatMap(
-      realPath(fs, path, "readDirectory"),
+      directoryIdentity(fs, path),
       (canonical) => collect(fs, path, "", new Set([canonical]), 0)
     )
     : Effect.map(entriesOf(fs, path), (names) => [...names])

@@ -24,8 +24,11 @@
  * Fetch standard, `redirect: "manual"` hands back an *opaque-redirect*
  * response — status `0`, no headers — rather than the 3xx a Node or Bun fetch
  * exposes, so the kernel's redirect loop has no `location` to follow and
- * simply returns it. A redirect therefore fails closed in the browser instead
- * of being followed; it never becomes an unauthorized hop.
+ * simply returns it. The opaque response is returned successfully with status 0; callers must
+ * handle that status. It never becomes an unauthorized hop.
+ *
+ * Only `layer` is exposed; there are no layerAt or contained factories.
+ * Crypto is not bundled: provide a browser Crypto layer alongside this host.
  *
  * @since 0.1.0
  */
@@ -33,6 +36,7 @@ import type { Jj } from "@smthrs/jj"
 import * as BrowserJj from "@smthrs/jj/browser/BrowserJj"
 import { Layer, Path } from "effect"
 import type { FileSystem } from "effect"
+import type * as PlatformError from "effect/PlatformError"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import type { HttpClient } from "effect/unstable/http/HttpClient"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -84,8 +88,11 @@ export const layer = (options: {
    * workspace root inside that namespace and optional stdio taps.
    */
   readonly jj: BrowserJj.BrowserJjOptions
-}): Layer.Layer<BrowserHost> => {
-  const platform = Layer.mergeAll(BrowserFileSystem.layer(options.fs), Path.layer)
+}): Layer.Layer<BrowserHost, PlatformError.PlatformError> => {
+  const platform = Layer.mergeAll(
+    BrowserFileSystem.layer(options.fs, { workspaceRoot: options.jj.root ?? "/" }),
+    Path.layer
+  )
   return Layer.mergeAll(
     platform,
     Layer.provide(BrowserChildProcessSpawner.layer(options.bash), platform),

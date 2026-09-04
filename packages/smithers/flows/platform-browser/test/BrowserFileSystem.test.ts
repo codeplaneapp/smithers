@@ -248,7 +248,9 @@ describe("BrowserFileSystem error mapping", () => {
         BrowserFileSystem.make({ ...throwingFs(codeError("ENOENT")), readdir, stat: async () => directory })
 
       const finite = yield* (
-        helperless(async (at) => (at === "/root" ? ["only"] : [])).readDirectory("/root", { recursive: true })
+        helperless(async (at) => (at === "/root/./child/.." ? ["only"] : [])).readDirectory("/root/./child/..", {
+          recursive: true
+        })
       )
       const error = yield* (
         Effect.flip(helperless(async () => ["loop"]).readDirectory("/root", { recursive: true }))
@@ -335,7 +337,7 @@ describe("BrowserFileSystem error mapping", () => {
     }))
 
   // Effect's makeNoop defects on makeTemp*, so BrowserFileSystem wires those four explicitly to NotFound.
-  it.effect("fails every deliberately unsupported operation with NotFound", () =>
+  it.effect("fails every deliberately unsupported operation with PermissionDenied", () =>
     Effect.gen(function*() {
       const fileSystem = BrowserFileSystem.make(throwingFs(codeError("ENOENT")))
       const operations: ReadonlyArray<
@@ -370,7 +372,7 @@ describe("BrowserFileSystem error mapping", () => {
           return [name, failure?.reason._tag ?? "Defect"] as const
         }), { concurrency: "unbounded" })
 
-      expect(observed).toEqual(operations.map(([name]) => [name, "NotFound"]))
+      expect(observed).toEqual(operations.map(([name]) => [name, "PermissionDenied"]))
     }))
 })
 
@@ -661,26 +663,11 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
       expect(observed).not.toBe(root)
     }))
 
-  /**
-   * A volume with no `realpath` has no links to follow, so lexical
-   * canonicalization is the whole answer; the path is still stat'ed so a
-   * missing one fails the way Node's own `realpath` fails.
-   */
-  it.effect("normalizes lexically when the backend cannot follow links", () =>
+  it.effect("refuses canonicalization when realpath is absent", () =>
     Effect.gen(function*() {
-      const lexical = BrowserFileSystem.make({ ...NodeFsPromises, realpath: undefined })
-
-      expect(yield* (lexical.realPath(`${root}/sub/./../a.txt`))).toBe(path("a.txt"))
-      expect(yield* (lexical.realPath("."))).toBe("/")
-      expect(yield* (Effect.flip(lexical.realPath("/nowhere/at/all")))).toMatchObject({
-        reason: { _tag: "NotFound", method: "realPath" }
-      })
-      // The stated limit, pinned rather than left to be discovered: without
-      // `realpath` a link resolves to its own name, so the kernel's symlink
-      // boundary over such a backend is only as strong as lexical naming. A
-      // volume that can hold links must supply `realpath`.
-      expect(yield* (lexical.realPath(path("link.txt")))).toBe(path("link.txt"))
-      expect(yield* (fileSystem.realPath(path("link.txt")))).not.toBe(path("link.txt"))
+      const adapter = BrowserFileSystem.make({ ...NodeFsPromises, realpath: undefined })
+      const error = yield* Effect.flip(adapter.realPath(path("a.txt")))
+      expect(error.reason).toMatchObject({ _tag: "PermissionDenied", method: "realPath" })
     }))
 
   /**

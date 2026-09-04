@@ -96,7 +96,7 @@ const layer = BrowserHost.layer({
   jj: {
     wasm: wasmBytes,
     fs: rootedSyncFs(host),
-    root: "/repo"
+    root: "/"
   }
 })
 
@@ -141,24 +141,24 @@ runHostContract(
       expected: "success",
       scratchPath: "/browser-host-contract",
       unsupported: {
-        chmod: "NotFound",
-        chown: "NotFound",
-        copy: "NotFound",
-        copyFile: "NotFound",
-        glob: "NotFound",
-        link: "NotFound",
-        makeTempDirectory: "NotFound",
-        makeTempDirectoryScoped: "NotFound",
-        makeTempFile: "NotFound",
-        makeTempFileScoped: "NotFound",
-        open: "NotFound",
-        readLink: "NotFound",
-        rename: "NotFound",
-        sink: "NotFound",
-        symlink: "NotFound",
-        truncate: "NotFound",
-        utimes: "NotFound",
-        watch: "NotFound"
+        chmod: "PermissionDenied",
+        chown: "PermissionDenied",
+        copy: "PermissionDenied",
+        copyFile: "PermissionDenied",
+        glob: "PermissionDenied",
+        link: "PermissionDenied",
+        makeTempDirectory: "PermissionDenied",
+        makeTempDirectoryScoped: "PermissionDenied",
+        makeTempFile: "PermissionDenied",
+        makeTempFileScoped: "PermissionDenied",
+        open: "PermissionDenied",
+        readLink: "PermissionDenied",
+        rename: "PermissionDenied",
+        sink: "PermissionDenied",
+        symlink: "PermissionDenied",
+        truncate: "PermissionDenied",
+        utimes: "PermissionDenied",
+        watch: "PermissionDenied"
       }
     },
     path: { expected: "success" },
@@ -181,10 +181,9 @@ runHostContract(
     },
     jj: {
       expected: "success",
-      prepareChange: (phase) =>
-        Effect.sync(() => fsModule.writeFileSync(join(host, "repo", `${phase}.txt`), `${phase}\n`)),
+      prepareChange: (phase) => Effect.sync(() => fsModule.writeFileSync(join(host, `${phase}.txt`), `${phase}\n`)),
       workspacePath: "/host-contract-workspace",
-      rootFrom: "/repo",
+      rootFrom: "/",
       unsupported: { revert: "not_installed" }
     },
     httpClient: { expected: "failure", code: "TransportError" }

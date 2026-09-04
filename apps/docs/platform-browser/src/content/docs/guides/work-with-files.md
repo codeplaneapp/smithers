@@ -68,10 +68,10 @@ rather than clamped: a negative `offset` is not "the start".
 
 ## What fails, and how
 
-Fifteen operations answer with a `NotFound` `PlatformError`, which is the honest
+Unsupported operations answer with a `PermissionDenied` `PlatformError`, which is the honest
 answer for a backend with no symlink creation, no writable file handles, and no
 watcher: `chmod`, `chown`, `copy`, `copyFile`, `glob`, `link`, `symlink`,
-`readLink`, `open`, `rename`, `sink`, `truncate`, `utimes`, `watch`, and the
+`readLink`, `open`, `sink`, `truncate`, `watch`, and the
 four `makeTemp*` operations. `sink` is among them because the slice has no
 writable handle to append through, so its incremental contract cannot be
 honoured. Each gap that turns out to matter becomes a ticket, not a
@@ -109,3 +109,8 @@ normalization.
 An async-mirror ZenFS backend acknowledges a write before it reaches IndexedDB
 or OPFS. Call the mount's `sync()` after writes that must survive a reload. This
 adapter does not own the mount.
+
+Publication delegates `rename` and `utimes` to the mounted backend. If either
+method is absent, that operation fails with `PermissionDenied`. `realPath`
+requires backend `realpath`; it never silently normalizes lexically.
+The isolation layer requires workspace root `/` and fails typed otherwise.

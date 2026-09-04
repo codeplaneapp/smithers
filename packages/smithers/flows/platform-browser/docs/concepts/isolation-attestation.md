@@ -18,11 +18,17 @@ descriptor-relative operations: open the workspace root once, then traverse from
 that descriptor without re-resolving names. A host that offers no such executor
 fails closed.
 
-A mounted virtual volume is in a different position. It cannot name a path
-outside itself under any circumstance, because there is no outside: the whole
-addressable namespace is the mount. For that case the kernel accepts an
-attestation, `withIsolatedFileSystem`, which says exactly that, and lets the
-guarded surface resolve paths directly.
+Mount isolation alone does not protect per-workspace subtree grants. ZenFS
+backends can support symlinks, and the kernel re-resolves paths after granting
+an operation. A link can change between those steps.
+
+The precondition is **one workspace per mount**, or a backend without symlinks.
+This adapter conservatively requires the workspace root to be the namespace's
+mount root `/`, even for backends without links. `layer(fs, { workspaceRoot })`
+fails with a typed `PermissionDenied` at layer construction for any other root.
+`BrowserHost.layer` checks `jj.root` (default `/`); `BrowserServices.layer`
+accepts `workspaceRoot`. The caller still owns genuine mount isolation and must
+not apply the attestation to narrower workspace grants later.
 
 ## `layer` attests, `make` does not
 
@@ -38,18 +44,18 @@ const attested = BrowserFileSystem.layer(fs)
 const bare = BrowserFileSystem.make(fs)
 ```
 
-`layer(fs)` returns `withIsolatedFileSystem(make(fs))`. `make(fs)` returns the
+`layer(fs)` validates the workspace root, then provides `withIsolatedFileSystem(make(fs))`. `make(fs)` returns the
 service alone, for a caller that wants Effect's `FileSystem` and no kernel claim
-attached to it. Nothing else distinguishes them, so the package's own suite
+attached to it. The package's own suite
 asserts the marker symbol is present on one and absent on the other.
 
 Composing `layer` is therefore an assertion about the object you passed:
 
-| You pass                       | The claim is                                                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------ |
-| A mounted ZenFS volume         | True. IndexedDB, OPFS, and in-memory backends address nothing outside the mount.           |
-| A rooted adapter over the host | True only if it re-roots every path itself, the way this package's shared-mount test does. |
-| `node:fs/promises` directly    | False. It addresses the whole machine.                                                     |
+| You pass                       | The claim is                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| A mounted ZenFS volume         | Only when the workspace occupies the whole mount.                            |
+| A rooted adapter over the host | Only when it confines every path and the workspace occupies the whole mount. |
+| `node:fs/promises` directly    | False. It addresses the whole machine.                                       |
 
 Passing `node:fs/promises` is a test-time convenience for a process that is
 itself the sandbox. It is never a production composition. When you want the
@@ -71,9 +77,8 @@ resource outside it.
 So this adapter canonicalizes for real. When the backend has `realpath`, it is
 called, on a path made absolute without collapsing segments first, so the
 backend follows a link before a later `..` chooses a parent. When the backend
-has no `realpath`, it has no links to follow, and lexical normalization is
-deliberately the whole answer; the path is still stat'ed, so a missing path
-fails the way `realpath` fails.
+has no `realpath`, canonicalization fails with `PermissionDenied`: missing
+support does not prove the backend lacks symlinks.
 
 `readLink` is one of the operations this adapter refuses. A volume that can hold
 symlinks must therefore supply `realpath`, or the kernel has no way to resolve a

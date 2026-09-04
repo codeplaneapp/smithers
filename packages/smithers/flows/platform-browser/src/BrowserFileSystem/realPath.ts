@@ -6,7 +6,7 @@
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
-import type * as PlatformError from "effect/PlatformError"
+import * as PlatformError from "effect/PlatformError"
 import { platformError } from "./platformError.ts"
 import type { ZenFsPromisesLike } from "./ZenFsPromisesLike.ts"
 
@@ -19,6 +19,7 @@ import type { ZenFsPromisesLike } from "./ZenFsPromisesLike.ts"
  * root is dropped the way a POSIX resolver drops it.
  *
  * @private
+ * @category utilities
  * @since 0.1.0
  * @slop
  */
@@ -40,6 +41,7 @@ export const normalizePath = (path: string): string => {
  * segments resolve. A tab has no cwd, so its relative names begin at `/`.
  *
  * @private
+ * @category utilities
  * @since 0.1.0
  */
 const rootPath = (path: string): string => path.startsWith("/") ? path : `/${path}`
@@ -54,11 +56,11 @@ const rootPath = (path: string): string => path.startsWith("/") ? path : `/${pat
  * Returning the input verbatim would make that defense a no-op, so the
  * backend's own `realpath` is used whenever it has one. Its input is made
  * absolute without collapsing segments so the backend follows a link before
- * applying a later `..`. A volume without `realpath` has no links to follow,
- * so lexical normalization is deliberately the whole answer; the path is
- * still stat'ed so a missing path fails the way Node's `realpath` fails.
+ * applying a later `..`. A volume without `realpath` is refused because lexical normalization
+ * cannot prove where a symlink resolves.
  *
  * @private
+ * @category utilities
  * @since 0.1.0
  * @slop
  */
@@ -75,9 +77,11 @@ export const realPath = (
   if (resolve !== undefined) {
     return Effect.tryPromise({ try: () => resolve.call(fs, rootPath(path)), catch: platformError(method, path) })
   }
-  const normalized = normalizePath(path)
-  return Effect.as(
-    Effect.tryPromise({ try: () => fs.stat(normalized), catch: platformError(method, path) }),
-    normalized
-  )
+  return Effect.fail(PlatformError.systemError({
+    _tag: "PermissionDenied",
+    module: "FileSystem",
+    method,
+    pathOrDescriptor: path,
+    description: "the browser backend does not support realPath"
+  }))
 }
