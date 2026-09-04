@@ -72,6 +72,16 @@ timers and `completedDeferreds(flowName)` replays completions. Both exclude rows
 whose run has settled, so a restart arms timers for runs that can still make
 progress and for no others.
 
+One corrupt row costs its own row and nothing else. Every list read
+(`dueClocks`, `pendingClocks`, `completedDeferreds`, `waitingRuns`,
+`runParents`, and `runChildren`) skips a row that will not decode and logs a
+storage-integrity warning naming its primary key, so a single unreadable row
+cannot stop a registration, a timer sweep, or a cancellation cascade. The point
+reads `deferred`, `clock`, and `waiting` still fail on such a row: they answer a
+question about one row, and reporting "no row" for a completion or deadline that
+is durably recorded but unreadable would re-run work whose side effects already
+ran.
+
 A wake for a flow the sweeping process has not registered is not dropped
 silently. The driver logs a once-per-run structured warning naming the run id
 and the flow, and leaves the durable waiting row parked, so any process that

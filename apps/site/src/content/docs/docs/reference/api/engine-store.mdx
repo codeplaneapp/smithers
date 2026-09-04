@@ -167,6 +167,14 @@ still make progress and for no others. `attemptSurvivors` is optional because
 only storage that can range-scan `flows_attempts` implements it; when absent the
 engine falls back to per-attempt point reads against `AttemptStore`.
 
+Every list read (`dueClocks`, `pendingClocks`, `completedDeferreds`,
+`waitingRuns`, `runParents`, and `runChildren`) skips a row that will not decode
+and logs a storage-integrity warning naming its primary key, so one corrupt row
+costs its own row and nothing else. The point reads `deferred`, `clock`, and
+`waiting` still die on such a row: reporting "no row" for a completion or
+deadline that is durably recorded but unreadable would re-run work whose side
+effects already ran.
+
 `recordRunParent` performs its cycle check inside the same write transaction as
 the insert, so a rejected edge leaves no durable trace and, of two concurrent
 writers whose edges jointly close a cycle, exactly one fails. `transaction`

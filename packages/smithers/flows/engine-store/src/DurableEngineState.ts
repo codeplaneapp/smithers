@@ -580,9 +580,11 @@ const WaitingDatabaseRow = Schema.Struct({
 
 type WaitingDatabaseRow = typeof WaitingDatabaseRow.Type
 
-const decodeWaitingRow = (input: unknown): Effect.Effect<WaitingRow> =>
+const decodeWaitingRow = (input: unknown): Effect.Effect<WaitingRow> => decodeWaitingRowResult(input).pipe(Effect.orDie)
+
+/** {@link decodeWaitingRow} with its parse failure left in the error channel. */
+const decodeWaitingRowResult = (input: unknown): Effect.Effect<WaitingRow, unknown> =>
   Schema.decodeUnknownEffect(WaitingDatabaseRow)(input).pipe(
-    Effect.orDie,
     Effect.map((row) => ({
       runId: row.runId,
       reason: row.waitingReason,
@@ -601,7 +603,11 @@ const RunParentDatabaseRow = Schema.Struct({
 type RunParentDatabaseRow = typeof RunParentDatabaseRow.Type
 
 const decodeRunParentEdge = (input: unknown): Effect.Effect<RunParentEdge> =>
-  Schema.decodeUnknownEffect(RunParentDatabaseRow)(input).pipe(Effect.orDie)
+  decodeRunParentEdgeResult(input).pipe(Effect.orDie)
+
+/** {@link decodeRunParentEdge} with its parse failure left in the error channel. */
+const decodeRunParentEdgeResult = (input: unknown): Effect.Effect<RunParentEdge, unknown> =>
+  Schema.decodeUnknownEffect(RunParentDatabaseRow)(input)
 
 /**
  * Walks the parent chain upward from `parentId` over the durable edges,
@@ -741,8 +747,14 @@ const clockRowKey = (row: Record<string, unknown>): string =>
 const deferredAddressRowKey = (row: Record<string, unknown>): string =>
   JSON.stringify([row["flowName"], row["executionId"], row["deferredName"]])
 
+/** The primary key of a run-parent edge, read the same way. */
+const runParentRowKey = (row: Record<string, unknown>): string => JSON.stringify([row["childId"], row["parentId"]])
+
+/** The primary key of a parked run's waiting payload, read the same way. */
+const waitingRowKey = (row: Record<string, unknown>): string => JSON.stringify([row["runId"]])
+
 /**
- * Decodes the rows one registration-time sweep read, skipping — with a
+ * Decodes the rows one durable-state sweep read, skipping — with a
  * storage-integrity warning naming the row's key — any row that will not
  * decode.
  *
@@ -754,6 +766,19 @@ const deferredAddressRowKey = (row: Record<string, unknown>): string =>
  * because it is what an operator needs to find and repair it, and it is read
  * field by field off the raw row so a row that failed to decode can still name
  * itself.
+ *
+ * Every enumeration goes through here for that reason, not just the two the
+ * outage named: `dueClocks`, `waitingRuns`, `runParents`, and `runChildren`
+ * each had their own version of it — no timer in the store fires, no parked
+ * run is ever swept, no cycle check can read a run's ancestry, no
+ * cancellation reaches a child.
+ *
+ * The point reads (`deferred`, `clock`, `waiting`) deliberately stay on
+ * `Effect.orDie`. They answer a question about ONE row, and their callers
+ * read "no row" as "this never happened": silently reporting that for a
+ * completion or deadline that is durably recorded but unreadable would
+ * re-run work whose side effects already ran. There the corrupt row IS the
+ * blast radius, so dying is the correct-sized failure.
  */
 const decodeSweep = <A>(
   rows: ReadonlyArray<Record<string, unknown>>,
@@ -1015,7 +1040,9 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       ORDER BY due_at_ms, execution_id, clock_name
     `.pipe(
       Effect.orDie,
-      Effect.flatMap((rows) => Effect.forEach(rows, decodeClockRow))
+      // This is the whole store's due-timer sweep: dying on one unreadable
+      // deadline stopped every timer in every flow from firing.
+      Effect.flatMap((rows) => decodeSweep(rows, "clock deadline", clockRowKey, decodeClockRowResult))
     )
   )
 
@@ -1260,7 +1287,10 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         ORDER BY waiting_wake_at_ms, run_id
       `).pipe(
         Effect.orDie,
-        Effect.flatMap((rows) => Effect.forEach(rows, decodeWaitingRow))
+        // The parked-run sweeper's only enumeration: one unreadable waiting
+        // payload stranded every parked run, including the ones whose
+        // cancellation had already been requested.
+        Effect.flatMap((rows) => decodeSweep(rows, "waiting run", waitingRowKey, decodeWaitingRowResult))
       )
   })
 
@@ -1435,7 +1465,9 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       ORDER BY seq
     `.pipe(
       Effect.orDie,
-      Effect.flatMap((rows) => Effect.forEach(rows, decodeRunParentEdge))
+      // One unreadable edge made a run's whole ancestry unreadable, so no
+      // subflow under it could be linked at all.
+      Effect.flatMap((rows) => decodeSweep(rows, "run parent", runParentRowKey, decodeRunParentEdgeResult))
     )
   )
 
@@ -1450,7 +1482,10 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       ORDER BY seq
     `.pipe(
       Effect.orDie,
-      Effect.flatMap((rows) => Effect.forEach(rows, decodeRunParentEdge))
+      // The cancellation cascade's only cross-process way to find a run's
+      // children: one unreadable sibling edge left every child running after
+      // its parent was cancelled.
+      Effect.flatMap((rows) => decodeSweep(rows, "run parent", runParentRowKey, decodeRunParentEdgeResult))
     )
   )
 
