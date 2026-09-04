@@ -217,6 +217,27 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       expect(error.message).toBe("jj: command not found on PATH")
     }))
 
+  it.effect("carries an unusable environment override's hint into a host spawn failure", () =>
+    run(
+      Effect.gen(function*() {
+        const jj = yield* Jj
+        // Change the override after the version probe so this exercises command
+        // resolution, not the layer's separate binary preflight.
+        process.env.SMITHERS_JJ_PATH = overrideBinary
+        chmodSync(overrideBinary, 0o644)
+        try {
+          const error = yield* Effect.flip(jj.status())
+          expect(error.code).toBe("not_installed")
+          expect(error.message).toContain(`jj: Cannot execute the jj binary at ${overrideBinary}.`)
+          expect(error.message).toContain(`chmod +x '${overrideBinary}'`)
+          expect(error.message).toContain("or point SMITHERS_JJ_PATH at a working jj.")
+        } finally {
+          chmodSync(overrideBinary, 0o755)
+        }
+      }),
+      missingBinary
+    ))
+
   it.live("spawns the binary SMITHERS_JJ_PATH names, through the spawner too", () =>
     Effect.gen(function*() {
       // The spawner hands the child `PATH=directory`, where the scripted `jj`
