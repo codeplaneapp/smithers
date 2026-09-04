@@ -35,6 +35,7 @@ describe("the shipped surface", () => {
       "down",
       "serve",
       "init",
+      "suggest",
       "doctor",
       "migrate",
       "gc",

@@ -117,9 +117,13 @@ describe("Checklist.scan", () => {
   it("cites the files each check read", async () => {
     const byId = new Map((await collect(full)).map((item) => [item.id, item]))
 
+    // Only the runner file this repository actually carries is cited: the
+    // check reads the tree, so `vitest.config.mts` and the rest of the
+    // vitest spellings are absent here because they are absent on disk.
     expect(byId.get("test-target")!.why).toBe(
-      "vitest is the test runner (package.json, vitest.config.ts, vitest.config.mts, vitest.config.js, vitest.workspace.ts), so a target keyed on its inputs skips the tests whose inputs did not change"
+      "vitest is the test runner (package.json, vitest.config.ts), so a target keyed on its inputs skips the tests whose inputs did not change"
     )
+    expect(byId.get("test-target")!.files).toEqual(["package.json", "vitest.config.ts"])
     expect(byId.get("lint-target")!.files).toEqual(["eslint.config.js"])
     expect(byId.get("pr-review")!.files).toEqual([".git/config", ".github/workflows/ci.yml"])
     expect(byId.get("repeated-script")!.title).toBe("A flow for the repeated task `release` reveals")

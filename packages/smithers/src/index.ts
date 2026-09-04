@@ -112,10 +112,20 @@ export * as Output from "./Output.ts"
  */
 export * as Project from "./Project.ts"
 /**
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export * as Providers from "./Providers.ts"
+/**
  * @category serve
  * @since 1.0.0
  */
 export * as Serve from "./Serve.ts"
+/**
+ * @category suggestions
+ * @since 1.0.0-rc.0
+ */
+export * as Suggest from "./Suggest.ts"
 /**
  * @category output
  * @since 1.0.0-rc.0

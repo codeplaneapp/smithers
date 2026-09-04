@@ -70,6 +70,7 @@ export const shipped: ReadonlyArray<Verb> = [
   verb("down", "Cancel every non-terminal run"),
   verb("serve", "Host the control server for this project", ["gateway"]),
   verb("init", "Scaffold flows/<name>/flow.mdx and ignore .flows/"),
+  verb("suggest", "Read the project, stream how Smithers can help, and implement the one you pick"),
   verb("doctor", "Report registry, database, runtime, and provider readiness"),
   verb("migrate", "Convert a Smithers 0.x project to the 1.0 authoring model"),
   // No compaction: `Journal.compact` refuses a run the fence still owns, and

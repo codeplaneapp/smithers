@@ -36,6 +36,7 @@ SUBCOMMANDS
   down               Cancel every non-terminal run
   serve              Host the control server for this project
   init               Scaffold flows/<name>/flow.mdx and ignore .flows/
+  suggest            Read the project, stream how Smithers can help, and implement the one you pick
   doctor             Report registry, database, runtime, and provider readiness
   gc                 Delete terminal runs older than a threshold, with the rows they own
   migrate            Convert a Smithers 0.x project to the 1.0 authoring model

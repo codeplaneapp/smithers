@@ -40,9 +40,9 @@ import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
 import * as Registry from "@smthrs/registry/Registry"
 import * as Effect from "effect/Effect"
-import * as FileSystem from "effect/FileSystem"
+import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
-import * as Path from "effect/Path"
+import type * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { randomUUID } from "node:crypto"
@@ -64,6 +64,8 @@ export const Implemented = Schema.Struct({
 })
 
 /**
+ * The decoded answer of one implementation.
+ *
  * @category models
  * @since 1.0.0-rc.0
  */
@@ -177,7 +179,9 @@ export const rules = (root: string): ReadonlyArray<Permission.Rule> => {
     allow("fs:*", `${trimmed}/**`),
     allow("net:*", "**"),
     allow("model:*", "**"),
-    ...[".git", ".flows"].flatMap((state) => [deny("fs:*", `${trimmed}/${state}`), deny("fs:*", `${trimmed}/${state}/**`)])
+    ...[".git", ".flows"].flatMap((
+      state
+    ) => [deny("fs:*", `${trimmed}/${state}`), deny("fs:*", `${trimmed}/${state}/**`)])
   ]
 }
 
@@ -222,7 +226,25 @@ const hostFor = (root: string): Layer.Layer<AgentAction.Host> => {
   ).pipe(Layer.provide(Registry.layerFromDescriptors([])), Layer.provide(platform))
 }
 
-const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
+/**
+ * The spend ceiling one implementation runs under.
+ *
+ * Not unbounded, and not an approved plan envelope either: this verb is run
+ * by hand and there is no control-plane card to read a budget off, so the
+ * ceiling is declared here. It is what one suggestion is worth on someone
+ * else's subscription, and the latency ceiling is the same wall clock
+ * {@link limits} gives the sandbox, so neither half of the step can outlive
+ * the other.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const budget: Budget.Policy = {
+  tokens: { max: 400_000, onExceeded: "fail" },
+  latency: { maxMillis: limits.totalMs, onExceeded: "fail" }
+}
+
+const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layer(budget))
 
 const layerSnapshotBoundary: Layer.Layer<FlowEngine.SnapshotBoundary> = Layer.succeed(FlowEngine.SnapshotBoundary)({
   snapshot: (options) => Effect.succeed({ boundary: "suggest-run", key: options.key }),
@@ -365,8 +387,7 @@ export const layerScripted = (config: { readonly root: string; readonly script: 
  * @category execution
  * @since 1.0.0-rc.0
  */
-export const run = (brief: string) =>
-  flow.execute({ brief }, { executionId: `suggest-${randomUUID()}` })
+export const run = (brief: string) => flow.execute({ brief }, { executionId: `suggest-${randomUUID()}` })
 
 /**
  * One sentence for a failed implementation.
@@ -376,7 +397,9 @@ export const run = (brief: string) =>
  */
 export const failureMessage = (error: unknown): string => {
   if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
-    const tag = "_tag" in error && typeof error._tag === "string" ? error._tag.slice(error._tag.lastIndexOf("/") + 1) : ""
+    const tag = "_tag" in error && typeof error._tag === "string"
+      ? error._tag.slice(error._tag.lastIndexOf("/") + 1)
+      : ""
     return tag === "" ? error.message : `${tag}: ${error.message}`
   }
   return String(error)

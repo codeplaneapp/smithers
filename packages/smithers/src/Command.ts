@@ -45,6 +45,7 @@ import * as NodeOutput from "./NodeOutput.ts"
 import { Output, renderValue } from "./Output.ts"
 import * as Project from "./Project.ts"
 import * as Serve from "./Serve.ts"
+import * as Suggest from "./Suggest.ts"
 import * as Ui from "./Ui.ts"
 import * as Unsupported from "./Unsupported.ts"
 import * as Update from "./Update.ts"
@@ -1075,6 +1076,49 @@ const init = Command.make("init", {
   })).pipe(Command.withDescription(Verb.find("init")!.help))
 
 /**
+ * `--json` is not declared here: it is a shared global, and a second
+ * declaration would shadow the one every other verb answers to. The verb
+ * reads it off `rootCommand` like every other handler does.
+ */
+const suggest = Command.make("suggest", {
+  path: Argument.string("path").pipe(Argument.optional),
+  seat: Flag.string("seat").pipe(
+    Flag.optional,
+    Flag.withDescription("The provider:model seat to scan and implement with, instead of the first available one")
+  ),
+  list: Flag.boolean("list").pipe(
+    Flag.withDescription("Print the suggestions and exit without asking which one to implement")
+  )
+}, (config) =>
+  Effect.gen(function*() {
+    yield* guardGlobals
+    const root = yield* rootCommand
+    const projectRoot = yield* Project.ProjectRoot
+    const target = Option.match(config.path, {
+      onNone: () => projectRoot,
+      onSome: (path) => resolve(Environment.ambientWorkingDirectory(), path)
+    })
+    if (!Suggest.isDirectory(target)) {
+      return yield* Effect.fail(
+        new CliError.UsageError({ message: `the path to suggest for must be a directory; ${target} is not one` })
+      )
+    }
+    const outcome = yield* Suggest.run({
+      root: target,
+      seat: Option.getOrUndefined(config.seat),
+      list: config.list,
+      json: root.json,
+      environment: process.env
+    })
+    // The status is the outcome's, not a rendering's: this verb prints as it
+    // scans, so there is no one document for `Output.render` to publish a
+    // status from. A cancelled prompt is 130, everything else is 0.
+    yield* Effect.sync(() => {
+      process.exitCode = Suggest.exitStatus(outcome)
+    })
+  })).pipe(Command.withDescription(Verb.find("suggest")!.help))
+
+/**
  * The migration tool's own flag set, declared on the verb.
  *
  * `smthrs migrate` and `smithers-migrate` run the same entry, so they take
@@ -1719,6 +1763,7 @@ export const cli = rootCommand.pipe(
     serveCommand,
     gatewayCommand,
     init,
+    suggest,
     doctor,
     gc,
     migrate,

@@ -56,7 +56,11 @@ describe("the suggest flow with a scripted model", { timeout: 120_000 }, () => {
       ].join("\n")
     })
 
-    expect(result).toEqual({ files: ["flows/test-target/flow.mdx"], command: "smthrs up test-target", notes: "scripted" })
+    expect(result).toEqual({
+      files: ["flows/test-target/flow.mdx"],
+      command: "smthrs up test-target",
+      notes: "scripted"
+    })
     expect(readFileSync(join(root, "flows", "test-target", "flow.mdx"), "utf8")).toBe(flowBody)
     // The teaching and the brief both reach the model, in that order.
     expect(asked[0]).toContain("# Implementing one suggestion in a Smithers project")

@@ -176,7 +176,9 @@ export const followUp = (
   return [
     `# Follow-up on \`${chosen.id}\`: ${which.question}`,
     "",
-    `The suggestion is implemented. It wrote: ${implemented.files.map((file) => `\`${file}\``).join(", ")}. It runs with \`${implemented.command}\`.`,
+    `The suggestion is implemented. It wrote: ${
+      implemented.files.map((file) => `\`${file}\``).join(", ")
+    }. It runs with \`${implemented.command}\`.`,
     "",
     `Seat: \`${context.seat}\`.`,
     "",

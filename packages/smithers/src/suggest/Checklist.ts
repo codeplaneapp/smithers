@@ -270,16 +270,26 @@ const repeatedScriptPattern = /^(release|publish|deploy|docs|generate|gen|codege
 export const checks: ReadonlyArray<Check> = [
   {
     id: "test-target",
-    match: (facts) => {
+    // The runner's own configuration files are filtered by what is on disk,
+    // not by what the runner could carry. Citing `vitest.config.mts` beside
+    // `vitest.config.ts` in a repository that has only the second names a
+    // file the agent is then told triggered the suggestion, and a brief that
+    // lists a file nobody wrote is a brief the model has to invent a reason
+    // for.
+    match: (facts, repository) => {
       if (facts.testRunner === undefined) return undefined
       const files = [
         ...(facts.scripts["test"] === undefined ? [] : ["package.json"]),
-        ...runnerFiles.filter(([, runner]) => runner === facts.testRunner).map(([file]) => file)
+        ...runnerFiles.filter(([file, runner]) => runner === facts.testRunner && repository.exists(file)).map((
+          [file]
+        ) => file)
       ]
       return {
         id: "test-target",
         title: "A test target that reruns only what changed",
-        why: `${facts.testRunner} is the test runner (${cite(files)}), so a target keyed on its inputs skips the tests whose inputs did not change`,
+        why: `${facts.testRunner} is the test runner (${
+          cite(files)
+        }), so a target keyed on its inputs skips the tests whose inputs did not change`,
         effort: "small",
         followUp: false,
         followUps: both,
@@ -293,7 +303,9 @@ export const checks: ReadonlyArray<Check> = [
       facts.lint.length === 0 ? undefined : {
         id: "lint-target",
         title: "A lint target over the files that changed",
-        why: `the repository configures a linter (${cite(facts.lint)}), so a flow can lint and fix only the changed files`,
+        why: `the repository configures a linter (${
+          cite(facts.lint)
+        }), so a flow can lint and fix only the changed files`,
         effort: "small",
         followUp: false,
         followUps: both,
@@ -309,7 +321,9 @@ export const checks: ReadonlyArray<Check> = [
       return {
         id: "agents-md",
         title: "An AGENTS.md generated from the packages",
-        why: `there is no AGENTS.md or CLAUDE.md, and the layout (${cite(files)}) is enough to write one that agents read first`,
+        why: `there is no AGENTS.md or CLAUDE.md, and the layout (${
+          cite(files)
+        }) is enough to write one that agents read first`,
         effort: "small",
         followUp: false,
         followUps: [followUps.ci],
@@ -340,7 +354,9 @@ export const checks: ReadonlyArray<Check> = [
       return {
         id: "pr-review",
         title: "A review flow for pull requests",
-        why: `the remote is on GitHub (${cite(files)}), so a flow can review each pull request's diff against the repository's own conventions`,
+        why: `the remote is on GitHub (${
+          cite(files)
+        }), so a flow can review each pull request's diff against the repository's own conventions`,
         effort: "medium",
         followUp: false,
         followUps: [followUps.ci],
@@ -399,7 +415,9 @@ export const checks: ReadonlyArray<Check> = [
         id: "sandboxed-review",
         title: "A sandboxed review that runs the tests on each pull request",
         why: `the remote is on GitHub and ${
-          facts.testRunner === undefined ? "the review can run in a sandbox" : `${facts.testRunner} can run in a sandbox`
+          facts.testRunner === undefined
+            ? "the review can run in a sandbox"
+            : `${facts.testRunner} can run in a sandbox`
         }, so a review flow can execute the change instead of only reading it`,
         effort: "large",
         followUp: true,
@@ -473,8 +491,10 @@ export const memoryRepository = (root: string, files: Readonly<Record<string, st
     exists: (path) => Object.hasOwn(files, path) || isDirectory(path),
     read: (path) => (Object.hasOwn(files, path) ? files[path] : undefined),
     list: (path) =>
-      [...new Set(
-        paths.filter((file) => file.startsWith(`${path}/`)).map((file) => file.slice(path.length + 1).split("/")[0]!)
-      )].sort()
+      [
+        ...new Set(
+          paths.filter((file) => file.startsWith(`${path}/`)).map((file) => file.slice(path.length + 1).split("/")[0]!)
+        )
+      ].sort()
   }
 }
