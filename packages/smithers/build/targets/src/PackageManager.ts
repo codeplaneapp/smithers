@@ -261,7 +261,7 @@ export function Pnpm(
  * ```ts
  * import { Smithers } from "@smthrs/targets"
  *
- * const runtime = Smithers.Runtime.Bun({ version: ">=1.3.0" })
+ * const runtime = Smithers.Runtime.Bun({ version: ">=1.4.0" })
  *
  * export const packageManager = Smithers.PackageManager.BunPackages({ runtime })
  * ```

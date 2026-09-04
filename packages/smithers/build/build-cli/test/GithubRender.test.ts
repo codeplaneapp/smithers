@@ -517,6 +517,7 @@ describe("triggers", () => {
       name: "coordinate",
       on: {
         pullRequest: { types: ["opened", "ready_for_review"] },
+        pullRequestTarget: { types: ["opened", "synchronize"] },
         issues: { types: ["opened", "labeled"] },
         workflowDispatch: {
           inputs: {
@@ -563,6 +564,7 @@ describe("triggers", () => {
 
     expect(content).toContain(
       "  pull_request:\n    types:\n      - opened\n      - ready_for_review\n" +
+        "  pull_request_target:\n    types:\n      - opened\n      - synchronize\n" +
         "  issues:\n    types:\n      - opened\n      - labeled\n"
     )
     expect(content).toContain(

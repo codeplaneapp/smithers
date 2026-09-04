@@ -30,7 +30,7 @@ describe("BunSuite", () => {
 
   it("names Bun as the interpreter rather than restating a package manager", () => {
     const attrs = attrsOf(BunSuite({ cwd: "packages/smithers/flows/keys" }))
-    expect(attrs.runtime).toEqual({ name: "bun", version: ">=1.3.0", executable: "bun" })
+    expect(attrs.runtime).toEqual({ name: "bun", version: ">=1.4.0", executable: "bun" })
     expect(attrs.packageManager).toBeUndefined()
   })
 

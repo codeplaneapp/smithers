@@ -45,7 +45,7 @@ const check = Smithers.Typecheck({
  * @category test
  */
 const unitTests = Smithers.NodeTest({
-  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
+  runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.testSuite(["tests"]),
   srcs: [...sources, ...suiteSources],
   deps: [],

@@ -78,7 +78,7 @@ describe("rules render a rooted path against their own cwd", () => {
 describe("PackageManager.dlx honours the declared executable", () => {
   it("renders bun dlx through the executable rather than a hard-coded bunx", () => {
     const bun = PackageManager.BunPackages({
-      runtime: Runtime.Bun({ version: ">=1.3.0" }),
+      runtime: Runtime.Bun({ version: ">=1.4.0" }),
       executable: "/opt/shim/bun"
     })
     expect(PackageManager.dlx(bun, ["jsr", "publish"])).toEqual(["/opt/shim/bun", "x", "jsr", "publish"])

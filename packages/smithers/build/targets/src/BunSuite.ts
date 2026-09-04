@@ -35,8 +35,8 @@ export interface Options {
    * anyway; `null` leaves the discovery implicit.
    */
   readonly config?: Input.File | null | undefined
-  /** @default ">=1.3.0" */
-  readonly version?: ">=1.3.0" | undefined
+  /** @default ">=1.4.0" */
+  readonly version?: ">=1.4.0" | undefined
   /** @default "node" */
   readonly environment?: string | undefined
 }
@@ -83,7 +83,7 @@ export interface Options {
  */
 export const BunSuite = (options: Options): ReturnType<typeof Vitest> =>
   Vitest({
-    runtime: Runtime.Bun({ version: options.version ?? ">=1.3.0" }),
+    runtime: Runtime.Bun({ version: options.version ?? ">=1.4.0" }),
     tests: [options.tests ?? Input.glob("test/**/*.test.ts")],
     sources: [options.sources ?? Input.glob("src/**/*.ts")],
     deps: options.deps ?? [],

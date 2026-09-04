@@ -286,10 +286,10 @@ describe("render", () => {
   })
 
   it("follows the declared package manager into its own workspace runner", () => {
-    const bunRuntime = { name: "bun" as const, version: ">=1.3.0" as const, executable: "bun" }
+    const bunRuntime = { name: "bun" as const, version: ">=1.4.0" as const, executable: "bun" }
     const rendered = render(attrsOf({
       ...goldenAttrs,
-      packageManager: { name: "bun", version: ">=1.3.0", executable: "bun", runtime: bunRuntime }
+      packageManager: { name: "bun", version: ">=1.4.0", executable: "bun", runtime: bunRuntime }
     }))
     expect(rendered).toContain("      - run: bun install --frozen-lockfile --ignore-scripts\n")
     expect(rendered).toContain("        run: bun x smithers-build test '//scripts/...'\n")

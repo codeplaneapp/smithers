@@ -1,7 +1,7 @@
 import { Smithers as S } from "@smthrs/targets"
 
 const runtime = S.Runtime.Node({ version: ">=22.19.0" })
-const bunRuntime = S.Runtime.Bun({ version: ">=1.3.0" })
+const bunRuntime = S.Runtime.Bun({ version: ">=1.4.0" })
 const packageManager = S.PackageManager.BunPackages({ runtime: bunRuntime })
 const installManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
 const srcs = S.Filegroup({ srcs: [S.glob("src/**/*.ts")] })

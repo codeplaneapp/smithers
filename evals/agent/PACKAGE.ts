@@ -33,7 +33,7 @@ const sources = [Smithers.glob("//evals/agent/*.ts"), Smithers.file("//evals/age
  * @category test
  */
 const test = Smithers.NodeTest({
-  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
+  runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.entrypoint(Smithers.file("//evals/agent/run.ts")),
   srcs: sources,
   deps: [],

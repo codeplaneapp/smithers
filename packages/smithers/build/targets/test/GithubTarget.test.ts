@@ -8,6 +8,7 @@ describe("Github.Workflow build-system attrs", () => {
       name: "coordinate",
       on: {
         pullRequest: { branches: ["main"], types: ["opened", "ready_for_review"] },
+        pullRequestTarget: { branches: ["main"], types: ["opened", "synchronize"] },
         issues: { types: ["opened", "labeled"] },
         workflowDispatch: {
           inputs: {
@@ -56,6 +57,7 @@ describe("Github.Workflow build-system attrs", () => {
         }
       }
     })
+    expect(attrs.on.pullRequestTarget).toEqual({ branches: ["main"], types: ["opened", "synchronize"] })
     expect(attrs.steps?.[1]).toMatchObject({
       run: ["echo first", "echo second"],
       workingDirectory: ".smithers"

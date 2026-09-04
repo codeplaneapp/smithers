@@ -27,7 +27,7 @@ describe("Install declared inputs", () => {
   })
 
   it("derives the lockfile name from the declared manager", () => {
-    const bun = PackageManager.BunPackages({ runtime: Runtime.Bun({ version: ">=1.3.0" }) })
+    const bun = PackageManager.BunPackages({ runtime: Runtime.Bun({ version: ">=1.4.0" }) })
     const metadata = Target.metadata(Install.Install({ packageManager: bun }))
     expect(metadata.inputs[0]).toEqual({ _tag: "File", path: "bun.lock" })
   })

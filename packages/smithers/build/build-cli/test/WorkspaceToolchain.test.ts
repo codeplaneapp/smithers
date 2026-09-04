@@ -16,7 +16,7 @@ import * as WorkspaceToolchain from "../src/WorkspaceToolchain.ts"
 
 const runtime = S.Runtime.Node({ version: ">=22.19.0" })
 const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
-const bun = S.Runtime.Bun({ version: ">=1.3.0" })
+const bun = S.Runtime.Bun({ version: ">=1.4.0" })
 
 const workspaceOf = (fields: Record<string, unknown>): WorkspaceDeclaration.WorkspaceDeclaration =>
   fields as unknown as WorkspaceDeclaration.WorkspaceDeclaration

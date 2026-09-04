@@ -385,7 +385,7 @@ describe("generated-file rules", () => {
   })
 
   it("PnpmWorkspace refuses a workspace whose declared manager is not pnpm", () => {
-    const bun = S.PackageManager.BunPackages({ runtime: S.Runtime.Bun({ version: ">=1.3.0" }) })
+    const bun = S.PackageManager.BunPackages({ runtime: S.Runtime.Bun({ version: ">=1.4.0" }) })
     expect(() => PnpmWorkspaceFile.PnpmWorkspace({ packageManager: bun, packages: ["packages/*"], mode: "check" }))
       .toThrow(/requires the pnpm declaration/)
     expect(() =>

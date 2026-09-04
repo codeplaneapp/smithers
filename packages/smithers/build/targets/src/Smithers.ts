@@ -20,6 +20,8 @@
 import * as CargoModule from "./Cargo.ts"
 import * as ChangesetsTargetModule from "./ChangesetsTarget.ts"
 import * as CiToolchainModule from "./CiToolchain.ts"
+import * as DocsCheckModule from "./DocsCheck.ts"
+import * as DocsPageModule from "./DocsPage.ts"
 import * as InputModule from "./Input.ts"
 import { Mise as MiseSurface } from "./Mise.ts"
 import * as NodeArtifactModule from "./NodeArtifact.ts"
@@ -538,3 +540,14 @@ export const Api = Object.freeze({ Compat: NodeArtifactModule.Compat })
  * @since 0.1.0
  */
 export const Size = Object.freeze({ Budgets: NodeArtifactModule.Budgets })
+
+/**
+ * Generated-documentation rules: `Docs.Page` writes one page with an agent
+ * under the `docs` verb, and `Docs.Check` fails, deterministically and with
+ * no agent, when a committed page is older than the inputs it was stamped
+ * against.
+ *
+ * @category targets
+ * @since 0.1.0
+ */
+export const Docs = Object.freeze({ Page: DocsPageModule.Page, Check: DocsCheckModule.Check })

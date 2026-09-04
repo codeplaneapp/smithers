@@ -191,7 +191,7 @@ describe.skipIf(process.platform === "win32")("NixExec.resolveEnvironment", () =
         code: "nix_version_mismatch",
         message: expect.stringContaining("declares node >=24.0.0 but the Nix environment provides node 22.20.1")
       })
-    await expect(NixExec.assertToolVersion(resolved, { name: "bun", requirement: ">=1.3.0" }, { root }))
+    await expect(NixExec.assertToolVersion(resolved, { name: "bun", requirement: ">=1.4.0" }, { root }))
       .rejects.toMatchObject({ code: "nix_tool_absent" })
   })
 })

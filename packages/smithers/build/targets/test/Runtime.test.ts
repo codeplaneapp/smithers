@@ -8,9 +8,9 @@ describe("Runtime declarations", () => {
       version: ">=22.19.0",
       executable: "node"
     })
-    expect(Runtime.Bun({ version: ">=1.3.0" })).toEqual({
+    expect(Runtime.Bun({ version: ">=1.4.0" })).toEqual({
       name: "bun",
-      version: ">=1.3.0",
+      version: ">=1.4.0",
       executable: "bun"
     })
   })
@@ -18,7 +18,7 @@ describe("Runtime declarations", () => {
   it("discriminates the union on `name`", () => {
     const declarations: ReadonlyArray<Runtime.Runtime> = [
       Runtime.Node({ version: ">=22.19.0" }),
-      Runtime.Bun({ version: ">=1.3.0" })
+      Runtime.Bun({ version: ">=1.4.0" })
     ]
     const versions = declarations.map((runtime) => {
       // The narrowing is the assertion: each branch sees only its own
@@ -35,7 +35,7 @@ describe("Runtime declarations", () => {
         }
       }
     })
-    expect(versions).toEqual([">=22.19.0", ">=1.3.0"])
+    expect(versions).toEqual([">=22.19.0", ">=1.4.0"])
   })
 
   it("routes versions outside the legacy declaration enumeration to the WORKSPACE.ts declaration", () => {
@@ -74,7 +74,7 @@ describe("Runtime declarations", () => {
 
   it("recognises only the declared variants", () => {
     expect(Runtime.isRuntime(Runtime.Node({ version: ">=22.19.0" }))).toBe(true)
-    expect(Runtime.isRuntime(Runtime.Bun({ version: ">=1.3.0" }))).toBe(true)
+    expect(Runtime.isRuntime(Runtime.Bun({ version: ">=1.4.0" }))).toBe(true)
     expect(Runtime.isRuntime({ name: "deno", version: "2.1.4", executable: "deno" })).toBe(false)
     expect(Runtime.isRuntime({ name: "node", version: "24.9.0", executable: "node" })).toBe(false)
     expect(Runtime.isRuntime({ name: "bun", version: ">=22.19.0", executable: "bun" })).toBe(false)
@@ -93,7 +93,7 @@ describe("Runtime declarations", () => {
       "console.log(1)",
       "x"
     ])
-    expect(Runtime.evaluate(Runtime.Bun({ version: ">=1.3.0" }), "console.log(1)")).toEqual([
+    expect(Runtime.evaluate(Runtime.Bun({ version: ">=1.4.0" }), "console.log(1)")).toEqual([
       "bun",
       "-e",
       "console.log(1)"

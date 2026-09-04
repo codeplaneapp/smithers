@@ -176,6 +176,13 @@ export const On = Schema.Struct({
       types: Schema.optional(Schema.Array(PullRequestActivity))
     })
   ])),
+  pullRequestTarget: Schema.optional(Schema.Union([
+    Schema.Boolean,
+    Schema.Struct({
+      branches: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+      types: Schema.optional(Schema.Array(PullRequestActivity))
+    })
+  ])),
   issues: Schema.optional(Schema.Struct({ types: Schema.optional(Schema.Array(IssueActivity)) })),
   push: Schema.optional(Schema.Struct({ branches: Schema.Array(Schema.NonEmptyString) })),
   schedule: Schema.optional(Schema.Array(Schema.NonEmptyString)),

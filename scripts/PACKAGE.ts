@@ -349,12 +349,35 @@ const localSmithersUnit = Smithers.NodeTest({
   deps: []
 })
 
+/**
+ * The untrusted-report boundary for issue and pull-request triage.
+ *
+ * The model never receives a GitHub token; this suite holds the deterministic
+ * publisher to an allowlisted schema and proves that a failed model run still
+ * asks the author for the concrete evidence needed to continue.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const githubTriage = Smithers.NodeTest({
+  summary: "GitHub triage publishes only validated labels and useful fallback requests.",
+  featured: true,
+  runner: Smithers.testRunner([Smithers.file("//scripts/github-triage.test.mjs")]),
+  srcs: [
+    Smithers.file("//scripts/github-triage.mjs"),
+    Smithers.file("//flows/issue-triage/flow.mdx"),
+    Smithers.file("//flows/pr-triage/flow.mdx")
+  ],
+  deps: []
+})
+
 export const Package = Smithers.Package({
   targets: {
     browserContract,
     changelog,
     dependencyBoundaries,
     effectVersion,
+    githubTriage,
     localSmithers,
     localSmithersUnit,
     lockfileParity,

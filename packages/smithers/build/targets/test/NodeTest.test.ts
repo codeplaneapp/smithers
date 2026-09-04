@@ -16,7 +16,7 @@ import * as StandardPackage from "../src/StandardPackage.ts"
 import * as Target from "../src/Target.ts"
 import { packageManager, runtime } from "./toolchain.ts"
 
-const bun = Runtime.Bun({ version: ">=1.3.0" })
+const bun = Runtime.Bun({ version: ">=1.4.0" })
 
 const attrsOf = <A>(target: unknown): A => Target.metadata(target as never).attrs as A
 

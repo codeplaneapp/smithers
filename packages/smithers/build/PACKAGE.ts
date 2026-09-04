@@ -83,7 +83,7 @@ const test = Smithers.Vitest({
  * @category test
  */
 const cacheService = Smithers.NodeTest({
-  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
+  runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.testSuite(["terraform/modules/cache/service/test"]),
   srcs: [
     Smithers.glob("//packages/smithers/build/terraform/modules/cache/service/*.js"),

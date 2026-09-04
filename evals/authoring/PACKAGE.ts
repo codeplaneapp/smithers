@@ -39,7 +39,7 @@ const dataset = Smithers.file("//evals/authoring/data/pilot-sft.jsonl")
  * @category test
  */
 const test = Smithers.NodeTest({
-  runtime: Smithers.Runtime.Bun({ version: ">=1.3.0" }),
+  runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.entrypoint(validator),
   srcs: [validator, dataset],
   deps: [],

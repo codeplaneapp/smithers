@@ -137,7 +137,7 @@ linkWorkspacePackages: true
   })
 
   it("refuses a manager that does not write this file", () => {
-    const bun = PackageManager.BunPackages({ runtime: Runtime.Bun({ version: ">=1.3.0" }) })
+    const bun = PackageManager.BunPackages({ runtime: Runtime.Bun({ version: ">=1.4.0" }) })
     expect(() => PnpmWorkspaceFile.PnpmWorkspace({ packageManager: bun, packages: ["packages/*"] }))
       .toThrow(/requires the pnpm declaration; this workspace declares bun/)
   })
@@ -162,7 +162,7 @@ describe("Lockfile", () => {
   })
 
   it("writes the lockfile the declared manager writes", () => {
-    const bun = PackageManager.BunPackages({ runtime: Runtime.Bun({ version: ">=1.3.0" }) })
+    const bun = PackageManager.BunPackages({ runtime: Runtime.Bun({ version: ">=1.4.0" }) })
     expect(Target.metadata(Lockfile.Lockfile({ packageManager: bun })).outputs)
       .toEqual({ cwd: ".", paths: ["bun.lock"] })
   })

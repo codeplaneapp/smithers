@@ -124,7 +124,7 @@ describe("a filled attr produces the argv the declaration used to spell", () => 
 })
 
 describe("a declared runtime overrides the interpreter without naming a manager", () => {
-  const bun = Runtime.Bun({ version: ">=1.3.0" })
+  const bun = Runtime.Bun({ version: ">=1.4.0" })
 
   it("a Bun runtime moves the suite onto bun's own tool runner", () => {
     expect(plannedArgv(Vitest({ ...vitestAttrs, packageManager, runtime: bun })))

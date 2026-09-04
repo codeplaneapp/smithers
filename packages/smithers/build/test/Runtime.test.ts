@@ -68,12 +68,12 @@ describe("Runtime.satisfies", () => {
   })
 
   it("compares a prerelease as its release version under a comparator", () => {
-    expect(Runtime.satisfies(">=1.3.0", "1.3.0-canary.2")).toBe(true)
+    expect(Runtime.satisfies(">=1.4.0", "1.3.0-canary.2")).toBe(true)
     expect(Runtime.satisfies("<1.4.0", "1.3.0-canary.2")).toBe(true)
   })
 
   it("treats build metadata as the release it annotates", () => {
-    expect(Runtime.satisfies(">=1.3.0", "1.3.0+build.7")).toBe(true)
+    expect(Runtime.satisfies(">=1.4.0", "1.3.0+build.7")).toBe(true)
     expect(Runtime.satisfies("1.3.0", "1.3.0+build.7")).toBe(true)
   })
 
