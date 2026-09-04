@@ -557,15 +557,17 @@ const contextWindowTokensFor: (modelId: string) => number
 The context window, in tokens, of a known model id, with a conservative floor
 of 128,000 for models the catalog has not met. Never zero.
 
-| Pattern          | Tokens    |
-| ---------------- | --------- |
-| `claude-*-haiku` | 200,000   |
-| other `claude`   | 1,000,000 |
-| `gpt-5`          | 400,000   |
-| `gpt-4.1`        | 1,000,000 |
-| `gpt-4o`         | 128,000   |
-| `o1`, `o3`, `o4` | 200,000   |
-| anything else    | 128,000   |
+| Pattern                                                                      | Tokens    |
+| ---------------------------------------------------------------------------- | --------- |
+| `claude-opus-5`, `claude-sonnet-5`                                           | 1,000,000 |
+| `claude-fable-5*`, `claude-mythos-5*` (numeric version suffixes)             | 1,000,000 |
+| `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-sonnet-4-6` | 1,000,000 |
+| Other `claude` ids, including Haiku and Bedrock/Vertex-prefixed ids          | 200,000   |
+| `gpt-5`                                                                      | 400,000   |
+| `gpt-4.1`                                                                    | 1,000,000 |
+| `gpt-4o`                                                                     | 128,000   |
+| `o1`, `o3`, `o4`                                                             | 200,000   |
+| anything else                                                                | 128,000   |
 
 ## QuotaPolicy
 

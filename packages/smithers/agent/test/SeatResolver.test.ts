@@ -41,6 +41,7 @@ describe("Seat.modelIdOf", () => {
 
 describe("SeatResolver.contextWindowTokensFor", () => {
   it("resolves a context window for every catalogued model and a floor for the rest", () => {
+    expect(SeatResolver.contextWindowTokensFor("claude-sonnet-4-5")).toBe(200_000)
     expect(SeatResolver.contextWindowTokensFor("claude-fable-5-1")).toBe(1_000_000)
     expect(SeatResolver.contextWindowTokensFor("claude-opus-5")).toBe(1_000_000)
     expect(SeatResolver.contextWindowTokensFor("claude-sonnet-5")).toBe(1_000_000)
@@ -53,6 +54,34 @@ describe("SeatResolver.contextWindowTokensFor", () => {
     expect(SeatResolver.contextWindowTokensFor("somebody-elses-model")).toBe(128_000)
   })
 
+  it.each([
+    ["claude-opus-5", 1_000_000],
+    ["claude-sonnet-5", 1_000_000],
+    ["claude-fable-5", 1_000_000],
+    ["claude-fable-5-1", 1_000_000],
+    ["claude-mythos-5", 1_000_000],
+    ["claude-mythos-5-1", 1_000_000],
+    ["claude-opus-4-6", 1_000_000],
+    ["claude-opus-4-7", 1_000_000],
+    ["claude-opus-4-8", 1_000_000],
+    ["claude-sonnet-4-6", 1_000_000],
+    ["claude-opus-4-5", 200_000],
+    ["claude-opus-4-1", 200_000],
+    ["claude-sonnet-4-5", 200_000],
+    ["claude-sonnet-4-5-20250929", 200_000],
+    ["claude-3-opus-20240229", 200_000],
+    ["claude-3-5-sonnet-20241022", 200_000],
+    ["claude-haiku-4-5", 200_000],
+    ["us.anthropic.claude-sonnet-4-5-20250929-v1:0", 200_000],
+    ["publishers/anthropic/models/claude-opus-4-5@20251101", 200_000],
+    ["us.anthropic.claude-opus-4-6-v1", 200_000],
+    ["claude-opus-4-9", 200_000],
+    ["claude-opus-5-1", 200_000],
+    ["claude-fable-50", 200_000]
+  ])("budgets %s at %i tokens", (id, tokens) => {
+    expect(SeatResolver.contextWindowTokensFor(id)).toBe(tokens)
+  })
+
   it("floors an empty model id rather than reporting zero", () => {
     // The empty string is what `modelIdOf` returns for a trailing-separator
     // seat, so it reaches this catalogue in practice and must still resolve
@@ -61,11 +90,12 @@ describe("SeatResolver.contextWindowTokensFor", () => {
   })
 
   it("matches the catalogue case-insensitively and first-pattern-wins", () => {
+    expect(SeatResolver.contextWindowTokensFor("CLAUDE-OPUS-4-1")).toBe(200_000)
     expect(SeatResolver.contextWindowTokensFor("CLAUDE-OPUS-5")).toBe(1_000_000)
     expect(SeatResolver.contextWindowTokensFor("CLAUDE-HAIKU-4-5")).toBe(200_000)
     expect(SeatResolver.contextWindowTokensFor("GPT-5-Codex")).toBe(400_000)
     // Two patterns match; the catalogue order decides, and `claude` is first.
-    expect(SeatResolver.contextWindowTokensFor("claude-gpt-5")).toBe(1_000_000)
+    expect(SeatResolver.contextWindowTokensFor("claude-gpt-5")).toBe(200_000)
   })
 
   it("anchors the o-series pattern, so a seat string is not a model id", () => {
