@@ -240,6 +240,13 @@ The scrub applied to every `payload` and `meta` before persistence.
 | `symbolMarker`     | `"[Symbol]"`                                     | a named symbol                                                          |
 | `depthMarker`      | `"[Deep]"`                                       | a value past `maxDepth`, under `onTooDeep: "name"`                      |
 
+Built-in text rules cover credential assignments with optional whitespace
+around `:` or `=`, Basic and Bearer authorization, bare JWTs, private-key PEM
+blocks (including OpenSSH), and cookie/session assignments. Structured
+credential suffixes also include `secretAccessKey`, `passphrase`, `sshKey`,
+`session`, `signature`, and `auth`. See the full
+[redaction rules](https://journal.smithers.sh/concepts/redaction/).
+
 Rows are permanent and are replayed verbatim to sync subscribers and
 time-travel consumers, so redaction on write is the only place it can be
 enforced once. The rule set is a best-effort textual net over shapes seen in
