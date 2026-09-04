@@ -174,6 +174,15 @@ describe("PierreDiffView live render (happy-dom)", () => {
     globalThis.MutationObserver = originalMutationObserver;
   });
 
+  /*
+   * pierre's first render in a process loads Shiki, its grammars and its web
+   * components: seconds here, more on a loaded runner. So the wait for its
+   * header is the event, against one generous deadline that only shapes the
+   * failure message. A 500 ms poll budget inside bun's default 5 s case
+   * timeout was a stopwatch on the machine, and it read red on a busy one.
+   */
+  const HEADER_DEADLINE_MS = 30_000;
+
   async function mount(element: ReactElement): Promise<HTMLElement> {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -181,7 +190,9 @@ describe("PierreDiffView live render (happy-dom)", () => {
     const r = root;
     await act(async () => r.render(element));
     // Let CodeView's mount effect render the file header into its shadow root.
-    for (let i = 0; i < 20 && !header(container); i += 1) {
+    const deadline = Date.now() + HEADER_DEADLINE_MS;
+    while (!header(container)) {
+      if (Date.now() > deadline) throw new Error(`pierre never rendered its file header within ${HEADER_DEADLINE_MS / 1000} s`);
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       });
@@ -203,7 +214,7 @@ describe("PierreDiffView live render (happy-dom)", () => {
       expect(head!.querySelector("[data-deletions-count]")?.textContent).toBe("-1");
       // pierre prints the counts itself; the adapter no longer adds a second stat through the metadata slot.
       expect(el.querySelector('[slot="header-metadata"]')?.textContent ?? "").toBe("");
-    });
+    }, 90_000);
   }
 
   test("the default Pierre mode follows root data-theme toggles", async () => {
@@ -231,5 +242,5 @@ describe("PierreDiffView live render (happy-dom)", () => {
       await Promise.resolve();
     });
     expect(adapter()?.getAttribute("data-theme-mode")).toBe("dark");
-  });
+  }, 90_000);
 });
