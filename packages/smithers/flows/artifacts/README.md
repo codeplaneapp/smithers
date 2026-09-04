@@ -1,5 +1,9 @@
 # `@smthrs/artifacts`
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://artifacts.smithers.sh
 
 The content-addressed artifact store: bytes addressed by their own SHA-256

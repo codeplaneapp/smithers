@@ -50,14 +50,20 @@ const npmInstallArgs = [
 // not a size problem.
 export const SINGLETONS = ["effect"];
 
-// Optional peers must not appear in a default install at all. The list is
-// derived from the release set itself rather than restated, so a package that
-// adds or drops an optional peer needs no edit here.
+/**
+ * External optional peers must stay absent from the default install. Workspace
+ * packages are explicitly requested by this fixture, so their presence does
+ * not imply an optional peer pulled them in.
+ *
+ * @since 1.0.0
+ * @category utilities
+ */
 export const optionalPeersOf = (manifests) => {
+  const installed = new Set(manifests.map((manifest) => manifest.name));
   const names = new Set();
   for (const manifest of manifests) {
     for (const [name, meta] of Object.entries(manifest.peerDependenciesMeta ?? {})) {
-      if (meta?.optional === true) names.add(name);
+      if (meta?.optional === true && !installed.has(name)) names.add(name);
     }
   }
   return [...names].sort();

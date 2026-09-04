@@ -1,5 +1,9 @@
 # @smthrs/std
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://std.smithers.sh
 
 The standard flows tool library for filesystem, search, HTTP, shell, and language-server work. Each callable tool is an ordinary `@smthrs/core` flow declaration with explicit capabilities and effects, plus an injectable handler where execution is host-owned.

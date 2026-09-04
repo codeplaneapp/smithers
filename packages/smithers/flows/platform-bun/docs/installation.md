@@ -8,22 +8,14 @@ sidebar:
 ## Install the package and its peer
 
 ```bash
-pnpm add @smthrs/platform-bun @effect/platform-bun@4.0.0-rc.108
+pnpm add @smthrs/platform-bun@next
 ```
 
-Install both. `@effect/platform-bun` is declared as an optional peer
-dependency, which means a package manager will not fetch it for you, and both
+`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.108` because
 the root entry point and `@smthrs/platform-bun/BunHost` import it at module
-load. Without it, the first `import { BunHost } from "@smthrs/platform-bun"`
-throws `ERR_MODULE_NOT_FOUND` for
-`@effect/platform-bun/BunChildProcessSpawner`.
-
-The one entry point that resolves without it is
-`@smthrs/platform-bun/BunFileSystem`, which imports nothing from
-`@effect/platform-bun`.
-
-The version must match the `effect` release the rest of your composition is
-built against. This package is built against `effect@4.0.0-rc.108`.
+load. Package managers that resolve required peers install it automatically.
+`effect`, `@effect/platform-node`, and `@effect/platform-node-shared` are also
+exact peers at that version, so the host shares one compatible Effect runtime.
 
 ## Supported runtimes
 

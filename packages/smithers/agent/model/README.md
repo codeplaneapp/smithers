@@ -1,5 +1,9 @@
 # @smthrs/model
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://model.smithers.sh
 
 Schema-first Effect model protocols, routes, and streaming events for flows. It separates provider-neutral model requests from provider framing, authentication, endpoint selection, transport execution, and event normalization.

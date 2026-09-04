@@ -63,6 +63,8 @@ const packages = (specifier: string): string =>
 
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
   dependencies: Record<string, string>
+  peerDependencies: Record<string, string>
+  devDependencies: Record<string, string>
   optionalDependencies: Record<string, string>
 }
 
@@ -97,17 +99,20 @@ describe("the scan surface's dependency boundary", () => {
   })
 
   it("keeps the flow-lane packages out of the hard dependencies", () => {
-    // `@effect/platform-node-shared` is not a fourth dependency: it is the
-    // half `@effect/platform-node` already installs, pinned at the same exact
-    // version so an npm consumer does not resolve its caret range to a newer
-    // release that carries a second Effect (the release policy).
-    expect(Object.keys(manifest.dependencies).sort()).toEqual([
-      "@effect/platform-node",
-      "@effect/platform-node-shared",
-      "effect",
-      "typescript"
-    ])
+    expect(Object.keys(manifest.dependencies)).toEqual(["typescript"])
     expect(Object.keys(manifest.optionalDependencies).every((name) => name.startsWith("@smthrs/"))).toBe(true)
     expect(Object.keys(manifest.optionalDependencies)).toContain("@smthrs/registry")
+  })
+
+  it("shares one exact Effect runtime with the consuming project", () => {
+    expect(manifest.peerDependencies).toEqual({
+      "@effect/platform-node": "4.0.0-rc.108",
+      "@effect/platform-node-shared": "4.0.0-rc.108",
+      effect: "4.0.0-rc.108"
+    })
+    for (const [name, version] of Object.entries(manifest.peerDependencies)) {
+      expect(manifest.dependencies[name]).toBeUndefined()
+      expect(manifest.devDependencies[name]).toBe(version)
+    }
   })
 })

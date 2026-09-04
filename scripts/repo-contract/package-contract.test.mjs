@@ -176,26 +176,59 @@ describe("the workspace package contract", () => {
     }
   })
 
-  it("keeps the Node Effect runtime as one exact peer set", () => {
-    const platform = publishable.find((entry) => entry.manifest.name === "@smthrs/platform-node")
-    assert.ok(platform, "@smthrs/platform-node must be publishable")
+  it("keeps every published Effect runtime dependency as an exact peer and workspace dev dependency", () => {
+    const substrate = ["effect", "@effect/platform-node", "@effect/platform-node-shared"]
+    for (const entry of publishable) {
+      for (const name of substrate) {
+        const declared = ["dependencies", "peerDependencies"]
+          .some((field) => entry.manifest[field]?.[name] !== undefined)
+        if (!declared) continue
+        const where = `packages/${entry.directory}`
+        assert.equal(
+          entry.manifest.peerDependencies?.[name],
+          "4.0.0-rc.108",
+          `${where} must constrain ${name} as an exact peer`
+        )
+        assert.equal(
+          entry.manifest.dependencies?.[name],
+          undefined,
+          `${where} must not install a private ${name} copy`
+        )
+        assert.equal(
+          entry.manifest.devDependencies?.[name],
+          "4.0.0-rc.108",
+          `${where} must install ${name} for its own checks`
+        )
+      }
+    }
+  })
+
+  it("pins the gateway's complete Node Effect peer set", () => {
+    const gateway = publishable.find((entry) => entry.manifest.name === "@smthrs/gateway")
+    assert.ok(gateway, "@smthrs/gateway must be publishable")
 
     for (const name of ["effect", "@effect/platform-node", "@effect/platform-node-shared"]) {
-      assert.equal(
-        platform.manifest.peerDependencies?.[name],
-        "4.0.0-rc.108",
-        `@smthrs/platform-node must constrain ${name} as an exact peer`
-      )
-      assert.equal(
-        platform.manifest.dependencies?.[name],
-        undefined,
-        `@smthrs/platform-node must not install a private ${name} copy`
-      )
-      assert.equal(
-        platform.manifest.devDependencies?.[name],
-        "4.0.0-rc.108",
-        `@smthrs/platform-node must install ${name} for its own checks`
-      )
+      assert.equal(gateway.manifest.peerDependencies?.[name], "4.0.0-rc.108", `${name} peer`)
+      assert.equal(gateway.manifest.devDependencies?.[name], "4.0.0-rc.108", `${name} dev dependency`)
+      assert.equal(gateway.manifest.dependencies?.[name], undefined, `${name} hard dependency`)
     }
+  })
+
+  it("keeps kernel's browser test host out of the runtime graph", () => {
+    const kernel = publishable.find((entry) => entry.manifest.name === "@smthrs/kernel")
+    assert.ok(kernel, "@smthrs/kernel must be publishable")
+
+    assert.equal(kernel.manifest.dependencies?.["@smthrs/platform-browser"], undefined)
+    assert.equal(kernel.manifest.devDependencies?.["@smthrs/platform-browser"], releaseVersion)
+    assert.equal(kernel.manifest.peerDependencies?.["@smthrs/platform-browser"], releaseVersion)
+    assert.equal(kernel.manifest.peerDependenciesMeta?.["@smthrs/platform-browser"]?.optional, true)
+  })
+
+  it("requires the Bun platform peer imported by the root entry point", () => {
+    const platform = publishable.find((entry) => entry.manifest.name === "@smthrs/platform-bun")
+    assert.ok(platform, "@smthrs/platform-bun must be publishable")
+
+    assert.equal(platform.manifest.peerDependencies?.["@effect/platform-bun"], "4.0.0-rc.108")
+    assert.notEqual(platform.manifest.peerDependenciesMeta?.["@effect/platform-bun"]?.optional, true)
   })
 })

@@ -94,8 +94,6 @@
   },
   "dependencies": {
     "@clack/prompts": "1.7.0",
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/platform-node-shared": "4.0.0-rc.108",
     "@smthrs/agent": "1.0.0-rc.0",
     "@smthrs/canonical": "1.0.0-rc.0",
     "@smthrs/capability": "1.0.0-rc.0",
@@ -121,17 +119,24 @@
     "@smthrs/registry": "1.0.0-rc.0",
     "@smthrs/run-store": "1.0.0-rc.0",
     "@smthrs/std": "1.0.0-rc.0",
-    "@smthrs/sync": "1.0.0-rc.0",
+    "@smthrs/sync": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/platform-node-shared": "4.0.0-rc.108",
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/platform-node-shared": "4.0.0-rc.108",
     "@effect/vitest": "4.0.0-rc.108",
     "@eslint/js": "9.39.1",
     "@smthrs/testing": "1.0.0-rc.0",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",
+    "effect": "4.0.0-rc.108",
     "esbuild": "0.28.1",
     "eslint": "9.39.1",
     "eslint-import-resolver-typescript": "4.4.5",

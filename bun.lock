@@ -1093,8 +1093,6 @@
       },
       "dependencies": {
         "@clack/prompts": "1.7.0",
-        "@effect/platform-node": "4.0.0-rc.108",
-        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@smthrs/agent": "1.0.0-rc.0",
         "@smthrs/canonical": "1.0.0-rc.0",
         "@smthrs/capability": "1.0.0-rc.0",
@@ -1121,16 +1119,18 @@
         "@smthrs/run-store": "1.0.0-rc.0",
         "@smthrs/std": "1.0.0-rc.0",
         "@smthrs/sync": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@smthrs/testing": "1.0.0-rc.0",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1141,6 +1141,11 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent": {
@@ -1169,7 +1174,6 @@
         "@smthrs/run-store": "1.0.0-rc.0",
         "@smthrs/std": "1.0.0-rc.0",
         "@smthrs/step-cache": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1181,6 +1185,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1191,6 +1196,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent/chain": {
@@ -1296,7 +1304,6 @@
         "@smthrs/model": "1.0.0-rc.0",
         "@smthrs/notifications": "1.0.0-rc.0",
         "@smthrs/registry": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
         "quickjs-emscripten-core": "0.32.0",
         "typescript": "6.0.3",
       },
@@ -1309,6 +1316,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1319,6 +1327,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent/integrations": {
@@ -1361,7 +1372,6 @@
         "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/model": "1.0.0-rc.0",
         "@smthrs/patterns": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1370,6 +1380,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1380,6 +1391,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent/model": {
@@ -1388,7 +1402,6 @@
       "dependencies": {
         "@smthrs/capability": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1397,6 +1410,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1407,6 +1421,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent/plugin": {
@@ -1414,7 +1431,6 @@
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/flow": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1423,6 +1439,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1433,6 +1450,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent/registry": {
@@ -1442,7 +1462,6 @@
         "@smthrs/core": "1.0.0-rc.0",
         "@smthrs/flow": "1.0.0-rc.0",
         "@smthrs/plan": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
         "yaml": "2.9.0",
       },
       "devDependencies": {
@@ -1458,6 +1477,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1468,6 +1488,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent/scorers": {
@@ -1505,7 +1528,6 @@
         "@smthrs/control": "1.0.0-rc.0",
         "@smthrs/core": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1515,6 +1537,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1525,6 +1548,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/agent/triggers": {
@@ -1688,7 +1714,6 @@
         "@smthrs/plan": "1.0.0-rc.0",
         "@smthrs/registry": "1.0.0-rc.0",
         "@smthrs/run-store": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1702,6 +1727,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1712,6 +1738,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/create-app": {
@@ -1793,7 +1822,6 @@
         "@smthrs/step-cache": "1.0.0-rc.0",
         "@smthrs/sync": "1.0.0-rc.0",
         "@smthrs/time-travel": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
       },
       "devDependencies": {
@@ -1811,6 +1839,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
         "eslint-plugin-import": "2.32.0",
@@ -1822,13 +1851,15 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/artifacts": {
       "name": "@smthrs/artifacts",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/crypto": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1838,6 +1869,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1849,19 +1881,20 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/canonical": {
       "name": "@smthrs/canonical",
       "version": "1.0.0-rc.0",
-      "dependencies": {
-        "effect": "4.0.0-rc.108",
-      },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@types/node": "25.9.5",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1873,13 +1906,13 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/capability": {
       "name": "@smthrs/capability",
       "version": "1.0.0-rc.0",
-      "dependencies": {
-        "effect": "4.0.0-rc.108",
-      },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
         "@effect/vitest": "4.0.0-rc.108",
@@ -1887,6 +1920,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1897,6 +1931,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/core": {
@@ -1905,7 +1942,6 @@
       "dependencies": {
         "@smthrs/canonical": "1.0.0-rc.0",
         "@smthrs/crypto": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
         "yaml": "2.9.0",
       },
       "devDependencies": {
@@ -1916,6 +1952,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1927,13 +1964,13 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/crypto": {
       "name": "@smthrs/crypto",
       "version": "1.0.0-rc.0",
-      "dependencies": {
-        "effect": "4.0.0-rc.108",
-      },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
         "@effect/platform-node": "4.0.0-rc.108",
@@ -1942,6 +1979,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1953,13 +1991,15 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/database": {
       "name": "@smthrs/database",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@effect/sql-sqlite-node": "4.0.0-rc.108",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1968,6 +2008,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1978,6 +2019,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/engine": {
@@ -1987,7 +2031,6 @@
         "@smthrs/crypto": "1.0.0-rc.0",
         "@smthrs/flow": "1.0.0-rc.0",
         "@smthrs/keys": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -1998,6 +2041,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2009,6 +2053,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/engine-store": {
@@ -2026,7 +2073,6 @@
         "@smthrs/plan": "1.0.0-rc.0",
         "@smthrs/run-store": "1.0.0-rc.0",
         "@smthrs/step-cache": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2039,6 +2085,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2049,6 +2096,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/flow": {
@@ -2058,7 +2108,6 @@
         "@smthrs/crypto": "1.0.0-rc.0",
         "@smthrs/keys": "1.0.0-rc.0",
         "@smthrs/plan": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2068,6 +2117,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2079,13 +2129,15 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/jj": {
       "name": "@smthrs/jj",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/capability": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2094,6 +2146,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2105,13 +2158,15 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/journal": {
       "name": "@smthrs/journal",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/database": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2123,6 +2178,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2134,6 +2190,9 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/kernel": {
       "name": "@smthrs/kernel",
@@ -2142,16 +2201,16 @@
         "@smthrs/capability": "1.0.0-rc.0",
         "@smthrs/jj": "1.0.0-rc.0",
         "@smthrs/journal": "1.0.0-rc.0",
-        "@smthrs/platform-browser": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
+        "@smthrs/platform-browser": "1.0.0-rc.0",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2165,10 +2224,13 @@
       },
       "peerDependencies": {
         "@effect/vitest": "4.0.0-rc.108",
+        "@smthrs/platform-browser": "1.0.0-rc.0",
+        "effect": "4.0.0-rc.108",
         "vitest": "4.1.9",
       },
       "optionalPeers": [
         "@effect/vitest",
+        "@smthrs/platform-browser",
         "vitest",
       ],
     },
@@ -2178,7 +2240,6 @@
       "dependencies": {
         "@smthrs/canonical": "1.0.0-rc.0",
         "@smthrs/crypto": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2188,6 +2249,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2198,6 +2260,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/observability": {
@@ -2215,7 +2280,6 @@
         "@opentelemetry/sdk-trace-node": "2.9.0",
         "@opentelemetry/sdk-trace-web": "2.9.0",
         "@smthrs/journal": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2224,6 +2288,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2235,13 +2300,15 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/patterns": {
       "name": "@smthrs/patterns",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/core": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2251,6 +2318,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2261,6 +2329,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/plan": {
@@ -2270,7 +2341,6 @@
         "@smthrs/crypto": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/keys": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2280,6 +2350,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2290,6 +2361,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/platform-browser": {
@@ -2298,7 +2372,6 @@
       "dependencies": {
         "@smthrs/jj": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2307,6 +2380,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2318,26 +2392,29 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/platform-bun": {
       "name": "@smthrs/platform-bun",
       "version": "1.0.0-rc.0",
       "dependencies": {
-        "@effect/platform-node": "4.0.0-rc.108",
-        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@smthrs/jj": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
         "@smthrs/platform-node": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
         "@effect/platform-bun": "4.0.0-rc.108",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2351,10 +2428,10 @@
       },
       "peerDependencies": {
         "@effect/platform-bun": "4.0.0-rc.108",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
+        "effect": "4.0.0-rc.108",
       },
-      "optionalPeers": [
-        "@effect/platform-bun",
-      ],
     },
     "packages/smithers/flows/platform-node": {
       "name": "@smthrs/platform-node",
@@ -2398,7 +2475,6 @@
         "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/journal": "1.0.0-rc.0",
         "@smthrs/observability": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2407,6 +2483,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2418,13 +2495,15 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/sandbox": {
       "name": "@smthrs/sandbox",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/kernel": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2438,6 +2517,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2450,6 +2530,9 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/flows/step-cache": {
       "name": "@smthrs/step-cache",
@@ -2457,7 +2540,6 @@
       "dependencies": {
         "@smthrs/canonical": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2466,6 +2548,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2476,6 +2559,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/sync": {
@@ -2483,7 +2569,6 @@
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/journal": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2492,6 +2577,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2502,6 +2588,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/flows/time-travel": {
@@ -2514,7 +2603,6 @@
         "@smthrs/journal": "1.0.0-rc.0",
         "@smthrs/run-store": "1.0.0-rc.0",
         "@smthrs/step-cache": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2531,6 +2619,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2542,19 +2631,22 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/gateway": {
       "name": "@smthrs/gateway",
       "version": "1.0.0-rc.0",
       "dependencies": {
-        "@effect/platform-node": "4.0.0-rc.108",
         "@smthrs/control": "1.0.0-rc.0",
         "@smthrs/run-store": "1.0.0-rc.0",
         "@smthrs/sync": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@smthrs/database": "1.0.0-rc.0",
@@ -2568,6 +2660,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2578,6 +2671,11 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/mcp": {
@@ -2589,7 +2687,6 @@
         "@smthrs/harness": "1.0.0-rc.0",
         "@smthrs/kernel": "1.0.0-rc.0",
         "@smthrs/registry": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2600,6 +2697,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2611,6 +2709,9 @@
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
       },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/migrate": {
       "name": "@smthrs/migrate",
@@ -2619,18 +2720,18 @@
         "smithers-migrate": "./dist/esm/flow/bin.js",
       },
       "dependencies": {
-        "@effect/platform-node": "4.0.0-rc.108",
-        "@effect/platform-node-shared": "4.0.0-rc.108",
-        "effect": "4.0.0-rc.108",
         "typescript": "6.0.3",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2656,13 +2757,17 @@
         "@smthrs/registry": "1.0.0-rc.0",
         "@smthrs/std": "1.0.0-rc.0",
       },
+      "peerDependencies": {
+        "@effect/platform-node": "4.0.0-rc.108",
+        "@effect/platform-node-shared": "4.0.0-rc.108",
+        "effect": "4.0.0-rc.108",
+      },
     },
     "packages/smithers/notifications": {
       "name": "@smthrs/notifications",
       "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/journal": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2672,6 +2777,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2682,6 +2788,9 @@
         "typescript": "6.0.3",
         "typescript-eslint": "8.65.0",
         "vitest": "4.1.9",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.108",
       },
     },
     "packages/smithers/ui": {
@@ -2752,7 +2861,6 @@
         "@smthrs/kernel": "1.0.0-rc.0",
         "@smthrs/model": "1.0.0-rc.0",
         "@smthrs/plan": "1.0.0-rc.0",
-        "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
         "@effect/language-service": "0.87.1",
@@ -2762,6 +2870,7 @@
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
+        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -2775,6 +2884,7 @@
       },
       "peerDependencies": {
         "@effect/vitest": "4.0.0-rc.108",
+        "effect": "4.0.0-rc.108",
         "vitest": "^4.1.0",
       },
       "optionalPeers": [

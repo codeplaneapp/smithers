@@ -31,12 +31,12 @@ filesystem from [`@smthrs/platform-node`](https://platform-node.smithers.sh/refe
 ## Install
 
 ```bash
-pnpm add @smthrs/platform-bun @effect/platform-bun@4.0.0-rc.108
+pnpm add @smthrs/platform-bun@next
 ```
 
-`@effect/platform-bun` is an optional peer dependency, so your package manager
-does not install it for you and the root import fails without it. The
-filesystem slot also needs a CPython 3 interpreter on the host. For both, see
+`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.108`. Package
+managers install it with the other required Effect peers. The filesystem slot
+also needs a CPython 3 interpreter on the host. For both, see
 [Installation](/installation/).
 
 ## The shortest real example

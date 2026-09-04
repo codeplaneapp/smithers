@@ -1,5 +1,9 @@
 # @smthrs/patterns
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://patterns.smithers.sh
 
 Higher-order flow patterns and decorators for flows. It composes `@smthrs/core` alone and imports no Node built-ins.

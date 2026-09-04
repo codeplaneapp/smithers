@@ -9,6 +9,10 @@ description: "Capability kernel: effect tiers, monotone capability sets, grant s
 
 > **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/jj`](/docs/reference/api/jj/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/platform-browser`](/docs/reference/api/platform-browser/)
 
+`@smthrs/kernel/test/TestHost` requires the optional peer
+`@smthrs/platform-browser@1.0.0-rc.0`. Install that package when using this
+test helper. Normal kernel imports do not install browser test support.
+
 The root entry point re-exports every module as a namespace, and each module is
 also importable from `@smthrs/kernel/<Module>`:
 

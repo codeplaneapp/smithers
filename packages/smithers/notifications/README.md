@@ -1,5 +1,9 @@
 # @smthrs/notifications
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://notifications.smithers.sh
 
 Durable notification queue, admission policy, and journal projection for flows. It models human and system notifications, derives queue state from journal events, and drains eligible work at harness boundaries.

@@ -3,6 +3,11 @@ title: "API reference"
 description: "Every public export of @smthrs/gateway: the assembled server and its Node host, the served read path, the wire schemas and folds, the RPC group, the diagnosis renderer, the failure vocabulary, and the supervision port."
 ---
 
+The gateway requires `effect`, `@effect/platform-node`, and
+`@effect/platform-node-shared` as exact `4.0.0-rc.108` peers. The shared
+platform pin keeps npm from selecting a later release candidate under the
+Node platform's transitive range. Use the same Effect version in the host.
+
 The root entry point exports one namespace per module, and every local module is
 also importable from `@smthrs/gateway/<Module>`.
 

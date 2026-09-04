@@ -1,5 +1,9 @@
 # @smthrs/control
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://control.smithers.sh
 
 Control services and RPC projections for flows. It defines the

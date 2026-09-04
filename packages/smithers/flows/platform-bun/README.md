@@ -1,5 +1,9 @@
 # @smthrs/platform-bun
 
+This package declares `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` as exact
+`4.0.0-rc.108` peer dependencies. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://platform-bun.smithers.sh
 
 The Bun Host bundle for Smithers.
@@ -10,17 +14,13 @@ writes no spawner and no HTTP client of its own: it composes those with Effect's
 `Path`, the Bun `Jj` adapter from `@smthrs/jj`, and `@smthrs/platform-node`'s
 atomic filesystem into the complete closed five-tag Host surface.
 
-`@effect/platform-bun` is a peer dependency that the root and `BunHost` entry
-points import at module load, and it is declared optional, so a package manager
-will not install it for you. Install it alongside this package:
+`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.108` because
+the root and `BunHost` entry points import it at module load. Package managers
+install it with the other required peers:
 
 ```sh
-npm install @smthrs/platform-bun @effect/platform-bun@4.0.0-rc.108
+npm install @smthrs/platform-bun@next
 ```
-
-Without it the first `import { BunHost } from "@smthrs/platform-bun"` throws
-`ERR_MODULE_NOT_FOUND` for `@effect/platform-bun/BunChildProcessSpawner`. Only
-`@smthrs/platform-bun/BunFileSystem` resolves on its own.
 
 ```ts
 import { BunHost } from "@smthrs/platform-bun"

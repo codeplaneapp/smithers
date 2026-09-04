@@ -1,5 +1,9 @@
 # @smthrs/core
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://core.smithers.sh
 
 Pure plan-time data model for flows. It defines inert Flow and Node declarations plus the graph, effect, placement, annotation, key-material, and Markdown projections consumed by the registry and execution layers above it. `TestRuntime` is the deliberately non-production exception: a pure evaluator for testing deferred declaration callbacks.

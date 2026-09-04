@@ -1,5 +1,9 @@
 # @smthrs/flows
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://flows.smithers.sh
 
 Convenience barrel for the complete durable flows architecture. Each package

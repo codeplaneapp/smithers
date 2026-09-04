@@ -1,5 +1,9 @@
 # @smthrs/gateway
 
+This package declares `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` as exact
+`4.0.0-rc.108` peer dependencies. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://gateway.smithers.sh
 
 The assembled workspace gateway: one HTTP surface carrying the control plane, the sync read path, the served projections, and a health probe. It also defines the gateway wire schemas and the stale-run supervision port, and re-exports the durable journal synchronization package gateway hosts use.

@@ -1,5 +1,9 @@
 # @smthrs/platform-browser
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://platform-browser.smithers.sh
 
 Browser implementations of Effect platform services backed by ZenFS and

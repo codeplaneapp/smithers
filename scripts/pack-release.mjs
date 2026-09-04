@@ -9,7 +9,7 @@
  */
 import { spawn } from "node:child_process"
 import { readFileSync } from "node:fs"
-import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { access, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -124,6 +124,11 @@ export const readWorkspaceManifests = (root = repoRoot) => {
  *
  * Only `@smthrs/*` edges resolving to a member of `manifests` are kept, so a
  * dependency on something outside the release set cannot order the release.
+ * Optional peers do not require an earlier publication; kernel's browser
+ * test host uses one to keep test support out of its runtime dependency graph.
+ *
+ * @since 1.0.0
+ * @category utilities
  */
 export const workspaceDependencies = (manifests) => {
   const directoryOf = new Map(
@@ -133,6 +138,10 @@ export const workspaceDependencies = (manifests) => {
     directory,
     new Set(
       Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })
+        .filter((dependency) =>
+          manifest.dependencies?.[dependency] !== undefined
+          || manifest.peerDependenciesMeta?.[dependency]?.optional !== true
+        )
         .map((dependency) => directoryOf.get(dependency))
         .filter((dependency) => dependency !== undefined)
     )
@@ -163,11 +172,12 @@ const dependsOnItself = (node, dependencies, remaining) => {
  * product package it belongs to publishes the same forty names in the same
  * order it published them from a top-level directory.
  *
- * The graph is not acyclic. `@smthrs/kernel` publishes `kernel/test/TestHost`,
- * which imports `@smthrs/platform-browser`, and `platform-browser` imports
- * `@smthrs/kernel` back. So the order emits an unblocked workspace whenever one
- * exists, and otherwise enters the remaining cycle at its alphabetically first
- * member. Only a genuine cycle is ever broken; every other edge is respected.
+ * The order emits an unblocked workspace whenever one exists, and otherwise
+ * enters a remaining cycle at its alphabetically first member. The release
+ * contract test requires the actual publication graph to remain acyclic.
+ *
+ * @since 1.0.0
+ * @category utilities
  */
 export const dependencyOrder = (dependencies) => {
   const byBasename = (left, right) => {
@@ -240,7 +250,9 @@ const sourceFiles = async (directory) => {
     const path = join(directory, entry.name)
     return entry.isDirectory()
       ? sourceFiles(path)
-      : entry.name.endsWith(".ts") ? [path] : []
+      : entry.name.endsWith(".ts")
+      ? [path]
+      : []
   }))
   return nested.flat()
 }

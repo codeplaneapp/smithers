@@ -1,5 +1,9 @@
 # @smthrs/cli
 
+This package declares `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` as exact
+`4.0.0-rc.108` peer dependencies. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://cli.smithers.sh
 
 Node command-line projection of the Smithers control plane. It turns `@smthrs/control` operations into the `smthrs` executable (with `smithers` as an alias) and supplies the Node HTTP, WebSocket, and output layers used by the CLI host.

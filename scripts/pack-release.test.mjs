@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, resolve, sep } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
@@ -55,8 +55,7 @@ const graphCommands = (steps) =>
   steps.flatMap((step) => [...step.matchAll(/pnpm exec smithers-build [^\n]+/g)].map((match) => match[0]))
 
 /** The recursive per-package script runners the target graph replaced. */
-const scriptRunners = (source) =>
-  [...source.matchAll(/\bpnpm (?:run [a-z][a-z:-]*|test)\b/g)].map((match) => match[0])
+const scriptRunners = (source) => [...source.matchAll(/\bpnpm (?:run [a-z][a-z:-]*|test)\b/g)].map((match) => match[0])
 
 /** The `with:` entries of one step, which a copy may extend but not contradict. */
 const withEntries = (step) => step.split("\n").filter((line) => line.startsWith("          "))
@@ -206,11 +205,7 @@ test("pack-release order is a topological order of the workspace dependency grap
     }
   }
 
-  // @smthrs/kernel publishes kernel/test/TestHost, which imports
-  // @smthrs/platform-browser, and platform-browser imports @smthrs/kernel
-  // back. That cycle is the one edge publication order cannot respect. A
-  // second entry here is a new cycle, and a new release-ordering hazard.
-  assert.deepEqual(unordered.sort(), ["packages/smithers/flows/kernel -> packages/smithers/flows/platform-browser"])
+  assert.deepEqual(unordered.sort(), [])
 })
 
 test("release.yml publishes exactly the packed workspaces, in the packed order", () => {
@@ -314,12 +309,14 @@ test("dependencyOrder is a topological order with an alphabetical tiebreak", () 
 
 test("dependencyOrder enters a cycle at its alphabetically first member", () => {
   assert.deepEqual(
-    dependencyOrder(new Map([
-      ["b", new Set(["c"])],
-      ["c", new Set(["b"])],
-      ["a", new Set(["b", "c"])],
-      ["d", new Set()]
-    ])),
+    dependencyOrder(
+      new Map([
+        ["b", new Set(["c"])],
+        ["c", new Set(["b"])],
+        ["a", new Set(["b", "c"])],
+        ["d", new Set()]
+      ])
+    ),
     ["d", "b", "c", "a"]
   )
 })
@@ -383,9 +380,9 @@ test("@smthrs/memory packs the SQL reference copies its shipped source cites", (
 
 test("the install docs pin the drifted @effect/platform-node-shared to the packed effect version", () => {
   // @effect/platform-node@4.0.0-rc.108 asks for @effect/platform-node-shared
-  // ^4.0.0-rc.108, the registry answers 4.0.0-rc.112, and rc.112 peers on
-  // effect ^4.0.0-rc.112. A fresh consumer following the install line installs
-  // the drifted copy and `npm ls` exits 1. The documented remedy is an
+  // ^4.0.0-rc.108, which selected 4.0.0-rc.112 before the exact peer set
+  // constrained it. Older installs can retain that incompatible Effect tree.
+  // The documented remedy for those installs is an
   // overrides pin, and it has to name the version the packed manifests pin.
   const manifests = readWorkspaceManifests()
   const pins = new Set(
@@ -500,7 +497,6 @@ test("the install line pins @effect/platform-node-shared beside @effect/platform
     )
   }
 })
-
 
 test("an export with no require condition is the only thing that exempts a module from the CommonJS check", () => {
   const manifest = {

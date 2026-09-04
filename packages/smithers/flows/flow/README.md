@@ -1,5 +1,9 @@
 # @smthrs/flow
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://flow.smithers.sh
 
 The flow authoring model. It defines typed flows, actions, durable waits

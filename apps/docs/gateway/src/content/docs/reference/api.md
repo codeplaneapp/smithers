@@ -4,6 +4,11 @@ description: "Every public export of @smthrs/gateway: the assembled server and i
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/gateway/docs/api.md"
 ---
 
+The gateway requires `effect`, `@effect/platform-node`, and
+`@effect/platform-node-shared` as exact `4.0.0-rc.108` peers. The shared
+platform pin keeps npm from selecting a later release candidate under the
+Node platform's transitive range. Use the same Effect version in the host.
+
 The root entry point exports one namespace per module, and every local module is
 also importable from `@smthrs/gateway/<Module>`.
 

@@ -33,6 +33,10 @@ evaluation path, and it needs a `Workspace`.
 
 ## Run against the deterministic host
 
+Install the optional `@smthrs/platform-browser@1.0.0-rc.0` peer before using
+`TestHost`. It supplies this test helper's browser host services and is not
+installed by normal kernel consumers.
+
 `@smthrs/kernel/test/TestHost` is the whole host surface with every source of
 nondeterminism pinned: a `Map`-backed filesystem, a scripted interpreter,
 `TestClock` so time moves only when a test moves it, and a seeded PRNG.

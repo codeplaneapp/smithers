@@ -4,6 +4,10 @@ description: "Every public export of @smthrs/kernel: the closed host service lis
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/kernel/docs/api.md"
 ---
 
+`@smthrs/kernel/test/TestHost` requires the optional peer
+`@smthrs/platform-browser@1.0.0-rc.0`. Install that package when using this
+test helper. Normal kernel imports do not install browser test support.
+
 The root entry point re-exports every module as a namespace, and each module is
 also importable from `@smthrs/kernel/<Module>`:
 

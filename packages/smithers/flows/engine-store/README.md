@@ -1,5 +1,9 @@
 # @smthrs/engine-store
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://engine-store.smithers.sh
 
 Durable persistence adapter for `@smthrs/engine`. It composes journal-backed

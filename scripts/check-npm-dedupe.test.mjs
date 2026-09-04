@@ -53,4 +53,10 @@ describe("check-npm-dedupe", () => {
       "no release manifest declares an optional peer, which would make the cell above vacuous",
     );
   });
+
+  it("allows a workspace optional peer explicitly installed by the consumer fixture", () => {
+    assert.equal(tree.optionalPeers.includes("@smthrs/platform-browser"), false);
+    assert.equal(copiesOf(tree.lockPackages, "@smthrs/platform-browser").length, 1);
+    assert.equal(copiesOf(tree.lockPackages, "@effect/platform-bun").length, 1);
+  });
 });

@@ -3,6 +3,10 @@ title: "API reference"
 description: "Every public export of @smthrs/kernel: the closed host service list, the guarded decorators over each port, the grant store and its durable events, process containment, and the public test subpaths."
 ---
 
+`@smthrs/kernel/test/TestHost` requires the optional peer
+`@smthrs/platform-browser@1.0.0-rc.0`. Install that package when using this
+test helper. Normal kernel imports do not install browser test support.
+
 The root entry point re-exports every module as a namespace, and each module is
 also importable from `@smthrs/kernel/<Module>`:
 

@@ -1,5 +1,9 @@
 # @smthrs/harness
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://harness.smithers.sh
 
 Built-in agent-loop contracts and pure turn helpers for flows. Scheduling, persistence, transport, and model execution stay behind explicit service ports.

@@ -200,7 +200,9 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/kernel": "1.0.0-rc.0",
+    "@smthrs/kernel": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
@@ -215,6 +217,7 @@
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
     "dprint": "0.55.2",
+    "effect": "4.0.0-rc.108",
     "esbuild": "0.28.1",
     "eslint": "9.39.1",
     "eslint-import-resolver-typescript": "4.4.5",

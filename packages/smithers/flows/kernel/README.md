@@ -1,5 +1,13 @@
 # @smthrs/kernel
 
+`@smthrs/kernel/test/TestHost` requires the optional peer
+`@smthrs/platform-browser@1.0.0-rc.0`. Install that package when using this
+test helper. Normal kernel imports do not install browser test support.
+
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://kernel.smithers.sh
 
 The closed host boundary and the capability kernel over it. This package owns

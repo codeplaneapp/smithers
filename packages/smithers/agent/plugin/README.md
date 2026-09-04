@@ -1,5 +1,9 @@
 # `@smthrs/plugin`
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://plugin.smithers.sh
 
 A typed, bounded plugin kernel for Effect programs: Vite's plugin model, with

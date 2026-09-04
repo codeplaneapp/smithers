@@ -45,13 +45,17 @@ required. `latest` still resolves the Smithers 0.x line. Install
 `4.0.0-rc.108`: a project with two Effect instances is unsupported, because
 schema internals are not interoperable between them.
 
-`@effect/platform-node-shared` is on that line because
-`@effect/platform-node@4.0.0-rc.108` asks for it as `^4.0.0-rc.108`, the
-registry answers `4.0.0-rc.112`, and that version's own peer range demands
-Effect `4.0.0-rc.112`. Naming the package yourself settles the range: npm, Bun,
-and pnpm each then resolve one copy, at `4.0.0-rc.108`.
+Published Smithers packages declare their Effect runtime requirements as exact
+`4.0.0-rc.108` peers and use dev dependencies for workspace checks. Node hosts
+also peer the Node platform and shared platform packages at that version.
 
-If you installed without it, `npm ls --all` exits 1 with
+`@effect/platform-node-shared` is explicit on that line because
+`@effect/platform-node@4.0.0-rc.108` asks for it as `^4.0.0-rc.108`. Before
+Smithers declared the complete peer set, that range could select
+`4.0.0-rc.112`, whose own peer range demands Effect `4.0.0-rc.112`. The exact
+peers now constrain the shared runtime to `4.0.0-rc.108`.
+
+If an older installation resolved that mismatched tree, `npm ls --all` exits 1 with
 `invalid: "^4.0.0-rc.112"`, while bare `npm ls` exits 0 because the drifted copy
 nests below the depth it prints. Adding the package repairs the tree in place,
 with no reinstall:

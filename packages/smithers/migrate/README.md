@@ -1,5 +1,9 @@
 # @smthrs/migrate
 
+This package declares `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` as exact
+`4.0.0-rc.108` peer dependencies. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://migrate.smithers.sh
 
 Upgrades a Smithers 0.x (JSX) project to the Smithers 1.0 authoring model and writes an auditable migration report.

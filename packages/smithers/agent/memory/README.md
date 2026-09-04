@@ -1,5 +1,9 @@
 # @smthrs/memory
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://memory.smithers.sh
 
 Effect services for durable cross-run facts, history, notes, recall, and maintenance. It sits above the database and model ports and exposes both storage primitives and callable remember/recall flows.

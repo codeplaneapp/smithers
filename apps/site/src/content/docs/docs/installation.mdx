@@ -34,7 +34,7 @@ A Node flow program depends on the engine packages, the Node host, and one pinne
 :::caution[Effect must stay at exactly the pinned version]
 A project with two Effect instances is unsupported, because schema internals are not interoperable between them.
 
-`@smthrs/platform-node` declares the compatible `effect` and Effect platform packages as exact peer dependencies. npm, Bun, and pnpm therefore install one compatible runtime without requiring an application to pin transitive implementation packages.
+Every published Smithers package that uses Effect declares it as an exact `4.0.0-rc.108` peer. Packages using the Effect Node platform also declare `@effect/platform-node` and `@effect/platform-node-shared` as exact peers at that version. npm, Bun, and pnpm therefore install one compatible runtime without requiring an application to pin transitive implementation packages.
 :::
 
 ## Verify the install

@@ -21,13 +21,10 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(BunHost.layer))
 ```
 
-:::warning
-`@effect/platform-bun` is a peer dependency, declared optional, that this
-barrel and `BunHost` both import at module load. Install it yourself
-(`npm install @effect/platform-bun@4.0.0-rc.108`) or the first import fails
-with `ERR_MODULE_NOT_FOUND`. Only
-`@smthrs/platform-bun/BunFileSystem` resolves without it.
-:::
+`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.108` because
+this barrel and `BunHost` import it at module load. It is installed alongside
+the package by package managers that resolve required peers. The Effect Node
+platform packages and `effect` are also exact peers at `4.0.0-rc.108`.
 
 :::warning
 This entry point is Node-only in the browser-bundle sense: it falls back to the

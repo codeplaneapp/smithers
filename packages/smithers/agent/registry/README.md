@@ -1,5 +1,9 @@
 # @smthrs/registry
 
+This package declares `effect` as an exact
+`4.0.0-rc.108` peer dependency. Keep the application on that version so
+all Smithers packages share one Effect runtime.
+
 **Documentation:** https://registry.smithers.sh
 
 Portable flow descriptor discovery and progressive-disclosure registry services. It scans ordered filesystem sources into serializable metadata, keeps prompt bodies lazy, and exposes lookup, disclosure, and execution to a host without evaluating modules during discovery.
