@@ -20,7 +20,7 @@ import * as EngineStore from "@smthrs/engine-store/EngineStore"
 import * as EngineMigrations from "@smthrs/engine-store/Migrations"
 import * as OwnerIdentity from "@smthrs/engine-store/OwnerIdentity"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
-import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
+import { Action, DurableClock, DurableDeferred, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import * as Jj from "@smthrs/jj"
 import * as Journal from "@smthrs/journal/Journal"
 import * as JournalEvent from "@smthrs/journal/JournalEvent"
@@ -32,6 +32,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as CompensationHandlers from "../src/CompensationHandlers.ts"
 import * as SqlTimeTravelStore from "../src/SqlTimeTravelStore.ts"
@@ -416,4 +417,97 @@ describe("time travel over an engine-written journal", () => {
       expect(result.row.status).toBe("suspended")
       expect(result.completions).toEqual([])
     }))
+  it.effect("parks a completed approval again after rewinding from the next await", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const approval = Flow.make("time-travel/Approval", {
+          payload: {},
+          success: Schema.String,
+          body: () => Post.call({})
+        })
+        const next = DurableDeferred.make("time-travel/next-approval", { success: Schema.String })
+        let advances = 0
+        const engine = yield* FlowRuntime.FlowRuntime
+        yield* engine.register(approval, () =>
+          Effect.gen(function*() {
+            yield* Action.make({
+              name: "time-travel/ApprovalStage",
+              tier: "compensable",
+              success: Schema.Void,
+              idempotencyKey: "approval-stage",
+              execute: Effect.void
+            })
+            const approved = yield* DurableDeferred.await(Settled)
+            advances++
+            yield* DurableDeferred.await(next)
+            return approved
+          }))
+        const execute = engine.execute(approval, { executionId: "approval-run", payload: {}, discard: true })
+        yield* execute
+        const journal = yield* Journal.Journal
+        const before = yield* journal.entries({ runId: "approval-run" as JournalEvent.RunId, limit: 100 })
+        const frame = { lineageId: FlowEngine.Lineage.root("approval-run"), seq: before.entries.at(-1)!.seq }
+        yield* engine.deferredDone(Settled, {
+          flowName: approval._tag,
+          executionId: "approval-run",
+          deferredName: Settled.name,
+          exit: Exit.succeed("approved")
+        })
+        const runs = yield* RunStore.RunStore
+        expect((yield* runs.get("approval-run")).status).toBe("suspended")
+        const state = yield* DurableEngineState.DurableEngineState
+        const beforeRewind = advances
+        expect(beforeRewind).toBeGreaterThan(0)
+        const timeTravel = yield* TimeTravel
+        yield* timeTravel.rewind({ runId: "approval-run", frame })
+        yield* execute
+        expect((yield* runs.get("approval-run")).status).toBe("suspended")
+        expect(advances).toBe(beforeRewind)
+        expect(
+          yield* state.deferred({ flowName: approval._tag, executionId: "approval-run", deferredName: Settled.name })
+        )
+          .toMatchObject({ _tag: "None" })
+      }).pipe(Effect.provide(engineLayer({ notifications: [], jjCalls: [] }, [])))
+    ))
+
+  it.effect("re-arms a durable sleep after rewinding before it was scheduled", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const timer = Flow.make("time-travel/Timer", { payload: {}, success: Schema.String, body: () => Post.call({}) })
+        const engine = yield* FlowRuntime.FlowRuntime
+        yield* engine.register(timer, () =>
+          Effect.gen(function*() {
+            yield* Action.make({
+              name: "time-travel/TimerStage",
+              tier: "compensable",
+              success: Schema.Void,
+              idempotencyKey: "timer-stage",
+              execute: Effect.void
+            })
+            yield* DurableClock.sleep({ name: "rewind-sleep", duration: 1000, inMemoryThreshold: 0 })
+            return yield* DurableDeferred.await(Settled)
+          }))
+        const execute = engine.execute(timer, { executionId: "clock-run", payload: {}, discard: true })
+        yield* execute
+        const journal = yield* Journal.Journal
+        const before = yield* journal.entries({ runId: "clock-run" as JournalEvent.RunId, limit: 100 })
+        const scheduled = before.entries.find((entry) => entry.eventType === "flows.engine.clock-scheduled")!
+        const frame = { lineageId: FlowEngine.Lineage.root("clock-run"), seq: scheduled.seq - 1 }
+        yield* TestClock.adjust(1000)
+        const state = yield* DurableEngineState.DurableEngineState
+        const address = { flowName: timer._tag, executionId: "clock-run", clockName: "rewind-sleep" }
+        expect(yield* state.clock(address)).toMatchObject({ _tag: "Some", value: { completedAtMs: 1000 } })
+        const timeTravel = yield* TimeTravel
+        yield* timeTravel.rewind({ runId: "clock-run", frame })
+        yield* execute
+        expect(yield* state.clock(address)).toMatchObject({
+          _tag: "Some",
+          value: { dueAtMs: 2000, completedAtMs: null }
+        })
+        expect(yield* state.deferred({ ...address, deferredName: "DurableClock/rewind-sleep" })).toMatchObject({
+          _tag: "None"
+        })
+        expect((yield* (yield* RunStore.RunStore).get("clock-run")).status).toBe("suspended")
+      }).pipe(Effect.provide(engineLayer({ notifications: [], jjCalls: [] }, [])))
+    ))
 })
