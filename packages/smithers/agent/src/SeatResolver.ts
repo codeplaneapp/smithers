@@ -84,7 +84,8 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<SeatRes
   Layer.succeed(SeatResolver)(makeNoop(overrides))
 
 const contextWindows: ReadonlyArray<readonly [RegExp, number]> = [
-  [/claude/i, 200_000],
+  [/claude.*haiku/i, 200_000],
+  [/claude/i, 1_000_000],
   [/gpt-5/i, 400_000],
   [/gpt-4\.1/i, 1_000_000],
   [/gpt-4o/i, 128_000],

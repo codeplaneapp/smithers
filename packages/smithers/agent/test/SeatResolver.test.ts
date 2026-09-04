@@ -41,7 +41,10 @@ describe("Seat.modelIdOf", () => {
 
 describe("SeatResolver.contextWindowTokensFor", () => {
   it("resolves a context window for every catalogued model and a floor for the rest", () => {
-    expect(SeatResolver.contextWindowTokensFor("claude-sonnet-4-5")).toBe(200_000)
+    expect(SeatResolver.contextWindowTokensFor("claude-fable-5-1")).toBe(1_000_000)
+    expect(SeatResolver.contextWindowTokensFor("claude-opus-5")).toBe(1_000_000)
+    expect(SeatResolver.contextWindowTokensFor("claude-sonnet-5")).toBe(1_000_000)
+    expect(SeatResolver.contextWindowTokensFor("claude-haiku-4-5")).toBe(200_000)
     expect(SeatResolver.contextWindowTokensFor("gpt-5")).toBe(400_000)
     expect(SeatResolver.contextWindowTokensFor("gpt-4.1-mini")).toBe(1_000_000)
     expect(SeatResolver.contextWindowTokensFor("gpt-4o")).toBe(128_000)
@@ -58,10 +61,11 @@ describe("SeatResolver.contextWindowTokensFor", () => {
   })
 
   it("matches the catalogue case-insensitively and first-pattern-wins", () => {
-    expect(SeatResolver.contextWindowTokensFor("CLAUDE-OPUS-4-1")).toBe(200_000)
+    expect(SeatResolver.contextWindowTokensFor("CLAUDE-OPUS-5")).toBe(1_000_000)
+    expect(SeatResolver.contextWindowTokensFor("CLAUDE-HAIKU-4-5")).toBe(200_000)
     expect(SeatResolver.contextWindowTokensFor("GPT-5-Codex")).toBe(400_000)
     // Two patterns match; the catalogue order decides, and `claude` is first.
-    expect(SeatResolver.contextWindowTokensFor("claude-gpt-5")).toBe(200_000)
+    expect(SeatResolver.contextWindowTokensFor("claude-gpt-5")).toBe(1_000_000)
   })
 
   it("anchors the o-series pattern, so a seat string is not a model id", () => {

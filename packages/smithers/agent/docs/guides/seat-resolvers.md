@@ -47,7 +47,8 @@ a conservative floor of 128,000 for models it has not met:
 
 | Model id         | Tokens    |
 | ---------------- | --------- |
-| `claude`         | 200,000   |
+| `claude-*-haiku` | 200,000   |
+| other `claude`   | 1,000,000 |
 | `gpt-5`          | 400,000   |
 | `gpt-4.1`        | 1,000,000 |
 | `gpt-4o`         | 128,000   |
