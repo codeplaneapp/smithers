@@ -151,7 +151,7 @@ shell, the pane host, and cancel all work end to end. Setting it to `0` selects
 the real `Agent.run` path, which is written out in full in `liveTurn` and does
 not run under workerd yet.
 
-Three upstream items in the Smithers packages block it:
+Two upstream items in the Smithers packages block it:
 
 1. **The sandbox cannot load.** `packages/smithers/agent/harness/src/QuickJSSandbox.ts:22`
    imports `@jitl/quickjs-singlefile-browser-release-sync` and compiles it at
@@ -162,14 +162,7 @@ Three upstream items in the Smithers packages block it:
    (`layerDefaults`) merges the sandbox layer unconditionally and
    `@smthrs/create-app/runtime`'s `layerFor` composes `layerDefaults`, so every
    real turn dies here before it reaches the model. This is the hard blocker.
-2. **Tool sources do not reach the host layer.**
-   `@smthrs/create-app/runtime` builds `AgentAction.layerHost` without
-   `flows`. `AgentAction.Host` already declares the field
-   (`packages/smithers/agent/src/AgentAction.ts:88`) and `AgentAction` already forwards
-   it to `agent.run`, so the vendored stub's own TODO is stale — it is a
-   one-line fix there. `liveTurn` attaches `tools.sources` on `Agent.run`
-   directly in the meantime.
-3. **No Durable Object engine store.** `packages/smithers/flows/database` has no
+2. **No Durable Object engine store.** `packages/smithers/flows/database` has no
    `ctx.storage.sql` driver, so a turn runs on `FlowEngine.layerMemory` and its
    journal does not survive the request. `AppSession` persists the app's own
    state (messages, cards, flows) instead, which is why a reload redraws the

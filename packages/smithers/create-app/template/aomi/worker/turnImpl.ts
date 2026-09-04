@@ -10,7 +10,7 @@
  * plausible sequence so the shell works end to end. `"0"` asks for the real
  * `Agent.run` path, which is written out in full at {@link liveTurn} and does
  * not run under workerd yet, so it is refused with
- * {@link liveRuntimeUnsupported} rather than started: three upstream blockers
+ * {@link liveRuntimeUnsupported} rather than started: two upstream blockers
  * stop it, and a caller that flips the flag deserves to be told which rather
  * than handed whichever of them fails first.
  */
@@ -148,16 +148,20 @@ const failureMessage = (cause: unknown): string =>
  * The refusal `APP_MOCK_TURN=0` gets today, exported so the flow-run path and
  * the tests state the same thing once.
  *
- * The three blockers are named in full because each one is a fix in a
- * different package, and a deployer who set the flag has no other way to learn
- * why nothing ran. {@link liveTurn} carries the file and line for each.
+ * Both blockers are named in full because each one is a fix in a different
+ * package, and a deployer who set the flag has no other way to learn why
+ * nothing ran. {@link liveTurn} carries the file and line for each.
+ *
+ * A third blocker used to be listed here: `@smthrs/create-app/runtime` built
+ * `AgentAction.layerHost` without `flows`, so an app's tool sources never
+ * reached a cell. `layerFor` passes `flows: tools.sources` now, so the claim
+ * was false and is gone.
  */
 export const liveRuntimeUnsupported =
-  "unsupported_runtime: the live agent path does not run under workerd yet. Three upstream blockers: "
+  "unsupported_runtime: the live agent path does not run under workerd yet. Two upstream blockers: "
   + "(1) @smthrs/harness compiles its QuickJS variant with WebAssembly.compile, which workerd refuses; "
-  + "(2) @smthrs/create-app/runtime builds AgentAction.layerHost without `flows`, so the app's tool sources "
-  + "never reach a cell; (3) @smthrs/database has no Durable Object SQLite driver, so a turn's journal does "
-  + "not survive the request. Leave APP_MOCK_TURN at \"1\" until all three land."
+  + "(2) @smthrs/database has no Durable Object SQLite driver, so a turn's journal does "
+  + "not survive the request. Leave APP_MOCK_TURN at \"1\" until both land."
 
 /**
  * Runs one turn and returns its NDJSON body.
@@ -367,7 +371,7 @@ const sessionSources = (
 /**
  * One turn on the real agent, streaming every event as a frame.
  *
- * TODO(upstream): this path cannot run inside workerd yet. Three items, all in
+ * TODO(upstream): this path cannot run inside workerd yet. Two items, both in
  * the Smithers packages:
  *
  *  1. `packages/smithers/agent/harness/src/QuickJSSandbox.ts:22` imports
@@ -378,21 +382,14 @@ const sessionSources = (
  *     `packages/smithers/agent/src/Agent.ts:474` (`layerDefaults`) merges that layer
  *     unconditionally, and `layerFor` composes `layerDefaults`, so every real
  *     turn dies there before it reaches the model.
- *  2. `@smthrs/create-app/runtime` builds `AgentAction.layerHost`
- *     without `flows`, so the app's tool sources never reach the cell through
- *     the layer. `AgentAction.Host` already declares the field
- *     (`packages/smithers/agent/src/AgentAction.ts:88`) and `AgentAction` already
- *     forwards it to `agent.run`, so the fix is one line in the vendored stub;
- *     until it lands, this function attaches the sources on `Agent.run`
- *     itself, which is the seam the stub's own TODO points at.
- *  3. `packages/smithers/flows/database` has no Durable Object SQLite driver, so the turn
+ *  2. `packages/smithers/flows/database` has no Durable Object SQLite driver, so the turn
  *     runs on `FlowEngine.layerMemory` (composed by `layerFor`) and its
  *     journal does not survive the request. `AppSession` persists the app's
  *     own state instead.
  */
 // Exported, and unreachable from `runTurn`, on purpose: it is the written-out
 // shape the fix will take, kept compiling against the current package APIs so
-// the three blockers above are the only thing left to land.
+// the two blockers above are the only thing left to land.
 export const liveTurn = async (options: TurnOptions, emit: (frame: TurnFrame) => void): Promise<void> => {
   const { env, request, session, signal } = options
   const route = routeFor(request.flowId)
