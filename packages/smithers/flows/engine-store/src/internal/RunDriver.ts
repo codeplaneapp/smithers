@@ -1343,7 +1343,7 @@ export const make = (
             // `!sameParent` implies the requested parent is present: an
             // omitted parent is deliberately compatible with any persisted
             // parent when joining an already-created root.
-            actual: options.parentRunId!
+            actual: options.parentRunId
           }
           : undefined
         if (conflict !== undefined) {
