@@ -91,6 +91,19 @@ const machinePaths = Smithers.NodeTest({
   deps: []
 })
 
+/**
+ * Every smithers.sh URL shipped by a package reaches the built documentation,
+ * directly or through one production redirect whose destination is real.
+ *
+ * @since 1.0.0
+ * @category test
+ */
+const smithersLinks = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/smithers-links.test.mjs")]),
+  srcs: [sources],
+  deps: []
+})
+
 export const Package = Smithers.Package({
-  targets: { barrels, faultSkips, machinePaths, packageContract, testScriptWiring }
+  targets: { barrels, faultSkips, machinePaths, packageContract, smithersLinks, testScriptWiring }
 })

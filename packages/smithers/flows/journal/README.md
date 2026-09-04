@@ -170,6 +170,6 @@ reads a table `@smthrs/run-store` owns. `test/JournalFence.test.ts` pins that
 contract here against a fixture of the columns the fence reads;
 `@smthrs/engine-store` pins it against the real migrated schema.
 
-See the [journal reference](https://smithers.sh/docs/reference/api/journal),
-[journal concepts](https://smithers.sh/docs/concepts/durable-execution), and
-[checkpoints and compaction](https://smithers.sh/compaction).
+See the [journal reference](https://smithers.sh/docs/reference/api/journal) and
+[journal concepts](https://smithers.sh/docs/concepts/durable-execution). The
+journal reference documents checkpoints and compaction.
