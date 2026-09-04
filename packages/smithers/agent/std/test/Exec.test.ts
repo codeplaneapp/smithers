@@ -13,6 +13,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import * as Bash from "../src/Bash.ts"
 import * as Exec from "../src/internal/Exec.ts"
 
 const host = Layer.provide(
@@ -24,40 +25,43 @@ const host = Layer.provide(
 const print = (text: string): string => `node -e ${JSON.stringify(`process.stdout.write(${JSON.stringify(text)})`)}`
 
 describe.skipIf(process.platform === "win32")("Exec capture", () => {
-  it.live("inherits only bootstrap variables and explicitly declared names", () =>
-    Effect.gen(function*() {
-      const inherited = {
-        ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"],
-        GH_TOKEN: process.env["GH_TOKEN"],
-        OPENAI_API_KEY: process.env["OPENAI_API_KEY"]
-      }
-      process.env["ANTHROPIC_API_KEY"] = "ambient-anthropic"
-      process.env["GH_TOKEN"] = "ambient-github"
-      process.env["OPENAI_API_KEY"] = "ambient-openai"
-      const result = yield* Exec.exec(process.execPath, {
-        args: [
-          "-e",
-          "process.stdout.write(JSON.stringify({" +
-          "anthropic: process.env.ANTHROPIC_API_KEY," +
-          "github: process.env.GH_TOKEN," +
-          "openai: process.env.OPENAI_API_KEY," +
-          "path: process.env.PATH," +
-          "declared: process.env.SMITHERS_EXPLICIT" +
-          "}))"
-        ],
-        env: { SMITHERS_EXPLICIT: "visible" }
-      }).pipe(Effect.ensuring(Effect.sync(() => {
-        for (const [name, value] of Object.entries(inherited)) {
-          if (value === undefined) delete process.env[name]
-          else process.env[name] = value
-        }
-      })))
-
-      expect(JSON.parse(result.stdout)).toEqual({
-        path: process.env.PATH,
-        declared: "visible"
-      })
-    }).pipe(Effect.provide(host)), 30_000)
+  for (const tool of ["Exec", "Bash"] as const) {
+    for (const declared of [false, true]) {
+      it.live(`${tool} filters the parent environment with declared env=${declared}`, () =>
+        Effect.gen(function*() {
+          const inherited = {
+            ANTHROPIC_API_KEY: process.env["ANTHROPIC_API_KEY"],
+            GH_TOKEN: process.env["GH_TOKEN"],
+            OPENAI_API_KEY: process.env["OPENAI_API_KEY"]
+          }
+          process.env["ANTHROPIC_API_KEY"] = "ambient-anthropic"
+          process.env["GH_TOKEN"] = "ambient-github"
+          process.env["OPENAI_API_KEY"] = "ambient-openai"
+          const options = declared ? { env: { SMITHERS_EXPLICIT: "visible" } } : {}
+          const result = yield* Effect.gen(function*() {
+            return tool === "Exec"
+              ? yield* Exec.exec("printenv", options)
+              : yield* Bash.run({ mode: "unhermetic", command: "printenv", ...options })
+          }).pipe(
+            Effect.ensuring(Effect.sync(() => {
+              for (const [name, value] of Object.entries(inherited)) {
+                if (value === undefined) delete process.env[name]
+                else process.env[name] = value
+              }
+            }))
+          )
+          const environment = Object.fromEntries(
+            result.stdout.trim().split("\n").map((line) => {
+              const separator = line.indexOf("=")
+              return [line.slice(0, separator), line.slice(separator + 1)]
+            })
+          )
+          expect(environment.PATH).toBe(process.env.PATH)
+          expect(environment.SMITHERS_EXPLICIT).toBe(declared ? "visible" : undefined)
+          for (const name of Object.keys(inherited)) expect(environment).not.toHaveProperty(name)
+        }).pipe(Effect.provide(Layer.merge(host, Path.layer))), 30_000)
+    }
+  }
 
   it.live("keeps every byte and drops none when no bound is given", () =>
     Effect.gen(function*() {

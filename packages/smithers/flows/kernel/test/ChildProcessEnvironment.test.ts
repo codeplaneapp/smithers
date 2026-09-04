@@ -7,6 +7,7 @@ describe("ChildProcessEnvironment", () => {
       PATH: "/bin",
       HOME: "/home/runner",
       LC_MESSAGES: "C",
+      LC_API_KEY: "ambient-sensitive-locale",
       ANTHROPIC_API_KEY: "ambient-anthropic",
       OPENAI_API_KEY: "ambient-openai",
       GH_TOKEN: "ambient-github",
