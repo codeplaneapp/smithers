@@ -217,6 +217,8 @@ jobs:
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Site
         run: pnpm exec smithers-build ci '//apps/site/...'
+      - name: Package docs sites
+        run: pnpm exec smithers-build ci '//apps/docs/...'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
