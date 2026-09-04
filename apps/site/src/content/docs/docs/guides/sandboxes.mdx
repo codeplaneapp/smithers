@@ -80,6 +80,8 @@ The body knows none of the placement: it asks for Effect's ordinary services, wr
 
 ## 3. Run a whole child flow inside the machine
 
+`SandboxedFlow` defaults to `runtime: "node"`. Set it to `"bun"` or an executable path to use another runtime. The runtime and bundle path are each quoted as one shell word; use a wrapper script when the runtime needs flags.
+
 `@smthrs/flows/SandboxedFlow` runs the child flow's own code inside the machine as one durable action of the parent. Declare the action over the child's payload schema, then implement it with a session key derived from the parent execution. This is the heart of example 41; `Greet` and `Greeting` come from the child module (`./sandboxed-child.ts` in the example):
 
 ```ts

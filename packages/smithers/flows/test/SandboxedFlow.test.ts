@@ -24,7 +24,7 @@ import * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Action, Engine, Flow, Interpreter } from "../src/index.ts"
@@ -41,6 +41,13 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 const entry = new URL("./fixtures/sandboxed-child.ts", import.meta.url)
 const pure = new URL("./fixtures/sandboxed-pure.ts", import.meta.url)
+const runtimeDirectory = mkdtempSync(join(tmpdir(), "flows-guest-runtimes-"))
+afterAll(() => rmSync(runtimeDirectory, { recursive: true, force: true }))
+const guestRuntime = (name: string, body: string): string => {
+  const path = join(runtimeDirectory, name)
+  writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+  return path
+}
 
 const platform = Layer.provideMerge(
   NodeChildProcessSpawner.layer,
@@ -114,6 +121,25 @@ const failureOf = <A>(
 const bunInstalled = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0
 
 describe("SandboxedFlow.execute on a scratch machine", () => {
+  it.live("treats a runtime path containing shell syntax as one executable", () =>
+    Effect.gen(function*() {
+      const directory = yield* provider
+      const runtimeDirectory = mkdtempSync(join(tmpdir(), "flows-runtime-"))
+      const runtime = join(runtimeDirectory, "node guest'; echo injected; #")
+      try {
+        symlinkSync(process.execPath, runtime)
+        const result = yield* SandboxedFlow.execute(Sum, { n: 31 }, {
+          provider: directory,
+          session: "quoted-runtime",
+          entry,
+          runtime
+        })
+        expect(result.output).toBe(42)
+      } finally {
+        rmSync(runtimeDirectory, { recursive: true, force: true })
+      }
+    }), 60_000)
+
   it.live("runs the child flow's own code in the guest and validates its result", () =>
     Effect.gen(function*() {
       const directory = yield* provider
@@ -279,7 +305,7 @@ describe("SandboxedFlow.execute failures", () => {
 
   it.live("reports a guest that exits 0 without writing a result, quoting its stderr", () =>
     Effect.gen(function*() {
-      const failure = yield* run(Sum, { n: 1 }, { runtime: "sh -c 'echo nothing to report >&2' sh" })
+      const failure = yield* run(Sum, { n: 1 }, { runtime: guestRuntime("no-result", "echo nothing to report >&2") })
       expect(failure.code).toBe("result_unreadable")
       expect(failure.message).toContain("without writing a result")
       expect(failure.message).toContain("stderr: nothing to report")
@@ -288,7 +314,7 @@ describe("SandboxedFlow.execute failures", () => {
   it.live("reports a result that is not the protocol's JSON, quoting the guest's stdout", () =>
     Effect.gen(function*() {
       const failure = yield* run(Sum, { n: 1 }, {
-        runtime: `sh -c 'echo wrote garbage; printf garbage > "$SMITHERS_SANDBOX_RESULT_PATH"' sh`
+        runtime: guestRuntime("bad-result", `echo wrote garbage; printf garbage > "$SMITHERS_SANDBOX_RESULT_PATH"`)
       })
       expect(failure.code).toBe("result_unreadable")
       expect(failure.message).toContain("not the protocol's JSON")

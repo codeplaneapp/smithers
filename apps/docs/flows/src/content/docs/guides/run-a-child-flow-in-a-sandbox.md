@@ -80,7 +80,7 @@ The remaining options are all optional:
 
 | Option        | Default                       | What it does                                                                                                                                                       |
 | ------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `runtime`     | `"node"`                      | The guest command the bundle is started with. `"bun"` and any command line the guest shell resolves also work; the bundle path is appended, quoted.                |
+| `runtime`     | `"node"`                      | The guest executable: `"node"`, `"bun"`, or an executable path. Each path is quoted as one shell word. Use a wrapper script for flags.                             |
 | `collectDiff` | `false`                       | Read back the files the guest created or resized. See [Collect the files a sandboxed child wrote](/guides/collect-a-workspace-diff/).                                  |
 | `limits`      | `SandboxedFlow.defaultLimits` | Bounds on the result and the diff.                                                                                                                                 |
 | `timeout`     | 10 minutes                    | The wall-clock budget for the whole session, acquisition through result readback. It is measured on the platform timer, so it fires under a frozen test clock too. |

@@ -177,9 +177,9 @@ export interface ExecuteOptions {
    */
   readonly entry: URL | string
   /**
-   * The guest command that runs the bundle: `"node"` (default), `"bun"`, or
-   * any command line the guest shell resolves. The bundle path is appended,
-   * quoted.
+   * The guest executable that runs the bundle: `"node"` (default), `"bun"`,
+   * or an executable path. The executable and bundle path are each quoted
+   * as one shell word; use a wrapper script for runtime flags.
    */
   readonly runtime?: string | undefined
   /** Whether to collect the files the guest created or resized. Default `false`. */
@@ -528,7 +528,7 @@ export const execute = <
             Effect.mapError(sessionFailure("the request could not be written into the workspace"))
           )
           const before = options.collectDiff === true ? yield* snapshot(files, workdir) : new Map<string, number>()
-          const command = `${runtime} ${CommandLine.quote(bundlePath)}`
+          const command = `${CommandLine.quote(runtime)} ${CommandLine.quote(bundlePath)}`
           const run = yield* Effect.scoped(
             Effect.gen(function*() {
               const process = yield* session.spawn(command, {
