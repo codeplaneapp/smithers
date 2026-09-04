@@ -106,6 +106,9 @@ cannot change the command's exit status.
 smthrs bug "up hangs after the second turn" --run <run-id>
 ```
 
+The summary may be quoted or supplied as separate words. Omitting it prompts on a TTY;
+on a pipe, the CLI exits 2 before opening project state.
+
 `bug` collects the context a maintainer always asks for: versions, platform,
 only the named run and its event digest. Without `--run`, no runs are included. Everything it
 collects passes through the journal's shared redaction rules before it leaves

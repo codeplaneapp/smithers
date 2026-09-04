@@ -1645,7 +1645,8 @@ const update = Command.make("update", {}, () =>
   })).pipe(Command.withDescription(Verb.find("update")!.help))
 
 const bug = Command.make("bug", {
-  summary: Argument.string("summary").pipe(Argument.variadic()),
+  summary: requiredArgument("summary"),
+  rest: Argument.string("summary").pipe(Argument.variadic()),
   runId: Flag.string("run").pipe(Flag.optional, Flag.withDescription("Include only this run and its event digest")),
   yes: Flag.boolean("yes").pipe(Flag.withDescription("Post the previewed payload without an interactive confirmation")),
   dryRun: Flag.boolean("dry-run").pipe(

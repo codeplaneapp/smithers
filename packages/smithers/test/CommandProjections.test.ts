@@ -260,24 +260,27 @@ describe("smthrs bug", () => {
     }
   }
 
-  it("posts the report to the configured endpoint and says where it went", async () => {
-    const target = await endpoint(202)
+  it.each([["the", "gc", "verb", "hangs"], ["the gc verb hangs"]])(
+    "posts the report with summary words %j and says where it went",
+    async (...summary) => {
+      const target = await endpoint(202)
 
-    const reported = await withEndpoint(
-      target.url,
-      () => run(json(["--json", "bug", "--yes", "the", "gc", "verb", "hangs"]), testControl)
-    )
+      const reported = await withEndpoint(
+        target.url,
+        () => run(json(["--json", "bug", "--yes", ...summary]), testControl)
+      )
 
-    expect(reported).toEqual({ reported: true, endpoint: target.url })
-    // The variadic summary is one sentence, and the environment the report
-    // carries is this process's own rather than anything the caller supplied.
-    expect(target.received).toHaveLength(1)
-    expect(target.received[0]).toMatchObject({
-      summary: "the gc verb hangs",
-      version: packageVersion,
-      node: process.versions.node
-    })
-  })
+      expect(reported).toEqual({ reported: true, endpoint: target.url })
+      // The variadic summary is one sentence, and the environment the report
+      // carries is this process's own rather than anything the caller supplied.
+      expect(target.received).toHaveLength(1)
+      expect(target.received[0]).toMatchObject({
+        summary: "the gc verb hangs",
+        version: packageVersion,
+        node: process.versions.node
+      })
+    }
+  )
 
   it("fails with the status when the endpoint refuses the report", async () => {
     const target = await endpoint(503)
