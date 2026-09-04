@@ -13,6 +13,7 @@ const smoke = S.Shell.Test({
   args: ["test"],
   data: [e2e, playwrightConfig],
   services: [src.dev],
+  sandbox: { network: true },
 })
 
 export const Package = S.Package({

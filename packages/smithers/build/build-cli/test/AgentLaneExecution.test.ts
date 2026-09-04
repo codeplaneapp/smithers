@@ -439,7 +439,9 @@ const svc = S.Shell.Serve({
   command: ${JSON.stringify(`${node} -e '${server}' ${port}`)},
   readiness: { port: ${port} },
 })
-const smoke = S.Shell.Test({ command: ${JSON.stringify(`${node} -e '${probe}' ${port}`)}, services: [svc] })
+const smoke = S.Shell.Test({ command: ${
+      JSON.stringify(`${node} -e '${probe}' ${port}`)
+    }, services: [svc], sandbox: { network: true } })
 const served = S.Agent.Diff({
   prompt: S.file("//prompt.md"),
   data: [srcs],

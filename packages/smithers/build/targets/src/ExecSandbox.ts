@@ -13,9 +13,9 @@
  * - Linux: bubblewrap. The host root is bind-mounted read-only, a tmpfs covers
  *   the workspace, declared reads are bound read-only at their own paths,
  *   declared writes read-write, the tmpfs is remounted read-only, and the
- *   network namespace is unshared unless the policy opens it. A loopback
- *   opening shares the host network, because a namespace cannot admit the
- *   host's loopback alone.
+ *   network namespace is unshared unless the policy opens it. A loopback-only
+ *   request is refused because bubblewrap cannot admit the host loopback
+ *   interface without granting the whole host network.
  * - macOS: seatbelt (`sandbox-exec`). Reads under the workspace are denied
  *   except the declared set (ancestor directories stay listable), writes are
  *   denied except the declared set and a private tmp, and the network is
@@ -45,13 +45,21 @@ import type * as WorkspaceDeclaration from "./WorkspaceDeclaration.ts"
 /**
  * The declared sandbox policy.
  *
+ * The literal `"none"` is the confinement opt-out, not a network posture: it
+ * asks for no sandbox at all, so the process keeps every access the host
+ * gives it, the network included. {@link Network} spells its closed posture
+ * with the same word and means the opposite, so read the token against the
+ * type carrying it rather than on sight.
+ *
  * @category models
  * @since 0.1.0
  */
 export type Policy = Attr.Sandbox
 
 /**
- * The network posture a policy resolves to.
+ * The network posture a policy resolves to. Here `"none"` is a closed
+ * network, the opposite of the `"none"` a {@link Policy} spells to drop
+ * confinement entirely.
  *
  * @category models
  * @since 0.1.0
@@ -80,8 +88,6 @@ export interface Request {
    * sits inside the workspace, is dropped.
    */
   readonly externalReads?: ReadonlyArray<string> | undefined
-  /** The consumer reaches services on the loopback interface. */
-  readonly services?: boolean | undefined
 }
 
 /**
@@ -210,20 +216,24 @@ export interface Plan {
 }
 
 /**
- * Resolves the network posture of a policy. Services a consumer declared open
- * the loopback interface on their own, because the consumer exists to reach
- * them; egress stays closed.
+ * Resolves the network posture of an explicit policy. Service dependencies do
+ * not widen it; their consumers must declare the network access they need.
+ *
+ * The policy `"none"` resolves to the `"open"` posture, which reads as a
+ * contradiction only until the two vocabularies are separated: a target that
+ * declared no sandbox is not confined, and an unconfined process has the
+ * host's network.
  *
  * @category resolution
  * @since 0.1.0
  */
-export const network = (policy: Policy | undefined, services = false): Network => {
+export const network = (policy: Policy | undefined): Network => {
   if (policy === "none") return "open"
   if (typeof policy === "object" && policy !== null) {
     if (policy.network === true) return "open"
     if (policy.network === "loopback") return "loopback"
   }
-  return services ? "loopback" : "none"
+  return "none"
 }
 
 const pathSeparator = (platform: NodeJS.Platform): string => platform === "win32" ? ";" : ":"
@@ -331,6 +341,15 @@ export const select = (request: Request, hostFacts: Host): Mechanism | Unenforce
     const executable = hostFacts.executable("bwrap")
     if (executable === undefined) {
       return unenforceable(platform, "bubblewrap", "bwrap", "bwrap is not on PATH (install the bubblewrap package)")
+    }
+    if (network(request.policy) === "loopback") {
+      return unenforceable(
+        platform,
+        "bubblewrap",
+        "network: true",
+        "bubblewrap cannot expose only the host loopback interface: sharing that interface also grants full host networking; " +
+          "declare sandbox: { network: true } to opt into that access"
+      )
     }
     return { _tag: "bubblewrap", executable }
   }
@@ -523,7 +542,7 @@ export const plan = (
     : { reads: declared, denies: [] }
   return {
     mechanism: selected,
-    network: network(request.policy, request.services ?? false),
+    network: network(request.policy),
     workspaceRoot: root,
     cwd: location.cwd,
     reads: collapse(folded.reads),
@@ -641,13 +660,13 @@ export const bubblewrap = (
   // re-closing.
   if (!confinement.writes.includes(confinement.workspaceRoot)) out.push("--remount-ro", confinement.workspaceRoot)
   out.push("--chdir", confinement.cwd, "--unshare-all", "--new-session", "--die-with-parent")
-  // A fresh network namespace carries a private loopback interface that
-  // reaches nothing on the host, which is what `none` means. `loopback` has
-  // to reach the services the executor started on the host's loopback, and a
-  // namespace cannot admit one interface of the host's network and not the
-  // rest, so on Linux the loopback opening shares the host network. Egress is
-  // not denied in that mode; the plan report and the docs say so.
-  if (confinement.network !== "none") out.push("--share-net")
+  // Bubblewrap cannot expose only the host loopback interface. Planning
+  // refuses that posture on Linux, so only an explicit full-network opening
+  // reaches `--share-net` here.
+  if (confinement.network === "loopback") {
+    throw new Error("bubblewrap cannot render loopback-only networking")
+  }
+  if (confinement.network === "open") out.push("--share-net")
   out.push("--", ...argv)
   return out
 }

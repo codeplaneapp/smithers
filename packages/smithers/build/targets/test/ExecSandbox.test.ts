@@ -57,15 +57,13 @@ const planned = (hostFacts: ExecSandbox.Host, override: Partial<ExecSandbox.Requ
 }
 
 describe("network", () => {
-  it("resolves the policy to a posture and lets services open loopback only", () => {
+  it("resolves only the explicit policy to a posture", () => {
     expect(ExecSandbox.network(undefined)).toBe("none")
     expect(ExecSandbox.network({})).toBe("none")
     expect(ExecSandbox.network({ network: false })).toBe("none")
     expect(ExecSandbox.network({ network: "loopback" })).toBe("loopback")
     expect(ExecSandbox.network({ network: true })).toBe("open")
     expect(ExecSandbox.network("none")).toBe("open")
-    expect(ExecSandbox.network(undefined, true)).toBe("loopback")
-    expect(ExecSandbox.network({ network: true }, true)).toBe("open")
   })
 })
 
@@ -89,6 +87,17 @@ describe("selection", () => {
     expect(selected.message).toContain("bubblewrap")
     expect(selected.message).toContain("never runs unconfined")
     expect(ExecSandbox.enforceable(request, host("linux"))).toBe(false)
+  })
+
+  it("refuses loopback-only networking on Linux instead of sharing the host network", () => {
+    const selected = ExecSandbox.select({ ...request, policy: { network: "loopback" } }, linux)
+    expect(ExecSandbox.isUnenforceable(selected)).toBe(true)
+    if (!ExecSandbox.isUnenforceable(selected)) return
+    expect(selected.platform).toBe("linux")
+    expect(selected.mechanism).toBe("bubblewrap")
+    expect(selected.missing).toBe("network: true")
+    expect(selected.message).toContain("cannot expose only the host loopback interface")
+    expect(selected.message).toContain("never runs unconfined")
   })
 
   it("refuses build confinement under a Microsandbox declaration on every host, naming the runtime seam", () => {
@@ -259,14 +268,13 @@ describe("bubblewrap argv", () => {
     expect(nested).toContain("--remount-ro /work/ws")
   })
 
-  it("unshares the network for the default policy and shares the host's for loopback and open", () => {
+  it("unshares the network by default and shares the host network only for an open policy", () => {
     const open = ExecSandbox.bubblewrap(planned(linux, { policy: { network: true } }), ["true"]).join(" ")
     expect(open).toContain("--share-net")
-    const loopback = ExecSandbox.bubblewrap(planned(linux, { policy: { network: "loopback" } }), ["true"])
-    expect(loopback.join(" ")).toContain("--share-net")
-    expect(loopback.slice(-2)).toEqual(["--", "true"])
-    const services = ExecSandbox.bubblewrap(planned(linux, { services: true }), ["true"]).join(" ")
-    expect(services).toContain("--share-net")
+    expect(ExecSandbox.bubblewrap(planned(linux), ["true"]).join(" ")).not.toContain("--share-net")
+    expect(() => ExecSandbox.bubblewrap({ ...planned(linux), network: "loopback" }, ["true"])).toThrow(
+      "bubblewrap cannot render loopback-only networking"
+    )
   })
 })
 

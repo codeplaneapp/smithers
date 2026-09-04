@@ -680,7 +680,8 @@ const consumer = S.Shell.Test({
             `curl -fsS -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' http://127.0.0.1:${forkPort} | grep -q '"result"'`
           )
         },
-  services: [fork]
+  services: [fork],
+  sandbox: { network: true }
 })
 export const Package = S.Package({ targets: { consumer, fork } })
 `,

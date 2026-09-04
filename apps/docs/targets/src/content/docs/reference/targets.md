@@ -461,3 +461,14 @@ export const Package = Smithers.Package({
 - `packages/smithers/build/targets/src/Target.ts`
 - `packages/smithers/build/targets/src/ToolBuild.ts`
 - `packages/smithers/build/targets/src/WorkspaceDeclaration.ts`
+
+## Build sandbox network policy
+
+Targets default to a closed network. `sandbox: "none"` disables the whole
+sandbox, including its network restriction; `sandbox: { network: false }`
+keeps confinement and denies networking. `{ network: true }` explicitly
+permits full network access. Service consumers must declare either that
+opening or `{ network: "loopback" }`; service dependencies do not open the
+network implicitly. Linux bubblewrap refuses loopback-only access with
+`sandbox_unenforceable`, because sharing host loopback also shares host egress.
+macOS seatbelt supports the loopback policy.

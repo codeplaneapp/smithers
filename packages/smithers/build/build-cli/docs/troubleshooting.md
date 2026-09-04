@@ -141,6 +141,14 @@ Install the mechanism, or declare one with
 `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`. The guard has no
 partial mode: a confinement claim it cannot keep is not made.
 
+**Linux refuses `{ network: "loopback" }`.**
+
+Bubblewrap cannot expose only the host loopback interface. Sharing it requires
+sharing the host network namespace, which also grants egress, so the executor
+fails closed instead. Declare `{ network: true }` only if full network access
+is acceptable. A target with `services` must make one of these network choices
+explicit; listing a service does not silently open the network.
+
 ## A target wrote outside its write set
 
 **The node fails and the change is reverted.**

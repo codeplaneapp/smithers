@@ -62,6 +62,10 @@ A target may declare `sandbox: { network: false }`,
 workspace may name the mechanism with
 `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`.
 
+`sandbox: "none"` disables confinement entirely and keeps host network access.
+The internal network posture `"none"` instead means no network; on a target,
+spell that policy `sandbox: { network: false }` (also the default).
+
 With no mechanism declared the platform picks one: bubblewrap on Linux
 (`bwrap` on `PATH`), seatbelt on macOS (`/usr/bin/sandbox-exec`), and a
 refusal elsewhere, because Windows has no user-level process sandbox and
@@ -71,6 +75,11 @@ A confined request with no mechanism available fails closed. The run refuses
 the target, and `--plan` reports the refusal beside the declaration. A result
 produced outside an enforced confinement is evidence for this machine only and
 never reaches the shared cache tier.
+
+Loopback-only networking is supported by seatbelt on macOS. Bubblewrap cannot
+expose the host loopback interface without also sharing the host's full network
+namespace, so Linux refuses `{ network: "loopback" }` with a typed sandbox
+limitation. Use `{ network: true }` only when full network access is intended.
 
 ### What a sandbox admits
 
@@ -110,6 +119,12 @@ one platform is never served to another.
 
 A target may depend on services the executor starts, refcounts across
 consumers, and stops through a declared contract.
+
+A target with `services` must explicitly declare `sandbox: { network:
+"loopback" }` or `sandbox: { network: true }`. Merely declaring a service never
+widens the consumer's network policy. Because Linux cannot enforce host
+loopback-only access, a cross-platform service consumer normally declares
+`network: true`; that is an explicit full-egress opt-in.
 
 Readiness is a port, an HTTP URL, or an exec probe. Health repeats the
 readiness probe on an interval, and a declared number of consecutive misses

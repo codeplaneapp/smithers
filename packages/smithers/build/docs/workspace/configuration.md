@@ -18,6 +18,11 @@ not wanted, for example `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`
 on a host without bubblewrap or seatbelt. See
 [Hermeticity](../concepts/actions-and-boundaries.md#hermeticity).
 
+Bubblewrap cannot expose host loopback without exposing the whole host network,
+so Linux refuses `{ network: "loopback" }`; use `{ network: true }` only as an
+explicit full-network opt-in. Targets that declare `services` must declare one
+of those network postures themselves.
+
 `Workspace` validates its options and performs no I/O, so `PACKAGE.ts` evaluation
 stays pure. The export name does not matter; when several exports are `Workspace`
 values, the workspace takes the first one in ascending export-name order.

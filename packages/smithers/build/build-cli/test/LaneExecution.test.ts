@@ -161,6 +161,27 @@ const serveDeclaration = (port: number, mark: string, extra: string, probes: str
 })`
 
 describe("services edge", () => {
+  it("refuses a service consumer that did not explicitly declare its network posture", async () => {
+    const root = await temporaryWorkspace()
+    const port = await freePort()
+    const mark = marker()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const svc = ${serveDeclaration(port, mark, "", `readiness: { port: ${port} }`)}
+const probe = S.Shell.Test({ command: "true", services: [svc] })
+export const Package = S.Package({ targets: { svc, probe } })
+`
+    )
+    commitAll(root)
+    const { exitCode, output } = await serve(root, ["//:probe", "--plan"])
+    expect(exitCode).toBe(0)
+    expect(output).toContain("services require an explicit sandbox network declaration")
+    expect(pgrep(mark)).toHaveLength(0)
+  })
+
   it("acquires the service before the consumer, gates on readiness, and releases it after success", async () => {
     const root = await temporaryWorkspace()
     const port = await freePort()
@@ -173,7 +194,7 @@ describe("services edge", () => {
 const svc = ${serveDeclaration(port, mark, "--delay-listen 500", `readiness: { port: ${port} }`)}
 const probe = S.Shell.Test({ command: ${
         JSON.stringify(probeCommand(`http://127.0.0.1:${port}/health`))
-      }, services: [svc] })
+      }, services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -199,7 +220,7 @@ export const Package = S.Package({ targets: { svc, probe } })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const svc = ${serveDeclaration(port, mark, "", `readiness: { port: ${port} }`)}
-const probe = S.Shell.Test({ command: "exit 3", services: [svc] })
+const probe = S.Shell.Test({ command: "exit 3", services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -229,7 +250,7 @@ const svc = ${
           `readiness: { http: "http://127.0.0.1:${port}/health", timeout: "1s" }`
         )
       }
-const probe = S.Shell.Test({ command: "true", services: [svc] })
+const probe = S.Shell.Test({ command: "true", services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -266,7 +287,7 @@ const svc = ${
   health: { interval: "150ms", failures: 2 }`
         )
       }
-const probe = S.Shell.Test({ command: ${JSON.stringify(consumer)}, services: [svc] })
+const probe = S.Shell.Test({ command: ${JSON.stringify(consumer)}, services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -331,7 +352,7 @@ export const Package = S.Package({ targets: { svc } })
       `import { Smithers as S } from "@smthrs/targets"
 const assets = S.Filegroup({ srcs: S.glob(["assets/**"]) })
 const svc = ${serveDeclaration(port, mark, "", `readiness: { port: ${port} }, data: [assets]`)}
-const probe = S.Shell.Test({ command: "true", services: [svc] })
+const probe = S.Shell.Test({ command: "true", services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { assets, svc, probe } })
 `
     )

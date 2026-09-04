@@ -464,10 +464,11 @@ export interface PlanReport {
     /**
      * Whether this host can enforce the declared sandbox.
      *
-     * Confinement is `sandbox-exec`, which exists only on macOS, so a target
-     * declaring `sandbox: { network: false }` runs with unrestricted egress
-     * everywhere else. The plan used to report the declaration and stay silent
-     * about the posture.
+     * Confinement is bubblewrap on Linux, seatbelt (`sandbox-exec`) on macOS,
+     * and Docker wherever the workspace declares it. A host missing its
+     * mechanism refuses the target with `sandbox_unenforceable` rather than
+     * running it unconfined, and the plan reports that answer here, because a
+     * declaration alone never said whether the posture was actually kept.
      */
     readonly sandboxEnforced?: boolean | undefined
     readonly refusal?: string | undefined
@@ -1572,6 +1573,16 @@ const visit = async (
   // execution dependencies (the data its process needs) are hoisted onto the
   // consumer instead, and a service's own services are acquired first.
   const services = attrTargets(attrs, "services")
+  const declaredSandbox = attrMember(attrs, "sandbox") as PackageNode["sandbox"]
+  if (
+    services.length > 0 &&
+    (typeof declaredSandbox !== "object" ||
+      (declaredSandbox.network !== "loopback" && declaredSandbox.network !== true))
+  ) {
+    noteRefusal(
+      "services require an explicit sandbox network declaration: use { network: \"loopback\" } where supported or { network: true }"
+    )
+  }
   const serviceDeps: Array<string> = []
   const hoistedDeps: Array<string> = []
   for (const service of services) {
@@ -1685,7 +1696,7 @@ const visit = async (
   for (const record of secretRecords) {
     if (Secret.isHttpCredential(record)) secrets.push(record)
   }
-  let sandbox = attrMember(attrs, "sandbox") as PackageNode["sandbox"]
+  let sandbox = declaredSandbox
 
   const overlayResolution = await OverlayExec.resolve({
     root: context.root,
@@ -3292,8 +3303,7 @@ const sandboxRequest = (
     reads: [...reads],
     writes: [...writes],
     readOnly: [`${cacheDirectory}/cache`],
-    externalReads: node.externalReads,
-    services: node.serviceDeps.length > 0
+    externalReads: node.externalReads
   }
 }
 

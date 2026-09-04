@@ -28,7 +28,11 @@ const dockerServiceAlias = S.Docker.Service({
   stop: { signal: "SIGTERM", grace: "3s" }
 })
 
-const dockerConsumer = S.Shell.Test({ command: "true", services: [dockerService, dockerServiceAlias] })
+const dockerConsumer = S.Shell.Test({
+  command: "true",
+  services: [dockerService, dockerServiceAlias],
+  sandbox: { network: true }
+})
 const dockerPush = S.Docker.Push({
   image: dockerBuild,
   registry: "registry.example.invalid",
