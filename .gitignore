@@ -83,6 +83,7 @@ worktrees/
 # Infrastructure-as-code and edge local state
 .alchemy/
 .wrangler/
+apps/observability/data/
 
 # flows engine state (artifact CAS under .flows/objects, fork lanes under
 # .flows/forks) — derived and engine-owned. jj must not snapshot it: a restore
