@@ -388,7 +388,61 @@ export const schedule = (
 const formatSchemaIssue = SchemaIssue.makeFormatterDefault()
 
 /**
+ * Whether the failure renderer walks this object, or leaves it to
+ * {@link Diagnostic.describe}.
+ *
+ * Exactly the values {@link cloneJson} accepts at the top level: a plain
+ * object or a plain array. Everything else — an `Error`, a class instance, a
+ * `Map` — renders better as its message than as the handful of own properties
+ * a walk would find, and that is the rendering `Diagnostic.describe` gives.
+ */
+const rendersAsJson = (value: object): boolean => {
+  if (NodeUtil.isProxy(value)) return false
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (Array.isArray(value)) return prototype === Array.prototype
+    return prototype === Object.prototype || prototype === null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Walks a failure value into JSON that one diagnostic message carries whole.
+ *
+ * The walk budgets bytes, and JSON escaping then inflates them: a stream tail
+ * of newlines doubles, and one of control characters sextuples. Rendering
+ * once and letting {@link Diagnostic.message} cut the overflow would drop the
+ * very markers that say what was cut, so an over-long render is walked again
+ * under a budget scaled by its own overshoot. The bound is a backstop, not the
+ * truncation.
+ */
+const renderFailureJson = (value: object): string | undefined => {
+  let limit = Diagnostic.maximumMessageCodeUnits
+  let encoded = JSON.stringify(cloneJson(value, new Set(), lossyBudget(limit), "failure", 0))
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (encoded === undefined || encoded.length <= Diagnostic.maximumMessageCodeUnits) return encoded
+    const next = Math.floor(limit * Diagnostic.maximumMessageCodeUnits / encoded.length) - 64
+    if (next < 1024 || next >= limit) return encoded
+    limit = next
+    encoded = JSON.stringify(cloneJson(value, new Set(), lossyBudget(limit), "failure", 0))
+  }
+  return encoded
+}
+
+/**
  * Renders a failure value compactly for a status line.
+ *
+ * The walk is lossy and total: a member JSON cannot carry is replaced by a
+ * marker naming what it was, and a value larger than one diagnostic may hold
+ * is truncated where it overruns. Refusing instead — which is what the cache
+ * encoder does, and what this shared with it — cost an operator the whole
+ * reason: a `//apps/ui:unitTests` failure carrying a 64 KiB stderr tail and a
+ * 64 KiB stdout tail overran the byte budget, the clone threw, and the CI log
+ * read `//apps/ui:unitTests  failed  86.1s  target failed` and nothing else.
+ *
+ * Members are rendered in sorted key order, so `argv`, `code`, `cwd` and
+ * `exitCode` all precede the stream tails and survive any later truncation.
  *
  * @category diagnostics
  * @since 0.1.0
@@ -405,25 +459,20 @@ export const describeFailure = (value: unknown): string => {
       // Fall through to the generic renderings.
     }
   }
-  if (typeof value === "object" && value !== null) {
+  if (typeof value === "object" && value !== null && rendersAsJson(value)) {
     try {
-      const cloned = cloneCacheJson(
-        value,
-        new Set(),
-        { bytes: entryLimit - Diagnostic.maximumMessageCodeUnits, members: 0 },
-        "failure",
-        0
-      )
-      const encoded = JSON.stringify(cloned)
-      if (encoded !== undefined && encoded !== "{}") return Diagnostic.message(encoded, "target failed")
+      const encoded = renderFailureJson(value)
+      if (encoded !== undefined && encoded !== "{}" && encoded !== "[]") {
+        return Diagnostic.message(encoded, "target failed")
+      }
     } catch {
-      // Fall through to the generic renderings.
+      // Total by construction; kept so a future member type that escapes the
+      // walk degrades to the generic rendering instead of losing the failure.
     }
   }
-  // Every Error reaches this line: the clone above refuses any prototype that
-  // is not a plain object. `Diagnostic.describe` is what makes the reason
-  // survive that refusal, including for the Effect errors whose message is a
-  // prototype accessor.
+  // Every Error reaches this line: `rendersAsJson` above admits only a plain
+  // prototype. `Diagnostic.describe` is what makes the reason survive that,
+  // including for the Effect errors whose message is a prototype accessor.
   return Diagnostic.describe(value, "target failed")
 }
 
@@ -456,22 +505,112 @@ const cacheValueTag = "smithers-build/cache-output/value-v1"
 const maximumCacheOutputDepth = 256
 const maximumCacheOutputMembers = 500_000
 
+/**
+ * What one walk of a value may spend, and whether overspending refuses.
+ *
+ * `limit` is the ceiling for `bytes`: the cache stores a whole entry, a
+ * diagnostic only what one message shows. `lossy` distinguishes the two
+ * callers — the cache encoder must refuse anything JSON would change, while
+ * the failure renderer exists to name a failure and so renders a marker and
+ * keeps going. `exhausted` records that a lossy walk has spent its budget, so
+ * the containing object stops and says how many members it dropped.
+ */
 interface OutputBudget {
   bytes: number
   members: number
+  readonly limit: number
+  readonly lossy: boolean
+  exhausted: boolean
 }
+
+const cacheBudget = (): OutputBudget => ({
+  bytes: 0,
+  members: 0,
+  limit: entryLimit,
+  lossy: false,
+  exhausted: false
+})
+
+/**
+ * The budget one rendered failure walks under.
+ *
+ * It starts at what {@link Diagnostic.message} keeps, because rendering more
+ * than that only builds a string the bound then throws away.
+ */
+const lossyBudget = (limit: number): OutputBudget => ({
+  bytes: 0,
+  members: 0,
+  limit,
+  lossy: true,
+  exhausted: false
+})
 
 const spendOutputBudget = (budget: OutputBudget, bytes: number, path: string): void => {
   budget.bytes += bytes
   budget.members += 1
-  if (budget.bytes > entryLimit) throw new Error(`${path} exceeds the ${entryLimit}-byte cache output limit`)
-  if (budget.members > maximumCacheOutputMembers) {
-    throw new Error(`${path} exceeds the ${maximumCacheOutputMembers}-member cache output limit`)
+  const overBytes = budget.bytes > budget.limit
+  const overMembers = budget.members > maximumCacheOutputMembers
+  if (!overBytes && !overMembers) return
+  if (budget.lossy) {
+    budget.exhausted = true
+    return
+  }
+  if (overBytes) throw new Error(`${path} exceeds the ${budget.limit}-byte cache output limit`)
+  throw new Error(`${path} exceeds the ${maximumCacheOutputMembers}-member cache output limit`)
+}
+
+/**
+ * Refuses one member, or renders it as a marker naming what it was.
+ *
+ * The cache path must refuse: storing `<undefined>` where a value stood would
+ * replay a lie. The failure path must not: the member it refused was often the
+ * whole reason the target failed.
+ */
+const refuseMember = (budget: OutputBudget, path: string, reason: string, rendered: string): string => {
+  if (!budget.lossy) throw new Error(`${path} ${reason}`)
+  spendOutputBudget(budget, rendered.length + 2, path)
+  return rendered
+}
+
+/** Names a function without reading a `name` any caller could have made an accessor. */
+const functionMarker = (member: object): string => {
+  if (NodeUtil.isProxy(member)) return "<function proxy>"
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(member, "name")
+    const name = descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string"
+      ? descriptor.value
+      : ""
+    return name === "" ? "<function>" : `<function ${name}>`
+  } catch {
+    return "<function>"
   }
 }
 
-/** Clones exactly the JSON value the cache will serialize, without invoking user code. */
-const cloneCacheJson = (
+/**
+ * Keeps the prefix of one string that still fits, and says how much it cut.
+ *
+ * The member that overruns a failure budget is almost always the largest one,
+ * which is the captured output of whatever failed. Replacing the whole of it
+ * with a marker would drop the evidence, so the prefix that fits is kept.
+ */
+const truncateToBudget = (member: string, budget: OutputBudget): string => {
+  const total = Buffer.byteLength(member, "utf8")
+  const note = (cut: number): string => `...<${cut} more bytes truncated>`
+  const room = Math.max(0, budget.limit - budget.bytes - 2 - note(total).length)
+  let keep = Math.min(member.length, room)
+  while (keep > 0 && Buffer.byteLength(member.slice(0, keep), "utf8") > room) keep = Math.floor(keep / 2)
+  const kept = member.slice(0, keep)
+  budget.bytes = budget.limit
+  budget.members += 1
+  budget.exhausted = true
+  return `${kept}${note(total - Buffer.byteLength(kept, "utf8"))}`
+}
+
+/**
+ * Clones exactly the JSON value the cache will serialize, without invoking
+ * user code, or — under a lossy budget — the closest total rendering of it.
+ */
+const cloneJson = (
   member: unknown,
   seen: Set<object>,
   budget: OutputBudget,
@@ -479,7 +618,12 @@ const cloneCacheJson = (
   depth: number
 ): unknown => {
   if (depth > maximumCacheOutputDepth) {
-    throw new Error(`${path} exceeds the maximum cache output depth of ${maximumCacheOutputDepth}`)
+    return refuseMember(
+      budget,
+      path,
+      `exceeds the maximum cache output depth of ${maximumCacheOutputDepth}`,
+      "<depth limit>"
+    )
   }
   if (member === null) {
     spendOutputBudget(budget, 4, path)
@@ -489,40 +633,56 @@ const cloneCacheJson = (
     case "boolean":
       spendOutputBudget(budget, member ? 4 : 5, path)
       return member
-    case "string":
-      spendOutputBudget(budget, Buffer.byteLength(member, "utf8") + 2, path)
-      return member
+    case "string": {
+      const bytes = Buffer.byteLength(member, "utf8") + 2
+      if (!budget.lossy || budget.bytes + bytes <= budget.limit) {
+        spendOutputBudget(budget, bytes, path)
+        return member
+      }
+      return truncateToBudget(member, budget)
+    }
     case "number":
-      if (!Number.isFinite(member)) throw new Error(`${path} is the non-finite number ${String(member)}`)
-      if (Object.is(member, -0)) throw new Error(`${path} is negative zero, which JSON would change to zero`)
+      if (!Number.isFinite(member)) {
+        return refuseMember(budget, path, `is the non-finite number ${String(member)}`, `<${String(member)}>`)
+      }
+      if (Object.is(member, -0)) {
+        return refuseMember(budget, path, "is negative zero, which JSON would change to zero", "<-0>")
+      }
       spendOutputBudget(budget, String(member).length, path)
       return member
     case "undefined":
-      throw new Error(`${path} is undefined, which JSON cannot distinguish from an absent member`)
+      return refuseMember(
+        budget,
+        path,
+        "is undefined, which JSON cannot distinguish from an absent member",
+        "<undefined>"
+      )
     case "bigint":
-      throw new Error(`${path} is a bigint`)
+      return refuseMember(budget, path, "is a bigint", `<bigint ${String(member)}>`)
     case "symbol":
-      throw new Error(`${path} is a symbol`)
+      return refuseMember(budget, path, "is a symbol", `<${String(member)}>`)
     case "function":
-      throw new Error(`${path} is a function`)
+      return refuseMember(budget, path, "is a function", functionMarker(member))
     case "object":
       break
     default:
       throw new Error(`${path} is an unsupported ${typeof member} value`)
   }
   const object = member
-  if (NodeUtil.isProxy(object)) throw new Error(`${path} is a Proxy`)
-  if (seen.has(object)) throw new Error(`${path} closes a reference cycle`)
+  if (NodeUtil.isProxy(object)) return refuseMember(budget, path, "is a Proxy", "<proxy>")
+  if (seen.has(object)) return refuseMember(budget, path, "closes a reference cycle", "<circular>")
   const prototype = Object.getPrototypeOf(object)
   seen.add(object)
   try {
     if (Array.isArray(object)) {
-      if (prototype !== Array.prototype) throw new Error(`${path} is an array subclass instance`)
+      if (prototype !== Array.prototype && !budget.lossy) throw new Error(`${path} is an array subclass instance`)
       const names = Object.getOwnPropertyNames(object)
       if (
-        names.length !== object.length + 1 ||
-        names.at(-1) !== "length" ||
-        Object.getOwnPropertySymbols(object).length > 0
+        !budget.lossy && (
+          names.length !== object.length + 1 ||
+          names.at(-1) !== "length" ||
+          Object.getOwnPropertySymbols(object).length > 0
+        )
       ) {
         throw new Error(`${path} is a sparse array or carries extra own properties`)
       }
@@ -530,7 +690,7 @@ const cloneCacheJson = (
       const encoded: Array<unknown> = []
       for (let index = 0; index < object.length; index += 1) {
         const childPath = `${path}[${index}]`
-        if (names[index] !== String(index)) {
+        if (!budget.lossy && names[index] !== String(index)) {
           throw new Error(`${path} is a sparse array or carries extra own properties`)
         }
         const descriptor = Object.getOwnPropertyDescriptor(object, String(index))
@@ -539,32 +699,56 @@ const cloneCacheJson = (
           !("value" in descriptor) ||
           descriptor.enumerable !== true
         ) {
-          throw new Error(`${childPath} is an accessor or non-enumerable property`)
+          if (!budget.lossy) throw new Error(`${childPath} is an accessor or non-enumerable property`)
         }
-        encoded.push(cloneCacheJson(descriptor.value, seen, budget, childPath, depth + 1))
+        // A hole reads as JSON's `null`, exactly as `JSON.stringify` renders it.
+        encoded.push(
+          descriptor === undefined
+            ? null
+            : "value" in descriptor
+            ? cloneJson(descriptor.value, seen, budget, childPath, depth + 1)
+            : "<accessor>"
+        )
+        if (budget.exhausted) {
+          const dropped = object.length - index - 1
+          if (dropped > 0) encoded.push(`<${dropped} more items omitted>`)
+          break
+        }
       }
       return encoded
     }
-    if (prototype !== Object.prototype && prototype !== null) {
+    if (prototype !== Object.prototype && prototype !== null && !budget.lossy) {
       throw new Error(`${path} is an object whose prototype is not a plain object`)
     }
-    if (Object.getOwnPropertySymbols(object).length > 0) {
+    if (Object.getOwnPropertySymbols(object).length > 0 && !budget.lossy) {
       throw new Error(`${path} carries symbol-keyed own properties`)
     }
     spendOutputBudget(budget, 2, path)
     const encoded = Object.create(null) as Record<string, unknown>
-    for (const key of Object.getOwnPropertyNames(object).sort()) {
+    const keys = Object.getOwnPropertyNames(object).sort()
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index]!
       const childPath = path === "" ? key : `${path}.${key}`
       const descriptor = Object.getOwnPropertyDescriptor(object, key)
-      if (
-        descriptor === undefined ||
-        !("value" in descriptor) ||
-        descriptor.enumerable !== true
-      ) {
-        throw new Error(`${childPath} is an accessor or non-enumerable property`)
+      if (descriptor === undefined) {
+        if (!budget.lossy) throw new Error(`${childPath} is an accessor or non-enumerable property`)
+        continue
+      }
+      if (!("value" in descriptor) || descriptor.enumerable !== true) {
+        // A lossy walk keeps a non-enumerable data property — that is where a
+        // native Error holds its message — and names an accessor rather than
+        // invoking one while a failure is being reported.
+        if (!budget.lossy) throw new Error(`${childPath} is an accessor or non-enumerable property`)
       }
       spendOutputBudget(budget, Buffer.byteLength(key, "utf8") + 3, childPath)
-      encoded[key] = cloneCacheJson(descriptor.value, seen, budget, childPath, depth + 1)
+      encoded[key] = "value" in descriptor
+        ? cloneJson(descriptor.value, seen, budget, childPath, depth + 1)
+        : "<accessor>"
+      if (budget.exhausted) {
+        const dropped = keys.length - index - 1
+        if (dropped > 0) encoded["<truncated>"] = `${dropped} more members omitted`
+        break
+      }
     }
     return encoded
   } finally {
@@ -587,7 +771,7 @@ export const encodeCacheOutput = (
     return {
       output: {
         _tag: cacheValueTag,
-        value: cloneCacheJson(value, new Set(), { bytes: 0, members: 0 }, "result", 0)
+        value: cloneJson(value, new Set(), cacheBudget(), "result", 0)
       }
     }
   } catch (cause) {
@@ -634,7 +818,7 @@ export const decodeCacheOutput = (
       throw new Error("cached output value is not a data property")
     }
     return {
-      value: cloneCacheJson(valueDescriptor.value, new Set(), { bytes: 0, members: 0 }, "cached result", 0)
+      value: cloneJson(valueDescriptor.value, new Set(), cacheBudget(), "cached result", 0)
     }
   } catch (cause) {
     return { reason: describeFailure(cause) }
