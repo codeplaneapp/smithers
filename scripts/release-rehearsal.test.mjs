@@ -228,3 +228,19 @@ test("CI gates the server's checks and tests in the required test job", () => {
   assert.equal(server?.run, "pnpm exec smithers-build ci '//apps/server/...'")
   assert.equal(server?.if, undefined)
 })
+
+test("release rebuilds and byte-compares the committed wasm before packing", () => {
+  const ci = parseWorkflow(readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8"))
+  const steps = release.jobs.publish.steps
+  const pack = steps.indexOf(step("Pack and smoke-test release artifacts"))
+  const install = step("Install pinned Rust toolchain")
+  assert.ok(install, "release must install the pinned Rust toolchain")
+  assert.deepEqual(install, ci.jobs["wasm-repro"].steps.find((entry) => entry.name === install.name))
+  for (const expected of ci.jobs["wasm-repro"].steps.filter((entry) => entry.run?.includes("smithers-build"))) {
+    const actual = step(expected.name)
+    assert.deepEqual(actual, expected)
+    assert.ok(steps.indexOf(install) < steps.indexOf(actual))
+    assert.ok(steps.indexOf(actual) < pack)
+    assert.equal(actual.if, undefined)
+  }
+})

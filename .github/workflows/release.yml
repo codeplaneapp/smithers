@@ -52,6 +52,8 @@ jobs:
         uses: docker://rhysd/actionlint:1.7.11
         with:
           args: ".github/workflows/ci.yml .github/workflows/release.yml .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/pr-review.yml"
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -258,6 +260,16 @@ jobs:
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Release version coherence
         run: pnpm exec smithers-build test '//scripts:releaseVersion'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Build-script unit tests
+        run: pnpm exec smithers-build test '//crates/flows-jj:buildScript'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Rebuild and byte-compare flows_jj.wasm
+        run: pnpm exec smithers-build test '//crates/flows-jj:wasmReproducibility'
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"

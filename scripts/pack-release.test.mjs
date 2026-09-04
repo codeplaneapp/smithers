@@ -227,12 +227,12 @@ test("every gate in ci.yml also runs in release.yml", () => {
   const ci = workflow("ci.yml")
 
   // The roster is pinned so a new CI job forces a decision here instead of
-  // silently landing outside the release's proof. The four jobs release.yml
+  // silently landing outside the release's proof. The jobs release.yml
   // does not mirror: `browser` runs `//scripts:browserContract`, which
   // `//scripts/...` already covers; `packages` runs `test '//packages/...'`,
   // which `ci '//packages/...'` already covers; `apps-e2e` needs the runner's
-  // Chrome and `rust`/`wasm-repro` need a Rust toolchain, and neither belongs
-  // on a publication job.
+  // Chrome; native Rust tests stay in `rust`. Release mirrors `wasm-repro`
+  // so the committed artifact is rebuilt and byte-compared before packing.
   const jobs = [...ci.slice(ci.indexOf("\njobs:\n")).matchAll(/^ {2}([a-z][\w-]*):$/gm)].map((match) => match[1])
   assert.deepEqual(jobs, [
     "test",
@@ -245,7 +245,7 @@ test("every gate in ci.yml also runs in release.yml", () => {
     "review-lints"
   ])
 
-  const mirrored = ["test", "e2e-faults"]
+  const mirrored = ["test", "e2e-faults", "wasm-repro"]
   const expected = mirrored.flatMap((job) => graphCommands(jobSteps(ci, job)))
   const actual = new Set(graphCommands(jobSteps(workflow("release.yml"), "publish")))
 
