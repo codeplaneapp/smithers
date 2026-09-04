@@ -55,7 +55,7 @@ The command exits 1 when any check reports a failure.
 smthrs update
 ```
 
-`update` reads npm's dist-tags for `@smthrs/cli` and reports whether the installed version is current. It never installs anything. A release candidate is compared against the `next` tag first, so it is never told to downgrade to a 0.x `latest`. When a later version exists, the command prints it with the install command to run:
+`update` reads npm's dist-tags for `@smthrs/cli` and reports whether the installed version is current. It never installs anything. It checks the `next` tag first and `latest` second, and only offers versions newer than the installed version. When a later version exists, the command prints it with the install command to run:
 
 ```text
 npm install -g @smthrs/cli@<version>
@@ -4869,11 +4869,15 @@ https://smithers.sh/docs/guides/pr-review-action/
 
 Get an agent review with a narrated HTML walkthrough on your pull requests, without running inference yourself.
 
-`smthrs review` runs one review agent per changed file, then a narrator agent writes a walkthrough of the whole change: chapters in logical reading order, prose explaining why each group of files changed, diffs embedded at the right point in the narrative, and Mermaid diagrams wherever structure changed. The output is a single self-contained HTML file you can open, share, or publish to a hosted URL.
+The Smithers review service runs one review agent per changed file, then a narrator agent writes a walkthrough of the whole change: chapters in logical reading order, prose explaining why each group of files changed, diffs embedded at the right point in the narrative, and Mermaid diagrams wherever structure changed. The output is a single self-contained HTML file you can open, share, or publish to a hosted URL.
 
 Pointed at a GitHub pull request, it also posts the review onto the PR: the narrative summary as the review body, and every finding as an inline comment with a `suggestion` block when there is replacement code to apply.
 
-Findings never fail the build. smthrs review reports; humans decide.
+Findings never fail the build. The review service reports; humans decide.
+
+This guide covers the review action and the separate `smithers-review` executable.
+The `review` subcommand was removed from the rc.0 CLI; see the
+[CLI migration reference](/docs/migration/1.0/#review).
 
 ## Before you start
 
@@ -7755,11 +7759,11 @@ https://smithers.sh/docs/reference/api/targets/
 
 The `exports` map publishes the index, every module under `src` through the `./*` subpath, and the manifest:
 
-| Import | Source | Platform |
-| --- | --- | --- |
-| `@smthrs/targets` | `src/index.ts` | Node.js 22.19.0+ |
-| `@smthrs/targets/Target` | `src/Target.ts` | Node.js 22.19.0+ |
-| `@smthrs/targets/package.json` | `package.json` | Node.js 22.19.0+ |
+| Import                         | Source          | Platform         |
+| ------------------------------ | --------------- | ---------------- |
+| `@smthrs/targets`              | `src/index.ts`  | Node.js 22.19.0+ |
+| `@smthrs/targets/Target`       | `src/Target.ts` | Node.js 22.19.0+ |
+| `@smthrs/targets/package.json` | `package.json`  | Node.js 22.19.0+ |
 
 The second row stands for every module under `src`: `./*` maps to `./src/*.ts`. The subpaths `./internal/*` and `./index` map to `null`, so neither resolves. The package publishes TypeScript sources, not a built distribution, and `effect` is a peer dependency pinned to `4.0.0-rc.108`.
 
@@ -7767,8 +7771,8 @@ The second row stands for every module under `src`: `./*` maps to `./src/*.ts`. 
 
 `src/index.ts` declares one namespace export:
 
-| Namespace | Summary |
-| --- | --- |
+| Namespace  | Summary                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `Smithers` | Every declaration constructor, catalog rule, macro, action, and error a `PACKAGE.ts` or `WORKSPACE.ts` file reaches, under one name. |
 
 {/* verify: src/index.ts documents this namespace as "the whole legacy declaration authoring surface", while README.md and src/Smithers.ts call it the PACKAGE.ts authoring surface. Which wording is intended? */}
@@ -7967,164 +7971,164 @@ Extracts and validates fenced source blocks from one Markdown file. `file` is th
 
 Every other export of `Smithers.ts`, in source order:
 
-| Name | Kind | Summary |
-| --- | --- | --- |
-| `Smithers.RemoteCache` | namespace | Workspace remote-cache declarations. |
-| `Smithers.Input` | namespace | Declared input schemas and constructors. |
-| `Smithers.Target` | namespace | Target construction and target metadata. |
-| `Smithers.SafeFs` | namespace | Confined filesystem reads shared by discovery. |
-| `Smithers.PackageJsonDeclaration` | namespace | Package manifest declarations, rendering, and target synthesis. |
-| `Smithers.PackageJsonTemplate` | namespace | Shared inert manifest templates. |
-| `Smithers.pnpmWorkspace` | constructor | Creates a workspace-membership input without reading the filesystem. |
-| `Smithers.Flags` | constructor | The flag surface: the workspace declaration constructor, and a property-access reference to one declared flag. |
-| `Smithers.Host` | constructor | The host surface: the workspace declaration constructor, and `Host.bin(name)` for one declared binary. |
-| `Smithers.Sandbox` | constructor | The sandbox implementation constructors. |
-| `Smithers.Sandboxes` | constructor | Declares the workspace sandbox implementations by name. |
-| `Smithers.LocalRepository` | constructor | Declares an opaque child Smithers workspace at a workspace-relative path. |
-| `Smithers.Owners` | namespace | `Owners.declare` validates an `owners` option, and `Owners.Codeowners` and `Owners.Tree` project every declaration into `.github/CODEOWNERS` and the per-directory `OWNERS` tree. |
-| `Smithers.Teams` | constructor | Validates a team roster: team names are login-shaped, members are logins, and every list is deduplicated and sorted. |
-| `Smithers.gitCommit` | constructor | References one git commit without invoking git. |
-| `Smithers.Mcp` | constructor | Declared MCP servers. |
-| `Smithers.NodeModule` | constructor | References an installed module, or one of its binaries through `NodeModule.Bin`. |
-| `Smithers.symlink` | constructor | Declares that a generated file is a symbolic link to `path`. |
-| `Smithers.Alias` | rule | A second name for one target: a distinct node whose kinds mirror the aliased target and whose only dependency is it. |
-| `Smithers.Files` | constructor | The declared file-set algebra, `Files.difference` and `Files.digest`. |
-| `Smithers.ImportClosure` | rule | The transitive import closure of the entry files, as per-file rows. |
-| `Smithers.Materialize` | rule | Places a build target's cached output tree into the working tree. |
-| `Smithers.Suite` | rule | A named group of check-capable targets that run together. |
-| `Smithers.Test` | rule | A declarative assertion over the file algebra. |
-| `Smithers.Copy` | rule | Copies one declared artifact or file-producing target to a path. |
-| `Smithers.Literal` | rule | Materializes fixed bytes at a declared path. |
-| `Smithers.Overlay` | rule | A derived file set with selected members replaced. |
-| `Smithers.Cron` | rule | A package-level inert schedule rendered by generated GitHub CI. |
-| `Smithers.PackageDefaults` | constructor | Declares pure workspace defaults. |
-| `Smithers.Exec` | action | The one shared action every catalog target uses to run a tool. |
-| `Smithers.ExecError` | schema | A typed external-tool failure. |
-| `Smithers.ExecLive` | layer | Implements `Exec` with a `node:child_process` spawn. |
-| `Smithers.BunSuite` | macro | Re-runs one package's vitest suite under Bun. |
-| `Smithers.FaultSuite` | macro | Runs one package's fault-injection cases, serially, without coverage. |
-| `Smithers.DocsReferenceSync` | macro | Reviews changed public APIs against the prose that documents them. |
-| `Smithers.DurableIdentityGuard` | macro | Reviews changed sources for identity strings, migrations, persisted schemas, and durable keys. |
-| `Smithers.JsdocTruthfulness` | macro | Reviews changed exports against the JSDoc that describes them. |
-| `Smithers.reviewPrompt` | constant | The framing every review rubric is prepended with. |
-| `Smithers.Fetch` | rule | A remote file pinned by sha256 and written to `out`. |
-| `Smithers.ExpandFilegroup` | action | Reads the files one group names and returns them digested. |
-| `Smithers.ExpandFilegroupLive` | layer | Implements `ExpandFilegroup`, resolving payload paths against `workspaceRoot`. |
-| `Smithers.FilegroupError` | error | Expanding a group's declared sources failed on a filesystem error. |
-| `Smithers.isFilegroup` | guard | Checks whether a value is a `Filegroup` target. |
-| `Smithers.Install` | rule | Plans an install for the declared package manager. |
-| `Smithers.Lockfile` | rule | Regenerates the declared manager's lockfile without linking a tree. |
-| `Smithers.PnpmWorkspace` | rule | Generates and drift-checks `pnpm-workspace.yaml`. |
-| `Smithers.Tsconfig` | rule | Generates and drift-checks a `tsconfig.json`. |
-| `Smithers.HttpSecret` | constructor | Binds a declared secret to one or more exact HTTP origins. |
-| `Smithers.TsBuild` | rule | Builds a JavaScript distribution with `tsc -p`, `tsup`, or the package's own build program. |
-| `Smithers.DtsBuild` | rule | Emits type declarations with `tsc --emitDeclarationOnly` or `tsup --dts-only`. |
-| `Smithers.Typecheck` | rule | Checks a package with `tsc --noEmit` or TypeScript build mode. |
-| `Smithers.Vitest` | rule | Plans a non-watch `vitest run` test target. |
-| `Smithers.VitestCoverage` | rule | Plans `vitest run` with coverage and declares the coverage directory output. |
-| `Smithers.VitestWatch` | rule | Plans an interactive Vitest watch session. |
-| `Smithers.BiomeCheck` | rule | Plans Biome lint and format checks without writing files. |
-| `Smithers.Dprint` | rule | Checks formatting with `dprint check`, or rewrites it with `dprint fmt`. |
-| `Smithers.EsLint` | rule | Plans ESLint over declared source sets. |
-| `Smithers.DepsLint` | rule | Plans missing, unused, and undeclared dependency checks. |
-| `Smithers.PackageLint` | rule | Plans publint and optional packed-tarball type checks. |
-| `Smithers.DocsParity` | rule | Checks that a package documents itself in prose beside its code. |
-| `Smithers.CheckDocs` | action | Checks one package README for presence, a title, and real prose. |
-| `Smithers.CheckDocsLive` | layer | Implements `CheckDocs` with confined, descriptor-stable, bounded reads. |
-| `Smithers.DocsParityError` | error | A package's documentation is missing or too thin to describe the package. |
-| `Smithers.SortPackageJson` | rule | Plans `sort-package-json` validation or rewriting. |
-| `Smithers.generated` | constructor | Asks for a model-written value instead of a literal one. |
-| `Smithers.PackageJson` | constructor | Declares one package's manifest. |
-| `Smithers.PackageJsonCheck` | rule | Regenerates a package manifest in memory and fails on drift. |
-| `Smithers.PackageJsonWrite` | rule | Rewrites a package manifest from its declaration. |
-| `Smithers.SyncPackageJson` | action | Regenerates one manifest and either compares it or writes it. |
-| `Smithers.SyncPackageJsonLive` | layer | Implements `SyncPackageJson` against the filesystem, the workspace field cache, and, in `refresh` mode only, the model CLI. |
-| `Smithers.NewPackage` | rule | Scaffolds a new workspace package. |
-| `Smithers.ScaffoldPackage` | action | Creates one package directory in the source tree. |
-| `Smithers.ScaffoldPackageLive` | layer | Implements `ScaffoldPackage` against the source tree. |
-| `Smithers.CheckFile` | action | Compares one generated file against its checked-in form. |
-| `Smithers.CheckFileLive` | layer | Implements `CheckFile` with a read and a byte comparison. |
-| `Smithers.checkGeneratedFile` | effect | Fails with `DriftError` unless the checked-in file matches. |
-| `Smithers.DriftError` | error | A checked-in file is missing or differs from its generated form. |
-| `Smithers.WriteFile` | action | Writes one generated file. |
-| `Smithers.WriteFileError` | error | A generated file could not be written. |
-| `Smithers.WriteFileLive` | layer | Implements `WriteFile` with an atomic write through a sibling temp file that is renamed into place. |
-| `Smithers.writeGeneratedFile` | effect | Writes contents to a sibling temp file, then renames it into place. |
-| `Smithers.GithubCiGen` | rule | Generates the GitHub Actions CI workflow from declared attrs. |
-| `Smithers.GithubWorkflow` | namespace | Reading and rendering GitHub Actions workflow files. |
-| `Smithers.NpmPublish` | rule | Plans npm publication after versioning, build, and package validation deps. |
-| `Smithers.JsrPublish` | rule | Plans JSR publication after npm publication and shared release deps. |
-| `Smithers.TypedocDocs` | rule | Plans TypeDoc generation into the declared documentation directory. |
-| `Smithers.LlmLint` | rule | Reviews changed files with a model and fails on rubric findings. |
-| `Smithers.ClaudeCliMissing` | error | The engine CLI executable was not found on the host. |
-| `Smithers.FindingsError` | error | The review completed and at least one finding met the `failOn` threshold. |
-| `Smithers.LlmReview` | action | The one sealed model action reviewing every batch of changed files. |
-| `Smithers.LlmReviewError` | error | A review round failed before producing findings. |
-| `Smithers.LlmReviewLive` | layer | Implements `LlmReview` with `git diff` and a model CLI. |
-| `Smithers.Clean` | rule | Removes the declared targets' outputs and the named scratch paths, and nothing else. |
-| `Smithers.Dev` | rule | Plans a long-lived development or watch command. |
-| `Smithers.ToolBuild` | rule | Runs one arbitrary command for Rust, Zig, native addons, or another toolchain through the shared action. |
-| `Smithers.ToolRun` | rule | Plans one irreversible external operation. |
-| `Smithers.NodeTest` | rule | Runs one declared JavaScript program as a test gate. |
-| `Smithers.entrypoint` | constructor | Declares a run of one program that gates on its exit code. |
-| `Smithers.testRunner` | constructor | Declares a run of the runtime's own test runner over the given files. |
-| `Smithers.testSuite` | constructor | Declares a run of the runtime's own test runner over the suites under the given directories. |
-| `Smithers.NodeBinary` | rule | Runs one declared JavaScript program under the build verb. |
-| `Smithers.CaptureOutputs` | action | Digests the declared outputs of a build target. |
-| `Smithers.CaptureOutputsLive` | layer | Implements `CaptureOutputs`, resolving declared paths against `workspaceRoot`. |
-| `Smithers.measureOutput` | function | Measures one declared output, or fails with an `OutputError`. |
-| `Smithers.OutputError` | error | Digesting one declared output failed. |
-| `Smithers.readOutputManifest` | function | Reads an untrusted value as the exact output manifest the target declared. |
-| `Smithers.verifyOutputs` | function | Re-measures every declared output and compares it to a manifest. |
-| `Smithers.Verb` | namespace and type | The CLI verbs a generated pipeline may run across a target graph. |
-| `Smithers.RustToolchain` | namespace and type | Declared Rust toolchains and the argv they install and run cargo with. |
-| `Smithers.Rust` | namespace and type | The workspace Rust surface, `Rust.Toolchain({ workspace, channel })` or `Rust.Toolchain({ toolchain, lockfile })`. |
-| `Smithers.CiToolchain` | namespace and type | What one generated CI job requires before its targets run. |
-| `Smithers.SecretProxy` | namespace | Placeholder minting and outbound secret substitution. |
-| `Smithers.Mise` | namespace | mise version authority and pinned binary references. |
-| `Smithers.Foundry` | namespace | Foundry toolchain plus the `Foundry.Build`, `Foundry.Test`, and `Foundry.Fmt` targets. |
-| `Smithers.Anvil` | namespace | Anvil fork services, `Anvil.Fork`. |
-| `Smithers.Repo` | namespace | Cross-repository target edges into opaque local workspaces, `Repo.Target`. |
-| `Smithers.Memory` | namespace | The `Memory.Retain` target and the `Memory.SmithersCloud` workspace declaration. |
-| `Smithers.Bundler` | namespace | The bundler surface, `Bundler.Rspack`. |
-| `Smithers.Go` | namespace | Go toolchain and package rules. |
-| `Smithers.Stamp` | namespace | Late-bound build stamps. |
-| `Smithers.Nix` | namespace | Nix dev-shell version authority and tools. |
-| `Smithers.Changesets` | namespace | Changesets versioning and publishing targets, `Changesets.Version` and `Changesets.Publish`. |
-| `Smithers.Api` | namespace | API-surface checks, `Api.Compat`. |
-| `Smithers.Size` | namespace | Artifact-size checks, `Size.Budgets`. |
+| Name                              | Kind               | Summary                                                                                                                                                                           |
+| --------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Smithers.RemoteCache`            | namespace          | Workspace remote-cache declarations.                                                                                                                                              |
+| `Smithers.Input`                  | namespace          | Declared input schemas and constructors.                                                                                                                                          |
+| `Smithers.Target`                 | namespace          | Target construction and target metadata.                                                                                                                                          |
+| `Smithers.SafeFs`                 | namespace          | Confined filesystem reads shared by discovery.                                                                                                                                    |
+| `Smithers.PackageJsonDeclaration` | namespace          | Package manifest declarations, rendering, and target synthesis.                                                                                                                   |
+| `Smithers.PackageJsonTemplate`    | namespace          | Shared inert manifest templates.                                                                                                                                                  |
+| `Smithers.pnpmWorkspace`          | constructor        | Creates a workspace-membership input without reading the filesystem.                                                                                                              |
+| `Smithers.Flags`                  | constructor        | The flag surface: the workspace declaration constructor, and a property-access reference to one declared flag.                                                                    |
+| `Smithers.Host`                   | constructor        | The host surface: the workspace declaration constructor, and `Host.bin(name)` for one declared binary.                                                                            |
+| `Smithers.Sandbox`                | constructor        | The sandbox implementation constructors.                                                                                                                                          |
+| `Smithers.Sandboxes`              | constructor        | Declares the workspace sandbox implementations by name.                                                                                                                           |
+| `Smithers.LocalRepository`        | constructor        | Declares an opaque child Smithers workspace at a workspace-relative path.                                                                                                         |
+| `Smithers.Owners`                 | namespace          | `Owners.declare` validates an `owners` option, and `Owners.Codeowners` and `Owners.Tree` project every declaration into `.github/CODEOWNERS` and the per-directory `OWNERS` tree. |
+| `Smithers.Teams`                  | constructor        | Validates a team roster: team names are login-shaped, members are logins, and every list is deduplicated and sorted.                                                              |
+| `Smithers.gitCommit`              | constructor        | References one git commit without invoking git.                                                                                                                                   |
+| `Smithers.Mcp`                    | constructor        | Declared MCP servers.                                                                                                                                                             |
+| `Smithers.NodeModule`             | constructor        | References an installed module, or one of its binaries through `NodeModule.Bin`.                                                                                                  |
+| `Smithers.symlink`                | constructor        | Declares that a generated file is a symbolic link to `path`.                                                                                                                      |
+| `Smithers.Alias`                  | rule               | A second name for one target: a distinct node whose kinds mirror the aliased target and whose only dependency is it.                                                              |
+| `Smithers.Files`                  | constructor        | The declared file-set algebra, `Files.difference` and `Files.digest`.                                                                                                             |
+| `Smithers.ImportClosure`          | rule               | The transitive import closure of the entry files, as per-file rows.                                                                                                               |
+| `Smithers.Materialize`            | rule               | Places a build target's cached output tree into the working tree.                                                                                                                 |
+| `Smithers.Suite`                  | rule               | A named group of check-capable targets that run together.                                                                                                                         |
+| `Smithers.Test`                   | rule               | A declarative assertion over the file algebra.                                                                                                                                    |
+| `Smithers.Copy`                   | rule               | Copies one declared artifact or file-producing target to a path.                                                                                                                  |
+| `Smithers.Literal`                | rule               | Materializes fixed bytes at a declared path.                                                                                                                                      |
+| `Smithers.Overlay`                | rule               | A derived file set with selected members replaced.                                                                                                                                |
+| `Smithers.Cron`                   | rule               | A package-level inert schedule rendered by generated GitHub CI.                                                                                                                   |
+| `Smithers.PackageDefaults`        | constructor        | Declares pure workspace defaults.                                                                                                                                                 |
+| `Smithers.Exec`                   | action             | The one shared action every catalog target uses to run a tool.                                                                                                                    |
+| `Smithers.ExecError`              | schema             | A typed external-tool failure.                                                                                                                                                    |
+| `Smithers.ExecLive`               | layer              | Implements `Exec` with a `node:child_process` spawn.                                                                                                                              |
+| `Smithers.BunSuite`               | macro              | Re-runs one package's vitest suite under Bun.                                                                                                                                     |
+| `Smithers.FaultSuite`             | macro              | Runs one package's fault-injection cases, serially, without coverage.                                                                                                             |
+| `Smithers.DocsReferenceSync`      | macro              | Reviews changed public APIs against the prose that documents them.                                                                                                                |
+| `Smithers.DurableIdentityGuard`   | macro              | Reviews changed sources for identity strings, migrations, persisted schemas, and durable keys.                                                                                    |
+| `Smithers.JsdocTruthfulness`      | macro              | Reviews changed exports against the JSDoc that describes them.                                                                                                                    |
+| `Smithers.reviewPrompt`           | constant           | The framing every review rubric is prepended with.                                                                                                                                |
+| `Smithers.Fetch`                  | rule               | A remote file pinned by sha256 and written to `out`.                                                                                                                              |
+| `Smithers.ExpandFilegroup`        | action             | Reads the files one group names and returns them digested.                                                                                                                        |
+| `Smithers.ExpandFilegroupLive`    | layer              | Implements `ExpandFilegroup`, resolving payload paths against `workspaceRoot`.                                                                                                    |
+| `Smithers.FilegroupError`         | error              | Expanding a group's declared sources failed on a filesystem error.                                                                                                                |
+| `Smithers.isFilegroup`            | guard              | Checks whether a value is a `Filegroup` target.                                                                                                                                   |
+| `Smithers.Install`                | rule               | Plans an install for the declared package manager.                                                                                                                                |
+| `Smithers.Lockfile`               | rule               | Regenerates the declared manager's lockfile without linking a tree.                                                                                                               |
+| `Smithers.PnpmWorkspace`          | rule               | Generates and drift-checks `pnpm-workspace.yaml`.                                                                                                                                 |
+| `Smithers.Tsconfig`               | rule               | Generates and drift-checks a `tsconfig.json`.                                                                                                                                     |
+| `Smithers.HttpSecret`             | constructor        | Binds a declared secret to one or more exact HTTP origins.                                                                                                                        |
+| `Smithers.TsBuild`                | rule               | Builds a JavaScript distribution with `tsc -p`, `tsup`, or the package's own build program.                                                                                       |
+| `Smithers.DtsBuild`               | rule               | Emits type declarations with `tsc --emitDeclarationOnly` or `tsup --dts-only`.                                                                                                    |
+| `Smithers.Typecheck`              | rule               | Checks a package with `tsc --noEmit` or TypeScript build mode.                                                                                                                    |
+| `Smithers.Vitest`                 | rule               | Plans a non-watch `vitest run` test target.                                                                                                                                       |
+| `Smithers.VitestCoverage`         | rule               | Plans `vitest run` with coverage and declares the coverage directory output.                                                                                                      |
+| `Smithers.VitestWatch`            | rule               | Plans an interactive Vitest watch session.                                                                                                                                        |
+| `Smithers.BiomeCheck`             | rule               | Plans Biome lint and format checks without writing files.                                                                                                                         |
+| `Smithers.Dprint`                 | rule               | Checks formatting with `dprint check`, or rewrites it with `dprint fmt`.                                                                                                          |
+| `Smithers.EsLint`                 | rule               | Plans ESLint over declared source sets.                                                                                                                                           |
+| `Smithers.DepsLint`               | rule               | Plans missing, unused, and undeclared dependency checks.                                                                                                                          |
+| `Smithers.PackageLint`            | rule               | Plans publint and optional packed-tarball type checks.                                                                                                                            |
+| `Smithers.DocsParity`             | rule               | Checks that a package documents itself in prose beside its code.                                                                                                                  |
+| `Smithers.CheckDocs`              | action             | Checks one package README for presence, a title, and real prose.                                                                                                                  |
+| `Smithers.CheckDocsLive`          | layer              | Implements `CheckDocs` with confined, descriptor-stable, bounded reads.                                                                                                           |
+| `Smithers.DocsParityError`        | error              | A package's documentation is missing or too thin to describe the package.                                                                                                         |
+| `Smithers.SortPackageJson`        | rule               | Plans `sort-package-json` validation or rewriting.                                                                                                                                |
+| `Smithers.generated`              | constructor        | Asks for a model-written value instead of a literal one.                                                                                                                          |
+| `Smithers.PackageJson`            | constructor        | Declares one package's manifest.                                                                                                                                                  |
+| `Smithers.PackageJsonCheck`       | rule               | Regenerates a package manifest in memory and fails on drift.                                                                                                                      |
+| `Smithers.PackageJsonWrite`       | rule               | Rewrites a package manifest from its declaration.                                                                                                                                 |
+| `Smithers.SyncPackageJson`        | action             | Regenerates one manifest and either compares it or writes it.                                                                                                                     |
+| `Smithers.SyncPackageJsonLive`    | layer              | Implements `SyncPackageJson` against the filesystem, the workspace field cache, and, in `refresh` mode only, the model CLI.                                                       |
+| `Smithers.NewPackage`             | rule               | Scaffolds a new workspace package.                                                                                                                                                |
+| `Smithers.ScaffoldPackage`        | action             | Creates one package directory in the source tree.                                                                                                                                 |
+| `Smithers.ScaffoldPackageLive`    | layer              | Implements `ScaffoldPackage` against the source tree.                                                                                                                             |
+| `Smithers.CheckFile`              | action             | Compares one generated file against its checked-in form.                                                                                                                          |
+| `Smithers.CheckFileLive`          | layer              | Implements `CheckFile` with a read and a byte comparison.                                                                                                                         |
+| `Smithers.checkGeneratedFile`     | effect             | Fails with `DriftError` unless the checked-in file matches.                                                                                                                       |
+| `Smithers.DriftError`             | error              | A checked-in file is missing or differs from its generated form.                                                                                                                  |
+| `Smithers.WriteFile`              | action             | Writes one generated file.                                                                                                                                                        |
+| `Smithers.WriteFileError`         | error              | A generated file could not be written.                                                                                                                                            |
+| `Smithers.WriteFileLive`          | layer              | Implements `WriteFile` with an atomic write through a sibling temp file that is renamed into place.                                                                               |
+| `Smithers.writeGeneratedFile`     | effect             | Writes contents to a sibling temp file, then renames it into place.                                                                                                               |
+| `Smithers.GithubCiGen`            | rule               | Generates the GitHub Actions CI workflow from declared attrs.                                                                                                                     |
+| `Smithers.GithubWorkflow`         | namespace          | Reading and rendering GitHub Actions workflow files.                                                                                                                              |
+| `Smithers.NpmPublish`             | rule               | Plans npm publication after versioning, build, and package validation deps.                                                                                                       |
+| `Smithers.JsrPublish`             | rule               | Plans JSR publication after npm publication and shared release deps.                                                                                                              |
+| `Smithers.TypedocDocs`            | rule               | Plans TypeDoc generation into the declared documentation directory.                                                                                                               |
+| `Smithers.LlmLint`                | rule               | Reviews changed files with a model and fails on rubric findings.                                                                                                                  |
+| `Smithers.ClaudeCliMissing`       | error              | The engine CLI executable was not found on the host.                                                                                                                              |
+| `Smithers.FindingsError`          | error              | The review completed and at least one finding met the `failOn` threshold.                                                                                                         |
+| `Smithers.LlmReview`              | action             | The one sealed model action reviewing every batch of changed files.                                                                                                               |
+| `Smithers.LlmReviewError`         | error              | A review round failed before producing findings.                                                                                                                                  |
+| `Smithers.LlmReviewLive`          | layer              | Implements `LlmReview` with `git diff` and a model CLI.                                                                                                                           |
+| `Smithers.Clean`                  | rule               | Removes the declared targets' outputs and the named scratch paths, and nothing else.                                                                                              |
+| `Smithers.Dev`                    | rule               | Plans a long-lived development or watch command.                                                                                                                                  |
+| `Smithers.ToolBuild`              | rule               | Runs one arbitrary command for Rust, Zig, native addons, or another toolchain through the shared action.                                                                          |
+| `Smithers.ToolRun`                | rule               | Plans one irreversible external operation.                                                                                                                                        |
+| `Smithers.NodeTest`               | rule               | Runs one declared JavaScript program as a test gate.                                                                                                                              |
+| `Smithers.entrypoint`             | constructor        | Declares a run of one program that gates on its exit code.                                                                                                                        |
+| `Smithers.testRunner`             | constructor        | Declares a run of the runtime's own test runner over the given files.                                                                                                             |
+| `Smithers.testSuite`              | constructor        | Declares a run of the runtime's own test runner over the suites under the given directories.                                                                                      |
+| `Smithers.NodeBinary`             | rule               | Runs one declared JavaScript program under the build verb.                                                                                                                        |
+| `Smithers.CaptureOutputs`         | action             | Digests the declared outputs of a build target.                                                                                                                                   |
+| `Smithers.CaptureOutputsLive`     | layer              | Implements `CaptureOutputs`, resolving declared paths against `workspaceRoot`.                                                                                                    |
+| `Smithers.measureOutput`          | function           | Measures one declared output, or fails with an `OutputError`.                                                                                                                     |
+| `Smithers.OutputError`            | error              | Digesting one declared output failed.                                                                                                                                             |
+| `Smithers.readOutputManifest`     | function           | Reads an untrusted value as the exact output manifest the target declared.                                                                                                        |
+| `Smithers.verifyOutputs`          | function           | Re-measures every declared output and compares it to a manifest.                                                                                                                  |
+| `Smithers.Verb`                   | namespace and type | The CLI verbs a generated pipeline may run across a target graph.                                                                                                                 |
+| `Smithers.RustToolchain`          | namespace and type | Declared Rust toolchains and the argv they install and run cargo with.                                                                                                            |
+| `Smithers.Rust`                   | namespace and type | The workspace Rust surface, `Rust.Toolchain({ workspace, channel })` or `Rust.Toolchain({ toolchain, lockfile })`.                                                                |
+| `Smithers.CiToolchain`            | namespace and type | What one generated CI job requires before its targets run.                                                                                                                        |
+| `Smithers.SecretProxy`            | namespace          | Placeholder minting and outbound secret substitution.                                                                                                                             |
+| `Smithers.Mise`                   | namespace          | mise version authority and pinned binary references.                                                                                                                              |
+| `Smithers.Foundry`                | namespace          | Foundry toolchain plus the `Foundry.Build`, `Foundry.Test`, and `Foundry.Fmt` targets.                                                                                            |
+| `Smithers.Anvil`                  | namespace          | Anvil fork services, `Anvil.Fork`.                                                                                                                                                |
+| `Smithers.Repo`                   | namespace          | Cross-repository target edges into opaque local workspaces, `Repo.Target`.                                                                                                        |
+| `Smithers.Memory`                 | namespace          | The `Memory.Retain` target and the `Memory.SmithersCloud` workspace declaration.                                                                                                  |
+| `Smithers.Bundler`                | namespace          | The bundler surface, `Bundler.Rspack`.                                                                                                                                            |
+| `Smithers.Go`                     | namespace          | Go toolchain and package rules.                                                                                                                                                   |
+| `Smithers.Stamp`                  | namespace          | Late-bound build stamps.                                                                                                                                                          |
+| `Smithers.Nix`                    | namespace          | Nix dev-shell version authority and tools.                                                                                                                                        |
+| `Smithers.Changesets`             | namespace          | Changesets versioning and publishing targets, `Changesets.Version` and `Changesets.Publish`.                                                                                      |
+| `Smithers.Api`                    | namespace          | API-surface checks, `Api.Compat`.                                                                                                                                                 |
+| `Smithers.Size`                   | namespace          | Artifact-size checks, `Size.Budgets`.                                                                                                                                             |
 
 ## Errors
 
 Every tagged error and coded refusal the package defines, with the module each one lives in named in the Sources section. The first nineteen are `Schema.TaggedError` classes or a tagged schema; the last six are `Error` subclasses carrying a `name` and a `code` or a field, not a `_tag`:
 
-| Tag | Raised when | Fields |
-| --- | --- | --- |
-| `smithers-build/AgentSessionError` | An agent execution fails while resolving, diffing, reading, spawning, parsing, applying, gating, settling, or consulting the verdict cache. | `phase`, `message` |
-| `smithers-build/AgentNeedsInput` | A required payload input is missing or invalid, before any session spawn. | `field`, `expected`, `message` |
-| `smithers-build/AgentMcpUnreachable` | A declared MCP server does not answer the reachability precheck, before any session spawn. | `name`, `url`, `message` |
-| `smithers-build/AgentWriteEscape` | A session proposes a write outside its declared write-set. The candidate is rejected whole. | `path`, `writeSet`, `message` |
-| `smithers-build/AgentFindingsError` | A check-mode `Agent.Lint` completes and the agent reports findings. | `findings`, `message` |
-| `smithers-build/AgentRoundsExhausted` | The candidate and gate loop uses `maxRounds` without a green gate set. | `rounds`, `diff`, `gateReport`, `message` |
-| `smithers-build/AgentPrSettleRefused` | An `Agent.Pr` loop converges and the pull-request settle action is not bound. | `diff`, `gateReport`, `message` |
-| `smithers-build/ImportClosureError` | An import closure cannot be resolved: an entry is missing, a file is unreadable, the resolver configuration is invalid, or a bound is hit. | `message` |
-| `smithers-build/FilesTestError` | A file-algebra assertion fails, or cannot be answered completely. | `message`, `leftover`, `unresolved`, `dynamic` |
-| `smithers-build/FilegroupError` | Expanding a group's declared sources fails on a filesystem error. | `message` |
-| `smithers-build/DocsParityError` | A package's documentation is missing or too thin to describe the package. | `path`, `message` |
-| `smithers-build/DriftError` | A checked-in generated file is missing, drifted, or unreadable. | `path`, `message`, `reason` |
-| `smithers-build/WriteFileError` | A generated file cannot be written. | `path`, `message` |
-| `smithers-build/OutputError` | Digesting one declared output fails. | `path`, `message` |
-| `smithers-build/ClaudeCliMissing` | The engine CLI executable is not found on the host. | `executable`, `message` |
-| `smithers-build/LlmReviewError` | A review round fails before producing findings, in the `diff`, `read`, `review`, or `parse` phase. | `phase`, `message` |
-| `smithers-build/FindingsError` | A review completes and at least one finding meets the `failOn` threshold. | `failOn`, `findings` |
-| `smithers-build/NotImplemented` | A catalog stub is executed under a bare Flow runtime instead of the package executor. | `target`, `message` |
-| `smithers-build/ExecError` | A tool run fails. `code` is one of `invalid_payload`, `spawn_failed`, `timed_out`, `signaled`, `stream_failed`, `secret_proxy_failed`, or `exit_status`. | `argv`, `cwd`, `exitCode`, `stdout`, `stderr`, `code`, `signal` |
-| `Refused` | An outward invocation is refused before any outward action, with `code` `missing_secret` or `approval_unsatisfied`. | `code`, `rule` |
-| `PrRefused` | A `Github.Pr` invocation is refused before any provider call, with `code` `missing_token_secret` or `approval_unsatisfied`. | `code` |
-| `SecretUnavailable` | A declared secret has no value on this host. | `env` |
-| `SecretAudienceDenied` | A placeholder is used for an origin the declaration does not authorize. | `env`, `audience` |
-| `SecretValueInvalid` | A host value cannot safely cross an HTTP request boundary. | `env` |
-| `WorkflowParseError` | A workflow file cannot be read as a GitHub Actions workflow. | `line` |
+| Tag                                   | Raised when                                                                                                                                              | Fields                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `smithers-build/AgentSessionError`    | An agent execution fails while resolving, diffing, reading, spawning, parsing, applying, gating, settling, or consulting the verdict cache.              | `phase`, `message`                                              |
+| `smithers-build/AgentNeedsInput`      | A required payload input is missing or invalid, before any session spawn.                                                                                | `field`, `expected`, `message`                                  |
+| `smithers-build/AgentMcpUnreachable`  | A declared MCP server does not answer the reachability precheck, before any session spawn.                                                               | `name`, `url`, `message`                                        |
+| `smithers-build/AgentWriteEscape`     | A session proposes a write outside its declared write-set. The candidate is rejected whole.                                                              | `path`, `writeSet`, `message`                                   |
+| `smithers-build/AgentFindingsError`   | A check-mode `Agent.Lint` completes and the agent reports findings.                                                                                      | `findings`, `message`                                           |
+| `smithers-build/AgentRoundsExhausted` | The candidate and gate loop uses `maxRounds` without a green gate set.                                                                                   | `rounds`, `diff`, `gateReport`, `message`                       |
+| `smithers-build/AgentPrSettleRefused` | An `Agent.Pr` loop converges and the pull-request settle action is not bound.                                                                            | `diff`, `gateReport`, `message`                                 |
+| `smithers-build/ImportClosureError`   | An import closure cannot be resolved: an entry is missing, a file is unreadable, the resolver configuration is invalid, or a bound is hit.               | `message`                                                       |
+| `smithers-build/FilesTestError`       | A file-algebra assertion fails, or cannot be answered completely.                                                                                        | `message`, `leftover`, `unresolved`, `dynamic`                  |
+| `smithers-build/FilegroupError`       | Expanding a group's declared sources fails on a filesystem error.                                                                                        | `message`                                                       |
+| `smithers-build/DocsParityError`      | A package's documentation is missing or too thin to describe the package.                                                                                | `path`, `message`                                               |
+| `smithers-build/DriftError`           | A checked-in generated file is missing, drifted, or unreadable.                                                                                          | `path`, `message`, `reason`                                     |
+| `smithers-build/WriteFileError`       | A generated file cannot be written.                                                                                                                      | `path`, `message`                                               |
+| `smithers-build/OutputError`          | Digesting one declared output fails.                                                                                                                     | `path`, `message`                                               |
+| `smithers-build/ClaudeCliMissing`     | The engine CLI executable is not found on the host.                                                                                                      | `executable`, `message`                                         |
+| `smithers-build/LlmReviewError`       | A review round fails before producing findings, in the `diff`, `read`, `review`, or `parse` phase.                                                       | `phase`, `message`                                              |
+| `smithers-build/FindingsError`        | A review completes and at least one finding meets the `failOn` threshold.                                                                                | `failOn`, `findings`                                            |
+| `smithers-build/NotImplemented`       | A catalog stub is executed under a bare Flow runtime instead of the package executor.                                                                    | `target`, `message`                                             |
+| `smithers-build/ExecError`            | A tool run fails. `code` is one of `invalid_payload`, `spawn_failed`, `timed_out`, `signaled`, `stream_failed`, `secret_proxy_failed`, or `exit_status`. | `argv`, `cwd`, `exitCode`, `stdout`, `stderr`, `code`, `signal` |
+| `Refused`                             | An outward invocation is refused before any outward action, with `code` `missing_secret` or `approval_unsatisfied`.                                      | `code`, `rule`                                                  |
+| `PrRefused`                           | A `Github.Pr` invocation is refused before any provider call, with `code` `missing_token_secret` or `approval_unsatisfied`.                              | `code`                                                          |
+| `SecretUnavailable`                   | A declared secret has no value on this host.                                                                                                             | `env`                                                           |
+| `SecretAudienceDenied`                | A placeholder is used for an origin the declaration does not authorize.                                                                                  | `env`, `audience`                                               |
+| `SecretValueInvalid`                  | A host value cannot safely cross an HTTP request boundary.                                                                                               | `env`                                                           |
+| `WorkflowParseError`                  | A workflow file cannot be read as a GitHub Actions workflow.                                                                                             | `line`                                                          |
 
 ## Example
 
@@ -8202,6 +8206,28 @@ export const Package = Smithers.Package({
 - `packages/smithers/build/targets/src/Target.ts`
 - `packages/smithers/build/targets/src/ToolBuild.ts`
 - `packages/smithers/build/targets/src/WorkspaceDeclaration.ts`
+
+## Build sandbox network policy
+
+Targets default to a closed network. `sandbox: "none"` disables the whole
+sandbox, including its network restriction; `sandbox: { network: false }`
+keeps confinement and denies networking. `{ network: true }` explicitly
+permits full network access. Service consumers must declare either that
+opening or `{ network: "loopback" }`; service dependencies do not open the
+network implicitly. Linux bubblewrap refuses loopback-only access with
+`sandbox_unenforceable`, because sharing host loopback also shares host egress.
+macOS seatbelt supports the loopback policy.
+
+`Exec.toolEnvironment(declared, sensitiveEnv, secretEnv?, base?)` constructs the
+allowlisted child environment shared by execution and cache-key planning.
+Declared values override inherited defaults, cache credentials are withheld,
+and explicitly minted secret placeholders are applied last.
+
+`Smithers.GithubCiGen` groups concurrent runs by pull request number, falling
+back to the commit SHA for other events. With the default
+`cancelInProgress: true`, a new PR run cancels the previous run for that PR;
+each pushed commit retains its own run and verdict. Set
+`cancelInProgress: false` to disable cancellation.
 
 ---
 
@@ -9019,17 +9045,17 @@ const contextWindowTokensFor: (modelId: string) => number
 The context window, in tokens, of a known model id, with a conservative floor
 of 128,000 for models the catalog has not met. Never zero.
 
-| Pattern           | Tokens    |
-| ----------------- | --------- |
-| `claude-opus-5`, `claude-sonnet-5` | 1,000,000 |
-| `claude-fable-5*`, `claude-mythos-5*` (numeric version suffixes) | 1,000,000 |
+| Pattern                                                                      | Tokens    |
+| ---------------------------------------------------------------------------- | --------- |
+| `claude-opus-5`, `claude-sonnet-5`                                           | 1,000,000 |
+| `claude-fable-5*`, `claude-mythos-5*` (numeric version suffixes)             | 1,000,000 |
 | `claude-opus-4-6`, `claude-opus-4-7`, `claude-opus-4-8`, `claude-sonnet-4-6` | 1,000,000 |
-| Other `claude` ids, including Haiku and Bedrock/Vertex-prefixed ids | 200,000 |
-| `gpt-5`           | 400,000   |
-| `gpt-4.1`         | 1,000,000 |
-| `gpt-4o`          | 128,000   |
-| `o1`, `o3`, `o4`  | 200,000   |
-| anything else     | 128,000   |
+| Other `claude` ids, including Haiku and Bedrock/Vertex-prefixed ids          | 200,000   |
+| `gpt-5`                                                                      | 400,000   |
+| `gpt-4.1`                                                                    | 1,000,000 |
+| `gpt-4o`                                                                     | 128,000   |
+| `o1`, `o3`, `o4`                                                             | 200,000   |
+| anything else                                                                | 128,000   |
 
 ## QuotaPolicy
 
@@ -10794,6 +10820,8 @@ https://smithers.sh/docs/reference/api/capability/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/capability/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/capability/docs/api.md) · [package docs](https://capability.smithers.sh)
 
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/)
+
 `@smthrs/capability` exports two modules from its root entry point, and each is
 also importable from `@smthrs/capability/<Module>`:
 
@@ -12370,16 +12398,18 @@ Interactive terminal rendering, with a plain-line fallback.
 | `Spinner` | interface | `start`, `message`, `stop`, `cancel`, `error`. Imperative by nature; the Effect boundary sits around the whole span. |
 | `StreamOptions`, `Streamed` | interfaces | How a streamed list is labelled and settled, and what the scan produced. |
 | `PickOptions`, `ConfirmOptions` | interfaces | How a pick and a confirmation are presented. `ConfirmOptions.nonInteractive` is required, because the safe answer differs per question. |
-| `Service` | interface | `interactive`, `intro`, `outro`, `note`, `info`, `success`, `step`, `warn`, `error`, `checklist`, `spinner`, `streamSuggestions`, `pickSuggestion`, `confirm`. |
+| `Service` | interface | `interactive`, `text`, `intro`, `outro`, `note`, `info`, `success`, `step`, `warn`, `error`, `checklist`, `spinner`, `streamSuggestions`, `pickSuggestion`, `confirm`. |
 | `Ui` | `Context.Service` | The service key, `/cli/Ui`. |
 | `Options` | `{ output, input?, interactive }` | The streams and the interactivity decision one service is built on. |
 | `isInteractive` | `(output, input, environment) => boolean` | Both streams are terminals, `CI` is not `"true"`, and `TERM` is not `dumb`. |
 | `make` | `(options: Options) => Service` | Builds a service on explicit streams. |
 | `layer` | `(environment) => Layer<Ui>` | Builds one on the process streams. |
+| `prompting` | `Effect<Service>` | Uses a supplied service, or prompts on stderr whenever stdin is a terminal, keeping stdout available for documents. |
 | `current` | `Effect<Service>` | The provided service, or a fallback on the process streams. |
 | `renderChecklist` | `(title, checks, { interactive, columns? }) => string` | The pure checklist rendering `smthrs doctor` prints. Non-interactive output is byte-identical to `Doctor.render`. |
 
-A cancelled `pickSuggestion` is `None` and a cancelled `confirm` is `false`.
+A cancelled `text` or `pickSuggestion` is `None` and a cancelled `confirm` is `false`.
+`text` requires a nonblank value; in a non-interactive session it returns `None` without reading stdin.
 Neither sets exit 130, because a Ctrl+C inside a raw-mode prompt is a keypress,
 not a signal.
 
@@ -12645,7 +12675,7 @@ Retention.
 | `Legacy` | `read(path)` opens a 0.x `smithers.db` read-only; `refusal(databases)` is the sentence that names its non-terminal runs; `terminalStatuses` is the vocabulary it counts against. |
 | `ClaudeMirror` | The Claude Code plugin mirror protocol: `contract`, `subscriptionsPath`, `subscriptionTtlMs`, `Subscription`, `readSubscriptions`, `subscribe`, `unsubscribe`, `MirrorNode`, `Frame`, `frame`, `defaultMaxOutputChars`, `terminalStatuses`, `isTerminal`, `Transition`, `notableKinds`, `transition`. |
 | `CodexAuth` | Locates and refreshes the Codex credential store: `refreshUrl`, `clientId`, `locate`, `parse`, `Store`, `MakeOptions`, `make`. |
-| `Update` | `packageName`, `registryUrl`, `Status`, `isNewer`, `compare(current, tags)`, `render(status)`. Compares the installed version against the `rc` and `latest` dist-tags and prints the install line. It changes nothing. |
+| `Update` | `packageName`, `registryUrl`, `Status`, `isNewer`, `compare(current, tags)`, `render(status)`. Compares the installed version against the `next` and `latest` dist-tags and prints the install line. It changes nothing. |
 | `Bug` | `defaultEndpoint`, `timeoutMs`, `scrubText`, `scrub`, `Report`, `report`. Everything collected takes the journal's redaction rules before it leaves the machine, and a value carrying a callable, a proxy, or a `toJSON` member is refused rather than rendered. |
 | `Version` | `packageVersion`, read from the shipped manifest. The module throws at import when the manifest declares no version, because printing `undefined` to an operator is worse than refusing to start. |
 
@@ -17911,7 +17941,7 @@ const defaultLimits: ResolvedLimits
 | `provider`    | `Sandbox.Provider` | required        | The provider that provisions the machine. A value, never a name.                                                                                                                                                               |
 | `session`     | `string`           | required        | The session key the machine is acquired under. An exclusive claim: two live executions with one key share a machine, and the first to finish tears it down under the other. Reusing a key is what resume looks like.           |
 | `entry`       | `URL \| string`    | required        | The module to bundle: a `file:` URL or an absolute path. It must export the flow being executed, under any name, and may export `layer`, an Effect `Layer` providing the implementations of the actions the flow's body names. |
-| `runtime`     | `string`           | `"node"`        | The guest command that runs the bundle. `"bun"` or any command line the guest shell resolves also works; the bundle path is appended, quoted.                                                                                  |
+| `runtime`     | `string`           | `"node"`        | The guest executable that runs the bundle: `"node"`, `"bun"`, or an executable path. Each path is quoted as one shell word. Use a wrapper script for flags.                                                                    |
 | `collectDiff` | `boolean`          | `false`         | Whether to collect the files the guest created or resized.                                                                                                                                                                     |
 | `limits`      | `Limits`           | `defaultLimits` | Bounds on the result and the diff.                                                                                                                                                                                             |
 | `timeout`     | `Duration.Input`   | 10 minutes      | The wall-clock budget for the whole session, acquisition through result readback. Measured on the platform timer, so it fires under a frozen test clock too.                                                                   |
@@ -18971,7 +19001,7 @@ https://smithers.sh/docs/reference/api/harness/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/agent/harness/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/harness/docs/api.md) · [package docs](https://harness.smithers.sh)
 
-> **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/model`](/docs/reference/api/model/) · [`@smthrs/notifications`](/docs/reference/api/notifications/) · [`@smthrs/registry`](/docs/reference/api/registry/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/model`](/docs/reference/api/model/) · [`@smthrs/notifications`](/docs/reference/api/notifications/) · [`@smthrs/registry`](/docs/reference/api/registry/)
 
 `@smthrs/harness` is the built-in agent loop, expressed as pure translation
 plus a small set of service ports. It holds no scheduler, no database, no
@@ -19016,8 +19046,8 @@ behavior and signatures.
 | `Plan`                       | `Child`, `Batch`, `ChildResult`, `ChildProgress`, `ChildSettled`, `SpliceEvent`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Local structural plan nodes used at the harness-to-engine boundary.                                      |
 | `EngineLike`                 | `SuspendReasonCode`, `SuspendReason`, `SealedModelStep`, `BoundaryIdentity`, `DurableSchema`, `RecordBoundary`, `Observation`, `Snapshot`, `CaptureRequest`, `EngineLike`, `make`, `layer`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                                                                                                                                     | Narrow engine port consumed by the built-in harness.                                                     |
 | `Tokens`                     | `Count`, `Segment`, `Accounting`, `Estimator`, `estimate`, `count`, `combine`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Deterministic token accounting for context windows.                                                      |
-| `ContextWindow`              | `TypeId`, `SegmentKind`, `SegmentZone`, `Content`, `ContextWindowErrorCode`, `ContextWindowError`, `Segment`, `ContextWindow`, `SegmentInput`, `MakeOptions`, `makeSegment`, `make`, `empty`, `appendTurn`, `activateTools`, `prefixDigest`, `compactPrefix`, `compact`, `render`, `contextWindowTokensFor`                                                                                                                                                                                                                                                                                                                       | The immutable, provider-neutral context assembled for one model request.                                 |
-| `Transcript`                 | `journalVersion`, `validateJournal`, `TranscriptErrorCode`, `TranscriptError`, `ProjectedMessage`, `ProjectedState`, `CellEvidence`, `projectStateResult`, `projectResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Transcript projection from durable journal entries.                                                      |
+| `ContextWindow`              | `TypeId`, `SegmentKind`, `SegmentZone`, `Content`, `ContextWindowErrorCode`, `ContextWindowError`, `Segment`, `ContextWindow`, `SegmentInput`, `MakeOptions`, `makeSegment`, `make`, `empty`, `appendTurn`, `activateTools`, `prefixDigest`, `compactPrefix`, `compact`, `render`, `contextWindowTokensFor`                                                                                                                                                                                                                                                                                             | The immutable, provider-neutral context assembled for one model request.                                 |
+| `Transcript`                 | `journalVersion`, `validateJournal`, `TranscriptErrorCode`, `TranscriptError`, `ProjectedMessage`, `ProjectedState`, `CellEvidence`, `projectStateResult`, `projectResult`                                                                                                                                                                                                                                                                                                                                                                                                                              | Transcript projection from durable journal entries.                                                      |
 | `Compaction`                 | `summaryInstruction`, `InvalidStep`, `Summarizer`, `CompactionStep`, `TokenAccounting`, `shouldCompact`, `selectPrefix`, `declare`, `summaryRequest`, `apply`                                                                                                                                                                                                                                                                                                                                                                                                                                           | Declarations for sealed transcript-summary steps.                                                        |
 | `Steering`                   | `Delivery`, `SteerInsert`, `QueueInsert`, `Insert`, `SeatChange`, `ThinkingChange`, `ActivateTools`, `Item`, `Queue`, `Drain`, `BoundaryInput`, `DrainRecord`, `drainRecord`, `PromotionState`, `empty`, `enqueue`, `drainAtClose`, `promoteAtIdle`, `Source`, `SourceInput`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                                                                                                                                                                                  | Turn-boundary steering values and their source contract.                                                 |
 | `Notifications`              | `Options`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Adapter from the durable notification queue to harness turn boundaries.                                  |
@@ -19067,14 +19097,14 @@ the interrupted call itself.
 any single ceiling; the others keep their defaults, so a partial override cannot
 disable them.
 
-| Limit         | Default | Scope       | What it bounds                                                                                                   |
-| ------------- | ------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `calls`       | 64      | per frame   | Flow calls one cell may make. A `ctx.checkpoint()` mint settles on the same channel and counts.                  |
-| `memoryBytes` | 128 MiB | per **run** | What the realm's own names hold, weighed by the panel probe at each frame's close.                               |
-| `steps`       | 1,000   | per frame   | Interrupt checks, not bytecode operations. At least `Sandbox.minimumSteps`.                                      |
+| Limit         | Default | Scope       | What it bounds                                                                                                                         |
+| ------------- | ------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `calls`       | 64      | per frame   | Flow calls one cell may make. A `ctx.checkpoint()` mint settles on the same channel and counts.                                        |
+| `memoryBytes` | 128 MiB | per **run** | What the realm's own names hold, weighed by the panel probe at each frame's close.                                                     |
+| `steps`       | 1,000   | per frame   | Interrupt checks, not bytecode operations. At least `Sandbox.minimumSteps`.                                                            |
 | `timeMs`      | 30,000  | per frame   | The cell's own JavaScript time. Time suspended in a `ctx.call` or `ctx.checkpoint()` does not count. At least `Sandbox.minimumTimeMs`. |
-| `totalMs`     | 900,000 | per frame   | Whole-evaluation time, host calls included. The backstop for a call that never settles.                          |
-| `callMs`      | 120,000 | per call    | Wall-clock time one flow call may take before it settles as a catchable timeout.                                 |
+| `totalMs`     | 900,000 | per frame   | Whole-evaluation time, host calls included. The backstop for a call that never settles.                                                |
+| `callMs`      | 120,000 | per call    | Wall-clock time one flow call may take before it settles as a catchable timeout.                                                       |
 
 `memoryBytes` is a run budget rather than a frame budget because a realm outlives
 its frames. `runtime.setMemoryLimit` covers the object graph but does not count
@@ -19810,8 +19840,7 @@ invoking a model; `summaryRequest` builds the model request input for the
 step, with `summaryInstruction` as its stable instruction; and `apply`
 splices a recorded summary into a projected window, failing with
 `InvalidStep` when the declaration does not match the window it is applied
-to. Summary segments render as user messages, including summaries replayed
-from older records, so compaction cannot create an assistant-first request.
+to.
 
 ## Plan
 
@@ -19954,7 +19983,7 @@ https://smithers.sh/docs/reference/api/integrations/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/agent/integrations/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/integrations/docs/api.md) · [package docs](https://integrations.smithers.sh)
 
-> **Related APIs:** [`@smthrs/control`](/docs/reference/api/control/) · [`@smthrs/database`](/docs/reference/api/database/) · [`@smthrs/errors`](/docs/reference/api/errors/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/notifications`](/docs/reference/api/notifications/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/control`](/docs/reference/api/control/) · [`@smthrs/database`](/docs/reference/api/database/) · [`@smthrs/errors`](/docs/reference/api/errors/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/notifications`](/docs/reference/api/notifications/)
 
 The package exports four namespaces from the aggregate entry point
 `@smthrs/integrations` and from the per-provider subpaths
@@ -20635,7 +20664,7 @@ https://smithers.sh/docs/reference/api/jj/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/jj/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/docs/api.md) · [package docs](https://jj.smithers.sh)
 
-> **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/capability`](/docs/reference/api/capability/)
 
 One program, three layers. The body never changes; the import at the top decides
 which adapter runs it.
@@ -20755,16 +20784,16 @@ Both optional operations are capability-checked like every other one:
 
 ### Failures
 
-| Export                | Signature                                                                                                              | Meaning                                                                                                                  |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unsupported_version", "unknown"]>` and the type                                | The closed reason vocabulary.                                                                                            |
-| `JjError`             | `class JjError` with `_tag` `"@smthrs/jj/JjError"`                                                                     | A jj failure, shaped after `effect/PlatformError`.                                                                       |
-| `jjError(options)`    | `(options: { code: JjErrorCode; module?: string; method: string; description?: string; command?: string }) => JjError` | Composes the human message from the code, the failing `module.method`, and the description. `module` defaults to `"Jj"`. |
-| `isJjError(error)`    | `(error: unknown) => error is JjError`                                                                                 | Tells "jj said no" from "the capability kernel said no" without matching `_tag` by hand.                                 |
-| `JjFailure`           | `type JjFailure = JjError \| Permission.PermissionError`                                                               | Everything a `Jj` operation can fail with.                                                                               |
-| `JjErrorCause`        | `Schema.Struct<{ name?: string; code?: string; message: string }>` and the type                                        | The plain-data projection of an underlying host failure.                                                                 |
-| `jjErrorCause(cause)` | `(cause: unknown) => JjErrorCause`                                                                                     | Projects an arbitrary host failure onto that shape, truncating each field to fit.                                        |
-| `causeMessageLimit`   | `1024`                                                                                                                 | How many characters each string in a `JjErrorCause` keeps.                                                               |
+| Export                | Signature                                                                                                                          | Meaning                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unsupported_version", "unknown"]>` and the type | The closed reason vocabulary.                                                                                            |
+| `JjError`             | `class JjError` with `_tag` `"@smthrs/jj/JjError"`                                                                                 | A jj failure, shaped after `effect/PlatformError`.                                                                       |
+| `jjError(options)`    | `(options: { code: JjErrorCode; module?: string; method: string; description?: string; command?: string }) => JjError`             | Composes the human message from the code, the failing `module.method`, and the description. `module` defaults to `"Jj"`. |
+| `isJjError(error)`    | `(error: unknown) => error is JjError`                                                                                             | Tells "jj said no" from "the capability kernel said no" without matching `_tag` by hand.                                 |
+| `JjFailure`           | `type JjFailure = JjError \| Permission.PermissionError`                                                                           | Everything a `Jj` operation can fail with.                                                                               |
+| `JjErrorCause`        | `Schema.Struct<{ name?: string; code?: string; message: string }>` and the type                                                    | The plain-data projection of an underlying host failure.                                                                 |
+| `jjErrorCause(cause)` | `(cause: unknown) => JjErrorCause`                                                                                                 | Projects an arbitrary host failure onto that shape, truncating each field to fit.                                        |
+| `causeMessageLimit`   | `1024`                                                                                                                             | How many characters each string in a `JjErrorCause` keeps.                                                               |
 
 `JjError` carries a stable `code`, the `module` and `method` that failed, a
 human `message`, the `command` that produced it, and an optional `cause`.
@@ -20798,10 +20827,10 @@ bundles for the browser; each implementation is imported from its own subpath.
 `NodeJj` shells out to the `jj` CLI with argv arrays and never a shell string.
 It ships four layers, and they differ along two axes.
 
-| Export                           | Signature                                                           | Process ownership | Repository      |
-| -------------------------------- | ------------------------------------------------------------------- | ----------------- | --------------- |
-| `layer`                          | `Layer<Jj, JjError>`                                                         | Its own child     | The process cwd |
-| `layerAt(repositoryRoot)`        | `(repositoryRoot: string) => Layer<Jj, JjError>`                             | Its own child     | Bound, absolute |
+| Export                           | Signature                                                             | Process ownership | Repository      |
+| -------------------------------- | --------------------------------------------------------------------- | ----------------- | --------------- |
+| `layer`                          | `Layer<Jj, JjError>`                                                  | Its own child     | The process cwd |
+| `layerAt(repositoryRoot)`        | `(repositoryRoot: string) => Layer<Jj, JjError>`                      | Its own child     | Bound, absolute |
 | `layerSpawner`                   | `Layer<Jj, JjError, ChildProcessSpawner>`                             | The host spawner  | The process cwd |
 | `layerSpawnerAt(repositoryRoot)` | `(repositoryRoot: string) => Layer<Jj, JjError, ChildProcessSpawner>` | The host spawner  | Bound, absolute |
 
@@ -20843,10 +20872,16 @@ empty strings, leading `-`, quotes, and newlines. Node and Bun pass messages as
 values are not interpreted as CLI flags.
 
 Node and Bun require **jj 0.39.0 or newer**, pinned by the exported
-`NodeJj.minimumVersion` constant. Each layer build probes `jj --version` once
-through its own process runner before exposing `Jj`. An older or unrecognized
-version fails construction with `JjError.code = "unsupported_version"` and the
-required minimum; a missing binary fails construction with `not_installed`.
+`NodeJj.minimumVersion` constant. Before exposing `Jj`, all CLI layers await a
+local `jj --version` probe through `node:child_process`, outside the host's
+process spawner and crash-reaping journal. The probe does not use or require the
+repository directory: bound layers can be built before runtime storage creates
+that directory. Repository operations still require a valid working directory.
+Concurrent and subsequent layer builds share the probe result per resolved
+executable path for the lifetime of the process. Restart the process after replacing a binary at the same path.
+Repository commands still use the layer's chosen process runner. An older or
+unrecognized version fails construction with `JjError.code = "unsupported_version"`
+and the required minimum; a missing binary fails construction with `not_installed`.
 All four CLI layers therefore have `JjError` in their layer error channel.
 
 Node and Bun repository commands (except `root`) disable jj's default new-file size limit with
@@ -20966,7 +21001,7 @@ because the frozen wasm ABI has no field for them:
 - `root(from)` answers the configured slice root, and fails when `from` is not
   inside it rather than answering for an unrelated tree.
 
-Every other divergence, including auto-initialization and symlink degradation,
+Every other divergence, including initialization and symlink degradation,
 is in [Run jj in a browser tab](https://jj.smithers.sh/guides/run-jj-in-a-browser/#where-the-wasm-backend-answers-differently).
 
 ### @smthrs/jj/browser/WasiPreview1
@@ -21068,6 +21103,14 @@ with capability checks, and [`@smthrs/time-travel`](/docs/reference/api/time-tra
 workspace snapshot and restore. See also
 [Capabilities and the host kernel](/docs/concepts/kernel/) and
 [Time travel](/docs/concepts/time-travel/).
+
+BrowserJj status, diff, and restore refuse missing repositories with typed
+`unknown` failures and never initialize them. Snapshot explicitly invokes the
+wasm `init` operation if the repository is absent.
+The published package includes a generated Rust dependency inventory in
+`THIRD_PARTY_NOTICES.md`. Maintainers regenerate it from the locked wasm Cargo
+graph with `node scripts/generate-third-party-notices.mjs`; Rust CI runs the
+script with `--check` to reject attribution drift.
 
 ---
 
@@ -21564,7 +21607,6 @@ caller who disables redaction.
 - [`@smthrs/chain`](/docs/reference/api/chain/) has a journal of its own with a different
   contract; see [the chain journal](https://chain.smithers.sh/concepts/journal/).
 
-
 ### Journal generations
 
 `Journal.Service.generation?(runId)` returns an Effect of
@@ -21573,7 +21615,6 @@ Append-only adapters may omit it (generation zero). A truncating adapter must
 advance it atomically with truncation so followers detect reused sequences.
 `SqlJournal.layer` persists it in `flows_journal_generations`, installed through
 `JournalGeneration.initialize`; a fresh run reports `{ generation: 0, afterSeq: -1 }`.
-
 
 `JournalGeneration.forget(runIds)` invalidates live journal source identities and
 allocation floors after a committed truncation, for every journal sharing the
@@ -22955,7 +22996,7 @@ https://smithers.sh/docs/reference/api/mcp/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/mcp/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/mcp/docs/api.md) · [package docs](https://mcp.smithers.sh)
 
-> **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/harness`](/docs/reference/api/harness/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/registry`](/docs/reference/api/registry/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/harness`](/docs/reference/api/harness/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/registry`](/docs/reference/api/registry/)
 
 `@smthrs/mcp` exports three modules from its root entry point, and each is also
 importable from `@smthrs/mcp/<Module>`:
@@ -25258,7 +25299,7 @@ https://smithers.sh/docs/reference/api/model/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/agent/model/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/model/docs/api.md) · [package docs](https://model.smithers.sh)
 
-> **Related APIs:** [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/kernel`](/docs/reference/api/kernel/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/kernel`](/docs/reference/api/kernel/)
 
 A model call is one composition: a `Protocol` owns the wire shape of an API
 family, an `Endpoint` owns where to send it, an `Auth` owns the credential,
@@ -26751,7 +26792,7 @@ https://smithers.sh/docs/reference/api/patterns/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/patterns/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/patterns/docs/api.md) · [package docs](https://patterns.smithers.sh)
 
-> **Related APIs:** [`@smthrs/core`](/docs/reference/api/core/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/core`](/docs/reference/api/core/)
 
 This page is the public API reference for the higher-order flow patterns:
 decorators that wrap one flow, and containers that compose several. The package
@@ -27027,7 +27068,7 @@ https://smithers.sh/docs/reference/api/plan/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/plan/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/docs/api.md) · [package docs](https://plan.smithers.sh)
 
-> **Related APIs:** [`@smthrs/crypto`](/docs/reference/api/crypto/) · [`@smthrs/database`](/docs/reference/api/database/) · [`@smthrs/keys`](/docs/reference/api/keys/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/crypto`](/docs/reference/api/crypto/) · [`@smthrs/database`](/docs/reference/api/database/) · [`@smthrs/keys`](/docs/reference/api/keys/)
 
 `@smthrs/plan` exports ten modules from its root entry point, and each is also
 importable from `@smthrs/plan/<Module>`:
@@ -28227,7 +28268,7 @@ double.
 marked, for [`@smthrs/kernel`](/docs/reference/api/kernel/), as a volume that cannot address any
 path outside itself, which is what lets the guarded surface resolve paths
 directly rather than through descriptor-relative operations. A mounted ZenFS
-volume satisfies that. A host-backed `node:fs/promises` does not, so passing one
+volume satisfies that only when its workspace occupies the whole mount. A host-backed `node:fs/promises` does not, so passing one
 is a test-time convenience for a process that is itself the sandbox, never a
 production composition. `BrowserFileSystem.make` builds the same service without
 the claim.
@@ -28237,10 +28278,10 @@ the claim.
 `BrowserFileSystem.make` wires up `readFile`, `readFileString`, `writeFile`,
 `writeFileString`, `stream`, `makeDirectory`, `readDirectory`, `stat`,
 `realPath`, `remove`, `access`, and `exists`. Everything else keeps
-`FileSystem.makeNoop`'s behaviour: a `NotFound` failure. That is the honest
+a typed `PermissionDenied` failure naming the unsupported operation. That is the honest
 answer for a backend with no symlink creation, writable handles, or watchers:
 `chmod`, `chown`, `copy`, `copyFile`, `glob`, `link`, `symlink`, `readLink`,
-`open`, `rename`, `sink`, `truncate`, `utimes`, `watch`, and the `makeTemp*`
+`open`, `sink`, `truncate`, `watch`, and the `makeTemp*`
 family fail rather than pretend to have succeeded. `sink` is in that list because
 the slice has no writable file handle to append through, so its incremental
 contract cannot be honoured. Each gap that turns out to matter becomes a ticket,
@@ -28253,16 +28294,16 @@ that plainly exist.
 
 The operations that are served honour their options rather than dropping them.
 
-| Option                                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `readDirectory({ recursive })`               | walked here, because the slice has no recursive `readdir`; entries come back as `parent/child` the way Node reports them, and a symlinked directory is listed but not descended into when the backend can `lstat`. A backend supplying neither `lstat` nor `realpath` follows a directory link forever, so that walk alone is capped at 128 levels and refuses a deeper tree; a backend with either member is walked to whatever depth the tree has                                                                                                                                        |
-| `access({ readable, writable })`             | answered from the reported `mode` bits, since a mounted volume has no user identity to check against; a path that exists without the requested permission fails `PermissionDenied`                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `access({ ok })`                             | the existence check a bare `access` already performs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `makeDirectory({ mode })`                    | forwarded, so a directory asked for as `0o700` is not created `0o755`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `realPath`                                   | canonicalized: symlinks are followed when the backend has its own `realpath`, and a `..` after a link names the parent of the link's target the way POSIX names it rather than being collapsed lexically before the link is followed. Without that member the answer is lexical, so a link resolves to its own name. This is load-bearing: `@smthrs/kernel` resolves every guarded path through `realPath` before checking the grant, and its `readLink` route is refused here, so a volume that can hold symlinks must supply `realpath` or the boundary is naming rather than resolution |
-| `writeFile({ flag, mode })`                  | forwarded, so `{ flag: "a" }` appends instead of silently truncating and `{ flag: "wx" }` fails `AlreadyExists`                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `exists`                                     | `false` only for a path that is absent; every other backend failure propagates, so a refusal to look is not reported as absence                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `stream({ offset, bytesToRead, chunkSize })` | honoured, and refused when they are not whole byte counts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Option                                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `readDirectory({ recursive })`               | walked here, because the slice has no recursive `readdir`; entries come back as `parent/child` the way Node reports them, and a symlinked directory is listed but not descended into when the backend can `lstat`. A backend supplying neither `lstat` nor `realpath` follows a directory link forever, so that walk alone is capped at 128 levels and refuses a deeper tree; a backend with either member is walked to whatever depth the tree has |
+| `access({ readable, writable })`             | answered from the reported `mode` bits, since a mounted volume has no user identity to check against; a path that exists without the requested permission fails `PermissionDenied`                                                                                                                                                                                                                                                                  |
+| `access({ ok })`                             | the existence check a bare `access` already performs                                                                                                                                                                                                                                                                                                                                                                                                |
+| `makeDirectory({ mode })`                    | forwarded, so a directory asked for as `0o700` is not created `0o755`                                                                                                                                                                                                                                                                                                                                                                               |
+| `realPath`                                   | Uses backend `realpath`, preserving symlink resolution order. Fails with `PermissionDenied` when unavailable.                                                                                                                                                                                                                                                                                                                                       |
+| `writeFile({ flag, mode })`                  | forwarded, so `{ flag: "a" }` appends instead of silently truncating and `{ flag: "wx" }` fails `AlreadyExists`                                                                                                                                                                                                                                                                                                                                     |
+| `exists`                                     | `false` only for a path that is absent; every other backend failure propagates, so a refusal to look is not reported as absence                                                                                                                                                                                                                                                                                                                     |
+| `stream({ offset, bytesToRead, chunkSize })` | honoured, and refused when they are not whole byte counts                                                                                                                                                                                                                                                                                                                                                                                           |
 
 Bytes and names cross the backend boundary by value. `writeFile` copies
 `data` and reads `flag` and `mode` when it is called, so the effect it returns
@@ -28350,6 +28391,16 @@ See [platform support](/docs/reference/api/#platform-support), the
 [`@smthrs/kernel` reference](/docs/reference/api/kernel/), whose closed service list this
 package's `BrowserHost` bundle fills, and
 [Capabilities and the host kernel](/docs/concepts/kernel/).
+
+Publication delegates `rename` and `utimes` to the mounted backend. If either
+method is absent, that operation fails with `PermissionDenied`. `realPath`
+requires backend `realpath`; it never silently normalizes lexically.
+The isolation layer requires workspace root `/` and fails typed otherwise.
+
+The memory engine, adapters, and kernel can run in a tab. The durable engine
+cannot: the shipped SqlClient uses `node:sqlite`, and NodeRuntime is Node-only.
+BrowserHost exposes only `layer`; supply browser Crypto separately for hashing.
+Opaque redirects are returned as successful HTTP responses with status 0.
 
 ---
 
@@ -28929,7 +28980,7 @@ https://smithers.sh/docs/reference/api/plugin/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/agent/plugin/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/plugin/docs/api.md) · [package docs](https://plugin.smithers.sh)
 
-> **Related APIs:** [`@smthrs/flow`](/docs/reference/api/flow/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/flow`](/docs/reference/api/flow/)
 
 Import the declarations from the root and the four stateful modules either as
 namespaces from the root or from their own subpaths:
@@ -31828,11 +31879,6 @@ https://smithers.sh/docs/reference/api/scorers/
 
 > **Related APIs:** [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/database`](/docs/reference/api/database/)
 
-## Availability
-
-`@smthrs/scorers` is a private workspace package for the 1.0.0-rc.0 release.
-Only code in this workspace may consume it. Do not install this package from npm.
-
 `@smthrs/scorers` declares scorers, attaches them to target flows, decides
 replay-stable sampling, and persists the resulting observations. It does not
 decide what to score or when: [`@smthrs/evals`](/docs/reference/api/evals/) does that and is
@@ -33292,7 +33338,6 @@ released afterwards, and soaks 200 five-subscriber rounds under a retained-heap
 budget. A regression that retains per-subscriber state passes every frame
 assertion in the other suites, so these are the tests that see it.
 
-
 ### Rewind generations
 
 `ReadRequest` and `SubscribeRequest` carry `protocolVersion: 1`. The server
@@ -33316,7 +33361,7 @@ https://smithers.sh/docs/reference/api/testing/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/testing/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/testing/docs/api.md) · [package docs](https://testing.smithers.sh)
 
-> **Related APIs:** [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/engine`](/docs/reference/api/engine/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/jj`](/docs/reference/api/jj/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/model`](/docs/reference/api/model/) · [`@smthrs/plan`](/docs/reference/api/plan/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/engine`](/docs/reference/api/engine/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/jj`](/docs/reference/api/jj/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/model`](/docs/reference/api/model/) · [`@smthrs/plan`](/docs/reference/api/plan/)
 
 `@smthrs/testing` exports twenty modules from its root entry point, and each is
 also importable from `@smthrs/testing/<Module>`:
@@ -35278,22 +35323,22 @@ so a caller that branches on it gets the same answer from either.
 
 ### Service
 
-| Method                                                            | What it does                                                                                                                                                             |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `snapshotAt(runId, frame)`                                        | The tier-2 anchor recorded at a frame, or `undefined`.                                                                                                                   |
-| `recordSnapshot(snapshot)`                                        | Records one anchor. Written by the snapshot projector, never by a caller.                                                                                                |
-| `stateAt(runId, frame)`                                           | The run state **at** a frame as encoded JSON, derived by replaying the run-decision records, not read off the run row's latest state.                                    |
-| `attemptsAt(runId, frame)`                                        | The attempts that had been admitted at a frame, derived the same way.                                                                                                    |
-| `descendants(runId, frame)`                                       | The lineage edges hanging off this run at or after a frame, split into attached and detached.                                                                            |
-| `writeAudit(audit)`                                               | Opens the audit trail for a rewind, before anything is compensated or truncated.                                                                                         |
-| `updateAudit(id, patch)`                                          | Advances an open audit row. Any key outside `AuditPatch` is refused `invalid`.                                                                                           |
-| `pendingAudits()`                                                 | Every audit row still `in_progress`. Recovery drains this on layer build.                                                                                                |
+| Method                                                            | What it does                                                                                                                                                                                                                                           |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `snapshotAt(runId, frame)`                                        | The tier-2 anchor recorded at a frame, or `undefined`.                                                                                                                                                                                                 |
+| `recordSnapshot(snapshot)`                                        | Records one anchor. Written by the snapshot projector, never by a caller.                                                                                                                                                                              |
+| `stateAt(runId, frame)`                                           | The run state **at** a frame as encoded JSON, derived by replaying the run-decision records, not read off the run row's latest state.                                                                                                                  |
+| `attemptsAt(runId, frame)`                                        | The attempts that had been admitted at a frame, derived the same way.                                                                                                                                                                                  |
+| `descendants(runId, frame)`                                       | The lineage edges hanging off this run at or after a frame, split into attached and detached.                                                                                                                                                          |
+| `writeAudit(audit)`                                               | Opens the audit trail for a rewind, before anything is compensated or truncated.                                                                                                                                                                       |
+| `updateAudit(id, patch)`                                          | Advances an open audit row. Any key outside `AuditPatch` is refused `invalid`.                                                                                                                                                                         |
+| `pendingAudits()`                                                 | Every audit row still `in_progress`. Recovery drains this on layer build.                                                                                                                                                                              |
 | `archiveAndTruncate(runId, frame, receipts, owner, childOwners?)` | Truncates a run back to a frame, archiving rather than deleting, removes deferred completions and clock deadlines named by the archived records, and persists the receipts. Fenced on the caller's ownership and on every non-terminal attached child. |
-| `archivedAt(runId, seq)`                                          | Whether the archive holds a record at that coordinate. Recovery's commit-point evidence.                                                                                 |
-| `nextForkId(parentRunId, frame)`                                  | Mints and durably reserves the run id the next fork off that frame will carry, without creating a run.                                                                   |
-| `abandonForkIntents(staleBeforeMs)`                               | Every reservation older than `staleBeforeMs` whose fork never committed, handed back exactly once.                                                                       |
-| `createFork(parentRunId, frame, childRunId?)`                     | Branches a new run off a frame, copying the journal prefix and the attempts that existed there, and recording the `fork` edge. The parent is untouched.                  |
-| `recordReceipt(receipt)`                                          | Persists one compensation receipt against its audit row, before the journal range that effect belongs to is truncated.                                                   |
+| `archivedAt(runId, seq)`                                          | Whether the archive holds a record at that coordinate. Recovery's commit-point evidence.                                                                                                                                                               |
+| `nextForkId(parentRunId, frame)`                                  | Mints and durably reserves the run id the next fork off that frame will carry, without creating a run.                                                                                                                                                 |
+| `abandonForkIntents(staleBeforeMs)`                               | Every reservation older than `staleBeforeMs` whose fork never committed, handed back exactly once.                                                                                                                                                     |
+| `createFork(parentRunId, frame, childRunId?)`                     | Branches a new run off a frame, copying the journal prefix and the attempts that existed there, and recording the `fork` edge. The parent is untouched.                                                                                                |
+| `recordReceipt(receipt)`                                          | Persists one compensation receipt against its audit row, before the journal range that effect belongs to is truncated.                                                                                                                                 |
 
 Every method fails as `TimeTravelError`.
 
@@ -35492,8 +35537,6 @@ another implementation left behind; an effect that recorded none resolves by
 effect that recorded no key, a custom `assess` result is decoded against
 `Assessment` and assesses `blocking` when it does not decode, and a rollback
 refuses a receipt whose tier or descriptor the handler does not match.
-
-
 
 After a successful archive transaction, `SqlTimeTravelStore.archiveAndTruncate`
 invalidates cached journal identities and allocation floors for the parent and
@@ -37921,6 +37964,8 @@ Flow ids that start with `system/` are reserved for the control plane and carry 
 smthrs plan system/replay: system/replay is a reserved system flow id and carries no body in 1.0.0-rc.0, so a launch would park with nothing to run. Name a flow from `smthrs ls`. See https://smithers.sh/migration/1.0#flows
 ```
 
+Omitting the flow with terminal stdin opens the discovered flow picker. With piped stdin, the command exits 2 and names the missing argument and `--wizard`.
+
 ## Arguments
 
 | Name | Type | Required | Description |
@@ -38436,6 +38481,8 @@ smthrs up <flow> [--data <json>] [-d]
 
 Flow ids that start with `system/` are reserved and refused with exit 1, exactly as `smthrs plan` refuses them. The 0.x flags are removed rather than ignored: `--serve`, `--interactive`, `--supervise`, `--herdr`, `--monitor`, `--report`, `--force`, `--steal-ownership`, `--resume-claim-owner`, `--resume-claim-heartbeat`, `--resume-restore-owner`, `--resume-restore-heartbeat`, and `--max-concurrency` each exit 1 with a migration link.
 
+Omitting the flow with terminal stdin opens the discovered flow picker. With piped stdin, the command exits 2 and names the missing argument and `--wizard`.
+
 ## Arguments
 
 | Name | Type | Required | Description |
@@ -38505,7 +38552,7 @@ smthrs update
 
 ## Description
 
-`update` reads the npm registry's dist-tags for `@smthrs/cli` (at `https://registry.npmjs.org/-/package/@smthrs/cli/dist-tags`) and compares them with the installed version. A release candidate publishes under the `rc` tag, so the check compares `rc` first and `latest` second, which keeps an rc install from being told to downgrade to an older stable. Reach for it before you upgrade the CLI. It prints the install command and never installs anything itself.
+`update` reads the npm registry's dist-tags for `@smthrs/cli` (at `https://registry.npmjs.org/-/package/@smthrs/cli/dist-tags`) and compares them with the installed version. A release candidate publishes under the `next` tag, so the check compares `next` first and `latest` second, which keeps an rc install from being told to downgrade to an older stable. Reach for it before you upgrade the CLI. It prints the install command and never installs anything itself.
 
 ## Output
 
@@ -38518,7 +38565,7 @@ When the installed build is current, the command prints one line:
 When a later tag exists, it prints which version is available under which tag, then the install command:
 
 ```text
-@smthrs/cli 1.0.0-rc.1 is available (rc); you have 1.0.0-rc.0.
+@smthrs/cli 1.0.0-rc.1 is available (next); you have 1.0.0-rc.0.
 npm install -g @smthrs/cli@1.0.0-rc.1
 ```
 
@@ -38551,13 +38598,28 @@ Every verb accepts these flags.
 | `--credential` | token | Bearer token for the remote control plane; falls back to `SMITHERS_API_KEY`. |
 | `--json` | none | Print the machine-readable document instead of the human rendering. |
 | `--remote` | URL | http(s) URL of the control plane to act on; falls back to `SMITHERS_REMOTE`. |
-| `--quiet` | none | Drop the banners and notices commands write to stderr. |
+| `--quiet` | none | Suppress banners and progress on stderr; stdout documents still print. |
 | `--mcp-config` | path | Path to the JSON array of MCP servers the local executor projects into a run's flow catalog. |
 | `--root` | path | Project root to act on, instead of walking up from the working directory. |
 | `--backend` | name | Hidden. `sqlite` is the only supported value, so it is a no-op; any other value exits 1 with `unsupported_database`. |
 | `--version` | none | Print the installed version. |
 | `--help` | none | Print the help document. Neither this nor `--version` resolves a project or opens a database. |
 | `--completions` | shell | Print a shell completion script. |
+| `--wizard` | none | Collect a command’s arguments and flags interactively, then offer to run it. |
+| `--log-level` | level | Minimum diagnostic log level: `all`, `trace`, `debug`, `info`, `warn`, `warning`, `error`, `fatal`, or `none`. |
+
+## Required input
+
+When stdin is a terminal, omitting a required positional argument opens a
+clack prompt. `plan` and `up` show the discovered flow picker; other verbs ask
+for the missing value. Prompts use stderr, so stdout remains the document.
+Cancelling a prompt exits 130 without submitting the command. With piped stdin,
+a missing argument exits 2, names the argument, and points to `--wizard` for
+guided input. Optional arguments keep their documented defaults.
+
+A nonexistent or inaccessible `--root` exits 2 and names the path. A command
+group such as `memory`, `claude`, or `mcp` without a subcommand also exits 2
+and lists its subcommands; use `--help` to request help with exit 0.
 
 ## Verbs
 
@@ -40700,7 +40762,7 @@ A live smoke test: the assembled production agent stack (the real cell loop, the
 
 Every example before this one scripts its model deliberately, so CI runs with no credentials and no cost. `packages/smithers/agent/test/Agent.test.ts` says why this one exists anyway: "a smoke test that calls a provider is not a smoke test" if it doesn't. This is that smoke test, for the example composition rather than the harness's own hand-wired one.
 
-Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its test is skipped when the key is absent rather than failing CI.
+Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary `pnpm run test:examples` suite clears the key in its test environment.
 
 @since 0.1.0
 
@@ -43331,6 +43393,10 @@ Usage: `node 22-mcp-server.ts`. It answers `initialize`, `tools/list`, and `tool
 ## Run it
 
 The program is [`examples/src/22-mcp-server.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/22-mcp-server.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+
+## Related reference
+
+
 
 ## Source
 
@@ -46167,12 +46233,23 @@ The program is [`examples/src/37-host-containment.ts`](https://github.com/smithe
 
 
 
-/** The host id both incarnations share. It is what makes the records theirs. */
+/**
+ * The host id both incarnations share. It is what makes the records theirs.
+ * @since 1.0.0-rc.0
+ * @category constants
+ */
 export const hostId = "examples/host-containment"
 
 const hostProgram = join(dirname(fileURLToPath(import.meta.url)), "37-host-containment-host.ts")
 
+/**
+ * Observations from the killed host and its replacement.
+ * @since 1.0.0-rc.0
+ * @category models
+ */
 export interface Summary {
+  /** Diagnostics from the host before it was killed; empty on successful startup. */
+  readonly hostStderr: string
   /** The process group the killed host started. */
   readonly pgid: number
   /** Whether that group survived the host, which is the problem to solve. */
@@ -46196,7 +46273,7 @@ const groupIsAlive = (pgid: number): boolean => {
  * Runs the host until it reports the group it started, kills it, and waits for
  * the operating system to reap it so its pid genuinely reads as gone.
  */
-const killHost = (filename: string): Promise<number> =>
+const killHost = (filename: string): Promise<{ readonly pgid: number; readonly hostStderr: string }> =>
   new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [hostProgram, filename, hostId], { stdio: ["ignore", "pipe", "pipe"] })
     let announced = ""
@@ -46216,9 +46293,9 @@ const killHost = (filename: string): Promise<number> =>
       stderr += chunk
     })
     child.on("error", reject)
-    child.on("exit", () => {
+    child.on("close", () => {
       if (pgid === undefined) reject(new Error(`the host exited before announcing a group: ${stderr}`))
-      else resolve(pgid)
+      else resolve({ pgid, hostStderr: stderr })
     })
   })
 
@@ -46234,10 +46311,15 @@ const waitForGroupExit = (pgid: number, budgetMs: number): Promise<boolean> =>
     poll()
   })
 
+/**
+ * Starts, kills, and replaces a host over the same durable journal.
+ * @since 1.0.0-rc.0
+ * @category examples
+ */
 export const main = (filename: string): Effect.Effect<Summary> =>
   Effect.gen(function*() {
     // ----------------------------------------------------------------- crash
-    const pgid = yield* Effect.promise(() => killHost(filename))
+    const { pgid, hostStderr } = yield* Effect.promise(() => killHost(filename))
     const orphaned = groupIsAlive(pgid)
 
     // --------------------------------------------------------------- restart
@@ -46253,14 +46335,17 @@ export const main = (filename: string): Effect.Effect<Summary> =>
       return page.entries.map((entry) => entry.eventType)
     }).pipe(
       Effect.provide(
-        NodeRuntime.layerHost({ filename, workspaceRoot: dirname(filename), owner: { hostId }, signals: [] }, Layer.empty)
+        NodeRuntime.layerHost(
+          { filename, workspaceRoot: dirname(filename), owner: { hostId }, signals: [] },
+          Layer.empty
+        )
       ),
       Effect.orDie,
       Effect.scoped
     )
 
     const survivedTheReaper = !(yield* Effect.promise(() => waitForGroupExit(pgid, 10_000)))
-    return { pgid, orphaned, survivedTheReaper, hostEvents }
+    return { pgid, hostStderr, orphaned, survivedTheReaper, hostEvents }
   })
 ```
 
@@ -46270,9 +46355,11 @@ The host program `37-host-containment.ts` kills.
 
 It is a separate process because the example is about what survives a host that never got to run a finalizer, and there is no way to produce that state from inside the process that has to observe it.
 
-Usage: `node 37-host-containment-host.ts <sqlite file> <hostId>`. It prints the process id of the group it started, then waits to be killed.
+Usage: `node 37-host-containment-host.ts <sqlite file> <hostId>`. It prints the process id of the group it started, then waits to be killed. Startup failures print their cause to stderr and exit with status 1.
 
 ```ts title="examples/src/37-host-containment-host.ts"
+
+
 
 
 
@@ -46322,7 +46409,7 @@ const flows = Interpreter.layer(Containment).pipe(
   Layer.provideMerge(Action.layerImplementations)
 )
 
-await Effect.runPromise(
+const exit = await Effect.runPromise(
   Effect.exit(
     Containment.execute({ what: "spawn" }, { executionId: "host-containment" }).pipe(
       Effect.provide(
@@ -46346,6 +46433,11 @@ await Effect.runPromise(
     )
   )
 )
+
+if (Exit.isFailure(exit)) {
+  process.stderr.write(`${Cause.pretty(exit.cause)}\n`)
+  process.exitCode = 1
+}
 ```
 
 ---

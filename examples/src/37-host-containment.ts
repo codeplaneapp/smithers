@@ -26,12 +26,23 @@ import { spawn } from "node:child_process"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-/** The host id both incarnations share. It is what makes the records theirs. */
+/**
+ * The host id both incarnations share. It is what makes the records theirs.
+ * @since 1.0.0-rc.0
+ * @category constants
+ */
 export const hostId = "examples/host-containment"
 
 const hostProgram = join(dirname(fileURLToPath(import.meta.url)), "37-host-containment-host.ts")
 
+/**
+ * Observations from the killed host and its replacement.
+ * @since 1.0.0-rc.0
+ * @category models
+ */
 export interface Summary {
+  /** Diagnostics from the host before it was killed; empty on successful startup. */
+  readonly hostStderr: string
   /** The process group the killed host started. */
   readonly pgid: number
   /** Whether that group survived the host, which is the problem to solve. */
@@ -55,7 +66,7 @@ const groupIsAlive = (pgid: number): boolean => {
  * Runs the host until it reports the group it started, kills it, and waits for
  * the operating system to reap it so its pid genuinely reads as gone.
  */
-const killHost = (filename: string): Promise<number> =>
+const killHost = (filename: string): Promise<{ readonly pgid: number; readonly hostStderr: string }> =>
   new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [hostProgram, filename, hostId], { stdio: ["ignore", "pipe", "pipe"] })
     let announced = ""
@@ -75,9 +86,9 @@ const killHost = (filename: string): Promise<number> =>
       stderr += chunk
     })
     child.on("error", reject)
-    child.on("exit", () => {
+    child.on("close", () => {
       if (pgid === undefined) reject(new Error(`the host exited before announcing a group: ${stderr}`))
-      else resolve(pgid)
+      else resolve({ pgid, hostStderr: stderr })
     })
   })
 
@@ -93,10 +104,15 @@ const waitForGroupExit = (pgid: number, budgetMs: number): Promise<boolean> =>
     poll()
   })
 
+/**
+ * Starts, kills, and replaces a host over the same durable journal.
+ * @since 1.0.0-rc.0
+ * @category examples
+ */
 export const main = (filename: string): Effect.Effect<Summary> =>
   Effect.gen(function*() {
     // ----------------------------------------------------------------- crash
-    const pgid = yield* Effect.promise(() => killHost(filename))
+    const { pgid, hostStderr } = yield* Effect.promise(() => killHost(filename))
     const orphaned = groupIsAlive(pgid)
 
     // --------------------------------------------------------------- restart
@@ -112,12 +128,15 @@ export const main = (filename: string): Effect.Effect<Summary> =>
       return page.entries.map((entry) => entry.eventType)
     }).pipe(
       Effect.provide(
-        NodeRuntime.layerHost({ filename, workspaceRoot: dirname(filename), owner: { hostId }, signals: [] }, Layer.empty)
+        NodeRuntime.layerHost(
+          { filename, workspaceRoot: dirname(filename), owner: { hostId }, signals: [] },
+          Layer.empty
+        )
       ),
       Effect.orDie,
       Effect.scoped
     )
 
     const survivedTheReaper = !(yield* Effect.promise(() => waitForGroupExit(pgid, 10_000)))
-    return { pgid, orphaned, survivedTheReaper, hostEvents }
+    return { pgid, hostStderr, orphaned, survivedTheReaper, hostEvents }
   })

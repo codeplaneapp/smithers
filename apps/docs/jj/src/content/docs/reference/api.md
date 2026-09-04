@@ -212,9 +212,11 @@ values are not interpreted as CLI flags.
 Node and Bun require **jj 0.39.0 or newer**, pinned by the exported
 `NodeJj.minimumVersion` constant. Before exposing `Jj`, all CLI layers await a
 local `jj --version` probe through `node:child_process`, outside the host's
-process spawner and crash-reaping journal. Concurrent and subsequent layer
-builds share the probe result per resolved executable path for the lifetime of
-the process. Restart the process after replacing a binary at the same path.
+process spawner and crash-reaping journal. The probe does not use or require the
+repository directory: bound layers can be built before runtime storage creates
+that directory. Repository operations still require a valid working directory.
+Concurrent and subsequent layer builds share the probe result per resolved
+executable path for the lifetime of the process. Restart the process after replacing a binary at the same path.
 Repository commands still use the layer's chosen process runner. An older or
 unrecognized version fails construction with `JjError.code = "unsupported_version"`
 and the required minimum; a missing binary fails construction with `not_installed`.

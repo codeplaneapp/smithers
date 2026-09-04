@@ -6,11 +6,14 @@
  * from inside the process that has to observe it.
  *
  * Usage: `node 37-host-containment-host.ts <sqlite file> <hostId>`. It prints
- * the process id of the group it started, then waits to be killed.
+ * the process id of the group it started, then waits to be killed. Startup
+ * failures print their cause to stderr and exit with status 1.
  */
 import { Action, Capability, Flow, Interpreter } from "@smthrs/flows"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { ChildProcess } from "effect/unstable/process"
@@ -57,7 +60,7 @@ const flows = Interpreter.layer(Containment).pipe(
   Layer.provideMerge(Action.layerImplementations)
 )
 
-await Effect.runPromise(
+const exit = await Effect.runPromise(
   Effect.exit(
     Containment.execute({ what: "spawn" }, { executionId: "host-containment" }).pipe(
       Effect.provide(
@@ -81,3 +84,8 @@ await Effect.runPromise(
     )
   )
 )
+
+if (Exit.isFailure(exit)) {
+  process.stderr.write(`${Cause.pretty(exit.cause)}\n`)
+  process.exitCode = 1
+}

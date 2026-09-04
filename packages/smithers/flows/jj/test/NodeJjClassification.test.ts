@@ -261,10 +261,10 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       // reports a missing binary, so a bound layer pointed at a directory that
       // is gone used to answer `not_installed` with jj sitting on PATH.
       const missing = join(directory, "gone")
-      const error = yield* Effect.flip(Effect.provide(Jj, NodeJj.layerAt(missing)))
+      const error = yield* Effect.flip(Effect.provide(Effect.flatMap(Jj, (jj) => jj.status()), NodeJj.layerAt(missing)))
 
       expect(error.code).toBe("unknown")
-      expect(error.message).toBe(`jj version: cannot run in ${missing}: not a directory`)
+      expect(error.message).toBe(`jj status: cannot run in ${missing}: not a directory`)
     }))
 
   it.live("bounds the command it records so a caller's message cannot ride into the journal", () =>

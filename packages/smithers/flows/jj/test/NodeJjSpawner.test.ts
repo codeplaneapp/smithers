@@ -258,10 +258,13 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       // the same way, so without the directory probe a bound layer pointed at a
       // directory that is gone answers `not_installed` with jj on PATH.
       const missing = join(directory, "absent-root")
-      const error = yield* Effect.flip(Effect.provide(Jj, Layer.provide(NodeJj.layerSpawnerAt(missing), missingBinary)))
+      const error = yield* Effect.flip(Effect.provide(
+        Effect.flatMap(Jj, (jj) => jj.status()),
+        Layer.provide(NodeJj.layerSpawnerAt(missing), missingBinary)
+      ))
 
       expect(error.code).toBe("unknown")
-      expect(error.message).toBe(`jj version: cannot run in ${missing}: not a directory`)
+      expect(error.message).toBe(`jj status: cannot run in ${missing}: not a directory`)
     }))
 
   it.effect("refuses output past the same ceiling the self-spawning layer applies", () =>

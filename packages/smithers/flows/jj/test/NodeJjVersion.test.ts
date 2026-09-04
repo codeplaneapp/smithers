@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Jj } from "../src/Jj.ts"
@@ -41,6 +41,37 @@ fi
   )
 
 describe("NodeJj version requirement", () => {
+  it.live("builds before the repository parent exists and runs after it is created", () =>
+    withVersion("jj 0.39.0", (root) =>
+      Effect.gen(function*() {
+        const repository = join(root, "missing", "repository")
+        yield* Effect.gen(function*() {
+          const jj = yield* Jj
+          yield* Effect.promise(() => expect(stat(join(root, "missing"))).rejects.toMatchObject({ code: "ENOENT" }))
+          yield* Effect.promise(() => mkdir(repository, { recursive: true }))
+          expect(yield* jj.status()).toBe("ok\n")
+        }).pipe(Effect.provide(NodeJj.layerAt(repository)))
+        yield* Effect.provide(Jj, NodeJj.layerAt(join(root, "another", "repository")))
+        expect(yield* Effect.promise(() => readFile(join(root, "probes"), "utf8"))).toBe("probe\n")
+      })))
+
+  it.live("refuses an unsupported binary even before the repository exists", () =>
+    withVersion("jj 0.38.0", (root) =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(Effect.provide(Jj, NodeJj.layerAt(join(root, "missing", "repository"))))
+        expect(error.code).toBe("unsupported_version")
+      })))
+
+  it.live("reports an executable that loses permission after the version probe", () =>
+    withVersion("jj 0.39.0", (root) =>
+      Effect.gen(function*() {
+        const jj = yield* Effect.provide(Jj, NodeJj.layerAt(root))
+        yield* Effect.promise(() => chmod(join(root, "jj"), 0o644))
+        const error = yield* Effect.flip(jj.status())
+        expect(error).toMatchObject({ code: "unknown", method: "status" })
+        expect(error.cause).toMatchObject({ code: "EACCES" })
+      })))
+
   it.live("does not reuse an unresolved command's failure after PATH changes", () =>
     withVersion("jj 0.39.0", (root) =>
       Effect.gen(function*() {

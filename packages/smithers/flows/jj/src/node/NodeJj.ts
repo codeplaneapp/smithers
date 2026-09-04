@@ -686,16 +686,12 @@ const operations = (run: Run, repositoryRoot?: string) => {
 // Host introspection finishes before the layer exists, so it must not enter
 // the host ledger. Cache by executable path, including in-flight probes, so
 // separate repository layers and host incarnations share the same answer.
+// The repository may not exist until runtime storage creates its parent.
 const versionProbes = new Map<string, Effect.Effect<string, JjError>>()
 
 /** Check the local executable before exposing repository operations. */
 const checkedOperations = (run: Run, repositoryRoot?: string): Effect.Effect<Jj, JjError> =>
   Effect.gen(function*() {
-    if (repositoryRoot !== undefined && !isDirectory(repositoryRoot)) {
-      return yield* Effect.fail(
-        spawnFailure("version", ["--version"], repositoryRoot, undefined, new Error("not a directory"), false)
-      )
-    }
     const binary = resolveJjBinary()
     const path = binary.executable || binary.source === "env" ? resolve(binary.path) : binary.path
     let probe = versionProbes.get(path)
