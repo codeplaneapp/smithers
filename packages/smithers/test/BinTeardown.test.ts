@@ -183,6 +183,58 @@ describe("smithers entrypoint", () => {
     ])
   })
 
+  it.each([
+    { args: ["--json", "plan"], code: 2, error: ["flow-id", "--wizard"], document: "" },
+    { args: ["--json", "steer", "run-1"], code: 2, error: ["--message", "--wizard"], document: "" },
+    { args: ["--json", "memory"], code: 2, error: ["subcommand", "list, get, set, rm"], document: "SUBCOMMANDS" },
+    { args: ["--json"], code: 2, error: ["subcommand", "plan, run, up"], document: "SUBCOMMANDS" },
+    { args: ["--json", "memory", "--help"], code: 0, error: [], document: "SUBCOMMANDS" },
+    { args: ["--json", "memory", "--nope"], code: 2, error: ["Unrecognized flag", "--nope"], document: "SUBCOMMANDS" }
+  ])("preserves the parser output contract for $args", async ({ args, code, error, document }) => {
+    const argv = process.argv
+    const cwd = process.cwd()
+    const project = mkdtempSync(join(tmpdir(), "flows-cli-bin-"))
+    const descriptor = Object.getOwnPropertyDescriptor(process, "stdin")!
+    const stdout: Array<string> = []
+    const stderr: Array<string> = []
+    const log = vi.spyOn(globalThis.console, "log").mockImplementation((...parts: ReadonlyArray<unknown>) => {
+      stdout.push(parts.map(String).join(" "))
+    })
+    const diagnostic = vi.spyOn(globalThis.console, "error").mockImplementation((...parts: ReadonlyArray<unknown>) => {
+      stderr.push(parts.map(String).join(" "))
+    })
+    const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      stderr.push(String(chunk))
+      return true
+    })
+    Object.defineProperty(process, "stdin", { configurable: true, value: new PassThrough() })
+    try {
+      process.chdir(project)
+      process.argv = [process.execPath, "smthrs", ...args]
+      const exit = await Effect.runPromiseExit(entrypoint.main)
+      expect(status(entrypoint, exit)).toBe(code)
+      for (const text of error) expect(stderr.join("\n")).toContain(text)
+      if (document === "") {
+        expect(stdout).toEqual([])
+        expect(existsSync(join(project, ".flows"))).toBe(false)
+        expect(Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined).toBeInstanceOf(
+          entrypoint.cliError.UsageError
+        )
+      } else {
+        expect(stdout.join("\n")).toContain(document)
+      }
+      if (error.length === 0) expect(stderr).toEqual([])
+    } finally {
+      Object.defineProperty(process, "stdin", descriptor)
+      log.mockRestore()
+      diagnostic.mockRestore()
+      write.mockRestore()
+      process.argv = argv
+      process.chdir(cwd)
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   it("prefers a received signal over the exit the runtime produced", async () => {
     const interrupted = await load()
     interrupted.onSigint()

@@ -299,6 +299,32 @@ describe("input decoding", () => {
 
     expect(card).toMatchObject({ flowId: "demo/ship" })
   })
+
+  it("explains how to create a flow when the picker has no candidates", async () => {
+    const ui: Ui.Service = { ...Ui.make({ output: process.stderr, interactive: false }), interactive: true }
+    const error = await run(
+      Effect.flip(runCommand(["plan"])).pipe(Effect.provideService(Ui.Ui, ui)),
+      TestControl.layer({ now: () => 0, flows: [] })
+    )
+
+    expect(error).toBeInstanceOf(CliError.UsageError)
+    expect((error as CliError.UsageError).message).toBe("No flows discovered; run smthrs init to create one")
+  })
+
+  it.each(["plan", "cancel"])("interrupts %s when required input collection is cancelled", async (verb) => {
+    const ui: Ui.Service = {
+      ...Ui.make({ output: process.stderr, interactive: false }),
+      interactive: true,
+      text: () => Effect.succeed(Option.none()),
+      pickSuggestion: () => Effect.succeed(Option.none())
+    }
+    const exit = await run(
+      Effect.exit(runCommand([verb])).pipe(Effect.provideService(Ui.Ui, ui)),
+      testControl
+    )
+
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+  })
 })
 
 describe("presentation flags", () => {
