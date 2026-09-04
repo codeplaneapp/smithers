@@ -106,8 +106,10 @@ describe("credential flag warning", () => {
     expect(result.errors).toContain("process listings")
     expect(result.errors).not.toContain("argv-secret")
     expect(result.output).not.toContain("SMITHERS_API_KEY")
-    if (quiet) expect(result.output).toBe("")
-    else expect(() => JSON.parse(result.output)).not.toThrow()
+    expect(JSON.parse(result.output)).toEqual({
+      _tag: "flows",
+      items: [{ flowId: demoFlow.flowId, description: demoFlow.description }]
+    })
   })
 
   it("does not warn when the flag is absent", async () => {
