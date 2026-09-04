@@ -209,13 +209,13 @@ export interface Options extends Partial<TelegramConfig> {
   /** `allowed_updates`. Defaults to message, edited_message, and callback_query. */
   readonly allowedUpdates?: ReadonlyArray<string> | undefined
   /**
-   * When set, updates from other chats are dropped, and so is an update whose
+   * Required and non-empty. Updates from other chats are dropped, and so is an update whose
    * chat this source cannot determine: an allowlist that admits what it cannot
    * classify is not one. A press on an inline keyboard whose message is
    * inaccessible is exactly that case. The offset still advances past every
    * dropped update once the rest of the batch is handled.
    */
-  readonly allowedChatIds?: ReadonlyArray<number | string> | undefined
+  readonly allowedChatIds: ReadonlyArray<number | string>
   /** An already-built client, for a caller that has one. */
   readonly client?: TelegramClient | undefined
 }
@@ -244,7 +244,7 @@ export interface Source {
  * Builds a long-poll source.
  *
  * `env` is the fallback source for the bot token, the same shape the clients
- * take: `Telegram.Source.make({})` with `SMITHERS_TELEGRAM_BOT_TOKEN` exported
+ * take: `Telegram.Source.make({ allowedChatIds: [chatId] })` with `SMITHERS_TELEGRAM_BOT_TOKEN` exported
  * works, and passing an explicit `env` replaces the ambient environment rather
  * than layering over it.
  *
@@ -252,10 +252,10 @@ export interface Source {
  * @since 1.0.0
  */
 export const make = (
-  options: Options = {},
+  options: Options,
   env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): Source => {
-  const sourceId = options.sourceId ?? SERVICE
+  const sourceId = options?.sourceId ?? SERVICE
   // The source id is every event's `source` and the scope of every dedupe key.
   // An empty one produces events `ExternalEvent` refuses and keys two sources
   // could share, so it is refused where it is configured.
@@ -266,11 +266,16 @@ export const make = (
       { sourceId }
     )
   }
+  if (options?.allowedChatIds === undefined || options.allowedChatIds.length === 0) {
+    throw new IntegrationError(
+      "invalid-config",
+      "Telegram allowedChatIds must be a non-empty list before polling can start.",
+      { sourceId }
+    )
+  }
   const pollTimeoutSeconds = options.pollTimeoutSeconds ?? DEFAULT_POLL_TIMEOUT_SECONDS
   const allowedUpdates = options.allowedUpdates ?? DEFAULT_ALLOWED_UPDATES
-  const allowedChats = options.allowedChatIds === undefined
-    ? null
-    : new Set(options.allowedChatIds.map((id) => String(id)))
+  const allowedChats = new Set(options.allowedChatIds.map((id) => String(id)))
   const client = options.client ?? makeClient({
     ...(options.botToken === undefined ? {} : { botToken: options.botToken }),
     apiBaseUrl: options.apiBaseUrl,
@@ -356,7 +361,7 @@ export const make = (
         // Fail closed. An update whose chat cannot be determined is exactly the
         // case an allowlist exists to refuse, and a callback query on an
         // inaccessible message is that case in practice.
-        if (allowedChats !== null && (chatId == null || !allowedChats.has(String(chatId)))) continue
+        if (chatId == null || !allowedChats.has(String(chatId))) continue
         events.push(...updateToEvents(sourceId, update, receivedAtMs))
       }
       // The acknowledgement offset is proposed, not committed: `run` stores it

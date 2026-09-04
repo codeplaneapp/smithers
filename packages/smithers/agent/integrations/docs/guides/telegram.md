@@ -86,9 +86,10 @@ const program = source.run((events) =>
 ).pipe(Effect.provide(Core.CursorStore.layerMemory))
 ```
 
-Replace `chatId` with the chat the bot serves, or drop `allowedChatIds` to
-accept every chat. When `allowedChatIds` is set, an update whose chat the
-source cannot determine is dropped too: an allowlist that admits what it
+Replace `chatId` with the chat the bot serves. `allowedChatIds` is required
+and must be non-empty; missing or empty configuration throws `invalid-config`
+before the source polls. Updates from other chats and updates whose chat the
+source cannot determine are dropped: an allowlist that admits what it
 cannot classify is not one. The offset still advances past every dropped
 update once the rest of the batch is handled.
 
@@ -112,14 +113,18 @@ for an already-built client.
 `Telegram.Approval` is the codec behind approve/reject and selection prompts.
 Telegram caps `callback_data` at 64 bytes, so a press carries a compact code
 and nothing else. It also carries no trust: any member of the chat can press
-a button, so `callback_data` never holds trust-sensitive state, and a caller
-that cares re-authorizes on the presser's user id.
+a button. `decision` accepts a press only when its `from.id` is in the
+spec's `allowedChatIds`, compared as strings. Missing or empty lists authorize
+nobody, even when the callback token matches. Pass the same allowlist to the
+source and the approval spec. Include individual user ids for approvers; a
+negative group chat id admits that chat but does not authorize its members.
 
 ```ts
 import { Telegram } from "@smthrs/integrations"
 
 const approvalToken = Telegram.Approval.token(approvalId)
-const spec: Telegram.Approval.KeyboardSpec = { mode: "approve", token: approvalToken }
+const allowedChatIds = [chatId, approverUserId]
+const spec: Telegram.Approval.KeyboardSpec = { mode: "approve", token: approvalToken, allowedChatIds }
 const keyboard = Telegram.Approval.keyboard(spec)
 
 // send the prompt with the keyboard attached
@@ -137,7 +142,9 @@ this approval fails safe: a rejection in `approve` mode, an empty selection
 in `select` mode, which also accepts only a key this approval offered. A
 prompt built with no token matches nothing at all, so two tokenless prompts
 cannot resolve each other. The token is a 32-bit namespace, not a secret; two
-approval ids can collide, and the press carries no trust in any case.
+approval ids can collide. `isOwnPress` checks only the prompt token;
+`decision` also checks the sender. An unlisted sender produces `approved: false`
+or an empty selection.
 
 In `select` mode, pass `options: [{ key, label }, ...]`. `keyboard` throws
 `INVALID_INPUT` for an empty option list, and `callbackData` throws for an

@@ -130,10 +130,41 @@ describe("keyboard", () => {
 })
 
 describe("decision", () => {
-  const spec = { mode: "approve" as const, token: TOKEN }
+  const spec = { mode: "approve" as const, token: TOKEN, allowedChatIds: [42] }
+
+  it.each(
+    [
+      [42, [42], true],
+      ["42", [42], true],
+      [42, ["42"], true],
+      [7, [42], false],
+      [undefined, [42], false],
+      [42, undefined, false],
+      [42, [], false],
+      [42, [-100], false]
+    ] as const
+  )("authorizes the presser %s using %s", (id, allowedChatIds, approved) => {
+    const query = { data: keyboard(spec)[0]?.[0]?.callback_data, from: { id, username: "will" } }
+    expect(decision(query, { ...spec, allowedChatIds }, NOW)).toMatchObject({ approved })
+  })
+
+  it("refuses an unlisted sender's selection even with valid callback data", () => {
+    const selectSpec = {
+      mode: "select" as const,
+      token: TOKEN,
+      options: [{ key: "a", label: "A" }],
+      allowedChatIds: [42]
+    }
+    const query = { data: keyboard(selectSpec)[0]?.[0]?.callback_data, from: { id: 7 } }
+    expect(decision(query, selectSpec, NOW)).toEqual({ selected: "", notes: null })
+  })
 
   it("approves this approval's own approve press", () => {
-    const result = decision({ data: callbackData({ kind: "approve" }, TOKEN), from: { username: "will" } }, spec, NOW)
+    const result = decision(
+      { data: callbackData({ kind: "approve" }, TOKEN), from: { id: 42, username: "will" } },
+      spec,
+      NOW
+    )
     expect(result).toEqual({
       approved: true,
       note: null,
@@ -143,7 +174,7 @@ describe("decision", () => {
   })
 
   it("rejects this approval's own reject press", () => {
-    expect(decision({ data: callbackData({ kind: "reject" }, TOKEN) }, spec, NOW))
+    expect(decision({ data: callbackData({ kind: "reject" }, TOKEN), from: { id: 42 } }, spec, NOW))
       .toMatchObject({ approved: false, note: null })
   })
 
@@ -167,8 +198,13 @@ describe("decision", () => {
   })
 
   it("selects only a key this approval offered", () => {
-    const selectSpec = { mode: "select" as const, token: TOKEN, options: [{ key: "a", label: "A" }] }
-    expect(decision({ data: callbackData({ kind: "select", key: "a" }, TOKEN) }, selectSpec, NOW))
+    const selectSpec = {
+      mode: "select" as const,
+      token: TOKEN,
+      allowedChatIds: [42],
+      options: [{ key: "a", label: "A" }]
+    }
+    expect(decision({ data: callbackData({ kind: "select", key: "a" }, TOKEN), from: { id: "42" } }, selectSpec, NOW))
       .toEqual({ selected: "a", notes: null })
     expect(decision({ data: callbackData({ kind: "select", key: "b" }, TOKEN) }, selectSpec, NOW))
       .toEqual({ selected: "", notes: null })

@@ -112,14 +112,23 @@ describe("updateToEvents", () => {
   })
 })
 
-const source = (options: Parameters<typeof make>[0] = {}) =>
+const source = (options: Partial<Parameters<typeof make>[0]> = {}) =>
   make({
+    allowedChatIds: [-100],
     client: makeClient({ botToken: TOKEN, apiBaseUrl: (fixture as Fixture).origin }),
     ...options
   })
 
 const runWithCursors = <A, E>(effect: Effect.Effect<A, E, CursorStore>, layer = layerMemory) =>
   Effect.runPromise(effect.pipe(Effect.provide(layer)) as Effect.Effect<A, E>)
+
+describe("source authorization", () => {
+  it.each([[undefined], [[]]])("refuses to start with allowedChatIds %s", async (allowedChatIds) => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
+    expect(() => source({ allowedChatIds } as never)).toThrow(/allowedChatIds.*non-empty/)
+    expect(fixture.requests).toHaveLength(0)
+  })
+})
 
 describe("poll", () => {
   it("sends the Bot API long-poll parameters and the stored offset", async () => {
@@ -222,11 +231,11 @@ describe("poll", () => {
     expect(batch.cursor).toBe("5")
   })
 
-  it("still emits an unclassifiable update when no allow list is configured", async () => {
+  it("drops unclassifiable updates with the required allowlist", async () => {
     fixture = await startFixture((_request, response) =>
       json(response, 200, { ok: true, result: [{ update_id: 4, callback_query: { id: "q" } }] })
     )
-    expect((await Effect.runPromise(source().poll(null))).events).toHaveLength(1)
+    expect((await Effect.runPromise(source().poll(null))).events).toHaveLength(0)
   })
 
   it("takes an explicit source id, timeout, and allowed updates", async () => {
@@ -251,7 +260,7 @@ describe("poll", () => {
 
   it("builds its own client from a bot token when given no client", async () => {
     fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
-    await Effect.runPromise(make({ botToken: TOKEN, apiBaseUrl: fixture.origin }).poll(null))
+    await Effect.runPromise(make({ allowedChatIds: [-100], botToken: TOKEN, apiBaseUrl: fixture.origin }).poll(null))
     expect(fixture.requests[0]?.url).toBe(`/bot${TOKEN}/getUpdates`)
   })
 
@@ -260,13 +269,13 @@ describe("poll", () => {
   it("takes the bot token from the environment it was built with", async () => {
     fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
     await Effect.runPromise(
-      make({ apiBaseUrl: fixture.origin }, { SMITHERS_TELEGRAM_BOT_TOKEN: TOKEN }).poll(null)
+      make({ allowedChatIds: [-100], apiBaseUrl: fixture.origin }, { SMITHERS_TELEGRAM_BOT_TOKEN: TOKEN }).poll(null)
     )
     expect(fixture.requests[0]?.url).toBe(`/bot${TOKEN}/getUpdates`)
   })
 
   it("refuses to build when neither the config nor the environment has a token", () => {
-    expect(() => make({ apiBaseUrl: "https://example.invalid" }, {}))
+    expect(() => make({ allowedChatIds: [-100], apiBaseUrl: "https://example.invalid" }, {}))
       .toThrow(/SMITHERS_TELEGRAM_BOT_TOKEN/)
   })
 })
@@ -426,7 +435,7 @@ describe("the poll refuses what it cannot read", () => {
   // The source id is every event's `source` and the scope of every dedupe key.
   it("refuses a source id that would make an unusable event", () => {
     for (const sourceId of ["", "   ", " telegram"]) {
-      expect(() => make({ sourceId, botToken: TOKEN, apiBaseUrl: "https://example.invalid" }))
+      expect(() => make({ allowedChatIds: [-100], sourceId, botToken: TOKEN, apiBaseUrl: "https://example.invalid" }))
         .toThrow(/source id must be a non-empty string/)
     }
   })

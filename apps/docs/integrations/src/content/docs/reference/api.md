@@ -567,10 +567,11 @@ handler has processed the batch.
 [Events, signals, and cursors](/concepts/events-and-signals/) explains the
 contract.
 
-`Options` fields, all optional: `sourceId` (the cursor key and dedupe scope,
+`Options` fields (only `allowedChatIds` is required): `sourceId` (the cursor key and dedupe scope,
 defaults to `telegram`), `pollTimeoutSeconds` (how long the Bot API holds a
 poll open, defaults to 25), `allowedUpdates` (defaults to `message`,
-`edited_message`, and `callback_query`), `allowedChatIds` (updates from other
+`edited_message`, and `callback_query`), `allowedChatIds` (required and non-empty; missing or empty throws
+`invalid-config` before polling; updates from other
 chats are dropped, and so is an update whose chat the source cannot
 determine; the offset still advances past every dropped update once the rest
 of the batch is handled), `client` (an already-built client), and the
@@ -589,7 +590,7 @@ returned nothing.
 | Export                 | Signature                                                                                         | Notes                                                                                                                                                                                                                                     |
 | ---------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Source`               | interface                                                                                         | `sourceId`, `poll`, `run`.                                                                                                                                                                                                                |
-| `make`                 | `(options?: Options, env?) => Source`                                                             | Throws an `IntegrationError` `invalid-config` for a source id that is empty or padded with whitespace, and `SmithersError` `INVALID_INPUT` when no bot token can be found.                                                                |
+| `make`                 | `(options: Options, env?) => Source`                                                              | Throws an `IntegrationError` `invalid-config` for a source id that is empty or padded with whitespace, and `SmithersError` `INVALID_INPUT` when no bot token can be found.                                                                |
 | `updateToEvents`       | `(source: string, update: Record<string, any>, receivedAtMs: number) => readonly ExternalEvent[]` | Maps one update onto its events. A message carrying `message_thread_id` emits a chat-scoped and a thread-scoped event with distinct dedupe keys; one carrying `web_app_data` additionally emits a separately deduped Mini App data event. |
 | `idempotencyKey`       | `(event: ExternalEvent) => string`                                                                | The event's dedupe key, already scoped to the source.                                                                                                                                                                                     |
 | `chatCorrelationId`    | `(chatId: number \| string) => string`                                                            | `chat:<id>`.                                                                                                                                                                                                                              |
@@ -624,9 +625,15 @@ token matches nothing at all.
 
 Models: `Choice` (`approve`, `reject`, or `select` with a `key`), `Option`
 (`key` and `label`), `KeyboardSpec` (`mode`, optional `token`, `options`,
-`approveText`, `rejectText`, `miniAppUrl`, `miniAppText`), `Decision`
+`allowedChatIds`, `approveText`, `rejectText`, `miniAppUrl`, `miniAppText`), `Decision`
 (`approved`, `note`, `decidedBy`, `decidedAt`), and `Selection` (`selected`,
 `notes`).
+
+`decision` accepts approve and selection presses only when `from.id` is in
+`spec.allowedChatIds`, compared as strings. Pass the source's allowlist here
+as well. Missing or empty lists authorize nobody. A group chat id does not
+authorize that group's members; include approvers' individual user ids.
+`isOwnPress` checks only the prompt token, not sender authorization.
 
 ### Telegram.InitData
 

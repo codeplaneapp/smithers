@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest"
 import { make as makeSource } from "../src/telegram/Source.ts"
 import { make } from "../src/telegram/TelegramClient.ts"
 
+const chatId = process.env["TELEGRAM_CHAT_ID"]
 const botToken = process.env["TELEGRAM_BOT_TOKEN"] ?? process.env["SMITHERS_TELEGRAM_BOT_TOKEN"]
 
 // Skipped without a credential: set TELEGRAM_BOT_TOKEN (or
@@ -30,11 +31,11 @@ describe.skipIf(botToken === undefined)("Telegram live contract (TELEGRAM_BOT_TO
     expect(typeof me.username).toBe("string")
   }, 30_000)
 
-  it("long-polls without confirming any update", async () => {
+  it.skipIf(chatId === undefined)("long-polls without confirming any update (TELEGRAM_CHAT_ID)", async () => {
     // `pollTimeoutSeconds: 0` returns immediately, and passing no offset
     // confirms nothing, so a running bot keeps its backlog.
     const batch = await Effect.runPromise(
-      makeSource({ client: client(), pollTimeoutSeconds: 0 }).poll(null)
+      makeSource({ client: client(), allowedChatIds: [chatId as string], pollTimeoutSeconds: 0 }).poll(null)
     )
     expect(Array.isArray(batch.events)).toBe(true)
   }, 30_000)

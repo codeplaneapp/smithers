@@ -4,7 +4,7 @@
  * Telegram caps `callback_data` at 64 **bytes**, so a press carries a compact
  * code and nothing else. It also carries no trust: any member of the chat can
  * press a button, so `callback_data` never holds trust-sensitive state and a
- * caller that cares re-authorizes on the presser's user id.
+ * decision checks the presser's user id against `allowedChatIds`.
  *
  * The per-approval {@link token} is what keeps one prompt's buttons from
  * resolving another's. A press whose token does not match this approval fails
@@ -13,8 +13,8 @@
  * two tokenless prompts cannot resolve each other.
  *
  * The namespace is a 32-bit hash, not a secret. Two approval ids can collide,
- * and `callback_data` carries no trust in any case: a caller that needs a
- * decision to be authorized re-checks the presser's user id.
+ * and `callback_data` carries no trust in any case. Sender authorization is
+ * checked separately from the token.
  *
  * @since 1.0.0
  */
@@ -63,6 +63,11 @@ export interface Option {
  */
 export interface KeyboardSpec {
   readonly mode: "approve" | "select"
+  /**
+   * The source's allowlist, checked against the presser's `from.id`.
+   * Missing or empty admits nobody. A group chat id does not authorize its members.
+   */
+  readonly allowedChatIds?: ReadonlyArray<number | string> | undefined
   /**
    * Namespaces this approval's buttons. See {@link token}. A spec without one
    * still builds a keyboard, but no press ever matches it, so a prompt that
@@ -301,16 +306,19 @@ export const decision = (
 ): Decision | Selection => {
   const choice = parseCallbackData(callbackQuery?.data)
   const own = matchesSpec(choice, spec)
+  const senderId = callbackQuery?.from?.id
+  const authorized = senderId !== undefined &&
+    (spec.allowedChatIds?.some((id) => String(id) === String(senderId)) ?? false)
   if (spec.mode === "select") {
     // Accept only a key this approval offered. A stale `sap:s:<key>` press
     // resolves to no selection rather than to somebody else's option.
     const offered = new Set((spec.options ?? []).map((option) => option.key))
-    const selected = own && choice.kind === "select" && offered.has(choice.key) ? choice.key : ""
+    const selected = own && authorized && choice.kind === "select" && offered.has(choice.key) ? choice.key : ""
     return { selected, notes: null }
   }
   return {
-    approved: own && choice.kind === "approve",
-    note: own ? null : "press did not match this approval's prompt",
+    approved: own && authorized && choice.kind === "approve",
+    note: !own ? "press did not match this approval's prompt" : authorized ? null : "sender is not in allowedChatIds",
     decidedBy: approverLabel(callbackQuery),
     decidedAt: new Date(nowMs).toISOString()
   }
