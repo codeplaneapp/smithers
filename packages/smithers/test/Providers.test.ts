@@ -81,14 +81,16 @@ describe("Providers.detect", () => {
     expect(codex!.setupHint).toContain("codex login")
   })
 
-  it.each([
-    ["kimi-k3", "MOONSHOT_API_KEY"],
-    ["openai", "OPENAI_API_KEY"],
-    ["gemini", "GEMINI_API_KEY"],
-    ["gemini", "GOOGLE_API_KEY"],
-    ["openrouter", "OPENROUTER_API_KEY"],
-    ["cerebras", "CEREBRAS_API_KEY"]
-  ] as const)("marks %s available when %s is set", (id, variable) => {
+  it.each(
+    [
+      ["kimi-k3", "MOONSHOT_API_KEY"],
+      ["openai", "OPENAI_API_KEY"],
+      ["gemini", "GEMINI_API_KEY"],
+      ["gemini", "GOOGLE_API_KEY"],
+      ["openrouter", "OPENROUTER_API_KEY"],
+      ["cerebras", "CEREBRAS_API_KEY"]
+    ] as const
+  )("marks %s available when %s is set", (id, variable) => {
     const detection = Providers.detect(host({ [variable]: "k" })).find((entry) => entry.id === id)!
 
     expect(detection.available).toBe(true)
@@ -101,7 +103,9 @@ describe("Providers.detect", () => {
 
     expect(openai.available).toBe(false)
     expect(openai.reason).toBe("$OPENAI_API_KEY exported but empty")
-    expect(openai.setupHint).toBe("export OPENAI_API_KEY=<your key>")
+    // Spelled without an `=`: `bin.ts` redacts every failure line it prints,
+    // and `KEY=<value>` is exactly the shape `Redaction.redact` rewrites.
+    expect(openai.setupHint).toBe("set OPENAI_API_KEY to your API key")
   })
 })
 
