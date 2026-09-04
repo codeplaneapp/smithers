@@ -251,3 +251,7 @@ open work, tracked as B-09 in `docs/pages/release/support-matrix.md`.
 
 **Node-only by construction.** The bundle resolves `node:child_process` and
 friends; `scripts/browser-check.mjs` at the repository root pins that.
+
+The host exports `implementationIds` for its five service slots. Its rooted
+factories reject invalid roots before constructing a layer, using the host's
+own error with code `invalid_repository_root`.

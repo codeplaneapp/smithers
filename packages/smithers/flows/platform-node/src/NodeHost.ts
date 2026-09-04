@@ -26,12 +26,14 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import type { Jj, JjError } from "@smthrs/jj"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
+import type { HostServiceIds } from "@smthrs/kernel/HostServices"
 import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type { HttpClient } from "effect/unstable/http/HttpClient"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { isAbsolute } from "node:path"
 import * as AtomicFileSystem from "./AtomicFileSystem.ts"
 import * as ProcessReaper from "./ProcessReaper.ts"
 
@@ -58,6 +60,36 @@ export { AtomicFileSystem, NodeChildProcessSpawner, NodeCrypto, NodeFileSystem, 
  * @since 0.1.0
  */
 export type NodeHost = FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpClient
+
+/**
+ * Invalid repository-root configuration, refused before layer construction.
+ * @category errors
+ * @since 1.0.0-rc.0
+ */
+export class NodeHostError extends Error {
+  override readonly name = "NodeHostError"
+  readonly code = "invalid_repository_root"
+}
+
+const absoluteRoot = (root: string): string => {
+  if (isAbsolute(root)) return root
+  throw new NodeHostError(
+    `NodeHost requires an absolute repository root, got ${JSON.stringify(Array.from(root).slice(0, 64).join(""))}`
+  )
+}
+
+/**
+ * Stable implementation identities for the five Host service slots.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export const implementationIds: Readonly<Record<(typeof HostServiceIds)[number], string>> = {
+  "effect/FileSystem": "@smthrs/platform-node/AtomicFileSystem",
+  "effect/Path": "effect/Path",
+  "effect/process/ChildProcessSpawner": "@effect/platform-node/NodeChildProcessSpawner",
+  "@smthrs/jj/Jj": "@smthrs/jj/node/NodeJj",
+  "effect/HttpClient": "@effect/platform-node/NodeHttpClient"
+}
 
 /** The two services `NodeChildProcessSpawner` resolves paths and files with. */
 const platform = Layer.mergeAll(AtomicFileSystem.layer, Path.layer)
@@ -119,7 +151,7 @@ export const layerAt = (repositoryRoot: string): Layer.Layer<NodeHost, JjError> 
     platform,
     Layer.provide(NodeChildProcessSpawner.layer, platform),
     NodeHttpClient.layerUndici,
-    NodeJj.layerAt(repositoryRoot)
+    NodeJj.layerAt(absoluteRoot(repositoryRoot))
   )
 
 /**
@@ -185,6 +217,6 @@ export const layerContainedAt = (
   return Layer.mergeAll(
     platform,
     NodeHttpClient.layerUndici,
-    Layer.provideMerge(NodeJj.layerSpawnerAt(repositoryRoot), spawner)
+    Layer.provideMerge(NodeJj.layerSpawnerAt(absoluteRoot(repositoryRoot)), spawner)
   ).pipe(Layer.provideMerge(ProcessReaper.layer(reaping(options))))
 }

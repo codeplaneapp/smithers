@@ -111,3 +111,7 @@ The refusals are the design, not gaps to fill later:
 - [API reference](/reference/api/): every export, with signatures and defaults.
 - [Troubleshooting](/troubleshooting/): the failures this bundle reports,
   what causes them, and what to change.
+
+The host exports `implementationIds` for its five service slots. Its rooted
+factories reject invalid roots before constructing a layer, using the host's
+own error with code `invalid_repository_root`.
