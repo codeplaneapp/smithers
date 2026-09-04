@@ -10,7 +10,8 @@
  * composition rather than the harness's own hand-wired one.
  *
  * Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its
- * test is skipped when the key is absent rather than failing CI.
+ * test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary
+ * `pnpm run test:examples` suite clears the key in its test environment.
  *
  * @since 0.1.0
  */
