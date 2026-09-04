@@ -436,14 +436,18 @@ export const activateTools: {
   return construct({ modelId: self.modelId, segments: self.segments, activeTools, replaced: self.replaced })
 })
 
-const summaryMessages = (summary: ModelRequest.Message | ReadonlyArray<ModelRequest.Message>): Content =>
-  (Array.isArray(summary) ? summary : [summary]).map((message) =>
+const summaryMessages = (summary: ModelRequest.Message | ReadonlyArray<ModelRequest.Message>): Content => {
+  const messages: ReadonlyArray<ModelRequest.Message> = Array.isArray(summary)
+    ? summary as ReadonlyArray<ModelRequest.Message>
+    : [summary as ModelRequest.Message]
+  return messages.map((message) =>
     message.role === "user"
       ? message
       : ModelRequest.Message.user(
         message.content.filter((part): part is ModelRequest.TextPart => part.type === "text")
       )
   )
+}
 
 const compactableSegments = (self: ContextWindow): ReadonlyArray<Segment> =>
   self.segments.filter((segment) =>
