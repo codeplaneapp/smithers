@@ -101,6 +101,29 @@ describe("parseWorkflow", () => {
     ).toThrow(/exactly one of `uses` or `run`/)
   })
 
+  /**
+   * A step's fields are a mapping. A `-` at that same indent starts a second
+   * sequence item in YAML, so the fields that follow belong to no step: the
+   * reader stops folding fields into the current step and refuses the line
+   * rather than silently attributing it, which is how a gate could be read as
+   * present while GitHub runs a different step.
+   */
+  it("refuses a sequence item where a step's own fields belong", () => {
+    expect(() =>
+      parseWorkflow(
+        "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n        - one\n"
+      )
+    ).toThrow(/line 7: expected a "key: value" mapping entry, found "one"/)
+    // A sequence nested *below* the field indent is a field's own value and is
+    // skipped with the rest of that field's block.
+    expect(
+      parseWorkflow(
+        "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n" +
+          "        with:\n          args:\n            - one\n      - run: echo\n"
+      ).jobs[0]?.steps
+    ).toEqual([{ uses: "actions/checkout@v4" }, { run: "echo" }])
+  })
+
   it("refuses sequence items and invalid identifiers where mappings are required", () => {
     expect(() => parseWorkflow("jobs:\n  - test:\n      runs-on: ubuntu-latest\n"))
       .toThrow(/expected a job mapping entry, not a sequence item/)

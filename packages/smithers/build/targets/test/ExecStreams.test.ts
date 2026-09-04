@@ -15,6 +15,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import * as Exec from "../src/Exec.ts"
+import * as Secret from "../src/Secret.ts"
 
 let root: string
 
@@ -79,6 +80,74 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await Fs.rm(root, { recursive: true, force: true })
+})
+
+/**
+ * A declared Nix closure replaces the host's executable lookup outright, so
+ * the child sees the closure's `PATH` and the variables its tools need rather
+ * than whatever the runner happened to export. Asserted against a real child's
+ * own view of its environment, because the point is what the process receives.
+ */
+/**
+ * A declared secret never reaches the child. The environment carries a minted
+ * placeholder and the loopback proxy that will substitute it on an authorized
+ * request, so a tool that dumps its own environment leaks a value that is
+ * worthless anywhere else.
+ */
+describe("a declared secret", () => {
+  it("hands the child a placeholder and the proxy endpoint, never the credential", async () => {
+    const credential = Secret.HttpSecret(
+      Secret.Secret("EXEC_STREAMS_TOKEN", { fallback: "the-real-credential" }),
+      ["https://example.test"]
+    )
+    const exit = await Effect.runPromiseExit(Exec.run({ workspaceRoot: root }, {
+      ...payload(
+        "process.stdout.write([process.env.EXEC_STREAMS_TOKEN, process.env.HTTP_PROXY, process.env.http_proxy].join(\"\\n\"))"
+      ),
+      secrets: [credential]
+    }))
+    if (!Exit.isSuccess(exit)) throw new Error(`expected a success: ${JSON.stringify(exit.cause)}`)
+    const [token, upper, lower] = exit.value.stdout.split("\n")
+    expect(token).toMatch(new RegExp(`^${Secret.placeholderPrefix}[0-9a-f]{${Secret.placeholderBytes * 2}}$`))
+    expect(exit.value.stdout).not.toContain("the-real-credential")
+    expect(upper).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/?$/)
+    // Tools split on which spelling they read, so both reach a POSIX child.
+    expect(lower).toBe(upper)
+  })
+})
+
+describe("a resolved tool environment", () => {
+  const readEnv = (name: string): string =>
+    `process.stdout.write(String(process.env[${JSON.stringify(name)}] ?? "<unset>"))`
+
+  it("replaces PATH with the closure's and carries the closure's other variables", async () => {
+    const closure = { path: "/closure/bin:/closure/sbin", variables: { SSL_CERT_FILE: "/closure/etc/ca-bundle.crt" } }
+    const exit = await Effect.runPromiseExit(Exec.run(
+      { workspaceRoot: root, environment: closure },
+      payload(`${readEnv("PATH")};process.stdout.write("|");${readEnv("SSL_CERT_FILE")}`)
+    ))
+    if (!Exit.isSuccess(exit)) throw new Error(`expected a success: ${JSON.stringify(exit.cause)}`)
+    expect(exit.value.stdout).toBe("/closure/bin:/closure/sbin|/closure/etc/ca-bundle.crt")
+    expect(exit.value.stdout).not.toContain(process.env["PATH"] ?? "\u0000")
+  })
+
+  it("lets the payload's own environment win over the closure's variables", async () => {
+    const closure = { path: "/closure/bin", variables: { SSL_CERT_FILE: "/closure/etc/ca-bundle.crt" } }
+    const declared = payload(readEnv("SSL_CERT_FILE"), { env: { SSL_CERT_FILE: "/declared/ca.pem" } })
+    const exit = await Effect.runPromiseExit(Exec.run({ workspaceRoot: root, environment: closure }, declared))
+    if (!Exit.isSuccess(exit)) throw new Error(`expected a success: ${JSON.stringify(exit.cause)}`)
+    expect(exit.value.stdout).toBe("/declared/ca.pem")
+  })
+
+  it("still withholds a sensitive name the closure exports", async () => {
+    const closure = { path: "/closure/bin", variables: { SMITHERS_CACHE_TOKEN: "leaked" } }
+    const exit = await Effect.runPromiseExit(Exec.run(
+      { workspaceRoot: root, environment: closure },
+      payload(readEnv("SMITHERS_CACHE_TOKEN"))
+    ))
+    if (!Exit.isSuccess(exit)) throw new Error(`expected a success: ${JSON.stringify(exit.cause)}`)
+    expect(exit.value.stdout).toBe("<unset>")
+  })
 })
 
 describe("stream decoding", () => {

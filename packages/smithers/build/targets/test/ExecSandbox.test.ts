@@ -330,6 +330,31 @@ describe("folding declared files into directories", () => {
     expect(plan.reads).toContain("/work/ws/src/lib/deep")
   })
 
+  it("keeps a directory's declared files when the host cannot list that one directory", () => {
+    // `entries` answers for the workspace but not for one candidate: the
+    // deepest directory is neither promoted nor denied, and because it stays
+    // uncovered its parents cannot be folded over it either.
+    const unlistable: ExecSandbox.Host = {
+      ...listingHost,
+      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? undefined : listing[directory])
+    }
+    const plan = planned(unlistable, { reads, writes: [] })
+    expect([...plan.reads].sort()).toEqual([...files].sort())
+    expect(plan.readDenies).toEqual([])
+  })
+
+  it("keeps a directory's declared files when the host lists that directory as empty", () => {
+    // An empty listing is not evidence that the declaration covers the
+    // directory, so it is treated exactly like an unreadable one.
+    const emptied: ExecSandbox.Host = {
+      ...listingHost,
+      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? [] : listing[directory])
+    }
+    const plan = planned(emptied, { reads, writes: [] })
+    expect([...plan.reads].sort()).toEqual([...files].sort())
+    expect(plan.readDenies).toEqual([])
+  })
+
   it("does not fold for bubblewrap, which binds each declared path", () => {
     const linuxListing: ExecSandbox.Host = { ...listingHost, platform: "linux", executable: () => "/usr/bin/bwrap" }
     const plan = planned(linuxListing, { reads, writes: [] })
@@ -414,6 +439,132 @@ describe("docker argv", () => {
       policy: { network: true }
     })
     expect(ExecSandbox.docker(plan, ["true"], {}).join(" ")).toContain("--network bridge")
+  })
+
+  it("omits the user mapping when the host reports no uid or no gid", () => {
+    // Windows has neither, and `process.getuid` is absent there, so the plan
+    // carries `undefined` and the argv must not name a half-formed user.
+    const facts = host("win32", { docker: "docker" }, ["/work/ws/src/a.ts"], ["/work/ws/node_modules", "/work/ws/dist"])
+    const declared = { mechanism: Sandbox.Docker({ image: "node:22" }) }
+    const neither = planned({ ...facts, uid: undefined, gid: undefined }, declared)
+    const gidOnly = planned({ ...facts, uid: undefined }, declared)
+    const uidOnly = planned({ ...facts, gid: undefined }, declared)
+    expect(neither.uid).toBeUndefined()
+    for (const plan of [neither, gidOnly, uidOnly]) {
+      expect(ExecSandbox.docker(plan, ["node"], {})).not.toContain("--user")
+    }
+    expect(ExecSandbox.docker(planned(facts, declared), ["node"], {})).toContain("--user")
+  })
+})
+
+/**
+ * The renderers are pure: a `Plan` in, a profile or an argv out. Pinning the
+ * whole emitted text means neither mechanism can drift on the host that does
+ * not run it, which is how a Linux-only or macOS-only change used to reach a
+ * release unread.
+ */
+describe("every mechanism renders the same text on any host", () => {
+  it("emits the seatbelt profile verbatim", () => {
+    expect(ExecSandbox.seatbelt(planned(darwin))).toBe(
+      "(version 1)(allow default)" +
+        "(deny network*)(allow network* (local unix-socket))" +
+        "(deny file-write*)" +
+        "(allow file-write* (subpath \"/dev\") (subpath \"/work/ws/out\") (subpath \"/work/ws/dist\")" +
+        " (subpath \"/work/ws/.flows/sandbox/run1\"))" +
+        "(deny file-write* (subpath \"/work/ws/.flows/cache\"))" +
+        "(deny file-read* (subpath \"/work/ws\"))" +
+        "(allow file-read-metadata (subpath \"/work/ws\"))" +
+        "(allow file-read* (literal \"/work/ws\") (literal \"/work/ws/.flows\") (literal \"/work/ws/.flows/sandbox\")" +
+        " (literal \"/work/ws/src\") (subpath \"/work/ws/src/a.ts\") (subpath \"/work/ws/node_modules\")" +
+        " (subpath \"/work/ws/out\") (subpath \"/work/ws/dist\") (subpath \"/work/ws/.flows/sandbox/run1\"))"
+    )
+  })
+
+  it("emits the bubblewrap argv verbatim", () => {
+    expect(ExecSandbox.bubblewrap(planned(linux), ["node", "build.js"])).toEqual([
+      "/usr/bin/bwrap",
+      "--ro-bind",
+      "/",
+      "/",
+      "--dev",
+      "/dev",
+      "--proc",
+      "/proc",
+      "--tmpfs",
+      "/tmp",
+      "--dir",
+      "/tmp/home",
+      "--dir",
+      "/tmp/cache",
+      "--tmpfs",
+      "/work/ws",
+      "--ro-bind",
+      "/work/ws/src/a.ts",
+      "/work/ws/src/a.ts",
+      "--ro-bind",
+      "/work/ws/node_modules",
+      "/work/ws/node_modules",
+      "--bind",
+      "/work/ws/out",
+      "/work/ws/out",
+      "--bind",
+      "/work/ws/dist",
+      "/work/ws/dist",
+      "--remount-ro",
+      "/work/ws",
+      "--chdir",
+      "/work/ws/pkg",
+      "--unshare-all",
+      "--new-session",
+      "--die-with-parent",
+      "--",
+      "node",
+      "build.js"
+    ])
+  })
+
+  it("emits the docker argv verbatim", () => {
+    const plan = planned(
+      host("win32", { docker: "docker" }, ["/work/ws/src/a.ts"], ["/work/ws/node_modules", "/work/ws/dist"]),
+      { mechanism: Sandbox.Docker({ image: "node:22" }) }
+    )
+    expect(ExecSandbox.docker(plan, ["node"], { CI: "1" })).toEqual([
+      "docker",
+      "run",
+      "--rm",
+      "--init",
+      "--read-only",
+      "--tmpfs",
+      "/tmp:rw,exec",
+      "--network",
+      "none",
+      "--workdir",
+      "/work/ws/pkg",
+      "--user",
+      "501:20",
+      "--mount",
+      "type=bind,src=/work/ws/src/a.ts,dst=/work/ws/src/a.ts,readonly",
+      "--mount",
+      "type=bind,src=/work/ws/node_modules,dst=/work/ws/node_modules,readonly",
+      "--mount",
+      "type=bind,src=/work/ws/out,dst=/work/ws/out",
+      "--mount",
+      "type=bind,src=/work/ws/dist,dst=/work/ws/dist",
+      "--env",
+      "CI=1",
+      "--env",
+      "HOME=/tmp/home",
+      "node:22",
+      "node"
+    ])
+  })
+
+  it("refuses to render a mechanism the plan did not select", () => {
+    const seatbeltPlan = planned(darwin)
+    const bubblewrapPlan = planned(linux)
+    expect(() => ExecSandbox.bubblewrap(seatbeltPlan, ["true"])).toThrow(/bubblewrap argv needs a bubblewrap plan/)
+    expect(() => ExecSandbox.seatbelt(bubblewrapPlan)).toThrow(/a seatbelt profile needs a seatbelt plan/)
+    expect(() => ExecSandbox.docker(seatbeltPlan, ["true"], {})).toThrow(/docker argv needs a docker plan/)
   })
 })
 

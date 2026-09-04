@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest"
 import * as CiToolchain from "../src/CiToolchain.ts"
-import { GithubCiGen, render as renderWorkflow } from "../src/GithubCiGen.ts"
+import { actions, GithubCiGen, render as renderWorkflow } from "../src/GithubCiGen.ts"
 import * as Input from "../src/Input.ts"
 import * as Nix from "../src/Nix.ts"
 import * as PackageManager from "../src/PackageManager.ts"
@@ -202,7 +202,7 @@ describe("GithubCiGen with a Nix environment", () => {
 
   it("installs Nix, installs the workspace inside the shell, and runs every step inside it", () => {
     const rendered = renderWorkflow(attrs(CiToolchain.Nix({ environment })))
-    expect(rendered).toContain("uses: DeterminateSystems/nix-installer-action@v16")
+    expect(rendered).toContain(`uses: ${actions.nixInstallerDeterminate}`)
     expect(rendered).not.toContain("actions/setup-node")
     expect(rendered).not.toContain("pnpm/action-setup")
     expect(rendered).toContain("nix develop .#ci --command pnpm install --frozen-lockfile --ignore-scripts")
@@ -225,7 +225,7 @@ describe("GithubCiGen with a Nix environment", () => {
       substituter: Secret("NIX_CACHE_URL"),
       publicKey: Secret("NIX_CACHE_PUBLIC_KEY")
     })))
-    expect(cachix).toContain("uses: cachix/install-nix-action@v31")
+    expect(cachix).toContain(`uses: ${actions.nixInstallerCachix}`)
     expect(cachix).toContain("extra_nix_config:")
   })
 })
