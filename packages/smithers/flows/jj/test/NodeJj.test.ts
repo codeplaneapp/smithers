@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { execFileSync } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
 import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { promisify } from "node:util"
 import { isJjError, Jj } from "../src/Jj.ts"
 import * as NodeJj from "../src/node/NodeJj.ts"
 
@@ -16,6 +17,8 @@ const jjInstalled = (() => {
     return false
   }
 })()
+
+const execFilePromise = promisify(execFile)
 
 // On CI the real-binary suite is the only thing exercising the actual jj
 // contract — the scripted-fake suite already keeps coverage green — so a
@@ -121,6 +124,110 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
 
       expect(existsSync(editorMarker)).toBe(false)
     }))
+
+  it.live("serializes concurrent snapshots in one process and keeps both restorable", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const target = await mkdtemp(join(tmpdir(), "flows-node-jj-concurrent-"))
+        execFileSync("jj", ["git", "init", target], { stdio: "ignore" })
+        await writeFile(join(target, "shared.txt"), "one state\n")
+        return target
+      }),
+      (target) =>
+        Effect.gen(function*() {
+          const snapshots = yield* Effect.gen(function*() {
+            const jj = yield* Jj
+            return yield* Effect.all(
+              [jj.snapshot("fiber one"), jj.snapshot("fiber two")],
+              { concurrency: "unbounded" }
+            )
+          }).pipe(Effect.provide(NodeJj.layerAt(target)))
+
+          expect(snapshots[0].changeId).not.toBe(snapshots[1].changeId)
+
+          yield* Effect.gen(function*() {
+            const jj = yield* Jj
+            yield* jj.restore(snapshots[0].changeId)
+            yield* jj.restore(snapshots[1].changeId)
+          }).pipe(Effect.provide(NodeJj.layerAt(target)))
+        }),
+      (target) => Effect.promise(() => rm(target, { recursive: true, force: true }))
+    ))
+
+  it.live("serializes snapshots across Node processes and keeps both restorable", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const target = await mkdtemp(join(tmpdir(), "flows-node-jj-processes-"))
+        execFileSync("jj", ["git", "init", target], { stdio: "ignore" })
+        await writeFile(join(target, "shared.txt"), "one state\n")
+        return target
+      }),
+      (target) =>
+        Effect.gen(function*() {
+          const contract = new URL("../src/Jj.ts", import.meta.url).href
+          const adapter = new URL("../src/node/NodeJj.ts", import.meta.url).href
+          const worker = `
+            import * as Effect from "effect/Effect"
+            import { Jj } from ${JSON.stringify(contract)}
+            import * as NodeJj from ${JSON.stringify(adapter)}
+            const result = await Effect.runPromise(
+              Effect.flatMap(Jj, (jj) => jj.snapshot(process.argv[2])).pipe(
+                Effect.provide(NodeJj.layerAt(process.argv[1]))
+              )
+            )
+            process.stdout.write(JSON.stringify(result))
+          `
+          const invoke = (message: string) =>
+            Effect.promise(() =>
+              execFilePromise(
+                process.execPath,
+                ["--experimental-strip-types", "--input-type=module", "--eval", worker, target, message],
+                { cwd: import.meta.dirname, encoding: "utf8" }
+              )
+            )
+
+          yield* Effect.promise(async () => {
+            await mkdir(join(target, ".jj", "smithers.lock"))
+            await writeFile(join(target, ".jj", "smithers.lock", "2147483647-dead-owner"), "")
+          })
+          const outputs = yield* Effect.all(Array.from({ length: 4 }, (_, i) => invoke(`process ${i}`)), {
+            concurrency: "unbounded"
+          })
+          const snapshots = outputs.map(({ stdout }) => JSON.parse(stdout) as { readonly changeId: string })
+
+          expect(new Set(snapshots.map((snapshot) => snapshot.changeId)).size).toBe(snapshots.length)
+
+          yield* Effect.gen(function*() {
+            const jj = yield* Jj
+            for (const snapshot of snapshots) {
+              yield* jj.restore(snapshot.changeId)
+              expect(readFileSync(join(target, "shared.txt"), "utf8")).toBe("one state\n")
+            }
+          }).pipe(Effect.provide(NodeJj.layerAt(target)))
+        }),
+      (target) => Effect.promise(() => rm(target, { recursive: true, force: true }))
+    ))
+
+  it.live("recovers a repository lock left by a dead process", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const target = await mkdtemp(join(tmpdir(), "flows-node-jj-stale-lock-"))
+        execFileSync("jj", ["git", "init", target], { stdio: "ignore" })
+        await mkdir(join(target, ".jj", "smithers.lock"))
+        await writeFile(join(target, ".jj", "smithers.lock", "2147483647-dead-owner"), "")
+        return target
+      }),
+      (target) =>
+        Effect.gen(function*() {
+          const snapshot = yield* Effect.flatMap(Jj, (jj) => jj.snapshot("after stale lock")).pipe(
+            Effect.provide(NodeJj.layerAt(target))
+          )
+
+          expect(snapshot.changeId).not.toBe("")
+          expect(existsSync(join(target, ".jj", "smithers.lock"))).toBe(false)
+        }),
+      (target) => Effect.promise(() => rm(target, { recursive: true, force: true }))
+    ))
 
   it.effect("keeps a bound layer in its repository when process.cwd points elsewhere", () =>
     Effect.acquireUseRelease(

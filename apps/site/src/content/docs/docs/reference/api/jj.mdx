@@ -192,6 +192,13 @@ directory, so pass absolute lane paths. `root(from)` is exempt from the binding
 by design, because its argument names the directory jj must run in. A relative
 root is a wiring mistake and throws a `TypeError` at construction.
 
+Repository state operations are fenced as a unit. `snapshot`, `restore`, and
+`diff` share one single-permit semaphore per repository inside a process and an
+exclusive `.jj/smithers.lock` owner directory across processes. The snapshot's
+CLI calls therefore cannot interleave with another state operation. A caller
+reclaims a lock whose owner process has exited, so an abruptly killed host does
+not strand the repository.
+
 One invocation buffers at most 64 MiB of each output stream, counted in bytes as
 they arrive rather than in decoded characters, and past the ceiling the child is
 killed and the operation fails `unknown`. The `command` recorded on a failure is

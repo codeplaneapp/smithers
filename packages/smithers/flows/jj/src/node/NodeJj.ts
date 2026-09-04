@@ -25,12 +25,14 @@
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as PlatformError from "effect/PlatformError"
+import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as EffectChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as ChildProcess from "node:child_process"
-import { statSync } from "node:fs"
-import { dirname, isAbsolute } from "node:path"
+import { realpathSync, statSync } from "node:fs"
+import { mkdtemp, readdir, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 import { isJjError, Jj, JjError, jjErrorCause } from "../Jj.ts"
 import { resolveJjBinary } from "./resolveJjBinary.ts"
 
@@ -231,6 +233,154 @@ const outputTooLarge = (method: string, args: ReadonlyArray<string>): JjError =>
     message: `jj ${method}: output exceeded the ${outputLimit}-byte ceiling`
   })
 
+interface RepositoryLock {
+  readonly semaphore: Semaphore.Semaphore
+  users: number
+}
+
+const repositoryLocks = new Map<string, RepositoryLock>()
+const lockName = "smithers.lock"
+const lockAcquireWithinMs = 120_000
+
+const errnoIs = (cause: unknown, code: string): boolean =>
+  typeof cause === "object" && cause !== null && "code" in cause && cause.code === code
+
+const lockFailure = (method: string, cause: unknown): JjError =>
+  new JjError({
+    code: "unknown",
+    module: MODULE,
+    method,
+    command: `jj ${method}`,
+    cause: jjErrorCause(cause),
+    message: `jj ${method}: repository lock failed: ${jjErrorCause(cause).message}`
+  })
+
+const processIsAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (cause) {
+    return !errnoIs(cause, "ESRCH")
+  }
+}
+
+/** Canonicalize aliases so layers rooted at a nested path or symlink share a permit. */
+const workspaceRootOf = (from: string): string | undefined => {
+  let directory = resolve(from)
+  for (;;) {
+    if (isDirectory(join(directory, ".jj"))) return realpathSync(directory)
+    const parent = dirname(directory)
+    if (parent === directory) return undefined
+    directory = parent
+  }
+}
+
+/**
+ * Remove only this unique owner's entry, then remove the directory IF empty.
+ * Another claimant may already have replaced the empty directory with its own
+ * populated one; rmdir cannot delete that live lock. A read-then-unlink of a
+ * single lock file would instead let two stale-lock reclaimers delete a new owner.
+ */
+const removeLockOwner = async (lockPath: string, owner: string): Promise<void> => {
+  try {
+    await unlink(join(lockPath, owner))
+  } catch (cause) {
+    if (!errnoIs(cause, "ENOENT")) throw cause
+  }
+  try {
+    await rmdir(lockPath)
+  } catch (cause) {
+    if (!errnoIs(cause, "ENOENT") && !errnoIs(cause, "ENOTEMPTY") && !errnoIs(cause, "EEXIST")) throw cause
+  }
+}
+
+const reclaimDeadLock = async (lockPath: string): Promise<void> => {
+  try {
+    const owners = await readdir(lockPath)
+    for (const owner of owners) {
+      const match = /^(\d+)-/.exec(owner)
+      if (match !== null && !processIsAlive(Number(match[1]))) await removeLockOwner(lockPath, owner)
+    }
+  } catch (cause) {
+    if (!errnoIs(cause, "ENOENT")) throw cause
+  }
+}
+
+/**
+ * Publish a populated directory with one atomic rename. No contender can see a
+ * half-written owner record, and rename cannot replace a populated live lock.
+ * Temporary candidates left by a killed process do not block future callers.
+ */
+const withLockFile = <A, E, R>(
+  method: string,
+  lockPath: string,
+  effect: Effect.Effect<A, E, R>
+): Effect.Effect<A, E | JjError, R> => {
+  const io = <T>(run: () => Promise<T>) => Effect.tryPromise({ try: run, catch: (cause) => lockFailure(method, cause) })
+  const cleanup = (run: () => Promise<unknown>) =>
+    io(run).pipe(Effect.catch((failure) => Effect.logWarning("Failed to release the jj repository lock", failure)))
+  return Effect.acquireUseRelease(
+    io(() => mkdtemp(join(dirname(lockPath), ".smithers-lock-"))),
+    (candidate) =>
+      Effect.gen(function*() {
+        const owner = `${process.pid}-${candidate.slice(candidate.lastIndexOf("-") + 1)}`
+        yield* io(() => writeFile(join(candidate, owner), "", { flag: "wx", mode: 0o600 }))
+        const acquire = Effect.gen(function*() {
+          const startedAt = Date.now()
+          for (;;) {
+            const claimed = yield* io(async () => {
+              try {
+                await rename(candidate, lockPath)
+                return true
+              } catch (cause) {
+                if (!errnoIs(cause, "ENOTEMPTY") && !errnoIs(cause, "EEXIST")) throw cause
+                await reclaimDeadLock(lockPath)
+                return false
+              }
+            })
+            if (claimed) return
+            if (Date.now() - startedAt >= lockAcquireWithinMs) {
+              return yield* Effect.fail(lockFailure(method, new Error("timed out waiting for another jj operation")))
+            }
+            // Only the wait is interruptible: acquisition and registration of
+            // its finalizer must be inseparable, or cancellation leaks a lock.
+            yield* Effect.interruptible(Effect.sleep("25 millis"))
+          }
+        })
+        return yield* Effect.acquireUseRelease(acquire, () =>
+          effect, () =>
+          cleanup(() => removeLockOwner(lockPath, owner)))
+      }),
+    (candidate) => cleanup(() => rm(candidate, { recursive: true, force: true }))
+  )
+}
+
+/** Fibers and independently constructed layers share a permit per workspace. */
+const withRepositoryLock = <A, E, R>(
+  method: string,
+  from: string,
+  effect: Effect.Effect<A, E, R>
+): Effect.Effect<A, E | JjError, R> =>
+  Effect.suspend(() => {
+    const root = workspaceRootOf(from)
+    const key = root ?? resolve(from)
+    let entry = repositoryLocks.get(key)
+    if (entry === undefined) {
+      entry = { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+      repositoryLocks.set(key, entry)
+    }
+    entry.users += 1
+    const held = entry
+    return held.semaphore.withPermit(
+      root === undefined ? effect : withLockFile(method, join(root, ".jj", lockName), effect)
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => {
+        held.users -= 1
+        if (held.users === 0) repositoryLocks.delete(key)
+      }))
+    )
+  })
+
 /** How one `jj` invocation reaches the operating system. */
 type Run = (method: string, args: ReadonlyArray<string>, cwd?: string) => Effect.Effect<string, JjError>
 
@@ -370,6 +520,14 @@ const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, ar
  */
 const operations = (run: Run, repositoryRoot?: string) => {
   const inRepository = (method: string, args: ReadonlyArray<string>) => run(method, args, repositoryRoot)
+  /**
+   * Fences one working-copy operation on the workspace it runs in.
+   *
+   * The bound root is the workspace when there is one; an unbound layer runs
+   * jj in the caller's working directory, so that is where the fence looks.
+   */
+  const repositoryCritical = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.suspend(() => withRepositoryLock(method, repositoryRoot ?? process.cwd(), effect))
 
   /**
    * `jj` snapshots the working copy on every command, so a snapshot is a
@@ -386,19 +544,22 @@ const operations = (run: Run, repositoryRoot?: string) => {
    * alone where `-m ""` would erase it.
    */
   const snapshot = (message?: string) =>
-    (message === undefined
-      ? Effect.void
-      : Effect.asVoid(inRepository("snapshot", ["describe", "-m", message, "--quiet"]))).pipe(
-        Effect.andThen(inRepository("snapshot", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"])),
-        Effect.tap(() => inRepository("snapshot", ["new", "--quiet"])),
-        Effect.map((changeId) => ({ changeId: changeId.trim() }))
-      )
+    repositoryCritical(
+      "snapshot",
+      (message === undefined
+        ? Effect.void
+        : Effect.asVoid(inRepository("snapshot", ["describe", "-m", message, "--quiet"]))).pipe(
+          Effect.andThen(inRepository("snapshot", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"])),
+          Effect.tap(() => inRepository("snapshot", ["new", "--quiet"])),
+          Effect.map((changeId) => ({ changeId: changeId.trim() }))
+        )
+    )
 
   const restore = (changeId: string) =>
     Effect.asVoid(
       Effect.flatMap(
         requireRevision("restore", "jj restore", changeId),
-        (revision) => inRepository("restore", ["restore", "--from", revision])
+        (revision) => repositoryCritical("restore", inRepository("restore", ["restore", "--from", revision]))
       )
     )
 
@@ -406,7 +567,10 @@ const operations = (run: Run, repositoryRoot?: string) => {
     Effect.flatMap(
       Effect.all([requireRevision("diff", "jj diff", from), requireRevision("diff", "jj diff", to)]),
       ([fromRevision, toRevision]) =>
-        inRepository("diff", ["diff", "--from", fromRevision, "--to", toRevision, "--git"])
+        repositoryCritical(
+          "diff",
+          inRepository("diff", ["diff", "--from", fromRevision, "--to", toRevision, "--git"])
+        )
     )
 
   /**

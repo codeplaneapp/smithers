@@ -101,6 +101,11 @@ killed and the operation fails with `unknown` rather than filling a buffer
 nobody will read. Both Node layers apply the same ceiling, since routing jj
 through the host's spawner must not change what a caller observes.
 
+`snapshot`, `restore`, and `diff` are serialized per repository. Fibers share a
+single-permit semaphore, while separate Node or Bun processes coordinate through
+an exclusive `.jj/smithers.lock` owner directory. A later caller reclaims a lock whose
+owner process has exited, so a killed host does not strand the repository.
+
 The tag key and the error `_tag` are durable identity: step keys digest the
 resolved service set and `JjError` round-trips through the journal, so
 renaming either invalidates recorded runs. `cause` is a projection onto plain
