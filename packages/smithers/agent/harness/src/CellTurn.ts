@@ -1918,30 +1918,57 @@ const frame = (
     /** What this frame's cell printed, once it has run. */
     let printed = ""
 
+    const hasNextFrame = state.maxFrames === 0 || state.frame + 1 < state.maxFrames
+
+    // Every exit records its delivery decision. With no frame left to read a
+    // message, keep it pending at the source instead of acknowledging and
+    // discarding it. Replays see the same decision under the same boundary.
+    const drain = (wouldIdle: boolean): Effect.Effect<Steering.DrainRecord, HarnessError> =>
+      Effect.gen(function*() {
+        const boundary = produced?.source.digest ?? contextWindow.digest
+        const drained = yield* engine.record({
+          name: "steering-drain",
+          identity: { session: state.session, frame: state.frame, boundary: `steering-drain:${boundary}` },
+          success: Steering.DrainRecord,
+          execute: hasNextFrame
+            ? steering.drain({ boundary: `${state.frame}:${boundary}`, wouldIdle }).pipe(
+              Effect.map(Steering.drainRecord)
+            )
+            : Effect.succeed({ inserts: [], seatChanges: [], activatedToolNames: [], queued: false })
+        })
+        yield* emit(new AgentEvent.SteeringDrained({ eventType: eventType.steeringDrained, messages: drained.inserts }))
+        return drained
+      })
+
     /** Records an unusable frame and asks for another, budget permitting. */
     const observe = (
       note: string,
       changes: Partial<ConstructorParameters<typeof State>[0]> = {},
       echo: number = liveCellEcho
-    ): Step => {
-      if (state.maxFrames > 0 && state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
-      return {
-        _tag: "Continue",
-        state: advance(state, {
-          frame: state.frame + 1,
-          // A frame's prints lead whatever the harness has to say about it, so
-          // a cell that printed and then threw is read in the order it ran.
-          contextWindow: observedOn(
-            contextWindow,
-            answer.message,
-            printed === "" ? note : `${printed}\n\n${note}`,
-            echo
-          ),
-          truncatedOutputs: TruncatedOutput.retain(ledger),
-          ...changes
-        })
-      }
-    }
+    ): Effect.Effect<Step, HarnessError> =>
+      Effect.gen(function*() {
+        const drained = yield* drain(!hasNextFrame)
+        if (!hasNextFrame) return { _tag: "Done" }
+        const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
+        const context = appended(
+          contextWindow,
+          answer.message,
+          [ModelRequest.Message.user(printed === "" ? note : `${printed}\n\n${note}`), ...drained.inserts],
+          echo
+        )
+        return {
+          _tag: "Continue",
+          state: advance(state, {
+            frame: state.frame + 1,
+            seat,
+            modelParams,
+            contextWindowTokens,
+            contextWindow: windowOn(state, seat, context),
+            truncatedOutputs: TruncatedOutput.retain(ledger),
+            ...changes
+          })
+        }
+      })
 
     /**
      * Continues a park a steer answered, carrying what the steer changed.
@@ -1954,8 +1981,7 @@ const frame = (
     const resumed = (
       drained: Steering.DrainRecord,
       changes: Partial<ConstructorParameters<typeof State>[0]> = {}
-    ): Step => {
-      if (state.maxFrames > 0 && state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
+    ): Extract<Step, { readonly _tag: "Continue" }> => {
       const { contextWindowTokens, modelParams, seat } = steered(state, drained.seatChanges)
       const context = appended(
         contextWindow,
@@ -1998,7 +2024,7 @@ const frame = (
       if (state.readOnlyCap > 0 && rejectedFrames >= state.readOnlyCap * 2) {
         return yield* readOnlyCapFailure(state.readOnlyCap, rejectedFrames)
       }
-      const step = observe(rejection.message, { readOnlyFrames: rejectedFrames }, deadCellEcho)
+      const step = yield* observe(rejection.message, { readOnlyFrames: rejectedFrames }, deadCellEcho)
       if (step._tag === "Done") {
         yield* emit(
           new AgentEvent.TurnClosed({
@@ -2409,7 +2435,7 @@ const frame = (
           missed === undefined ? "" : `\n${missed}`
         }${salvage}${alert}`
         : `${outcome.message}${salvage}${alert}`
-      const step = observe(note, {
+      const step = yield* observe(note, {
         workspace: closed,
         readOnlyFrames: raisedFrames,
         repeatFrames,
@@ -2476,7 +2502,7 @@ const frame = (
           return yield* readOnlyCapFailure(cap, parkFrames)
         }
         const limits = Sandbox.withDefaults(sandbox.capabilities, input.limits)
-        const step = observe(
+        const step = yield* observe(
           parkRefusal(
             transition.message,
             state.maxFrames === 0 ? "unlimited" : Math.max(0, state.maxFrames - state.frame - 1),
@@ -2514,6 +2540,23 @@ const frame = (
           )
         }
         return step
+      }
+      if (!hasNextFrame) {
+        yield* drain(true)
+        yield* emit(
+          new AgentEvent.TurnClosed({
+            eventType: eventType.turnClosed,
+            stopReason: answer.message.stopReason,
+            outcome: "resolved"
+          })
+        )
+        yield* emit(
+          new AgentEvent.Resolved({
+            eventType: eventType.resolved,
+            message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
+          })
+        )
+        return { _tag: "Done" }
       }
       // The drain on the park path, and the only thing that can ever answer an
       // honored park.
@@ -2581,17 +2624,9 @@ const frame = (
           new AgentEvent.TurnClosed({
             eventType: eventType.turnClosed,
             stopReason: answer.message.stopReason,
-            outcome: step._tag === "Done" ? "resolved" : "continue"
+            outcome: "continue"
           })
         )
-        if (step._tag === "Done") {
-          yield* emit(
-            new AgentEvent.Resolved({
-              eventType: eventType.resolved,
-              message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
-            })
-          )
-        }
         return step
       }
       yield* emit(
@@ -2643,6 +2678,32 @@ const frame = (
     // the two `State` fields it needs, and it is a controlled arm of its own
     // wave when it happens — not a change that rides along with another.
 
+    const drained = yield* drain(transition._tag === "complete" || !hasNextFrame)
+    if (transition._tag === "complete" && carries(drained)) {
+      printed += `\n\nThe completed answer before this follow-up:\n${transition.output}`
+      const step = resumed(drained, {
+        workspace: closed,
+        readOnlyFrames,
+        repeatFrames,
+        callSignatures,
+        checkpointIds,
+        checks,
+        callLedger,
+        failures,
+        mutations,
+        openingDigest,
+        panel,
+        ...(mutated ? { readOnlyGrace: 0, pendingReadOnlyDemand: undefined } : {})
+      })
+      yield* emit(
+        new AgentEvent.TurnClosed({
+          eventType: eventType.turnClosed,
+          stopReason: answer.message.stopReason,
+          outcome: "continue"
+        })
+      )
+      return step
+    }
     if (transition._tag === "complete") {
       // The completion's own evidence, judged once per demand. A run gets
       // exactly one frame wrong for free — the last one — and three things can
@@ -2836,25 +2897,6 @@ const frame = (
       return { _tag: "Done" }
     }
 
-    // The drain consumes host queue state, so it is a nondeterministic read
-    // and must be journaled like every other boundary: a resumed run replays
-    // the recorded drain instead of draining an already-drained queue, which
-    // would rebuild a different context and re-key every later sealed step.
-    const drained = yield* engine.record({
-      name: "steering-drain",
-      identity: { session: state.session, frame: state.frame, boundary: `steering-drain:${cell.digest}` },
-      success: Steering.DrainRecord,
-      execute: steering.drain({
-        boundary: `${state.frame}:${cell.digest}`,
-        wouldIdle: false
-      }).pipe(Effect.map(Steering.drainRecord))
-    })
-    yield* emit(
-      new AgentEvent.SteeringDrained({
-        eventType: eventType.steeringDrained,
-        messages: drained.inserts
-      })
-    )
     if (state.maxFrames > 0 && state.frame + 1 >= state.maxFrames) {
       yield* emit(
         new AgentEvent.TurnClosed({

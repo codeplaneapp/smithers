@@ -721,7 +721,7 @@ console.log(kept)`
     // cell digest — never through a bare `steering.drain` a replay would
     // re-issue against an already-drained queue.
     const drains = engine.recorder.records.filter((boundary) => boundary.name === "steering-drain")
-    expect(drains).toHaveLength(1)
+    expect(drains).toHaveLength(2)
     expect(drains[0]?.identity).toMatchObject({ session: "session-1", frame: 0 })
     // The purpose is folded into the boundary as well as carried in `name`, so
     // an engine that keys on identity alone cannot serve this frame's drain

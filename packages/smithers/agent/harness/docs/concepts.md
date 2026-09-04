@@ -142,6 +142,11 @@ promoted into inserts and seat changes, journals the drain as a record so a
 resumed run does not drain an already-drained queue, and never lets an
 un-actionable steer look delivered.
 
+Steering is considered after raised and rejected cells as well as successful
+transitions. A completion is an idle boundary: queued follow-ups can keep the
+run going. When the frame budget is exhausted, undeliverable notifications stay
+pending in the durable queue for the host to carry forward.
+
 Implemented by `Notifications.ts`, `Steering.ts`.
 
 ## Step keys and the model layer

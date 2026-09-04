@@ -8,10 +8,12 @@
  * and the durable values a host may hand back malformed.
  */
 import { type KeyMaterial, Placement } from "@smthrs/core"
+import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import { Capability, Permission } from "@smthrs/kernel"
 import { CanonicalJson, Model, ModelEvent, ModelRequest } from "@smthrs/model"
+import { NotificationQueue } from "@smthrs/notifications"
 import { Descriptor } from "@smthrs/registry"
-import { Effect, type Layer, Option, Result, Schema, Stream } from "effect"
+import { Effect, Layer, Option, Result, Schema, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as AgentEvent from "../src/AgentEvent.ts"
 import * as Cell from "../src/Cell.ts"
@@ -19,6 +21,7 @@ import * as CellTurn from "../src/CellTurn.ts"
 import * as ContextWindow from "../src/ContextWindow.ts"
 import * as EngineLike from "../src/EngineLike.ts"
 import { HarnessError } from "../src/HarnessError.ts"
+import * as Notifications from "../src/Notifications.ts"
 import * as QuickJSSandbox from "../src/QuickJSSandbox.ts"
 import * as Sandbox from "../src/Sandbox.ts"
 import * as Steering from "../src/Steering.ts"
@@ -1018,7 +1021,7 @@ describe("CellTurn steering boundaries", () => {
     duplicate: false
   }
 
-  it("journals an empty drain at every continuing boundary", async () => {
+  it("journals an empty drain at every frame boundary", async () => {
     const { engine, events } = await run({
       script: [
         emits(`console.log("next")`),
@@ -1028,8 +1031,8 @@ describe("CellTurn steering boundaries", () => {
 
     // Nothing to deliver is still a read of the world, so the boundary is
     // recorded rather than skipped.
-    expect(of(events, "steering-drained").map((event) => event.messages)).toEqual([[]])
-    expect(engine.recorder.records.filter((record) => record.name === "steering-drain")).toHaveLength(1)
+    expect(of(events, "steering-drained").map((event) => event.messages)).toEqual([[], []])
+    expect(engine.recorder.records.filter((record) => record.name === "steering-drain")).toHaveLength(2)
   })
 
   it("delivers steering that arrived mid-frame at the next frame boundary", async () => {
@@ -1511,10 +1514,10 @@ describe("CellTurn replay", () => {
     const identities = engine.recorder.records
       .filter((record) => record.name === "steering-drain")
       .map((record) => record.identity)
-    expect(identities.map((identity) => identity.frame)).toEqual([0, 1])
-    // Two frames, two distinct boundaries: a replay of frame one cannot serve
+    expect(identities.map((identity) => identity.frame)).toEqual([0, 1, 2])
+    // Each frame has its own boundary: a replay of frame one cannot serve
     // frame zero's recorded drain.
-    expect(new Set(identities.map((identity) => identity.boundary)).size).toBe(2)
+    expect(new Set(identities.map((identity) => identity.boundary)).size).toBe(3)
   })
 })
 
@@ -1754,6 +1757,31 @@ describe("CellTurn recorded observations", () => {
     expect(messagesOf(second.model, 1)).not.toContain("output the original frame never had")
   })
 
+  it.each(["throw new Error(\"repair\")", "ctx.done(\"first answer\")"])(
+    "replays steering delivered after %s",
+    async (cell) => {
+      const records = new Map<string, unknown>()
+      const queue = steeringQueue()
+      queue.steer("Handle the follow-up")
+      const attempt = async () => {
+        const model = ScriptedModel.make([emits(cell), emits("ctx.done(\"answered\")")])
+        const engine = ScriptedEngine.make(model.model)
+        const observed = await collect({ state: state(), flows: [] }, {
+          engine: journaled(engine, records),
+          steering: queue.layer
+        })
+        return { ...observed, requests: model.recorder.requests }
+      }
+      const first = await attempt()
+      const replay = await attempt()
+      expect(first.failure).toBeUndefined()
+      expect(replay.failure).toBeUndefined()
+      expect(JSON.stringify(first.requests[1]?.messages)).toContain("Handle the follow-up")
+      expect(replay.requests).toEqual(first.requests)
+      expect(queue.pending()).toEqual([])
+    }
+  )
+
   it("answers a parked run with a steer admitted while it was parked", async () => {
     const records = new Map<string, unknown>()
     const queue = steeringQueue()
@@ -1799,7 +1827,7 @@ describe("CellTurn recorded observations", () => {
     expect(messagesOf(replayed.model, 1)).toContain("use the release branch")
   })
 
-  it("ends an answered park on the budget message when it was the run's last frame", async () => {
+  it("retains steering at a park when it was the run's last frame", async () => {
     const queue = steeringQueue()
     queue.steer("finish up")
     const model = ScriptedModel.make([emits(`ctx.park("waiting-input", "which branch?")`)])
@@ -1809,11 +1837,9 @@ describe("CellTurn recorded observations", () => {
       { engine: engine.layer, steering: queue.layer }
     )
 
-    // The steer answered the park, and the answer arrived with no frame left to
-    // spend it in. That ends the run on its budget message rather than parking
-    // it on a question somebody has already answered.
     expect(of(events, "suspended")).toHaveLength(0)
-    expect(of(events, "steering-drained")[0]?.messages).toHaveLength(1)
+    expect(of(events, "steering-drained")[0]?.messages).toEqual([])
+    expect(queue.pending()).toEqual([ModelRequest.Message.user("finish up")])
     expect(resolvedText(events)).toContain("frame budget of 1 is exhausted")
   })
 
@@ -1965,5 +1991,79 @@ describe("CellTurn truncated model output", () => {
     expect(of(events, "cell-settled")[0]?.outcome).toMatchObject({ _tag: "rejected", code: "output_truncated" })
     expect(JSON.stringify(model.recorder.requests[1]?.messages)).toContain("output limit")
     expect(resolvedText(events)).toBe("recovered")
+  })
+})
+
+describe("CellTurn delivery through the durable notification queue", () => {
+  const cases = [
+    ["raised", emits("throw new Error(\"repair me\")"), false],
+    ["rejected", prose("No program this time"), false],
+    ["sandbox rejected", emits("while (true) {}"), false],
+    ["refused park", emits("ctx.park(\"waiting-input\", \"which branch?\")"), false],
+    ["honored park", emits("ctx.park(\"waiting-input\", \"which branch?\")"), true],
+    ["complete", emits("ctx.done(\"first answer\")"), false],
+    ["continue", emits("console.log(\"continue\")"), false]
+  ] as const
+
+  const deliver = async (
+    first: ScriptedModel.Step,
+    approvalChannel: boolean,
+    maxFrames: number,
+    delivery: "steer" | "queue"
+  ) => {
+    const model = ScriptedModel.make([first, emits("ctx.done(\"follow-up answered\")")])
+    const engine = ScriptedEngine.make(model.model)
+    const events: Array<AgentEvent.AgentEvent> = []
+    const journal = TestJournal.layer()
+    const pending = await Effect.runPromise(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", {
+          ...(delivery === "steer" ? { _tag: "human-steer" as const, delivery } : { _tag: "human-followup" as const, delivery }),
+          id: "follow-up",
+          targetLineageId: "run/root",
+          provenance: {
+            sourceRunId: "operator",
+            sourceLineageId: "operator/root",
+            sourceTurn: 0,
+            sourceActor: "human"
+          },
+          payload: { body: "Please handle the follow-up" }
+        })
+        const source = yield* Notifications.make({ runId: "run", lineageId: "run/root" })
+        yield* CellTurn.run({
+          state: new CellTurn.State({ ...state({ maxFrames, approvalChannel }), revalidations: 0 }),
+          flows: [],
+          limits: { steps: 100 }
+        }).pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.provide(engine.layer),
+          Effect.provide(QuickJSSandbox.layer),
+          Effect.provideService(Steering.Source, source)
+        )
+        return yield* queue.pending("run")
+      }).pipe(Effect.provide(NotificationQueue.layer.pipe(Layer.provide(journal))), Effect.scoped)
+    )
+    return { model, engine, events, pending }
+  }
+
+  it.each(cases)("delivers a steer after a %s frame", async (_, first, approvalChannel) => {
+    const { model, events, pending } = await deliver(first, approvalChannel, 3, "steer")
+    expect(JSON.stringify(model.recorder.requests[1]?.messages)).toContain("Please handle the follow-up")
+    expect(resolvedText(events)).toBe("follow-up answered")
+    expect(pending).toEqual([])
+  })
+
+  it("promotes a queued follow-up when a frame completes", async () => {
+    const { model, events, pending } = await deliver(emits("ctx.done(\"first answer\")"), false, 3, "queue")
+    expect(JSON.stringify(model.recorder.requests[1]?.messages)).toContain("Please handle the follow-up")
+    expect(resolvedText(events)).toBe("follow-up answered")
+    expect(pending).toEqual([])
+  })
+
+  it.each(cases)("retains an undeliverable steer after the last %s frame", async (_, first, approvalChannel) => {
+    const { model, pending } = await deliver(first, approvalChannel, 1, "steer")
+    expect(model.recorder.requests).toHaveLength(1)
+    expect(pending.map((message) => message.id)).toEqual(["follow-up"])
   })
 })
