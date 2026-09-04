@@ -2,19 +2,20 @@ DESCRIPTION
   Report a bug with a run digest attached
 
 USAGE
-  smthrs bug [flags] [<summary...>]
+  smthrs bug [flags] <summary> [<summary-word...>]
 
 ARGUMENTS
-  summary... string     (optional)
+  summary string           
+  summary-word... string    (optional)
 
 FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY
   --json                 Print the machine-readable document instead of the human rendering
   --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
-  --quiet                Drop the banners and notices commands write to stderr
+  --quiet                Suppress banners and progress on stderr; stdout documents still print
   --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
   --root string          Project root to act on, instead of walking up from the working directory
-  --run string           
+  --run string           Attach the diagnosis digest of this run to the bug report
 
 GLOBAL FLAGS
   --help, -h                                                          Show help information

@@ -1,4 +1,7 @@
+import { NodeServices } from "@effect/platform-node"
 import { Effect, Redacted } from "effect"
+import { TestConsole } from "effect/testing"
+import { Command } from "effect/unstable/cli"
 import { describe, expect, it } from "vitest"
 import { cli } from "../src/Command.ts"
 import { make } from "../src/Output.ts"
@@ -37,5 +40,31 @@ describe("Command", () => {
     const second = await Effect.runPromise(output.render(value, "json"))
     expect(first.text).toBe("{\"nested\":{\"a\":true,\"token\":\"<redacted>\"},\"z\":1}")
     expect(second).toEqual(first)
+  })
+})
+
+describe("flag descriptions", () => {
+  it("describes every visible flag in the real help documents", async () => {
+    const visit = async (command: Command.Command.Any, path: ReadonlyArray<string>): Promise<void> => {
+      if (command.unlisted) return
+      const lines = await Effect.runPromise(
+        Effect.gen(function*() {
+          yield* Command.runWith(cli, { version: "test" })([...path, "--help"]).pipe(Effect.ignore)
+          return yield* TestConsole.logLines
+        }).pipe(Effect.provide(TestConsole.layer), Effect.provide(NodeServices.layer)) as Effect.Effect<
+          ReadonlyArray<unknown>
+        >
+      )
+      const help = lines.map(String).join("\n")
+      const flags = help.split("\n").filter((line) => /^  --?/.test(line))
+      expect(flags.length).toBeGreaterThan(0)
+      for (const line of flags) {
+        expect(line, `${path.join(" ")}: flag needs a description`).toMatch(/^  --?.*?\S {2,}\S/)
+      }
+      for (const group of command.subcommands) {
+        for (const child of group.commands) await visit(child, [...path, child.name])
+      }
+    }
+    await visit(cli, [])
   })
 })

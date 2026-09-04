@@ -8,11 +8,11 @@ FLAGS
   --credential string    Bearer token for the remote control plane; falls back to SMITHERS_API_KEY
   --json                 Print the machine-readable document instead of the human rendering
   --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
-  --quiet                Drop the banners and notices commands write to stderr
+  --quiet                Suppress banners and progress on stderr; stdout documents still print
   --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
   --root string          Project root to act on, instead of walking up from the working directory
-  --flow string          
-  --status choice        (choices: accepted, running, parked, waiting-approval, cancelled, completed, failed)
+  --flow string          Only list runs of this flow id
+  --status choice        Only list runs with this lifecycle status (choices: accepted, running, parked, waiting-approval, cancelled, completed, failed)
 
 GLOBAL FLAGS
   --help, -h                                                          Show help information

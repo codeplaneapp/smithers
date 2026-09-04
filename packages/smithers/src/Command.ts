@@ -88,7 +88,10 @@ const global = {
 const rootCommand = Command.make("smthrs").pipe(Command.withSharedFlags(global))
 
 const input = Argument.string("key=value").pipe(Argument.variadic())
-const data = Flag.string("data").pipe(Flag.optional)
+const data = Flag.string("data").pipe(
+  Flag.optional,
+  Flag.withDescription("Flow input as JSON; object members override key=value entries")
+)
 /** Required values are collected before the command opens durable services. */
 const inputPrompt = (name: string, pickFlow = false) =>
   Effect.gen(function*() {
@@ -595,7 +598,7 @@ const runLaunch = (payload: ControlService.ApprovalInput) =>
 
 const run = Command.make("run", {
   plan: requiredArgument("plan-payload"),
-  resume: Flag.boolean("resume")
+  resume: Flag.boolean("resume").pipe(Flag.withDescription("Resume the parked run named by the positional argument"))
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -612,7 +615,10 @@ const resume = Command.make("resume", { runId: requiredArgument("run-id") }, (co
 const upFlags = {
   flow: requiredArgument("flow", true),
   data,
-  detached: Flag.boolean("detached").pipe(Flag.withAlias("d")),
+  detached: Flag.boolean("detached").pipe(
+    Flag.withAlias("d"),
+    Flag.withDescription("Launch a local executor in the background and print its run id and log path")
+  ),
   serve: removedFlag("up", "serve"),
   interactive: removedFlag("up", "interactive"),
   supervise: removedFlag("up", "supervise"),
@@ -783,6 +789,7 @@ const signalCommand = Command.make("signal", {
 const steer = Command.make("steer", {
   runId: requiredArgument("run-id"),
   message: Flag.string("message").pipe(
+    Flag.withDescription("Text to deliver as an attributed steering message to the run"),
     Flag.withFallbackPrompt(inputPrompt("--message"))
   ),
   takeover: removedFlag("steer", "takeover")
@@ -896,7 +903,10 @@ const workflow = Command.make(
 )
 
 const ps = Command.make("ps", {
-  flow: Flag.string("flow").pipe(Flag.optional),
+  flow: Flag.string("flow").pipe(
+    Flag.optional,
+    Flag.withDescription("Only list runs of this flow id")
+  ),
   // Validated, not cast: at the import reference any string reached the store
   // as a `RunStatus`, so `--status done` listed nothing and said nothing.
   status: Flag.choice(
@@ -910,7 +920,7 @@ const ps = Command.make("ps", {
       "completed",
       "failed"
     ] as const
-  ).pipe(Flag.optional)
+  ).pipe(Flag.optional, Flag.withDescription("Only list runs with this lifecycle status"))
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1062,14 +1072,14 @@ const readLogs = (runId: Option.Option<string>, follow: boolean, forceJson: bool
 
 const logs = Command.make("logs", {
   runId: Argument.string("run-id").pipe(Argument.optional),
-  follow: Flag.boolean("follow")
+  follow: Flag.boolean("follow").pipe(Flag.withDescription("Keep streaming new run events after the recorded history"))
 }, (config) => readLogs(config.runId, config.follow, false)).pipe(
   Command.withDescription(Verb.find("logs")!.help)
 )
 
 const events = Command.make("events", {
   runId: Argument.string("run-id").pipe(Argument.optional),
-  follow: Flag.boolean("follow")
+  follow: Flag.boolean("follow").pipe(Flag.withDescription("Keep streaming new run events after the recorded history"))
 }, (config) => readLogs(config.runId, config.follow, true)).pipe(
   Command.withDescription("Alias of `logs --json`"),
   Command.unlisted
@@ -1339,9 +1349,20 @@ const memoryNamespace = (
   )
 }
 
-const memoryFlags = { namespace: Flag.string("namespace").pipe(Flag.optional) }
+const memoryFlags = {
+  namespace: Flag.string("namespace").pipe(
+    Flag.optional,
+    Flag.withDescription("Namespace as flow:<id>, agent:<id>, user:<id>, or global:<id>; defaults to user:cli")
+  )
+}
 
-const memoryList = Command.make("list", { ...memoryFlags, prefix: Flag.string("prefix").pipe(Flag.optional) }, (
+const memoryList = Command.make("list", {
+  ...memoryFlags,
+  prefix: Flag.string("prefix").pipe(
+    Flag.optional,
+    Flag.withDescription("Only list fact keys starting with this prefix")
+  )
+}, (
   config
 ) =>
   Effect.gen(function*() {
@@ -1415,7 +1436,10 @@ const memory = Command.make("memory").pipe(
   Command.withSubcommands([memoryList, memoryGet, memorySet, memoryRm])
 )
 
-const claudeSession = Flag.string("session").pipe(Flag.optional)
+const claudeSession = Flag.string("session").pipe(
+  Flag.optional,
+  Flag.withDescription("Claude Code session id; falls back to CLAUDE_CODE_SESSION_ID")
+)
 
 const sessionId = (raw: Option.Option<string>): string =>
   Option.getOrElse(raw, () => process.env["CLAUDE_CODE_SESSION_ID"] ?? "unknown")
@@ -1423,7 +1447,10 @@ const sessionId = (raw: Option.Option<string>): string =>
 const claudeTick = Command.make("tick", {
   runId: requiredArgument("run-id"),
   session: claudeSession,
-  afterSeq: Flag.integer("after-seq").pipe(Flag.withDefault(0))
+  afterSeq: Flag.integer("after-seq").pipe(
+    Flag.withDefault(0),
+    Flag.withDescription("Only include events after this sequence number")
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1446,7 +1473,10 @@ const claudeTick = Command.make("tick", {
 const claudeNodeWait = Command.make("node-wait", {
   runId: requiredArgument("run-id"),
   nodeId: requiredArgument("node-id"),
-  timeout: Flag.integer("timeout-ms").pipe(Flag.withDefault(30_000))
+  timeout: Flag.integer("timeout-ms").pipe(
+    Flag.withDefault(30_000),
+    Flag.withDescription("Maximum time in milliseconds to wait for the node to settle")
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1489,8 +1519,11 @@ const claudeNodeWait = Command.make("node-wait", {
 
 const claudeMonitor = Command.make("monitor", {
   session: claudeSession,
-  allRuns: Flag.boolean("all-runs"),
-  limit: Flag.integer("limit").pipe(Flag.withDefault(200))
+  allRuns: Flag.boolean("all-runs").pipe(Flag.withDescription("Include all runs, beyond this session’s subscriptions")),
+  limit: Flag.integer("limit").pipe(
+    Flag.withDefault(200),
+    Flag.withDescription("Maximum number of runs in the monitor frame")
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1562,7 +1595,10 @@ const claude = Command.make("claude").pipe(
 )
 
 const mcpAdd = Command.make("add", {
-  agent: Flag.string("agent").pipe(Flag.optional)
+  agent: Flag.string("agent").pipe(
+    Flag.optional,
+    Flag.withDescription("Agent to configure; omit to register with every supported agent")
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1611,7 +1647,10 @@ const update = Command.make("update", {}, () =>
 const bug = Command.make("bug", {
   summary: requiredArgument("summary"),
   rest: Argument.string("summary-word").pipe(Argument.variadic()),
-  runId: Flag.string("run").pipe(Flag.optional)
+  runId: Flag.string("run").pipe(
+    Flag.optional,
+    Flag.withDescription("Attach the diagnosis digest of this run to the bug report")
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1695,8 +1734,13 @@ const doctor = Command.make("doctor", {}, () =>
   })).pipe(Command.withDescription(Verb.find("doctor")!.help))
 
 const gc = Command.make("gc", {
-  olderThan: Flag.string("older-than").pipe(Flag.withDefault(Gc.defaultRetention)),
-  dryRun: Flag.boolean("dry-run")
+  olderThan: Flag.string("older-than").pipe(
+    Flag.withDefault(Gc.defaultRetention),
+    Flag.withDescription("Delete terminal runs older than this duration, for example 7d")
+  ),
+  dryRun: Flag.boolean("dry-run").pipe(
+    Flag.withDescription("Report the runs and rows that would be deleted without deleting them")
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1712,9 +1756,17 @@ const gc = Command.make("gc", {
   })).pipe(Command.withDescription(Verb.find("gc")!.help))
 
 const serveFlags = {
-  host: Flag.string("host").pipe(Flag.withDefault(Serve.defaultBind.host)),
-  port: Flag.integer("port").pipe(Flag.withDefault(Serve.defaultBind.port)),
-  listen: Flag.boolean("listen")
+  host: Flag.string("host").pipe(
+    Flag.withDefault(Serve.defaultBind.host),
+    Flag.withDescription("Host address to bind; non-loopback addresses require --listen and a credential")
+  ),
+  port: Flag.integer("port").pipe(
+    Flag.withDefault(Serve.defaultBind.port),
+    Flag.withDescription("TCP port for the control server")
+  ),
+  listen: Flag.boolean("listen").pipe(
+    Flag.withDescription("Allow binding a non-loopback host; also requires --credential or SMITHERS_API_KEY")
+  )
 }
 
 const serveHandler = (config: { readonly host: string; readonly port: number; readonly listen: boolean }) =>
