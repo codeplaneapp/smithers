@@ -1,11 +1,13 @@
 # smthrs
 
+**Documentation:** https://smthrs.smithers.sh
+
 `smthrs@1.0.0-rc.0` is a migration notice, not a runtime. Importing it throws:
 
 ```
 smthrs 1.0 is a migration notice, not a runtime.
 Smithers 1.0 ships as @smthrs/* packages. Install @smthrs/flows (authoring and engine)
-and @smthrs/cli (the `smithers` command), then run `smithers migrate` in a 0.x project.
+and @smthrs/cli (the `smthrs` command), then run `smthrs migrate` in a 0.x project.
 Migration guide: https://smithers.sh/migration/1.0
 ```
 
@@ -16,11 +18,11 @@ Read the [migration guide](https://smithers.sh/migration/1.0), then:
 ```sh
 npm remove smthrs
 npm install @smthrs/flows@1.0.0-rc.0 @smthrs/cli@1.0.0-rc.0
-npx smithers migrate
+npx smthrs migrate
 ```
 
 `@smthrs/flows` is the curated aggregate: authoring primitives, the engine, and
-the durable stores. `@smthrs/cli` owns the `smithers` command. Import the
+the durable stores. `@smthrs/cli` owns the `smthrs` command. Import the
 `@smthrs/*` package you need directly; there is no umbrella package at 1.0.
 
 ## `ERR_PACKAGE_PATH_NOT_EXPORTED` instead of the notice
@@ -61,7 +63,7 @@ against.
 | Output accessors and workflow context hooks                               | Journal projections and the run store (`@smthrs/journal`, `@smthrs/run-store`).                     |
 | `mdx-plugin`, JSX workflow loaders and templates                          | Flow descriptor discovery (`@smthrs/registry`).                                                     |
 | Backend selection and direct database helpers                             | `@smthrs/database` and `@smthrs/engine-store`. SQLite is the only backend supported at 1.0.0-rc.0.  |
-| The `smithers` binary published by `smthrs`                               | `@smthrs/cli`, which owns the `smithers` binary at 1.0.                                             |
+| The `smithers` binary published by `smthrs`                               | `@smthrs/cli`, which owns the `smthrs` binary at 1.0.                                               |
 
 Smithers 1.0.0-rc.0 does not migrate live or in-flight 0.x runs. Finish,
 archive, or discard them before upgrading.

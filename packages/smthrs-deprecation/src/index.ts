@@ -19,7 +19,7 @@
 const notice: string = [
   "smthrs 1.0 is a migration notice, not a runtime.",
   "Smithers 1.0 ships as @smthrs/* packages. Install @smthrs/flows (authoring and engine)",
-  "and @smthrs/cli (the `smithers` command), then run `smithers migrate` in a 0.x project.",
+  "and @smthrs/cli (the `smthrs` command), then run `smthrs migrate` in a 0.x project.",
   "Migration guide: https://smithers.sh/migration/1.0"
 ].join("\n")
 

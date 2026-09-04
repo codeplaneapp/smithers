@@ -15,7 +15,7 @@ describe("smthrs", () => {
 
     expect(failure?.message).toContain("@smthrs/flows")
     expect(failure?.message).toContain("@smthrs/cli")
-    expect(failure?.message).toContain("smithers migrate")
+    expect(failure?.message).toContain("smthrs migrate")
     expect(failure?.message).toContain("https://smithers.sh/migration/1.0")
   })
 })
